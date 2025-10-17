@@ -12,5 +12,11 @@
   },
   "http_api": {
     "key": "0Bmi8sRKc-lpnA77ti0AW_P8vWIn8FDgfVkknlv-xIclvAlIX0DGIC95bRy_K6PXvP1Yb-J3m2mTAd2rVoTLnQ"
+  },
+  "channel": {
+    "without_namespace":{
+      "allow_subscribe_for_client": true
+    }
+
   }
 }
