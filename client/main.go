@@ -51,7 +51,7 @@ func main() {
 		go func() {
 			start := <-startTimeChan
 
-			var jsonData map[string]interface{}
+			var jsonData map[string]any
 			if err := json.Unmarshal(event.Data, &jsonData); err != nil {
 				fmt.Println("Error unmarshalling json data:", err.Error())
 				return
