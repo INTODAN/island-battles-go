@@ -1,4 +1,3 @@
-The backend for the island battles project.  
-Meant to be run as a docker container in a serverless architecture.
-
-Uses postgresql for keeping a state, and centrifugo for keeping realtime connections.
+The go monorepo for island battles.  
+contains the frontend and the backend.  
+The backend is language agnostic, and is used for all clients.
