@@ -1,0 +1,49 @@
+services:
+  db:
+    image: postgres:15
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-U", "islandBattles", "-d", "islandBattles" ]
+      interval: 1s
+      timeout: 5s
+      retries: 10
+    environment:
+      - POSTGRES_USER=islandBattles
+      - POSTGRES_PASSWORD=islandBattles
+      - POSTGRES_DB=islandBattles
+    expose:
+      - 5432
+    ports:
+      - 5432:5432
+    command: ["postgres", "-c", "wal_level=logical", "-c", "wal_writer_delay=10ms"]
+
+  # backend:
+  #   build: ./backend
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ./backend:/usr/src/app
+  #   expose:
+  #     - 8888
+  #   ports:
+  #     - 8888:8888
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  # centrifugo:
+  #   image: centrifugo/centrifugo:v6
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ./centrifugo:/centrifugo
+  #   command: centrifugo -c config.json
+  #   ports:
+  #     - "8000:8000"
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #     kafka:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+volumes:
+  postgres_data:
