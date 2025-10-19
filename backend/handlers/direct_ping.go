@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"islandBattles/backend/config"
 	"net/http"
 	"time"
 
@@ -22,7 +21,7 @@ type RPCResponse struct {
 	}
 }
 
-func DirectPing(c *gin.Context) {
+func (env *Env) DirectPing(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -33,7 +32,7 @@ func DirectPing(c *gin.Context) {
 		return
 	}
 
-	_, err = config.Client.Publish(ctx, "direct_ping", centrifugoResponseJson)
+	_, err = env.CentrifugoClient.Publish(ctx, "direct_ping", centrifugoResponseJson)
 	if err != nil {
 		fmt.Println("Error on publish: ", err)
 		return

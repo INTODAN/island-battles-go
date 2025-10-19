@@ -7,6 +7,6 @@ import (
 )
 
 
-func SetupRoutes(router *gin.Engine) {
-	router.POST("direct_ping", handlers.DirectPing)
+func SetupRoutes(router *gin.Engine, env *handlers.Env) {
+	router.POST("direct_ping", env.DirectPing)
 }

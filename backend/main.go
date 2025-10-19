@@ -2,21 +2,22 @@ package main
 
 import (
 	"fmt"
-	"islandBattles/backend/config"
+	"islandBattles/backend/dependencies"
+	"islandBattles/backend/handlers"
 	"islandBattles/backend/routes"
 
 	"github.com/gin-gonic/gin"
 )
 
 func main() {
-	config.ConnectCentrifugoClient()
-	config.ConnectDatabase()
+	centrifugoClient := dependencies.ConnectCentrifugoClient()
+	db := dependencies.InitDB()
 	
-	// defer config.Conn.Close(context.Background())
+	env := handlers.Env{CentrifugoClient: centrifugoClient, DB: db}
 	
 	r := gin.Default()
 
-	routes.SetupRoutes(r)
+	routes.SetupRoutes(r, &env)
 
 	fmt.Println("Listening on port 8888")
 

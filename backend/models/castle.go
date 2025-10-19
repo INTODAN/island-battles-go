@@ -1,5 +1,7 @@
 package models
 
+import "gorm.io/gorm"
+
 type Castle struct {
-	ID int `json:"id"`
+	gorm.Model
 }
