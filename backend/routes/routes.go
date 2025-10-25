@@ -8,5 +8,6 @@ import (
 
 
 func SetupRoutes(router *gin.Engine, env *handlers.Env) {
-	router.POST("direct_ping", env.DirectPing)
+	router.POST("ping", env.Ping)
+	router.POST("connect", env.Connect)
 }

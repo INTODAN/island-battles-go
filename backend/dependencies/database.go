@@ -1,6 +1,7 @@
 package dependencies
 
 import (
+	"fmt"
 	"islandBattles/backend/models"
 	"log"
 
@@ -15,6 +16,17 @@ func InitDB() *gorm.DB {
 	if err != nil {
 		log.Fatalln("failed to connect database")
 	}
+	
+	sql := "CREATE EXTENSION IF NOT EXISTS postgis;"
+	if result := db.Exec(sql); result.Error != nil {
+		log.Fatalf("Failed to create PostGIS extension: %v", result.Error)
+	}
+	
+	fmt.Println("Postgis extension enabled!")
+	
+	db.AutoMigrate(&models.Map{})
 	db.AutoMigrate(&models.Castle{})
+	
+	fmt.Println("migrated models!")
 	return db
 }

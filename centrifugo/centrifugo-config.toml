@@ -4,11 +4,19 @@ allowed_origins = ["*"]
 [client.token]
 hmac_secret_key = "A8FgbPduK-tLiVkQxlKPVDegJ3JAR5XiuEH1bgJkCOIZW3JVLbMQx4hcf2yz4_LbcsiEaK44Wdu-KguwPxTq_g"
 
+[client.proxy.connect]
+enabled = true
+endpoint = "http://localhost:8888/connect"
+
+[client.subscribe_to_user_personal_channel]
+enabled = true
+personal_channel_namespace = "personal"
+single_connection = true
+
 [[proxies]]
 name = "proxy_ping"
-endpoint = "http://localhost:8888/direct_ping"
+endpoint = "http://localhost:8888/ping"
 
-[rpc]
 [[rpc.namespaces]]
 name = "proxy_ping"
 proxy_enabled = true
@@ -24,3 +32,7 @@ key = "0Bmi8sRKc-lpnA77ti0AW_P8vWIn8FDgfVkknlv-xIclvAlIX0DGIC95bRy_K6PXvP1Yb-J3m
 
 [channel.without_namespace]
 allow_subscribe_for_client = true
+
+[[channel.namespaces]]
+name="personal"
+presence = true

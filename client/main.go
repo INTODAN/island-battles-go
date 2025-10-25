@@ -11,7 +11,7 @@ import (
 
 func main() {
 	endpoint := "ws://localhost:8000/connection/websocket"
-	client := centrifuge.NewJsonClient(endpoint, centrifuge.Config{Token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsImV4cCI6MTc2MTMxMDM3MiwiaWF0IjoxNzYwNzA1NTcyfQ.QF_YZ8ta2Ou2E79q4YnJjHYjh2RZA4B4GZj5J4LJvkA"})
+	client := centrifuge.NewJsonClient(endpoint, centrifuge.Config{})
 	defer client.Close()
 
 	client.OnConnecting(func(event centrifuge.ConnectingEvent) {
@@ -35,12 +35,13 @@ func main() {
 	err := client.Connect()
 	if err != nil {
 		fmt.Println(err.Error())
-		return
+		return 
 	}
+	
 
-	sub, err := client.NewSubscription("direct_ping")
+	sub, err := client.NewSubscription("ping")
 	if err != nil {
-		fmt.Println(err.Error())
+		fmt.Println("Error:", err.Error())
 		return
 	}
 
