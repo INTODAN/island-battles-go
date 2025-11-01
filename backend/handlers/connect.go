@@ -1,22 +1,23 @@
 package handlers
 
 import (
-	"net/http"
-
-	"github.com/gin-gonic/gin"
+	"context"
 )
 
+type ConnectResult struct {
+	User string
+}
+
 type ConnectResponse struct {
-	Result struct {
-		User string `json:"user"`
+	Body struct {
+		Result ConnectResult
 	}
 }
 
-func (env *Env) Connect(c *gin.Context) {
+func (env *Env) Connect(ctx context.Context, input *struct{}) (*ConnectResponse, error) {
 	user_id := "0"
-	resp := ConnectResponse{Result: struct {
-		User string `json:"user"`
-	}{User: user_id}}
+	resp := &ConnectResponse{}
+	resp.Body.Result = ConnectResult{User: user_id}
 
-	c.JSON(http.StatusOK, resp)
+	return resp, nil
 }

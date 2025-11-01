@@ -17,15 +17,16 @@ func InitDB() *gorm.DB {
 		log.Fatalln("failed to connect database")
 	}
 	
-	sql := "CREATE EXTENSION IF NOT EXISTS postgis;"
-	if result := db.Exec(sql); result.Error != nil {
-		log.Fatalf("Failed to create PostGIS extension: %v", result.Error)
-	}
-	
 	fmt.Println("Postgis extension enabled!")
 	
-	db.AutoMigrate(&models.Map{})
-	db.AutoMigrate(&models.Castle{})
+	err = db.AutoMigrate(&models.Map{})
+	if err != nil {
+		log.Fatalln("failed to migrate map model")
+	}
+	err = db.AutoMigrate(&models.Castle{})
+	if err != nil {
+		log.Fatalln("failed to migrate castle model")
+	}
 	
 	fmt.Println("migrated models!")
 	return db

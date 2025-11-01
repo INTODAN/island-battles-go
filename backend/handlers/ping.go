@@ -4,24 +4,24 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/danielgtaylor/huma/v2"
 )
-
 
 type PingResponse struct {
 	Message string `json:"message" example:"direct_pong" doc:"Direct ping response with pong."`
 }
 
 type RPCResponse struct {
-	Result struct {
-		Data json.RawMessage
+	Body struct {
+		Result struct {
+			Data json.RawMessage
+		}
 	}
 }
 
-func (env *Env) Ping(c *gin.Context) {
+func (env *Env) Ping(ctx context.Context, input *struct{}) (*RPCResponse, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -29,16 +29,17 @@ func (env *Env) Ping(c *gin.Context) {
 
 	if err != nil {
 		fmt.Println(err.Error())
-		return
+		return nil, huma.Error500InternalServerError(err.Error())
 	}
 
 	_, err = env.CentrifugoClient.Publish(ctx, "ping", centrifugoResponseJson)
 	if err != nil {
-		fmt.Println("Error on publish: ", err)
-		return
+		fmt.Println("Error off publish: ", err)
+		return nil, huma.Error500InternalServerError(err.Error())
 	}
 
-	resp := RPCResponse{Result: struct{ Data json.RawMessage }{Data: json.RawMessage(`{}`)}}
+	resp := &RPCResponse{}
+	resp.Body.Result = struct{Data json.RawMessage}{Data: json.RawMessage(`{}`)}
 
-	c.JSON(http.StatusOK, resp)
+	return resp, nil
 }
