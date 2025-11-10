@@ -5,32 +5,44 @@ import (
 	"islandBattles/backend/dependencies"
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/routes"
+	"log/slog"
 	"net/http"
+	"os"
 
-	"github.com/danielgtaylor/huma/middleware"
+	"github.com/lmittmann/tint"
+
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/danielgtaylor/huma/v2/adapters/humago"
+	"github.com/danielgtaylor/huma/v2/adapters/humachi"
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/httplog/v3"
 )
 
 func main() {
+	logger := slog.New(tint.NewHandler(os.Stdout, &tint.Options{
+		Level: slog.LevelInfo,
+	}))
+
 	centrifugoClient := dependencies.ConnectCentrifugoClient()
 	db := dependencies.InitDB()
-	
-	router := http.NewServeMux()
-	
-	api := humago.New(router, huma.DefaultConfig("Island Battles Go Backend", "1.0.0"))
-	
-	
+
+	router := chi.NewMux()
+	router.Use(httplog.RequestLogger(logger, &httplog.Options{
+		Level:  slog.LevelInfo,
+		Schema: httplog.SchemaOTEL.Concise(true),
+	}))
+	api := humachi.New(router, huma.DefaultConfig("Island Battles Go Backend", "1.0.0"))
+
 	env := handlers.Env{CentrifugoClient: centrifugoClient, DB: db}
-	
+
 	routes.SetupRoutes(&api, &env)
 
 	fmt.Println("Listening on port 8888")
-	
-	handler := middleware.Logger(router)
 
-	http.ListenAndServe("127.0.0.1:8888", handler)
+	http.ListenAndServe(":8888", router)
 
-	
 	fmt.Println("Server closed")
+}
+
+func isDebugHeaderSet(r *http.Request) bool {
+	return r.Header.Get("Debug") == "reveal-body-logs"
 }

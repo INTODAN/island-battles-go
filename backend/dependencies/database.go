@@ -17,8 +17,6 @@ func InitDB() *gorm.DB {
 		log.Fatalln("failed to connect database")
 	}
 	
-	fmt.Println("Postgis extension enabled!")
-	
 	err = db.AutoMigrate(&models.Map{})
 	if err != nil {
 		log.Fatalln("failed to migrate map model")
