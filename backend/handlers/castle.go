@@ -7,10 +7,11 @@ import (
 	"islandBattles/backend/models"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type CreateCastleResult struct {
-	CastleId uint `json:"castle_id"`
+	CastleId uint
 }
 
 type CreateCastleResponse struct {
@@ -19,14 +20,20 @@ type CreateCastleResponse struct {
 	}
 }
 
+type CreateCastleBody struct {
+	UserId uint
+	models.CastleFields
+	Position pgtype.Vec2
+}
+
 type CreateCastleRequest struct {
-	User uint `json:"user_id"`
+	Body CreateCastleBody
 }
 
 func (env *Env) CreateCastle(ctx context.Context, input *CreateCastleRequest) (*CreateCastleResponse, error) {
-	var castleFields models.CastleFields
-
-	castleId, err := dal.CreateCastle(env.DB, models.Castle{CastleFields: models.CastleFields{TeamColor: castleFields.TeamColor, Position: castleFields.Position, SoldierAmount: castleFields.SoldierAmount}})
+	fmt.Println("Received position: ", input.Body.Position)
+	castle := models.Castle{CastleFields: models.CastleFields{TeamColor: input.Body.TeamColor, Position: pgtype.Point{P: input.Body.Position, Valid: true}, SoldierAmount: input.Body.SoldierAmount}}
+	castleId, err := dal.CreateCastle(env.DB, &castle)
 	if err != nil {
 		fmt.Println("Error when creating castle: ", err)
 		return nil, huma.Error500InternalServerError(err.Error())

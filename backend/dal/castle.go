@@ -32,8 +32,8 @@ func distancesQuery(db gorm.DB){
 	}
 }
 
-func CreateCastle(db *gorm.DB, castle models.Castle) (uint, error) {
-	err := db.Create(castle).Error
+func CreateCastle(db *gorm.DB, castle *models.Castle) (uint, error) {
+	err := db.Create(&castle).Error
 	if err != nil {
 		return 0, err
 	}

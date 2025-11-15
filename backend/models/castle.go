@@ -6,9 +6,9 @@ import (
 )
 
 type CastleFields struct {
-	TeamColor int `json:"team_color"`
-	Position pgtype.Point `json:"position" gorm:"type:point"`
-	SoldierAmount int `json:"soldier_amount"`
+	TeamColor int
+	Position pgtype.Point `gorm:"type:point"`
+	SoldierAmount int
 }
 
 type Castle struct {
