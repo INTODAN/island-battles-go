@@ -4,7 +4,6 @@ import (
 	"islandBattles/backend/models"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 func CreateMapTemplate(db *gorm.DB, input *models.MapTemplate) (uint, error) {
