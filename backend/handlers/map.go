@@ -10,13 +10,9 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type CreateMapTemplateResult struct {
-	MapTemplateId uint
-}
-
 type CreateMapTemplateResponse struct {
 	Body struct {
-		Result CreateMapTemplateResult
+		Result struct{MapTemplateId uint}
 	}
 }
 
@@ -34,17 +30,18 @@ type CreateMapTemplateRequest struct {
 
 func (input *InputCastle) Resolve(ctx huma.Context, prefix *huma.PathBuffer) []error {
 	var point pgtype.Point
-	point.Scan(input.RawPosition) 
+	point.Scan(input.RawPosition)
 	input.Position = point
 	return nil
 }
 
 func (env *Env) CreateMapTemplate(ctx context.Context, input *CreateMapTemplateRequest) (*CreateMapTemplateResponse, error) {
-	castleTemplates := make([]models.CastleTemplate, len(input.Body.Castles))
-	for i, c := range input.Body.Castles {
-		castleTemplates[i] = models.CastleTemplate{
-			CastleFields: c.CastleFields,
-		}
+	var castleTemplates []models.CastleTemplate
+
+	for _, ct := range input.Body.Castles {
+		castleTemplates = append(castleTemplates, models.CastleTemplate{
+			CastleFields: ct.CastleFields,
+		})
 	}
 
 	mapTemplateId, err := dal.CreateMapTemplate(env.DB, &models.MapTemplate{MapFields: input.Body.MapFields, CastleTemplates: castleTemplates})
@@ -53,8 +50,31 @@ func (env *Env) CreateMapTemplate(ctx context.Context, input *CreateMapTemplateR
 		return nil, huma.Error500InternalServerError(err.Error())
 	}
 	resp := &CreateMapTemplateResponse{}
-	resp.Body.Result = CreateMapTemplateResult{MapTemplateId: mapTemplateId}
+	resp.Body.Result.MapTemplateId = mapTemplateId
 
 	return resp, nil
 }
 
+type CreateMapFromTemplateRequest struct {
+	Body struct {
+		TemplateID uint `json:"template_id"`
+	}
+}
+
+type CreateMapFromTemplateResponse struct {
+	Body struct {
+		Result struct {MapID uint}
+	}
+}
+
+func (env *Env) CreateMapFromTemplate(ctx context.Context, input *CreateMapFromTemplateRequest) (*CreateMapFromTemplateResponse, error) {
+	mapID, err := dal.CreateMapFromTemplate(env.DB, input.Body.TemplateID)
+	if err != nil {
+		fmt.Println("Error when creating Map from Template: ", err)
+		return nil, huma.Error500InternalServerError(err.Error())
+	}
+	resp := &CreateMapFromTemplateResponse{}
+	resp.Body.Result.MapID = mapID
+
+	return resp, nil
+}
