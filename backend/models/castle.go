@@ -7,21 +7,21 @@ import (
 
 type CastleFields struct {
 	TeamColor int
-	Position pgtype.Point `gorm:"type:point" json:"-"`
+	Position  pgtype.Point `gorm:"type:point" json:"-"`
 }
 
 type Castle struct {
 	gorm.Model
 	CastleFields
 	SoldierAmount int
-	
+
 	MapID uint
-	Map Map
+	Map   Map
 }
 
 type CastleTemplate struct {
 	gorm.Model
 	CastleFields
 	MapTemplateID uint
-	MapTemplate MapTemplate
+	MapTemplate   MapTemplate
 }

@@ -16,12 +16,12 @@ func InitDB() *gorm.DB {
 	if err != nil {
 		log.Fatalln("failed to connect database")
 	}
-	
+
 	err = db.AutoMigrate(&models.Map{}, &models.Castle{}, &models.CastleTemplate{}, &models.MapTemplate{})
 	if err != nil {
 		log.Fatalln("failed to migrate models")
 	}
-	
+
 	fmt.Println("migrated models!")
 	return db
 }

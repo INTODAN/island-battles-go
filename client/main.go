@@ -35,9 +35,8 @@ func main() {
 	err := client.Connect()
 	if err != nil {
 		fmt.Println(err.Error())
-		return 
+		return
 	}
-	
 
 	sub, err := client.NewSubscription("ping")
 	if err != nil {

@@ -39,7 +39,7 @@ func (env *Env) Ping(ctx context.Context, input *struct{}) (*RPCResponse, error)
 	}
 
 	resp := &RPCResponse{}
-	resp.Body.Result = struct{Data json.RawMessage}{Data: json.RawMessage(`{}`)}
+	resp.Body.Result = struct{ Data json.RawMessage }{Data: json.RawMessage(`{}`)}
 
 	return resp, nil
 }
