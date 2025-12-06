@@ -42,10 +42,12 @@ func (input *InputCastle) Resolve(ctx huma.Context, prefix *huma.PathBuffer) []e
 func (env *Env) CreateMapTemplate(ctx context.Context, input *CreateMapTemplateRequest) (*CreateMapTemplateResponse, error) {
 	var castleTemplates []models.CastleTemplate
 
-	for _, ct := range input.Body.Castles {
-		castleTemplates = append(castleTemplates, models.CastleTemplate{
-			CastleFields: ct.CastleFields,
-		})
+	for i, inputCastle := range input.Body.Castles {
+		castleTemplate := models.CastleTemplate{
+			CastleFields: inputCastle.CastleFields,
+		}
+		castleTemplate.CastleId = uint(i)
+		castleTemplates = append(castleTemplates, castleTemplate)
 	}
 
 	mapTemplateId, err := dal.CreateMapTemplate(env.DB, &models.MapTemplate{MapFields: input.Body.MapFields, CastleTemplates: castleTemplates})
