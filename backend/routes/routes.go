@@ -12,4 +12,5 @@ func SetupRoutes(api *huma.API, env *handlers.Env) {
 	huma.Register(*api, huma.Operation{Path: "/connect", Method: http.MethodPost, DefaultStatus: http.StatusOK}, env.Connect)
 	huma.Register(*api, huma.Operation{Path: "/create_map_template", Method: http.MethodPost, DefaultStatus: http.StatusOK, Summary: "Create a Map Template."}, env.CreateMapTemplate)
 	huma.Register(*api, huma.Operation{Path: "/create_map_from_template", Method: http.MethodPost, DefaultStatus: http.StatusOK, Summary: "Create a Map from a Template."}, env.CreateMapFromTemplate)
+	huma.Register(*api, huma.Operation{Path: "/create_generation_from_template", Method: http.MethodPost, DefaultStatus: http.StatusOK, Summary: "Create a Generation from a Map Template."}, env.CreateGenerationFromTemplate)
 }

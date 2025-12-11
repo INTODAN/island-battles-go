@@ -6,7 +6,7 @@ import (
 
 type Generation struct {
 	gorm.Model
-	Map Map
+	MapID uint
+	Map   Map
 	// TODO: soldierGroups []SoldierGroup
 }
- 

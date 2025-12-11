@@ -39,3 +39,19 @@ func CreateCastle(db *gorm.DB, castle *models.Castle) (uint, error) {
 	}
 	return castle.ID, nil
 }
+
+func IncreaseSoldiersForMap(db *gorm.DB, mapID uint, amount int) error {
+	m, err := GetMap(db, mapID)
+	if err != nil {
+		return err
+	}
+
+	for i := range m.Castles {
+		m.Castles[i].SoldierAmount += amount
+	}
+
+	if err := db.Save(&m.Castles).Error; err != nil {
+		return err
+	}
+	return nil
+}

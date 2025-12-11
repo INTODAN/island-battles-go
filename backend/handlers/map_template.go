@@ -60,5 +60,3 @@ func (env *Env) CreateMapTemplate(ctx context.Context, input *CreateMapTemplateR
 
 	return resp, nil
 }
-
-
