@@ -4,6 +4,7 @@ import (
 	"islandBattles/backend/models"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func CreateGeneration(db *gorm.DB, generation *models.Generation) (uint, error) {
@@ -16,7 +17,7 @@ func CreateGeneration(db *gorm.DB, generation *models.Generation) (uint, error) 
 
 func GetGeneration(db *gorm.DB, generationID uint) (*models.Generation, error) {
 	var generation models.Generation
-	err := db.Preload("Map").First(&generation, generationID).Error
+	err := db.Preload(clause.Associations).First(&generation, generationID).Error
 	if err != nil {
 		return nil, err
 	}

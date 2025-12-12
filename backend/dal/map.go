@@ -4,6 +4,7 @@ import (
 	"islandBattles/backend/models"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func CreateMapTemplate(db *gorm.DB, mapTemplate *models.MapTemplate) (uint, error) {
@@ -16,8 +17,7 @@ func CreateMapTemplate(db *gorm.DB, mapTemplate *models.MapTemplate) (uint, erro
 
 func CreateMapFromTemplate(db *gorm.DB, templateID uint) (uint, error) {
 	var template models.MapTemplate
-	// Preload CastleTemplates so we can copy them
-	if err := db.Preload("CastleTemplates").First(&template, templateID).Error; err != nil {
+	if err := db.Preload(clause.Associations).First(&template, templateID).Error; err != nil {
 		return 0, err
 	}
 
@@ -43,7 +43,7 @@ func CreateMapFromTemplate(db *gorm.DB, templateID uint) (uint, error) {
 
 func DuplicateMap(db *gorm.DB, originalMapID uint) (uint, error) {
 	var originalMap models.Map
-	if err := db.Preload("Castles").First(&originalMap, originalMapID).Error; err != nil {
+	if err := db.Preload(clause.Associations).First(&originalMap, originalMapID).Error; err != nil {
 		return 0, err
 	}
 
@@ -69,7 +69,7 @@ func DuplicateMap(db *gorm.DB, originalMapID uint) (uint, error) {
 
 func GetMap(db *gorm.DB, mapID uint) (*models.Map, error) {
 	var m models.Map
-	if err := db.Preload("Castles").First(&m, mapID).Error; err != nil {
+	if err := db.Preload(clause.Associations).First(&m, mapID).Error; err != nil {
 		return nil, err
 	}
 	return &m, nil
