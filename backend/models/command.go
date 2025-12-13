@@ -19,9 +19,5 @@ type Command struct {
 type CommandType string
 
 const (
-	SoldierAmountIncrease CommandType = "SOLDIER_AMOUNT_INCREASE"
+	IncreaseSoldierAmount CommandType = "increase_soldier_amount"
 )
-
-var CommandParams = map[CommandType]interface{}{
-	SoldierAmountIncrease: struct{}{},
-}

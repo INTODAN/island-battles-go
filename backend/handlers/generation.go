@@ -67,15 +67,6 @@ func (env *Env) MigrateGeneration(ctx context.Context, input *MigrateGenerationR
 		return nil, huma.Error500InternalServerError(err.Error())
 	}
 
-	// TODO: Make the default command appended to the list of commands received,
-	// and apply generically as the first iteration of the for loop.
-	// 3. Apply the default command: increasing soldier amount of each castle by 1
-	// Assuming a default increase of 1 soldier per castle. This can be made configurable if needed.
-	err = dal.IncreaseSoldiersForMap(env.DB, newMapID, 1)
-	if err != nil {
-		return nil, huma.Error500InternalServerError(err.Error())
-	}
-
 	// 4. Iterate through the provided commands and apply their changes
 	for _, cmd := range input.Body.Commands {
 		_ = cmd // dummy usage to avoid compile error
