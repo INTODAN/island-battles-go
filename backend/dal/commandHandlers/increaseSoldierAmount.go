@@ -1,7 +1,6 @@
 package commandHandlers
 
 import (
-	"fmt"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
 
@@ -11,11 +10,7 @@ import (
 type IncreaseSoldierAmountParams struct{}
 
 // Increase the soldier amount of each castle in the generation's map.
-func IncreaseSoldierAmountHandler(db *gorm.DB, generation *models.Generation, parameters any) error {
-	parsedParameters, ok := parameters.(IncreaseSoldierAmountParams)
-	if !ok {
-		return fmt.Errorf("invalid params type")
-	}
+func IncreaseSoldierAmountHandler(db *gorm.DB, generation *models.Generation, parameters IncreaseSoldierAmountParams) error {
 	const amount = 1 // TODO: implement upgrade system and get amount from castles.
 
 	m, err := dal.GetMap(db, generation.MapID)
