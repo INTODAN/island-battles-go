@@ -9,7 +9,7 @@ import (
 
 type IncreaseSoldierAmountParams struct{}
 
-// Increase the soldier amount of each castle in the generation's map.
+// IncreaseSoldierAmountHandler Increase the soldier amount of each castle in the generation's map.
 func IncreaseSoldierAmountHandler(db *gorm.DB, generation *models.Generation, parameters IncreaseSoldierAmountParams) error {
 	const amount = 1 // TODO: implement upgrade system and get amount from castles.
 

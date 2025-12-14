@@ -1,14 +1,14 @@
 package models
 
 import (
-	"github.com/jackc/pgx/v5/pgtype"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
 type CommandFields struct {
 	GenerationId uint
 	CommandType  CommandType
-	Parameters   pgtype.JSONBCodec `gorm:"type:jsonb"`
+	Parameters   datatypes.JSON `gorm:"type:jsonb"`
 }
 
 type Command struct {

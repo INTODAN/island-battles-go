@@ -2,7 +2,10 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"islandBattles/backend/dal"
+	"islandBattles/backend/dal/commandHandlers"
 	"islandBattles/backend/models"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -16,8 +19,8 @@ type CreateGenerationFromTemplateRequest struct {
 
 type MigrateGenerationRequest struct {
 	Body struct {
-		GenerationID uint             `json:"generation_id"`
-		Commands     []models.Command `json:"commands"`
+		GenerationID uint                   `json:"generation_id"`
+		Commands     []models.CommandFields `json:"commands"`
 	}
 }
 
@@ -66,10 +69,19 @@ func (env *Env) MigrateGeneration(ctx context.Context, input *MigrateGenerationR
 	if err != nil {
 		return nil, huma.Error500InternalServerError(err.Error())
 	}
+	increaseSoldiersAmountCommand := models.CommandFields{GenerationId: previousGeneration.ID,
+		CommandType: models.IncreaseSoldierAmount,
+		Parameters:  []byte("{}")}
+
+	commands := append([]models.CommandFields{increaseSoldiersAmountCommand}, input.Body.Commands...)
 
 	// 4. Iterate through the provided commands and apply their changes
-	for _, cmd := range input.Body.Commands {
-		_ = cmd // dummy usage to avoid compile error
+	for _, cmd := range commands {
+		err := processCommand(env, &cmd)
+		if err != nil {
+			fmt.Println("Error processing command:", err)
+			return nil, err
+		}
 	}
 
 	// 5. Create the new generation linking to the new map
@@ -86,4 +98,22 @@ func (env *Env) MigrateGeneration(ctx context.Context, input *MigrateGenerationR
 	resp.Body.GenerationID = generationID
 
 	return resp, nil
+}
+
+func processCommand(env *Env, command *models.CommandFields) error {
+	var jsonParams any
+	if err := json.Unmarshal(command.Parameters, &jsonParams); err != nil {
+		fmt.Println("Error unmarshalling json parameters", err)
+		return err
+	}
+
+	fmt.Println("Parsed params.")
+
+	err := commandHandlers.Mapping[command.CommandType](env.DB, command.GenerationId, jsonParams)
+	if err != nil {
+		fmt.Println("Error while handling command in dal", err)
+		return err
+	}
+
+	return nil
 }
