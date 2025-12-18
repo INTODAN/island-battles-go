@@ -9,6 +9,8 @@ type SoldierGroupFields struct {
 	DestinationCastleID uint
 	DestinationCastle   Castle
 
+	GenerationID uint
+
 	SoldierAmount uint
 }
 

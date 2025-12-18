@@ -34,7 +34,9 @@ type CreateMapTemplateRequest struct {
 
 func (input *InputCastle) Resolve(ctx huma.Context, prefix *huma.PathBuffer) []error {
 	var point pgtype.Point
-	point.Scan(input.RawPosition)
+	if err := point.Scan(input.RawPosition); err != nil {
+		return []error{fmt.Errorf("invalid position format: %w", err)}
+	}
 	input.Position = point
 	return nil
 }

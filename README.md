@@ -46,7 +46,7 @@
     cd backend
     go run main.go
     ```
-    
+
     Or for hot relaod:
     ```bash
     air

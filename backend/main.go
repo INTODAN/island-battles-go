@@ -38,11 +38,10 @@ func main() {
 
 	fmt.Println("Listening on port 8888")
 
-	http.ListenAndServe(":8888", router)
+	if err := http.ListenAndServe(":8888", router); err != nil && err != http.ErrServerClosed {
+		logger.Error("Server failed to listen and serve", "error", err)
+		os.Exit(1)
+	}
 
 	fmt.Println("Server closed")
-}
-
-func isDebugHeaderSet(r *http.Request) bool {
-	return r.Header.Get("Debug") == "reveal-body-logs"
 }

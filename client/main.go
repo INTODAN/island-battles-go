@@ -78,7 +78,7 @@ func main() {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 
-			emptyJsonRequestData, err := json.Marshal(&struct{}{})
+			emptyJsonRequestData, _ := json.Marshal(&struct{}{})
 
 			if ctx.Err() != nil {
 				fmt.Println("Context is already canceled:", ctx.Err())

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 )
@@ -22,9 +21,6 @@ type RPCResponse struct {
 }
 
 func (env *Env) Ping(ctx context.Context, input *struct{}) (*RPCResponse, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
 	centrifugoResponseJson, err := json.Marshal(PingResponse{Message: "pong"})
 
 	if err != nil {
