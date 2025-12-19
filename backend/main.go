@@ -23,7 +23,7 @@ func main() {
 	}))
 
 	centrifugoClient := dependencies.ConnectCentrifugoClient()
-	db := dependencies.InitDB()
+	db := dependencies.InitDB(dependencies.DatabaseURL)
 
 	router := chi.NewMux()
 	router.Use(httplog.RequestLogger(logger, &httplog.Options{

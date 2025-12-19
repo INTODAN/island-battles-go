@@ -33,16 +33,7 @@ type NewGenerationResponse struct {
 func (env *Env) CreateGenerationFromTemplate(ctx context.Context, input *CreateGenerationFromTemplateRequest) (
 	*NewGenerationResponse, error) {
 
-	mapID, err := dal.CreateMapFromTemplate(env.DB, input.Body.TemplateID)
-	if err != nil {
-		return nil, huma.Error500InternalServerError(err.Error())
-	}
-
-	generation := models.Generation{
-		MapID: mapID,
-	}
-
-	generationID, err := dal.CreateGeneration(env.DB, &generation)
+	generationID, err := dal.CreateGenerationFromTemplate(env.DB, input.Body.TemplateID)
 	if err != nil {
 		return nil, huma.Error500InternalServerError(err.Error())
 	}
@@ -53,7 +44,7 @@ func (env *Env) CreateGenerationFromTemplate(ctx context.Context, input *CreateG
 	return resp, nil
 }
 
-// Takes the previous generation and creates the new generation.
+// MigrateGeneration Takes the previous generation and creates the new generation.
 // First, duplicates the map with a deep copy in the db.
 // Then applies the default command, which is increasing the soldier group amount of each castle.
 // Then, iterates through the commands, apply each of the command's changes.
