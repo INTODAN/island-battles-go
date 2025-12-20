@@ -38,7 +38,7 @@ func main() {
 
 	fmt.Println("Listening on port 8888")
 
-	if err := http.ListenAndServe(":8888", router); err != nil && err != http.ErrServerClosed {
+	if err := http.ListenAndServe(":8888", router); err != nil {
 		logger.Error("Server failed to listen and serve", "error", err)
 		os.Exit(1)
 	}

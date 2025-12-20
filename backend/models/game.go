@@ -10,6 +10,6 @@ type Game struct {
 
 type Player struct {
 	gorm.Model
-	GameId    uint
+	GameID    uint
 	TeamColor int
 }
