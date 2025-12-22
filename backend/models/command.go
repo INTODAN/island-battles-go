@@ -6,7 +6,7 @@ import (
 )
 
 type CommandFields struct {
-	GenerationId uint
+	GenerationID uint
 	CommandType  CommandType
 	Parameters   datatypes.JSON `gorm:"type:jsonb"`
 }

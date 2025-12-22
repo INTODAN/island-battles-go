@@ -11,7 +11,7 @@ import (
 )
 
 type CreateMapTemplateResult struct {
-	MapTemplateId uint
+	MapTemplateID uint
 }
 
 type CreateMapTemplateResponse struct {
@@ -48,17 +48,17 @@ func (env *Env) CreateMapTemplate(ctx context.Context, input *CreateMapTemplateR
 		castleTemplate := models.CastleTemplate{
 			CastleFields: inputCastle.CastleFields,
 		}
-		castleTemplate.CastleId = uint(i)
+		castleTemplate.CastleID = uint(i)
 		castleTemplates = append(castleTemplates, castleTemplate)
 	}
 
-	mapTemplateId, err := dal.CreateMapTemplate(env.DB, &models.MapTemplate{MapFields: input.Body.MapFields, CastleTemplates: castleTemplates})
+	mapTemplateID, err := dal.CreateMapTemplate(env.DB, &models.MapTemplate{MapFields: input.Body.MapFields, CastleTemplates: castleTemplates})
 	if err != nil {
 		fmt.Println("Error when creating MapTemplate: ", err)
 		return nil, huma.Error500InternalServerError(err.Error())
 	}
 	resp := &CreateMapTemplateResponse{}
-	resp.Body.Result = CreateMapTemplateResult{MapTemplateId: mapTemplateId}
+	resp.Body.Result = CreateMapTemplateResult{MapTemplateID: mapTemplateID}
 
 	return resp, nil
 }

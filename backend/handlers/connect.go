@@ -15,9 +15,9 @@ type ConnectResponse struct {
 }
 
 func (env *Env) Connect(ctx context.Context, input *struct{}) (*ConnectResponse, error) {
-	userId := "0"
+	userID := "0"
 	resp := &ConnectResponse{}
-	resp.Body.Result = ConnectResult{User: userId}
+	resp.Body.Result = ConnectResult{User: userID}
 
 	return resp, nil
 }

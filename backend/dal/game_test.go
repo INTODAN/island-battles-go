@@ -1,15 +1,18 @@
-package dal
+package dal_test
 
 import (
+	"islandBattles/backend/dal"
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/models"
 	"testing"
+
+	"gorm.io/gorm/clause"
 )
 
 func TestCreateGame(t *testing.T) {
 	db := testutils.InitTestDB(t)
 
-	gameID, err := CreateGame(db)
+	gameID, err := dal.CreateGame(db)
 	if err != nil {
 		t.Fatalf("Failed to create game: %v", err)
 	}
@@ -27,24 +30,27 @@ func TestCreateGame(t *testing.T) {
 func TestAddPlayerToGame(t *testing.T) {
 	db := testutils.InitTestDB(t)
 
-	gameID, err := CreateGame(db)
+	gameID, err := dal.CreateGame(db)
 	if err != nil {
 		t.Fatalf("Failed to create game: %v", err)
 	}
 
 	// Add first player
-	if err := AddPlayerToGame(db, gameID); err != nil {
+	if err := dal.AddPlayerToGame(db, gameID); err != nil {
 		t.Fatalf("Failed to add first player: %v", err)
 	}
 
 	// Add second player
-	if err := AddPlayerToGame(db, gameID); err != nil {
+	if err := dal.AddPlayerToGame(db, gameID); err != nil {
 		t.Fatalf("Failed to add second player: %v", err)
 	}
 
 	// Verify players
 	var players []models.Player
-	if err := db.Where("game_id = ?", gameID).Order("team_color asc").Find(&players).Error; err != nil {
+	if err := db.Where(&models.Player{GameID: gameID}).Order(clause.OrderByColumn{Column: clause.Column{Name: "team_color"},
+		Desc: false,
+	}).Find(&players).
+		Error; err != nil {
 		t.Fatalf("Failed to find players: %v", err)
 	}
 
@@ -65,15 +71,15 @@ func TestAddPlayerToGame(t *testing.T) {
 		t.Fatalf("Failed to delete player 0: %v", err)
 	}
 
-	// Add another player. 
-	// Current max color is 1 (player 1). 
+	// Add another player.
+	// Current max color is 1 (player 1).
 	// New player should get 1 + 1 = 2.
-	if err := AddPlayerToGame(db, gameID); err != nil {
+	if err := dal.AddPlayerToGame(db, gameID); err != nil {
 		t.Fatalf("Failed to add third player: %v", err)
 	}
 
 	var newPlayers []models.Player
-	if err := db.Where("game_id = ?", gameID).Find(&newPlayers).Error; err != nil {
+	if err := db.Where(&models.Player{GameID: gameID}).Find(&newPlayers).Error; err != nil {
 		t.Fatalf("Failed to find players after addition: %v", err)
 	}
 

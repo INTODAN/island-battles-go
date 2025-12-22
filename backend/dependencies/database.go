@@ -17,7 +17,8 @@ func InitDB(connectionString string) *gorm.DB {
 		log.Fatalln("failed to connect database")
 	}
 
-	err = db.AutoMigrate(&models.Map{}, &models.Castle{}, &models.CastleTemplate{}, &models.MapTemplate{},
+	err = db.AutoMigrate(&models.Game{}, &models.Player{}, &models.Map{}, &models.Castle{}, &models.CastleTemplate{},
+		&models.MapTemplate{},
 		&models.Generation{}, &models.SoldierGroup{})
 	if err != nil {
 		log.Fatalln("failed to migrate models")

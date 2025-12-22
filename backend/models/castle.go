@@ -8,7 +8,7 @@ import (
 type CastleFields struct {
 	TeamColor int
 	Position  pgtype.Point `gorm:"type:point" json:"-"`
-	CastleId  uint         `json:"-"`
+	CastleID  uint         `json:"-"`
 }
 
 type Castle struct {

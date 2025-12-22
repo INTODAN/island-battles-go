@@ -5,7 +5,7 @@ import (
 )
 
 type MapFields struct {
-	MapName                      string `json:"map_name" gorm:"unique"`
+	MapName                      string `json:"map_name"`
 	PlayerAmount                 int    `json:"player_amount" default:"2"`
 	PlaneSizeY                   int    `json:"plane_size_y"`
 	PlaneSizeX                   int    `json:"plane_size_x"`

@@ -1,9 +1,11 @@
 package dal
 
 import (
+	"errors"
 	"islandBattles/backend/models"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // CreateGame creates a game in the db with no generations and no players (Empty lists)
@@ -21,18 +23,22 @@ func CreateGame(db *gorm.DB) (uint, error) {
 	return game.ID, nil
 }
 
-// AddPlayerToGame adds a player to the game with the gameId,
+// AddPlayerToGame adds a player to the game with the gameID,
 // assigning the next available TeamColor (highest + 1).
 func AddPlayerToGame(db *gorm.DB, gameID uint) error {
-	var lastPlayer models.Player
+	var highestTeamColorPlayer models.Player
 	// Find the player with the highest TeamColor for this game
-	err := db.Where(&models.Player{GameID: gameID}).Order("team_color desc").First(&lastPlayer).Error
+	err := db.Where(&models.Player{GameID: gameID}).Order(clause.OrderByColumn{Column: clause.Column{Name: "team_color"},
+		Desc: false,
+	}).First(
+		&highestTeamColorPlayer).
+		Error
 
 	newColor := 0
 	if err == nil {
 		// Player found, increment color
-		newColor = lastPlayer.TeamColor + 1
-	} else if err != gorm.ErrRecordNotFound {
+		newColor = highestTeamColorPlayer.TeamColor + 1
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		// Real error
 		return err
 	}

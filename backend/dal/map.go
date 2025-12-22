@@ -1,6 +1,7 @@
 package dal
 
 import (
+	"fmt"
 	"islandBattles/backend/models"
 
 	"gorm.io/gorm"
@@ -8,6 +9,14 @@ import (
 )
 
 func CreateMapTemplate(db *gorm.DB, mapTemplate *models.MapTemplate) (uint, error) {
+	// Check if a map template with the same name already exists
+	var count int64
+	db.Where(&models.MapTemplate{MapFields: models.MapFields{MapName: mapTemplate.MapName}}).Count(&count)
+
+	if count > 0 {
+		return 0, fmt.Errorf("map template with name '%s' already exists", mapTemplate.MapName)
+	}
+
 	err := db.Create(&mapTemplate).Error
 	if err != nil {
 		return 0, err

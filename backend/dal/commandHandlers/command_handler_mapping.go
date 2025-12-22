@@ -1,0 +1,43 @@
+package commandHandlers
+
+import (
+	"encoding/json"
+	"fmt"
+	"islandBattles/backend/dal"
+	"islandBattles/backend/models"
+
+	"gorm.io/datatypes"
+	"gorm.io/gorm"
+)
+
+type CommandHandler[T any] func(db *gorm.DB, generation *models.Generation, parameters T) error
+type CommandHandlerWrapper func(db *gorm.DB, generationID uint, parameters datatypes.JSON) error
+
+func WrapCommandHandler[TParams any](handler CommandHandler[TParams]) CommandHandlerWrapper {
+	return func(db *gorm.DB, generationID uint, rawParameters datatypes.JSON) error {
+		var parsedParameters TParams
+		err := json.Unmarshal(rawParameters, &parsedParameters)
+		if err != nil {
+			return err
+		}
+		generation, err := dal.GetGeneration(db, generationID)
+		if err != nil {
+			return err
+		}
+		return handler(db, generation, parsedParameters)
+	}
+}
+
+var Mapping = map[models.CommandType]CommandHandlerWrapper{
+	models.IncreaseSoldierAmount: WrapCommandHandler[IncreaseSoldierAmountParams](IncreaseSoldierAmountHandler),
+}
+
+func ProcessCommand(db *gorm.DB, command *models.CommandFields) error {
+	err := Mapping[command.CommandType](db, command.GenerationID, command.Parameters)
+	if err != nil {
+		fmt.Println("Error while handling command in dal", err)
+		return err
+	}
+
+	return nil
+}

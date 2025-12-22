@@ -16,7 +16,8 @@ func InitTestDB(t *testing.T) *gorm.DB {
 	ctx := context.Background()
 
 	postgresContainer, err := postgres.Run(ctx, "postgres:18-alpine",
-		postgres.WithDatabase("islandBattles"), postgres.WithUsername("islandBattles"), postgres.WithPassword("islandBattles"), testcontainers.WithWaitStrategy(
+		postgres.WithDatabase("islandBattles"), postgres.WithUsername("islandBattles"), postgres.WithPassword("islandBattles"),
+		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
 				WithOccurrence(2).
 				WithStartupTimeout(5*time.Second),
