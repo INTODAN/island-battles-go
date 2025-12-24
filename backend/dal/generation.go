@@ -16,7 +16,7 @@ func CreateGeneration(db *gorm.DB, generation *models.Generation) (uint, error) 
 
 func GetGeneration(db *gorm.DB, generationID uint) (*models.Generation, error) {
 	var generation models.Generation
-	err := db.Preload("Map.Castles").Preload("SoldierGroups").First(&generation, generationID).Error
+	err := db.Preload("Map.Castles").Preload("Commands").Preload("SoldierGroups").First(&generation, generationID).Error
 	if err != nil {
 		return nil, err
 	}

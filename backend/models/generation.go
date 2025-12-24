@@ -9,5 +9,6 @@ type Generation struct {
 	MapID         uint
 	GameID        uint
 	Map           Map
+	Commands      []Command
 	SoldierGroups []SoldierGroup
 }

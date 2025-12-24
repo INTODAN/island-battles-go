@@ -19,7 +19,7 @@ func InitDB(connectionString string) *gorm.DB {
 
 	err = db.AutoMigrate(&models.Game{}, &models.Player{}, &models.Map{}, &models.Castle{}, &models.CastleTemplate{},
 		&models.MapTemplate{},
-		&models.Generation{}, &models.SoldierGroup{})
+		&models.Generation{}, &models.SoldierGroup{}, &models.Command{})
 	if err != nil {
 		log.Fatalln("failed to migrate models")
 	}

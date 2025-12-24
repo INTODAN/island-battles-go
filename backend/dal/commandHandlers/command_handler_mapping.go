@@ -32,7 +32,7 @@ var Mapping = map[models.CommandType]CommandHandlerWrapper{
 	models.IncreaseSoldierAmount: WrapCommandHandler[IncreaseSoldierAmountParams](IncreaseSoldierAmountHandler),
 }
 
-func ProcessCommand(db *gorm.DB, command *models.CommandFields) error {
+func ProcessCommand(db *gorm.DB, command *models.Command) error {
 	err := Mapping[command.CommandType](db, command.GenerationID, command.Parameters)
 	if err != nil {
 		fmt.Println("Error while handling command in dal", err)

@@ -27,4 +27,7 @@ func TestMigrateGeneration(t *testing.T) {
 	if migratedGeneration.Map.Castles[0].SoldierAmount <= migratedGeneration.Map.NeutralStartingSoldierAmount {
 		t.Fatal("Soldier amount did not increase as expected")
 	}
+	if len(migratedGeneration.Commands) < 1 {
+		t.Fatal("expected at least one command")
+	}
 }
