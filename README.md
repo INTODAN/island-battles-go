@@ -77,3 +77,4 @@
 
 1. ALWAYS use go structs when performing queries, never use strings for queries (DON'T DO "game_id = ?"), and same for OrderBy,
    etc.
+2. If the user deletes a function that an agent has added, the agent SHOULD NOT add the function back in a later message.

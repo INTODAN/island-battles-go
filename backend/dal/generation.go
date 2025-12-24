@@ -4,6 +4,7 @@ import (
 	"islandBattles/backend/models"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func CreateGeneration(db *gorm.DB, generation *models.Generation) (uint, error) {
@@ -25,7 +26,10 @@ func GetGeneration(db *gorm.DB, generationID uint) (*models.Generation, error) {
 
 func GetLatestGenerationForGame(db *gorm.DB, gameID uint) (*models.Generation, error) {
 	var generation models.Generation
-	err := db.Preload("Map.Castles").Where("game_id = ?", gameID).Order("created_at desc").First(&generation).Error
+	err := db.Preload("Map.Castles").
+		Where(&models.Generation{GameID: gameID}).
+		Order(clause.OrderByColumn{Column: clause.Column{Name: "id"}, Desc: true}).
+		First(&generation).Error
 	if err != nil {
 		return nil, err
 	}
