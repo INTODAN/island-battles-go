@@ -8,6 +8,15 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+func GetGame(db *gorm.DB, gameID uint) (*models.Game, error) {
+	var game models.Game
+	err := db.Preload("Generations.Map.Castles").First(&game, gameID).Error
+	if err != nil {
+		return nil, err
+	}
+	return &game, nil
+}
+
 // CreateGame creates a game in the db with no generations and no players (Empty lists)
 func CreateGame(db *gorm.DB) (uint, error) {
 	game := models.Game{

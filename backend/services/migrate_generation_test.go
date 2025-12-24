@@ -10,7 +10,11 @@ import (
 func TestMigrateGeneration(t *testing.T) {
 	db := testutils.InitTestDB(t)
 	generationID := testutils.CreateGenerationForTest(t, db)
-	migratedGenerationID, err := MigrateGeneration(db, generationID, []models.CommandFields{})
+	generation, err := dal.GetGeneration(db, generationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	migratedGenerationID, err := MigrateGeneration(db, generation.GameID, []models.CommandFields{})
 	if err != nil {
 		t.Fatal(err)
 	}

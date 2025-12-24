@@ -9,9 +9,13 @@ import (
 	"gorm.io/gorm"
 )
 
-func MigrateGeneration(db *gorm.DB, generationID uint, commands []models.CommandFields) (uint, error) {
+func MigrateGeneration(db *gorm.DB, GameID uint, commands []models.CommandFields) (uint, error) {
+	latestGeneration, err := dal.GetLatestGenerationForGame(db, GameID)
+	if err != nil {
+		return 0, err
+	}
 	// Get previous generation to get its map ID
-	previousGeneration, err := dal.GetGeneration(db, generationID)
+	previousGeneration, err := dal.GetGeneration(db, latestGeneration.ID)
 	if err != nil {
 		return 0, err
 	}

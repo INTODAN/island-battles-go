@@ -13,3 +13,20 @@ func TestGetGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestGetLatestGeneration(t *testing.T) {
+	db := testutils.InitTestDB(t)
+
+	generationID := testutils.CreateGenerationForTest(t, db)
+	generation, err := dal.GetGeneration(db, generationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	latestGeneration, err := dal.GetLatestGenerationForGame(db, generation.GameID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if latestGeneration.ID != generationID {
+		t.Fatal("Latest generation ID not correct")
+	}
+}

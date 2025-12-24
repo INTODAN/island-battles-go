@@ -17,7 +17,7 @@ import (
 func (env *Env) GetGameGraph(ctx context.Context, input *struct {
 	GameID uint `path:"id" doc:"The ID of the game"`
 }) (*huma.StreamResponse, error) {
-	generations, err := dal.GetGenerationsForGame(env.DB, input.GameID)
+	game, err := dal.GetGame(env.DB, input.GameID)
 	if err != nil {
 		return nil, huma.Error404NotFound(fmt.Sprintf("Generations not found for game %d", input.GameID))
 	}
@@ -25,7 +25,7 @@ func (env *Env) GetGameGraph(ctx context.Context, input *struct {
 	page := components.NewPage()
 	page.PageTitle = fmt.Sprintf("Game %d Visualization", input.GameID)
 
-	for i, generation := range generations {
+	for i, generation := range game.Generations {
 		// Identify unique team colors and create categories
 		teamColorMap := make(map[int]int) // TeamColor -> CategoryIndex
 		categories := make([]*opts.GraphCategory, 0)
@@ -45,7 +45,7 @@ func (env *Env) GetGameGraph(ctx context.Context, input *struct {
 			}),
 			charts.WithTitleOpts(opts.Title{
 				Title: fmt.Sprintf("Game ID: %d - Generation ID: %d (Step %d/%d)", input.GameID, generation.ID, i+1,
-					len(generations)),
+					len(game.Generations)),
 			}),
 			charts.WithLegendOpts(opts.Legend{Show: opts.Bool(true)}),
 			charts.WithTooltipOpts(opts.Tooltip{
@@ -137,7 +137,7 @@ func (env *Env) GetGameGraph(ctx context.Context, input *struct {
 		});
 	</script>
 	</body>
-	`, len(generations))
+	`, len(game.Generations))
 
 	htmlContent = strings.Replace(htmlContent, "<body>", "<body>"+controlsHTML, 1)
 	htmlContent = strings.Replace(htmlContent, "</body>", scriptHTML, 1)
