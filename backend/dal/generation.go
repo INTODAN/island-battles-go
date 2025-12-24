@@ -24,6 +24,15 @@ func GetGeneration(db *gorm.DB, generationID uint) (*models.Generation, error) {
 	return &generation, nil
 }
 
+func GetLatestGenerationForGame(db *gorm.DB, gameID uint) (*models.Generation, error) {
+	var generation models.Generation
+	err := db.Preload("Map.Castles").Where("game_id = ?", gameID).Order("created_at desc").First(&generation).Error
+	if err != nil {
+		return nil, err
+	}
+	return &generation, nil
+}
+
 func CreateGenerationFromTemplate(db *gorm.DB, mapTemplateID uint, gameID uint) (uint, error) {
 	mapID, err := CreateMapFromTemplate(db, mapTemplateID)
 	if err != nil {

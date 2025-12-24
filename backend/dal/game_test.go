@@ -29,6 +29,7 @@ func TestCreateGame(t *testing.T) {
 
 func TestAddPlayerToGame(t *testing.T) {
 	db := testutils.InitTestDB(t)
+	//db := dependencies.InitDB(dependencies.DatabaseURL)
 
 	gameID, err := dal.CreateGame(db)
 	if err != nil {
