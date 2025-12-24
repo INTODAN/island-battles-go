@@ -71,3 +71,9 @@
 *   **Lint/Verify (Go):** `go vet ./...`
 *   **Format:** `go fmt ./...`
 *   **Test:** `go test ./...`
+
+
+## Code philosophies
+
+1. ALWAYS use go structs when performing queries, never use strings for queries (DON'T DO "game_id = ?"), and same for OrderBy,
+   etc.
