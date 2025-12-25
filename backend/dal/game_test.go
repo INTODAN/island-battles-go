@@ -9,6 +9,28 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+func TestGetGame(t *testing.T) {
+	db := testutils.InitTestDB(t)
+	generationID := testutils.CreateGenerationForTest(t, db)
+	generation, err := dal.GetGeneration(db, generationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	game, err := dal.GetGame(db, generation.GameID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(game.Generations) < 1 {
+		t.Fatal("Game has no generations")
+	}
+	if game.Generations[0].Map.ID == 0 {
+		t.Fatal("Game has no Map loaded.")
+	}
+	if game.Generations[0].Map.Castles == nil {
+		t.Fatal("Game has no Castles loaded.")
+	}
+}
+
 func TestCreateGame(t *testing.T) {
 	db := testutils.InitTestDB(t)
 

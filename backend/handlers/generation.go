@@ -18,8 +18,8 @@ type CreateGenerationFromTemplateRequest struct {
 
 type MigrateGenerationRequest struct {
 	Body struct {
-		GenerationID uint                   `json:"generation_id"`
-		Commands     []models.CommandFields `json:"commands"`
+		GameID   uint                   `json:"game_id"`
+		Commands []models.CommandFields `json:"commands"`
 	}
 }
 
@@ -48,7 +48,7 @@ func (env *Env) CreateGenerationFromTemplate(ctx context.Context, input *CreateG
 // Then applies the default command, which is increasing the soldier group amount of each castle.
 // Then, iterates through the commands, apply each of the command's changes.
 func (env *Env) MigrateGeneration(ctx context.Context, input *MigrateGenerationRequest) (*NewGenerationResponse, error) {
-	generationID, err := services.MigrateGeneration(env.DB, input.Body.GenerationID, input.Body.Commands)
+	generationID, err := services.MigrateGeneration(env.DB, input.Body.GameID, input.Body.Commands)
 	if err != nil {
 		return nil, huma.Error500InternalServerError(err.Error())
 	}

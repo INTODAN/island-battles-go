@@ -17,7 +17,19 @@ func CreateGeneration(db *gorm.DB, generation *models.Generation) (uint, error) 
 
 func GetGeneration(db *gorm.DB, generationID uint) (*models.Generation, error) {
 	var generation models.Generation
-	err := db.Preload(clause.Associations).First(&generation, generationID).Error
+	err := db.Preload("Map.Castles").Preload("SoldierGroups").Preload("Commands").First(&generation, generationID).Error
+	if err != nil {
+		return nil, err
+	}
+	return &generation, nil
+}
+
+func GetLatestGenerationForGame(db *gorm.DB, gameID uint) (*models.Generation, error) {
+	var generation models.Generation
+	err := db.Preload("Map.Castles").
+		Where(&models.Generation{GameID: gameID}).
+		Order(clause.OrderByColumn{Column: clause.Column{Name: "id"}, Desc: true}).
+		First(&generation).Error
 	if err != nil {
 		return nil, err
 	}

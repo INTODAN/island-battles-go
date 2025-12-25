@@ -71,3 +71,13 @@
 *   **Lint/Verify (Go):** `go vet ./...`
 *   **Format:** `go fmt ./...`
 *   **Test:** `go test ./...`
+
+
+## Code philosophies
+
+1. ALWAYS use go structs when performing queries, never use strings for queries (DON'T DO "game_id = ?"), and same for OrderBy,
+   etc.
+2. If the user deletes a function that an agent has added, the agent SHOULD NOT add the function back in a later message.
+3. Avoid using the make function.
+4. use verbose variable names, no abbreviations.
+5. when changing any function, make sure to update the summaries in the huma routes if necessary.

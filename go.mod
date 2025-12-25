@@ -6,6 +6,7 @@ require (
 	github.com/centrifugal/centrifuge-go v0.10.11
 	github.com/centrifugal/gocent/v3 v3.4.0
 	github.com/danielgtaylor/huma/v2 v2.34.1
+	github.com/go-echarts/go-echarts/v2 v2.6.7
 	github.com/jackc/pgx/v5 v5.7.6
 	github.com/testcontainers/testcontainers-go v0.40.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.40.0
