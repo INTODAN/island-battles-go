@@ -3,6 +3,7 @@ package services
 import (
 	"islandBattles/backend/dal"
 	"islandBattles/backend/internal/testutils"
+	"islandBattles/backend/models"
 	"os"
 	"testing"
 )
@@ -14,6 +15,13 @@ func TestGetGameGraph(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	for i := 0; i < 300-1; i++ {
+		_, err := MigrateGeneration(db, generation.GameID, []models.CommandFields{})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	htmlContent, err := GetGameGraph(db, generation.GameID)
 	if err != nil {
 		t.Fatal(err)
