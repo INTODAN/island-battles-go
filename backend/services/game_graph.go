@@ -26,8 +26,8 @@ func GetGameGraph(db *gorm.DB, gameID uint) (string, error) {
 
 	for i, generation := range game.Generations {
 		// Identify unique team colors and create categories
-		teamColorMap := make(map[int]int) // TeamColor -> CategoryIndex
-		categories := make([]*opts.GraphCategory, 0)
+		teamColorMap := map[int]int{} // TeamColor -> CategoryIndex
+		categories := []*opts.GraphCategory{}
 		for _, castle := range generation.Map.Castles {
 			if _, exists := teamColorMap[castle.TeamColor]; !exists {
 				teamColorMap[castle.TeamColor] = len(categories)
@@ -56,7 +56,7 @@ func GetGameGraph(db *gorm.DB, gameID uint) (string, error) {
 		halfWidth := float32(generation.Map.PlaneSizeX) / 2
 		halfHeight := float32(generation.Map.PlaneSizeY) / 2
 
-		nodes := make([]opts.GraphNode, 0)
+		nodes := []opts.GraphNode{}
 		for _, castle := range generation.Map.Castles {
 			nodes = append(nodes, opts.GraphNode{
 				Name:       strconv.Itoa(int(castle.ID)),

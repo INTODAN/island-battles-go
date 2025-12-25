@@ -18,5 +18,5 @@ func SetupRoutes(api *huma.API, env *handlers.Env) {
 	huma.Register(*api, huma.Operation{Path: "/generation/migrate", Method: http.MethodPost, DefaultStatus: http.StatusOK,
 		Summary: "Migrate to the next generation in the game."}, env.MigrateGeneration)
 	huma.Register(*api, huma.Operation{Path: "/game/{id}/graph", Method: http.MethodGet, DefaultStatus: http.StatusOK,
-		Summary: "Get a graph visualization of the game's latest generation."}, env.GetGameGraph)
+		Summary: "Get a graph visualization of the game"}, env.GetGameGraph)
 }

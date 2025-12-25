@@ -45,20 +45,9 @@ func MigrateGeneration(db *gorm.DB, GameID uint, commands []models.CommandFields
 
 	commands = append(commands, increaseSoldiersAmountCommand)
 
-	var dbCommands []models.Command
-
-	for _, command := range commands {
-		dbCommand := models.Command{CommandFields: command, GenerationID: migratedGenerationID}
-		_, err := dal.CreateCommand(db, &dbCommand)
-		if err != nil {
-			return 0, err
-		}
-		dbCommands = append(dbCommands, dbCommand)
-	}
-
 	// Iterate through the provided commands and apply their changes
-	for _, cmd := range dbCommands {
-		err := commandHandlers.ProcessCommand(db, &cmd)
+	for _, cmd := range commands {
+		err := commandHandlers.ProcessCommand(db, &cmd, migratedGenerationID)
 		if err != nil {
 			fmt.Println("Error processing command:", err)
 			return 0, err
