@@ -30,6 +30,13 @@ repos:
         types: [go]
         pass_filenames: false # golangci-lint runs on whole project by default
 
+      - id: go-test
+        name: go test
+        entry: go test ./...
+        language: system
+        types: [go]
+        pass_filenames: false
+
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.18.2
     hooks:
