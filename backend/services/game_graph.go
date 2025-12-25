@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"islandBattles/backend/dal"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -13,14 +15,14 @@ import (
 	"gorm.io/gorm"
 )
 
-func GetGameGraph(db *gorm.DB, GameID uint) (string, error) {
-	game, err := dal.GetGame(db, GameID)
+func GetGameGraph(db *gorm.DB, gameID uint) (string, error) {
+	game, err := dal.GetGame(db, gameID)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("game not found: %w", err)
 	}
 
 	page := components.NewPage()
-	page.PageTitle = fmt.Sprintf("Game %d Visualization", GameID)
+	page.PageTitle = fmt.Sprintf("Game %d Visualization", gameID)
 
 	for i, generation := range game.Generations {
 		// Identify unique team colors and create categories
@@ -41,7 +43,7 @@ func GetGameGraph(db *gorm.DB, GameID uint) (string, error) {
 				ChartID: fmt.Sprintf("gen_%d", i),
 			}),
 			charts.WithTitleOpts(opts.Title{
-				Title: fmt.Sprintf("Game ID: %d - Generation ID: %d (Step %d/%d)", GameID, generation.ID, i+1,
+				Title: fmt.Sprintf("Game ID: %d - Generation ID: %d (Step %d/%d)", gameID, generation.ID, i+1,
 					len(game.Generations)),
 			}),
 			charts.WithLegendOpts(opts.Legend{Show: opts.Bool(true)}),
@@ -70,7 +72,7 @@ func GetGameGraph(db *gorm.DB, GameID uint) (string, error) {
 			SetSeriesOptions(
 				charts.WithGraphChartOpts(opts.GraphChart{
 					Layout:             "none",
-					Roam:               opts.Bool(true),
+					Roam:               opts.Bool(false),
 					FocusNodeAdjacency: opts.Bool(true),
 					Categories:         categories,
 				}),
@@ -84,60 +86,42 @@ func GetGameGraph(db *gorm.DB, GameID uint) (string, error) {
 
 	var buffer bytes.Buffer
 	if err := page.Render(&buffer); err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to render graph: %w", err)
 	}
 
 	htmlContent := buffer.String()
 
-	// Inject Pagination Controls and Logic
-	controlsHTML := `
-	<div style="text-align: center; margin: 20px;">
-		<button onclick="changeGen(-1)" style="padding: 10px 20px; font-size: 16px;">Previous</button>
-		<span id="gen-display" style="margin: 0 15px; font-size: 18px; font-weight: bold;">Step 1</span>
-		<button onclick="changeGen(1)" style="padding: 10px 20px; font-size: 16px;">Next</button>
-	</div>
-	`
-	scriptHTML := fmt.Sprintf(`
-	<script>
-		let currentGen = 0;
-		const totalGens = %d;
+	// Try to find the template files in multiple possible locations
+	possiblePaths := []string{
+		"graph",                            // Relative to backend/services/
+		filepath.Join("services", "graph"), // Relative to backend/
+		filepath.Join("backend", "services", "graph"), // Relative to project root
+	}
 
-		function showGen(index) {
-			// Hide all
-			for (let i = 0; i < totalGens; i++) {
-				const el = document.getElementById('gen_' + i);
-				if (el) el.style.display = 'none';
-			}
-			// Show current
-			const current = document.getElementById('gen_' + index);
-			if (current) current.style.display = 'block';
+	var controlsHTML, scriptJS string
+	var pathFound bool
 
-			// Update label
-			document.getElementById('gen-display').innerText = 'Step ' + (index + 1) + ' / ' + totalGens;
-
-			// Trigger resize to fix echarts rendering if hidden
-			const chartInstance = echarts.getInstanceByDom(current);
-			if (chartInstance) chartInstance.resize();
+	for _, possiblePath := range possiblePaths {
+		controlsHTMLBytes, controlsHTMLErr := os.ReadFile(filepath.Join(possiblePath, "controls.html"))
+		scriptJSBytes, scriptJSErr := os.ReadFile(filepath.Join(possiblePath, "script.js"))
+		if controlsHTMLErr == nil && scriptJSErr == nil {
+			controlsHTML = string(controlsHTMLBytes)
+			scriptJS = string(scriptJSBytes)
+			pathFound = true
+			break
 		}
+	}
 
-		function changeGen(delta) {
-			let newGen = currentGen + delta;
-			if (newGen < 0) newGen = 0;
-			if (newGen >= totalGens) newGen = totalGens - 1;
-			currentGen = newGen;
-			showGen(currentGen);
-		}
+	if !pathFound {
+		return "", fmt.Errorf("failed to find template files in possible locations: %v", possiblePaths)
+	}
 
-		// Init
-		document.addEventListener("DOMContentLoaded", function() {
-			showGen(0);
-		});
-	</script>
-	</body>
-	`, len(game.Generations))
+	// Inject variable and wrap in script tag
+	scriptHTML := fmt.Sprintf("<script type=\"module\">\nwindow.totalGens = %d;\n%s\n</script>", len(game.Generations), scriptJS)
 
 	htmlContent = strings.Replace(htmlContent, "<body>", "<body>"+controlsHTML, 1)
-	htmlContent = strings.Replace(htmlContent, "</body>", scriptHTML, 1)
+
+	htmlContent = strings.Replace(htmlContent, "</body>", scriptHTML+"</body>", 1)
 
 	return htmlContent, nil
 }
