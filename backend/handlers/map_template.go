@@ -22,7 +22,8 @@ type CreateMapTemplateResponse struct {
 
 type InputCastle struct {
 	models.CastleFields
-	RawPosition string `json:"position" example:"(x,y)"`
+	RawPosition string       `json:"Position" example:"(x,y)"`
+	Position    pgtype.Point `json:"-"`
 }
 
 type CreateMapTemplateRequest struct {
