@@ -1,9 +1,10 @@
-package services
+package services_test
 
 import (
 	"islandBattles/backend/dal"
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/models"
+	"islandBattles/backend/services"
 	"testing"
 )
 
@@ -14,7 +15,7 @@ func TestMigrateGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	migratedGenerationID, err := MigrateGeneration(db, generation.GameID, []models.CommandFields{})
+	migratedGenerationID, err := services.MigrateGeneration(db, generation.GameID, []models.CommandFields{})
 	if err != nil {
 		t.Fatal(err)
 	}
