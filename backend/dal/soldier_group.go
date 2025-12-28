@@ -12,3 +12,12 @@ func UpdateSoldierGroupPosition(db *gorm.DB, soldierGroup *models.SoldierGroup, 
 	soldierGroup.Position = newPosition
 	return db.Save(soldierGroup).Error
 }
+
+func CreateSoldierGroup(db *gorm.DB, soldierGroup *models.SoldierGroup) (uint, error) {
+	err := db.Create(&soldierGroup).Error
+
+	if err != nil {
+		return 0, err
+	}
+	return soldierGroup.ID, nil
+}

@@ -14,7 +14,7 @@ type CastleFields struct {
 type Castle struct {
 	gorm.Model
 	CastleFields
-	SoldierAmount int
+	SoldierAmount uint
 
 	MapID uint
 	Map   Map

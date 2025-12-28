@@ -6,21 +6,20 @@ import (
 )
 
 type SoldierGroupFields struct {
-	OriginCastleID uint
-	OriginCastle   Castle
-
+	OriginCastleID      uint
 	DestinationCastleID uint
-	DestinationCastle   Castle
-
-	GenerationID uint
-
-	SoldierAmount uint
-	Position      pgtype.Point `gorm:"type:point"`
+	SoldierAmount       uint
 }
 
 type SoldierGroup struct {
 	gorm.Model
 	SoldierGroupFields
+
+	OriginCastle      Castle `json:"-"`
+	DestinationCastle Castle `json:"-"`
+
+	GenerationID uint
+	Position     pgtype.Point `gorm:"type:point"`
 }
 
 const SoldierGroupSpeedPerGeneration = 0.5
