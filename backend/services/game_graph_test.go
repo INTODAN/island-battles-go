@@ -47,9 +47,17 @@ func TestGameGraphWithSoldierGroups(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = services.MigrateGeneration(db, generation.GameID, []models.CommandFields{{CommandType: models.SendSoldierGroup, Parameters: rawParams}})
+	migratedGenerationID, err := services.MigrateGeneration(db, generation.GameID, []models.CommandFields{{CommandType: models.
+		SendSoldierGroup, Parameters: rawParams}})
 	if err != nil {
 		t.Fatal(err)
+	}
+	loadedMigratedGeneration, err := dal.GetGeneration(db, migratedGenerationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loadedMigratedGeneration.SoldierGroups) < 1 {
+		t.Fatal("Sent Soldier group not loaded")
 	}
 
 	for i := 0; i < 5-1; i++ {

@@ -59,6 +59,5 @@ func MigrateGeneration(db *gorm.DB, GameID uint, commands []models.CommandFields
 			return 0, err
 		}
 	}
-
 	return migratedGenerationID, nil
 }

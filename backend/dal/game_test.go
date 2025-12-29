@@ -29,6 +29,12 @@ func TestGetGame(t *testing.T) {
 	if game.Generations[0].Map.Castles == nil {
 		t.Fatal("Game has no Castles loaded.")
 	}
+	if game.Generations[0].Commands == nil {
+		t.Fatal("Game has no Commands loaded.")
+	}
+	if game.Generations[0].SoldierGroups == nil {
+		t.Fatal("Game has no Commands loaded.")
+	}
 }
 
 func TestCreateGame(t *testing.T) {

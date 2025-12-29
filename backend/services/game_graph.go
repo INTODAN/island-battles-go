@@ -8,7 +8,6 @@ import (
 	"islandBattles/backend/models"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/go-echarts/go-echarts/v2/charts"
@@ -56,12 +55,23 @@ func BuildGraphForGeneration(generation *models.Generation, index int, totalGens
 	var nodes []opts.GraphNode
 	for _, castle := range generation.Map.Castles {
 		nodes = append(nodes, opts.GraphNode{
-			Name:       strconv.Itoa(int(castle.ID)),
+			Name:       fmt.Sprintf("castle_%d", castle.CastleID),
 			Value:      float32(castle.SoldierAmount),
 			X:          float32(castle.Position.P.X) + halfWidth,
 			Y:          float32(castle.Position.P.Y) + halfHeight,
 			SymbolSize: 50,
 			Category:   teamColorMap[castle.TeamColor],
+		})
+	}
+
+	for _, soldierGroup := range generation.SoldierGroups {
+		nodes = append(nodes, opts.GraphNode{
+			Name:       fmt.Sprintf("soldier_group_%d", soldierGroup.ID),
+			Value:      float32(soldierGroup.SoldierAmount),
+			X:          float32(soldierGroup.Position.P.X) + halfWidth,
+			Y:          float32(soldierGroup.Position.P.Y) + halfHeight,
+			SymbolSize: 50,
+			Category:   teamColorMap[soldierGroup.OriginCastle.TeamColor],
 		})
 	}
 

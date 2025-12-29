@@ -10,7 +10,8 @@ import (
 
 func GetGame(db *gorm.DB, gameID uint) (*models.Game, error) {
 	var game models.Game
-	err := db.Preload("Generations.Map.Castles").First(&game, gameID).Error
+	err := db.Preload("Generations.Map.Castles").Preload("Generations.SoldierGroups").Preload("Generations.Commands").Preload("Generations.SoldierGroups.OriginCastle").Preload(
+		"Generations.SoldierGroups.DestinationCastle").First(&game, gameID).Error
 	if err != nil {
 		return nil, err
 	}
