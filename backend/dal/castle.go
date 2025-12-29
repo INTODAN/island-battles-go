@@ -7,13 +7,13 @@ import (
 	"gorm.io/gorm"
 )
 
-func GetCastleFromGeneration(generation *models.Generation, castleID uint) (*models.Castle, error) {
+func GetCastleFromGeneration(generation *models.Generation, logicalCastleID uint) (*models.Castle, error) {
 	for i := range generation.Map.Castles {
-		if generation.Map.Castles[i].CastleID == castleID {
+		if generation.Map.Castles[i].LogicalCastleID == logicalCastleID {
 			return &generation.Map.Castles[i], nil
 		}
 	}
-	return nil, fmt.Errorf("castle with CastleID %d not found in generation %d", castleID, generation.ID)
+	return nil, fmt.Errorf("castle with LogicalCastleID %d not found in generation %d", logicalCastleID, generation.ID)
 }
 
 func UpdateSoldierGroupAmount(db *gorm.DB, castle *models.Castle, soldierAmount uint) error {

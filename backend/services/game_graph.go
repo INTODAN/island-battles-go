@@ -17,18 +17,6 @@ import (
 )
 
 func BuildGraphForGeneration(generation *models.Generation, index int, totalGens int) *charts.Graph {
-	// Identify unique team colors and create categories
-	teamColorMap := map[int]int{} // TeamColor -> CategoryIndex
-	var categories []*opts.GraphCategory
-	for _, castle := range generation.Map.Castles {
-		if _, exists := teamColorMap[castle.TeamColor]; !exists {
-			teamColorMap[castle.TeamColor] = len(categories)
-			categories = append(categories, &opts.GraphCategory{
-				Name: fmt.Sprintf("Team %d", castle.TeamColor),
-			})
-		}
-	}
-
 	graph := charts.NewGraph()
 	graph.SetGlobalOptions(
 		charts.WithInitializationOpts(opts.Initialization{
@@ -49,39 +37,80 @@ func BuildGraphForGeneration(generation *models.Generation, index int, totalGens
 		}),
 	)
 
+	// Standard ECharts palette to ensure consistent colors across categories
+	palette := []string{"#5470c6", "#91cc75", "#fac858", "#ee6666", "#73c0de", "#3ba272", "#fc8452", "#9a60b4", "#ea7ccc"}
+	teamColorHex := map[int]string{} // TeamColor -> HexColor
+
+	categoryIndices := map[string]int{}
+	var categories []*opts.GraphCategory
+
+	// Helper to ensure category exists and returns its index
+	ensureCategory := func(name string, teamColor int) int {
+		if idx, ok := categoryIndices[name]; ok {
+			return idx
+		}
+
+		// Determine color for this team
+		color, ok := teamColorHex[teamColor]
+		if !ok {
+			color = palette[len(teamColorHex)%len(palette)]
+			teamColorHex[teamColor] = color
+		}
+
+		idx := len(categories)
+		categoryIndices[name] = idx
+		categories = append(categories, &opts.GraphCategory{
+			Name: name,
+			ItemStyle: &opts.ItemStyle{
+				Color: color,
+			},
+		})
+		return idx
+	}
+
 	halfWidth := float32(generation.Map.PlaneSizeX) / 2
 	halfHeight := float32(generation.Map.PlaneSizeY) / 2
 
 	var nodes []opts.GraphNode
 	for _, castle := range generation.Map.Castles {
+		catName := fmt.Sprintf("Castles Team %d", castle.TeamColor)
+		catIdx := ensureCategory(catName, castle.TeamColor)
+
 		nodes = append(nodes, opts.GraphNode{
-			Name:       fmt.Sprintf("castle_%d", castle.CastleID),
+			Name:       fmt.Sprintf("castle_%d", castle.LogicalCastleID),
 			Value:      float32(castle.SoldierAmount),
 			X:          float32(castle.Position.P.X) + halfWidth,
 			Y:          float32(castle.Position.P.Y) + halfHeight,
 			SymbolSize: 50,
-			Category:   teamColorMap[castle.TeamColor],
+			Category:   catIdx,
 		})
 	}
 
 	for _, soldierGroup := range generation.SoldierGroups {
+		teamColor := soldierGroup.OriginCastle.TeamColor
+		catName := fmt.Sprintf("SoldierGroup Team %d", teamColor)
+		catIdx := ensureCategory(catName, teamColor)
+
 		nodes = append(nodes, opts.GraphNode{
 			Name:       fmt.Sprintf("soldier_group_%d", soldierGroup.ID),
 			Value:      float32(soldierGroup.SoldierAmount),
 			X:          float32(soldierGroup.Position.P.X) + halfWidth,
 			Y:          float32(soldierGroup.Position.P.Y) + halfHeight,
 			SymbolSize: 50,
-			Category:   teamColorMap[soldierGroup.OriginCastle.TeamColor],
+			Category:   catIdx,
 		})
 	}
 
-	graph.AddSeries("Castles", nodes, []opts.GraphLink{}).
+	graph.AddSeries("Generation", nodes, []opts.GraphLink{}).
 		SetSeriesOptions(
 			charts.WithGraphChartOpts(opts.GraphChart{
 				Layout:             "none",
 				Roam:               opts.Bool(false),
-				FocusNodeAdjacency: opts.Bool(true),
+				FocusNodeAdjacency: opts.Bool(false),
 				Categories:         categories,
+			}),
+			charts.WithEmphasisOpts(opts.Emphasis{
+				Focus: "none",
 			}),
 			charts.WithLabelOpts(opts.Label{
 				Show:      opts.Bool(true),

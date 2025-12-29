@@ -18,7 +18,7 @@ func CreateMapTemplate(db *gorm.DB, mapTemplate *models.MapTemplate) (uint, erro
 	}
 
 	for i := range mapTemplate.CastleTemplates {
-		mapTemplate.CastleTemplates[i].CastleID = uint(i)
+		mapTemplate.CastleTemplates[i].LogicalCastleID = uint(i)
 	}
 
 	err := db.Create(&mapTemplate).Error
