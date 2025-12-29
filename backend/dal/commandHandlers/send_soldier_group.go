@@ -13,10 +13,19 @@ type SendSoldierGroupParams struct {
 }
 
 func SendSoldierGroupHandler(db *gorm.DB, generation *models.Generation, parameters SendSoldierGroupParams) error {
-	originCastle, err := dal.GetCastle(db, parameters.OriginCastleID)
+	originCastle, err := dal.GetCastleFromGeneration(generation, parameters.OriginCastleID)
 	if err != nil {
 		return err
 	}
+
+	destinationCastle, err := dal.GetCastleFromGeneration(generation, parameters.DestinationCastleID)
+	if err != nil {
+		return err
+	}
+
+	parameters.OriginCastleID = originCastle.ID
+	parameters.DestinationCastleID = destinationCastle.ID
+
 	if originCastle.SoldierAmount < parameters.SoldierAmount {
 		return fmt.Errorf("castle doesn't have enough soldier amount")
 	}

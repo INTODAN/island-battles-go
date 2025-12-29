@@ -30,6 +30,8 @@ func WrapCommandHandler[TParams any](handler CommandHandler[TParams]) CommandHan
 
 var Mapping = map[models.CommandType]CommandHandlerWrapper{
 	models.IncreaseSoldierAmount: WrapCommandHandler[IncreaseSoldierAmountParams](IncreaseSoldierAmountHandler),
+	models.MoveSoldierGroups:     WrapCommandHandler[MoveSoldierGroupsParams](MoveSoldierGroupsHandler),
+	models.SendSoldierGroup:      WrapCommandHandler[SendSoldierGroupParams](SendSoldierGroupHandler),
 }
 
 func ProcessCommand(db *gorm.DB, command *models.CommandFields, generationID uint) error {

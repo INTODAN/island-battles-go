@@ -1,7 +1,9 @@
 package services_test
 
 import (
+	"encoding/json"
 	"islandBattles/backend/dal"
+	"islandBattles/backend/dal/commandHandlers"
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
@@ -24,6 +26,37 @@ func TestGetGameGraph(t *testing.T) {
 	_ = testutils.CreateGameGraphForTest(t, db, generation.GameID)
 }
 
-//func TestGameGraphWithSoldierGroups(t *testing.T) {
-//	db := testutils.InitTestDB(t)
-//}
+func TestGameGraphWithSoldierGroups(t *testing.T) {
+	db := testutils.InitTestDB(t)
+	generationID := testutils.CreateGenerationForTest(t, db)
+	generation, err := dal.GetGeneration(db, generationID)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5-1; i++ {
+		_, err := services.MigrateGeneration(db, generation.GameID, []models.CommandFields{})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	sendSoldierGroupParams := commandHandlers.SendSoldierGroupParams{SoldierGroupFields: models.
+		SoldierGroupFields{SoldierAmount: 10, OriginCastleID: generation.Map.Castles[0].CastleID,
+		DestinationCastleID: generation.Map.Castles[1].CastleID}}
+	rawParams, err := json.Marshal(sendSoldierGroupParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = services.MigrateGeneration(db, generation.GameID, []models.CommandFields{{CommandType: models.SendSoldierGroup, Parameters: rawParams}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 5-1; i++ {
+		_, err := services.MigrateGeneration(db, generation.GameID, []models.CommandFields{})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = testutils.CreateGameGraphForTest(t, db, generation.GameID)
+}
