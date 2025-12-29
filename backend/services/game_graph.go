@@ -28,8 +28,9 @@ func BuildGraphForGeneration(generation *models.Generation, index int, totalGens
 			Left: "5%",
 		}),
 		charts.WithLegendOpts(opts.Legend{
-			Show:  opts.Bool(true),
-			Right: "5%",
+			Show:   opts.Bool(true),
+			Bottom: "0%",
+			Left:   "center",
 		}),
 		charts.WithTooltipOpts(opts.Tooltip{
 			Show:      opts.Bool(true),
@@ -92,7 +93,7 @@ func BuildGraphForGeneration(generation *models.Generation, index int, totalGens
 		catIdx := ensureCategory(catName, teamColor)
 
 		nodes = append(nodes, opts.GraphNode{
-			Name:       fmt.Sprintf("soldier_group_%d", soldierGroup.ID),
+			Name:       fmt.Sprintf("soldier_group_%d", soldierGroup.LogicalSoldierGroupID),
 			Value:      float32(soldierGroup.SoldierAmount),
 			X:          float32(soldierGroup.Position.P.X) + halfWidth,
 			Y:          float32(soldierGroup.Position.P.Y) + halfHeight,

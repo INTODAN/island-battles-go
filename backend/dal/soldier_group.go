@@ -15,7 +15,23 @@ func UpdateSoldierGroupPosition(db *gorm.DB, soldierGroup *models.SoldierGroup, 
 }
 
 func CreateSoldierGroup(db *gorm.DB, soldierGroup *models.SoldierGroup) (uint, error) {
-	err := db.Create(&soldierGroup).Error
+	var lastGroups []models.SoldierGroup
+	err := db.Where(&models.SoldierGroup{GenerationID: soldierGroup.GenerationID}).
+		Order(clause.OrderByColumn{Column: clause.Column{Name: "logical_soldier_group_id"}, Desc: true}).
+		Limit(1).
+		Find(&lastGroups).Error
+
+	if err != nil {
+		return 0, err
+	}
+
+	if len(lastGroups) > 0 {
+		soldierGroup.LogicalSoldierGroupID = lastGroups[0].LogicalSoldierGroupID + 1
+	} else {
+		soldierGroup.LogicalSoldierGroupID = 0
+	}
+
+	err = db.Create(&soldierGroup).Error
 
 	if err != nil {
 		return 0, err
@@ -49,8 +65,9 @@ func DuplicateSoldierGroup(db *gorm.DB, migratedGenerationID uint, originSoldier
 			OriginCastleID:      newOriginCastle.ID,
 			DestinationCastleID: newDestinationCastle.ID,
 		},
-		Position:     originalSoldierGroup.Position,
-		GenerationID: migratedGenerationID,
+		Position:              originalSoldierGroup.Position,
+		GenerationID:          migratedGenerationID,
+		LogicalSoldierGroupID: originalSoldierGroup.LogicalSoldierGroupID,
 	}
 
 	if err := db.Create(&newSoldierGroup).Error; err != nil {

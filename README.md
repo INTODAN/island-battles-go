@@ -105,3 +105,4 @@ This loop (Modify Code -> Run Test with Export -> Refresh Browser) is the recomm
 3. Avoid using the make function.
 4. use verbose variable names, no abbreviations.
 5. when changing any function, make sure to update the summaries in the huma routes if necessary.
+6. Prefer `Limit(1).Find(&slice)` over `First(&struct)` to gracefully handle non-existent records without checking for `gorm.ErrRecordNotFound`.

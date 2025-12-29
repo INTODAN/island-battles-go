@@ -18,8 +18,9 @@ type SoldierGroup struct {
 	OriginCastle      Castle `json:"-"`
 	DestinationCastle Castle `json:"-"`
 
-	GenerationID uint
-	Position     pgtype.Point `gorm:"type:point"`
+	GenerationID          uint
+	LogicalSoldierGroupID uint
+	Position              pgtype.Point `gorm:"type:point"`
 }
 
 const SoldierGroupSpeedPerGeneration = 0.5

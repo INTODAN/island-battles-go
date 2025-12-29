@@ -60,7 +60,25 @@ func TestGameGraphWithSoldierGroups(t *testing.T) {
 		t.Fatal("Sent Soldier group not loaded")
 	}
 
-	for i := 0; i < 20; i++ {
+	for i := 0; i < 10; i++ {
+		_, err := services.MigrateGeneration(db, generation.GameID, []models.CommandFields{})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	sendSoldierGroupParams = commandHandlers.SendSoldierGroupParams{SoldierGroupFields: models.
+		SoldierGroupFields{SoldierAmount: 10, OriginCastleID: generation.Map.Castles[1].LogicalCastleID,
+		DestinationCastleID: generation.Map.Castles[0].LogicalCastleID}}
+	rawParams, err = json.Marshal(sendSoldierGroupParams)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = services.MigrateGeneration(db, generation.GameID, []models.CommandFields{{CommandType: models.
+		SendSoldierGroup, Parameters: rawParams}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 10; i++ {
 		_, err := services.MigrateGeneration(db, generation.GameID, []models.CommandFields{})
 		if err != nil {
 			t.Fatal(err)
