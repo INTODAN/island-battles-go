@@ -43,3 +43,15 @@ func TestGetLatestGeneration(t *testing.T) {
 		t.Fatal("Latest generation ID not correct")
 	}
 }
+
+func TestUniqueLogicalCastleID(t *testing.T) {
+	db := testutils.InitTestDB(t)
+	generationID := testutils.CreateGenerationForTest(t, db)
+	generation, err := dal.GetGeneration(db, generationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if generation.Map.Castles[0].CastleID == generation.Map.Castles[1].CastleID {
+		t.Fatal("Castle IDs are not unique")
+	}
+}

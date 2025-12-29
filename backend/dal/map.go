@@ -17,6 +17,10 @@ func CreateMapTemplate(db *gorm.DB, mapTemplate *models.MapTemplate) (uint, erro
 		return 0, fmt.Errorf("map template with name '%s' already exists", mapTemplate.MapName)
 	}
 
+	for i := range mapTemplate.CastleTemplates {
+		mapTemplate.CastleTemplates[i].CastleID = uint(i)
+	}
+
 	err := db.Create(&mapTemplate).Error
 	if err != nil {
 		return 0, err

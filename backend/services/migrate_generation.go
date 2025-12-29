@@ -49,7 +49,7 @@ func MigrateGeneration(db *gorm.DB, GameID uint, commands []models.CommandFields
 	}
 
 	commands = append(commands, increaseSoldiersAmountCommand)
-	commands = append(commands, moveSoldierGroupsCommand)
+	commands = append([]models.CommandFields{moveSoldierGroupsCommand}, commands...)
 
 	// Iterate through the provided commands and apply their changes
 	for _, cmd := range commands {

@@ -45,7 +45,7 @@ func BuildGraphForGeneration(generation *models.Generation, index int, totalGens
 		}),
 		charts.WithTooltipOpts(opts.Tooltip{
 			Show:      opts.Bool(true),
-			Formatter: "Castle ID: {b}<br/>Soldier Amount: {c}",
+			Formatter: "ID: {b}<br/>Soldier Amount: {c}",
 		}),
 	)
 
