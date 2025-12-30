@@ -19,7 +19,8 @@ type Command struct {
 type CommandType string
 
 const (
-	IncreaseSoldierAmount CommandType = "increase_soldier_amount"
-	MoveSoldierGroups     CommandType = "move_soldier_groups"
-	SendSoldierGroup      CommandType = "send_soldier_group"
+	IncreaseSoldierAmount      CommandType = "increase_soldier_amount"
+	MoveSoldierGroups          CommandType = "move_soldier_groups"
+	SendSoldierGroup           CommandType = "send_soldier_group"
+	RemoveArrivedSoldierGroups CommandType = "remove_arrived_soldier_groups"
 )

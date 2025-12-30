@@ -20,3 +20,8 @@ func UpdateSoldierGroupAmount(db *gorm.DB, castle *models.Castle, soldierAmount 
 	castle.SoldierAmount = soldierAmount
 	return db.Save(castle).Error
 }
+
+func UpdateCastleTeamColor(db *gorm.DB, castle *models.Castle, teamColor uint) error {
+	castle.TeamColor = teamColor
+	return db.Save(castle).Error
+}

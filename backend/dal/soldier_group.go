@@ -68,6 +68,7 @@ func DuplicateSoldierGroup(db *gorm.DB, migratedGenerationID uint, originSoldier
 		Position:              originalSoldierGroup.Position,
 		GenerationID:          migratedGenerationID,
 		LogicalSoldierGroupID: originalSoldierGroup.LogicalSoldierGroupID,
+		TeamColor:             originalSoldierGroup.TeamColor,
 	}
 
 	if err := db.Create(&newSoldierGroup).Error; err != nil {
@@ -75,4 +76,8 @@ func DuplicateSoldierGroup(db *gorm.DB, migratedGenerationID uint, originSoldier
 	}
 
 	return newSoldierGroup.ID, nil
+}
+
+func DeleteSoldierGroup(db *gorm.DB, soldierGroupID uint) error {
+	return db.Delete(&models.SoldierGroup{}, soldierGroupID).Error
 }

@@ -20,6 +20,7 @@ type SoldierGroup struct {
 
 	GenerationID          uint
 	LogicalSoldierGroupID uint
+	TeamColor             uint
 	Position              pgtype.Point `gorm:"type:point"`
 }
 

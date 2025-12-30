@@ -75,7 +75,7 @@ func BuildGraphForGeneration(generation *models.Generation, index int, totalGens
 	var nodes []opts.GraphNode
 	for _, castle := range generation.Map.Castles {
 		catName := fmt.Sprintf("Castles Team %d", castle.TeamColor)
-		catIdx := ensureCategory(catName, castle.TeamColor)
+		catIdx := ensureCategory(catName, int(castle.TeamColor))
 
 		nodes = append(nodes, opts.GraphNode{
 			Name:       fmt.Sprintf("castle_%d", castle.LogicalCastleID),
@@ -88,9 +88,9 @@ func BuildGraphForGeneration(generation *models.Generation, index int, totalGens
 	}
 
 	for _, soldierGroup := range generation.SoldierGroups {
-		teamColor := soldierGroup.OriginCastle.TeamColor
+		teamColor := soldierGroup.TeamColor
 		catName := fmt.Sprintf("SoldierGroup Team %d", teamColor)
-		catIdx := ensureCategory(catName, teamColor)
+		catIdx := ensureCategory(catName, int(teamColor))
 
 		nodes = append(nodes, opts.GraphNode{
 			Name:       fmt.Sprintf("soldier_group_%d", soldierGroup.LogicalSoldierGroupID),
