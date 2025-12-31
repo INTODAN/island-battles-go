@@ -1,9 +1,11 @@
 package commandHandlers
 
 import (
+	"cmp"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
 	"math"
+	"slices"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"gorm.io/gorm"
@@ -18,16 +20,42 @@ type Line struct {
 
 func MoveSoldierGroupsHandler(db *gorm.DB, generation *models.Generation, parameters MoveSoldierGroupsParams) error {
 	moveVectors := make(map[uint]Line)
+	soldierGroupsMap := make(map[uint]*models.SoldierGroup)
+
 	for i := range generation.SoldierGroups {
 		soldierGroup := &generation.SoldierGroups[i]
+		soldierGroupsMap[soldierGroup.ID] = soldierGroup
 		newPosition := MoveTowards(soldierGroup.Position, soldierGroup.DestinationCastle.Position)
 		moveVectors[soldierGroup.ID] = Line{Start: soldierGroup.Position, End: newPosition, TeamColor: soldierGroup.TeamColor}
 	}
 	clashes := CalculateClashes(db, moveVectors)
-	for clashedSoldierGroupID, clashedPosition := range clashes {
-		vector := moveVectors[clashedSoldierGroupID]
-		vector.End = clashedPosition
-		moveVectors[clashedSoldierGroupID] = vector
+	for clashedPosition, clashedSoldierGroupIDs := range clashes {
+		soldierAmountsMap := make(map[uint]uint)
+		for _, id := range clashedSoldierGroupIDs {
+			vector := moveVectors[id]
+			vector.End = clashedPosition
+			moveVectors[id] = vector
+
+			soldierGroup := soldierGroupsMap[id]
+			soldierAmountsMap[soldierGroup.TeamColor] += soldierGroup.SoldierAmount
+		}
+
+		slices.SortFunc(clashedSoldierGroupIDs, func(a, b uint) int {
+			return cmp.Compare(soldierGroupsMap[a].SoldierAmount, soldierGroupsMap[b].SoldierAmount)
+		})
+
+		//for _, id := range clashedSoldierGroupIDs {
+		//	soldierGroup := soldierGroupsMap[id]
+		// get the soldier group amount, and decrease it using enemy soldier groups amount (
+		// team colors that aren't equal in the soldierAmountsMap. Then, decrease that soldier amount from the map as well.
+		// Once the soldierGroup's amount reaches 0,
+		// delete it from the db using the corresponding dal function.
+		// if before then all the enemy soldier's amounts reach 0 in the map,
+		// then we just continue to the next soldier group,
+		// and update the soldier amount of the soldier group using the corresponding dal function.
+
+		//}
+
 	}
 
 	err := db.Model(generation).Association("SoldierGroups").Find(&generation.SoldierGroups)
@@ -71,7 +99,7 @@ func MoveTowards(currentPosition pgtype.Point, destination pgtype.Point) pgtype.
 // If a soldier group clashes in multiple positions, return the clash with the earliest clash (The one closest to the Start)
 // Calculate the intersection based both on whether the vectors intersect and whether the soldier groups would hit each other
 // knowing they move through the line at a constant speed.
-func CalculateClashes(db *gorm.DB, moveVectors map[uint]Line) map[uint]pgtype.Point {
+func CalculateClashes(db *gorm.DB, moveVectors map[uint]Line) map[pgtype.Point][]uint {
 	type ClashInfo struct {
 		Time  float64
 		Point pgtype.Point
@@ -164,9 +192,9 @@ func CalculateClashes(db *gorm.DB, moveVectors map[uint]Line) map[uint]pgtype.Po
 		}
 	}
 
-	result := make(map[uint]pgtype.Point)
+	result := make(map[pgtype.Point][]uint)
 	for id, info := range clashes {
-		result[id] = info.Point
+		result[info.Point] = append(result[info.Point], id)
 	}
 	return result
 }
