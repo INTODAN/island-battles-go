@@ -16,7 +16,7 @@ func GetCastleFromGeneration(generation *models.Generation, logicalCastleID uint
 	return nil, fmt.Errorf("castle with LogicalCastleID %d not found in generation %d", logicalCastleID, generation.ID)
 }
 
-func UpdateSoldierGroupAmount(db *gorm.DB, castle *models.Castle, soldierAmount uint) error {
+func UpdateCastleSoldierGroupAmount(db *gorm.DB, castle *models.Castle, soldierAmount uint) error {
 	castle.SoldierAmount = soldierAmount
 	return db.Save(castle).Error
 }

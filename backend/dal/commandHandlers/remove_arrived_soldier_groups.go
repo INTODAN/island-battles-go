@@ -33,7 +33,7 @@ func RemoveArrivedSoldierGroupsHandler(db *gorm.DB, generation *models.Generatio
 				}
 			}
 
-			err := dal.UpdateSoldierGroupAmount(db, destinationCastle,
+			err := dal.UpdateCastleSoldierGroupAmount(db, destinationCastle,
 				uint(soldierAmountDiff))
 			if err != nil {
 				return err

@@ -29,7 +29,7 @@ func SendSoldierGroupHandler(db *gorm.DB, generation *models.Generation, paramet
 	if originCastle.SoldierAmount < parameters.SoldierAmount {
 		return fmt.Errorf("castle doesn't have enough soldier amount")
 	}
-	err = dal.UpdateSoldierGroupAmount(db, originCastle, originCastle.SoldierAmount-parameters.SoldierAmount)
+	err = dal.UpdateCastleSoldierGroupAmount(db, originCastle, originCastle.SoldierAmount-parameters.SoldierAmount)
 	if err != nil {
 		return err
 	}

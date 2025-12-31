@@ -14,6 +14,11 @@ func UpdateSoldierGroupPosition(db *gorm.DB, soldierGroup *models.SoldierGroup, 
 	return db.Save(soldierGroup).Error
 }
 
+func UpdateSoldierGroupAmount(db *gorm.DB, soldierGroup *models.SoldierGroup, newSoldierAmount uint) error {
+	soldierGroup.SoldierAmount = newSoldierAmount
+	return db.Save(soldierGroup).Error
+}
+
 func CreateSoldierGroup(db *gorm.DB, soldierGroup *models.SoldierGroup) (uint, error) {
 	var lastGroups []models.SoldierGroup
 	err := db.Where(&models.SoldierGroup{GenerationID: soldierGroup.GenerationID}).
