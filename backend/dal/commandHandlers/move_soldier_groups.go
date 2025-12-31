@@ -44,17 +44,39 @@ func MoveSoldierGroupsHandler(db *gorm.DB, generation *models.Generation, parame
 			return cmp.Compare(soldierGroupsMap[a].SoldierAmount, soldierGroupsMap[b].SoldierAmount)
 		})
 
-		//for _, id := range clashedSoldierGroupIDs {
-		//	soldierGroup := soldierGroupsMap[id]
-		// get the soldier group amount, and decrease it using enemy soldier groups amount (
-		// team colors that aren't equal in the soldierAmountsMap. Then, decrease that soldier amount from the map as well.
-		// Once the soldierGroup's amount reaches 0,
-		// delete it from the db using the corresponding dal function.
-		// if before then all the enemy soldier's amounts reach 0 in the map,
-		// then we just continue to the next soldier group,
-		// and update the soldier amount of the soldier group using the corresponding dal function.
+		for _, id := range clashedSoldierGroupIDs {
+			soldierGroup := soldierGroupsMap[id]
 
-		//}
+			var enemyTeamIDs []uint
+			for teamColor, amount := range soldierAmountsMap {
+				if teamColor != soldierGroup.TeamColor && amount > 0 {
+					enemyTeamIDs = append(enemyTeamIDs, teamColor)
+				}
+			}
+			slices.Sort(enemyTeamIDs)
+
+			for _, enemyTeamID := range enemyTeamIDs {
+				enemyAmount := soldierAmountsMap[enemyTeamID]
+				deduction := min(soldierGroup.SoldierAmount, enemyAmount)
+
+				soldierGroup.SoldierAmount -= deduction
+				soldierAmountsMap[enemyTeamID] -= deduction
+
+				if soldierGroup.SoldierAmount == 0 {
+					break
+				}
+			}
+
+			if soldierGroup.SoldierAmount == 0 {
+				if err := dal.DeleteSoldierGroup(db, soldierGroup.ID); err != nil {
+					return err
+				}
+			} else {
+				if err := dal.UpdateSoldierGroupAmount(db, soldierGroup, soldierGroup.SoldierAmount); err != nil {
+					return err
+				}
+			}
+		}
 
 	}
 
