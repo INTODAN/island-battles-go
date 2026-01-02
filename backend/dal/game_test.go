@@ -87,11 +87,11 @@ func TestAddPlayerToGame(t *testing.T) {
 	}
 
 	if players[0].TeamColor != 0 {
-		t.Errorf("Expected first player to have TeamColor 0, got %d", players[0].TeamColor)
+		t.Errorf("Expected first player to have SoldierGroup 0, got %d", players[0].TeamColor)
 	}
 
 	if players[1].TeamColor != 1 {
-		t.Errorf("Expected second player to have TeamColor 1, got %d", players[1].TeamColor)
+		t.Errorf("Expected second player to have SoldierGroup 1, got %d", players[1].TeamColor)
 	}
 
 	// Delete player 0
@@ -119,6 +119,6 @@ func TestAddPlayerToGame(t *testing.T) {
 		}
 	}
 	if !found2 {
-		t.Errorf("Expected new player to have TeamColor 2")
+		t.Errorf("Expected new player to have SoldierGroup 2")
 	}
 }

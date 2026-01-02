@@ -40,7 +40,7 @@ func BuildGraphForGeneration(generation *models.Generation, index int, totalGens
 
 	// Standard ECharts palette to ensure consistent colors across categories
 	palette := []string{"#5470c6", "#91cc75", "#fac858", "#ee6666", "#73c0de", "#3ba272", "#fc8452", "#9a60b4", "#ea7ccc"}
-	teamColorHex := map[int]string{} // TeamColor -> HexColor
+	teamColorHex := map[int]string{} // SoldierGroup -> HexColor
 
 	categoryIndices := map[string]int{}
 	var categories []*opts.GraphCategory

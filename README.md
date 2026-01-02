@@ -102,7 +102,6 @@ This loop (Modify Code -> Run Test with Export -> Refresh Browser) is the recomm
 1. ALWAYS use go structs when performing queries, never use strings for queries (DON'T DO "game_id = ?"), and same for OrderBy,
    etc.
 2. If the user deletes a function that an agent has added, the agent SHOULD NOT add the function back in a later message.
-3. Avoid using the make function.
-4. use verbose variable names, no abbreviations.
-5. when changing any function, make sure to update the summaries in the huma routes if necessary.
-6. Prefer `Limit(1).Find(&slice)` over `First(&struct)` to gracefully handle non-existent records without checking for `gorm.ErrRecordNotFound`.
+3. use verbose variable names, no abbreviations.
+4. when changing any function, make sure to update the summaries in the huma routes if necessary.
+5. Prefer `Limit(1).Find(&slice)` over `First(&struct)` to gracefully handle non-existent records without checking for `gorm.ErrRecordNotFound`.
