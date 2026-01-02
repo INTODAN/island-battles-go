@@ -30,15 +30,14 @@ func updateInitialSoldierGroupsPositionsWithClashPositions(
 	soldierGroupsPositions []soldierGroupMoveDelta,
 	clashPositions map[pgtype.Point][]*models.SoldierGroup,
 ) {
+	soldierGroupsPositionsMap := make(map[uint]*soldierGroupMoveDelta)
+	for i := range soldierGroupsPositions {
+		soldierGroupsPositionsMap[soldierGroupsPositions[i].SoldierGroup.ID] = &soldierGroupsPositions[i]
+	}
+
 	for clashedPosition, clashedSoldierGroups := range clashPositions {
 		for _, soldierGroup := range clashedSoldierGroups {
-			for i := range soldierGroupsPositions {
-				if soldierGroupsPositions[i].SoldierGroup.ID == soldierGroup.ID {
-					vector := soldierGroupsPositions[i]
-					vector.End = clashedPosition
-					soldierGroupsPositions[i] = vector
-				}
-			}
+			soldierGroupsPositionsMap[soldierGroup.ID].End = clashedPosition
 		}
 	}
 }
