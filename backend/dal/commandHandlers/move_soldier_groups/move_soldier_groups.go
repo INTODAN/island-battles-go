@@ -8,7 +8,7 @@ import (
 )
 
 type MoveSoldierGroupsParams struct{}
-type SoldierGroupMoveDelta struct {
+type soldierGroupMoveDelta struct {
 	Start        pgtype.Point
 	End          pgtype.Point
 	SoldierGroup *models.SoldierGroup
@@ -18,12 +18,12 @@ func MoveSoldierGroupsHandler(db *gorm.DB, generation *models.Generation, parame
 	soldierGroupsPositions := calculateInitialPositions(generation.SoldierGroups)
 	clashPositions := calculateClashPositions(soldierGroupsPositions)
 
-	err := updateSoldierGroupPositions(db, generation, soldierGroupsPositions)
+	err := updateSoldierGroupPositions(db, soldierGroupsPositions, clashPositions)
 	if err != nil {
 		return err
 	}
 
-	err = updateSoldierGroupAmounts(db, generation, clashPositions)
+	err = updateSoldierGroupAmounts(db, clashPositions)
 	if err != nil {
 		return err
 	}

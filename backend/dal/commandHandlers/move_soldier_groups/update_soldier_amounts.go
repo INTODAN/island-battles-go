@@ -1,10 +1,8 @@
 package move_soldier_groups
 
 import (
-	"cmp"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
-	"slices"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"gorm.io/gorm"
@@ -12,54 +10,58 @@ import (
 
 func updateSoldierGroupAmounts(
 	db *gorm.DB,
-	generation *models.Generation,
-	clashPositions map[pgtype.Point][]uint,
+	clashPositions map[pgtype.Point][]*models.SoldierGroup,
 ) error {
-	soldierGroupsMap := make(map[uint]*models.SoldierGroup)
-	for i := range generation.SoldierGroups {
-		soldierGroupsMap[generation.SoldierGroups[i].ID] = &generation.SoldierGroups[i]
+	for _, clashedSoldierGroups := range clashPositions {
+		soldierAmountsPerTeam := getSoldierAmountsPerTeam(clashedSoldierGroups)
+
+		for _, soldierGroup := range clashedSoldierGroups {
+			newSoldierAmount := calculateNewSoldierAmount(soldierGroup, soldierAmountsPerTeam)
+			err := updateSoldierGroupAmount(db, soldierGroup, newSoldierAmount)
+			if err != nil {
+				return err
+			}
+		}
 	}
-	for _, clashedSoldierGroupIDs := range clashPositions {
-		slices.SortFunc(
-			clashedSoldierGroupIDs, func(firstID, secondID uint) int {
-				return cmp.Compare(soldierGroupsMap[firstID].SoldierAmount, soldierGroupsMap[secondID].SoldierAmount)
-			},
-		)
+	return nil
+}
 
-		soldierAmountsPerTeam := make(map[uint]uint)
-		for _, id := range clashedSoldierGroupIDs {
-			soldierAmountsPerTeam[soldierGroupsMap[id].TeamColor] += soldierGroupsMap[id].SoldierAmount
+func getSoldierAmountsPerTeam(clashedSoldierGroups []*models.SoldierGroup) map[uint]uint {
+	soldierAmountsPerTeam := make(map[uint]uint)
+	for _, soldierGroup := range clashedSoldierGroups {
+		soldierAmountsPerTeam[soldierGroup.TeamColor] += soldierGroup.SoldierAmount
+	}
+	return soldierAmountsPerTeam
+}
+
+func calculateNewSoldierAmount(soldierGroup *models.SoldierGroup, soldierAmountsPerTeam map[uint]uint) uint {
+	newSoldierAmount := soldierGroup.SoldierAmount
+	for teamColor, amount := range soldierAmountsPerTeam {
+		if teamColor == soldierGroup.TeamColor || amount == 0 {
+			continue
 		}
+		enemyAmount := soldierAmountsPerTeam[teamColor]
+		deduction := min(newSoldierAmount, enemyAmount)
 
-		for _, id := range clashedSoldierGroupIDs {
-			soldierGroup := soldierGroupsMap[id]
-			newSoldierAmount := soldierGroup.SoldierAmount
-			for teamColor, amount := range soldierAmountsPerTeam {
-				if teamColor == soldierGroup.TeamColor || amount == 0 {
-					continue
-				}
-				enemyAmount := soldierAmountsPerTeam[teamColor]
-				deduction := min(newSoldierAmount, enemyAmount)
+		newSoldierAmount -= deduction
+		soldierAmountsPerTeam[teamColor] -= deduction
 
-				newSoldierAmount -= deduction
-				soldierAmountsPerTeam[teamColor] -= deduction
-
-				if newSoldierAmount == 0 {
-					break
-				}
-			}
-
-			if newSoldierAmount == 0 {
-				if err := dal.DeleteSoldierGroup(db, soldierGroup.ID); err != nil {
-					return err
-				}
-			} else {
-				if err := dal.UpdateSoldierGroupAmount(db, soldierGroup, newSoldierAmount); err != nil {
-					return err
-				}
-			}
+		if newSoldierAmount == 0 {
+			break
 		}
+	}
+	return newSoldierAmount
+}
 
+func updateSoldierGroupAmount(db *gorm.DB, soldierGroup *models.SoldierGroup, newSoldierAmount uint) error {
+	if newSoldierAmount == 0 {
+		if err := dal.DeleteSoldierGroup(db, soldierGroup.ID); err != nil {
+			return err
+		}
+	} else {
+		if err := dal.UpdateSoldierGroupAmount(db, soldierGroup, newSoldierAmount); err != nil {
+			return err
+		}
 	}
 	return nil
 }

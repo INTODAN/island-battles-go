@@ -1,6 +1,7 @@
 package move_soldier_groups
 
 import (
+	"islandBattles/backend/models"
 	"math"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -11,25 +12,16 @@ import (
 // If a soldier group clashes in multiple positions, return the clash with the earliest clash (The one closest to the Start)
 // Calculate the intersection based both on whether the vectors intersect and whether the soldier groups would hit each other
 // knowing they move through the line at a constant speed.
-func calculateClashPositions(soldierGroupsPositions map[uint]SoldierGroupMoveDelta) map[pgtype.Point][]uint {
+func calculateClashPositions(soldierGroupsPositions []soldierGroupMoveDelta) map[pgtype.Point][]*models.SoldierGroup {
 	type ClashInfo struct {
 		Time  float64
 		Point pgtype.Point
 	}
-	clashes := make(map[uint]ClashInfo)
+	clashes := make(map[soldierGroupMoveDelta]ClashInfo)
 	const epsilon = 1e-9
 
-	// Convert map to slice for stable iteration order (optional but good for testing if we sort, but generic is fine)
-	var ids []uint
-	for id := range soldierGroupsPositions {
-		ids = append(ids, id)
-	}
-
-	for i := 0; i < len(ids); i++ {
-		for j := i + 1; j < len(ids); j++ {
-			id1, id2 := ids[i], ids[j]
-			l1, l2 := soldierGroupsPositions[id1], soldierGroupsPositions[id2]
-
+	for _, l1 := range soldierGroupsPositions {
+		for _, l2 := range soldierGroupsPositions {
 			if l1.Start == l2.Start || l1.SoldierGroup.TeamColor == l2.SoldierGroup.TeamColor {
 				continue
 			}
@@ -93,36 +85,21 @@ func calculateClashPositions(soldierGroupsPositions map[uint]SoldierGroupMoveDel
 				}
 
 				// Update clashes for id1
-				if existing, ok := clashes[id1]; !ok || t < existing.Time {
-					clashes[id1] = ClashInfo{Time: t, Point: collisionPoint}
+				if existing, ok := clashes[l1]; !ok || t < existing.Time {
+					clashes[l1] = ClashInfo{Time: t, Point: collisionPoint}
 				}
 				// Update clashes for id2
-				if existing, ok := clashes[id2]; !ok || t < existing.Time {
-					clashes[id2] = ClashInfo{Time: t, Point: collisionPoint}
+				if existing, ok := clashes[l2]; !ok || t < existing.Time {
+					clashes[l2] = ClashInfo{Time: t, Point: collisionPoint}
 				}
 			}
 		}
 	}
 
-	clashPositions := make(map[pgtype.Point][]uint)
-	for id, info := range clashes {
-		clashPositions[info.Point] = append(clashPositions[info.Point], id)
+	clashPositions := make(map[pgtype.Point][]*models.SoldierGroup)
+	for soldierGroupMoveDelta, info := range clashes {
+		clashPositions[info.Point] = append(clashPositions[info.Point], soldierGroupMoveDelta.SoldierGroup)
 	}
-
-	updateInitialSoldierGroupsPositionsWithClashPositions(soldierGroupsPositions, clashPositions)
 
 	return clashPositions
-}
-
-func updateInitialSoldierGroupsPositionsWithClashPositions(
-	soldierGroupsPositions map[uint]SoldierGroupMoveDelta,
-	clashes map[pgtype.Point][]uint,
-) {
-	for clashedPosition, clashedSoldierGroupIDs := range clashes {
-		for _, id := range clashedSoldierGroupIDs {
-			vector := soldierGroupsPositions[id]
-			vector.End = clashedPosition
-			soldierGroupsPositions[id] = vector
-		}
-	}
 }
