@@ -9,22 +9,27 @@ import (
 )
 
 type SendSoldierGroupParams struct {
-	models.SoldierGroupFields
+	OriginLogicalCastleID      uint
+	DestinationLogicalCastleID uint
+	SoldierAmount              uint
 }
 
 func SendSoldierGroupHandler(db *gorm.DB, generation *models.Generation, parameters SendSoldierGroupParams) error {
-	originCastle, err := dal.GetCastleFromGeneration(generation, parameters.OriginCastleID)
+	originCastle, err := dal.GetCastleFromGeneration(generation, parameters.OriginLogicalCastleID)
 	if err != nil {
 		return err
 	}
 
-	destinationCastle, err := dal.GetCastleFromGeneration(generation, parameters.DestinationCastleID)
+	destinationCastle, err := dal.GetCastleFromGeneration(generation, parameters.DestinationLogicalCastleID)
 	if err != nil {
 		return err
 	}
 
-	parameters.OriginCastleID = originCastle.ID
-	parameters.DestinationCastleID = destinationCastle.ID
+	soldierGroupFields := models.SoldierGroupFields{
+		SoldierAmount:       parameters.SoldierAmount,
+		OriginCastleID:      originCastle.ID,
+		DestinationCastleID: destinationCastle.ID,
+	}
 
 	if originCastle.SoldierAmount < parameters.SoldierAmount {
 		return fmt.Errorf("castle doesn't have enough soldier amount")
@@ -33,8 +38,10 @@ func SendSoldierGroupHandler(db *gorm.DB, generation *models.Generation, paramet
 	if err != nil {
 		return err
 	}
-	dbSoldierGroup := models.SoldierGroup{SoldierGroupFields: parameters.SoldierGroupFields, GenerationID: generation.ID,
-		Position: originCastle.Position, TeamColor: originCastle.TeamColor}
+	dbSoldierGroup := models.SoldierGroup{
+		SoldierGroupFields: soldierGroupFields, GenerationID: generation.ID,
+		Position: originCastle.Position, TeamColor: originCastle.TeamColor,
+	}
 	_, err = dal.CreateSoldierGroup(db, &dbSoldierGroup)
 	if err != nil {
 		return err

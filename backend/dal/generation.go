@@ -15,6 +15,10 @@ func WithFullGeneration(db *gorm.DB) *gorm.DB {
 		Preload("Commands")
 }
 
+func RefreshGeneration(db *gorm.DB, generation *models.Generation) error {
+	return db.Scopes(WithFullGeneration).First(&generation, generation.ID).Error
+}
+
 func CreateGeneration(db *gorm.DB, generation *models.Generation) (uint, error) {
 	err := db.Create(&generation).Error
 	if err != nil {

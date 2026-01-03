@@ -40,15 +40,23 @@ func TestGameGraphWithSoldierGroups(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	sendSoldierGroupParams := commandHandlers.SendSoldierGroupParams{SoldierGroupFields: models.
-		SoldierGroupFields{SoldierAmount: 10, OriginCastleID: generation.Map.Castles[0].LogicalCastleID,
-		DestinationCastleID: generation.Map.Castles[1].LogicalCastleID}}
+	sendSoldierGroupParams := commandHandlers.SendSoldierGroupParams{
+		SoldierAmount:              10,
+		OriginLogicalCastleID:      generation.Map.Castles[0].LogicalCastleID,
+		DestinationLogicalCastleID: generation.Map.Castles[1].LogicalCastleID,
+	}
 	rawParams, err := json.Marshal(sendSoldierGroupParams)
 	if err != nil {
 		t.Fatal(err)
 	}
-	migratedGenerationID, err := services.MigrateGeneration(db, generation.GameID, []models.CommandFields{{CommandType: models.
-		SendSoldierGroup, Parameters: rawParams}})
+	migratedGenerationID, err := services.MigrateGeneration(
+		db, generation.GameID, []models.CommandFields{
+			{
+				CommandType: models.
+					SendSoldierGroup, Parameters: rawParams,
+			},
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,15 +74,23 @@ func TestGameGraphWithSoldierGroups(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	sendSoldierGroupParams = commandHandlers.SendSoldierGroupParams{SoldierGroupFields: models.
-		SoldierGroupFields{SoldierAmount: 20, OriginCastleID: generation.Map.Castles[1].LogicalCastleID,
-		DestinationCastleID: generation.Map.Castles[0].LogicalCastleID}}
+	sendSoldierGroupParams = commandHandlers.SendSoldierGroupParams{
+		SoldierAmount:              20,
+		OriginLogicalCastleID:      generation.Map.Castles[1].LogicalCastleID,
+		DestinationLogicalCastleID: generation.Map.Castles[0].LogicalCastleID,
+	}
 	rawParams, err = json.Marshal(sendSoldierGroupParams)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = services.MigrateGeneration(db, generation.GameID, []models.CommandFields{{CommandType: models.
-		SendSoldierGroup, Parameters: rawParams}})
+	_, err = services.MigrateGeneration(
+		db, generation.GameID, []models.CommandFields{
+			{
+				CommandType: models.
+					SendSoldierGroup, Parameters: rawParams,
+			},
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

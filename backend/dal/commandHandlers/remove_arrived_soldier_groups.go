@@ -10,36 +10,14 @@ import (
 type RemoveArrivedSoldierGroupsParams struct{}
 
 // RemoveArrivedSoldierGroupsHandler Remove all soldier groups that arrived to their destination.
-func RemoveArrivedSoldierGroupsHandler(db *gorm.DB, generation *models.Generation,
-	parameters RemoveArrivedSoldierGroupsParams) error {
-
+func RemoveArrivedSoldierGroupsHandler(
+	db *gorm.DB,
+	generation *models.Generation,
+	parameters RemoveArrivedSoldierGroupsParams,
+) error {
 	for _, soldierGroup := range generation.SoldierGroups {
-		destinationCastle, err := dal.GetCastleFromGeneration(generation, soldierGroup.DestinationCastle.LogicalCastleID)
-		if err != nil {
-			return err
-		}
-		if soldierGroup.Position == destinationCastle.Position {
-			soldierAmountToAdd := -int(soldierGroup.SoldierAmount)
-			if destinationCastle.TeamColor == soldierGroup.TeamColor {
-				soldierAmountToAdd = -soldierAmountToAdd
-			}
-
-			soldierAmountDiff := int(destinationCastle.SoldierAmount) + soldierAmountToAdd
-			if soldierAmountDiff < 0 {
-				soldierAmountDiff = -soldierAmountDiff
-				err := dal.UpdateCastleTeamColor(db, destinationCastle, soldierGroup.TeamColor)
-				if err != nil {
-					return err
-				}
-			}
-
-			err := dal.UpdateCastleSoldierGroupAmount(db, destinationCastle,
-				uint(soldierAmountDiff))
-			if err != nil {
-				return err
-			}
-
-			err = dal.DeleteSoldierGroup(db, soldierGroup.ID)
+		if soldierGroup.Position == soldierGroup.DestinationCastle.Position {
+			err := handleDestinationArrival(db, generation, &soldierGroup)
 			if err != nil {
 				return err
 			}
@@ -47,5 +25,41 @@ func RemoveArrivedSoldierGroupsHandler(db *gorm.DB, generation *models.Generatio
 	}
 
 	// Update the generation with the new list of soldier groups.
-	return db.Model(generation).Association("SoldierGroups").Find(&generation.SoldierGroups)
+	return nil
+}
+
+func handleDestinationArrival(db *gorm.DB, generation *models.Generation, soldierGroup *models.SoldierGroup) error {
+	soldierAmountDiff := calculateSoldierAmountDiff(soldierGroup)
+
+	if soldierAmountDiff < 0 {
+		soldierAmountDiff = -soldierAmountDiff
+		err := dal.UpdateCastleTeamColor(db, &soldierGroup.DestinationCastle, soldierGroup.TeamColor)
+		if err != nil {
+			return err
+		}
+	}
+
+	err := dal.UpdateCastleSoldierGroupAmount(
+		db, &soldierGroup.DestinationCastle,
+		uint(soldierAmountDiff),
+	)
+	if err != nil {
+		return err
+	}
+
+	err = dal.DeleteSoldierGroup(db, soldierGroup.ID)
+	if err != nil {
+		return err
+	}
+	return dal.RefreshGeneration(db, generation)
+}
+
+func calculateSoldierAmountDiff(soldierGroup *models.SoldierGroup) int {
+	soldierAmountToAdd := -int(soldierGroup.SoldierAmount)
+	if soldierGroup.DestinationCastle.TeamColor == soldierGroup.TeamColor {
+		soldierAmountToAdd = -soldierAmountToAdd
+	}
+
+	soldierAmountDiff := int(soldierGroup.DestinationCastle.SoldierAmount) + soldierAmountToAdd
+	return soldierAmountDiff
 }
