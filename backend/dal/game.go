@@ -32,7 +32,7 @@ func CreateGame(db *gorm.DB) (uint, error) {
 }
 
 // AddPlayerToGame adds a player to the game with the gameID,
-// assigning the next available SoldierGroup (highest + 1).
+// assigning the next available TeamColor (highest + 1).
 func AddPlayerToGame(db *gorm.DB, gameID uint) error {
 	var players []models.Player
 	// Find the player with the highest SoldierGroup for this game
@@ -45,7 +45,7 @@ func AddPlayerToGame(db *gorm.DB, gameID uint) error {
 		return err
 	}
 
-	newColor := 0
+	newColor := 1
 	if len(players) > 0 {
 		// Player found, increment color
 		newColor = players[0].TeamColor + 1
