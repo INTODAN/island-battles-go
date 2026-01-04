@@ -12,6 +12,8 @@ type clashInfo struct {
 	Point pgtype.Point
 }
 
+const epsilon = 1e-9
+
 // calculateClashPositions Calculates all the clashes that occurred between the soldier groups received.
 // X1(t) = start1 + t * distance1
 // X2(t) = start2 + t * distance2
@@ -21,10 +23,8 @@ type clashInfo struct {
 // make sure tX == tY -+ epsilon
 // check that 0<=t<=1 to make sure intersection happens in time frame
 // Finally on collision, calculate the X, Y for the collision
-
-func calculateClashPositions(soldierGroupsPositions []soldierGroupMoveDelta) map[pgtype.Point][]*models.SoldierGroup {
+func calculateClashPositions(soldierGroupsPositions []soldierGroupMoveDelta) (map[pgtype.Point][]*models.SoldierGroup, error) {
 	clashes := make(map[soldierGroupMoveDelta]clashInfo)
-	const epsilon = 1e-9
 
 	for _, line1 := range soldierGroupsPositions {
 		for _, line2 := range soldierGroupsPositions {
@@ -38,7 +38,23 @@ func calculateClashPositions(soldierGroupsPositions []soldierGroupMoveDelta) map
 			tX := calculateTime(line1.Start.P.X, line2.Start.P.X, distance1.X, distance2.X)
 			tY := calculateTime(line1.Start.P.Y, line2.Start.P.Y, distance1.Y, distance2.Y)
 
-			if t := tX; math.Abs(tX-tY) < epsilon && 0 <= t && t <= 1 {
+			if math.IsNaN(tX) && math.IsNaN(tY) {
+				// tX and tY will never meet as we know the start points aren't equal in at least one axis.
+				continue
+			}
+
+			timeEqual := false
+			t := tX
+			if math.IsNaN(tX) {
+				timeEqual = line1.Start.P.X == line2.Start.P.X
+				t = tY
+			} else if math.IsNaN(tY) {
+				timeEqual = line1.Start.P.Y == line2.Start.P.Y
+			} else {
+				timeEqual = math.Abs(tY-tX) < epsilon
+			}
+
+			if timeEqual && 0 <= t && t <= 1 {
 				// We have a clash in the time frame.
 				collisionX := calculatePosition(line1.Start.P.X, distance1.X, t)
 				collisionY := calculatePosition(line1.Start.P.Y, distance1.Y, t)
@@ -62,7 +78,7 @@ func calculateClashPositions(soldierGroupsPositions []soldierGroupMoveDelta) map
 		clashPositions[clashInfo.Point] = append(clashPositions[clashInfo.Point], curSoldierGroupMoveDelta.SoldierGroup)
 	}
 
-	return clashPositions
+	return clashPositions, nil
 }
 
 // updateClashes making sure to update clashes only if an earlier clash is detected

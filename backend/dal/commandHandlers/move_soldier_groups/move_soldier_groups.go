@@ -16,9 +16,12 @@ type soldierGroupMoveDelta struct {
 
 func MoveSoldierGroupsHandler(db *gorm.DB, generation *models.Generation, parameters MoveSoldierGroupsParams) error {
 	soldierGroupsPositions := calculateInitialPositions(generation.SoldierGroups)
-	clashPositions := calculateClashPositions(soldierGroupsPositions)
+	clashPositions, err := calculateClashPositions(soldierGroupsPositions)
+	if err != nil {
+		return err
+	}
 
-	err := updateSoldierGroupPositions(db, soldierGroupsPositions, clashPositions)
+	err = updateSoldierGroupPositions(db, soldierGroupsPositions, clashPositions)
 	if err != nil {
 		return err
 	}
