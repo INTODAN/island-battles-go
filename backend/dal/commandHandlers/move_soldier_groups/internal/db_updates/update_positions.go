@@ -1,16 +1,17 @@
-package move_soldier_groups
+package db_updates
 
 import (
 	"islandBattles/backend/dal"
+	"islandBattles/backend/dal/commandHandlers/move_soldier_groups/internal"
 	"islandBattles/backend/models"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"gorm.io/gorm"
 )
 
-func updateSoldierGroupPositions(
+func UpdateSoldierGroupPositions(
 	db *gorm.DB,
-	soldierGroupsPositions []soldierGroupMoveDelta,
+	soldierGroupsPositions []internal.SoldierGroupMoveDelta,
 	clashPositions map[pgtype.Point][]*models.SoldierGroup,
 ) error {
 	updateInitialSoldierGroupsPositionsWithClashPositions(soldierGroupsPositions, clashPositions)
@@ -27,10 +28,10 @@ func updateSoldierGroupPositions(
 }
 
 func updateInitialSoldierGroupsPositionsWithClashPositions(
-	soldierGroupsPositions []soldierGroupMoveDelta,
+	soldierGroupsPositions []internal.SoldierGroupMoveDelta,
 	clashPositions map[pgtype.Point][]*models.SoldierGroup,
 ) {
-	soldierGroupsPositionsMap := make(map[uint]*soldierGroupMoveDelta)
+	soldierGroupsPositionsMap := make(map[uint]*internal.SoldierGroupMoveDelta)
 	for i := range soldierGroupsPositions {
 		soldierGroupsPositionsMap[soldierGroupsPositions[i].SoldierGroup.ID] = &soldierGroupsPositions[i]
 	}

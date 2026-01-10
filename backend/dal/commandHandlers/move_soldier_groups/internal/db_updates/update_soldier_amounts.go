@@ -1,4 +1,4 @@
-package move_soldier_groups
+package db_updates
 
 import (
 	"islandBattles/backend/dal"
@@ -8,7 +8,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func updateSoldierGroupAmounts(
+func UpdateSoldierGroupAmounts(
 	db *gorm.DB,
 	clashPositions map[pgtype.Point][]*models.SoldierGroup,
 ) error {

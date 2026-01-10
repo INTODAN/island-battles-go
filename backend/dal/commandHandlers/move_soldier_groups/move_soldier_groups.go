@@ -1,32 +1,28 @@
 package move_soldier_groups
 
 import (
+	"islandBattles/backend/dal/commandHandlers/move_soldier_groups/internal/calculations"
+	"islandBattles/backend/dal/commandHandlers/move_soldier_groups/internal/db_updates"
 	"islandBattles/backend/models"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"gorm.io/gorm"
 )
 
 type MoveSoldierGroupsParams struct{}
-type soldierGroupMoveDelta struct {
-	Start        pgtype.Point
-	End          pgtype.Point
-	SoldierGroup *models.SoldierGroup
-}
 
 func MoveSoldierGroupsHandler(db *gorm.DB, generation *models.Generation, parameters MoveSoldierGroupsParams) error {
-	soldierGroupsPositions := calculateInitialPositions(generation.SoldierGroups)
-	clashPositions, err := calculateClashPositions(soldierGroupsPositions)
+	soldierGroupsPositions := calculations.CalculateInitialPositions(generation.SoldierGroups)
+	clashPositions, err := calculations.CalculateClashPositions(soldierGroupsPositions)
 	if err != nil {
 		return err
 	}
 
-	err = updateSoldierGroupPositions(db, soldierGroupsPositions, clashPositions)
+	err = db_updates.UpdateSoldierGroupPositions(db, soldierGroupsPositions, clashPositions)
 	if err != nil {
 		return err
 	}
 
-	err = updateSoldierGroupAmounts(db, clashPositions)
+	err = db_updates.UpdateSoldierGroupAmounts(db, clashPositions)
 	if err != nil {
 		return err
 	}

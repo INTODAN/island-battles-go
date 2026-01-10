@@ -1,20 +1,21 @@
-package move_soldier_groups
+package calculations
 
 import (
+	"islandBattles/backend/dal/commandHandlers/move_soldier_groups/internal"
 	"islandBattles/backend/models"
 	"math"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-func calculateInitialPositions(soldierGroups []models.SoldierGroup) []soldierGroupMoveDelta {
-	var soldierGroupsPositions []soldierGroupMoveDelta
+func CalculateInitialPositions(soldierGroups []models.SoldierGroup) []internal.SoldierGroupMoveDelta {
+	var soldierGroupsPositions []internal.SoldierGroupMoveDelta
 
 	for i := range soldierGroups {
 		soldierGroup := &soldierGroups[i]
 		newPosition := moveTowards(soldierGroup.Position, soldierGroup.DestinationCastle.Position)
 		soldierGroupsPositions = append(
-			soldierGroupsPositions, soldierGroupMoveDelta{
+			soldierGroupsPositions, internal.SoldierGroupMoveDelta{
 				Start:        soldierGroup.Position,
 				End:          newPosition,
 				SoldierGroup: soldierGroup,
