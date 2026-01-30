@@ -29,6 +29,12 @@ func TestGetGame(t *testing.T) {
 	if game.Generations[0].Map.Castles == nil {
 		t.Fatal("Game has no Castles loaded.")
 	}
+	if game.Generations[0].Commands == nil {
+		t.Fatal("Game has no Commands loaded.")
+	}
+	if game.Generations[0].SoldierGroups == nil {
+		t.Fatal("Game has no Commands loaded.")
+	}
 }
 
 func TestCreateGame(t *testing.T) {
@@ -69,9 +75,12 @@ func TestAddPlayerToGame(t *testing.T) {
 
 	// Verify players
 	var players []models.Player
-	if err := db.Where(&models.Player{GameID: gameID}).Order(clause.OrderByColumn{Column: clause.Column{Name: "team_color"},
-		Desc: false,
-	}).Find(&players).
+	if err := db.Where(&models.Player{GameID: gameID}).Order(
+		clause.OrderByColumn{
+			Column: clause.Column{Name: "team_color"},
+			Desc:   false,
+		},
+	).Find(&players).
 		Error; err != nil {
 		t.Fatalf("Failed to find players: %v", err)
 	}
@@ -80,12 +89,12 @@ func TestAddPlayerToGame(t *testing.T) {
 		t.Fatalf("Expected 2 players, got %d", len(players))
 	}
 
-	if players[0].TeamColor != 0 {
-		t.Errorf("Expected first player to have TeamColor 0, got %d", players[0].TeamColor)
+	if players[0].TeamColor != 1 {
+		t.Errorf("Expected first player to have TeamColor 1, got %d", players[0].TeamColor)
 	}
 
-	if players[1].TeamColor != 1 {
-		t.Errorf("Expected second player to have TeamColor 1, got %d", players[1].TeamColor)
+	if players[1].TeamColor != 2 {
+		t.Errorf("Expected second player to have TeamColor 2, got %d", players[1].TeamColor)
 	}
 
 	// Delete player 0
@@ -105,14 +114,14 @@ func TestAddPlayerToGame(t *testing.T) {
 		t.Fatalf("Failed to find players after addition: %v", err)
 	}
 
-	found2 := false
+	found3 := false
 	for _, p := range newPlayers {
-		if p.TeamColor == 2 {
-			found2 = true
+		if p.TeamColor == 3 {
+			found3 = true
 			break
 		}
 	}
-	if !found2 {
-		t.Errorf("Expected new player to have TeamColor 2")
+	if !found3 {
+		t.Errorf("Expected new player to have TeamColor 3")
 	}
 }

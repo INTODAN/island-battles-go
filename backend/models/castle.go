@@ -6,15 +6,15 @@ import (
 )
 
 type CastleFields struct {
-	TeamColor int
-	Position  pgtype.Point `gorm:"type:point"`
-	CastleID  uint         `json:"-"`
+	TeamColor       uint
+	Position        pgtype.Point `gorm:"type:point"`
+	LogicalCastleID uint         `json:"-"`
 }
 
 type Castle struct {
 	gorm.Model
 	CastleFields
-	SoldierAmount int
+	SoldierAmount uint
 
 	MapID uint
 	Map   Map

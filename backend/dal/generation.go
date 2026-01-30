@@ -7,6 +7,18 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// WithFullGeneration is a scope that preloads all associations of a Generation
+func WithFullGeneration(db *gorm.DB) *gorm.DB {
+	return db.Preload("Map.Castles").
+		Preload("SoldierGroups.OriginCastle").
+		Preload("SoldierGroups.DestinationCastle").
+		Preload("Commands")
+}
+
+func RefreshGeneration(db *gorm.DB, generation *models.Generation) error {
+	return db.Scopes(WithFullGeneration).First(&generation, generation.ID).Error
+}
+
 func CreateGeneration(db *gorm.DB, generation *models.Generation) (uint, error) {
 	err := db.Create(&generation).Error
 	if err != nil {
@@ -17,7 +29,7 @@ func CreateGeneration(db *gorm.DB, generation *models.Generation) (uint, error) 
 
 func GetGeneration(db *gorm.DB, generationID uint) (*models.Generation, error) {
 	var generation models.Generation
-	err := db.Preload("Map.Castles").Preload("SoldierGroups").Preload("Commands").First(&generation, generationID).Error
+	err := db.Scopes(WithFullGeneration).First(&generation, generationID).Error
 	if err != nil {
 		return nil, err
 	}
@@ -26,7 +38,7 @@ func GetGeneration(db *gorm.DB, generationID uint) (*models.Generation, error) {
 
 func GetLatestGenerationForGame(db *gorm.DB, gameID uint) (*models.Generation, error) {
 	var generation models.Generation
-	err := db.Preload("Map.Castles").
+	err := db.Scopes(WithFullGeneration).
 		Where(&models.Generation{GameID: gameID}).
 		Order(clause.OrderByColumn{Column: clause.Column{Name: "id"}, Desc: true}).
 		First(&generation).Error

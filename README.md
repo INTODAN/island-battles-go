@@ -72,12 +72,36 @@
 *   **Format:** `go fmt ./...`
 *   **Test:** `go test ./...`
 
+## Testing & Visualization
+
+The project uses a specialized methodology for testing complex game state transitions and verifying them visually.
+
+### Game Graph Tests
+Tests in `backend/services/game_graph_test.go` simulate game sessions by:
+1.  Initializing a transient PostgreSQL instance via **Testcontainers**.
+2.  Creating map templates and initializing games.
+3.  Migrating the game through multiple generations (steps) using `services.MigrateGeneration`.
+4.  Injecting specific commands (e.g., `SendSoldierGroup`) to test edge cases.
+
+### Visual Verification
+Since Go tests cannot natively verify the correctness of the interactive JavaScript-based visualization (ECharts), we use an "Export-to-Browser" methodology:
+
+1.  **Run with Export:** Set the `EXPORT_GAME_GRAPH` environment variable to `true`.
+    ```bash
+    export EXPORT_GAME_GRAPH=true && go test ./backend/services/... -v -run TestGameGraphWithSoldierGroups
+    ```
+2.  **Locate Output:** The test will log the path to a temporary HTML file (e.g., `/tmp/game_graph_*.html`).
+3.  **Inspect:** Open this file in any web browser.
+    *   **Visual Check:** Verify that soldier groups are moving correctly, castle amounts update, and nodes do not overlap.
+    *   **JavaScript Console:** Check for any ECharts or browser-side errors (e.g., duplicate node IDs, rendering order issues) that the Go test might pass silently.
+
+This loop (Modify Code -> Run Test with Export -> Refresh Browser) is the recommended way to debug visualization logic.
 
 ## Code philosophies
 
 1. ALWAYS use go structs when performing queries, never use strings for queries (DON'T DO "game_id = ?"), and same for OrderBy,
    etc.
 2. If the user deletes a function that an agent has added, the agent SHOULD NOT add the function back in a later message.
-3. Avoid using the make function.
-4. use verbose variable names, no abbreviations.
-5. when changing any function, make sure to update the summaries in the huma routes if necessary.
+3. use verbose variable names, no abbreviations.
+4. when changing any function, make sure to update the summaries in the huma routes if necessary.
+5. Prefer `Limit(1).Find(&slice)` over `First(&struct)` to gracefully handle non-existent records without checking for `gorm.ErrRecordNotFound`.

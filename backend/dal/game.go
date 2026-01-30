@@ -1,7 +1,6 @@
 package dal
 
 import (
-	"errors"
 	"islandBattles/backend/models"
 
 	"gorm.io/gorm"
@@ -10,7 +9,7 @@ import (
 
 func GetGame(db *gorm.DB, gameID uint) (*models.Game, error) {
 	var game models.Game
-	err := db.Preload("Generations.Map.Castles").First(&game, gameID).Error
+	err := db.Preload("Generations", WithFullGeneration).First(&game, gameID).Error
 	if err != nil {
 		return nil, err
 	}
@@ -35,21 +34,21 @@ func CreateGame(db *gorm.DB) (uint, error) {
 // AddPlayerToGame adds a player to the game with the gameID,
 // assigning the next available TeamColor (highest + 1).
 func AddPlayerToGame(db *gorm.DB, gameID uint) error {
-	var highestTeamColorPlayer models.Player
+	var players []models.Player
 	// Find the player with the highest TeamColor for this game
-	err := db.Where(&models.Player{GameID: gameID}).Order(clause.OrderByColumn{Column: clause.Column{Name: "team_color"},
-		Desc: false,
-	}).First(
-		&highestTeamColorPlayer).
-		Error
+	err := db.Where(&models.Player{GameID: gameID}).
+		Order(clause.OrderByColumn{Column: clause.Column{Name: "team_color"}, Desc: true}).
+		Limit(1).
+		Find(&players).Error
 
-	newColor := 0
-	if err == nil {
-		// Player found, increment color
-		newColor = highestTeamColorPlayer.TeamColor + 1
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		// Real error
+	if err != nil {
 		return err
+	}
+
+	newColor := 1
+	if len(players) > 0 {
+		// Player found, increment color
+		newColor = players[0].TeamColor + 1
 	}
 
 	player := models.Player{

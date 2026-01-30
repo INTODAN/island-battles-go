@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"islandBattles/backend/dal"
+	"islandBattles/backend/dal/commandHandlers/move_soldier_groups"
 	"islandBattles/backend/models"
 
 	"gorm.io/datatypes"
@@ -30,6 +31,11 @@ func WrapCommandHandler[TParams any](handler CommandHandler[TParams]) CommandHan
 
 var Mapping = map[models.CommandType]CommandHandlerWrapper{
 	models.IncreaseSoldierAmount: WrapCommandHandler[IncreaseSoldierAmountParams](IncreaseSoldierAmountHandler),
+	models.MoveSoldierGroups: WrapCommandHandler[move_soldier_groups.MoveSoldierGroupsParams](
+		move_soldier_groups.MoveSoldierGroupsHandler,
+	),
+	models.SendSoldierGroup:           WrapCommandHandler[SendSoldierGroupParams](SendSoldierGroupHandler),
+	models.RemoveArrivedSoldierGroups: WrapCommandHandler[RemoveArrivedSoldierGroupsParams](RemoveArrivedSoldierGroupsHandler),
 }
 
 func ProcessCommand(db *gorm.DB, command *models.CommandFields, generationID uint) error {

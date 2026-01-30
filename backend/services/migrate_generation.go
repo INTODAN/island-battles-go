@@ -10,12 +10,7 @@ import (
 )
 
 func MigrateGeneration(db *gorm.DB, GameID uint, commands []models.CommandFields) (uint, error) {
-	latestGeneration, err := dal.GetLatestGenerationForGame(db, GameID)
-	if err != nil {
-		return 0, err
-	}
-	// Get previous generation to get its map ID
-	previousGeneration, err := dal.GetGeneration(db, latestGeneration.ID)
+	previousGeneration, err := dal.GetLatestGenerationForGame(db, GameID)
 	if err != nil {
 		return 0, err
 	}
@@ -36,14 +31,29 @@ func MigrateGeneration(db *gorm.DB, GameID uint, commands []models.CommandFields
 		return 0, err
 	}
 
-	// TODO: Duplicate the soldier groups with a deep copy
-	//newSoldierGroups =
-
+	for _, soldierGroup := range previousGeneration.SoldierGroups {
+		_, err := dal.DuplicateSoldierGroup(db, migratedGenerationID, soldierGroup.ID)
+		if err != nil {
+			return 0, err
+		}
+	}
 	increaseSoldiersAmountCommand := models.CommandFields{
 		CommandType: models.IncreaseSoldierAmount,
 		Parameters:  []byte("{}")}
 
+	moveSoldierGroupsCommand := models.CommandFields{
+		CommandType: models.MoveSoldierGroups,
+		Parameters:  []byte("{}"),
+	}
+
+	removeArrivedSoldierGroupsCommand := models.CommandFields{
+		CommandType: models.RemoveArrivedSoldierGroups,
+		Parameters:  []byte("{}"),
+	}
+
+	commands = append(commands, moveSoldierGroupsCommand)
 	commands = append(commands, increaseSoldiersAmountCommand)
+	commands = append(commands, removeArrivedSoldierGroupsCommand)
 
 	// Iterate through the provided commands and apply their changes
 	for _, cmd := range commands {
@@ -53,6 +63,5 @@ func MigrateGeneration(db *gorm.DB, GameID uint, commands []models.CommandFields
 			return 0, err
 		}
 	}
-
 	return migratedGenerationID, nil
 }

@@ -45,11 +45,10 @@ func (input *InputCastle) Resolve(ctx huma.Context, prefix *huma.PathBuffer) []e
 func (env *Env) CreateMapTemplate(ctx context.Context, input *CreateMapTemplateRequest) (*CreateMapTemplateResponse, error) {
 	var castleTemplates []models.CastleTemplate
 
-	for i, inputCastle := range input.Body.Castles {
+	for _, inputCastle := range input.Body.Castles {
 		castleTemplate := models.CastleTemplate{
 			CastleFields: inputCastle.CastleFields,
 		}
-		castleTemplate.CastleID = uint(i)
 		castleTemplates = append(castleTemplates, castleTemplate)
 	}
 

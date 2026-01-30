@@ -7,6 +7,19 @@ const totalGens = window.totalGens;
 /** @type {any[]} */
 const generationsGraphJSON = window.generationsGraphJSON;
 
+// Fix 0 values being displayed as "undefined" by replacing the string formatter with a function
+generationsGraphJSON.forEach(gen => {
+    if (gen.series) {
+        gen.series.forEach(series => {
+            if (series.label) {
+                series.label.formatter = (params) => {
+                    return params.value !== undefined ? params.value : 0;
+                };
+            }
+        });
+    }
+});
+
 const initializedGens = { }; // gen_0 is initialized by go-echarts inline script
 
 function initGen(index) {

@@ -9,9 +9,9 @@ import (
 	"gorm.io/gorm"
 )
 
-func GetExampleMapTemplate(t *testing.T, db *gorm.DB) uint {
+func getExampleMapTemplate(t *testing.T, db *gorm.DB, mapInput string) uint {
 	var mapTemplate models.MapTemplate
-	err := json.Unmarshal([]byte(MapExampleInput), &mapTemplate)
+	err := json.Unmarshal([]byte(mapInput), &mapTemplate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -21,8 +21,17 @@ func GetExampleMapTemplate(t *testing.T, db *gorm.DB) uint {
 	}
 	return mapTemplateID
 }
+
 func CreateGenerationForTest(t *testing.T, db *gorm.DB) uint {
-	mapTemplateID := GetExampleMapTemplate(t, db)
+	return createGenerationForTest(t, db, MapExampleInput)
+}
+
+func CreateComplexGenerationForTest(t *testing.T, db *gorm.DB) uint {
+	return createGenerationForTest(t, db, MapExampleInputComplex)
+}
+
+func createGenerationForTest(t *testing.T, db *gorm.DB, mapInput string) uint {
+	mapTemplateID := getExampleMapTemplate(t, db, mapInput)
 	gameID, err := dal.CreateGame(db)
 	if err != nil {
 		t.Fatal(err)
