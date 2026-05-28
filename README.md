@@ -55,7 +55,7 @@
 3.  **Run Client:**
     The client connects to Centrifugo, which proxies requests to the backend.
     ```bash
-    cd client
+    cd clients
     go run main.go
     ```
 

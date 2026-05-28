@@ -7,13 +7,31 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-func GetGame(db *gorm.DB, gameID uint) (*models.Game, error) {
-	var game models.Game
-	err := db.Preload("Generations", WithFullGeneration).First(&game, gameID).Error
+func GetGameByID(db *gorm.DB, gameID uint) (*models.Game, error) {
+	var games []models.Game
+	err := db.Preload("Generations", WithFullGeneration).Limit(1).Find(&games, gameID).Error
 	if err != nil {
 		return nil, err
 	}
-	return &game, nil
+	if len(games) == 0 {
+		return nil, nil
+	}
+	return &games[0], nil
+}
+
+func GetGameByRoomName(db *gorm.DB, roomName string) (*models.Game, error) {
+	var games []models.Game
+	err := db.Preload("Generations", WithFullGeneration).
+		Where(&models.Game{RoomName: roomName}).
+		Limit(1).
+		Find(&games).Error
+	if err != nil {
+		return nil, err
+	}
+	if len(games) == 0 {
+		return nil, nil
+	}
+	return &games[0], nil
 }
 
 // CreateGame creates a game in the db with no generations and no players (Empty lists)
@@ -21,6 +39,7 @@ func CreateGame(db *gorm.DB) (uint, error) {
 	game := models.Game{
 		Generations: []models.Generation{},
 		Players:     []models.Player{},
+		RoomName:    "test-game",
 	}
 
 	result := db.Create(&game)

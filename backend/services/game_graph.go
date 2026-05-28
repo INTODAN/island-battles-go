@@ -144,7 +144,7 @@ func BuildGraphForGeneration(generation *models.Generation, index int, totalGens
 }
 
 func GetGameGraph(db *gorm.DB, gameID uint) (string, error) {
-	game, err := dal.GetGame(db, gameID)
+	game, err := dal.GetGameByID(db, gameID)
 	if err != nil {
 		return "", fmt.Errorf("game not found: %w", err)
 	}

@@ -16,7 +16,7 @@ func TestGetGame(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	game, err := dal.GetGame(db, generation.GameID)
+	game, err := dal.GetGameByID(db, generation.GameID)
 	if err != nil {
 		t.Fatal(err)
 	}
