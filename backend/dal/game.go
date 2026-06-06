@@ -7,6 +7,8 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// GetGameByID retrieves a game by its ID, preloading all generations.
+// It returns the game if found, nil if not found, and an error if the query fails.
 func GetGameByID(db *gorm.DB, gameID uint) (*models.Game, error) {
 	var games []models.Game
 	err := db.Preload("Generations", WithFullGeneration).Limit(1).Find(&games, gameID).Error
@@ -19,6 +21,8 @@ func GetGameByID(db *gorm.DB, gameID uint) (*models.Game, error) {
 	return &games[0], nil
 }
 
+// GetGameByRoomName retrieves a game by its room name, preloading all generations.
+// It returns the game if found, nil if not found, and an error if the query fails.
 func GetGameByRoomName(db *gorm.DB, roomName string) (*models.Game, error) {
 	var games []models.Game
 	err := db.Preload("Generations", WithFullGeneration).
@@ -34,7 +38,8 @@ func GetGameByRoomName(db *gorm.DB, roomName string) (*models.Game, error) {
 	return &games[0], nil
 }
 
-// CreateGame creates a game in the db with no generations and no players (Empty lists)
+// CreateGame creates a game in the db with no generations and no players (Empty lists).
+// It returns the created game's ID and an error if the creation fails.
 func CreateGame(db *gorm.DB) (uint, error) {
 	game := models.Game{
 		Generations: []models.Generation{},

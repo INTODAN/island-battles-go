@@ -5,9 +5,16 @@ import (
 	"islandBattles/backend/dal"
 )
 
+type ConnectAction string
+
+const (
+	Create ConnectAction = "create"
+	Join   ConnectAction = "join"
+)
+
 type ConnectInput struct {
-	RoomName     string
-	ShouldCreate bool
+	RoomName      string
+	ConnectAction ConnectAction
 }
 
 type ConnectResult struct {
@@ -21,15 +28,16 @@ type ConnectResponse struct {
 }
 
 func (env *Env) Connect(ctx context.Context, input *ConnectInput) (*ConnectResponse, error) {
-	game, err := dal.GetGameByRoomName(env.DB, input.RoomName)
-	if err != nil {
-		return nil, err
-	}
-	if input.ShouldCreate {
-		if game == nil {
-
+	if input.ConnectAction == Create {
+		_, err := dal.CreateGame(env.DB)
+		if err != nil {
+			return nil, err
 		}
-		dal.CreateGame()
+	} else if input.ConnectAction == Join {
+		_, err := dal.GetGameByRoomName(env.DB, input.RoomName)
+		if err != nil {
+			return nil, err
+		}
 	}
 	userID := "0"
 	resp := &ConnectResponse{}
