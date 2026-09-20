@@ -1,7 +1,9 @@
 # Multiplayer architecture decision
 
 Date: 2026-09-20  
-Status: Keep Centrifugo and the existing Go/Huma/PostgreSQL architecture. The lobby, Lambda, and client-generation design below describes the intended direction, not completed functionality.
+Status: Keep Centrifugo and the existing Go/Huma/PostgreSQL architecture. The generic lobby and Huma-generated Python client are implemented; Lambda routing, round timers and C#/TypeScript clients remain planned. See the [implementation evidence](tasks/generic-lobby/implementation-status.md) for verification status.
+
+Implementation planning: [generic lobby task pack](tasks/generic-lobby/README.md) defines the package/API contracts, migration policy, parallel work order, and required tests. The task pack is not an implementation completion report.
 
 ## Requirements
 
@@ -27,12 +29,12 @@ Use the existing standalone Centrifugo server. Embedding the related [Centrifuge
 | Area | Current implementation | Intended direction |
 | --- | --- | --- |
 | Backend | [Go/Huma/Chi HTTP server](../backend/main.go), GORM/PostgreSQL, game logic under `backend/` | Keep the stack; add shared lobby behavior and game-action routing |
-| Messaging | [Centrifugo configuration](../centrifugo/centrifugo-config.toml), connect/RPC proxies, backend publication through `gocent` | Keep Centrifugo; add authorized room and player channels |
-| Connections | [Connect handler](../backend/handlers/connect.go) includes game create/join actions and a placeholder user ID | Separate authenticated connection establishment from explicit create/join operations |
-| Clients | [Go CLI example](../clients/main.go) and [Python client scaffold](../clients/island-battles-client-python/client/connect.py) | Add generated command clients and validate the required C#/TypeScript/Python player flows |
+| Messaging | [Centrifugo configuration](../centrifugo/centrifugo-config.toml), authorized subscribe/refresh proxies and durable outbox publication | Keep Centrifugo transport recovery with HTTP snapshot reconciliation |
+| Connections | [Generic lobby](../lobby/README.md): guest credentials, explicit create/join, teams and durable per-client leases | Account identity and additional games can reuse the boundary |
+| Clients | [Go example](../clients/main.go) and [generated Python client](../clients/lobby-python/README.md) | Add and validate C#/TypeScript player flows |
 | Deployment | [Compose infrastructure](../docker-compose.yml) includes PostgreSQL and Centrifugo | Initially share one host; add Lambda integration separately |
 
-Complete lobby semantics, Lambda routing, generated game clients, and C# engine compatibility have not been implemented or verified by this research. The existing WebSocket RPC proxy flow remains valid; the command API recommendation below does not require an immediate transport migration.
+Generic lobby commands now use HTTP, with Centrifugo for authenticated subscriptions and invalidations. The old connect/RPC lobby flow has been removed. Lambda routing, game-specific generated clients and C# engine compatibility remain unimplemented; later sections retain the broader architectural direction.
 
 ## Intended architecture
 
