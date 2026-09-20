@@ -2,43 +2,37 @@ services:
   db:
     image: postgres:18-alpine
     volumes:
-      - postgres_data:/var/lib/postgresql/data/
+      # PostgreSQL 18 stores data under /var/lib/postgresql/18/docker.
+      - postgres_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "islandBattles", "-d", "islandBattles"]
       interval: 1s
       timeout: 5s
       retries: 10
     environment:
-      - POSTGRES_USER=islandBattles
-      - POSTGRES_PASSWORD=islandBattles
-      - POSTGRES_DB=islandBattles
+      POSTGRES_USER: islandBattles
+      POSTGRES_PASSWORD: islandBattles
+      POSTGRES_DB: islandBattles
     ports:
       - 5432:5432
     extra_hosts:
       - "host.docker.internal:host-gateway"
-  # backend:
-  #   build: ./backend
-  #   restart: unless-stopped
-  #   volumes:
-  #     - ./backend:/usr/src/app
-  #   expose:
-  #     - 8888
-  #   ports:
-  #     - 8888:8888
-  #   depends_on:
-  #     db:
-  #       condition: service_healthy
   centrifugo:
-    image: centrifugo/centrifugo:v6
+    # Pinned after checking Centrifugo v6.9.6 configuration documentation.
+    image: centrifugo/centrifugo:v6.9.6
     restart: unless-stopped
     volumes:
-      - ./centrifugo:/centrifugo
+      - ./centrifugo:/centrifugo:ro,Z
     command: centrifugo -c /centrifugo/centrifugo-config.toml
     ports:
       - "8000:8000"
     environment:
-      - CENTRIFUGO_PROXIES=[{"name":"proxy_ping","endpoint":"http://host.docker.internal:8888/ping"}]
-      - CENTRIFUGO_CLIENT_PROXY_CONNECT_ENDPOINT=http://host.docker.internal:8888/connect
+      CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY: ${ISLAND_BATTLES_CONNECTION_TOKEN_HMAC_SECRET:?set ISLAND_BATTLES_CONNECTION_TOKEN_HMAC_SECRET}
+      CENTRIFUGO_HTTP_API_KEY: ${ISLAND_BATTLES_CENTRIFUGO_API_KEY:?set ISLAND_BATTLES_CENTRIFUGO_API_KEY}
+      CENTRIFUGO_ADMIN_PASSWORD: ${ISLAND_BATTLES_CENTRIFUGO_ADMIN_PASSWORD:?set ISLAND_BATTLES_CENTRIFUGO_ADMIN_PASSWORD}
+      CENTRIFUGO_ADMIN_SECRET: ${ISLAND_BATTLES_CENTRIFUGO_ADMIN_SECRET:?set ISLAND_BATTLES_CENTRIFUGO_ADMIN_SECRET}
+      CENTRIFUGO_VAR_LOBBY_PROXY_SECRET: ${ISLAND_BATTLES_LOBBY_PROXY_SECRET:?set ISLAND_BATTLES_LOBBY_PROXY_SECRET}
+      CENTRIFUGO_CLIENT_ALLOWED_ORIGINS: ${ISLAND_BATTLES_CENTRIFUGO_ALLOWED_ORIGINS:-http://localhost:3000 http://127.0.0.1:3000}
     depends_on:
       db:
         condition: service_healthy

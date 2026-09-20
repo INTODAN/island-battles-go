@@ -2,15 +2,24 @@ package routes
 
 import (
 	"islandBattles/backend/handlers"
+	"islandBattles/backend/lobbyadapter"
+	"islandBattles/lobby"
+	"islandBattles/lobby/auth"
+	"islandBattles/lobby/httpapi"
 	"net/http"
 
 	"github.com/danielgtaylor/huma/v2"
 )
 
+// SetupLobbyRoutes embeds reusable lobby commands and the explicit game binding.
+// Centrifugo's trusted proxy endpoints are registered separately from OpenAPI.
+func SetupLobbyRoutes(api huma.API, application lobby.Application, authentication *auth.Service, gameAdapter *lobbyadapter.Service) {
+	httpapi.Register(api, application, authentication, authentication)
+	lobbyadapter.Register(api, gameAdapter, authentication)
+}
+
 func SetupRoutes(api *huma.API, env *handlers.Env) {
 	huma.Register(*api, huma.Operation{Path: "/ping", Method: http.MethodPost, DefaultStatus: http.StatusOK}, env.Ping)
-	huma.Register(*api, huma.Operation{Path: "/connect", Method: http.MethodPost, DefaultStatus: http.StatusOK},
-		env.Connect)
 	huma.Register(*api, huma.Operation{Path: "/map/create", Method: http.MethodPost, DefaultStatus: http.StatusOK,
 		Summary: "Create a Map Template."}, env.CreateMapTemplate)
 	huma.Register(*api, huma.Operation{Path: "/generation/create", Method: http.MethodPost, DefaultStatus: http.StatusOK,
