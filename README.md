@@ -61,6 +61,8 @@
 
 ## Architecture Notes
 
+See [Multiplayer architecture decision](docs/multiplayer-architecture.md) for the Centrifugo decision, planned lobby/Lambda responsibilities, client generation, and alternatives considered.
+
 *   **Centrifugo Proxy:** The backend is configured as a proxy for Centrifugo. Client events (like connection attempts or RPC calls) are forwarded from Centrifugo to the backend's HTTP endpoints (`/connect`, `/ping`).
 *   **Environment Variables:**
     *   The `docker-compose.yml` configures Centrifugo to proxy requests to `http://host.docker.internal:8888`.
