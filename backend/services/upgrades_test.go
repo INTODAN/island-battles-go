@@ -70,6 +70,9 @@ func TestCastleUpgradesAffectOnlyNewSoldierGroups(t *testing.T) {
 	if oldCastle.Upgrades[models.SpeedUpgrade] != 1 || newCastle.Upgrades[models.SpeedUpgrade] != 4 {
 		t.Fatal("castle upgrades were not isolated between generations")
 	}
+	if oldCastle.SoldierAmount != 91 || newCastle.SoldierAmount != 22 {
+		t.Fatalf("upgrade costs were not deducted: before=%d after=%d", oldCastle.SoldierAmount, newCastle.SoldierAmount)
+	}
 	if len(after.SoldierGroups) != 2 {
 		t.Fatal("expected old and newly spawned groups")
 	}
@@ -129,4 +132,45 @@ func TestCastleUpgradesAffectOnlyNewSoldierGroups(t *testing.T) {
 		}
 	}
 	_ = testutils.CreateGameGraphForTest(t, database, gameID)
+}
+
+func TestUnaffordableUpgradeRollsBackEarlierCommands(t *testing.T) {
+	database := testutils.InitTestDB(t)
+	generationID := testutils.CreateGenerationForTest(t, database)
+	generation, err := dal.GetGeneration(database, generationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	castle, err := dal.GetCastleFromGeneration(generation, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dal.UpdateCastleSoldierGroupAmount(database, castle, 40); err != nil {
+		t.Fatal(err)
+	}
+	upgradeParameters, err := json.Marshal(commandHandlers.UpgradeCastleParams{LogicalCastleID: 0, UpgradeType: models.SpeedUpgrade})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sendParameters, err := json.Marshal(commandHandlers.SendSoldierGroupParams{OriginLogicalCastleID: 0, DestinationLogicalCastleID: 1, SoldierAmount: 15})
+	if err != nil {
+		t.Fatal(err)
+	}
+	upgrade := models.CommandFields{CommandType: models.UpgradeCastle, Parameters: upgradeParameters}
+	// 40 - send(15) - level2(10) leaves 15, below level3's cost of 20.
+	commands := []models.CommandFields{{CommandType: models.SendSoldierGroup, Parameters: sendParameters}, upgrade, upgrade}
+	if next, err := services.MigrateGeneration(database, generation.GameID, commands); next != 0 || !errors.Is(err, models.ErrInsufficientSoldiers) {
+		t.Fatalf("unexpected turn result: id=%d err=%v", next, err)
+	}
+	generation, err = dal.GetLatestGenerationForGame(database, generation.GameID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	castle, err = dal.GetCastleFromGeneration(generation, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if generation.ID != generationID || len(generation.SoldierGroups) != 0 || castle.SoldierAmount != 40 || castle.Upgrades[models.SpeedUpgrade] != 1 {
+		t.Fatalf("failed turn did not roll back: castle=%+v generation=%+v", castle, generation)
+	}
 }

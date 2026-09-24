@@ -12,6 +12,9 @@ func TestUpgradeLevelsAndSnapshots(t *testing.T) {
 		if err != nil || value != speed {
 			t.Fatalf("level %d: value=%v err=%v", level+1, value, err)
 		}
+		if cost, err := upgrades.Cost(SpeedUpgrade); err != nil || cost != []uint{0, 10, 20, 30}[level] {
+			t.Fatalf("level %d cost=%d err=%v", level+1, cost, err)
+		}
 		if level == 3 {
 			break
 		}
@@ -46,14 +49,17 @@ func TestUpgradeTypesHaveIndependentLimitsAndEffects(t *testing.T) {
 	// A second definition exercises the generic mechanism without adding an
 	// unrequested upgrade to the game itself.
 	const testUpgrade UpgradeType = "test-upgrade"
-	upgradeValues[testUpgrade] = []float64{10, 25}
-	t.Cleanup(func() { delete(upgradeValues, testUpgrade) })
+	upgradeLevels[testUpgrade] = []upgradeLevel{{Value: 10}, {Value: 25, SoldierCost: 7}}
+	t.Cleanup(func() { delete(upgradeLevels, testUpgrade) })
 	upgrades, err := (Upgrades{SpeedUpgrade: 3}).Upgraded(testUpgrade)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if value, err := upgrades.Value(testUpgrade); err != nil || value != 25 {
 		t.Fatalf("effect=%v err=%v", value, err)
+	}
+	if cost, err := upgrades.Cost(testUpgrade); err != nil || cost != 7 {
+		t.Fatalf("independent type cost=%d err=%v", cost, err)
 	}
 	if _, err := upgrades.Upgraded(testUpgrade); !errors.Is(err, ErrUpgradeMaxLevel) {
 		t.Fatal("type-specific cap ignored")

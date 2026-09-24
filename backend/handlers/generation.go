@@ -54,7 +54,7 @@ func (env *Env) MigrateGeneration(ctx context.Context, input *MigrateGenerationR
 		if errors.Is(err, models.ErrInvalidUpgrade) {
 			return nil, huma.Error422UnprocessableEntity(err.Error())
 		}
-		if errors.Is(err, models.ErrUpgradeMaxLevel) {
+		if errors.Is(err, models.ErrUpgradeMaxLevel) || errors.Is(err, models.ErrInsufficientSoldiers) {
 			return nil, huma.Error409Conflict(err.Error())
 		}
 		return nil, huma.Error500InternalServerError(err.Error())

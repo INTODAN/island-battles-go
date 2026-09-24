@@ -42,7 +42,7 @@ The active host receives `game_id`, `lobby_id` and a stable team UUID/order/colo
 
 ## Castle upgrades
 
-Castles and soldier groups persist an `upgrades` map, such as `{"speed":1}`. Each upgrade type defines its own level effects and maximum in `models/upgrades.go`. Speed currently has four levels: **1 → 0.5**, **2 → 1**, **3 → 1.5**, and **4 → 2** world units per turn. Omitted upgrades and existing database records default to level 1. Map templates can provide initial castle levels.
+Castles and soldier groups persist an `upgrades` map, such as `{"speed":1}`. Each upgrade type defines its own level effects, fixed soldier costs, and maximum in `models/upgrades.go`. Speed currently has four levels: **1 → 0.5**, **2 → 1**, **3 → 1.5**, and **4 → 2** world units per turn. Omitted upgrades and existing database records default to level 1. Map templates can provide initial castle levels. Purchasing speed levels **2**, **3**, and **4** costs **10**, **20**, and **30 soldiers**, respectively; the default level 1 has no purchase cost.
 
 To increase a castle's speed by one level, submit a command to `POST /generation/migrate`:
 
@@ -58,7 +58,7 @@ To increase a castle's speed by one level, submit a command to `POST /generation
 }
 ```
 
-Commands execute in the supplied order before movement. Sending troops after upgrading copies the new levels; troops sent before upgrading retain the old levels. Every group keeps its own snapshot throughout later turns. Upgrading at the maximum returns HTTP 409; unknown upgrade types or invalid levels return HTTP 422. A rejected command rolls back the whole turn. The temporary lobby still runs automatic battles without player gameplay controls.
+Commands execute in the supplied order before movement. Sending troops after upgrading copies the new levels; troops sent before upgrading retain the old levels. Every group keeps its own snapshot throughout later turns. The castle must have enough soldiers at the moment the command executes. The purchase atomically deducts the target level's cost and advances the upgrade; an exact balance is allowed and leaves zero soldiers before normal turn production. Insufficient soldiers or upgrading at the maximum returns HTTP 409; unknown upgrade types or invalid levels return HTTP 422. A rejected command rolls back the whole turn. The temporary lobby still runs automatic battles without player gameplay controls.
 
 ## Schema and recovery
 

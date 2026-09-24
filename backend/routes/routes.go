@@ -39,7 +39,7 @@ func SetupRoutes(api huma.API, env *handlers.Env) {
 	huma.Register(api, huma.Operation{Path: "/generation/create", Method: http.MethodPost, DefaultStatus: http.StatusOK,
 		Summary: "Create a Generation from a Map Template."}, env.CreateGenerationFromTemplate)
 	huma.Register(api, huma.Operation{Path: "/generation/migrate", Method: http.MethodPost, DefaultStatus: http.StatusOK,
-		Summary: "Advance one game turn and apply commands, including castle upgrades.", Description: "Commands execute in order. upgrade_castle accepts logical_castle_id and upgrade_type, and advances that upgrade by one level. Groups spawned afterward copy the castle upgrades; existing groups retain their levels. A rejected command rolls back the entire turn."}, env.MigrateGeneration)
+		Summary: "Advance one game turn and apply commands, including castle upgrades.", Description: "Commands execute in order. upgrade_castle accepts logical_castle_id and upgrade_type, and advances that upgrade by one level, atomically deducting its fixed soldier cost from the castle. Speed levels 2, 3, and 4 cost 10, 20, and 30 soldiers. Insufficient soldiers returns HTTP 409. Groups spawned afterward copy the castle upgrades; existing groups retain their levels. A rejected command rolls back the entire turn."}, env.MigrateGeneration)
 	huma.Register(api, huma.Operation{Path: "/game/{id}/graph", Method: http.MethodGet, DefaultStatus: http.StatusOK,
 		Summary: "Get a graph visualization of the game."}, env.GetGameGraph)
 }

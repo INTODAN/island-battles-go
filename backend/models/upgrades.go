@@ -10,20 +10,26 @@ type UpgradeType string
 const SpeedUpgrade UpgradeType = "speed"
 
 var (
-	ErrInvalidUpgrade  = errors.New("invalid upgrade")
-	ErrUpgradeMaxLevel = errors.New("upgrade is already at its maximum level")
+	ErrInvalidUpgrade       = errors.New("invalid upgrade")
+	ErrUpgradeMaxLevel      = errors.New("upgrade is already at its maximum level")
+	ErrInsufficientSoldiers = errors.New("not enough soldiers to upgrade")
 )
 
-// Each type defines its own level effects; the number of entries is its maximum
+type upgradeLevel struct {
+	Value       float64
+	SoldierCost uint
+}
+
+// Each type defines its own level effects and costs; the number of entries is its maximum
 // level. Missing entries in a castle/group's upgrades mean the default level 1.
-var upgradeValues = map[UpgradeType][]float64{
-	SpeedUpgrade: {0.5, 1, 1.5, 2},
+var upgradeLevels = map[UpgradeType][]upgradeLevel{
+	SpeedUpgrade: {{Value: 0.5}, {Value: 1, SoldierCost: 10}, {Value: 1.5, SoldierCost: 20}, {Value: 2, SoldierCost: 30}},
 }
 
 type Upgrades map[UpgradeType]int
 
 func (upgrades Upgrades) Level(upgradeType UpgradeType) (int, error) {
-	values, exists := upgradeValues[upgradeType]
+	values, exists := upgradeLevels[upgradeType]
 	if !exists {
 		return 0, fmt.Errorf("%w: unknown type %q", ErrInvalidUpgrade, upgradeType)
 	}
@@ -42,7 +48,17 @@ func (upgrades Upgrades) Value(upgradeType UpgradeType) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return upgradeValues[upgradeType][level-1], nil
+	return upgradeLevels[upgradeType][level-1].Value, nil
+}
+
+// Cost is the fixed soldier cost of reaching this level, not the next level.
+// The default level has no purchase cost.
+func (upgrades Upgrades) Cost(upgradeType UpgradeType) (uint, error) {
+	level, err := upgrades.Level(upgradeType)
+	if err != nil {
+		return 0, err
+	}
+	return upgradeLevels[upgradeType][level-1].SoldierCost, nil
 }
 
 func (upgrades Upgrades) Validate() error {
@@ -56,8 +72,8 @@ func (upgrades Upgrades) Validate() error {
 
 // Clone snapshots every current level without sharing the original map.
 func (upgrades Upgrades) Clone() Upgrades {
-	copy := make(Upgrades, len(upgrades)+len(upgradeValues))
-	for upgradeType := range upgradeValues {
+	copy := make(Upgrades, len(upgrades)+len(upgradeLevels))
+	for upgradeType := range upgradeLevels {
 		copy[upgradeType] = 1
 	}
 	for upgradeType, level := range upgrades {
@@ -75,7 +91,7 @@ func (upgrades Upgrades) Upgraded(upgradeType UpgradeType) (Upgrades, error) {
 	if err != nil {
 		return nil, err
 	}
-	if level == len(upgradeValues[upgradeType]) {
+	if level == len(upgradeLevels[upgradeType]) {
 		return nil, fmt.Errorf("%w: %s", ErrUpgradeMaxLevel, upgradeType)
 	}
 	result := upgrades.Clone()
