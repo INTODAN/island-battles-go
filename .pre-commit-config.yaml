@@ -11,28 +11,28 @@ repos:
     hooks:
       - id: go-fmt
         name: go fmt
-        entry: go fmt ./...
+        entry: go fmt ./... ./lobby/...
         language: system
         types: [go]
         pass_filenames: false # go fmt runs on whole project by default
 
       - id: go-vet
         name: go vet
-        entry: go vet ./...
+        entry: go vet ./... ./lobby/...
         language: system
         types: [go]
         pass_filenames: false # go vet runs on whole project by default
 
       - id: golangci-lint
         name: golangci-lint
-        entry: golangci-lint run --timeout=5m
+        entry: golangci-lint run --timeout=5m ./... ./lobby/...
         language: system
         types: [go]
         pass_filenames: false # golangci-lint runs on whole project by default
 
       - id: go-test
         name: go test
-        entry: go test ./...
+        entry: go test ./... ./lobby/...
         language: system
         types: [go]
         pass_filenames: false

@@ -11,3 +11,14 @@ type SoldierGroupMoveDelta struct {
 	End          pgtype.Point
 	SoldierGroup *models.SoldierGroup
 }
+
+type ClashParticipant struct {
+	SoldierGroup *models.SoldierGroup
+	Position     pgtype.Point
+}
+
+// Clash groups simultaneous contacts, retaining each group's own position.
+type Clash struct {
+	Time         float64
+	Participants []ClashParticipant
+}

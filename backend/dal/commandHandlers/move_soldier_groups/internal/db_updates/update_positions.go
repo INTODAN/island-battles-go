@@ -9,36 +9,21 @@ import (
 	"gorm.io/gorm"
 )
 
-func UpdateSoldierGroupPositions(
-	db *gorm.DB,
-	soldierGroupsPositions []internal.SoldierGroupMoveDelta,
-	clashPositions map[pgtype.Point][]*models.SoldierGroup,
-) error {
-	updateInitialSoldierGroupsPositionsWithClashPositions(soldierGroupsPositions, clashPositions)
-	for i := range soldierGroupsPositions {
-		err := dal.UpdateSoldierGroupPosition(
-			db, soldierGroupsPositions[i].SoldierGroup,
-			soldierGroupsPositions[i].End,
-		)
-		if err != nil {
+func UpdateSoldierGroupPositions(database *gorm.DB, movements []internal.SoldierGroupMoveDelta, clashes []internal.Clash) error {
+	positions := map[*models.SoldierGroup]pgtype.Point{}
+	for _, clash := range clashes {
+		for _, participant := range clash.Participants {
+			positions[participant.SoldierGroup] = participant.Position
+		}
+	}
+	for _, movement := range movements {
+		position, stopped := positions[movement.SoldierGroup]
+		if !stopped {
+			position = movement.End
+		}
+		if err := dal.UpdateSoldierGroupPosition(database, movement.SoldierGroup, position); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-func updateInitialSoldierGroupsPositionsWithClashPositions(
-	soldierGroupsPositions []internal.SoldierGroupMoveDelta,
-	clashPositions map[pgtype.Point][]*models.SoldierGroup,
-) {
-	soldierGroupsPositionsMap := make(map[uint]*internal.SoldierGroupMoveDelta)
-	for i := range soldierGroupsPositions {
-		soldierGroupsPositionsMap[soldierGroupsPositions[i].SoldierGroup.ID] = &soldierGroupsPositions[i]
-	}
-
-	for clashedPosition, clashedSoldierGroups := range clashPositions {
-		for _, soldierGroup := range clashedSoldierGroups {
-			soldierGroupsPositionsMap[soldierGroup.ID].End = clashedPosition
-		}
-	}
 }

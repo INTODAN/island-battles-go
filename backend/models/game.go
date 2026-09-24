@@ -4,12 +4,7 @@ import "gorm.io/gorm"
 
 type Game struct {
 	gorm.Model
+	LobbyID     *string `gorm:"type:uuid;uniqueIndex"`
+	Replay      []byte  `gorm:"type:jsonb" json:"-"`
 	Generations []Generation
-	Players     []Player
-}
-
-type Player struct {
-	gorm.Model
-	GameID    uint
-	TeamColor int
 }

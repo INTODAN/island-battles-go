@@ -1,0 +1,105 @@
+package postgres
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/json"
+
+	"islandBattles/lobby/domain"
+
+	"gorm.io/datatypes"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+)
+
+func canonicalCreate(request domain.CreateRequest) (domain.CreateRequest, error) {
+	if domain.ValidateUUID(request.RequestID) != nil || domain.ValidateUUID(request.ClientInstanceID) != nil || domain.ValidateGameKey(request.GameKey) != nil {
+		return request, domain.ErrInvalidInput
+	}
+	var err error
+	request.Name, err = domain.NormalizeName(request.Name, 80)
+	if err != nil {
+		return request, err
+	}
+	request.Teams, err = domain.ValidateTeamDefinitions(request.Teams, request.Capacity)
+	return request, err
+}
+func (store *Store) Create(ctx context.Context, principal domain.Principal, request domain.CreateRequest, aggregate domain.Aggregate) (domain.Snapshot, error) {
+	canonical, err := canonicalCreate(request)
+	if err != nil {
+		return domain.Snapshot{}, err
+	}
+	if domain.ValidateUUID(principal.PlayerID) != nil {
+		return domain.Snapshot{}, domain.ErrUnauthenticated
+	}
+	payload, err := json.Marshal(canonical)
+	if err != nil {
+		return domain.Snapshot{}, storageError(err)
+	}
+	fingerprint := sha256.Sum256(payload)
+	var response domain.Snapshot
+	err = store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Insert-first uniqueness serializes requests without a check/write gap.
+		// The temporary response cannot escape this transaction; rollback removes it.
+		record := CreateRequestRecord{PlayerID: principal.PlayerID, RequestID: request.RequestID, PayloadHash: fingerprint[:], ResponseJSON: datatypes.JSON(`{}`), CreatedAt: store.clock.Now().UTC()}
+		inserted := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "player_id"}, {Name: "request_id"}}, DoNothing: true}).Create(&record)
+		if inserted.Error != nil {
+			return inserted.Error
+		}
+		if inserted.RowsAffected == 0 {
+			var records []CreateRequestRecord
+			if err := tx.Where(&CreateRequestRecord{PlayerID: principal.PlayerID, RequestID: request.RequestID}).Limit(1).Find(&records).Error; err != nil {
+				return err
+			}
+			if len(records) != 1 {
+				return domain.ErrUnavailable
+			}
+			if !bytes.Equal(records[0].PayloadHash, fingerprint[:]) {
+				return domain.ErrIdempotencyConflict
+			}
+			return json.Unmarshal(records[0].ResponseJSON, &response)
+		}
+		aggregate = aggregate.DeepCopy()
+		if aggregate.Lobby.Version != 1 || aggregate.Lobby.GameKey != canonical.GameKey {
+			return domain.ErrInvalidInput
+		}
+		room := roomRecord(aggregate.Lobby)
+		if err := tx.Create(&room).Error; err != nil {
+			if isCodeCollision(err) {
+				return domain.ErrJoinCodeCollision
+			}
+			return err
+		}
+		if err := persistChildren(tx, aggregate, true); err != nil {
+			return err
+		}
+		if err := store.insertJobs(tx, aggregate.Lobby, domain.Change{PublicChanged: true}); err != nil {
+			return err
+		}
+		stored, err := loadAggregate(tx, aggregate.Lobby.Scope(), false)
+		if err != nil {
+			return err
+		}
+		response, err = domain.BuildSnapshot(stored, principal.PlayerID)
+		if err != nil {
+			return err
+		}
+		body, err := json.Marshal(response)
+		if err != nil {
+			return err
+		}
+		record.ResponseJSON = body
+		if err := tx.Model(&CreateRequestRecord{}).Where(&CreateRequestRecord{PlayerID: principal.PlayerID, RequestID: request.RequestID}).Select("response_json").Updates(&record).Error; err != nil {
+			return err
+		}
+		// First response and replay have the same public representation, including
+		// UTC/timestamp precision and exclusion of internal-only room fields.
+		response = domain.Snapshot{}
+		return json.Unmarshal(body, &response)
+	})
+	if err != nil {
+		return domain.Snapshot{}, storageError(err)
+	}
+	return response, nil
+}

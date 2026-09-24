@@ -8,69 +8,46 @@
 *   **API Framework:** [Huma v2](https://github.com/danielgtaylor/huma) with [Chi](https://github.com/go-chi/chi) router.
 *   **Real-time Messaging:** [Centrifugo](https://centrifugal.dev/) (v6).
 *   **Database:** PostgreSQL (v18-alpine) with [GORM](https://gorm.io/).
-*   **Client:** Go-based CLI client using `centrifuge-go`.
+*   **Clients:** Generated Python HTTP SDK with an asyncio Centrifugo companion, plus a Go connection example.
 
 ## Project Structure
 
-*   **`backend/`**: The core game server API.
-    *   `main.go`: Entry point, initializes DB, Centrifugo client, and HTTP server (port 8888).
-    *   `routes/`: Defines HTTP API endpoints (`/ping`, `/connect`, `/create_map_template`).
-    *   `handlers/`: Implementation of route logic.
-    *   `dal/`: Data Access Layer (database interactions).
-    *   `models/`: GORM data models.
-*   **`client/`**: A reference Go CLI client.
-    *   Connects to Centrifugo via WebSocket (`ws://localhost:8000/connection/websocket`).
-    *   Demonstrates subscribing to channels and making RPC calls (e.g., `proxy_ping`).
-*   **`centrifugo/`**: Configuration for the Centrifugo server.
-*   **`docker-compose.yml`**: Orchestrates the infrastructure services (Postgres and Centrifugo).
+- `lobby/`: Independent generic lobby component: Go module, clients, API artifacts, transport configuration, docs, and shared test tooling. See [its README](lobby/README.md).
+- `backend/`: Island Battles game logic and wiring to the generic lobby module.
+- `integration/island_battles/`: Host-specific lobby/game binding acceptance checks.
+- `scripts/test-lobby-acceptance.sh`: Runs the shared acceptance suite against the Island Battles host, including its game-specific checks.
+- `go.work`: Connects the host and lobby Go modules for local development.
 
 ## Development Setup
 
-### Prerequisites
-*   Go 1.25+
-*   Docker & Docker Compose
+Requires Go 1.25+ and either Docker with Compose or Podman on Linux. Python 3.14+ with uv is only needed for the Python client and acceptance tests.
 
-### Running the Project
+```sh
+./scripts/dev.sh
+```
 
-1.  **Start Infrastructure:**
-    Launch PostgreSQL and Centrifugo.
-    ```bash
-    docker compose up -d db centrifugo
-    ```
-    *   **Postgres:** Port `5432` (User/Pass/DB: `islandBattles`)
-    *   **Centrifugo:** Port `8000` (Dashboard/Client API)
+The script creates `.env` from `.env.example` if needed, exports it, starts the dependencies, waits for PostgreSQL, and runs the backend. Open **http://localhost:8888/lobby/ui/** in two fresh tabs to test the lobby with two players. No frontend build is required.
 
-2.  **Run Backend:**
-    The backend listens on port `8888` and acts as the proxy/auth for Centrifugo.
-    ```bash
-    cd backend
-    go run main.go
-    ```
+PostgreSQL listens on port 5432, Centrifugo on 8000, and the backend on 8888. The native Podman path uses these local defaults, stores database data in the `island-battles-dev-postgres` volume, and disables the Centrifugo admin UI. `/healthz` reports HTTP readiness; Huma serves API documentation at `/docs`.
 
-    Or for hot relaod:
-    ```bash
-    air
-    ```
+Ctrl+C stops the backend. Dependencies remain running for the next launch. Stop them with `docker compose stop` or, for native Podman, `podman stop island-battles-dev-db island-battles-dev-centrifugo`.
 
-3.  **Run Client:**
-    The client connects to Centrifugo, which proxies requests to the backend.
-    ```bash
-    cd client
-    go run main.go
-    ```
+Use the [Python client walkthrough](lobby/clients/lobby-python/README.md) for two-player team selection, or the [Go example](lobby/clients/README.md). Backend settings and the explicit game-binding endpoint are documented in [backend/README.md](backend/README.md).
 
 ## Architecture Notes
 
-*   **Centrifugo Proxy:** The backend is configured as a proxy for Centrifugo. Client events (like connection attempts or RPC calls) are forwarded from Centrifugo to the backend's HTTP endpoints (`/connect`, `/ping`).
-*   **Environment Variables:**
-    *   The `docker-compose.yml` configures Centrifugo to proxy requests to `http://host.docker.internal:8888`.
-    *   Ensure the backend is running locally on port `8888` for this connection to succeed.
+The [multiplayer architecture decision](lobby/docs/multiplayer-architecture.md) explains the design, and the [task pack](lobby/docs/tasks/generic-lobby/README.md) records contracts, edge cases and agent assignments. Guest credentials identify players; opening a socket does not create or join a room. HTTP commands commit state and durable invalidations together. Centrifugo reconnects and recovers transport history; clients reconcile authorized HTTP snapshots after subscribing and periodically.
+
+Teams and readiness belong to the generic lobby. Starting freezes a roster. The Island Battles adapter then creates a map, runs an automatic battle, and saves a spectator replay for both players. `POST /game/from-lobby` can also retry a failed game launch. The generic lobby has no dependency on the game simulation.
 
 ## Commands
 
-*   **Lint/Verify (Go):** `go vet ./...`
-*   **Format:** `go fmt ./...`
-*   **Test:** `go test ./...`
+*   **Lint/Verify (Go):** `go vet ./... ./lobby/...`
+*   **Format:** `go fmt ./... ./lobby/...`
+*   **Test (disposable PostgreSQL containers):** `go test ./... ./lobby/...`
+*   **Check OpenAPI:** `go run ./lobby/cmd/export-lobby-openapi --output lobby/api/openapi.json --events-output lobby/api/events.json --check`
+*   **Python unit tests:** `uv run --project lobby/clients/lobby-python --locked pytest lobby/clients/lobby-python/tests`
+*   **Live acceptance (Linux Docker or Podman):** `./scripts/test-lobby-acceptance.sh`
 
 ## Testing & Visualization
 

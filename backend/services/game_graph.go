@@ -144,7 +144,7 @@ func BuildGraphForGeneration(generation *models.Generation, index int, totalGens
 }
 
 func GetGameGraph(db *gorm.DB, gameID uint) (string, error) {
-	game, err := dal.GetGame(db, gameID)
+	game, err := dal.GetGameByID(db, gameID)
 	if err != nil {
 		return "", fmt.Errorf("game not found: %w", err)
 	}
@@ -174,7 +174,25 @@ func GetGameGraph(db *gorm.DB, gameID uint) (string, error) {
 	possiblePaths := []string{
 		"graph",                            // Relative to backend/services/
 		filepath.Join("services", "graph"), // Relative to backend/
-		filepath.Join("backend", "services", "graph"), // Relative to project root
+		filepath.Join("backend", "services", "graph"),  // Relative to project root
+		filepath.Join("..", "services", "graph"),       // Relative to backend/dal
+		filepath.Join("..", "..", "services", "graph"), // Relative to nested folders
+	}
+
+	// Dynamic lookup by finding the project root (where go.mod resides)
+	if cwd, err := os.Getwd(); err == nil {
+		dir := cwd
+		for i := 0; i < 6; i++ {
+			if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+				possiblePaths = append(possiblePaths, filepath.Join(dir, "backend", "services", "graph"))
+				break
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
 	}
 
 	var controlsHTML, scriptJS string

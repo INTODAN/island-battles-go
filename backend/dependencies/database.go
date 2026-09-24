@@ -1,29 +1,40 @@
 package dependencies
 
 import (
+	"context"
 	"fmt"
 	"islandBattles/backend/models"
-	"log"
+	lobbypostgres "islandBattles/lobby/postgres"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
-const DatabaseURL = "postgres://islandBattles:islandBattles@localhost:5432/islandBattles"
-
-func InitDB(connectionString string) *gorm.DB {
+// InitDB opens and initializes the current database schema. It returns errors
+// to bootstrap instead of terminating the process from a reusable dependency.
+func InitDB(connectionString string) (*gorm.DB, error) {
 	db, err := gorm.Open(postgres.Open(connectionString), &gorm.Config{})
 	if err != nil {
-		log.Fatalln("failed to connect database")
+		return nil, fmt.Errorf("connect database: %w", err)
 	}
+	if err := initializeSchema(context.Background(), db); err != nil {
+		if sqlDatabase, closeError := db.DB(); closeError == nil {
+			_ = sqlDatabase.Close()
+		}
+		return nil, err
+	}
+	return db, nil
+}
 
-	err = db.AutoMigrate(&models.Game{}, &models.Player{}, &models.Map{}, &models.Castle{}, &models.CastleTemplate{},
+func initializeSchema(ctx context.Context, db *gorm.DB) error {
+	if err := lobbypostgres.InitializeSchema(ctx, db); err != nil {
+		return fmt.Errorf("initialize lobby schema: %w", err)
+	}
+	err := db.WithContext(ctx).AutoMigrate(&models.Game{}, &models.Map{}, &models.Castle{}, &models.CastleTemplate{},
 		&models.MapTemplate{},
-		&models.Generation{}, &models.SoldierGroup{}, &models.Command{})
+		&models.Generation{}, &models.SoldierGroup{}, &models.Command{}, &models.TeamBindingRecord{})
 	if err != nil {
-		log.Fatalln("failed to migrate models")
+		return fmt.Errorf("initialize game schema: %w", err)
 	}
-
-	fmt.Println("migrated models!")
-	return db
+	return nil
 }

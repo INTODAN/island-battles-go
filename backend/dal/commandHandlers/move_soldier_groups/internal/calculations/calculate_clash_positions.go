@@ -1,112 +1,121 @@
 package calculations
 
 import (
-	"islandBattles/backend/dal/commandHandlers/move_soldier_groups/internal"
-	"islandBattles/backend/models"
+	"fmt"
 	"math"
+	"sort"
+
+	"islandBattles/backend/dal/commandHandlers/move_soldier_groups/internal"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type clashInfo struct {
-	Time  float64
-	Point pgtype.Point
-}
-
 const epsilon = 1e-9
 
-// CalculateClashPositions Calculates all the clashes that occurred between the soldier groups received.
-// X1(t) = start1 + t * distance1
-// X2(t) = start2 + t * distance2
-// t(distance1 - distance2) = start2 - start1
-// t = (start2 - start1) / (distance1 - distance2)
-// calculate tX, tY
-// make sure tX == tY -+ epsilon
-// check that 0<=t<=1 to make sure intersection happens in time frame
-// Finally on collision, calculate the X, Y for the collision
-func CalculateClashPositions(soldierGroupsPositions []internal.SoldierGroupMoveDelta) (
-	map[pgtype.Point][]*models.SoldierGroup,
-	error,
-) {
-	clashes := make(map[internal.SoldierGroupMoveDelta]clashInfo)
-
-	for _, line1 := range soldierGroupsPositions {
-		for _, line2 := range soldierGroupsPositions {
-			if line1.Start == line2.Start || line1.SoldierGroup.TeamColor == line2.SoldierGroup.TeamColor {
+// CalculateClashPositions checks the entire movement interval for entry into
+// either enemy group's clash radius (the larger radius, not the sum). Groups
+// stop at their own first contact position for this turn. Simultaneous connected
+// contacts form one clash; a group cannot fight twice in the same turn.
+func CalculateClashPositions(movements []internal.SoldierGroupMoveDelta) ([]internal.Clash, error) {
+	type contact struct {
+		time        float64
+		left, right int
+	}
+	contacts := []contact{}
+	for _, movement := range movements {
+		radius := movement.SoldierGroup.EffectiveClashRadius()
+		if radius < 0 || math.IsNaN(radius) || math.IsInf(radius, 0) {
+			return nil, fmt.Errorf("invalid soldier group clash radius: %v", radius)
+		}
+	}
+	for left := range movements {
+		for right := left + 1; right < len(movements); right++ {
+			if movements[left].SoldierGroup.TeamColor == movements[right].SoldierGroup.TeamColor {
 				continue
 			}
-
-			distance1 := calculateDistance(line1)
-			distance2 := calculateDistance(line2)
-
-			tY := calculateTime(line1.Start.P.Y, line2.Start.P.Y, distance1.Y, distance2.Y)
-			tX := calculateTime(line1.Start.P.X, line2.Start.P.X, distance1.X, distance2.X)
-
-			if math.IsNaN(tX) && math.IsNaN(tY) {
-				// tX and tY will never meet as we know the start points aren't equal in at least one axis.
-				continue
-			}
-
-			timeEqual := false
-			t := tX
-			if math.IsNaN(tX) {
-				timeEqual = line1.Start.P.X == line2.Start.P.X
-				t = tY
-			} else if math.IsNaN(tY) {
-				timeEqual = line1.Start.P.Y == line2.Start.P.Y
-			} else {
-				timeEqual = math.Abs(tY-tX) < epsilon
-			}
-
-			if timeEqual && 0 <= t && t <= 1 {
-				// We have a clash in the time frame.
-				collisionX := calculatePosition(line1.Start.P.X, distance1.X, t)
-				collisionY := calculatePosition(line1.Start.P.Y, distance1.Y, t)
-
-				clash := clashInfo{
-					Time: t,
-					Point: pgtype.Point{
-						P:     pgtype.Vec2{X: collisionX, Y: collisionY},
-						Valid: true,
-					},
-				}
-
-				updateClashes(line1, clash, clashes)
-				updateClashes(line2, clash, clashes)
+			radius := math.Max(movements[left].SoldierGroup.EffectiveClashRadius(), movements[right].SoldierGroup.EffectiveClashRadius())
+			if time, meets := contactTime(movements[left], movements[right], radius); meets {
+				contacts = append(contacts, contact{time: time, left: left, right: right})
 			}
 		}
 	}
-
-	clashPositions := make(map[pgtype.Point][]*models.SoldierGroup)
-	for curSoldierGroupMoveDelta, clashInfo := range clashes {
-		clashPositions[clashInfo.Point] = append(clashPositions[clashInfo.Point], curSoldierGroupMoveDelta.SoldierGroup)
+	sort.SliceStable(contacts, func(left, right int) bool { return contacts[left].time < contacts[right].time })
+	clashed := make([]bool, len(movements))
+	clashes := []internal.Clash{}
+	for first := 0; first < len(contacts); {
+		last := first + 1
+		for last < len(contacts) && math.Abs(contacts[last].time-contacts[first].time) < epsilon {
+			last++
+		}
+		// Union only simultaneous contacts whose groups did not clash earlier.
+		parents := make([]int, len(movements))
+		for index := range parents {
+			parents[index] = index
+		}
+		root := func(index int) int {
+			for parents[index] != index {
+				index = parents[index]
+			}
+			return index
+		}
+		participating := make([]bool, len(movements))
+		for _, contact := range contacts[first:last] {
+			if clashed[contact.left] || clashed[contact.right] {
+				continue
+			}
+			participating[contact.left], participating[contact.right] = true, true
+			parents[root(contact.right)] = root(contact.left)
+		}
+		components := map[int]int{}
+		for index, movement := range movements {
+			if !participating[index] {
+				continue
+			}
+			component := root(index)
+			clashIndex, exists := components[component]
+			if !exists {
+				clashIndex = len(clashes)
+				components[component] = clashIndex
+				clashes = append(clashes, internal.Clash{Time: contacts[first].time})
+			}
+			clashes[clashIndex].Participants = append(clashes[clashIndex].Participants, internal.ClashParticipant{
+				SoldierGroup: movement.SoldierGroup, Position: positionAt(movement, contacts[first].time),
+			})
+			clashed[index] = true
+		}
+		first = last
 	}
-
-	return clashPositions, nil
+	return clashes, nil
 }
 
-// updateClashes making sure to update clashes only if an earlier clash is detected
-func updateClashes(
-	line internal.SoldierGroupMoveDelta,
-	clash clashInfo,
-	clashes map[internal.SoldierGroupMoveDelta]clashInfo,
-) {
-	if existing, ok := clashes[line]; !ok || clash.Time < existing.Time {
-		clashes[line] = clash
+// Solve |relativeStart + time*relativeVelocity| <= radius for the first time
+// in [0,1]. Closest approach avoids dividing by nearly stationary axes.
+func contactTime(left, right internal.SoldierGroupMoveDelta, radius float64) (float64, bool) {
+	startX, startY := left.Start.P.X-right.Start.P.X, left.Start.P.Y-right.Start.P.Y
+	if math.Hypot(startX, startY) <= radius+epsilon {
+		return 0, true
 	}
-}
-
-func calculateDistance(line internal.SoldierGroupMoveDelta) pgtype.Vec2 {
-	return pgtype.Vec2{X: line.End.P.X - line.Start.P.X, Y: line.End.P.Y - line.Start.P.Y}
-}
-
-func calculateTime(start1 float64, start2 float64, distance1 float64, distance2 float64) float64 {
-	if math.Abs(distance1-distance2) < epsilon {
-		return math.NaN()
+	velocityX := (left.End.P.X - left.Start.P.X) - (right.End.P.X - right.Start.P.X)
+	velocityY := (left.End.P.Y - left.Start.P.Y) - (right.End.P.Y - right.Start.P.Y)
+	speedSquared := velocityX*velocityX + velocityY*velocityY
+	if speedSquared <= epsilon*epsilon {
+		return 0, false
 	}
-	return (start2 - start1) / (distance1 - distance2)
+	closestTime := -(startX*velocityX + startY*velocityY) / speedSquared
+	closestDistance := math.Hypot(startX+closestTime*velocityX, startY+closestTime*velocityY)
+	if closestDistance > radius+epsilon {
+		return 0, false
+	}
+	entryTime := closestTime - math.Sqrt(math.Max(0, radius*radius-closestDistance*closestDistance)/speedSquared)
+	if entryTime < -epsilon || entryTime > 1+epsilon {
+		return 0, false
+	}
+	return math.Max(0, math.Min(1, entryTime)), true
 }
 
-func calculatePosition(start float64, distance float64, t float64) float64 {
-	return start + t*distance
+func positionAt(movement internal.SoldierGroupMoveDelta, time float64) pgtype.Point {
+	return pgtype.Point{P: pgtype.Vec2{
+		X: movement.Start.P.X + time*(movement.End.P.X-movement.Start.P.X),
+		Y: movement.Start.P.Y + time*(movement.End.P.Y-movement.Start.P.Y),
+	}, Valid: true}
 }

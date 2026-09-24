@@ -2,17 +2,21 @@ package db_updates
 
 import (
 	"islandBattles/backend/dal"
+	"islandBattles/backend/dal/commandHandlers/move_soldier_groups/internal"
 	"islandBattles/backend/models"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"gorm.io/gorm"
 )
 
 func UpdateSoldierGroupAmounts(
 	db *gorm.DB,
-	clashPositions map[pgtype.Point][]*models.SoldierGroup,
+	clashes []internal.Clash,
 ) error {
-	for _, clashedSoldierGroups := range clashPositions {
+	for _, clash := range clashes {
+		clashedSoldierGroups := make([]*models.SoldierGroup, 0, len(clash.Participants))
+		for _, participant := range clash.Participants {
+			clashedSoldierGroups = append(clashedSoldierGroups, participant.SoldierGroup)
+		}
 		soldierAmountsPerTeam := getSoldierAmountsPerTeam(clashedSoldierGroups)
 
 		for _, soldierGroup := range clashedSoldierGroups {

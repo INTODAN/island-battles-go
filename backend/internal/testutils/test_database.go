@@ -41,5 +41,14 @@ func InitTestDB(t *testing.T) *gorm.DB {
 
 	// 4. Connect with GORM
 	// Note: We use the GORM driver here, not the testcontainers module
-	return dependencies.InitDB(connStr)
+	db, err := dependencies.InitDB(connStr)
+	if err != nil {
+		t.Fatalf("initialize test database: %v", err)
+	}
+	sqlDatabase, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sqlDatabase.Close() })
+	return db
 }

@@ -20,8 +20,7 @@ profile.cov
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
-# Go workspace file
-go.work
+# Workspace dependency checksums
 go.work.sum
 
 # env file
@@ -30,3 +29,9 @@ go.work.sum
 # Editor/IDE
 .idea/
 # .vscode/
+
+# Python environments and test caches
+.venv/
+__pycache__/
+.pytest_cache/
+*.egg-info/
