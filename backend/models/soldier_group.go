@@ -24,9 +24,9 @@ type SoldierGroup struct {
 	MovementPauseGenerations uint         `json:"movement_pause_generations" gorm:"not null;default:0"`
 	ClashRadius              float64      `json:"clash_radius" gorm:"not null;default:0.25;check:clash_radius > 0"`
 	Position                 pgtype.Point `gorm:"type:point"`
+	Upgrades                 Upgrades     `json:"upgrades" gorm:"serializer:json;type:jsonb;not null;default:'{\"speed\":1}'"`
 }
 
-const SoldierGroupSpeedPerGeneration = 0.5
 const DefaultClashRadius = 0.25
 
 // ClashStopGenerations includes the generation of the clash. Configure before

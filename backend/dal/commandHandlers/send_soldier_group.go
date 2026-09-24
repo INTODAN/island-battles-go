@@ -47,6 +47,7 @@ func SendSoldierGroupHandler(db *gorm.DB, generation *models.Generation, paramet
 	dbSoldierGroup := models.SoldierGroup{
 		SoldierGroupFields: soldierGroupFields, GenerationID: generation.ID,
 		Position: originCastle.Position, TeamColor: originCastle.TeamColor,
+		Upgrades: originCastle.Upgrades.Clone(),
 	}
 	_, err = dal.CreateSoldierGroup(db, &dbSoldierGroup)
 	if err != nil {

@@ -9,6 +9,12 @@ type CastleFields struct {
 	TeamColor       uint
 	Position        pgtype.Point `gorm:"type:point"`
 	LogicalCastleID uint         `json:"-"`
+	Upgrades        Upgrades     `json:"upgrades,omitempty" gorm:"serializer:json;type:jsonb;not null;default:'{\"speed\":1}'"`
+}
+
+func (fields CastleFields) Clone() CastleFields {
+	fields.Upgrades = fields.Upgrades.Clone()
+	return fields
 }
 
 type Castle struct {

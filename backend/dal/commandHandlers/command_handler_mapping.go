@@ -30,6 +30,7 @@ func WrapCommandHandler[TParams any](handler CommandHandler[TParams]) CommandHan
 }
 
 var Mapping = map[models.CommandType]CommandHandlerWrapper{
+	models.UpgradeCastle:         WrapCommandHandler[UpgradeCastleParams](UpgradeCastleHandler),
 	models.IncreaseSoldierAmount: WrapCommandHandler[IncreaseSoldierAmountParams](IncreaseSoldierAmountHandler),
 	models.MoveSoldierGroups: WrapCommandHandler[move_soldier_groups.MoveSoldierGroupsParams](
 		move_soldier_groups.MoveSoldierGroupsHandler,

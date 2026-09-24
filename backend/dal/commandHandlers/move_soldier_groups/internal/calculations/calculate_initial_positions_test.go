@@ -13,8 +13,8 @@ func TestMoveTowards(t *testing.T) {
 	startPosition := pgtype.Point{Valid: true, P: pgtype.Vec2{X: 0, Y: 0}}
 	newDestination := pgtype.Point{Valid: true, P: pgtype.Vec2{X: 2, Y: 2}}
 	anotherNewDestination := pgtype.Point{Valid: true, P: pgtype.Vec2{X: 10, Y: 10}}
-	newPosition := moveTowards(startPosition, newDestination)
-	anotherNewPosition := moveTowards(startPosition, anotherNewDestination)
+	newPosition := moveTowards(startPosition, newDestination, 0.5)
+	anotherNewPosition := moveTowards(startPosition, anotherNewDestination, 0.5)
 	dx := newPosition.P.X - startPosition.P.X
 	dy := newPosition.P.Y - startPosition.P.Y
 	distance := math.Sqrt(dx*dx + dy*dy)
@@ -90,7 +90,10 @@ func TestCalculateInitialPositions(t *testing.T) {
 	for _, testCase := range tests {
 		t.Run(
 			testCase.name, func(t *testing.T) {
-				result := CalculateInitialPositions(testCase.soldierGroups)
+				result, err := CalculateInitialPositions(testCase.soldierGroups)
+				if err != nil {
+					t.Fatal(err)
+				}
 
 				if len(result) != testCase.expectedCount {
 					t.Fatalf("Expected %d results, got %d", testCase.expectedCount, len(result))
@@ -115,10 +118,33 @@ func TestCalculateInitialPositions(t *testing.T) {
 
 					// Allow for small float point errors
 					if math.Abs(dist-testCase.expectedDistance) > 1e-9 {
-						t.Errorf("Expected distance moved to be %f, got %f", models.SoldierGroupSpeedPerGeneration, dist)
+						t.Errorf("Expected distance moved to be %f, got %f", 0.5, dist)
 					}
 				}
 			},
 		)
+	}
+}
+
+func TestMovementUsesGroupUpgradeSnapshot(t *testing.T) {
+	for level, speed := range []float64{.5, 1, 1.5, 2} {
+		group := models.SoldierGroup{
+			Upgrades:          models.Upgrades{models.SpeedUpgrade: level + 1},
+			Position:          pgtype.Point{P: pgtype.Vec2{X: 0, Y: 0}, Valid: true},
+			DestinationCastle: models.Castle{CastleFields: models.CastleFields{Position: pgtype.Point{P: pgtype.Vec2{X: 3, Y: 4}, Valid: true}}},
+		}
+		movements, err := CalculateInitialPositions([]models.SoldierGroup{group})
+		if err != nil {
+			t.Fatal(err)
+		}
+		position := movements[0].End.P
+		if math.Abs(math.Hypot(position.X, position.Y)-speed) > 1e-9 {
+			t.Fatalf("level %d moved %v", level+1, position)
+		}
+		group.DestinationCastle.Position.P = pgtype.Vec2{X: .1, Y: .1}
+		movements, err = CalculateInitialPositions([]models.SoldierGroup{group})
+		if err != nil || movements[0].End != group.DestinationCastle.Position {
+			t.Fatal("overshot destination")
+		}
 	}
 }

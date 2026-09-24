@@ -69,10 +69,21 @@ func TestArrivalTakesPriorityOverClash(t *testing.T) {
 }
 
 func TestShortTripKeepsItsFullSpeed(t *testing.T) {
-	group := models.SoldierGroup{Position: pgtype.Point{P: pgtype.Vec2{X: 0}, Valid: true}, DestinationCastle: models.Castle{CastleFields: models.CastleFields{Position: pgtype.Point{P: pgtype.Vec2{X: .2}, Valid: true}}}}
-	movement := CalculateInitialPositions([]models.SoldierGroup{group})[0]
-	if movement.ArrivalTime == nil || math.Abs(*movement.ArrivalTime-.4) > epsilon || math.Abs(positionAt(movement, .2).P.X-.1) > epsilon {
-		t.Fatalf("short trip slowed down: %+v", movement)
+	for level, speed := range []float64{.5, 1, 1.5, 2} {
+		group := models.SoldierGroup{
+			Position:          pgtype.Point{P: pgtype.Vec2{X: 0}, Valid: true},
+			DestinationCastle: models.Castle{CastleFields: models.CastleFields{Position: pgtype.Point{P: pgtype.Vec2{X: .2}, Valid: true}}},
+			Upgrades:          models.Upgrades{models.SpeedUpgrade: level + 1},
+		}
+		movements, err := CalculateInitialPositions([]models.SoldierGroup{group})
+		if err != nil {
+			t.Fatal(err)
+		}
+		movement := movements[0]
+		arrival := .2 / speed
+		if movement.ArrivalTime == nil || math.Abs(*movement.ArrivalTime-arrival) > epsilon || math.Abs(positionAt(movement, arrival/2).P.X-.1) > epsilon {
+			t.Fatalf("level %d: short trip used the wrong speed: %+v", level+1, movement)
+		}
 	}
 }
 

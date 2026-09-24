@@ -241,3 +241,31 @@ func TestClashPausePersistsForConfiguredGenerations(t *testing.T) {
 		})
 	}
 }
+
+func TestPausedGroupRetainsUpgradesAcrossGenerations(t *testing.T) {
+	database, generation := captureFixture(t)
+	captureGroup(t, database, generation, 1, 10, .5)
+	group := &generation.SoldierGroups[0]
+	group.Upgrades = models.Upgrades{models.SpeedUpgrade: 2}
+	group.MovementPauseGenerations = 1
+	if err := database.Save(group).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, expectedPosition := range []float64{.5, 1.5} {
+		generationID, err := services.MigrateGeneration(database, generation.GameID, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		generation, err = dal.GetGeneration(database, generationID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(generation.SoldierGroups) != 1 {
+			t.Fatal("expected the traveling group to remain")
+		}
+		group = &generation.SoldierGroups[0]
+		if group.Position.P.X != expectedPosition || group.Upgrades[models.SpeedUpgrade] != 2 || group.MovementPauseGenerations != 0 {
+			t.Fatalf("upgrade or pause lost across generations: position=%v level=%d pause=%d", group.Position.P.X, group.Upgrades[models.SpeedUpgrade], group.MovementPauseGenerations)
+		}
+	}
+}

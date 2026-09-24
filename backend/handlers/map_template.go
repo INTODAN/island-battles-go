@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
@@ -54,6 +55,9 @@ func (env *Env) CreateMapTemplate(ctx context.Context, input *CreateMapTemplateR
 
 	mapTemplateID, err := dal.CreateMapTemplate(env.DB, &models.MapTemplate{MapFields: input.Body.MapFields, CastleTemplates: castleTemplates})
 	if err != nil {
+		if errors.Is(err, models.ErrInvalidUpgrade) {
+			return nil, huma.Error422UnprocessableEntity(err.Error())
+		}
 		fmt.Println("Error when creating MapTemplate: ", err)
 		return nil, huma.Error500InternalServerError(err.Error())
 	}
