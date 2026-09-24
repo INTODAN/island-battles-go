@@ -8,7 +8,7 @@ Follow the [root setup](../README.md#development-setup). All seven backend setti
 
 Use `go run ./backend` from the repository root. `/docs` exposes Huma documentation, `/openapi.json` the combined schema, and `/healthz` HTTP readiness. The lobby-only generated contract is in [`api/lobby/`](../api/lobby/README.md).
 
-Compose mounts PostgreSQL 18's parent data directory at `/var/lib/postgresql`. An existing volume from an older PostgreSQL layout needs its own database upgrade or backup/restore; the lobby schema migration does not move PostgreSQL data files.
+Compose mounts PostgreSQL 18's parent data directory at `/var/lib/postgresql`.
 
 ## Lobby lifecycle
 
@@ -26,9 +26,9 @@ The host is the earliest active joiner. Team changes clear readiness. At least t
 
 The active host receives `game_id`, `lobby_id` and a stable team UUID/order/color mapping. Replays return the same game after reauthorizing the caller. The transaction creates the game and all mappings together. Generic rooms create no Island Battles rows. Map generation and simulation are separate existing game operations.
 
-## Upgrade and recovery
+## Schema and recovery
 
-Startup initializes generic tables, archives legacy connection records, then initializes current game tables and bindings. Legacy players are preserved as JSON with checksums, not converted into authenticated identities. Existing game graphs remain intact. Old `room_name` values remain archived and the legacy column permits nulls; new games use nullable unique `lobby_id`. See [migration procedure and verification](migrations/README.md).
+Startup initializes the nine generic lobby tables, current game tables, and game-team bindings for a fresh schema. It does not import retired connection records or create compatibility data. New games use the nullable unique `lobby_id` link; generic lobby operations create no game rows until the explicit binding endpoint is called.
 
 The outbox retries publication after Centrifugo failure. Wire events contain only invalidation identifiers/version, never roster details. Subscribe and refresh proxies authorize current membership with a server-only shared header. Clients subscribe before fetching a snapshot and reconcile periodically, so bounded history is an optimization rather than durable state storage. Existing unrelated game command authorization has not been redesigned in this extraction.
 

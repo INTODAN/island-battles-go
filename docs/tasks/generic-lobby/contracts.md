@@ -113,11 +113,11 @@ Task 12 owns `island_game_team_bindings` records/initializer under backend/lobby
 
 ## PostgreSQL schema rules
 
-Explicit names: `lobby_players`, `lobby_sessions`, `lobby_rooms`, `lobby_teams`, `lobby_memberships`, `lobby_leases`, `lobby_start_roster`, `lobby_create_requests`, `lobby_outbox`, `lobby_legacy_records`. UUID primary keys except stable composite identity where appropriate. Do not embed GORM soft deletion in active membership tables; persist active/generation state explicitly.
+Explicit names: `lobby_players`, `lobby_sessions`, `lobby_rooms`, `lobby_teams`, `lobby_memberships`, `lobby_leases`, `lobby_start_roster`, `lobby_create_requests`, and `lobby_outbox`. UUID primary keys except stable composite identity where appropriate. Do not embed GORM soft deletion in active membership tables; persist active/generation state explicitly.
 
 Constraints include unique `(game_key, join_code)`, unique `(lobby_id, player_id)`, unique `(lobby_id, team order)`, unique team-name normalization within lobby, unique lease tuple, unique create request tuple, and unique invalidation `(lobby_id, version)` via a partial unique index for invalidation jobs only; revocations can share that version. Enforce team-in-lobby relationships with composite foreign keys; preserve member history after leave. Foreign keys do not replace the lock required for capacity checks. Use CHECK constraints for local bounds and positive versions/generations. Expiry and outbox claim columns require indexes.
 
-Queries use model filters and GORM clauses; optional reads use `Limit(1).Find(&slice)`. For migrations, DDL and exact legacy-column manipulation may use fixed SQL; no interpolated user values. Lock ordering is always room → memberships/teams/leases → outbox. Claims must commit before network I/O; worker acknowledgements compare claim token so an expired worker cannot acknowledge a new claim.
+Queries use model filters and GORM clauses; optional reads use `Limit(1).Find(&slice)`. Schema initialization uses fixed definitions and no interpolated user values. Lock ordering is always room → memberships/teams/leases → outbox. Claims must commit before network I/O; worker acknowledgements compare claim token so an expired worker cannot acknowledge a new claim.
 
 ## Realtime wire protocol
 

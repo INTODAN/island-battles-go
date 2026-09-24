@@ -14,14 +14,13 @@ locked Python SDK/wrapper against it. No configured developer database is used.
 Tests cover two-player teams/start/game binding, an unrelated generic game,
 real socket loss and Centrifugo history loss, reconciliation during publication
 failure, outbox retry, the subscribe/snapshot race, shared-identity leases,
-explicit leave, persisted expiry after a backend process restart, legacy startup
-migration, protocol authorization and minimal invalidation payloads. Go database
-tests additionally cover full legacy simulation graph preservation and exact
-deadline/concurrency boundaries.
+explicit leave, persisted expiry after a backend process restart, fresh-schema
+startup and restart, protocol authorization and minimal invalidation payloads.
+Go database tests additionally cover exact deadline/concurrency boundaries.
 
-The runner seeds test-owned legacy tables before first startup. Test-only Unix
-signals stop/restart the backend through the runner; they are not production
-control endpoints. Containers and processes are cleaned on success or failure.
+The runner starts from a disposable empty database. Test-only Unix signals
+stop/restart the backend through the runner; they are not production control
+endpoints. Containers and processes are cleaned on success or failure.
 Failure logs are retained in a printed `/tmp/lobby-acceptance-*` directory.
 `LOBBY_CONTAINER_RUNTIME` can select a specific Docker-compatible executable.
 

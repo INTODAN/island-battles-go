@@ -10,7 +10,7 @@ Use the existing PostgreSQL/GORM/testcontainers dependencies; do not add another
 
 - `lobby/postgres/models.go`, `lobby/postgres/schema.go`, `lobby/postgres/schema_test.go`.
 - `lobby/internal/testutil/postgres.go` and fixture-specific tests in that directory.
-- No root domain types, backend migration/wiring, identity/store implementation, or unrelated fixtures.
+- No root domain types, backend wiring, identity/store implementation, or unrelated fixtures.
 - Ask task 01 to change contracts; ask task 13 to call the schema initializer during bootstrap.
 
 ## Deliverable
@@ -18,14 +18,14 @@ Use the existing PostgreSQL/GORM/testcontainers dependencies; do not add another
 Provide lobby-owned GORM records with explicit table names and an error-returning schema initializer.
 Provide a disposable PostgreSQL fixture usable by every package below `lobby/`.
 Importing these packages must not connect, migrate, inspect environment, launch workers, or exit.
-The schema must support tasks 03/04/07/10/11 without parallel agents editing `models.go`.
+The schema must support tasks 03/04/07/10 without parallel agents editing `models.go`.
 Confirm all record fields with those owners before declaring this prerequisite complete.
 
 ## Implementation steps
 
 1. Translate frozen domain records into persistence records; keep persistence types out of root ports.
 2. Explicitly name `lobby_players`, `lobby_sessions`, `lobby_rooms`, `lobby_teams`, and `lobby_memberships`.
-3. Also name `lobby_leases`, `lobby_start_roster`, `lobby_create_requests`, `lobby_outbox`, and `lobby_legacy_records`.
+3. Also name `lobby_leases`, `lobby_start_roster`, `lobby_create_requests`, and `lobby_outbox`.
 4. Use UUID primary keys or the frozen stable composite keys; versions/generations use positive bigint values.
 5. Avoid embedded `gorm.Model` soft deletion on active tables; membership uses explicit active/generation fields.
 6. Preserve nullable host/team/deadline/release fields; absence must remain SQL NULL rather than an invented zero UUID.
@@ -42,22 +42,20 @@ Confirm all record fields with those owners before declaring this prerequisite c
 17. Outbox contains typed invalidation/revocation jobs, event IDs, attempt count, next-attempt time, claim token/deadline, and acknowledgement state.
 18. Enforce invalidation `(lobby_id, version)` uniqueness without preventing multiple revocations for that same version.
 19. Use a partial unique index for invalidation jobs if sharing the outbox table; freeze discriminator values with task 04.
-20. Legacy records contain unique source identity, original row JSON, checksum, and archival/migration metadata.
-21. Freeze source identity as `(source_table, source_primary_key)` with task 11; archive JSON preserves nullable source fields.
-22. Add CHECK constraints for room/team capacity bounds, valid phases, positive versions/generations, and valid team order.
-23. Cross-row totals, team count, live capacity, and host eligibility remain transaction/domain checks, not misleading CHECK expressions.
-24. Index session expiry, lease deadline lookup, scope lookup, and pending/expired outbox claims.
-25. Build the schema in dependency order; add cyclic/composite FKs after prerequisite tables exist when necessary.
-26. Make repeated schema initialization safe; return errors instead of `log.Fatal` or panic.
-27. The initializer creates only the generic schema; task 11 owns legacy backfill and deprecated-column changes.
-28. Fixture starts disposable `postgres:18-alpine`, opens GORM, initializes this schema, and registers container/pool cleanup.
-29. Do not import `backend/internal/testutils`: Go internal visibility forbids that dependency from root `lobby/`.
-30. Return `*gorm.DB`; permit independent connections and explicit transactions for subsequent race tests.
-31. Use a realistic container startup timeout and report Docker startup failures as failures, not skipped passes.
+20. Add CHECK constraints for room/team capacity bounds, valid phases, positive versions/generations, and valid team order.
+21. Cross-row totals, team count, live capacity, and host eligibility remain transaction/domain checks, not misleading CHECK expressions.
+22. Index session expiry, lease deadline lookup, scope lookup, and pending/expired outbox claims.
+23. Build the schema in dependency order; add cyclic/composite FKs after prerequisite tables exist when necessary.
+24. Make repeated schema initialization safe; return errors instead of `log.Fatal` or panic.
+25. The initializer creates the complete fresh generic schema.
+26. Fixture starts disposable `postgres:18-alpine`, opens GORM, initializes this schema, and registers container/pool cleanup.
+27. Do not import `backend/internal/testutils`: Go internal visibility forbids that dependency from root `lobby/`.
+28. Return `*gorm.DB`; permit independent connections and explicit transactions for subsequent race tests.
+29. Use a realistic container startup timeout and report Docker startup failures as failures, not skipped passes.
 
 ## Required tests and exact assertions
 
-- `TestSchemaCreatesOnlyLobbyTables`: all ten named tables exist; no `games`, `players`, or simulation tables are created.
+- `TestSchemaCreatesOnlyLobbyTables`: all nine named tables exist; no `games`, `players`, or simulation tables are created.
 - `TestSchemaInitializationIsRepeatable`: initialize twice around a seeded room; seed values/count remain unchanged.
 - `TestSchemaRejectsDuplicateMembership`: second row for one room/player fails while that player in another room succeeds.
 - `TestSchemaAllowsInactiveMembershipReuse`: deactivate/reactivate the existing row without deleting it; row ID is stable.
@@ -69,7 +67,6 @@ Confirm all record fields with those owners before declaring this prerequisite c
 - `TestSchemaScopesTeamUniqueness`: duplicate order/normalized name within a room fails; another room can reuse both.
 - `TestSchemaSeparatesInvalidationAndRevocationUniqueness`: duplicate invalidation version fails; two member revocations at that version succeed.
 - `TestSchemaPreservesNullAndFalse`: unassigned/inactive/not-ready rows read back with SQL NULL and false intact.
-- `TestSchemaPreservesLegacyArchiveJSON`: timestamps, numeric IDs, deleted_at null/value, and source checksum round-trip without loss.
 - `TestFixtureIsolation`: two fixture databases do not share a seeded room; no developer database URL is used.
 
 Use real PostgreSQL for constraints; do not substitute SQLite. Test schema behavior, not every field assignment.
@@ -85,6 +82,6 @@ go list -deps ./lobby/...
 ```
 
 The dependency output must contain no `islandBattles/backend/` imports.
-List tables, record names, exported initializer/fixture signatures, and indexes for tasks 03/04/11.
+List tables, record names, exported initializer/fixture signatures, and indexes for tasks 03/04.
 Record exact test results and Docker limitations; a blocked container run is not completion evidence.
 Done means schema and fixture tests pass and all downstream owners agree on the shared persistence fields.

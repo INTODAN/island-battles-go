@@ -35,18 +35,11 @@ type Service struct {
 	insertBindings func(*gorm.DB, []TeamBindingRecord) error
 }
 
-// Binder is retained as the adapter-focused name used by bootstrap callers.
-type Binder = Service
-
 func NewService(database *gorm.DB, lobbies lobby.Application) (*Service, error) {
 	if database == nil || lobbies == nil {
 		return nil, errors.New("lobby adapter: missing dependency")
 	}
 	return &Service{database: database, lobbies: lobbies, insertBindings: defaultInsertBindings}, nil
-}
-
-func NewBinder(database *gorm.DB, lobbies lobby.Application) (*Binder, error) {
-	return NewService(database, lobbies)
 }
 
 // Bind creates or replays an Island Battles game for one authorized, started

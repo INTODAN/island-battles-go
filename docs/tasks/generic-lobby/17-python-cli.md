@@ -1,4 +1,4 @@
-# Task 17 — Add a runnable lobby CLI and migration documentation
+# Task 17 — Add a runnable lobby CLI and user documentation
 
 Status: implemented; see [verification evidence](implementation-status.md). Prerequisite: task 16's wrapper and documented public signatures.
 Read [README](README.md), [architecture](architecture.md), and [contracts](contracts.md).
@@ -8,7 +8,6 @@ This task demonstrates the real generated HTTP client and official SDK through t
 
 - `clients/lobby-python/examples/lobby_cli.py` and `examples/__init__.py` if needed.
 - `clients/lobby-python/README.md` and `tests/test_cli.py`.
-- `clients/island-battles-client-python/README.md` for old scaffold deprecation guidance.
 - No edits to generated sources, wrapper internals, packaging/locks, or backend/configuration files.
 - Request task 15/16 owner changes if a missing dependency or public wrapper API blocks the example.
 
@@ -59,8 +58,6 @@ This task demonstrates the real generated HTTP client and official SDK through t
 - Include API base URL troubleshooting, expired session behavior, and typed command conflict messages.
 - Document no automatic identity recovery after the 24-hour guest credential expires.
 - Mark live smoke/reconnect claims as pending until task 18 records passing evidence.
-- Add an old-scaffold README directing users to `../lobby-python/`; retain old source files untouched.
-- Explain the old Python scaffold is incomplete and does not implement the new authentication/lobby protocol.
 
 ## Required tests and exact assertions
 

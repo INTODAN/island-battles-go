@@ -10,7 +10,7 @@ Apply `.agents/skills/backend-development/SKILL.md`; inspect task 01's types, er
 - `lobby/postgres/store.go`, `store_create.go`, `store_read.go`, `store_mutation.go`, and matching `store*_test.go`.
 - `lobby/postgres/outbox_store.go` and `outbox_store_test.go`.
 - Do not edit shared `models.go`/`schema.go`; request changes from task 02.
-- Do not implement identity auth, lifecycle policy, publication workers, or backend migration in this task.
+- Do not implement identity auth, lifecycle policy, publication workers, or backend schema wiring in this task.
 
 ## Deliverable
 

@@ -38,7 +38,7 @@ func (problem *adapterProblem) ContentType(string) string { return "application/
 
 // Register installs the Island Battles-only explicit binding operation. It is
 // intentionally outside lobby/httpapi and its generated generic SDK surface.
-func Register(api huma.API, binder *Binder, authenticator lobby.Authenticator) {
+func Register(api huma.API, service *Service, authenticator lobby.Authenticator) {
 	group := huma.NewGroup(api)
 	group.UseMiddleware(adapterAuthenticate(authenticator))
 	huma.Register(group, huma.Operation{
@@ -53,7 +53,7 @@ func Register(api huma.API, binder *Binder, authenticator lobby.Authenticator) {
 		Errors:        []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusConflict, http.StatusServiceUnavailable},
 	}, func(ctx context.Context, input *bindInput) (*bindOutput, error) {
 		principal, _ := ctx.Value(adapterPrincipalKey{}).(lobby.Principal)
-		result, err := binder.Bind(ctx, principal, lobby.Scope{GameKey: input.Body.GameKey, LobbyID: input.Body.LobbyID})
+		result, err := service.Bind(ctx, principal, lobby.Scope{GameKey: input.Body.GameKey, LobbyID: input.Body.LobbyID})
 		if err != nil {
 			return nil, adapterProblemFor(err)
 		}

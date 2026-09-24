@@ -8,7 +8,7 @@ import (
 )
 
 // InitializeSchema creates only the Island Battles-specific team mapping.
-// Generic lobby tables and legacy archival remain owned by their initializers.
+// Generic lobby and game tables are initialized separately by bootstrap.
 func InitializeSchema(ctx context.Context, database *gorm.DB) error {
 	if database == nil {
 		return errors.New("lobby adapter: nil database")

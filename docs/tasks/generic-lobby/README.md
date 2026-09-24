@@ -1,6 +1,6 @@
 # Generic lobby implementation task pack
 
-Prepared against commit `186a2e5` on 2026-09-20. Implementation is complete; [implementation status](implementation-status.md) records completed work, model assignments and actual test evidence. Individual task files remain the original specifications.
+Prepared against commit `186a2e5` on 2026-09-20. Implementation is complete; [implementation status](implementation-status.md) records completed work, model assignments and actual test evidence. The task files contain the current specifications.
 
 Implement a reusable Go lobby package in this repository, extract connection and membership responsibilities from Island Battles, and generate a working Python HTTP client from Huma OpenAPI with an asyncio Centrifugo companion. This pack is designed for small agents working in parallel.
 
@@ -8,11 +8,11 @@ Read [the architecture decision](../../multiplayer-architecture.md), [architectu
 
 ## Scope
 
-Included: guest identity, explicit create/join/leave, team selection, host/ready/start lifecycle, durable membership and reconnect grace, authorized Centrifugo delivery, PostgreSQL migrations, an Island Battles adapter, reproducible Python generation, and a runnable multi-player Python example.
+Included: guest identity, explicit create/join/leave, team selection, host/ready/start lifecycle, durable membership and reconnect grace, authorized Centrifugo delivery, fresh PostgreSQL schema initialization, an Island Battles adapter, reproducible Python generation, and a runnable multi-player Python example.
 
 Deferred: account/password/OAuth management, matchmaking, invitations beyond join codes, spectators, kicking/banning, multiple backend deployments, Lambda dispatch, game round timers, game action authorization overhaul, C#/TypeScript SDKs, and game-specific Python commands. Starting a lobby freezes its roster for game creation; it does not invoke Lambda or begin simulation.
 
-The guest credential is a bearer capability issued by this backend. Display names and join codes are not identities. Existing placeholder user `0` has no migration authority.
+The guest credential is a bearer capability issued by this backend. Display names and join codes are not identities, and callers cannot select a player ID.
 
 ## Task order and exclusive ownership
 
@@ -30,20 +30,19 @@ Each task file lists exact implementation steps, edge cases, tests, and completi
 | [08](08-huma-api.md) | Public Huma DTOs and routes | 01; verify with 03, 05–07 | `lobby/httpapi/` |
 | [09](09-centrifugo-adapter.md) | Proxy authorization and transport adapter | 01, 03, 04; verify with 05, 07 | `lobby/realtime/` |
 | [10](10-delivery-worker.md) | Retried outbox delivery and revocation | 04, 09 | `lobby/delivery/` |
-| [11](11-legacy-migration.md) | Safe, repeatable legacy import | 02, 04 | `backend/migrations/` |
-| [12](12-island-adapter.md) | Game model extraction and explicit binding | 05, 06, 11 | `backend/models/game.go`, game DAL, `backend/lobbyadapter/` and relevant game tests |
-| [13](13-bootstrap-config.md) | Application wiring and Centrifugo configuration | 03, 07–12 | backend entry point/dependencies/routes/test DB fixture, go.mod/go.sum, old connect removal, Compose/config, Go example |
+| [12](12-island-adapter.md) | Game model extraction and explicit binding | 05, 06 | `backend/models/game.go`, game DAL, `backend/lobbyadapter/` and relevant game tests |
+| [13](13-bootstrap-config.md) | Application wiring and Centrifugo configuration | 03, 07–10, 12 | backend entry point/dependencies/routes/test DB fixture, go.mod/go.sum, explicit HTTP flow, Compose/config, Go example |
 | [14](14-openapi-export.md) | Offline lobby-only OpenAPI export | 08 | `cmd/export-lobby-openapi/`, `api/lobby/` |
 | [15](15-generated-python.md) | Pinned generation and committed HTTP SDK | 14 | `clients/lobby-python/` packaging/scripts/generated, excluding runtime/tests below |
 | [16](16-python-realtime.md) | Python connection and reconciliation wrapper | 15; contract development may start after 01 | `clients/lobby-python/lobby_client/`, wrapper unit tests |
-| [17](17-python-cli.md) | Runnable CLI and user documentation | 16 | Python examples, client README, old Python scaffold deprecation |
+| [17](17-python-cli.md) | Runnable CLI and user documentation | 16 | Python examples and client README |
 | [18](18-acceptance.md) | Live acceptance tests and final integration | 01–17 | `integration/lobby/`, acceptance scripts, final repository documentation |
 
 ## Parallel scheduling
 
 1. Complete 01 first; coordinator checks signatures and records the contract freeze. It must compile without database or network access.
-2. Start 02 and DTO work in 08. Once 02 lands, run 03 and 04 concurrently. Task 11 can prepare legacy fixtures at this point.
-3. After 04, run 05, 06, 07, 09, and 11 in independent worktrees. Agents may implement against frozen interfaces, but cannot mark integration checks passed before dependencies land.
+2. Start 02 and DTO work in 08. Once 02 lands, run 03 and 04 concurrently.
+3. After 04, run 05, 06, 07, and 09 in independent worktrees. Agents may implement against frozen interfaces, but cannot mark integration checks passed before dependencies land.
 4. Run 10 and 12 as their dependencies finish. Complete 08, then 14 → 15 → 16 → 17 while 13 finishes Go/config integration.
 5. Run 18 after all integrations. Fix failures in the owning task's files; the coordinator resolves cross-task contract changes and reruns dependent checks.
 
@@ -63,11 +62,9 @@ flowchart LR
   T04 --> T09
   T05 --> T09
   T07 --> T09
-  T04 --> T11[11 Migration]
   T09 --> T10[10 Delivery]
   T05 --> T12[12 Game adapter]
   T06 --> T12
-  T11 --> T12
   T05 --> T08
   T06 --> T08
   T07 --> T08
@@ -107,4 +104,4 @@ Do not claim completion with stubs, skipped required checks, or only mock covera
 
 ## Final completion gate
 
-The project is complete only after a clean checkout can migrate legacy data, run the backend and Centrifugo, generate the exact committed SDK, and use two Python clients to create/join, choose teams, disconnect/reconnect, recover a snapshot, and leave. Failed or unavailable Docker/network checks remain outstanding, with the exact command and reason recorded. Documentation must distinguish tested behavior from future Lambda/game integration.
+The project is complete only after a clean checkout can initialize the fresh schema, run the backend and Centrifugo, generate the exact committed SDK, and use two Python clients to create/join, choose teams, disconnect/reconnect, recover a snapshot, and leave. Failed or unavailable Docker/network checks remain outstanding, with the exact command and reason recorded. Documentation must distinguish tested behavior from future Lambda/game integration.

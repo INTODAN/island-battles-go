@@ -1,4 +1,4 @@
-# Task 13 — Backend wiring, configuration, and transport cutover
+# Task 13 — Backend wiring, configuration, and transport
 
 Status: implemented; see [verification evidence](implementation-status.md).
 
@@ -7,14 +7,13 @@ Status: implemented; see [verification evidence](implementation-status.md).
 - Read [README](README.md), [architecture](architecture.md), [contracts](contracts.md), and [test matrix](test-matrix.md).
 - Requires 03 and 07–12; stage configuration work earlier, but do not claim integration before those tasks land.
 - Read the backend-development skill. Keep generic package imports independent of `backend/`.
-- Follow 11's migration cutover order exactly; legacy Player removal must not precede archival.
 
 ## Exclusive ownership
 
 - Own `backend/main.go`, `backend/dependencies/`, `backend/routes/`, `backend/handlers/env.go`, and removal of `backend/handlers/connect.go`; also own `backend/internal/testutils/test_database.go` updates needed for the error-returning initializer.
 - Own `centrifugo/centrifugo-config.toml`, `docker-compose.yml`, root local environment examples, and `clients/main.go` Go example.
 - Own `go.mod` and `go.sum` centrally for every task. Other agents send dependency requests instead of editing them.
-- Own adjacent bootstrap/config/route tests; no generic service, migration implementation, game model/DAL, or generated Python edits.
+- Own adjacent bootstrap/config/route tests; no generic service, schema implementation, game model/DAL, or generated Python edits.
 - Coordinate existing ping behavior with 09; keep its trusted backend publication working without reopening global player subscriptions.
 
 ## Backend assembly steps
@@ -23,8 +22,8 @@ Status: implemented; see [verification evidence](implementation-status.md).
 2. Define and document stable environment names for PostgreSQL URL, API listen address, WebSocket public URL, Centrifugo API URL/key, signing key, and proxy secret.
 3. Register `island-battles` and `quiz-demo` game keys; configure contract timing defaults through validated policy, not scattered constants.
 4. Open PostgreSQL with an error-returning constructor. Library dependency code must not call `log.Fatal` or terminate the process.
-5. Initialize generic lobby schema first, run 11's legacy migration against any existing old tables next, then AutoMigrate current game models, then initialize island_game_team_bindings. A fresh database takes the no-legacy branch before current game creation.
-6. Keep this order explicit in one error-returning initialization function used by production and disposable backend fixtures; never AutoMigrate the retired `models.Player` or recreate deprecated room-name writes.
+5. Initialize the nine-table generic lobby schema first, then AutoMigrate current game models and initialize island_game_team_bindings. Startup targets the current schema.
+6. Keep this order explicit in one error-returning initialization function used by production and disposable backend fixtures.
 7. Construct identity/authentication, JWT issuer, aggregate/job stores, service, realtime authorizer/transport, and Island Battles adapter explicitly.
 8. Share one policy/clock configuration between service, authorization, sweeper, and workers.
 9. Register public lobby Huma routes through 08's registrar and the game binding route through 12's adapter.
@@ -35,7 +34,7 @@ Status: implemented; see [verification evidence](implementation-status.md).
 14. Use an explicit `http.Server`, signal-aware root context, bounded `Shutdown`, and owned worker cancellation/waiting.
 15. Stop accepting requests, let active requests complete within a bound, stop background work, and close SQL connections last.
 16. Workers must leave interrupted claims reclaimable; process exit is not delivery acknowledgement.
-17. Update the Go example to use explicit HTTP guest/create/join/token flow and SDK reconnection; it must not invoke the removed connect action.
+17. Update the Go example to use explicit HTTP guest/create/join/token flow and SDK reconnection.
 18. Keep examples out of package initialization, accept configurable endpoints, and never embed server API/signing credentials in clients.
 
 ## Centrifugo and Compose steps
@@ -54,7 +53,7 @@ Status: implemented; see [verification evidence](implementation-status.md).
 12. Supply signing/API/admin keys through environment configuration; sample development values must be clearly local and must not appear in client artifacts.
 13. Point Docker proxy endpoints at the actual backend host. Retain host-gateway mapping for host-run Go, or use service DNS for a containerized backend.
 14. Ensure endpoint defaults work for the documented single chosen launch arrangement; do not mix container localhost with host localhost.
-15. Provide required environment values consistently to backend and Centrifugo. Remove stale proxy_ping/connect overrides that conflict with final routes.
+15. Provide required environment values consistently to backend and Centrifugo.
 16. Validate Compose interpolation and image startup before claiming configuration done. Do not add Redis or change PostgreSQL deployment unnecessarily.
 17. Document that refresh expiry scheduling may lag and does not control the 45s lease/60s application grace.
 
@@ -68,7 +67,7 @@ Status: implemented; see [verification evidence](implementation-status.md).
 ## Named tests and exact assertions
 
 - `TestStartupRejectsMissingSecrets`: missing signing/API/proxy secret fails before HTTP serving or background work, without logging secret values.
-- `TestStartupMigrationFailureDoesNotServe`: migration error returns cleanly and closes initialized resources; no partial server/worker starts.
+- `TestStartupSchemaFailureDoesNotServe`: schema initialization error returns cleanly and closes initialized resources; no partial server/worker starts.
 - `TestPublicLobbyRoutesAndOldConnectRemoval`: public routes exist, protected routes enforce bearer auth, and POST `/connect` has no create/join path.
 - `TestInternalProxyRoutesRequireSecret`: internal paths reject unauthenticated requests and stay absent from public lobby spec.
 - `TestGracefulShutdownStopsOwnedWorkers`: canceled root context shuts down HTTP/workers within bounds and closes DB only afterward.
@@ -92,6 +91,6 @@ Use the pinned image's documented equivalent if its validation command differs. 
 
 ## Done and handoff
 
-- Give 17/18 exact startup commands, environment example, addresses, tested image version, and shutdown/migration ordering.
+- Give 17/18 exact startup commands, environment example, addresses, tested image version, and shutdown/schema initialization ordering.
 - Report test commands/results, dependency changes, retired routes, and unavailable live checks without treating them as passing.
 - Confirm no generated/client artifact contains API keys, signing keys, or the proxy secret, and no generic package imports backend code.

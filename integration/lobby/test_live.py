@@ -252,15 +252,26 @@ async def test_persisted_lease_expiry_after_backend_restart(guests):
     assert response.status_code == 404
 
 
-async def test_legacy_upgrade_is_repeatable():
-    assert await sql("SELECT count(*) FROM lobby_legacy_records") == "4"
-    assert await sql("SELECT count(*) FROM lobby_legacy_records WHERE source_deleted_at IS NOT NULL") == "2"
-    assert await sql("SELECT original_row_json->>'id' FROM lobby_legacy_records WHERE source_table='players' AND source_primary_key='9007199254740993'") == "9007199254740993"
-    archive = await sql("SELECT jsonb_agg(to_jsonb(record) ORDER BY source_table, source_primary_key)::text FROM lobby_legacy_records record")
-    assert await sql("SELECT room_name FROM games WHERE id=1") == "legacy-room"
-    await sql("INSERT INTO games (created_at,updated_at) VALUES (now(),now()),(now(),now())")
+async def test_schema_initialization_is_repeatable(guests):
+    client = await guests("Schema restart")
+    room = await create(client)
+    scope = Scope.from_snapshot(room)
+    tables = await sql("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")
+    lobby_tables = {table for table in tables.splitlines() if table.startswith("lobby_")}
+    assert lobby_tables == {
+        "lobby_players", "lobby_sessions", "lobby_rooms", "lobby_teams",
+        "lobby_memberships", "lobby_leases", "lobby_start_roster",
+        "lobby_create_requests", "lobby_outbox",
+    }
+    assert set(tables.splitlines()) == lobby_tables | {
+        "games", "maps", "castles", "castle_templates", "map_templates",
+        "generations", "soldier_groups", "commands", "island_game_team_bindings",
+    }
+    columns = await sql("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='games' ORDER BY ordinal_position")
+    assert set(columns.splitlines()) == {"id", "created_at", "updated_at", "deleted_at", "lobby_id"}
     await control_backend(signal.SIGUSR1)
-    assert await sql("SELECT jsonb_agg(to_jsonb(record) ORDER BY source_table, source_primary_key)::text FROM lobby_legacy_records record") == archive
-    assert await sql("SELECT count(*) FROM games WHERE room_name IS NULL AND lobby_id IS NULL") == "2"
-    # No numeric legacy identity is silently granted a modern credential.
-    assert await sql("SELECT count(*) FROM lobby_players WHERE display_name='legacy-room'") == "0"
+    assert await sql("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename") == tables
+    observed = await client.snapshot(scope)
+    assert observed.lobby.id == room.lobby.id
+    assert observed.lobby.host_player_id == room.lobby.host_player_id
+    assert observed.membership_generation == room.membership_generation

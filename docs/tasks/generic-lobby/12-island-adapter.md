@@ -1,7 +1,7 @@
 # Task 12 — Extract game membership and bind started lobbies explicitly
 
-Status: implemented; see [verification evidence](implementation-status.md). Prerequisites: tasks 05/06 service behavior and task 11 migration are available.
-Read [contracts](contracts.md), [architecture](architecture.md), and [migration task](11-legacy-migration.md).
+Status: implemented; see [verification evidence](implementation-status.md). Prerequisites: tasks 05/06 service behavior are available.
+Read [contracts](contracts.md) and [architecture](architecture.md).
 Read `backend/models/game.go`, `backend/dal/game.go`, `backend/dal/game_test.go`, and `backend/internal/testutils/test_generation.go`.
 Also read `backend/models/castle.go`, `soldier_group.go`, `map.go`, and existing generation/service tests.
 Apply `.agents/skills/backend-development/SKILL.md` and `.agents/skills/game-state-testing/SKILL.md`.
@@ -11,28 +11,28 @@ Apply `.agents/skills/backend-development/SKILL.md` and `.agents/skills/game-sta
 - `backend/models/game.go`, `backend/dal/game.go`, and `backend/dal/game_test.go`.
 - New `backend/lobbyadapter/` implementation and tests, including adapter-specific Huma registration if needed.
 - `backend/internal/testutils/test_generation.go` only if adapting game creation requires fixture changes.
-- Game-specific team-binding persistence can live in `backend/lobbyadapter/`; export its migration records/initializer to task 13.
-- Task 13 owns startup/dependencies/routes and old connect-handler removal; request wiring edits from that owner.
-- Task 11 owns legacy source migration; task 02 owns generic tables. Do not edit their shared files.
+- Game-specific team-binding persistence can live in `backend/lobbyadapter/`; export its records/initializer to task 13.
+- Task 13 owns startup/dependencies/routes; request wiring edits from that owner.
+- Task 02 owns generic tables. Do not edit its shared files.
 
 ## Outcome and boundaries
 
 Island Battles retains game IDs, generations, map/castle/soldier/command state, and simulation-specific colors.
-Active lobby membership, room names, and team selection live in the generic package.
+Active lobby membership and team selection live in the generic package.
 An explicit authenticated `POST /game/from-lobby` creates or returns a game for a started `island-battles` lobby.
 The adapter persists a stable generic-team-to-color map in one transaction with the game link.
 Create/join/socket reconnect/start by themselves must create no game or generation.
 
 ## Model and DAL extraction
 
-1. Keep `Game` primary key/timestamps and `Generations`; remove active `Players` association and `RoomName` field usage.
+1. Keep `Game` primary key/timestamps and `Generations`; game persistence has no active player association.
 2. Add nullable unique UUID `LobbyID`; detached existing/new fixture games use NULL, not an empty UUID/string.
-3. Do not drop retained `players` or `games.room_name` database objects; task 11 owns additive archival migration.
+3. Keep player identity, membership, and connection persistence exclusively in the generic lobby package.
 4. Remove backend `Player` as active persistence; do not reintroduce it through a compatibility alias that continues writes.
 5. Remove `AddPlayerToGame` and replace its obsolete max-plus-one tests with lobby explicit-selection coverage.
-6. Remove lobby room-name lookup from game DAL after coordinating old connect caller removal with task 13.
+6. Keep game DAL independent from lobby membership lookup; binding goes through the explicit adapter service.
 7. Preserve `GetGameByID` and its complete generation preload/not-found contract.
-8. Keep `CreateGame(db)` for game fixtures, now inserting no room name, member, or lobby state.
+8. Keep `CreateGame(db)` for game fixtures without creating lobby membership state.
 9. Remove the hardcoded unique `test-game` value so several games can exist in one fixture database.
 10. Update remaining obsolete references; do not alter unrelated game generation/movement behavior.
 11. Leave Castle.TeamColor, SoldierGroup.TeamColor, Map.PlayerAmount, and map-template data unchanged.
@@ -61,11 +61,11 @@ Create/join/socket reconnect/start by themselves must create no game or generati
 31. Keep the adapter dependency direction `backend/lobbyadapter` → `lobby`; generic packages never import backend.
 32. Define public Huma summary/description explaining explicit binding, required started state, and idempotence.
 33. Keep this game-specific endpoint out of the task 14 lobby-only SDK export.
-34. Give task 13 exact registration function, migration order, authenticator dependency, and error mapping.
+34. Give task 13 the exact registration function, schema initialization order, authenticator dependency, and error mapping.
 
 ## Required tests and exact assertions
 
-- `TestCreateMultipleGames`: create twice in one DB; distinct nonzero IDs, NULL lobby links, no room-name uniqueness failure.
+- `TestCreateMultipleGames`: create twice in one DB; distinct nonzero IDs and NULL lobby links.
 - `TestGetGamePreservesGenerationPreloads`: existing graph fixture still loads generation maps/castles/commands/soldier groups.
 - `TestBindStartedLobbyCreatesStableTeamMap`: teams ordered 1..N persist matching colors, including empty teams, with zero unused.
 - `TestBindLobbyIsIdempotent`: sequential repeats return one game ID and unchanged mapping row count/content.
@@ -79,7 +79,6 @@ Create/join/socket reconnect/start by themselves must create no game or generati
 - `TestBindMappingFailureRollsBackGame`: inject mapping insert failure; neither new game nor partial map persists.
 - `TestBindDoesNotCreateGeneration`: successful binding creates game/map association rows only; generation count remains zero.
 - `TestLobbyLifecycleDoesNotCreateGame`: create/join/start/heartbeat/reconnect authorization leave game count unchanged until explicit bind.
-- `TestLegacyGameRemainsDetached`: migrated game graph remains readable with NULL lobby link and inaccessible archive identities.
 
 Use disposable PostgreSQL and actual generic service setup; generate identity-backed membership through legitimate test helpers.
 For service fixtures, use external test packages where `testutils` imports would otherwise cause a cycle.
@@ -95,5 +94,5 @@ go list -deps ./lobby/...
 ```
 
 Check the dependency output contains no backend package and list every removed caller requiring task 13 wiring.
-Handoff endpoint registration/DTOs, mapping schema, legacy migration prerequisites, commands/results, and unresolved integration checks.
+Handoff endpoint registration/DTOs, mapping schema, commands/results, and unresolved integration checks.
 Done requires stable concurrent binding, preserved simulation regressions, and a reusable generic lobby with no game imports.

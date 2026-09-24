@@ -3,7 +3,7 @@
 Date: 2026-09-20  
 Status: Keep Centrifugo and the existing Go/Huma/PostgreSQL architecture. The generic lobby and Huma-generated Python client are implemented; Lambda routing, round timers and C#/TypeScript clients remain planned. See the [implementation evidence](tasks/generic-lobby/implementation-status.md) for verification status.
 
-Implementation planning: [generic lobby task pack](tasks/generic-lobby/README.md) defines the package/API contracts, migration policy, parallel work order, and required tests. The task pack is not an implementation completion report.
+Implementation planning: [generic lobby task pack](tasks/generic-lobby/README.md) defines the package/API contracts, schema policy, parallel work order, and required tests. The task pack is not an implementation completion report.
 
 ## Requirements
 

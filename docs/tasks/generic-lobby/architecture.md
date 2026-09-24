@@ -19,7 +19,6 @@ lobby/                   pure domain types, service, repository ports, policy
   delivery/              retrying outbox/revocation worker
   internal/testutil/     disposable PostgreSQL fixture; no backend imports
 backend/lobbyadapter/    Island Battles binding and stable team-color mapping
-backend/migrations/     versioned import of legacy backend-owned schema
 cmd/export-lobby-openapi/  offline public lobby specification export
 api/lobby/              checked-in OpenAPI and event schema artifacts
 clients/lobby-python/   generated HTTP SDK plus separately maintained asyncio wrapper
@@ -51,12 +50,6 @@ During grace, retain team, ready state, and host. After grace, waiting-room memb
 Lock one lobby row before checking capacity, teams, host, phase, generations, and deadlines. Read the entire aggregate in a consistent transaction. Increment its version once for a visible committed change and insert an invalidation outbox row in that transaction. Heartbeat timestamp extensions alone do not increment the version. Store failures roll back both data and event. An outbox publisher retries after failures; duplicate delivery is expected.
 
 Clients subscribe and wait for acknowledgement before reading the snapshot. SDK callbacks enqueue signals and return quickly. A single worker fetches the snapshot, comparing its version to the highest buffered event version; it repeats if the snapshot is behind. Full snapshots replace state, so duplicate/out-of-order invalidations never roll the view backward. Fetch a fresh snapshot after every successful (re)subscription, even if event recovery reports success; recovery and heartbeat versions are additional hints, not the only authority. Reconcile at least every 15 seconds while subscribed to handle a committed but delayed publication.
-
-## Legacy data policy
-
-Preserve existing games and their entire simulation graph. Existing players cannot be mapped to guest identities because no identity was stored. Copy original player rows, including IDs, game IDs, colors, creation/update/deletion timestamps, into lobby-owned `lobby_legacy_records` as source-keyed JSON archives. Also archive old game room names. The archive is inaccessible to player APIs and cannot be claimed through row IDs, room names, or user `0`.
-
-Leave legacy games detached (`LobbyID=NULL`); do not create fake active members, hosts, or playable lobbies for them. Keep source tables/columns during this additive migration and verify archive counts/checksums. Stop reading/writing legacy `players` and `games.room_name` in the application. Schema removal is a separate, later migration, outside this task. Existing legacy unique room-name constraints must not prevent multiple new detached games: the migration makes the deprecated column nullable, and new inserts leave it NULL. A rollback must not silently run the old application against newly created detached games; document the cutover boundary.
 
 ## Boundaries of this implementation
 

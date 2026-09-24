@@ -68,9 +68,6 @@ def main() -> int:
             if time.monotonic() >= deadline:
                 raise TimeoutError("Disposable PostgreSQL did not become ready")
             time.sleep(0.1)
-        command(runtime, "exec", "-i", database_name, "psql", "-v", "ON_ERROR_STOP=1",
-                "-U", "lobby", "-d", "lobby", input=(ROOT / "integration/lobby/legacy.sql").read_text(),
-                stdout=subprocess.DEVNULL)
         environment = os.environ.copy()
         environment.update({
             "ISLAND_BATTLES_DATABASE_URL": f"postgres://lobby:lobby@127.0.0.1:{database_port}/lobby?sslmode=disable",

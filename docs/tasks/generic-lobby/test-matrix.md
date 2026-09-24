@@ -1,12 +1,10 @@
 # Cross-task edge cases and test ownership
 
-This matrix prevents seams between otherwise passing tasks. Individual task files specify detailed named tests. Use real PostgreSQL for constraints/concurrency/migrations, fake time for deadlines, protocol fixtures for proxy shape, and real Centrifugo/Python for recovery/auth compatibility.
+This matrix prevents seams between otherwise passing tasks. Individual task files specify detailed named tests. Use real PostgreSQL for constraints/concurrency/schema initialization, fake time for deadlines, protocol fixtures for proxy shape, and real Centrifugo/Python for recovery/auth compatibility.
 
 | Risk or boundary | Required outcome | Primary tasks |
 | --- | --- | --- |
 | Connect/reconnect has create/join data | Connection has no create/join/game side effect | 03, 09, 13, 18 |
-| Legacy player row lacks identity | Preserve unclaimable archive; do not assign user 0/new guest | 11, 12, 18 |
-| Old room_name unique column survives | New games insert NULL in deprecated column; multiple creations work | 11, 12 |
 | Root lobby tests import backend/internal | Independent root-level lobby fixture; no backend dependency | 01, 02, 18 |
 | Same display name or code known | Neither implies authentication or player ownership | 03, 08, 18 |
 | Bearer expires while socket is active | Token refresh fails; new auth fails; no new guest silently created | 03, 09, 16 |
@@ -43,7 +41,6 @@ This matrix prevents seams between otherwise passing tasks. Individual task file
 | Generated SDK drops nullable field/error route | Fail generation on warnings; schema/import/request tests | 14, 15 |
 | Unreferenced realtime model omitted by generator | Explicit component/model assertion; no hand-maintained duplicate | 08, 14, 15 |
 | Export command needs DB or secrets | Pure route registration export with inert dependencies | 08, 14 |
-| Legacy migration interrupted/repeated | Atomic/idempotent archive+marker, source preserved, verifiable cutover | 11, 18 |
 | Island adapter retried/concurrent | One game per lobby and stable color map from frozen roster | 12, 18 |
 
 ## Deterministic race setup
@@ -56,4 +53,4 @@ For client synchronization, gate snapshot responses with asyncio events and deli
 
 ## Regression gate
 
-Existing generation, soldier-group, and graph tests must keep passing after removing active backend Player/RoomName logic. Visual graph export is not required for a lobby-only change; use the existing game-state-testing skill if a simulation regression needs investigation. Do not rewrite game expectations to hide extraction errors.
+Existing generation, soldier-group, and graph tests must keep passing alongside the lobby extraction. Visual graph export is not required for a lobby-only change; use the existing game-state-testing skill if a simulation regression needs investigation. Do not rewrite game expectations to hide extraction errors.

@@ -101,8 +101,8 @@ func run(ctx context.Context, config dependencies.Config, logger *slog.Logger) e
 	router := chi.NewMux()
 	router.Use(httplog.RequestLogger(logger, &httplog.Options{Level: slog.LevelInfo, Schema: httplog.SchemaOTEL.Concise(true)}))
 	api := humachi.New(router, huma.DefaultConfig("Island Battles Go Backend", "1.0.0"))
-	environment := handlers.Env{CentrifugoClient: centrifugoClient, DB: database}
-	routes.SetupRoutes(&api, &environment)
+	environment := handlers.Env{DB: database}
+	routes.SetupRoutes(api, &environment)
 	routes.SetupLobbyRoutes(api, application, authentication, gameAdapter)
 	proxy.Register(router)
 	router.Get("/healthz", func(response http.ResponseWriter, request *http.Request) { response.WriteHeader(http.StatusNoContent) })

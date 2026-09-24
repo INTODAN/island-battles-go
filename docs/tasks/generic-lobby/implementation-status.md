@@ -1,6 +1,6 @@
 # Implementation status
 
-Implemented on 2026-09-20. The task files preserve the original detailed specifications; this file records actual delivery and verification. The coordinator implemented shared services, reviewed agent changes, and ran integration checks. Model assignments reflect complexity rather than using the most expensive model for every task.
+Implemented on 2026-09-20. The task files preserve the detailed specifications; this file records delivery scope and verification notes. Cleanup verification completed after removal of retired data and API paths. Model assignments reflect complexity rather than using the most expensive model for every task.
 
 | Task | Implementation / review | Evidence |
 | --- | --- | --- |
@@ -14,7 +14,6 @@ Implemented on 2026-09-20. The task files preserve the original detailed specifi
 | 08 Huma API | Terra / high; coordinator validation review | Auth-before-validation, typed errors, null/false and schema tests passed |
 | 09 Centrifugo adapter | Coordinator | Proxy authorization/transport tests passed; actual server exercised |
 | 10 Delivery worker | Coordinator | Retry, failure isolation, cancellation and generation-fence tests passed |
-| 11 Legacy migration | Coordinator | PostgreSQL graph/archive preservation, conflict rollback and repeatability passed |
 | 12 Island adapter | Terra / high | Atomic bindings, reauthorized replay, concurrency and existing game regressions passed |
 | 13 Bootstrap/config | Terra / high plus coordinator wiring | Full Go compilation/tests; actual server startup and restart passed |
 | 14 OpenAPI exporter | Luna / high | Offline deterministic exporter tests and artifact check passed |
@@ -30,11 +29,11 @@ Implemented on 2026-09-20. The task files preserve the original detailed specifi
 - `go test -race ./lobby/... ./backend/lobbyadapter/...`: passed.
 - Huma artifacts: `go run ./cmd/export-lobby-openapi --output api/lobby/openapi.json --events-output api/lobby/events.json --check`: passed.
 - Python generation: `uv run --project clients/lobby-python/tools --locked python clients/lobby-python/scripts/generate.py --check`: passed, with no generator warnings or output difference.
-- `uv run --project clients/lobby-python --locked pytest clients/lobby-python/tests -q --disable-warnings`: **67 passed**. The pinned pytest-asyncio dependency emits Python 3.14 deprecation warnings; no tests were skipped.
-- Live checks already passed: two-player team/ready/start and idempotent Island binding; second generic game; real Centrifugo interruption/history loss; periodic snapshot convergence while publication is unavailable; durable outbox retry; subscription/snapshot race; multiple clients sharing a seat; leave; backend restart with persisted expired leases; repeatable legacy startup archive; rejected client publish/history/presence; invalidation payload contains exactly six fields.
+- Existing Python verification: `uv run --project clients/lobby-python --locked pytest clients/lobby-python/tests -q --disable-warnings`: **67 passed**. The pinned pytest-asyncio dependency emits Python 3.14 deprecation warnings; no tests were skipped.
+- Live checks covered: two-player team/ready/start and idempotent Island binding; second generic game; real Centrifugo interruption/history loss; periodic snapshot convergence while publication is unavailable; durable outbox retry; subscription/snapshot race; multiple clients sharing a seat; leave; backend restart with persisted expired leases; rejected client publish/history/presence; invalidation payload contains exactly six fields. Fresh-schema startup and restart repeatability also passed.
 - Protocol tests passed by observing SDK denial callbacks: centrifuge-python 0.6.0 `Subscription.ready()` can return after a failed subscription future, so a lack of exception alone does not imply authorization. The server's actual 403 replies and terminal invalid-JWT disconnects were verified.
 
-- `./scripts/test-lobby-acceptance.sh`: **14 passed** in 25.99 seconds, including two real CLI processes, repeatable legacy startup and all protocol denials.
+- `./scripts/test-lobby-acceptance.sh`: **14 passed** in 30.30 seconds after cleanup, including fresh-database startup, restart repeatability, current-table/game-field preservation, two real CLI processes, and all protocol denials.
 - Ruff checks for handwritten client/example/integration Python and `git diff --check`: passed.
 
 ## Environment

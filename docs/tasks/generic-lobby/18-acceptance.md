@@ -16,9 +16,9 @@ Create `integration/lobby/` (isolated Compose/test launcher and Python acceptanc
 6. Exercise a state change between subscription acknowledgement and initial snapshot completion through test synchronization hooks; confirm the client eventually displays the latest version. Also delay/fail outbox publish while HTTP commits; periodic reconciliation must still converge, and retried delivery must not duplicate state.
 7. Test multi-client same credential. Releasing one client does not expire the other's seat. Expire all leases past grace; restart backend before sweep, then confirm persisted deadline cleanup and correct host transfer. Check started-room frozen roster rejoin independently from waiting-room expiry.
 8. Test isolation: player B cannot read/subscribe A's unrelated room or private channel; bad-signature connection JWT fails; forged internal proxy call without secret fails; former member cannot obtain snapshots. Confirm client presence/history/publish are denied and no roster appears in invalidation history.
-9. Seed actual legacy tables and a game graph using task 11 fixture. Run application migration twice; old game state and archive hashes remain intact, no fabricated authenticated membership, and at least two new detached games can be created despite the old unique room_name column.
+9. Start the backend against a disposable empty database, initialize the schema, restart it against the same database, and verify initialization remains repeatable: current tables are unchanged and no retired player, room-name, or archive tables appear.
 10. Run exact reproducibility check from 15 in a clean checkout/temp output. All public operations and LobbyInvalidation model must generate, with no warnings, skipped endpoints, or diff. Verify root-level lobby dependency graph contains no backend imports.
-11. Update documentation to describe only completed behavior, installation/generation/test commands, session expiry, team/host rules, recovery limits, migration/cutover and explicit Island adapter call. Keep Lambda/C#/TypeScript/round timers clearly pending. Link new package/client docs and preserve useful original architecture research.
+11. Update documentation to describe only completed behavior, installation/generation/test commands, session expiry, team/host rules, recovery limits, fresh-schema startup, and the explicit Island adapter call. Keep Lambda/C#/TypeScript/round timers clearly pending. Link new package/client docs and preserve useful original architecture research.
 
 ## Mandatory acceptance tests
 
@@ -33,11 +33,11 @@ Create `integration/lobby/` (isolated Compose/test launcher and Python acceptanc
 | `test_multiclient_release_and_restart_expiry` | One close preserves other lease; overdue deadline survives backend restart |
 | `test_leave_revokes_state_access` | Snapshot and new subscriptions denied; late wire events contain only frozen invalidation fields |
 | `test_wrong_identity_and_proxy_spoofing` | Bad JWT/cross-room/private access/forged proxy rejected with no protected data |
-| `test_legacy_upgrade_is_repeatable` | Legacy state preserved, archive matches, no fake ownership, new rooms/games work |
+| `test_schema_initialization_is_repeatable` | Fresh-schema startup and restart leave current tables usable without retired tables |
 | `test_generated_client_is_reproducible` | Fresh generation exactly matches tracked output and imports successfully |
 
 ## Final verification commands
 
 From repository root: `go test ./...`, `go vet ./...`, focused `go test -race ./lobby/... ./backend/lobbyadapter/...`, the Python locked unit-test command from 15/16, generation check, and `./scripts/test-lobby-acceptance.sh`. Large existing game suites require Docker. Do not silently skip Docker tests or call unrun tests successful.
 
-The final handoff lists commands/results, tested Go/Python/Centrifugo/PostgreSQL/generator versions, migration behavior, generated SDK path, example command, and any unresolved integration failure. Task 18 is incomplete until the live two-player flow, reconnect fallback, and clean generation work; documentation alone is not sufficient.
+The final handoff lists commands/results, tested Go/Python/Centrifugo/PostgreSQL/generator versions, schema initialization behavior, generated SDK path, example command, and any unresolved integration failure. Task 18 is incomplete until the live two-player flow, reconnect fallback, and clean generation work; documentation alone is not sufficient.

@@ -9,7 +9,7 @@ Create `lobby/auth/service.go`, `credentials.go`, `connection_token.go`, and tes
 ## Steps
 
 1. Implement guest creation: validate trimmed display name, generate unrelated player/session UUIDs and at least 32 random bearer bytes, encode bearer URL-safely, hash it, and atomically insert player plus its unique session. Expiry is injected-clock now+24h. Return raw bearer only in the successful creation response; never persist/log it.
-2. Each create_session call creates a new player. Exactly one session belongs to each player in v1; multiple clients may share that bearer. There is no caller-selected player ID, account lookup by name, renewal into an existing identity, or legacy row claim.
+2. Each create_session call creates a new player. Exactly one session belongs to each player in v1; multiple clients may share that bearer. There is no caller-selected player ID, account lookup by name, or renewal into an existing identity.
 3. Authenticate HTTP credentials by strict Bearer parsing and hash lookup. Use a constant-time comparison where comparing secret material directly. Reject absent, empty, malformed, unknown, expired, or otherwise invalid credentials as typed unauthenticated. `now == expires_at` is expired.
 4. Authentication must never infer identity from display_name, room code, path, user-supplied player ID, or the old constant `0`. Respect request cancellation and map infrastructure failures separately from bad credentials.
 5. Implement IdentityStore optional reads using model/clause filters. Populate Principal.DisplayName from stored immutable guest identity, never request labels. Lookup-by-player for proxy authorization returns the single session expiry and whether it is currently valid. Never turn `(nil, nil)` into an authenticated empty principal.
@@ -26,7 +26,7 @@ Create `lobby/auth/service.go`, `credentials.go`, `connection_token.go`, and tes
 | `TestGuestCreationIsAtomic` | Force session insertion/randomness failure; no orphan player or reusable credential |
 | `TestGuestHasExactlyOneSession` | Direct duplicate player-session insertion fails the DB constraint; clients sharing existing bearer still authenticate |
 | `TestAuthenticateRejectsInvalidCredentials` | Table-test missing/empty/malformed/unknown and expired bearers, including exact expiry boundary |
-| `TestAuthenticateIgnoresClaimedIdentity` | Valid bearer for A plus input claiming B/legacy `0` never produces B's principal |
+| `TestAuthenticateIgnoresClaimedIdentity` | Valid bearer for A plus input claiming B never produces B's principal |
 | `TestConnectionTokenClaimsAndExpiry` | Verify signature using configured secret, sub equals actor, exp is capped by session expiry and no secrets appear in claims |
 | `TestConnectionTokenRefreshHasNoLobbySideEffects` | Issue multiple tokens and compare room/member/lease/game counts and player identity |
 | `TestConnectionTokenFailsClosed` | Empty signing config, crypto failure, cancelled context and expired guest produce errors, never usable JWTs |
