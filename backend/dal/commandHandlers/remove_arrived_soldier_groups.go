@@ -3,6 +3,7 @@ package commandHandlers
 import (
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
+	"sort"
 
 	"gorm.io/gorm"
 )
@@ -15,9 +16,20 @@ func RemoveArrivedSoldierGroupsHandler(
 	generation *models.Generation,
 	parameters RemoveArrivedSoldierGroupsParams,
 ) error {
-	for _, soldierGroup := range generation.SoldierGroups {
+	// Use a stable snapshot of the arrivals, but read each destination from the
+	// refreshed generation so an earlier arrival's damage/capture is preserved.
+	soldierGroups := append([]models.SoldierGroup(nil), generation.SoldierGroups...)
+	sort.SliceStable(soldierGroups, func(left, right int) bool {
+		return soldierGroups[left].LogicalSoldierGroupID < soldierGroups[right].LogicalSoldierGroupID
+	})
+	for _, soldierGroup := range soldierGroups {
 		if soldierGroup.Position == soldierGroup.DestinationCastle.Position {
-			err := handleDestinationArrival(db, generation, &soldierGroup)
+			castle, err := dal.GetCastleFromGeneration(generation, soldierGroup.DestinationCastle.LogicalCastleID)
+			if err != nil {
+				return err
+			}
+			soldierGroup.DestinationCastle = *castle
+			err = handleDestinationArrival(db, generation, &soldierGroup)
 			if err != nil {
 				return err
 			}

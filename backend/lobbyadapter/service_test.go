@@ -189,13 +189,13 @@ func TestBindRunsAutomaticBattleAndSavesReplay(t *testing.T) {
 		t.Fatal("automatic battle never sent troops")
 	}
 	// The first opposing groups (15 Blue vs 16 Red) meet during turn 6.
-	// The saved replay must contain the surviving Red soldier at the clash,
-	// rather than two unchanged groups that have passed through each other.
+	// The saved replay contains the surviving Red soldier after completing its
+	// movement; a clash no longer stops the survivor for the rest of the turn.
 	if len(replay.Frames) <= 6 || len(replay.Frames[5].Groups) != 2 || len(replay.Frames[6].Groups) != 1 {
 		t.Fatal("the first clash was not reflected in the replay")
 	}
 	survivor := replay.Frames[6].Groups[0]
-	if survivor.Color != 2 || survivor.Soldiers != 1 || survivor.X != 0.875 || survivor.ClashRadius != 0.25 {
+	if survivor.Color != 2 || survivor.Soldiers != 1 || survivor.X != 0.5 || survivor.ClashRadius != 0.25 {
 		t.Fatalf("unexpected first clash survivor: %+v", survivor)
 	}
 	if _, err := newGameBinding(t, db, snapshot).Bind(context.Background(), principal, scope); err != nil {

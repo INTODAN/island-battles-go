@@ -17,12 +17,12 @@ func MoveSoldierGroupsHandler(db *gorm.DB, generation *models.Generation, parame
 		return err
 	}
 
-	err = db_updates.UpdateSoldierGroupPositions(db, soldierGroupsPositions, clashPositions)
+	err = db_updates.UpdateSoldierGroupAmounts(db, clashPositions)
 	if err != nil {
 		return err
 	}
 
-	err = db_updates.UpdateSoldierGroupAmounts(db, clashPositions)
+	err = db_updates.UpdateSoldierGroupPositions(db, soldierGroupsPositions)
 	if err != nil {
 		return err
 	}

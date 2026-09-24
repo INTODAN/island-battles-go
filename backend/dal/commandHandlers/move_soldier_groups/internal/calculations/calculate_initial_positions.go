@@ -14,11 +14,17 @@ func CalculateInitialPositions(soldierGroups []models.SoldierGroup) []internal.S
 	for i := range soldierGroups {
 		soldierGroup := &soldierGroups[i]
 		newPosition := moveTowards(soldierGroup.Position, soldierGroup.DestinationCastle.Position)
+		var arrivalTime *float64
+		if newPosition == soldierGroup.DestinationCastle.Position {
+			time := math.Hypot(newPosition.P.X-soldierGroup.Position.P.X, newPosition.P.Y-soldierGroup.Position.P.Y) / models.SoldierGroupSpeedPerGeneration
+			arrivalTime = &time
+		}
 		soldierGroupsPositions = append(
 			soldierGroupsPositions, internal.SoldierGroupMoveDelta{
 				Start:        soldierGroup.Position,
 				End:          newPosition,
 				SoldierGroup: soldierGroup,
+				ArrivalTime:  arrivalTime,
 			},
 		)
 	}
