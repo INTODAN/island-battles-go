@@ -11,6 +11,7 @@ import (
 	"islandBattles/backend/services"
 
 	"encoding/json"
+	"fmt"
 	"github.com/jackc/pgx/v5/pgtype"
 	"gorm.io/gorm"
 )
@@ -194,5 +195,49 @@ func TestEmptyAndSelfSendOrdersAreRejected(t *testing.T) {
 	}
 	if origin.SoldierAmount != 100 || len(generation.SoldierGroups) != 0 {
 		t.Fatal("rejected send changed game state")
+	}
+}
+
+func TestClashPausePersistsForConfiguredGenerations(t *testing.T) {
+	for _, duration := range []uint{1, 3} {
+		t.Run(fmt.Sprintf("duration-%d", duration), func(t *testing.T) {
+			previous := models.ClashStopGenerations
+			models.ClashStopGenerations = duration
+			t.Cleanup(func() { models.ClashStopGenerations = previous })
+			database, generation := captureFixture(t)
+			captureGroup(t, database, generation, 1, 10, 1)
+			captureGroup(t, database, generation, 2, 5, 1.75)
+			for turn := uint(0); turn <= duration; turn++ {
+				// A small attack during the pause must neither grant movement nor reset it.
+				if duration == 3 && turn == 1 {
+					captureGroup(t, database, generation, 2, 1, 1.5)
+				}
+				generationID, err := services.MigrateGeneration(database, generation.GameID, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				generation, err = dal.GetGeneration(database, generationID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(generation.SoldierGroups) != 1 {
+					t.Fatalf("expected one survivor, got %+v", generation.SoldierGroups)
+				}
+				group := generation.SoldierGroups[0]
+				expectedPosition, expectedPause := 1.375, uint(0)
+				if turn < duration {
+					expectedPause = duration - turn - 1
+				} else {
+					expectedPosition += .5
+				}
+				expectedSoldiers := uint(5)
+				if duration == 3 && turn >= 1 {
+					expectedSoldiers = 4
+				}
+				if group.Position.P.X != expectedPosition || group.MovementPauseGenerations != expectedPause || group.SoldierAmount != expectedSoldiers {
+					t.Fatalf("turn %d: position=%v pause=%d soldiers=%d; want %v,%d,%d", turn, group.Position.P.X, group.MovementPauseGenerations, group.SoldierAmount, expectedPosition, expectedPause, expectedSoldiers)
+				}
+			}
+		})
 	}
 }

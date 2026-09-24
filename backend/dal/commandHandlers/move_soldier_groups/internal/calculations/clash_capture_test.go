@@ -99,3 +99,74 @@ func TestSimultaneousCombatDoesNotDependOnInputOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestClashStopThresholdAndMidpoint(t *testing.T) {
+	for _, scenario := range []struct {
+		name        string
+		left, right uint
+		stop        bool
+	}{
+		{"less than half", 10, 4, false},
+		{"less than half reversed", 4, 10, false},
+		{"exactly half", 10, 5, true},
+		{"exactly half reversed", 5, 10, true},
+		{"equal", 10, 10, true},
+		{"odd below half", 9, 4, false},
+		{"odd above half", 9, 5, true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			movements := []internal.SoldierGroupMoveDelta{clashMovement(0, 2, 1, scenario.left, 0), clashMovement(2, 0, 2, scenario.right, 1)}
+			clashes, err := CalculateClashPositions(movements)
+			if err != nil || len(clashes) != 1 {
+				t.Fatalf("clashes=%+v err=%v", clashes, err)
+			}
+			expectedLeft, expectedRight := 2.0, 0.0
+			if scenario.stop {
+				expectedLeft, expectedRight = 1, 1
+			}
+			if movements[0].End.P.X != expectedLeft || movements[1].End.P.X != expectedRight {
+				t.Fatalf("wrong final positions: %+v", movements)
+			}
+			if movements[0].PauseGenerations != 0 || movements[1].PauseGenerations != 0 {
+				t.Fatal("default stop must include only the clash generation")
+			}
+		})
+	}
+}
+
+func TestClashRechecksPathsAfterStopping(t *testing.T) {
+	for _, laterMoves := range []bool{false, true} {
+		laterEnd := 1.0
+		if laterMoves {
+			laterEnd = 0
+		}
+		movements := []internal.SoldierGroupMoveDelta{clashMovement(0, 2, 1, 20, 0), clashMovement(.25, .25, 2, 10, 1), clashMovement(1, laterEnd, 2, 1, 2)}
+		clashes, err := CalculateClashPositions(movements)
+		expectedClashes := 1
+		if laterMoves {
+			expectedClashes = 2
+		}
+		if err != nil || len(clashes) != expectedClashes {
+			t.Fatalf("laterMoves=%v: stale paths used: %+v err=%v", laterMoves, clashes, err)
+		}
+		if movements[0].End.P.X != .125 {
+			t.Fatal("small later contact moved the paused survivor")
+		}
+		if laterMoves && math.Abs(clashes[1].Time-.625) > epsilon {
+			t.Fatalf("wrong later contact time: %v", clashes[1].Time)
+		}
+	}
+}
+
+func TestPauseDurationZeroDisablesStopping(t *testing.T) {
+	previous := models.ClashStopGenerations
+	models.ClashStopGenerations = 0
+	t.Cleanup(func() { models.ClashStopGenerations = previous })
+	movements := []internal.SoldierGroupMoveDelta{clashMovement(0, 2, 1, 10, 0), clashMovement(2, 0, 2, 5, 1)}
+	if _, err := CalculateClashPositions(movements); err != nil {
+		t.Fatal(err)
+	}
+	if movements[0].End.P.X != 2 || movements[0].PauseGenerations != 0 {
+		t.Fatalf("zero duration stopped movement: %+v", movements[0])
+	}
+}

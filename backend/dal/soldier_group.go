@@ -70,11 +70,12 @@ func DuplicateSoldierGroup(db *gorm.DB, migratedGenerationID uint, originSoldier
 			OriginCastleID:      newOriginCastle.ID,
 			DestinationCastleID: newDestinationCastle.ID,
 		},
-		Position:              originalSoldierGroup.Position,
-		GenerationID:          migratedGenerationID,
-		LogicalSoldierGroupID: originalSoldierGroup.LogicalSoldierGroupID,
-		TeamColor:             originalSoldierGroup.TeamColor,
-		ClashRadius:           originalSoldierGroup.ClashRadius,
+		Position:                 originalSoldierGroup.Position,
+		GenerationID:             migratedGenerationID,
+		LogicalSoldierGroupID:    originalSoldierGroup.LogicalSoldierGroupID,
+		TeamColor:                originalSoldierGroup.TeamColor,
+		ClashRadius:              originalSoldierGroup.ClashRadius,
+		MovementPauseGenerations: originalSoldierGroup.MovementPauseGenerations,
 	}
 
 	if err := db.Create(&newSoldierGroup).Error; err != nil {

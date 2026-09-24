@@ -34,7 +34,7 @@ func SetupRoutes(api huma.API, env *handlers.Env) {
 		Summary: "Create a Generation from a Map Template."}, env.CreateGenerationFromTemplate)
 	huma.Register(api, huma.Operation{Path: "/generation/migrate", Method: http.MethodPost, DefaultStatus: http.StatusOK,
 		Summary:     "Migrate to the next generation in the game.",
-		Description: "Clash survivors continue moving and resolve later contacts in time order. Arrived groups leave field combat. Castle arrivals use the updated castle state. Send orders require a positive soldier amount and distinct origin and destination castles."}, env.MigrateGeneration)
+		Description: "Clashes resolve in time order. Survivors continue moving only when one group has strictly less than half the other's troops; otherwise they stop at the contact midpoint. ClashStopGenerations configures the pause, including the clash generation (default 1). Arrived groups leave field combat. Castle arrivals use the updated castle state. Send orders require a positive soldier amount and distinct origin and destination castles."}, env.MigrateGeneration)
 	huma.Register(api, huma.Operation{Path: "/game/{id}/graph", Method: http.MethodGet, DefaultStatus: http.StatusOK,
 		Summary: "Get a graph visualization of the game."}, env.GetGameGraph)
 }
