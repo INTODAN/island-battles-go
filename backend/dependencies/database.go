@@ -32,7 +32,7 @@ func initializeSchema(ctx context.Context, db *gorm.DB) error {
 	}
 	err := db.WithContext(ctx).AutoMigrate(&models.Game{}, &models.Map{}, &models.Castle{}, &models.CastleTemplate{},
 		&models.MapTemplate{},
-		&models.Generation{}, &models.SoldierGroup{}, &models.Command{}, &models.TeamBindingRecord{})
+		&models.Generation{}, &models.SoldierGroup{}, &models.Command{}, &models.TeamBindingRecord{}, &models.FrozenGamePlayer{}, &models.GenerationInput{}, &models.GenerationRequest{}, &models.GenerationNotification{})
 	if err != nil {
 		return fmt.Errorf("initialize game schema: %w", err)
 	}

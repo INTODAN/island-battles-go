@@ -16,6 +16,7 @@ import (
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/routes"
+	"islandBattles/backend/services"
 	"islandBattles/lobby/application"
 	"islandBattles/lobby/auth"
 	"islandBattles/lobby/delivery"
@@ -117,9 +118,11 @@ func run(ctx context.Context, config dependencies.Config, logger *slog.Logger) e
 	defer stopWorkers()
 	var workers sync.WaitGroup
 	report := func(err error) { logger.Error("Lobby background work failed; will retry", "error", err) }
-	workers.Add(2)
+	generationPublisher := &services.GenerationDelivery{Database: database, Publisher: centrifugoClient}
+	workers.Add(3)
 	go func() { defer workers.Done(); publisher.Run(workerContext, report) }()
 	go func() { defer workers.Done(); sweeper.Run(workerContext, report) }()
+	go func() { defer workers.Done(); generationPublisher.Run(workerContext, report) }()
 	shutdownDone := make(chan struct{})
 	go func() {
 		defer close(shutdownDone)

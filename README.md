@@ -32,13 +32,13 @@ PostgreSQL listens on port 5432, Centrifugo on 8000, and the backend on 8888. Th
 
 Ctrl+C stops the backend. Dependencies remain running for the next launch. Stop them with `docker compose stop` or, for native Podman, `podman stop island-battles-dev-db island-battles-dev-centrifugo`.
 
-Use the [Python client walkthrough](lobby/clients/lobby-python/README.md) for two-player team selection, or the [Go example](lobby/clients/README.md). Backend settings and the explicit game-binding endpoint are documented in [backend/README.md](backend/README.md).
+Use the [Python lobby client walkthrough](lobby/clients/lobby-python/README.md) for two-player team selection, the [Island Battles Python client](clients/island-battles-python/README.md) for gameplay turns, or the [Go example](lobby/clients/README.md). Backend settings and the game endpoints are documented in [backend/README.md](backend/README.md). The implementation contract is recorded in the [Issue #6 task plan](docs/tasks/issue-6-player-generation-commands.md).
 
 ## Architecture Notes
 
-The [multiplayer architecture decision](lobby/docs/multiplayer-architecture.md) explains the design, and the [task pack](lobby/docs/tasks/generic-lobby/README.md) records contracts, edge cases and agent assignments. Guest credentials identify players; opening a socket does not create or join a room. HTTP commands commit state and durable invalidations together. Centrifugo reconnects and recovers transport history; clients reconcile authorized HTTP snapshots after subscribing and periodically.
+The [multiplayer architecture decision](lobby/docs/multiplayer-architecture.md) explains the design, and the [task pack](lobby/docs/tasks/generic-lobby/README.md) records contracts, edge cases and agent assignments. Guest credentials identify players; opening a socket does not create or join a room. Generic lobby HTTP commands commit their state and durable invalidations together. Island Battles generation notifications use a separate durable game event queue. Centrifugo reconnects and recovers transport history; clients reconcile authorized HTTP snapshots after subscribing and periodically.
 
-Teams and readiness belong to the generic lobby. Starting freezes a roster. The Island Battles adapter then creates a map, runs an automatic battle, and saves a spectator replay for both players. `POST /game/from-lobby` can also retry a failed game launch. The generic lobby has no dependency on the game simulation.
+Teams and readiness belong to the generic lobby. Starting freezes a roster. The Island Battles adapter initializes generation one with a castle and 30 soldiers for each occupied team. Every player in that frozen roster registers commands and completes their turn; the game advances once all roster players have completed. Disconnected players remain part of the turn barrier and must reconnect to submit or complete their turn. The generic lobby has no dependency on the game simulation.
 
 ## Commands
 
@@ -47,6 +47,7 @@ Teams and readiness belong to the generic lobby. Starting freezes a roster. The 
 *   **Test (disposable PostgreSQL containers):** `go test ./... ./lobby/...`
 *   **Check OpenAPI:** `go run ./lobby/cmd/export-lobby-openapi --output lobby/api/openapi.json --events-output lobby/api/events.json --check`
 *   **Python unit tests:** `uv run --project lobby/clients/lobby-python --locked pytest lobby/clients/lobby-python/tests`
+*   **Gameplay SDK tests:** `uv run --project clients/island-battles-python --locked pytest clients/island-battles-python/tests`
 *   **Live acceptance (Linux Docker or Podman):** `./scripts/test-lobby-acceptance.sh`
 
 ## Testing & Visualization

@@ -23,7 +23,7 @@ async def started_lobby(guests, game_key):
     return alice, bob, scope
 
 
-async def test_start_runs_game_and_binding_is_idempotent(guests):
+async def test_start_initializes_one_generation_and_binding_is_idempotent(guests):
     alice, bob, scope = await started_lobby(guests, "island-battles")
     assert await sql(f"SELECT count(*) FROM games WHERE lobby_id='{scope.lobby_id}' AND replay IS NOT NULL") == "1"
     async with httpx.AsyncClient(base_url=BASE, headers={"Authorization": f"Bearer {alice.credential}"}) as adapter:
@@ -32,6 +32,8 @@ async def test_start_runs_game_and_binding_is_idempotent(guests):
     assert first.status_code == replay.status_code == 200
     assert first.json() == replay.json()
     assert await sql(f"SELECT count(*) FROM games WHERE lobby_id='{scope.lobby_id}'") == "1"
+    game_id = first.json()["game_id"]
+    assert await sql(f"SELECT count(*) FROM generations WHERE game_id={game_id}") == "1"
     result_path = f"/game/from-lobby/{scope.lobby_id}/replay"
     async with httpx.AsyncClient(base_url=BASE) as client:
         host_result = await client.get(result_path, headers={"Authorization": f"Bearer {alice.credential}"})
@@ -58,6 +60,7 @@ async def test_island_schema_survives_restart():
     assert set(tables.splitlines()) == lobby_tables | {
         "games", "maps", "castles", "castle_templates", "map_templates",
         "generations", "soldier_groups", "commands", "island_game_team_bindings",
+        "frozen_game_players", "generation_inputs", "generation_requests", "generation_notifications",
     }
     columns = await sql("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='games' ORDER BY ordinal_position")
     assert set(columns.splitlines()) == {"id", "created_at", "updated_at", "deleted_at", "lobby_id", "replay"}

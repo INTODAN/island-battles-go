@@ -21,13 +21,23 @@ import (
 func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authentication *auth.Service, gameBinding *application.GameBinding[models.BindingResult], game *handlers.LobbyGame) {
 	httpapi.Register(api, lobbyadapter.WithGameStart(lobbyApplication, gameBinding), authentication, authentication)
 	lobbyadapter.Register(api, gameBinding, authentication)
-	api.OpenAPI().Paths["/lobby/v1/games/{game_key}/lobbies/{lobby_id}/start"].Post.Description += " Island Battles also runs an automatic game and saves its spectator replay. Retrying resumes a failed game launch."
+	api.OpenAPI().Paths["/lobby/v1/games/{game_key}/lobbies/{lobby_id}/start"].Post.Description += " Island Battles initializes one playable generation and waits for every frozen roster player to complete their turn. Retrying resumes a failed initialization."
 	huma.Register(api, huma.Operation{
 		OperationID: "getIslandLobbyReplay", Path: "/game/from-lobby/{lobby_id}/replay", Method: http.MethodGet,
-		Summary:     "Watch the automatic Island Battles game for a started lobby",
-		Description: "Current lobby members can view the same saved spectator replay. No game commands are accepted.",
+		Summary:     "View the Island Battles replay history for a started lobby",
+		Description: "Current lobby members can view saved generations, including the initialized state of a new game.",
 		Tags:        []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
 	}, game.Replay)
+	huma.Register(api, huma.Operation{
+		OperationID: "getIslandLobbyGeneration", Path: "/game/from-lobby/{lobby_id}/generation", Method: http.MethodGet,
+		Summary: "Read the current generation for a roster player", Description: "Requires a current authorized lobby snapshot and frozen roster membership. Returns logical castle IDs, troop state and your turn completion flag.",
+		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
+	}, game.CurrentGeneration)
+	huma.Register(api, huma.Operation{
+		OperationID: "registerGenerationCommand", Path: "/generation/commands", Method: http.MethodPost,
+		Summary: "Register an atomic player command batch and optionally complete the turn", Description: "Only owned send_soldier_group commands are accepted. Complete defaults to true; an empty batch can complete a turn. The last frozen roster completion advances exactly once. Retry the same request UUID and payload safely; changed payloads and stale new requests conflict.",
+		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
+	}, game.RegisterGenerationCommands)
 }
 
 func SetupRoutes(api huma.API, env *handlers.Env) {
@@ -36,10 +46,6 @@ func SetupRoutes(api huma.API, env *handlers.Env) {
 	api.OpenAPI().Components.Schemas.RegisterTypeAlias(reflect.TypeOf(datatypes.JSON{}), reflect.TypeOf(json.RawMessage{}))
 	huma.Register(api, huma.Operation{Path: "/map/create", Method: http.MethodPost, DefaultStatus: http.StatusOK,
 		Summary: "Create a map template with optional castle upgrades.", Description: "Castle upgrades are a map of upgrade type to level. Omitted upgrades default to level 1; speed supports levels 1 through 4, and clash_stop_generations supports levels 1 through 3."}, env.CreateMapTemplate)
-	huma.Register(api, huma.Operation{Path: "/generation/create", Method: http.MethodPost, DefaultStatus: http.StatusOK,
-		Summary: "Create a Generation from a Map Template."}, env.CreateGenerationFromTemplate)
-	huma.Register(api, huma.Operation{Path: "/generation/migrate", Method: http.MethodPost, DefaultStatus: http.StatusOK,
-		Summary: "Advance one game turn and apply commands, including castle upgrades.", Description: "Commands execute in order. upgrade_castle accepts logical_castle_id and upgrade_type, and advances that upgrade by one level, atomically deducting its fixed soldier cost from the castle. Speed levels 2, 3, and 4 cost 10, 20, and 30 soldiers. Insufficient soldiers returns HTTP 409. Groups spawned afterward copy the castle upgrades; existing groups retain their levels. A rejected command rolls back the entire turn. Clashes resolve in time order. Survivors continue moving only when one group has strictly less than half the other's troops; otherwise they stop at the contact midpoint. Each group's clash_stop_generations upgrade sets its pause to 3, 2, or 1 generations at levels 1, 2, or 3, including the clash generation. Buying levels 2 and 3 costs 10 and 20 soldiers. Arrived groups leave field combat. Castle arrivals use the updated castle state. Send orders require a positive soldier amount and distinct origin and destination castles."}, env.MigrateGeneration)
 	huma.Register(api, huma.Operation{Path: "/game/{id}/graph", Method: http.MethodGet, DefaultStatus: http.StatusOK,
 		Summary: "Get a graph visualization of the game."}, env.GetGameGraph)
 }
