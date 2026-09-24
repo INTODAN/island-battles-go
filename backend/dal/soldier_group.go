@@ -20,6 +20,10 @@ func UpdateSoldierGroupAmount(db *gorm.DB, soldierGroup *models.SoldierGroup, ne
 }
 
 func CreateSoldierGroup(db *gorm.DB, soldierGroup *models.SoldierGroup) (uint, error) {
+	if err := soldierGroup.Upgrades.Validate(); err != nil {
+		return 0, err
+	}
+	soldierGroup.Upgrades = soldierGroup.Upgrades.Clone()
 	var lastGroups []models.SoldierGroup
 	err := db.Where(&models.SoldierGroup{GenerationID: soldierGroup.GenerationID}).
 		Order(clause.OrderByColumn{Column: clause.Column{Name: "logical_soldier_group_id"}, Desc: true}).
@@ -75,6 +79,7 @@ func DuplicateSoldierGroup(db *gorm.DB, migratedGenerationID uint, originSoldier
 		LogicalSoldierGroupID: originalSoldierGroup.LogicalSoldierGroupID,
 		TeamColor:             originalSoldierGroup.TeamColor,
 		ClashRadius:           originalSoldierGroup.ClashRadius,
+		Upgrades:              originalSoldierGroup.Upgrades.Clone(),
 	}
 
 	if err := db.Create(&newSoldierGroup).Error; err != nil {

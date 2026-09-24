@@ -18,6 +18,9 @@ func CreateMapTemplate(db *gorm.DB, mapTemplate *models.MapTemplate) (uint, erro
 	}
 
 	for i := range mapTemplate.CastleTemplates {
+		if err := mapTemplate.CastleTemplates[i].Upgrades.Validate(); err != nil {
+			return 0, err
+		}
 		mapTemplate.CastleTemplates[i].LogicalCastleID = uint(i)
 	}
 
@@ -41,7 +44,7 @@ func CreateMapFromTemplate(db *gorm.DB, templateID uint) (uint, error) {
 	var castles []models.Castle
 	for _, ct := range template.CastleTemplates {
 		castles = append(castles, models.Castle{
-			CastleFields:  ct.CastleFields,
+			CastleFields:  ct.CastleFields.Clone(),
 			SoldierAmount: template.NeutralStartingSoldierAmount,
 		})
 	}
@@ -67,7 +70,7 @@ func DuplicateMap(db *gorm.DB, originalMapID uint) (uint, error) {
 	var newCastles []models.Castle
 	for _, originalCastle := range originalMap.Castles {
 		newCastles = append(newCastles, models.Castle{
-			CastleFields:  originalCastle.CastleFields,
+			CastleFields:  originalCastle.CastleFields.Clone(),
 			SoldierAmount: originalCastle.SoldierAmount,
 		})
 	}
