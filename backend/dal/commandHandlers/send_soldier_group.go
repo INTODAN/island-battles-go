@@ -15,6 +15,12 @@ type SendSoldierGroupParams struct {
 }
 
 func SendSoldierGroupHandler(db *gorm.DB, generation *models.Generation, parameters SendSoldierGroupParams) error {
+	if parameters.SoldierAmount == 0 {
+		return fmt.Errorf("soldier amount must be greater than zero")
+	}
+	if parameters.OriginLogicalCastleID == parameters.DestinationLogicalCastleID {
+		return fmt.Errorf("origin and destination castles must differ")
+	}
 	originCastle, err := dal.GetCastleFromGeneration(generation, parameters.OriginLogicalCastleID)
 	if err != nil {
 		return err

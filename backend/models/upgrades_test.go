@@ -68,3 +68,32 @@ func TestUpgradeTypesHaveIndependentLimitsAndEffects(t *testing.T) {
 		t.Fatal("other type inherited the wrong cap")
 	}
 }
+
+func TestClashStopUpgradeLevelsAndCosts(t *testing.T) {
+	upgrades := Upgrades{SpeedUpgrade: 4}
+	for index, duration := range []float64{3, 2, 1} {
+		value, err := upgrades.Value(ClashStopGenerationsUpgrade)
+		if err != nil || value != duration {
+			t.Fatalf("level %d duration=%v err=%v", index+1, value, err)
+		}
+		cost, err := upgrades.Cost(ClashStopGenerationsUpgrade)
+		if err != nil || cost != []uint{0, 10, 20}[index] {
+			t.Fatalf("level %d cost=%d err=%v", index+1, cost, err)
+		}
+		if upgrades[SpeedUpgrade] != 4 {
+			t.Fatal("stoppage upgrade changed speed")
+		}
+		if index < 2 {
+			upgrades, err = upgrades.Upgraded(ClashStopGenerationsUpgrade)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if _, err := upgrades.Upgraded(ClashStopGenerationsUpgrade); !errors.Is(err, ErrUpgradeMaxLevel) {
+		t.Fatalf("level cap ignored: %v", err)
+	}
+	if err := (Upgrades{ClashStopGenerationsUpgrade: 4}).Validate(); !errors.Is(err, ErrInvalidUpgrade) {
+		t.Fatalf("invalid stop level accepted: %v", err)
+	}
+}

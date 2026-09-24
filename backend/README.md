@@ -24,7 +24,13 @@ Starting an `island-battles` lobby through the hosted lobby API also creates and
 
 Both players see the saved replay at `/lobby/ui/`. Playback controls do not issue gameplay commands. `GET /game/from-lobby/{lobby_id}/replay` requires a guest bearer credential and current lobby membership. Player names, teams, frames, and outcome are saved together and survive restarts. The replay uses embedded HTML/SVG with no external JavaScript dependency.
 
-Soldier groups have a persisted `ClashRadius`, defaulting to **0.25 world units**, which is copied to subsequent generations. Enemies clash when their center-to-center distance reaches either group's radius (the larger radius, rather than their sum). Detection covers the full movement interval; each group stops at its own first contact position for that turn. Simultaneous connected contacts resolve together. The replay draws troop circles using their stored radius and castle circles with a visual-only radius of **0.5 units**, with the same world scale on both axes. Castle arrival/capture rules are unchanged. Existing troop rows receive the default during migration; old saved replays display the default radius but retain their original simulation results.
+Soldier groups have a persisted `ClashRadius`, defaulting to **0.25 world units**, which is copied to subsequent generations. Enemies clash when their center-to-center distance reaches either group's radius (the larger radius, rather than their sum). Contacts resolve in time order using troop counts before casualties. If one group has strictly less than half the other's soldiers, the survivor completes its movement. Otherwise the groups stop at the midpoint between their contact positions for the generation; exactly half also stops. In a simultaneous connected clash, any comparable opposing pair causes a stop at the average participant position. Paths are recalculated after a stop so survivors can still fight later enemies. Dead and empty groups cannot participate in later clashes. Simultaneous connected contacts resolve together; each team loses up to the combined opposing force, with losses assigned in logical group order.
+
+Each group's `clash_stop_generations` upgrade controls its own pause duration: **level 1 → 3 generations**, **level 2 → 2**, and **level 3 → 1**, including the clash generation. Troops copy this level when spawned, so upgrading the castle does not change existing troops. Each group persists its remaining `MovementPauseGenerations`, which is copied across generations and decremented when it stays still. Smaller attacks do not restart or extend an existing pause. Existing records without this upgrade use level 1; already-running pause counters retain their remaining duration.
+
+Groups leave field combat when they reach their destination, including arrivals exactly tied with contact. Already-arrived groups cannot clash with newly spawned troops. Short trips retain normal movement speed until arrival. At the end of the turn, castle arrivals resolve in logical group order against the updated castle state, preserving earlier damage, captures, and reinforcements. Sending zero soldiers or sending to the same castle is rejected.
+
+The replay draws troop circles using their stored radius and castle circles with a visual-only radius of **0.5 units**, with the same world scale on both axes. Existing troop rows receive the default radius during migration; saved replays retain their original simulation results.
 
 The Island Battles adapter wraps the generic start operation. Generic lobby start freezes the roster first; the game then locks its bound row and commits all simulated generations and its replay in one transaction. Concurrent or repeated starts reuse the saved result. A failed simulation rolls back its generations; retry start (or the endpoint below) to finish preparing the same game. Other game keys are unaffected.
 
@@ -42,7 +48,7 @@ The active host receives `game_id`, `lobby_id` and a stable team UUID/order/colo
 
 ## Castle upgrades
 
-Castles and soldier groups persist an `upgrades` map, such as `{"speed":1}`. Each upgrade type defines its own level effects, fixed soldier costs, and maximum in `models/upgrades.go`. Speed currently has four levels: **1 → 0.5**, **2 → 1**, **3 → 1.5**, and **4 → 2** world units per turn. Omitted upgrades and existing database records default to level 1. Map templates can provide initial castle levels. Purchasing speed levels **2**, **3**, and **4** costs **10**, **20**, and **30 soldiers**, respectively; the default level 1 has no purchase cost.
+Castles and soldier groups persist an `upgrades` map, such as `{"speed":1,"clash_stop_generations":1}`. Each upgrade type defines its own level effects, fixed soldier costs, and maximum in `models/upgrades.go`. Speed currently has four levels: **1 → 0.5**, **2 → 1**, **3 → 1.5**, and **4 → 2** world units per turn. The `clash_stop_generations` type has three levels, reducing stoppage from **3** to **2** to **1** generations. Purchasing its levels **2** and **3** costs **10** and **20 soldiers**. Omitted upgrades and existing database records default to level 1. Map templates can provide initial castle levels. Purchasing speed levels **2**, **3**, and **4** costs **10**, **20**, and **30 soldiers**, respectively; the default level 1 has no purchase cost.
 
 To increase a castle's speed by one level, submit a command to `POST /generation/migrate`:
 
@@ -57,6 +63,8 @@ To increase a castle's speed by one level, submit a command to `POST /generation
   ]
 }
 ```
+
+Use `"upgrade_type":"clash_stop_generations"` in the same command to reduce future troops' clash pauses.
 
 Commands execute in the supplied order before movement. Sending troops after upgrading copies the new levels; troops sent before upgrading retain the old levels. Every group keeps its own snapshot throughout later turns. The castle must have enough soldiers at the moment the command executes. The purchase atomically deducts the target level's cost and advances the upgrade; an exact balance is allowed and leaves zero soldiers before normal turn production. Insufficient soldiers or upgrading at the maximum returns HTTP 409; unknown upgrade types or invalid levels return HTTP 422. A rejected command rolls back the whole turn. The temporary lobby still runs automatic battles without player gameplay controls.
 

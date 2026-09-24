@@ -10,11 +10,17 @@ type SoldierGroupMoveDelta struct {
 	Start        pgtype.Point
 	End          pgtype.Point
 	SoldierGroup *models.SoldierGroup
+	// Nil means the destination is beyond this turn; otherwise this is the
+	// fraction of the turn at which the group leaves the field.
+	ArrivalTime      *float64
+	StartTime        float64
+	PauseGenerations uint
 }
 
 type ClashParticipant struct {
-	SoldierGroup *models.SoldierGroup
-	Position     pgtype.Point
+	SoldierGroup      *models.SoldierGroup
+	Position          pgtype.Point
+	RemainingSoldiers uint
 }
 
 // Clash groups simultaneous contacts, retaining each group's own position.

@@ -39,7 +39,7 @@ func TestUpgradeDefaultsMigrateExistingState(t *testing.T) {
 			t.Fatal("fixture had no existing rows")
 		}
 		for _, row := range rows {
-			if row.Upgrades[models.SpeedUpgrade] != 1 {
+			if row.Upgrades[models.SpeedUpgrade] != 1 || row.Upgrades[models.ClashStopGenerationsUpgrade] != 1 {
 				t.Fatalf("missing migrated default: %+v", row)
 			}
 		}

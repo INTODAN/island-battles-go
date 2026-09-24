@@ -72,3 +72,42 @@ func TestUpgradeCastleHTTP(t *testing.T) {
 		}
 	}
 }
+
+func TestClashStopUpgradeHTTP(t *testing.T) {
+	database := testutils.InitTestDB(t)
+	generationID := testutils.CreateGenerationForTest(t, database)
+	generation, err := dal.GetGeneration(database, generationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	castle, err := dal.GetCastleFromGeneration(generation, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dal.UpdateCastleSoldierGroupAmount(database, castle, 30); err != nil {
+		t.Fatal(err)
+	}
+	_, api := humatest.New(t)
+	routes.SetupRoutes(api, &handlers.Env{DB: database})
+	body := fmt.Sprintf(`{"game_id":%d,"commands":[{"CommandType":"upgrade_castle","Parameters":{"logical_castle_id":0,"upgrade_type":"clash_stop_generations"}}]}`, generation.GameID)
+	for _, expected := range []struct {
+		status, level int
+		soldiers      uint
+	}{{http.StatusOK, 2, 21}, {http.StatusOK, 3, 2}, {http.StatusConflict, 3, 2}} {
+		response := api.Post("/generation/migrate", "Content-Type: application/json", strings.NewReader(body))
+		if response.Code != expected.status {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+		generation, err = dal.GetLatestGenerationForGame(database, generation.GameID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		castle, err = dal.GetCastleFromGeneration(generation, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if castle.Upgrades[models.ClashStopGenerationsUpgrade] != expected.level || castle.SoldierAmount != expected.soldiers {
+			t.Fatalf("unexpected purchase: level=%d soldiers=%d", castle.Upgrades[models.ClashStopGenerationsUpgrade], castle.SoldierAmount)
+		}
+	}
+}

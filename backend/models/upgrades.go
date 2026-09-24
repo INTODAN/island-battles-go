@@ -7,7 +7,10 @@ import (
 
 type UpgradeType string
 
-const SpeedUpgrade UpgradeType = "speed"
+const (
+	SpeedUpgrade                UpgradeType = "speed"
+	ClashStopGenerationsUpgrade UpgradeType = "clash_stop_generations"
+)
 
 var (
 	ErrInvalidUpgrade       = errors.New("invalid upgrade")
@@ -23,7 +26,8 @@ type upgradeLevel struct {
 // Each type defines its own level effects and costs; the number of entries is its maximum
 // level. Missing entries in a castle/group's upgrades mean the default level 1.
 var upgradeLevels = map[UpgradeType][]upgradeLevel{
-	SpeedUpgrade: {{Value: 0.5}, {Value: 1, SoldierCost: 10}, {Value: 1.5, SoldierCost: 20}, {Value: 2, SoldierCost: 30}},
+	SpeedUpgrade:                {{Value: 0.5}, {Value: 1, SoldierCost: 10}, {Value: 1.5, SoldierCost: 20}, {Value: 2, SoldierCost: 30}},
+	ClashStopGenerationsUpgrade: {{Value: 3}, {Value: 2, SoldierCost: 10}, {Value: 1, SoldierCost: 20}},
 }
 
 type Upgrades map[UpgradeType]int
