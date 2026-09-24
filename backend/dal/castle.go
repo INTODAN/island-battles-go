@@ -25,3 +25,16 @@ func UpdateCastleTeamColor(db *gorm.DB, castle *models.Castle, teamColor uint) e
 	castle.TeamColor = teamColor
 	return db.Save(castle).Error
 }
+
+// UpgradeCastle updates this generation's castle; spawned groups retain their snapshot.
+func UpgradeCastle(database *gorm.DB, castle *models.Castle, upgradeType models.UpgradeType) error {
+	upgrades, err := castle.Upgrades.Upgraded(upgradeType)
+	if err != nil {
+		return err
+	}
+	if err := database.Model(castle).Updates(&models.Castle{CastleFields: models.CastleFields{Upgrades: upgrades}}).Error; err != nil {
+		return err
+	}
+	castle.Upgrades = upgrades
+	return nil
+}

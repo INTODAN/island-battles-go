@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
@@ -48,8 +49,14 @@ func (env *Env) CreateGenerationFromTemplate(ctx context.Context, input *CreateG
 // Then applies the default command, which is increasing the soldier group amount of each castle.
 // Then, iterates through the commands, apply each of the command's changes.
 func (env *Env) MigrateGeneration(ctx context.Context, input *MigrateGenerationRequest) (*NewGenerationResponse, error) {
-	generationID, err := services.MigrateGeneration(env.DB, input.Body.GameID, input.Body.Commands)
+	generationID, err := services.MigrateGeneration(env.DB.WithContext(ctx), input.Body.GameID, input.Body.Commands)
 	if err != nil {
+		if errors.Is(err, models.ErrInvalidUpgrade) {
+			return nil, huma.Error422UnprocessableEntity(err.Error())
+		}
+		if errors.Is(err, models.ErrUpgradeMaxLevel) {
+			return nil, huma.Error409Conflict(err.Error())
+		}
 		return nil, huma.Error500InternalServerError(err.Error())
 	}
 

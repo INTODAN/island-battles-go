@@ -40,6 +40,26 @@ The active host receives `game_id`, `lobby_id` and a stable team UUID/order/colo
 
 `lobbyadapter` selects the Island Battles game key, connects game persistence to the shared binding service, and registers the game endpoint. It uses types directly from `models`, without aliases. Authorization and HTTP handling are delegated to the [shared game-binding helpers](../lobby/README.md#binding-a-game-to-a-started-lobby). Island Battles persistence lives in `dal/lobby_binding.go`; its only translation is from generic team UUID/order to simulation colors 1..N, with zero reserved for neutral.
 
+## Castle upgrades
+
+Castles and soldier groups persist an `upgrades` map, such as `{"speed":1}`. Each upgrade type defines its own level effects and maximum in `models/upgrades.go`. Speed currently has four levels: **1 → 0.5**, **2 → 1**, **3 → 1.5**, and **4 → 2** world units per turn. Omitted upgrades and existing database records default to level 1. Map templates can provide initial castle levels.
+
+To increase a castle's speed by one level, submit a command to `POST /generation/migrate`:
+
+```json
+{
+  "game_id": 1,
+  "commands": [
+    {
+      "CommandType": "upgrade_castle",
+      "Parameters": {"logical_castle_id": 0, "upgrade_type": "speed"}
+    }
+  ]
+}
+```
+
+Commands execute in the supplied order before movement. Sending troops after upgrading copies the new levels; troops sent before upgrading retain the old levels. Every group keeps its own snapshot throughout later turns. Upgrading at the maximum returns HTTP 409; unknown upgrade types or invalid levels return HTTP 422. A rejected command rolls back the whole turn. The temporary lobby still runs automatic battles without player gameplay controls.
+
 ## Schema and recovery
 
 Startup initializes the nine generic lobby tables, current game tables, and game-team bindings for a fresh schema. It does not import retired connection records or create compatibility data. New games use the nullable unique `lobby_id` link and a JSONB `replay` column. Creating or joining a lobby does not create a game; starting an Island Battles lobby does.

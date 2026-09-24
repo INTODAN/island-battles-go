@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"encoding/json"
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/models"
@@ -9,8 +10,10 @@ import (
 	"islandBattles/lobby/domain"
 	"islandBattles/lobby/httpapi"
 	"net/http"
+	"reflect"
 
 	"github.com/danielgtaylor/huma/v2"
+	"gorm.io/datatypes"
 )
 
 // SetupLobbyRoutes embeds reusable lobby commands and the explicit game binding.
@@ -28,12 +31,15 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 }
 
 func SetupRoutes(api huma.API, env *handlers.Env) {
+	// GORM JSON marshals as raw JSON, rather than the base64 string Huma infers
+	// from its underlying byte slice. Describe command parameters accordingly.
+	api.OpenAPI().Components.Schemas.RegisterTypeAlias(reflect.TypeOf(datatypes.JSON{}), reflect.TypeOf(json.RawMessage{}))
 	huma.Register(api, huma.Operation{Path: "/map/create", Method: http.MethodPost, DefaultStatus: http.StatusOK,
-		Summary: "Create a Map Template."}, env.CreateMapTemplate)
+		Summary: "Create a map template with optional castle upgrades.", Description: "Castle upgrades are a map of upgrade type to level. Omitted upgrades default to level 1; speed supports levels 1 through 4."}, env.CreateMapTemplate)
 	huma.Register(api, huma.Operation{Path: "/generation/create", Method: http.MethodPost, DefaultStatus: http.StatusOK,
 		Summary: "Create a Generation from a Map Template."}, env.CreateGenerationFromTemplate)
 	huma.Register(api, huma.Operation{Path: "/generation/migrate", Method: http.MethodPost, DefaultStatus: http.StatusOK,
-		Summary: "Migrate to the next generation in the game."}, env.MigrateGeneration)
+		Summary: "Advance one game turn and apply commands, including castle upgrades.", Description: "Commands execute in order. upgrade_castle accepts logical_castle_id and upgrade_type, and advances that upgrade by one level. Groups spawned afterward copy the castle upgrades; existing groups retain their levels. A rejected command rolls back the entire turn."}, env.MigrateGeneration)
 	huma.Register(api, huma.Operation{Path: "/game/{id}/graph", Method: http.MethodGet, DefaultStatus: http.StatusOK,
 		Summary: "Get a graph visualization of the game."}, env.GetGameGraph)
 }

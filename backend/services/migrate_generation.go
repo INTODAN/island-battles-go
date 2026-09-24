@@ -9,7 +9,21 @@ import (
 	"gorm.io/gorm"
 )
 
-func MigrateGeneration(db *gorm.DB, GameID uint, commands []models.CommandFields) (uint, error) {
+// MigrateGeneration commits the whole turn or rolls it back when a command is rejected.
+func MigrateGeneration(database *gorm.DB, gameID uint, commands []models.CommandFields) (uint, error) {
+	var generationID uint
+	err := database.Transaction(func(transaction *gorm.DB) error {
+		var err error
+		generationID, err = migrateGeneration(transaction, gameID, commands)
+		return err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return generationID, nil
+}
+
+func migrateGeneration(db *gorm.DB, GameID uint, commands []models.CommandFields) (uint, error) {
 	previousGeneration, err := dal.GetLatestGenerationForGame(db, GameID)
 	if err != nil {
 		return 0, err

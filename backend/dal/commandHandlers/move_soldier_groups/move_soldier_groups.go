@@ -11,7 +11,10 @@ import (
 type MoveSoldierGroupsParams struct{}
 
 func MoveSoldierGroupsHandler(db *gorm.DB, generation *models.Generation, parameters MoveSoldierGroupsParams) error {
-	soldierGroupsPositions := calculations.CalculateInitialPositions(generation.SoldierGroups)
+	soldierGroupsPositions, err := calculations.CalculateInitialPositions(generation.SoldierGroups)
+	if err != nil {
+		return err
+	}
 	clashPositions, err := calculations.CalculateClashPositions(soldierGroupsPositions)
 	if err != nil {
 		return err
