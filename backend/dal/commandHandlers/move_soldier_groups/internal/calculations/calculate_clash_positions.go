@@ -89,7 +89,7 @@ func CalculateClashPositions(movements []internal.SoldierGroupMoveDelta) ([]inte
 		}
 		for index := firstClash; index < len(clashes); index++ {
 			clash := &clashes[index]
-			if models.ClashStopGenerations > 0 && shouldStop(clash) {
+			if shouldStop(clash) {
 				// For two groups this is their contact midpoint; simultaneous multi-group
 				// clashes use the average of all participant positions.
 				midpoint := pgtype.Point{Valid: true}
@@ -98,6 +98,10 @@ func CalculateClashPositions(movements []internal.SoldierGroupMoveDelta) ([]inte
 					midpoint.P.Y += participant.Position.P.Y / float64(len(clash.Participants))
 				}
 				for _, participant := range clash.Participants {
+					stopGenerations, err := participant.SoldierGroup.Upgrades.Value(models.ClashStopGenerationsUpgrade)
+					if err != nil {
+						return nil, err
+					}
 					movement := &movements[movementIndices[participant.SoldierGroup]]
 					movement.Start, movement.End, movement.StartTime = midpoint, midpoint, nextTime
 					movement.ArrivalTime = nil
@@ -105,7 +109,7 @@ func CalculateClashPositions(movements []internal.SoldierGroupMoveDelta) ([]inte
 						time := nextTime
 						movement.ArrivalTime = &time
 					}
-					movement.PauseGenerations = max(movement.PauseGenerations, models.ClashStopGenerations-1)
+					movement.PauseGenerations = max(movement.PauseGenerations, uint(stopGenerations)-1)
 				}
 			}
 			resolveClash(clash)

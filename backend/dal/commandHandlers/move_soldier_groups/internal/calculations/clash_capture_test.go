@@ -138,8 +138,12 @@ func TestClashStopThresholdAndMidpoint(t *testing.T) {
 			if movements[0].End.P.X != expectedLeft || movements[1].End.P.X != expectedRight {
 				t.Fatalf("wrong final positions: %+v", movements)
 			}
-			if movements[0].PauseGenerations != 0 || movements[1].PauseGenerations != 0 {
-				t.Fatal("default stop must include only the clash generation")
+			expectedPause := uint(0)
+			if scenario.stop {
+				expectedPause = 2
+			}
+			if movements[0].PauseGenerations != expectedPause || movements[1].PauseGenerations != expectedPause {
+				t.Fatal("default stop must include the clash generation and two more")
 			}
 		})
 	}
@@ -169,15 +173,17 @@ func TestClashRechecksPathsAfterStopping(t *testing.T) {
 	}
 }
 
-func TestPauseDurationZeroDisablesStopping(t *testing.T) {
-	previous := models.ClashStopGenerations
-	models.ClashStopGenerations = 0
-	t.Cleanup(func() { models.ClashStopGenerations = previous })
-	movements := []internal.SoldierGroupMoveDelta{clashMovement(0, 2, 1, 10, 0), clashMovement(2, 0, 2, 5, 1)}
-	if _, err := CalculateClashPositions(movements); err != nil {
-		t.Fatal(err)
+func TestClashPauseUsesEachGroupUpgrade(t *testing.T) {
+	movements := []internal.SoldierGroupMoveDelta{clashMovement(0, 1, 1, 20, 0), clashMovement(0, 1, 1, 10, 1), clashMovement(0, -1, 2, 15, 2)}
+	movements[1].SoldierGroup.Upgrades = models.Upgrades{models.ClashStopGenerationsUpgrade: 3}
+	clashes, err := CalculateClashPositions(movements)
+	if err != nil || len(clashes) != 1 {
+		t.Fatalf("clashes=%+v err=%v", clashes, err)
 	}
-	if movements[0].End.P.X != 2 || movements[0].PauseGenerations != 0 {
-		t.Fatalf("zero duration stopped movement: %+v", movements[0])
+	if movements[0].PauseGenerations != 2 || movements[1].PauseGenerations != 0 {
+		t.Fatal("each survivor must use its own upgrade snapshot")
+	}
+	if clashes[0].Participants[0].RemainingSoldiers != 5 || clashes[0].Participants[1].RemainingSoldiers != 10 {
+		t.Fatal("both allied groups must survive this clash")
 	}
 }

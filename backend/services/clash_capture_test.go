@@ -198,15 +198,17 @@ func TestEmptyAndSelfSendOrdersAreRejected(t *testing.T) {
 	}
 }
 
-func TestClashPausePersistsForConfiguredGenerations(t *testing.T) {
-	for _, duration := range []uint{1, 3} {
+func TestClashPausePersistsForUpgradedGenerations(t *testing.T) {
+	for level, duration := range []uint{3, 2, 1} {
 		t.Run(fmt.Sprintf("duration-%d", duration), func(t *testing.T) {
-			previous := models.ClashStopGenerations
-			models.ClashStopGenerations = duration
-			t.Cleanup(func() { models.ClashStopGenerations = previous })
 			database, generation := captureFixture(t)
 			captureGroup(t, database, generation, 1, 10, 1)
 			captureGroup(t, database, generation, 2, 5, 1.75)
+			group := &generation.SoldierGroups[0]
+			group.Upgrades[models.ClashStopGenerationsUpgrade] = level + 1
+			if err := database.Save(group).Error; err != nil {
+				t.Fatal(err)
+			}
 			for turn := uint(0); turn <= duration; turn++ {
 				// A small attack during the pause must neither grant movement nor reset it.
 				if duration == 3 && turn == 1 {
@@ -266,6 +268,50 @@ func TestPausedGroupRetainsUpgradesAcrossGenerations(t *testing.T) {
 		group = &generation.SoldierGroups[0]
 		if group.Position.P.X != expectedPosition || group.Upgrades[models.SpeedUpgrade] != 2 || group.MovementPauseGenerations != 0 {
 			t.Fatalf("upgrade or pause lost across generations: position=%v level=%d pause=%d", group.Position.P.X, group.Upgrades[models.SpeedUpgrade], group.MovementPauseGenerations)
+		}
+	}
+}
+
+func TestClashStopUpgradeOnlyAffectsNewTroops(t *testing.T) {
+	database, generation := captureFixture(t)
+	sendParameters, err := json.Marshal(commandHandlers.SendSoldierGroupParams{OriginLogicalCastleID: 0, DestinationLogicalCastleID: 1, SoldierAmount: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	upgradeParameters, err := json.Marshal(commandHandlers.UpgradeCastleParams{LogicalCastleID: 0, UpgradeType: models.ClashStopGenerationsUpgrade})
+	if err != nil {
+		t.Fatal(err)
+	}
+	send := models.CommandFields{CommandType: models.SendSoldierGroup, Parameters: sendParameters}
+	upgrade := models.CommandFields{CommandType: models.UpgradeCastle, Parameters: upgradeParameters}
+	if _, err := services.MigrateGeneration(database, generation.GameID, []models.CommandFields{send}); err != nil {
+		t.Fatal(err)
+	}
+	generationID, err := services.MigrateGeneration(database, generation.GameID, []models.CommandFields{upgrade, upgrade, send})
+	if err != nil {
+		t.Fatal(err)
+	}
+	generation, err = dal.GetGeneration(database, generationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	castle, err := dal.GetCastleFromGeneration(generation, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if castle.Upgrades[models.ClashStopGenerationsUpgrade] != 3 || castle.SoldierAmount != 52 {
+		t.Fatalf("upgrade purchase wrong: level=%d balance=%d", castle.Upgrades[models.ClashStopGenerationsUpgrade], castle.SoldierAmount)
+	}
+	if len(generation.SoldierGroups) != 2 {
+		t.Fatal("expected both old and new troops")
+	}
+	for _, group := range generation.SoldierGroups {
+		expected := 1
+		if group.LogicalSoldierGroupID == 1 {
+			expected = 3
+		}
+		if group.Upgrades[models.ClashStopGenerationsUpgrade] != expected {
+			t.Fatalf("wrong snapshot for group %d: %+v", group.LogicalSoldierGroupID, group.Upgrades)
 		}
 	}
 }
