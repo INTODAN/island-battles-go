@@ -167,3 +167,70 @@ func TestSoldierGroupColor(t *testing.T) {
 	// Export the game graph so a human can inspect the full capture timeline
 	_ = testutils.CreateGameGraphForTest(t, db, currentGameID)
 }
+
+func TestClashRadiusDefaultAndMigration(t *testing.T) {
+	database := testutils.InitTestDB(t)
+	generationID := testutils.CreateGenerationForTest(t, database)
+	generation, err := dal.GetGeneration(database, generationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	origin, destination := generation.Map.Castles[0], generation.Map.Castles[1]
+	for _, radius := range []float64{0, .75} {
+		group := models.SoldierGroup{
+			SoldierGroupFields: models.SoldierGroupFields{OriginCastleID: origin.ID, DestinationCastleID: destination.ID, SoldierAmount: 2},
+			GenerationID:       generationID, TeamColor: origin.TeamColor, Position: origin.Position, ClashRadius: radius,
+		}
+		if _, err := dal.CreateSoldierGroup(database, &group); err != nil {
+			t.Fatal(err)
+		}
+	}
+	migratedID, err := services.MigrateGeneration(database, generation.GameID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrated, err := dal.GetGeneration(database, migratedID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(migrated.SoldierGroups) != 2 {
+		t.Fatalf("expected two groups: %+v", migrated.SoldierGroups)
+	}
+	for _, group := range migrated.SoldierGroups {
+		expected := models.DefaultClashRadius
+		if group.LogicalSoldierGroupID == 1 {
+			expected = .75
+		}
+		if group.ClashRadius != expected {
+			t.Fatalf("radius changed across generation: %v, want %v", group.ClashRadius, expected)
+		}
+	}
+}
+
+func TestExistingSoldierGroupsReceiveDefaultRadius(t *testing.T) {
+	database := testutils.InitTestDB(t)
+	generationID := testutils.CreateGenerationForTest(t, database)
+	generation, err := dal.GetGeneration(database, generationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := commandHandlers.SendSoldierGroupHandler(database, generation, commandHandlers.SendSoldierGroupParams{OriginLogicalCastleID: 0, DestinationLogicalCastleID: 1, SoldierAmount: 2}); err != nil {
+		t.Fatal(err)
+	}
+	// Recreate the prior schema, then apply the same model migration as startup.
+	if err := database.Migrator().DropColumn(&models.SoldierGroup{}, "ClashRadius"); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.AutoMigrate(&models.SoldierGroup{}); err != nil {
+		t.Fatal(err)
+	}
+	var loaded []models.SoldierGroup
+	// Use a new query shape after deliberately changing the schema in this
+	// connection; existing SELECT * prepared statements describe the old columns.
+	if err := database.Select("clash_radius").Where(&models.SoldierGroup{GenerationID: generationID}).Find(&loaded).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded) != 1 || loaded[0].ClashRadius != .25 {
+		t.Fatalf("existing row was not defaulted: %+v", loaded)
+	}
+}

@@ -21,7 +21,17 @@ type SoldierGroup struct {
 	GenerationID          uint
 	LogicalSoldierGroupID uint
 	TeamColor             uint
+	ClashRadius           float64      `json:"clash_radius" gorm:"not null;default:0.25;check:clash_radius > 0"`
 	Position              pgtype.Point `gorm:"type:point"`
 }
 
 const SoldierGroupSpeedPerGeneration = 0.5
+const DefaultClashRadius = 0.25
+
+// EffectiveClashRadius also supplies the default for groups not yet persisted.
+func (group SoldierGroup) EffectiveClashRadius() float64 {
+	if group.ClashRadius == 0 {
+		return DefaultClashRadius
+	}
+	return group.ClashRadius
+}

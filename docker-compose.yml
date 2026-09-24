@@ -22,7 +22,7 @@ services:
     image: centrifugo/centrifugo:v6.9.6
     restart: unless-stopped
     volumes:
-      - ./centrifugo:/centrifugo:ro,Z
+      - ./lobby/centrifugo:/centrifugo:ro,Z
     command: centrifugo -c /centrifugo/centrifugo-config.toml
     ports:
       - "8000:8000"

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Island Battles replay</title>
+<style>
+* { box-sizing: border-box; }
+body { margin: 0; padding: 20px; font-family: system-ui, sans-serif; color: #202d40; background: #fff; }
+h1 { font-size: 1.2rem; margin: 0 0 6px; }
+p { margin: 0; color: #687386; font-size: .85rem; }
+#teams { display: flex; flex-wrap: wrap; gap: 12px; margin: 18px 0; }
+.team { flex: 1; min-width: 130px; padding: 12px; background: #f5f7fb; border-radius: 10px; border-left: 4px solid; }
+.team strong, .team span { display: block; overflow-wrap: anywhere; }
+.team span { font-size: .8rem; margin-top: 5px; }
+svg { display: block; width: 100%; max-height: 330px; border-radius: 14px; background: #edf5fb; }
+.controls { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+button { padding: 9px 14px; border: 0; border-radius: 8px; background: #edf2fb; color: #305dc7; font: inherit; cursor: pointer; }
+button:focus-visible, input:focus-visible { outline: 3px solid #aac4ff; outline-offset: 3px; }
+input { flex: 1; min-width: 100px; accent-color: #3464e0; }
+#turn { white-space: nowrap; font-size: .82rem; }
+#outcome { margin-top: 14px; font-weight: 600; color: #202d40; }
+@media (max-width: 450px) { body { padding: 12px; } .controls input { flex-basis: 100%; order: 1; } }
+</style>
+</head>
+<body>
+<h1>Island Battles</h1>
+<p>Automatic battle · Circles are castles; moving dots are troops. Numbers show soldiers.</p>
+<div id="teams"></div>
+<svg id="battlefield" viewBox="0 0 800 600" role="img" aria-label="Battlefield showing castles and moving troops"></svg>
+<div class="controls">
+<button id="play" type="button">Pause</button>
+<button id="result" type="button">Show result</button>
+<label id="turn" for="timeline"></label>
+<input id="timeline" type="range" min="0" value="0" aria-label="Replay turn">
+</div>
+<p id="outcome" role="status"></p>
+<script>
+"use strict";
+const replay = {{.}};
+document.body.dataset.gameId = replay.game_id;
+const colors = ["#3464e0", "#d94d5b", "#288562", "#9560cb", "#b37914", "#24828f"];
+const field = document.getElementById("battlefield");
+const slider = document.getElementById("timeline");
+const play = document.getElementById("play");
+const lastTurn = replay.frames.length - 1;
+let turn = 0;
+let playing = true;
+slider.max = lastTurn;
+const color = (team) => colors[(team - 1) % colors.length] || "#8290a4";
+const worldScale = 100;
+const castleRadius = 0.5; // Visual only; castle arrival still uses its center.
+const point = (node) => [400 + node.x * worldScale, 300 + node.y * worldScale];
+const scoreLabels = new Map();
+for (const team of replay.teams) {
+  const card = document.createElement("div");
+  card.className = "team";
+  card.style.borderColor = color(team.color);
+  const title = document.createElement("strong");
+  title.textContent = `${team.name} · ${team.players.join(", ")}`;
+  const score = document.createElement("span");
+  card.append(title, score);
+  document.getElementById("teams").append(card);
+  scoreLabels.set(team.color, score);
+}
+function svg(tag, attributes, text) {
+  const element = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [key, value] of Object.entries(attributes)) element.setAttribute(key, value);
+  if (text !== undefined) element.textContent = text;
+  field.append(element);
+  return element;
+}
+function render() {
+  const frame = replay.frames[turn];
+  field.replaceChildren();
+  for (let index = 1; index < frame.castles.length; index++) {
+    const [x1, y1] = point(frame.castles[index - 1]);
+    const [x2, y2] = point(frame.castles[index]);
+    svg("line", { x1, y1, x2, y2, stroke: "#c6d8e7", "stroke-width": 2, "stroke-dasharray": "7 8" });
+  }
+  for (const castle of frame.castles) {
+    const [x, y] = point(castle);
+    svg("circle", { cx: x, cy: y, r: castleRadius * worldScale, fill: "#fff", stroke: color(castle.color), "stroke-width": 3, "data-kind": "castle" });
+    svg("text", { x, y: y + 8, "text-anchor": "middle", "font-size": 26, "font-weight": 700, fill: color(castle.color) }, castle.soldiers);
+    svg("text", { x, y: y + 72, "text-anchor": "middle", "font-size": 17, fill: "#52667b" }, `Castle ${castle.id + 1}`);
+  }
+  for (const group of frame.groups) {
+    const [x, y] = point(group);
+    svg("circle", { cx: x, cy: y, r: (group.clash_radius ?? 0.25) * worldScale, fill: color(group.color), stroke: "#fff", "stroke-width": 2, "data-kind": "soldier-group" });
+    svg("text", { x, y: y + 5, "text-anchor": "middle", "font-size": 13, "font-weight": 700, fill: "white" }, group.soldiers);
+  }
+  for (const team of replay.teams) {
+    const castles = frame.castles.filter((castle) => castle.color === team.color);
+    const soldiers = [...castles, ...frame.groups.filter((group) => group.color === team.color)].reduce((total, node) => total + node.soldiers, 0);
+    scoreLabels.get(team.color).textContent = `${castles.length} castles · ${soldiers} soldiers`;
+  }
+  slider.value = turn;
+  document.getElementById("turn").textContent = `Turn ${turn} / ${lastTurn}`;
+  document.getElementById("outcome").textContent = turn === lastTurn ? replay.outcome : "Watching the battle…";
+  play.textContent = playing ? "Pause" : turn === lastTurn ? "Replay" : "Play";
+}
+play.addEventListener("click", () => { if (turn === lastTurn) turn = 0; playing = !playing; render(); });
+slider.addEventListener("input", () => { turn = Number(slider.value); playing = false; render(); });
+document.getElementById("result").addEventListener("click", () => { turn = lastTurn; playing = false; render(); });
+setInterval(() => {
+  if (!playing) return;
+  if (turn < lastTurn) turn++;
+  if (turn === lastTurn) playing = false;
+  render();
+}, 500);
+render();
+</script>
+</body>
+</html>

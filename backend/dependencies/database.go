@@ -3,7 +3,6 @@ package dependencies
 import (
 	"context"
 	"fmt"
-	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/models"
 	lobbypostgres "islandBattles/lobby/postgres"
 
@@ -33,9 +32,9 @@ func initializeSchema(ctx context.Context, db *gorm.DB) error {
 	}
 	err := db.WithContext(ctx).AutoMigrate(&models.Game{}, &models.Map{}, &models.Castle{}, &models.CastleTemplate{},
 		&models.MapTemplate{},
-		&models.Generation{}, &models.SoldierGroup{}, &models.Command{})
+		&models.Generation{}, &models.SoldierGroup{}, &models.Command{}, &models.TeamBindingRecord{})
 	if err != nil {
 		return fmt.Errorf("initialize game schema: %w", err)
 	}
-	return lobbyadapter.InitializeSchema(ctx, db)
+	return nil
 }

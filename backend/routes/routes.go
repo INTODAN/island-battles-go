@@ -3,8 +3,10 @@ package routes
 import (
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/lobbyadapter"
-	"islandBattles/lobby"
+	"islandBattles/backend/models"
+	"islandBattles/lobby/application"
 	"islandBattles/lobby/auth"
+	"islandBattles/lobby/domain"
 	"islandBattles/lobby/httpapi"
 	"net/http"
 
@@ -13,9 +15,16 @@ import (
 
 // SetupLobbyRoutes embeds reusable lobby commands and the explicit game binding.
 // Centrifugo's trusted proxy endpoints are registered separately from OpenAPI.
-func SetupLobbyRoutes(api huma.API, application lobby.Application, authentication *auth.Service, gameAdapter *lobbyadapter.Service) {
-	httpapi.Register(api, application, authentication, authentication)
-	lobbyadapter.Register(api, gameAdapter, authentication)
+func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authentication *auth.Service, gameBinding *application.GameBinding[models.BindingResult], game *handlers.LobbyGame) {
+	httpapi.Register(api, lobbyadapter.WithGameStart(lobbyApplication, gameBinding), authentication, authentication)
+	lobbyadapter.Register(api, gameBinding, authentication)
+	api.OpenAPI().Paths["/lobby/v1/games/{game_key}/lobbies/{lobby_id}/start"].Post.Description += " Island Battles also runs an automatic game and saves its spectator replay. Retrying resumes a failed game launch."
+	huma.Register(api, huma.Operation{
+		OperationID: "getIslandLobbyReplay", Path: "/game/from-lobby/{lobby_id}/replay", Method: http.MethodGet,
+		Summary:     "Watch the automatic Island Battles game for a started lobby",
+		Description: "Current lobby members can view the same saved spectator replay. No game commands are accepted.",
+		Tags:        []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
+	}, game.Replay)
 }
 
 func SetupRoutes(api huma.API, env *handlers.Env) {

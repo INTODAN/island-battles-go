@@ -16,9 +16,11 @@ import (
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/routes"
-	"islandBattles/lobby"
+	"islandBattles/lobby/application"
 	"islandBattles/lobby/auth"
 	"islandBattles/lobby/delivery"
+	"islandBattles/lobby/domain"
+	"islandBattles/lobby/frontend"
 	lobbypostgres "islandBattles/lobby/postgres"
 	"islandBattles/lobby/realtime"
 
@@ -54,9 +56,9 @@ func run(ctx context.Context, config dependencies.Config, logger *slog.Logger) e
 		return err
 	}
 	defer sqlDatabase.Close()
-	clock := lobby.SystemClock{}
-	identifiers := lobby.CryptoIdentifiers{}
-	policy := lobby.DefaultPolicy("island-battles", "quiz-demo")
+	clock := domain.SystemClock{}
+	identifiers := domain.CryptoIdentifiers{}
+	policy := domain.DefaultPolicy("island-battles", "quiz-demo")
 	store, err := lobbypostgres.NewStore(database, clock, identifiers)
 	if err != nil {
 		return err
@@ -69,11 +71,11 @@ func run(ctx context.Context, config dependencies.Config, logger *slog.Logger) e
 	if err != nil {
 		return err
 	}
-	application, err := lobby.NewService(store, clock, identifiers, policy)
+	lobbyService, err := application.NewService(store, clock, identifiers, policy)
 	if err != nil {
 		return err
 	}
-	gameAdapter, err := lobbyadapter.NewService(database, application)
+	gameBinding, err := lobbyadapter.NewService(database, lobbyService)
 	if err != nil {
 		return err
 	}
@@ -94,7 +96,7 @@ func run(ctx context.Context, config dependencies.Config, logger *slog.Logger) e
 	if err != nil {
 		return err
 	}
-	sweeper, err := lobby.NewSweeper(store, clock, policy, 64)
+	sweeper, err := application.NewSweeper(store, clock, policy, 64)
 	if err != nil {
 		return err
 	}
@@ -103,8 +105,12 @@ func run(ctx context.Context, config dependencies.Config, logger *slog.Logger) e
 	api := humachi.New(router, huma.DefaultConfig("Island Battles Go Backend", "1.0.0"))
 	environment := handlers.Env{DB: database}
 	routes.SetupRoutes(api, &environment)
-	routes.SetupLobbyRoutes(api, application, authentication, gameAdapter)
+	routes.SetupLobbyRoutes(api, lobbyService, authentication, gameBinding, &handlers.LobbyGame{Database: database, Lobbies: lobbyService, Authenticator: authentication})
 	proxy.Register(router)
+	router.Get("/lobby/ui", func(response http.ResponseWriter, request *http.Request) {
+		http.Redirect(response, request, "/lobby/ui/", http.StatusTemporaryRedirect)
+	})
+	router.Handle("/lobby/ui/*", http.StripPrefix("/lobby/ui/", frontend.Handler()))
 	router.Get("/healthz", func(response http.ResponseWriter, request *http.Request) { response.WriteHeader(http.StatusNoContent) })
 	server := &http.Server{Addr: config.HTTPAddr, Handler: router, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 	workerContext, stopWorkers := context.WithCancel(ctx)

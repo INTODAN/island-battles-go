@@ -12,44 +12,41 @@
 
 ## Project Structure
 
-- `lobby/`: Generic identities, rooms, teams, memberships, reconnect leases, PostgreSQL persistence, Huma HTTP API and durable event delivery. It has no Island Battles dependency.
-- `backend/`: Game logic and an explicit adapter that binds a started lobby to an Island Battles game.
-- `clients/lobby-python/`: Generated HTTP SDK, realtime wrapper and interactive CLI.
-- `clients/main.go`: Go guest/create/join connection example.
-- `api/lobby/`: Deterministically exported Huma OpenAPI and invalidation schema.
-- `centrifugo/`: Authorized subscriptions and transport recovery configuration.
+- `lobby/`: Independent generic lobby component: Go module, clients, API artifacts, transport configuration, docs, and shared test tooling. See [its README](lobby/README.md).
+- `backend/`: Island Battles game logic and wiring to the generic lobby module.
+- `integration/island_battles/`: Host-specific lobby/game binding acceptance checks.
+- `scripts/test-lobby-acceptance.sh`: Runs the shared acceptance suite against the Island Battles host, including its game-specific checks.
+- `go.work`: Connects the host and lobby Go modules for local development.
 
 ## Development Setup
 
-Requires Go 1.25+, Docker with Compose, and Python 3.14+ with uv for the Python client.
+Requires Go 1.25+ and either Docker with Compose or Podman on Linux. Python 3.14+ with uv is only needed for the Python client and acceptance tests.
 
 ```sh
-cp .env.example .env
-# Review local configuration before starting services.
-set -a
-. ./.env
-set +a
-docker compose up -d db centrifugo
-go run ./backend
+./scripts/dev.sh
 ```
 
-PostgreSQL listens on port 5432, Centrifugo on 8000, and the backend on 8888. Compose loads `.env`; the Go process requires the same variables exported into its environment. Centrifugo proxies subscription authorization to the host backend on port 8888. `/healthz` reports HTTP readiness; Huma serves API documentation at `/docs`.
+The script creates `.env` from `.env.example` if needed, exports it, starts the dependencies, waits for PostgreSQL, and runs the backend. Open **http://localhost:8888/lobby/ui/** in two fresh tabs to test the lobby with two players. No frontend build is required.
 
-Use the [Python client walkthrough](clients/lobby-python/README.md) for two-player team selection, or the [Go example](clients/README.md). Backend settings and the explicit game-binding endpoint are documented in [backend/README.md](backend/README.md).
+PostgreSQL listens on port 5432, Centrifugo on 8000, and the backend on 8888. The native Podman path uses these local defaults, stores database data in the `island-battles-dev-postgres` volume, and disables the Centrifugo admin UI. `/healthz` reports HTTP readiness; Huma serves API documentation at `/docs`.
+
+Ctrl+C stops the backend. Dependencies remain running for the next launch. Stop them with `docker compose stop` or, for native Podman, `podman stop island-battles-dev-db island-battles-dev-centrifugo`.
+
+Use the [Python client walkthrough](lobby/clients/lobby-python/README.md) for two-player team selection, or the [Go example](lobby/clients/README.md). Backend settings and the explicit game-binding endpoint are documented in [backend/README.md](backend/README.md).
 
 ## Architecture Notes
 
-The [multiplayer architecture decision](docs/multiplayer-architecture.md) explains the design, and the [task pack](docs/tasks/generic-lobby/README.md) records contracts, edge cases and agent assignments. Guest credentials identify players; opening a socket does not create or join a room. HTTP commands commit state and durable invalidations together. Centrifugo reconnects and recovers transport history; clients reconcile authorized HTTP snapshots after subscribing and periodically.
+The [multiplayer architecture decision](lobby/docs/multiplayer-architecture.md) explains the design, and the [task pack](lobby/docs/tasks/generic-lobby/README.md) records contracts, edge cases and agent assignments. Guest credentials identify players; opening a socket does not create or join a room. HTTP commands commit state and durable invalidations together. Centrifugo reconnects and recovers transport history; clients reconcile authorized HTTP snapshots after subscribing and periodically.
 
-Teams and readiness belong to the generic lobby. Starting freezes a roster. An explicit `POST /game/from-lobby` binds a started `island-battles` lobby to a game; it does not generate a map or start simulation. Lambda routing, round timers and C#/TypeScript clients remain future work.
+Teams and readiness belong to the generic lobby. Starting freezes a roster. The Island Battles adapter then creates a map, runs an automatic battle, and saves a spectator replay for both players. `POST /game/from-lobby` can also retry a failed game launch. The generic lobby has no dependency on the game simulation.
 
 ## Commands
 
-*   **Lint/Verify (Go):** `go vet ./...`
-*   **Format:** `go fmt ./...`
-*   **Test (disposable PostgreSQL containers):** `go test ./...`
-*   **Check OpenAPI:** `go run ./cmd/export-lobby-openapi --output api/lobby/openapi.json --events-output api/lobby/events.json --check`
-*   **Python unit tests:** `uv run --project clients/lobby-python --locked pytest clients/lobby-python/tests`
+*   **Lint/Verify (Go):** `go vet ./... ./lobby/...`
+*   **Format:** `go fmt ./... ./lobby/...`
+*   **Test (disposable PostgreSQL containers):** `go test ./... ./lobby/...`
+*   **Check OpenAPI:** `go run ./lobby/cmd/export-lobby-openapi --output lobby/api/openapi.json --events-output lobby/api/events.json --check`
+*   **Python unit tests:** `uv run --project lobby/clients/lobby-python --locked pytest lobby/clients/lobby-python/tests`
 *   **Live acceptance (Linux Docker or Podman):** `./scripts/test-lobby-acceptance.sh`
 
 ## Testing & Visualization

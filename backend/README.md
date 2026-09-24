@@ -6,7 +6,9 @@ The Go/Huma server hosts the reusable [`lobby/`](../lobby/README.md) package and
 
 Follow the [root setup](../README.md#development-setup). All seven backend settings in [`.env.example`](../.env.example) are required: database URL, HTTP address, public WebSocket URL, server-only Centrifugo API URL/key, connection-token signing secret and internal proxy secret. Startup rejects missing values. Public clients receive only their guest credential and short-lived connection JWT.
 
-Use `go run ./backend` from the repository root. `/docs` exposes Huma documentation, `/openapi.json` the combined schema, and `/healthz` HTTP readiness. The lobby-only generated contract is in [`api/lobby/`](../api/lobby/README.md).
+Run `./scripts/dev.sh` from the repository root to load `.env`, start local dependencies with Docker Compose or Podman, and run the backend. If dependencies are already running and the environment is exported, `go run ./backend` also works. `/docs` exposes Huma documentation, `/openapi.json` the combined schema, and `/healthz` HTTP readiness. The lobby-only generated contract is in [`lobby/api/`](../lobby/api/README.md).
+
+Open `/lobby/ui/` for the [temporary two-player lobby frontend](../lobby/frontend/README.md). It is embedded in the backend and needs no separate frontend build.
 
 Compose mounts PostgreSQL 18's parent data directory at `/var/lib/postgresql`.
 
@@ -16,7 +18,17 @@ A guest session lasts 24 hours. Create/join is explicit and scoped by game key. 
 
 The host is the earliest active joiner. Team changes clear readiness. At least two members are required to start; all active members must choose a team, become ready and have a live lease. Starting freezes the roster; only roster players can subsequently rejoin that started room. An empty waiting room closes. Expired guest credentials require an explicit new session and do not transfer ownership.
 
-## Bind a started lobby to Island Battles
+## Automatic Island Battles games
+
+Starting an `island-battles` lobby through the hosted lobby API also creates and simulates its game. Each occupied team starts with a castle and 30 soldiers. Automatic orders send half a castle's soldiers toward the nearest enemy every six turns, staggered between teams. The existing generation engine handles production, movement, combat, and captures. The simulation ends when one team remains or after 60 turns; reaching the limit reports no winner.
+
+Both players see the saved replay at `/lobby/ui/`. Playback controls do not issue gameplay commands. `GET /game/from-lobby/{lobby_id}/replay` requires a guest bearer credential and current lobby membership. Player names, teams, frames, and outcome are saved together and survive restarts. The replay uses embedded HTML/SVG with no external JavaScript dependency.
+
+Soldier groups have a persisted `ClashRadius`, defaulting to **0.25 world units**, which is copied to subsequent generations. Enemies clash when their center-to-center distance reaches either group's radius (the larger radius, rather than their sum). Detection covers the full movement interval; each group stops at its own first contact position for that turn. Simultaneous connected contacts resolve together. The replay draws troop circles using their stored radius and castle circles with a visual-only radius of **0.5 units**, with the same world scale on both axes. Castle arrival/capture rules are unchanged. Existing troop rows receive the default during migration; old saved replays display the default radius but retain their original simulation results.
+
+The Island Battles adapter wraps the generic start operation. Generic lobby start freezes the roster first; the game then locks its bound row and commits all simulated generations and its replay in one transaction. Concurrent or repeated starts reuse the saved result. A failed simulation rolls back its generations; retry start (or the endpoint below) to finish preparing the same game. Other game keys are unaffected.
+
+### Retry or explicitly bind a started lobby
 
 `POST /game/from-lobby` accepts the guest bearer credential and body:
 
@@ -24,20 +36,22 @@ The host is the earliest active joiner. Team changes clear readiness. At least t
 {"game_key":"island-battles","lobby_id":"<started-lobby-uuid>"}
 ```
 
-The active host receives `game_id`, `lobby_id` and a stable team UUID/order/color mapping. Replays return the same game after reauthorizing the caller. The transaction creates the game and all mappings together. Generic rooms create no Island Battles rows. Map generation and simulation are separate existing game operations.
+The active host receives `game_id`, `lobby_id` and a stable team UUID/order/color mapping after the automatic simulation completes. Replays return the same game after reauthorizing the caller. The binding transaction creates the game and all mappings together; simulation and saved replay are committed together in a subsequent transaction.
+
+`lobbyadapter` selects the Island Battles game key, connects game persistence to the shared binding service, and registers the game endpoint. It uses types directly from `models`, without aliases. Authorization and HTTP handling are delegated to the [shared game-binding helpers](../lobby/README.md#binding-a-game-to-a-started-lobby). Island Battles persistence lives in `dal/lobby_binding.go`; its only translation is from generic team UUID/order to simulation colors 1..N, with zero reserved for neutral.
 
 ## Schema and recovery
 
-Startup initializes the nine generic lobby tables, current game tables, and game-team bindings for a fresh schema. It does not import retired connection records or create compatibility data. New games use the nullable unique `lobby_id` link; generic lobby operations create no game rows until the explicit binding endpoint is called.
+Startup initializes the nine generic lobby tables, current game tables, and game-team bindings for a fresh schema. It does not import retired connection records or create compatibility data. New games use the nullable unique `lobby_id` link and a JSONB `replay` column. Creating or joining a lobby does not create a game; starting an Island Battles lobby does.
 
 The outbox retries publication after Centrifugo failure. Wire events contain only invalidation identifiers/version, never roster details. Subscribe and refresh proxies authorize current membership with a server-only shared header. Clients subscribe before fetching a snapshot and reconcile periodically, so bounded history is an optimization rather than durable state storage. Existing unrelated game command authorization has not been redesigned in this extraction.
 
 ## Verification
 
 ```sh
-go test ./...
-go vet ./...
-go test -race ./lobby/... ./backend/lobbyadapter/...
+go test ./... ./lobby/...
+go vet ./... ./lobby/...
+go test -race ./lobby/... ./backend/lobbyadapter/... ./backend/dal/...
 ./scripts/test-lobby-acceptance.sh
 ```
 
