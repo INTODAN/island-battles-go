@@ -1,39 +1,75 @@
 # Island Battles Python player client
 
-An asyncio client for authenticated generation turns. It uses the existing lobby guest bearer credential and the lobby connection-token endpoint. Install with `uv sync --locked` (Python 3.14 or later), then subclass `IslandBattlesClient`:
+An asyncio client for authenticated generation turns. It uses the existing lobby guest bearer credential and connection-token endpoint. Install with `uv sync --locked` (Python 3.14 or later). Keep the authenticated generic `LobbyClient` joined and running while the game client plays: it owns the lobby heartbeat and lease. Closing it can revoke game access after the lease expires.
+
+Subclass `Player` and implement `async on_generation(generation, commands) -> None`. The shared `Player.__init__(team_color)` assigns `self.team_color` directly, so a strategy needs no constructor or property unless it has additional setup. `Player` is an abstract base class: subclasses must implement `on_generation` before they can be instantiated. It contains no networking or command implementation. The client reads the first authorized generation state, obtains the frozen team color, and calls `player_factory(team_color)` once to build the strategy:
 
 ```python
 import asyncio
-from island_battles_client import IslandBattlesClient, SoldierGroupOrder
+
+from island_battles_client import (
+    NEUTRAL_TEAM_COLOR,
+    CommandReceiver,
+    Generation,
+    IslandBattlesClient,
+    Player,
+    SoldierGroupOrder,
+)
 
 
-class MyPlayer(IslandBattlesClient):
-    async def next_generation(self, generation):
-        own = next((castle for castle in generation.generation.castles
-                    if castle.team_color == generation.team_color and castle.soldiers > 1), None)
-        other = next((castle for castle in generation.generation.castles
-                      if castle.team_color != generation.team_color), None)
-        if own and other:
-            await self.send_soldier_groups([SoldierGroupOrder(own.id, other.id, 1)])
-        await self.end_turn()  # Empty final batch; seals this generation's turn.
+class MyPlayer(Player):
+    async def on_generation(
+        self, generation: Generation, commands: CommandReceiver
+    ) -> None:
+        own = next(
+            (castle for castle in generation.castles
+             if castle.team_color == self.team_color and castle.soldiers > 0),
+            None,
+        )
+        enemy = next(
+            (castle for castle in generation.castles
+             if castle.team_color not in (NEUTRAL_TEAM_COLOR, self.team_color)),
+            None,
+        )
+        if own is not None and enemy is not None:
+            await commands.send_soldier_groups([
+                SoldierGroupOrder(
+                    origin_logical_castle_id=own.id,
+                    destination_logical_castle_id=enemy.id,
+                    soldier_amount=1,
+                )
+            ])
 
 
-async def main():
-    player = MyPlayer("http://localhost:8888", "guest-bearer-token", "lobby-uuid")
-    await player.run()
+async def main() -> None:
+    client = IslandBattlesClient(
+        "http://localhost:8888",
+        "guest-bearer-token",
+        "lobby-uuid",
+        player_factory=MyPlayer,
+    )
+    await client.run()
 
 
 asyncio.run(main())
 ```
 
-The full example is in [examples/player.py](examples/player.py). Obtain the guest credential and lobby ID through the generic lobby flow before starting this client. **Keep the authenticated `LobbyClient` joined and running while the game client plays:** it owns the lobby heartbeat/lease. Closing it can revoke game access after the lobby lease expires. The game is initialized when that lobby starts; every player in its frozen roster must complete the turn before the next generation appears.
+The full example is in [examples/player.py](examples/player.py). Obtain the guest credential and lobby ID through the generic lobby flow before starting this client. `player_factory` is invoked once after authentication and the first authorized state read, with the team color bound to that player's frozen roster entry. The constructed strategy is available as `client.player`.
 
-`start()` subscribes to the authenticated `player:<player_uuid>` channel and synchronizes the current state; it returns a `GenerationState`. A first authorized GET discovers the channel, then a second GET after subscription acknowledgment closes the delivery gap. `state` holds the latest authorized state. `next_generation(self, generation)` receives that `GenerationState` once per generation ID, on a separate serial task. Commands inside the callback stay pinned to its generation even if the client refreshes a newer state during the callback. Calls outside the callback use the latest `state`. `run()` waits for callbacks or reconciliation errors and closes the client; `close()` and `async with` are also available.
+If a strategy needs its own `__init__`, call `super().__init__(team_color)` before initializing its additional state.
 
-`send_soldier_groups()` immediately posts a batch with `complete: false`. It accepts `SoldierGroupOrder` values or dictionaries with `origin_logical_castle_id`, `destination_logical_castle_id`, and `soldier_amount`. Castle ID zero is valid. `send_soldier_group()` is a single-order convenience method. `end_turn()` immediately posts an empty batch with `complete: true`; you may call it without sending soldiers. The server rejects forbidden commands and ownership, insufficient soldiers including teammate reservations, stale generations, and commands after completion without applying the rejected batch.
+`Generation` exposes only `id`, `castles`, and `soldier_groups`. These public snapshot and order models are frozen Pydantic models; nested collections such as `castles` and `soldier_groups` are tuples. Castle and group values are read directly from `generation.castles` and `generation.soldier_groups`. Transport identity and submission status stay inside the client rather than leaking into the strategy API. `client.generation`, `start()`, and `refresh()` expose the current `Generation` snapshot.
 
-Each request carries a UUID. Supply `request_id=` when an application needs to retry explicitly. The client reuses the same UUID and body through automatic transport retries, and repeated calls with a supplied UUID in one client instance reuse the original generation and payload. A different batch under that UUID raises `GameError` with status 409. You can also supply `generation_id=` for a retry after process restart. `GameError.status` and `.detail` retain the server's HTTP status and Huma problem detail; 401 raises `GameAuthenticationError`. Background authentication and callback failures surface from `run()` or `wait()`.
+The client owns authentication, the personal player-channel subscription, reconnect recovery, state reconciliation, and turn completion. It calls `on_generation` serially with a fresh `CommandReceiver` scoped to that callback. Use `await commands.send_soldier_groups([...])` with frozen `SoldierGroupOrder` models, or `await commands.send_soldier_group(origin_id, destination_id, amount)` to submit orders for that generation. Both methods return `None`. The receiver expires as soon as the callback returns or raises, so it cannot be saved for later use. A successful callback return completes the turn automatically, including a callback that submits no commands. An exception or cancellation does not complete the turn. Player code does not call `end_turn` or pass generation IDs to command methods.
 
-Realtime publications trigger an authorized HTTP refresh; the push body is only used to select relevant events. The SDK also refreshes after reconnect and every `refresh_interval` seconds (default 15), so a missed publication does not strand the client. `refresh()` permits an explicit read.
+Each submission is pinned to the generation whose callback received the receiver. An optional `request_id` lets the caller repeat the identical batch within that callback's generation; reusing an ID for a changed batch or a different generation is rejected. The SDK also preserves its generated request UUID and identical payload through automatic transport retries. It deduplicates repeated events and reconciles authorized HTTP state after subscription or reconnect. Push delivery is at least once; HTTP state remains authoritative. The existing `game.next_generation` wire event is unchanged. No periodic polling is enabled by default; `refresh()` can request an explicit read.
 
-Run tests with `uv run --locked pytest -q`.
+The full HTTP contract, authorization rules, reservation checks, retry behavior and status codes are documented in the [backend README](../../backend/README.md). The browser's **New demo lobby** uses its own JavaScript player strategy. See the [demo walkthrough](../../lobby/frontend/README.md).
+
+Run SDK tests with `uv run --locked pytest -q`. The example is checked with Ruff and ty:
+
+```sh
+uv run --locked ruff check island_battles_client examples
+uv run --locked ruff format --check island_battles_client examples
+uv run --locked ty check island_battles_client examples --error-on-warning
+```

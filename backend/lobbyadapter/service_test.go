@@ -55,7 +55,7 @@ func TestBindStartedLobbyCreatesStableTeamMap(t *testing.T) {
 	if err := db.Where(&models.TeamBindingRecord{GameID: result.GameID}).Order("team_order").Find(&records).Error; err != nil {
 		t.Fatal(err)
 	}
-	if len(records) != 2 || records[0].TeamColor == 0 || records[1].TeamColor == 0 {
+	if len(records) != 2 || records[0].TeamColor == models.NeutralTeamColor || records[1].TeamColor == models.NeutralTeamColor {
 		t.Fatalf("persisted mappings = %#v", records)
 	}
 }

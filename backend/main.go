@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"islandBattles/backend/demo"
 	"islandBattles/backend/dependencies"
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/lobbyadapter"
@@ -112,6 +113,7 @@ func run(ctx context.Context, config dependencies.Config, logger *slog.Logger) e
 		http.Redirect(response, request, "/lobby/ui/", http.StatusTemporaryRedirect)
 	})
 	router.Handle("/lobby/ui/*", http.StripPrefix("/lobby/ui/", frontend.Handler()))
+	router.Handle("/game/demo/*", http.StripPrefix("/game/demo/", demo.Handler()))
 	router.Get("/healthz", func(response http.ResponseWriter, request *http.Request) { response.WriteHeader(http.StatusNoContent) })
 	server := &http.Server{Addr: config.HTTPAddr, Handler: router, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 	workerContext, stopWorkers := context.WithCancel(ctx)

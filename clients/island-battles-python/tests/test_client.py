@@ -5,27 +5,39 @@ from uuid import uuid4
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from island_battles_client import (
-    GameAuthenticationError, GameClientClosedError, GameError, IslandBattlesClient,
+    GameAuthenticationError,
+    GameClientClosedError,
+    GameError,
+    GameProtocolError,
+    IslandBattlesClient,
+    Player,
     SoldierGroupOrder,
 )
-
 
 LOBBY = "00000000-0000-0000-0000-000000000001"
 PLAYER = "00000000-0000-0000-0000-000000000002"
 OTHER = "00000000-0000-0000-0000-000000000003"
 
 
-def state(generation=1, *, player=PLAYER, lobby=LOBBY, submitted=False):
+def state(generation=1, *, player=PLAYER, lobby=LOBBY, team_color=1, submitted=False):
     return {
-        "game_id": 7, "lobby_id": lobby, "generation_id": generation,
-        "player_id": player, "team_color": 1, "channel": f"player:{player}",
+        "game_id": 7,
+        "lobby_id": lobby,
+        "generation_id": generation,
+        "player_id": player,
+        "team_color": team_color,
+        "channel": f"player:{player}",
         "submitted": submitted,
-        "generation": {"castles": [
-            {"id": 0, "team_color": 1, "soldiers": 30, "x": -2, "y": 0},
-            {"id": 1, "team_color": 2, "soldiers": 30, "x": 2, "y": 0},
-        ], "soldier_groups": []},
+        "generation": {
+            "castles": [
+                {"id": 0, "team_color": 1, "soldiers": 30, "x": -2, "y": 0},
+                {"id": 1, "team_color": 2, "soldiers": 30, "x": 2, "y": 0},
+            ],
+            "soldier_groups": [],
+        },
     }
 
 
@@ -47,20 +59,19 @@ class FakeSubscription:
         self.ack.clear()
 
     async def publish(self, payload):
-        await self.events.on_publication(SimpleNamespace(pub=SimpleNamespace(data=payload)))
+        await self.events.on_publication(
+            SimpleNamespace(pub=SimpleNamespace(data=payload))
+        )
 
     async def reconnect(self):
         await self.events.on_subscribed(SimpleNamespace(recovered=False))
 
 
 class FakeSDK:
-    instances = []
-
     def __init__(self, address, **options):
         self.address, self.options = address, options
         self.sub = None
         self.disconnected = False
-        self.instances.append(self)
 
     async def connect(self):
         await self.options["events"].on_connected(None)
@@ -79,19 +90,23 @@ class FakeSDK:
 class Server:
     def __init__(self):
         self.generation = 1
+        self.team_color = 1
         self.calls = []
         self.gets = 0
         self.post_error = None
         self.get_error = None
         self.transport_failures = 0
         self.get_hook = None
-        self.advance_on_complete = True
+        self.advance_on_complete = False
+        self.submitted = set()
 
     async def __call__(self, request):
         self.calls.append(request)
         assert request.headers["Authorization"] == "Bearer guest-secret"
         if request.url.path == "/lobby/v1/connection-token":
-            return httpx.Response(200, json={"token": "connection-token", "websocket_url": "ws://test/ws"})
+            return httpx.Response(
+                200, json={"token": "connection-token", "websocket_url": "ws://test/ws"}
+            )
         if request.method == "GET":
             self.gets += 1
             if self.get_hook is not None:
@@ -100,7 +115,14 @@ class Server:
                     return response
             if self.get_error:
                 return httpx.Response(self.get_error, json={"detail": "read forbidden"})
-            return httpx.Response(200, json=state(self.generation))
+            return httpx.Response(
+                200,
+                json=state(
+                    self.generation,
+                    team_color=self.team_color,
+                    submitted=self.generation in self.submitted,
+                ),
+            )
         assert request.method == "POST" and request.url.path == "/generation/commands"
         if self.transport_failures:
             self.transport_failures -= 1
@@ -108,94 +130,165 @@ class Server:
         if self.post_error:
             return httpx.Response(self.post_error, json={"detail": "command forbidden"})
         body = json.loads(request.content)
-        if body["complete"] and self.advance_on_complete:
-            self.generation += 1
-        return httpx.Response(200, json=state(
-            self.generation, submitted=body["complete"] and not self.advance_on_complete))
+        if body["complete"]:
+            self.submitted.add(body["generation_id"])
+            if self.advance_on_complete:
+                self.generation += 1
+        return httpx.Response(
+            200,
+            json=state(
+                self.generation,
+                team_color=self.team_color,
+                submitted=self.generation in self.submitted,
+            ),
+        )
 
     @property
     def posts(self):
-        return [json.loads(call.content) for call in self.calls
-                if call.url.path == "/generation/commands"]
+        return [
+            json.loads(call.content)
+            for call in self.calls
+            if call.url.path == "/generation/commands"
+        ]
 
 
-class RecordingClient(IslandBattlesClient):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+class RecordingPlayer(Player):
+    def __init__(self, team_color):
+        super().__init__(team_color)
         self.seen = asyncio.Queue()
+        self.receivers = asyncio.Queue()
 
-    async def next_generation(self, generation):
-        await self.seen.put(generation.generation_id)
+    async def on_generation(self, generation, commands):
+        await self.seen.put(generation)
+        await self.receivers.put(commands)
 
 
-def client(server, cls=RecordingClient, **options):
+class WaitingPlayer(RecordingPlayer):
+    def __init__(self, team_color):
+        super().__init__(team_color)
+        self.release = asyncio.Event()
+
+    async def on_generation(self, generation, commands):
+        await super().on_generation(generation, commands)
+        await self.release.wait()
+
+
+def client(server, player_factory=RecordingPlayer, **options):
     transport = httpx.MockTransport(server)
-    return cls("http://test", "guest-secret", LOBBY,
-               http_client=httpx.AsyncClient(transport=transport),
-               sdk_factory=FakeSDK, **options)
+    return IslandBattlesClient(
+        "http://test",
+        "guest-secret",
+        LOBBY,
+        player_factory=player_factory,
+        http_client=httpx.AsyncClient(transport=transport),
+        sdk_factory=FakeSDK,
+        **options,
+    )
 
 
 async def until(predicate, timeout=1):
     async def poll():
         while not predicate():
             await asyncio.sleep(0.001)
+
     await asyncio.wait_for(poll(), timeout)
 
 
-async def test_initial_callback_commands_empty_completion_and_dedup():
+async def seen(game):
+    return await asyncio.wait_for(game.player.seen.get(), 1)
+
+
+async def test_orders_then_automatic_completion_empty_turn_and_dedup():
     server = Server()
-    async with client(server) as game:
-        assert game.state.generation.castles[0].id == 0
-        assert await asyncio.wait_for(game.seen.get(), 1) == 1
-        result = await game.send_soldier_groups([SoldierGroupOrder(0, 1, 5)])
-        assert result.submitted is False
-        assert server.posts[-1]["complete"] is False
-        assert server.posts[-1]["commands"][0]["parameters"]["origin_logical_castle_id"] == 0
-        await game.end_turn()
-        assert server.posts[-1]["complete"] is True
-        assert server.posts[-1]["commands"] == []
-        assert await asyncio.wait_for(game.seen.get(), 1) == 2
+    server.advance_on_complete = True
+
+    class OrderingPlayer(RecordingPlayer):
+        async def on_generation(self, generation, commands):
+            await super().on_generation(generation, commands)
+            if generation.id == 1:
+                assert (
+                    await commands.send_soldier_groups(
+                        [
+                            SoldierGroupOrder(
+                                origin_logical_castle_id=0,
+                                destination_logical_castle_id=1,
+                                soldier_amount=5,
+                            )
+                        ]
+                    )
+                    is None
+                )
+            else:
+                server.advance_on_complete = False
+
+    async with client(server, OrderingPlayer) as game:
+        assert game.generation.castles[0].id == 0
+        assert (await seen(game)).id == 1
+        assert (await seen(game)).id == 2
+        await until(lambda: len(server.posts) == 3)
+        assert [
+            (batch["generation_id"], batch["complete"]) for batch in server.posts
+        ] == [
+            (1, False),
+            (1, True),
+            (2, True),
+        ]
+        assert (
+            server.posts[0]["commands"][0]["parameters"]["origin_logical_castle_id"]
+            == 0
+        )
+        assert server.posts[1]["commands"] == server.posts[2]["commands"] == []
         event = {"schema_version": 1, "type": "game.next_generation", "state": state(2)}
         await game._sdk.sub.publish(event)
         await game._sdk.sub.publish(event)
         await asyncio.sleep(0.01)
-        assert game.seen.empty()
+        assert game.player.seen.empty()
+        assert len(server.posts) == 3
     assert game._sdk.disconnected
     assert game._sdk.sub.unsubscribed
     assert game._http.is_closed
     with pytest.raises(GameClientClosedError):
-        await game.end_turn()
+        await game.refresh()
 
 
-async def test_foreign_and_malformed_pushes_ignored_and_lost_push_reconciled():
+async def test_foreign_pushes_ignored_lost_push_poll_and_reconnect():
     server = Server()
     async with client(server, refresh_interval=0.02) as game:
-        assert await game.seen.get() == 1
+        assert (await seen(game)).id == 1
         baseline = server.gets
         for event in (
-            {"schema_version": 1, "type": "game.next_generation", "state": state(9, player=OTHER)},
-            {"schema_version": 1, "type": "game.next_generation", "state": state(9, lobby=OTHER)},
+            {
+                "schema_version": 1,
+                "type": "game.next_generation",
+                "state": state(9, player=OTHER),
+            },
+            {
+                "schema_version": 1,
+                "type": "game.next_generation",
+                "state": state(9, lobby=OTHER),
+            },
             {"schema_version": 2, "type": "game.next_generation", "state": state(9)},
             {"schema_version": 1, "type": "other", "state": state(9)},
         ):
             await game._sdk.sub.publish(event)
         await asyncio.sleep(0.005)
-        assert game.seen.empty()
+        assert game.player.seen.empty()
         server.generation = 2  # Missing push: periodic authorized GET recovers it.
-        assert await asyncio.wait_for(game.seen.get(), 1) == 2
+        assert (await seen(game)).id == 2
         assert server.gets > baseline
         server.generation = 3
         await game._sdk.sub.reconnect()
-        assert await asyncio.wait_for(game.seen.get(), 1) == 3
+        assert (await seen(game)).id == 3
 
 
 async def test_http_error_detail_and_auth_failure_propagation():
     server = Server()
-    async with client(server) as game:
-        await game.seen.get()
+    async with client(server, WaitingPlayer) as game:
+        await seen(game)
+        receiver = await game.player.receivers.get()
         server.post_error = 403
         with pytest.raises(GameError) as caught:
-            await game.end_turn()
+            await receiver.send_soldier_group(0, 1, 1)
         assert caught.value.status == 403
         assert caught.value.detail == "command forbidden"
         server.get_error = 401
@@ -206,23 +299,25 @@ async def test_http_error_detail_and_auth_failure_propagation():
         assert auth.value.detail == "read forbidden"
 
 
-async def test_temporary_http_outage_recovers_without_failing_callbacks():
+async def test_temporary_http_outage_recovers_after_reconnect():
     server = Server()
-    async with client(server, refresh_interval=0.02) as game:
-        assert await game.seen.get() == 1
+    async with client(server) as game:
+        assert (await seen(game)).id == 1
         server.get_error = 503
         await game._sdk.sub.reconnect()
         await asyncio.sleep(0.03)
         assert game._failure is None
         server.get_error = None
         server.generation = 2
-        assert await asyncio.wait_for(game.seen.get(), 1) == 2
+        await game._sdk.sub.reconnect()
+        assert (await seen(game)).id == 2
 
 
-async def test_cancelled_wait_and_concurrent_close_clean_up():
+async def test_cancelled_wait_and_close_cancel_callback_without_completion():
     server = Server()
-    game = client(server)
+    game = client(server, WaitingPlayer)
     await game.start()
+    await seen(game)
     waiter = asyncio.create_task(game.wait())
     await asyncio.sleep(0)
     waiter.cancel()
@@ -232,34 +327,38 @@ async def test_cancelled_wait_and_concurrent_close_clean_up():
     assert game._http.is_closed
     assert game._sdk.disconnected
     assert all(task.done() for task in game._tasks)
+    assert server.posts == []
 
 
-async def test_request_uuid_and_payload_survive_transport_retry_and_explicit_replay():
+async def test_request_uuid_payload_survive_transport_retry_and_explicit_replay():
     server = Server()
-    async with client(server) as game:
-        await game.seen.get()
+    async with client(server, WaitingPlayer) as game:
+        await seen(game)
+        receiver = await game.player.receivers.get()
         server.transport_failures = 1
         request_id = uuid4()
-        await game.send_soldier_group(0, 1, 3, request_id=request_id)
-        attempts = [json.loads(call.content) for call in server.calls
-                    if call.url.path == "/generation/commands"]
+        await receiver.send_soldier_group(0, 1, 3, request_id=request_id)
+        attempts = [
+            json.loads(call.content)
+            for call in server.calls
+            if call.url.path == "/generation/commands"
+        ]
         assert len(attempts) == 2
         assert attempts[0] == attempts[1]
         assert attempts[0]["request_id"] == str(request_id)
         server.generation = 2
         await game.refresh()
-        await game.send_soldier_group(0, 1, 3, request_id=request_id)
+        await receiver.send_soldier_group(0, 1, 3, request_id=request_id)
         assert server.posts[-1] == attempts[0]
         with pytest.raises(GameError) as conflict:
-            await game.send_soldier_group(0, 1, 4, request_id=request_id)
+            await receiver.send_soldier_group(0, 1, 4, request_id=request_id)
         assert conflict.value.status == 409
 
 
 async def test_late_same_generation_get_cannot_undo_submitted_state():
     server = Server()
-    server.advance_on_complete = False  # Another player has not completed the barrier.
     async with client(server) as game:
-        await game.seen.get()
+        await until(lambda: game._state.submitted)
         entered, release = asyncio.Event(), asyncio.Event()
 
         async def delayed_get(_):
@@ -271,43 +370,264 @@ async def test_late_same_generation_get_cannot_undo_submitted_state():
         server.get_hook = delayed_get
         fetch = asyncio.create_task(game.refresh())
         await entered.wait()
-        await game.end_turn()
-        assert game.state.submitted is True
         release.set()
-        assert (await fetch).submitted is True
-        assert game.state.submitted is True
+        await fetch
+        assert game._state.submitted is True
 
 
-async def test_callback_turn_uses_original_generation_during_reconcile():
-    started = asyncio.Event()
-    release = asyncio.Event()
+async def test_receiver_keeps_original_generation_during_reconcile():
+    started, release = asyncio.Event(), asyncio.Event()
 
-    class BlockingClient(RecordingClient):
-        async def next_generation(self, generation):
-            await self.seen.put(generation.generation_id)
-            if generation.generation_id == 1:
+    class BlockingPlayer(RecordingPlayer):
+        async def on_generation(self, generation, commands):
+            await super().on_generation(generation, commands)
+            if generation.id == 1:
                 started.set()
                 await release.wait()
-                await self.send_soldier_group(0, 1, 1)
+                await commands.send_soldier_group(0, 1, 1)
+            else:
+                await asyncio.Future()  # Keep the next turn open for inspection.
 
     server = Server()
-    async with client(server, BlockingClient) as game:
+    async with client(server, BlockingPlayer) as game:
         await started.wait()
         server.generation = 2
         await game.refresh()
         release.set()
-        assert await asyncio.wait_for(game.seen.get(), 1) == 1
-        assert await asyncio.wait_for(game.seen.get(), 1) == 2
-        assert server.posts[-1]["generation_id"] == 1
+        assert (await seen(game)).id == 1
+        assert (await seen(game)).id == 2
+        await until(lambda: len(server.posts) == 1)
+        await asyncio.sleep(0.01)
+        # Returning from the superseded callback must not complete generation 2.
+        assert len(server.posts) == 1
+        assert server.posts[0]["generation_id"] == 1
+        assert server.posts[0]["complete"] is False
+        assert game.generation.id == 2
 
 
-async def test_reject_send_before_sync_and_initial_auth_error_closes():
+async def test_initial_auth_failure_does_not_construct_player():
     server = Server()
-    game = client(server)
-    with pytest.raises(GameError, match="not synchronized"):
-        await game.end_turn()
+    constructed = []
+
+    def factory(color):
+        constructed.append(color)
+        return RecordingPlayer(color)
+
+    game = client(server, factory)
+    assert game.player is None and game.generation is None
     server.get_error = 401
     with pytest.raises(GameAuthenticationError):
         await game.start()
+    assert constructed == []
     assert game._http.is_closed
     assert game._sdk.disconnected
+
+
+async def test_default_no_polling_and_push_uses_authorized_state():
+    server = Server()
+    async with client(server) as game:
+        assert (await seen(game)).id == 1
+        await asyncio.sleep(0.01)
+        initial_gets = server.gets
+        server.generation = 2
+        await game._sdk.sub.publish(
+            {
+                "schema_version": 1,
+                "type": "game.next_generation",
+                "state": state(2),
+            }
+        )
+        assert (await seen(game)).id == 2
+        await asyncio.sleep(0.03)
+        assert server.gets == initial_gets
+        assert game._refresh_interval is None
+        assert game.generation.id == 2
+
+
+async def test_empty_callback_completes_with_same_uuid_after_transport_retry():
+    server = Server()
+    server.transport_failures = 1
+    async with client(server) as game:
+        await until(lambda: game._state.submitted)
+        assert len(server.posts) == 2
+        assert server.posts[0] == server.posts[1]
+        assert server.posts[0]["complete"] is True
+        assert server.posts[0]["commands"] == []
+        assert server.posts[0]["generation_id"] == 1
+
+
+async def test_failed_callback_does_not_complete_partial_commands():
+    class FailingPlayer(Player):
+        async def on_generation(self, generation, commands):
+            self.receiver = commands
+            await commands.send_soldier_group(0, 1, 1)
+            raise RuntimeError("strategy failed")
+
+    server = Server()
+    async with client(server, FailingPlayer) as game:
+        with pytest.raises(RuntimeError, match="strategy failed"):
+            await asyncio.wait_for(game.wait(), 1)
+        assert len(server.posts) == 1
+        assert server.posts[0]["complete"] is False
+        assert not game._state.submitted
+        with pytest.raises(GameError, match="closed|expired|ended"):
+            await game.player.receiver.send_soldier_group(0, 1, 1)
+
+
+async def test_automatic_completion_error_surfaces_from_wait():
+    server = Server()
+    server.post_error = 403
+    async with client(server) as game:
+        with pytest.raises(GameError, match="command forbidden") as caught:
+            await asyncio.wait_for(game.wait(), 1)
+        assert caught.value.status == 403
+        assert len(server.posts) == 1
+        assert server.posts[0]["complete"] is True
+
+
+async def test_already_submitted_generation_is_not_replayed():
+    server = Server()
+    server.submitted.add(1)
+    async with client(server) as game:
+        await asyncio.sleep(0.01)
+        assert game.player.seen.empty()
+        assert server.posts == []
+
+
+async def test_receiver_expires_when_callback_returns():
+    server = Server()
+    async with client(server) as game:
+        await seen(game)
+        receiver = await game.player.receivers.get()
+        await until(lambda: game._state.submitted)
+        with pytest.raises(GameError, match="closed|expired|ended"):
+            await receiver.send_soldier_group(0, 1, 1)
+        assert len(server.posts) == 1
+
+
+async def test_factory_called_once_and_team_identity_cannot_change():
+    server = Server()
+    colors = []
+
+    def factory(color):
+        colors.append(color)
+        return RecordingPlayer(color)
+
+    async with client(server, factory) as game:
+        first = game.player
+        assert colors == [1]
+        assert first.team_color == 1
+        server.generation = 2
+        await game.refresh()
+        assert game.player is first and colors == [1]
+        server.team_color = 2
+        with pytest.raises(GameProtocolError):
+            await game.refresh()
+        assert game.player is first and first.team_color == 1
+
+
+async def test_factory_must_return_player_for_authenticated_team():
+    server = Server()
+
+    class WrongTeamPlayer(RecordingPlayer):
+        def __init__(self, team_color):
+            super().__init__(team_color + 1)
+
+    game = client(server, WrongTeamPlayer)
+    with pytest.raises(GameProtocolError):
+        await game.start()
+    assert game._http.is_closed
+
+
+async def test_public_generation_is_lean_frozen_and_nested_values_are_tuples():
+    server = Server()
+
+    async def with_group(_):
+        payload = state()
+        payload["generation"]["soldier_groups"] = [
+            {
+                "id": 0,
+                "team_color": 1,
+                "soldiers": 5,
+                "origin_logical_castle_id": 0,
+                "destination_logical_castle_id": 1,
+                "clash_radius": 0.5,
+                "x": -1.0,
+                "y": 0.0,
+            }
+        ]
+        return httpx.Response(200, json=payload)
+
+    server.get_hook = with_group
+    async with client(server, WaitingPlayer) as game:
+        generation = await seen(game)
+        assert game.generation == generation
+        assert set(type(generation).model_fields) == {"id", "castles", "soldier_groups"}
+        assert isinstance(generation.castles, tuple)
+        assert isinstance(generation.soldier_groups, tuple)
+        assert generation.soldier_groups[0].id == 0
+        assert not hasattr(generation, "game_id")
+        assert not hasattr(generation, "player_id")
+        assert not hasattr(generation, "submitted")
+        with pytest.raises(ValidationError):
+            generation.id = 99
+        with pytest.raises(ValidationError):
+            generation.castles[0].soldiers = 999
+        with pytest.raises(ValidationError):
+            generation.soldier_groups[0].soldiers = 999
+        with pytest.raises(TypeError):
+            generation.castles[0] = generation.castles[1]
+        order = SoldierGroupOrder(
+            origin_logical_castle_id=0,
+            destination_logical_castle_id=1,
+            soldier_amount=5,
+        )
+        with pytest.raises(ValidationError):
+            order.soldier_amount = 99
+
+
+@pytest.mark.parametrize(
+    "field,bad",
+    [
+        ("id", True),
+        ("id", "0"),
+        ("soldiers", True),
+        ("soldiers", "30"),
+    ],
+)
+async def test_malformed_wire_castle_rejected(field, bad):
+    server = Server()
+
+    async def malformed(_):
+        payload = state()
+        payload["generation"]["castles"][0][field] = bad
+        return httpx.Response(200, json=payload)
+
+    server.get_hook = malformed
+    game = client(server)
+    with pytest.raises(GameProtocolError):
+        await game.start()
+    assert game._http.is_closed
+    assert game.player is None
+
+
+@pytest.mark.parametrize(
+    "field,bad",
+    [
+        ("origin_logical_castle_id", True),
+        ("destination_logical_castle_id", "1"),
+        ("soldier_amount", False),
+        ("soldier_amount", "5"),
+    ],
+)
+def test_order_rejects_coercion_and_requires_keywords(field, bad):
+    values = {
+        "origin_logical_castle_id": 0,
+        "destination_logical_castle_id": 1,
+        "soldier_amount": 5,
+    }
+    values[field] = bad
+    with pytest.raises(ValidationError):
+        SoldierGroupOrder(**values)
+    with pytest.raises((TypeError, ValidationError)):
+        SoldierGroupOrder(0, 1, 5)

@@ -32,14 +32,14 @@ func RunLobbyGame(database *gorm.DB, snapshot domain.Snapshot) (models.BindingRe
 		replay, gameMap := prepareLobbyGame(binding, snapshot)
 		players := make([]models.FrozenGamePlayer, 0, len(snapshot.StartRoster))
 		for _, entry := range snapshot.StartRoster {
-			color := uint(0)
+			color := models.NeutralTeamColor
 			for _, team := range binding.Teams {
 				if team.TeamID == entry.TeamID {
 					color = team.TeamColor
 					break
 				}
 			}
-			if color == 0 {
+			if color == models.NeutralTeamColor {
 				return fmt.Errorf("frozen player has no team binding")
 			}
 			players = append(players, models.FrozenGamePlayer{GameID: binding.GameID, PlayerID: entry.PlayerID, TeamColor: color})
@@ -86,8 +86,9 @@ type replayNode struct {
 }
 
 type replayFrame struct {
-	Castles []replayNode `json:"castles"`
-	Groups  []replayNode `json:"groups"`
+	GenerationID uint         `json:"generation_id,omitempty"`
+	Castles      []replayNode `json:"castles"`
+	Groups       []replayNode `json:"groups"`
 }
 
 type gameReplay struct {
@@ -139,7 +140,7 @@ func prepareLobbyGame(binding models.BindingResult, snapshot domain.Snapshot) (g
 }
 
 func playableReplayFrame(generation *models.Generation) replayFrame {
-	frame := replayFrame{Castles: []replayNode{}, Groups: []replayNode{}}
+	frame := replayFrame{GenerationID: generation.ID, Castles: []replayNode{}, Groups: []replayNode{}}
 	for _, castle := range generation.Map.Castles {
 		frame.Castles = append(frame.Castles, replayNode{ID: castle.LogicalCastleID, Color: castle.TeamColor, Soldiers: castle.SoldierAmount, X: castle.Position.P.X, Y: castle.Position.P.Y})
 	}
