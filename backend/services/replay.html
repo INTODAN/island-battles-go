@@ -83,10 +83,6 @@ function svg(tag, attributes, text) {
 function renderClashes(frame, animate) {
   const losses = new Map();
   const summaries = [];
-  const obstacles = [
-    ...frame.groups.map((group) => ({ position: point(group), radius: (group.clash_radius ?? 0.25) * worldScale })),
-    ...frame.castles.map((castle) => ({ position: point(castle), radius: castleRadius * worldScale })),
-  ];
   for (const clash of frame.clashes || []) {
     if (!clash.participants.length) continue;
     const positions = clash.participants.map(point);
@@ -106,23 +102,8 @@ function renderClashes(frame, animate) {
         losses.set(participant.group_id, (losses.get(participant.group_id) || 0) + participant.soldiers_before - participant.soldiers_after);
         continue;
       }
-      const contact = point(participant);
-      let [x, y] = contact;
+      const [x, y] = point(participant);
       const ghostRadius = participant.clash_radius * worldScale;
-      // Clashes can stop survivors at the midpoint. Move only the annotation
-      // aside when it would cover a troop; a leader preserves the contact point.
-      const direction = Math.atan2(y - center[1], x - center[0]);
-      for (let attempt = 0; attempt < 128; attempt++) {
-        if (obstacles.every((obstacle) => Math.hypot(x - obstacle.position[0], y - obstacle.position[1]) >= ghostRadius + obstacle.radius + 8)) break;
-        const distance = (1 + Math.floor(attempt / 16)) * (2 * ghostRadius + 8);
-        const angle = direction + (attempt % 16) * Math.PI / 8;
-        x = contact[0] + Math.cos(angle) * distance;
-        y = contact[1] + Math.sin(angle) * distance;
-      }
-      obstacles.push({ position: [x, y], radius: ghostRadius });
-      if (Math.hypot(x - contact[0], y - contact[1]) > 1) {
-        svg("line", { x1: contact[0], y1: contact[1], x2: x, y2: y, stroke: color(participant.team_color), opacity: .4, "stroke-dasharray": "3 4", "pointer-events": "none" });
-      }
       const outline = svg("circle", { cx: x, cy: y, r: ghostRadius, fill: "none", stroke: color(participant.team_color), "stroke-width": 2, "stroke-dasharray": "4 4", "data-kind": "defeated-outline", "pointer-events": "none" });
       svg("text", { x, y: y + 7, "text-anchor": "middle", "font-size": 25, fill: color(participant.team_color), "data-kind": "defeated-cross", "pointer-events": "none" }, "×");
       if (animate && !reducedMotion.matches) outline.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 350 });

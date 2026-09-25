@@ -68,9 +68,9 @@ The integration uses those results as the event source:
    show no inferred clashes for them. The generated Huma schema and Python client
    expose the event records as well.
 4. Render a separate overlay in the lobby view. Put group outlines at their recorded
-   contact positions and the impact ring at the mean participant position. Move
-   overlapping outlines aside with a leader to their contact point, keeping live
-   troop numbers readable. Combine losses above groups surviving the full turn.
+   contact positions and the impact ring at the mean participant position. Keep
+   markers at those exact positions even when they overlap other objects, without
+   offset lines. Combine losses above groups surviving the full turn.
    Keep overlays out of soldier totals, selection, and collision logic. The
    animation must not change simulation timing or clash-stop upgrades.
 
