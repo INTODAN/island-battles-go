@@ -42,7 +42,7 @@ test("push-driven turns deduplicate events; paused idle players do not poll", as
   let reads = 0;
   const commands = [];
   let state = initial();
-  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", credential: "test", subscription, interval: 1,
+  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", credential: "test", subscription,
     fetcher: async (url, options) => {
       if (options.method === "GET") reads++;
       else { commands.push(JSON.parse(options.body)); state = { ...state, submitted: true }; }
@@ -78,7 +78,7 @@ test("lost command responses retry the same UUID and body without polling", asyn
   const subscription = new Subscription();
   const attempts = [];
   let reads = 0;
-  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", credential: "test", subscription, interval: 1,
+  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", credential: "test", subscription, retryDelay: 1,
     fetcher: async (url, options) => {
       if (options.method === "GET") { reads++; return { ok: true, json: async () => initial() }; }
       attempts.push(options.body);
@@ -91,4 +91,46 @@ test("lost command responses retry the same UUID and body without polling", asyn
   await until(() => attempts.length === 2 && !player.inFlight);
   assert.equal(attempts[0], attempts[1]);
   assert.equal(reads, 1);
+});
+
+test("new generations submit immediately, with no concurrent turn requests", async (context) => {
+  const subscription = new Subscription();
+  const commands = [];
+  let releaseFirst;
+  const firstResponse = new Promise((resolve) => { releaseFirst = resolve; });
+  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", credential: "test", subscription,
+    fetcher: async (url, options) => {
+      if (options.method === "GET") return { ok: true, json: async () => initial() };
+      const command = JSON.parse(options.body);
+      commands.push(command);
+      if (commands.length === 1) await firstResponse;
+      return { ok: true, json: async () => ({ ...initial(), generation_id: command.generation_id, submitted: true }) };
+    },
+  });
+  context.after(() => player.stop());
+  player.receive(initial());
+  await Promise.resolve();
+  assert.equal(commands.length, 1, "the first turn must not wait for a timer");
+  subscription.publish({ ...initial(), generation_id: 2 });
+  player.receive({ ...initial(), generation_id: 2 });
+  assert.equal(commands.length, 1, "new state must not submit concurrently");
+  releaseFirst();
+  await until(() => commands.length === 2 && !player.inFlight);
+  assert.deepEqual(commands.map((command) => command.generation_id), [1, 2]);
+});
+
+test("transport failures back off and pause cancels the pending retry", async (context) => {
+  const subscription = new Subscription();
+  let attempts = 0;
+  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", credential: "test", subscription, retryDelay: 100,
+    fetcher: async () => { attempts++; throw new Error("offline"); },
+  });
+  context.after(() => player.stop());
+  player.receive(initial());
+  await until(() => attempts === 1 && !player.inFlight);
+  await delay(20);
+  assert.equal(attempts, 1, "no immediate retry loop");
+  player.setEnabled(false);
+  await delay(110);
+  assert.equal(attempts, 1, "paused retry must not submit");
 });
