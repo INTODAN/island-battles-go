@@ -86,9 +86,10 @@ type replayNode struct {
 }
 
 type replayFrame struct {
-	GenerationID uint         `json:"generation_id,omitempty"`
-	Castles      []replayNode `json:"castles"`
-	Groups       []replayNode `json:"groups"`
+	GenerationID uint                `json:"generation_id,omitempty"`
+	Castles      []replayNode        `json:"castles"`
+	Groups       []replayNode        `json:"groups"`
+	Clashes      []models.ClashEvent `json:"clashes,omitempty"`
 }
 
 type gameReplay struct {
@@ -140,7 +141,7 @@ func prepareLobbyGame(binding models.BindingResult, snapshot domain.Snapshot) (g
 }
 
 func playableReplayFrame(generation *models.Generation) replayFrame {
-	frame := replayFrame{GenerationID: generation.ID, Castles: []replayNode{}, Groups: []replayNode{}}
+	frame := replayFrame{GenerationID: generation.ID, Castles: []replayNode{}, Groups: []replayNode{}, Clashes: generation.Clashes}
 	for _, castle := range generation.Map.Castles {
 		frame.Castles = append(frame.Castles, replayNode{ID: castle.PersistentCastleID, Color: castle.TeamColor, Soldiers: castle.SoldierAmount, X: castle.Position.P.X, Y: castle.Position.P.Y})
 	}

@@ -4,7 +4,7 @@ from enum import StrEnum
 from math import hypot
 from typing import Final
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 NEUTRAL_TEAM_COLOR: Final[int] = 0
 """Team color for castles and soldiers that belong to no player team."""
@@ -31,11 +31,11 @@ class BoardEntity(_FrozenModel):
     x: float
     y: float
 
-    def distance(self, other: Castle | SoldierGroup) -> float:
+    def distance(self, other: "Castle | SoldierGroup") -> float:
         """Return straight-line distance in map units."""
         return hypot(other.x - self.x, other.y - self.y)
 
-    def compare_team(self, other: Castle | SoldierGroup) -> TeamType:
+    def compare_team(self, other: "Castle | SoldierGroup") -> TeamType:
         """Classify other; a neutral target is neutral even when self is neutral."""
         if other.team_color == NEUTRAL_TEAM_COLOR:
             return TeamType.neutral
@@ -66,9 +66,34 @@ class SoldierGroup(BoardEntity):
         return self.distance(self.destination_castle)
 
 
+class ClashParticipant(_FrozenModel):
+    """One group's contact position and casualties for a recorded clash."""
+
+    model_config = ConfigDict(strict=True, allow_inf_nan=False)
+
+    group_id: int = Field(ge=0)
+    team_color: int = Field(ge=0)
+    x: float
+    y: float
+    clash_radius: float = Field(gt=0)
+    soldiers_before: int = Field(ge=0)
+    soldiers_after: int = Field(ge=0)
+
+
+class Clash(_FrozenModel):
+    """A combat event, with an ID scoped to its generation and a turn fraction."""
+
+    model_config = ConfigDict(strict=True, allow_inf_nan=False)
+
+    id: int = Field(gt=0)
+    time: float = Field(ge=0, le=1)
+    participants: list[ClashParticipant]
+
+
 class Generation(_FrozenModel):
     """One board snapshot, without authentication or transport metadata."""
 
     id: int
     castles: list[Castle]
     soldier_groups: list[SoldierGroup]
+    clashes: list[Clash] = Field(default_factory=list)

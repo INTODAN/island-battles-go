@@ -15,11 +15,12 @@ export function singleSoldierCommands(state) {
 
 export class ExamplePlayer {
   constructor({ lobbyID, playerID, credential, subscription, enabled = true, pending = null, savePending = () => {},
-    onState = () => {}, onStatus = () => {}, interval = 1500, fetcher = (...args) => globalThis.fetch(...args) }) {
-    Object.assign(this, { lobbyID, playerID, credential, subscription, enabled, pending, savePending, onState, onStatus, interval, fetcher });
+    onState = () => {}, onStatus = () => {}, retryDelay = 500, fetcher = (...args) => globalThis.fetch(...args) }) {
+    Object.assign(this, { lobbyID, playerID, credential, subscription, enabled, pending, savePending, onState, onStatus, retryDelay, fetcher });
     this.stopped = false;
     this.inFlight = false;
-    this.timer = null;
+    this.commandRetry = null;
+    this.commandFailures = 0;
     this.state = null;
     this.refreshing = null;
     this.refreshRetry = null;
@@ -61,19 +62,25 @@ export class ExamplePlayer {
     // Late publications must not reopen a turn already completed over HTTP.
     if (this.state?.generation_id === state.generation_id && this.state.submitted) state = { ...state, submitted: true };
     this.state = state;
-    if (this.pending && (this.pending.game_id !== state.game_id || this.pending.generation_id !== state.generation_id || state.submitted)) this.remember(null);
+    if (this.pending && (this.pending.game_id !== state.game_id || this.pending.generation_id !== state.generation_id || state.submitted)) {
+      this.remember(null);
+      clearTimeout(this.commandRetry);
+      this.commandRetry = null;
+      this.commandFailures = 0;
+    }
     this.onState(state);
     this.scheduleTurn();
   }
 
   scheduleTurn() {
-    if (this.stopped || this.inFlight || this.timer || !this.state) return;
+    if (this.stopped || this.inFlight || this.commandRetry || this.refreshing || this.refreshRetry || !this.state) return;
     if (!this.enabled) {
       this.onStatus("Paused", "This player will wait before submitting its next turn.");
     } else if (this.state.submitted) {
       this.onStatus("Turn submitted", "Waiting for the other player to finish.");
     } else {
-      this.timer = setTimeout(() => { this.timer = null; void this.submitTurn(); }, this.interval);
+      // Live generations drive simulation immediately; replay controls own pacing.
+      void this.submitTurn();
     }
   }
 
@@ -90,6 +97,7 @@ export class ExamplePlayer {
       const submitted = this.pending;
       const result = await this.request("/generation/commands", submitted);
       if (this.stopped) return;
+      this.commandFailures = 0;
       this.remember(null);
       this.receive(result);
       const order = submitted.commands[0]?.parameters;
@@ -107,6 +115,11 @@ export class ExamplePlayer {
       } else {
         // A lost command response is retried with the original UUID and body.
         this.onStatus("Reconnecting", "The same turn will be retried when the server responds.");
+        this.commandFailures++;
+        this.commandRetry = setTimeout(() => {
+          this.commandRetry = null;
+          this.scheduleTurn();
+        }, Math.min(this.retryDelay * 2 ** Math.min(this.commandFailures - 1, 5), 10000));
       }
     } finally {
       this.inFlight = false;
@@ -117,6 +130,7 @@ export class ExamplePlayer {
   refresh() {
     if (this.refreshing || this.stopped) return this.refreshing;
     clearTimeout(this.refreshRetry);
+    this.refreshRetry = null;
     this.refreshing = this.request(`/game/from-lobby/${encodeURIComponent(this.lobbyID)}/generation`)
       .then((state) => { this.refreshFailures = 0; this.receive(state); })
       .catch((error) => {
@@ -124,9 +138,9 @@ export class ExamplePlayer {
         this.onStatus("Waiting for connection", error.message);
         if (!error.status || error.status >= 500) {
           this.refreshFailures++;
-          this.refreshRetry = setTimeout(() => { void this.refresh(); }, Math.min(500 * 2 ** Math.min(this.refreshFailures - 1, 5), 10000));
+          this.refreshRetry = setTimeout(() => { this.refreshRetry = null; void this.refresh(); }, Math.min(500 * 2 ** Math.min(this.refreshFailures - 1, 5), 10000));
         }
-      }).finally(() => { this.refreshing = null; });
+      }).finally(() => { this.refreshing = null; this.scheduleTurn(); });
     return this.refreshing;
   }
 
@@ -141,15 +155,15 @@ export class ExamplePlayer {
 
   setEnabled(enabled) {
     this.enabled = enabled;
-    clearTimeout(this.timer);
-    this.timer = null;
+    clearTimeout(this.commandRetry);
+    this.commandRetry = null;
     if (enabled && !this.state) void this.refresh();
     this.scheduleTurn();
   }
 
   stop() {
     this.stopped = true;
-    clearTimeout(this.timer);
+    clearTimeout(this.commandRetry);
     clearTimeout(this.refreshRetry);
     this.requestController?.abort();
     this.subscription.unsubscribe();

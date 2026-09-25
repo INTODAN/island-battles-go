@@ -1,11 +1,11 @@
 """Private wire envelopes; player callbacks receive only game data."""
 
-from typing import Annotated
+from typing import Annotated, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError
 
 from .errors import GameProtocolError
-from .models import Castle, Generation, SoldierGroup
+from .models import Castle, Clash, Generation, SoldierGroup
 
 _PositiveInt = Annotated[int, Field(strict=True, gt=0)]
 _Identifier = Annotated[str, Field(strict=True, min_length=1)]
@@ -31,6 +31,7 @@ class _GenerationContents(BaseModel):
 
     castles: list[Castle]
     soldier_groups: list[_SoldierGroupContents]
+    clashes: list[Clash] = Field(default_factory=list)
 
 
 class GenerationState(BaseModel):
@@ -46,7 +47,7 @@ class GenerationState(BaseModel):
     generation: _GenerationContents
 
     @classmethod
-    def parse(cls, data: object) -> GenerationState:
+    def parse(cls, data: object) -> Self:
         try:
             return cls.model_validate(data)
         except ValidationError as exc:
@@ -76,4 +77,5 @@ class GenerationState(BaseModel):
             id=self.generation_id,
             castles=self.generation.castles,
             soldier_groups=soldier_groups,
+            clashes=self.generation.clashes,
         )

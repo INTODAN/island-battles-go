@@ -20,6 +20,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid #aac4ff; outline-
 input { flex: 1; min-width: 100px; accent-color: #3464e0; }
 #turn { white-space: nowrap; font-size: .82rem; }
 #outcome { margin-top: 14px; font-weight: 600; color: #202d40; }
+#clashes { margin-top: 10px; color: #824309; overflow-wrap: anywhere; }
 @media (max-width: 450px) { body { padding: 12px; } .controls input { flex-basis: 100%; order: 1; } }
 </style>
 </head>
@@ -36,6 +37,7 @@ input { flex: 1; min-width: 100px; accent-color: #3464e0; }
 <input id="timeline" type="range" min="0" value="0" aria-label="Replay turn">
 </div>
 <p id="outcome" role="status"></p>
+<p id="clashes" role="status"></p>
 <script>
 "use strict";
 const replay = {{.}};
@@ -58,6 +60,8 @@ const worldScale = 100;
 const castleRadius = 0.5; // Visual only; castle arrival still uses its center.
 const point = (node) => [400 + node.x * worldScale, 300 + node.y * worldScale];
 const scoreLabels = new Map();
+const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+let renderedTurn = null;
 for (const team of replay.teams) {
   const card = document.createElement("div");
   card.className = "team";
@@ -76,8 +80,51 @@ function svg(tag, attributes, text) {
   field.append(element);
   return element;
 }
-function render() {
+function renderClashes(frame, animate) {
+  const losses = new Map();
+  const summaries = [];
+  for (const clash of frame.clashes || []) {
+    if (!clash.participants.length) continue;
+    const positions = clash.participants.map(point);
+    const center = positions.reduce(([x, y], [nextX, nextY]) => [x + nextX / positions.length, y + nextY / positions.length], [0, 0]);
+    const radius = Math.max(...positions.map(([x, y], index) => Math.hypot(x - center[0], y - center[1]) + clash.participants[index].clash_radius * worldScale)) + 12;
+    const ring = svg("circle", { cx: center[0], cy: center[1], r: radius, fill: "none", stroke: "#b37914", "stroke-width": 2, opacity: .35, "data-kind": "clash-ring", "pointer-events": "none" });
+    if (animate && !reducedMotion.matches) {
+      ring.style.transformBox = "fill-box";
+      ring.style.transformOrigin = "center";
+      ring.animate([{ opacity: 1, transform: "scale(.55)" }, { opacity: .35, transform: "scale(1)" }], { duration: 350, easing: "ease-out" });
+    }
+    const participants = [];
+    for (const participant of clash.participants) {
+      const team = replay.teams.find((team) => team.color === participant.team_color);
+      participants.push(`${team?.name || `Team ${participant.team_color}`} ${participant.soldiers_before} → ${participant.soldiers_after}`);
+      if (participant.soldiers_after > 0) {
+        losses.set(participant.group_id, (losses.get(participant.group_id) || 0) + participant.soldiers_before - participant.soldiers_after);
+        continue;
+      }
+      const [x, y] = point(participant);
+      const ghostRadius = participant.clash_radius * worldScale;
+      const outline = svg("circle", { cx: x, cy: y, r: ghostRadius, fill: "none", stroke: color(participant.team_color), "stroke-width": 2, "stroke-dasharray": "4 4", "data-kind": "defeated-outline", "pointer-events": "none" });
+      svg("text", { x, y: y + 7, "text-anchor": "middle", "font-size": 25, fill: color(participant.team_color), "data-kind": "defeated-cross", "pointer-events": "none" }, "×");
+      if (animate && !reducedMotion.matches) outline.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 350 });
+    }
+    summaries.push(`Clash: ${participants.join(" · ")}`);
+  }
+  // Aggregate losses when a surviving group fought more than once this turn.
+  // A group that died later or arrived at a castle has no active troop label.
+  for (const group of frame.groups) {
+    const lost = losses.get(group.id);
+    if (!lost) continue;
+    const [x, y] = point(group);
+    const label = svg("text", { x, y: y - (group.clash_radius ?? .25) * worldScale - 12, "text-anchor": "middle", "font-size": 16, "font-weight": 700, fill: "#824309", "data-kind": "clash-loss", "pointer-events": "none" }, `−${lost}`);
+    if (animate && !reducedMotion.matches) label.animate([{ opacity: 0, transform: "translateY(8px)" }, { opacity: 1, transform: "translateY(0)" }], { duration: 350 });
+  }
+  document.getElementById("clashes").textContent = summaries.join(". ");
+}
+function render(animateClashes = false) {
   const frame = replay.frames[turn];
+  const animate = animateClashes && renderedTurn !== turn;
+  renderedTurn = turn;
   field.replaceChildren();
   for (let index = 1; index < frame.castles.length; index++) {
     const [x1, y1] = point(frame.castles[index - 1]);
@@ -95,6 +142,7 @@ function render() {
     svg("circle", { cx: x, cy: y, r: (group.clash_radius ?? 0.25) * worldScale, fill: color(group.color), stroke: "#fff", "stroke-width": 2, "data-kind": "soldier-group" });
     svg("text", { x, y: y + 5, "text-anchor": "middle", "font-size": 13, "font-weight": 700, fill: "white" }, group.soldiers);
   }
+  renderClashes(frame, animate);
   for (const team of replay.teams) {
     const castles = frame.castles.filter((castle) => castle.color === team.color);
     const soldiers = [...castles, ...frame.groups.filter((group) => group.color === team.color)].reduce((total, node) => total + node.soldiers, 0);
@@ -117,20 +165,33 @@ window.addEventListener("message", (event) => {
   if (state?.game_id !== replay.game_id || state.generation_id <= latestGeneration || !state.generation) return;
   latestGeneration = state.generation_id;
   const node = (entry) => ({ id: entry.id, color: entry.team_color, soldiers: entry.soldiers, x: entry.x, y: entry.y, clash_radius: entry.clash_radius });
-  replay.frames.push({ generation_id: latestGeneration, castles: state.generation.castles.map(node), groups: state.generation.soldier_groups.map(node) });
+  replay.frames.push({ generation_id: latestGeneration, castles: state.generation.castles.map(node), groups: state.generation.soldier_groups.map(node), clashes: state.generation.clashes || [] });
   lastTurn = replay.frames.length - 1;
   slider.max = lastTurn;
   live.hidden = false;
   if (followingLive) turn = lastTurn;
-  render();
+  render(followingLive);
 });
 setInterval(() => {
   if (!playing) return;
   if (turn < lastTurn) turn++;
   if (turn === lastTurn) playing = false;
-  render();
+  render(true);
 }, 500);
 render();
+// Let the host fit the embedded view as summaries wrap or team cards resize.
+// Body height is intrinsic, so resizing the frame does not impose a minimum.
+if (window.parent !== window) {
+  let reportedHeight = 0;
+  const reportSize = () => {
+    const height = Math.ceil(document.body.getBoundingClientRect().height);
+    if (height === reportedHeight) return;
+    reportedHeight = height;
+    window.parent.postMessage({ type: "game.result-size", height }, "*");
+  };
+  new ResizeObserver(reportSize).observe(document.body);
+  reportSize();
+}
 </script>
 </body>
 </html>

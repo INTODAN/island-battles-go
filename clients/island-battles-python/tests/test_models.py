@@ -1,8 +1,6 @@
 import math
 
 import pytest
-from pydantic import ValidationError
-
 from island_battles_client import (
     Castle,
     GameProtocolError,
@@ -11,6 +9,7 @@ from island_battles_client import (
     TeamType,
 )
 from island_battles_client._protocol import GenerationState
+from pydantic import ValidationError
 
 
 def make_entity(entity_type, **values):

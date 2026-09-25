@@ -25,12 +25,12 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 	huma.Register(api, huma.Operation{
 		OperationID: "getIslandLobbyReplay", Path: "/game/from-lobby/{lobby_id}/replay", Method: http.MethodGet,
 		Summary:     "View the Island Battles replay history for a started lobby",
-		Description: "Current lobby members can view saved generations, including the initialized state of a new game.",
+		Description: "Current lobby members can view saved generations, including clash effects with survivor losses and defeated troop outlines. Older replays without clash events remain viewable.",
 		Tags:        []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
 	}, game.Replay)
 	huma.Register(api, huma.Operation{
 		OperationID: "getIslandLobbyGeneration", Path: "/game/from-lobby/{lobby_id}/generation", Method: http.MethodGet,
-		Summary: "Read the current generation for a roster player", Description: "Requires a current authorized lobby snapshot and frozen roster membership. Returns persistent castle IDs, troop state and your turn completion flag.",
+		Summary: "Read the current generation for a roster player", Description: "Requires a current authorized lobby snapshot and frozen roster membership. Returns persistent castle IDs, troop state, recorded clashes with per-participant before/after counts, and your turn completion flag.",
 		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
 	}, game.CurrentGeneration)
 	huma.Register(api, huma.Operation{

@@ -20,6 +20,7 @@ type SoldierGroupMoveDelta struct {
 type ClashParticipant struct {
 	SoldierGroup      *models.SoldierGroup
 	Position          pgtype.Point
+	SoldiersBefore    uint
 	RemainingSoldiers uint
 }
 
