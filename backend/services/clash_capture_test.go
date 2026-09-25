@@ -44,15 +44,15 @@ func captureFixture(t *testing.T) (*gorm.DB, *models.Generation) {
 
 func captureGroup(t *testing.T, database *gorm.DB, generation *models.Generation, team, amount uint, x float64) {
 	t.Helper()
-	originLogicalID, destinationLogicalID := uint(0), uint(1)
+	originPersistentID, destinationPersistentID := uint(0), uint(1)
 	if team == 2 {
-		originLogicalID, destinationLogicalID = 1, 0
+		originPersistentID, destinationPersistentID = 1, 0
 	}
-	origin, err := dal.GetCastleFromGeneration(generation, originLogicalID)
+	origin, err := dal.GetCastleFromGeneration(generation, originPersistentID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	destination, err := dal.GetCastleFromGeneration(generation, destinationLogicalID)
+	destination, err := dal.GetCastleFromGeneration(generation, destinationPersistentID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestOneSoldierPerTurnCannotPinCapturingArmy(t *testing.T) {
 		t.Fatal(err)
 	}
 	captureGroup(t, database, generation, 1, 100, 1)
-	parameters, err := json.Marshal(commandHandlers.SendSoldierGroupParams{OriginLogicalCastleID: 1, DestinationLogicalCastleID: 0, SoldierAmount: 1})
+	parameters, err := json.Marshal(commandHandlers.SendSoldierGroupParams{OriginPersistentCastleID: 1, DestinationPersistentCastleID: 0, SoldierAmount: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestOneSoldierPerTurnCannotPinCapturingArmy(t *testing.T) {
 func TestArrivedArmyDoesNotClashWithNewSpawn(t *testing.T) {
 	database, generation := captureFixture(t)
 	captureGroup(t, database, generation, 1, 120, 3)
-	if err := commandHandlers.SendSoldierGroupHandler(database, generation, commandHandlers.SendSoldierGroupParams{OriginLogicalCastleID: 1, DestinationLogicalCastleID: 0, SoldierAmount: 1}); err != nil {
+	if err := commandHandlers.SendSoldierGroupHandler(database, generation, commandHandlers.SendSoldierGroupParams{OriginPersistentCastleID: 1, DestinationPersistentCastleID: 0, SoldierAmount: 1}); err != nil {
 		t.Fatal(err)
 	}
 	if err := dal.RefreshGeneration(database, generation); err != nil {
@@ -181,7 +181,7 @@ func TestSurvivorCannotBypassSecondDefender(t *testing.T) {
 
 func TestEmptyAndSelfSendOrdersAreRejected(t *testing.T) {
 	database, generation := captureFixture(t)
-	for _, parameters := range []commandHandlers.SendSoldierGroupParams{{OriginLogicalCastleID: 0, DestinationLogicalCastleID: 1, SoldierAmount: 0}, {OriginLogicalCastleID: 0, DestinationLogicalCastleID: 0, SoldierAmount: 1}} {
+	for _, parameters := range []commandHandlers.SendSoldierGroupParams{{OriginPersistentCastleID: 0, DestinationPersistentCastleID: 1, SoldierAmount: 0}, {OriginPersistentCastleID: 0, DestinationPersistentCastleID: 0, SoldierAmount: 1}} {
 		if err := commandHandlers.SendSoldierGroupHandler(database, generation, parameters); err == nil {
 			t.Fatalf("invalid send accepted: %+v", parameters)
 		}
@@ -274,11 +274,11 @@ func TestPausedGroupRetainsUpgradesAcrossGenerations(t *testing.T) {
 
 func TestClashStopUpgradeOnlyAffectsNewTroops(t *testing.T) {
 	database, generation := captureFixture(t)
-	sendParameters, err := json.Marshal(commandHandlers.SendSoldierGroupParams{OriginLogicalCastleID: 0, DestinationLogicalCastleID: 1, SoldierAmount: 10})
+	sendParameters, err := json.Marshal(commandHandlers.SendSoldierGroupParams{OriginPersistentCastleID: 0, DestinationPersistentCastleID: 1, SoldierAmount: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
-	upgradeParameters, err := json.Marshal(commandHandlers.UpgradeCastleParams{LogicalCastleID: 0, UpgradeType: models.ClashStopGenerationsUpgrade})
+	upgradeParameters, err := json.Marshal(commandHandlers.UpgradeCastleParams{PersistentCastleID: 0, UpgradeType: models.ClashStopGenerationsUpgrade})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,11 +307,11 @@ func TestClashStopUpgradeOnlyAffectsNewTroops(t *testing.T) {
 	}
 	for _, group := range generation.SoldierGroups {
 		expected := 1
-		if group.LogicalSoldierGroupID == 1 {
+		if group.PersistentSoldierGroupID == 1 {
 			expected = 3
 		}
 		if group.Upgrades[models.ClashStopGenerationsUpgrade] != expected {
-			t.Fatalf("wrong snapshot for group %d: %+v", group.LogicalSoldierGroupID, group.Upgrades)
+			t.Fatalf("wrong snapshot for group %d: %+v", group.PersistentSoldierGroupID, group.Upgrades)
 		}
 	}
 }

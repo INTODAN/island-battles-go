@@ -15,7 +15,7 @@ func TestUpgradeDefaultsMigrateExistingState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := commandHandlers.SendSoldierGroupHandler(database, generation, commandHandlers.SendSoldierGroupParams{OriginLogicalCastleID: 0, DestinationLogicalCastleID: 1, SoldierAmount: 2}); err != nil {
+	if err := commandHandlers.SendSoldierGroupHandler(database, generation, commandHandlers.SendSoldierGroupParams{OriginPersistentCastleID: 0, DestinationPersistentCastleID: 1, SoldierAmount: 2}); err != nil {
 		t.Fatal(err)
 	}
 	for _, model := range []any{&models.CastleTemplate{}, &models.Castle{}, &models.SoldierGroup{}} {

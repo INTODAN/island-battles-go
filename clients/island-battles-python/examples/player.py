@@ -38,8 +38,8 @@ class ExamplePlayer(Player):
         )
         if own is not None and target is not None:
             await commands_receiver.send_soldier_group(
-                origin_logical_castle_id=own.id,
-                destination_logical_castle_id=target.id,
+                origin_castle_id=own.id,
+                destination_castle_id=target.id,
                 soldier_amount=1,
             )
 

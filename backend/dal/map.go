@@ -21,7 +21,7 @@ func CreateMapTemplate(db *gorm.DB, mapTemplate *models.MapTemplate) (uint, erro
 		if err := mapTemplate.CastleTemplates[i].Upgrades.Validate(); err != nil {
 			return 0, err
 		}
-		mapTemplate.CastleTemplates[i].LogicalCastleID = uint(i)
+		mapTemplate.CastleTemplates[i].PersistentCastleID = uint(i)
 	}
 
 	err := db.Create(&mapTemplate).Error

@@ -132,7 +132,7 @@ func prepareLobbyGame(binding models.BindingResult, snapshot domain.Snapshot) (g
 	for index, team := range replay.Teams {
 		angle := math.Pi + 2*math.Pi*float64(index)/float64(len(replay.Teams))
 		gameMap.Castles = append(gameMap.Castles, models.Castle{
-			CastleFields:  models.CastleFields{TeamColor: team.Color, LogicalCastleID: uint(index), Position: pgtype.Point{P: pgtype.Vec2{X: 2 * math.Cos(angle), Y: 2 * math.Sin(angle)}, Valid: true}},
+			CastleFields:  models.CastleFields{TeamColor: team.Color, PersistentCastleID: uint(index), Position: pgtype.Point{P: pgtype.Vec2{X: 2 * math.Cos(angle), Y: 2 * math.Sin(angle)}, Valid: true}},
 			SoldierAmount: 30,
 		})
 	}
@@ -142,10 +142,10 @@ func prepareLobbyGame(binding models.BindingResult, snapshot domain.Snapshot) (g
 func playableReplayFrame(generation *models.Generation) replayFrame {
 	frame := replayFrame{GenerationID: generation.ID, Castles: []replayNode{}, Groups: []replayNode{}}
 	for _, castle := range generation.Map.Castles {
-		frame.Castles = append(frame.Castles, replayNode{ID: castle.LogicalCastleID, Color: castle.TeamColor, Soldiers: castle.SoldierAmount, X: castle.Position.P.X, Y: castle.Position.P.Y})
+		frame.Castles = append(frame.Castles, replayNode{ID: castle.PersistentCastleID, Color: castle.TeamColor, Soldiers: castle.SoldierAmount, X: castle.Position.P.X, Y: castle.Position.P.Y})
 	}
 	for _, group := range generation.SoldierGroups {
-		frame.Groups = append(frame.Groups, replayNode{ID: group.LogicalSoldierGroupID, Color: group.TeamColor, Soldiers: group.SoldierAmount, X: group.Position.P.X, Y: group.Position.P.Y, ClashRadius: group.EffectiveClashRadius()})
+		frame.Groups = append(frame.Groups, replayNode{ID: group.PersistentSoldierGroupID, Color: group.TeamColor, Soldiers: group.SoldierAmount, X: group.Position.P.X, Y: group.Position.P.Y, ClashRadius: group.EffectiveClashRadius()})
 	}
 	sort.Slice(frame.Castles, func(left, right int) bool { return frame.Castles[left].ID < frame.Castles[right].ID })
 	sort.Slice(frame.Groups, func(left, right int) bool { return frame.Groups[left].ID < frame.Groups[right].ID })

@@ -222,7 +222,7 @@ async def test_orders_then_automatic_completion_empty_turn_and_dedup():
             (2, True),
         ]
         assert (
-            server.posts[0]["commands"][0]["parameters"]["origin_logical_castle_id"]
+            server.posts[0]["commands"][0]["parameters"]["origin_persistent_castle_id"]
             == 0
         )
         assert server.posts[1]["commands"] == server.posts[2]["commands"] == []
@@ -333,8 +333,8 @@ async def test_generated_uuid_survives_retry_but_new_calls_send_distinct_groups(
             {
                 "command_type": "send_soldier_group",
                 "parameters": {
-                    "origin_logical_castle_id": 0,
-                    "destination_logical_castle_id": 1,
+                    "origin_persistent_castle_id": 0,
+                    "destination_persistent_castle_id": 1,
                     "soldier_amount": 3,
                 },
             }
@@ -532,7 +532,7 @@ async def test_factory_must_return_player_for_authenticated_team():
     assert game._http.is_closed
 
 
-async def test_public_generation_is_lean_frozen_and_nested_values_are_tuples():
+async def test_public_generation_is_lean_frozen_and_nested_values_are_lists():
     server = Server()
 
     async def with_group(_):
@@ -542,8 +542,8 @@ async def test_public_generation_is_lean_frozen_and_nested_values_are_tuples():
                 "id": 0,
                 "team_color": 1,
                 "soldiers": 5,
-                "origin_logical_castle_id": 0,
-                "destination_logical_castle_id": 1,
+                "origin_persistent_castle_id": 0,
+                "destination_persistent_castle_id": 1,
                 "clash_radius": 0.5,
                 "x": -1.0,
                 "y": 0.0,
@@ -556,8 +556,8 @@ async def test_public_generation_is_lean_frozen_and_nested_values_are_tuples():
         generation = await seen(game)
         assert game.generation == generation
         assert set(type(generation).model_fields) == {"id", "castles", "soldier_groups"}
-        assert isinstance(generation.castles, tuple)
-        assert isinstance(generation.soldier_groups, tuple)
+        assert isinstance(generation.castles, list)
+        assert isinstance(generation.soldier_groups, list)
         assert generation.soldier_groups[0].id == 0
         assert not hasattr(generation, "game_id")
         assert not hasattr(generation, "player_id")
@@ -568,8 +568,6 @@ async def test_public_generation_is_lean_frozen_and_nested_values_are_tuples():
             generation.castles[0].soldiers = 999
         with pytest.raises(ValidationError):
             generation.soldier_groups[0].soldiers = 999
-        with pytest.raises(TypeError):
-            generation.castles[0] = generation.castles[1]
 
 
 @pytest.mark.parametrize(
@@ -600,20 +598,20 @@ async def test_malformed_wire_castle_rejected(field, bad):
 @pytest.mark.parametrize(
     "field,bad,error",
     [
-        ("origin_logical_castle_id", True, TypeError),
-        ("destination_logical_castle_id", "1", TypeError),
+        ("origin_castle_id", True, TypeError),
+        ("destination_castle_id", "1", TypeError),
         ("soldier_amount", False, TypeError),
         ("soldier_amount", "5", TypeError),
-        ("origin_logical_castle_id", -1, ValueError),
-        ("destination_logical_castle_id", -1, ValueError),
+        ("origin_castle_id", -1, ValueError),
+        ("destination_castle_id", -1, ValueError),
         ("soldier_amount", 0, ValueError),
         ("soldier_amount", -1, ValueError),
     ],
 )
 async def test_send_rejects_invalid_parameters_before_sending(field, bad, error):
     values = {
-        "origin_logical_castle_id": 0,
-        "destination_logical_castle_id": 1,
+        "origin_castle_id": 0,
+        "destination_castle_id": 1,
         "soldier_amount": 5,
     }
     values[field] = bad

@@ -41,9 +41,9 @@ func TestGameGraphWithSoldierGroups(t *testing.T) {
 		}
 	}
 	sendSoldierGroupParams := commandHandlers.SendSoldierGroupParams{
-		SoldierAmount:              10,
-		OriginLogicalCastleID:      generation.Map.Castles[0].LogicalCastleID,
-		DestinationLogicalCastleID: generation.Map.Castles[1].LogicalCastleID,
+		SoldierAmount:                 10,
+		OriginPersistentCastleID:      generation.Map.Castles[0].PersistentCastleID,
+		DestinationPersistentCastleID: generation.Map.Castles[1].PersistentCastleID,
 	}
 	rawParams, err := json.Marshal(sendSoldierGroupParams)
 	if err != nil {
@@ -75,9 +75,9 @@ func TestGameGraphWithSoldierGroups(t *testing.T) {
 		}
 	}
 	sendSoldierGroupParams = commandHandlers.SendSoldierGroupParams{
-		SoldierAmount:              20,
-		OriginLogicalCastleID:      generation.Map.Castles[1].LogicalCastleID,
-		DestinationLogicalCastleID: generation.Map.Castles[0].LogicalCastleID,
+		SoldierAmount:                 20,
+		OriginPersistentCastleID:      generation.Map.Castles[1].PersistentCastleID,
+		DestinationPersistentCastleID: generation.Map.Castles[0].PersistentCastleID,
 	}
 	rawParams, err = json.Marshal(sendSoldierGroupParams)
 	if err != nil {

@@ -10,11 +10,11 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-func clashMovement(start, end float64, team, soldiers, logicalID uint) internal.SoldierGroupMoveDelta {
+func clashMovement(start, end float64, team, soldiers, persistentID uint) internal.SoldierGroupMoveDelta {
 	return internal.SoldierGroupMoveDelta{
 		Start:        pgtype.Point{P: pgtype.Vec2{X: start}, Valid: true},
 		End:          pgtype.Point{P: pgtype.Vec2{X: end}, Valid: true},
-		SoldierGroup: &models.SoldierGroup{TeamColor: team, LogicalSoldierGroupID: logicalID, SoldierGroupFields: models.SoldierGroupFields{SoldierAmount: soldiers}},
+		SoldierGroup: &models.SoldierGroup{TeamColor: team, PersistentSoldierGroupID: persistentID, SoldierGroupFields: models.SoldierGroupFields{SoldierAmount: soldiers}},
 	}
 }
 
@@ -103,7 +103,7 @@ func TestSimultaneousCombatDoesNotDependOnInputOrder(t *testing.T) {
 			t.Fatalf("clashes=%+v err=%v", clashes, err)
 		}
 		for _, participant := range clashes[0].Participants {
-			expected := []uint{8, 10, 0, 0}[participant.SoldierGroup.LogicalSoldierGroupID]
+			expected := []uint{8, 10, 0, 0}[participant.SoldierGroup.PersistentSoldierGroupID]
 			if participant.RemainingSoldiers != expected {
 				t.Fatalf("input order changed outcome: %+v", clashes[0])
 			}

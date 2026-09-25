@@ -26,7 +26,7 @@ func CreateSoldierGroup(db *gorm.DB, soldierGroup *models.SoldierGroup) (uint, e
 	soldierGroup.Upgrades = soldierGroup.Upgrades.Clone()
 	var lastGroups []models.SoldierGroup
 	err := db.Where(&models.SoldierGroup{GenerationID: soldierGroup.GenerationID}).
-		Order(clause.OrderByColumn{Column: clause.Column{Name: "logical_soldier_group_id"}, Desc: true}).
+		Order(clause.OrderByColumn{Column: clause.Column{Name: "persistent_soldier_group_id"}, Desc: true}).
 		Limit(1).
 		Find(&lastGroups).Error
 
@@ -35,9 +35,9 @@ func CreateSoldierGroup(db *gorm.DB, soldierGroup *models.SoldierGroup) (uint, e
 	}
 
 	if len(lastGroups) > 0 {
-		soldierGroup.LogicalSoldierGroupID = lastGroups[0].LogicalSoldierGroupID + 1
+		soldierGroup.PersistentSoldierGroupID = lastGroups[0].PersistentSoldierGroupID + 1
 	} else {
-		soldierGroup.LogicalSoldierGroupID = 0
+		soldierGroup.PersistentSoldierGroupID = 0
 	}
 
 	err = db.Create(&soldierGroup).Error
@@ -59,11 +59,11 @@ func DuplicateSoldierGroup(db *gorm.DB, migratedGenerationID uint, originSoldier
 		return 0, err
 	}
 
-	newOriginCastle, err := GetCastleFromGeneration(migratedGeneration, originalSoldierGroup.OriginCastle.LogicalCastleID)
+	newOriginCastle, err := GetCastleFromGeneration(migratedGeneration, originalSoldierGroup.OriginCastle.PersistentCastleID)
 	if err != nil {
 		return 0, err
 	}
-	newDestinationCastle, err := GetCastleFromGeneration(migratedGeneration, originalSoldierGroup.DestinationCastle.LogicalCastleID)
+	newDestinationCastle, err := GetCastleFromGeneration(migratedGeneration, originalSoldierGroup.DestinationCastle.PersistentCastleID)
 	if err != nil {
 		return 0, err
 	}
@@ -76,7 +76,7 @@ func DuplicateSoldierGroup(db *gorm.DB, migratedGenerationID uint, originSoldier
 		},
 		Position:                 originalSoldierGroup.Position,
 		GenerationID:             migratedGenerationID,
-		LogicalSoldierGroupID:    originalSoldierGroup.LogicalSoldierGroupID,
+		PersistentSoldierGroupID: originalSoldierGroup.PersistentSoldierGroupID,
 		TeamColor:                originalSoldierGroup.TeamColor,
 		ClashRadius:              originalSoldierGroup.ClashRadius,
 		MovementPauseGenerations: originalSoldierGroup.MovementPauseGenerations,

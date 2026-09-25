@@ -48,9 +48,9 @@ func TestSoldierGroupColor(t *testing.T) {
 	// Step 0: Castle 0 (Team 1) sends Group X (5 soldiers) to Castle 1 (Team 2).
 	// Group X allegiance is Team 1. Distance is 4.0, taking 8 migrations to arrive.
 	paramsX := commandHandlers.SendSoldierGroupParams{
-		OriginLogicalCastleID:      0,
-		DestinationLogicalCastleID: 1,
-		SoldierAmount:              5,
+		OriginPersistentCastleID:      0,
+		DestinationPersistentCastleID: 1,
+		SoldierAmount:                 5,
 	}
 	err = commandHandlers.SendSoldierGroupHandler(db, generation, paramsX)
 	if err != nil {
@@ -71,9 +71,9 @@ func TestSoldierGroupColor(t *testing.T) {
 	// Step 1: Castle 2 (Team 2) sends Group Y (30 soldiers) to Castle 0 (Team 1).
 	// Group Y is sent from (2, 2) to (0, 1), taking 5 migrations to arrive.
 	paramsY := commandHandlers.SendSoldierGroupParams{
-		OriginLogicalCastleID:      2,
-		DestinationLogicalCastleID: 0,
-		SoldierAmount:              30,
+		OriginPersistentCastleID:      2,
+		DestinationPersistentCastleID: 0,
+		SoldierAmount:                 30,
 	}
 	err = commandHandlers.SendSoldierGroupHandler(db, gen1, paramsY)
 	if err != nil {
@@ -107,7 +107,7 @@ func TestSoldierGroupColor(t *testing.T) {
 	var groupX *models.SoldierGroup
 	for i := range gen6.SoldierGroups {
 		sg := &gen6.SoldierGroups[i]
-		if sg.OriginCastle.LogicalCastleID == 0 && sg.DestinationCastle.LogicalCastleID == 1 {
+		if sg.OriginCastle.PersistentCastleID == 0 && sg.DestinationCastle.PersistentCastleID == 1 {
 			groupX = sg
 			break
 		}
@@ -198,7 +198,7 @@ func TestClashRadiusDefaultAndMigration(t *testing.T) {
 	}
 	for _, group := range migrated.SoldierGroups {
 		expected := models.DefaultClashRadius
-		if group.LogicalSoldierGroupID == 1 {
+		if group.PersistentSoldierGroupID == 1 {
 			expected = .75
 		}
 		if group.ClashRadius != expected {
@@ -214,7 +214,7 @@ func TestExistingSoldierGroupsReceiveDefaultRadius(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := commandHandlers.SendSoldierGroupHandler(database, generation, commandHandlers.SendSoldierGroupParams{OriginLogicalCastleID: 0, DestinationLogicalCastleID: 1, SoldierAmount: 2}); err != nil {
+	if err := commandHandlers.SendSoldierGroupHandler(database, generation, commandHandlers.SendSoldierGroupParams{OriginPersistentCastleID: 0, DestinationPersistentCastleID: 1, SoldierAmount: 2}); err != nil {
 		t.Fatal(err)
 	}
 	// Recreate the prior schema, then apply the same model migration as startup.

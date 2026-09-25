@@ -255,8 +255,8 @@ func validateCommands(generation *models.Generation, teamColor uint, inputs []mo
 	available := map[uint]uint{}
 	castles := map[uint]models.Castle{}
 	for _, castle := range generation.Map.Castles {
-		castles[castle.LogicalCastleID] = castle
-		available[castle.LogicalCastleID] = castle.SoldierAmount
+		castles[castle.PersistentCastleID] = castle
+		available[castle.PersistentCastleID] = castle.SoldierAmount
 	}
 	for _, input := range inputs {
 		var commands []models.CommandFields
@@ -268,10 +268,10 @@ func validateCommands(generation *models.Generation, teamColor uint, inputs []mo
 			if err := json.Unmarshal(command.Parameters, &parameters); err != nil {
 				return nil, err
 			}
-			if parameters.SoldierAmount > available[parameters.OriginLogicalCastleID] {
+			if parameters.SoldierAmount > available[parameters.OriginPersistentCastleID] {
 				return nil, errors.New("persisted reservations exceed available soldiers")
 			}
-			available[parameters.OriginLogicalCastleID] -= parameters.SoldierAmount
+			available[parameters.OriginPersistentCastleID] -= parameters.SoldierAmount
 		}
 	}
 	commands := make([]models.CommandFields, 0, len(public))
@@ -280,8 +280,8 @@ func validateCommands(generation *models.Generation, teamColor uint, inputs []mo
 			return nil, reject(403, "only send_soldier_group is a player command")
 		}
 		var parameters struct {
-			Origin      *uint `json:"origin_logical_castle_id"`
-			Destination *uint `json:"destination_logical_castle_id"`
+			Origin      *uint `json:"origin_persistent_castle_id"`
+			Destination *uint `json:"destination_persistent_castle_id"`
 			Soldiers    *uint `json:"soldier_amount"`
 		}
 		decoder := json.NewDecoder(bytes.NewReader(command.Parameters))
@@ -294,7 +294,7 @@ func validateCommands(generation *models.Generation, teamColor uint, inputs []mo
 			return nil, reject(422, "invalid parameters")
 		}
 		if parameters.Origin == nil || parameters.Destination == nil || parameters.Soldiers == nil || *parameters.Soldiers == 0 {
-			return nil, reject(422, "origin_logical_castle_id, destination_logical_castle_id and positive soldier_amount are required")
+			return nil, reject(422, "origin_persistent_castle_id, destination_persistent_castle_id and positive soldier_amount are required")
 		}
 		if *parameters.Origin == *parameters.Destination {
 			return nil, reject(422, "origin and destination must differ")
@@ -313,7 +313,7 @@ func validateCommands(generation *models.Generation, teamColor uint, inputs []mo
 			return nil, reject(409, "insufficient soldiers after accepted team reservations")
 		}
 		available[*parameters.Origin] -= *parameters.Soldiers
-		raw, err := json.Marshal(commandHandlers.SendSoldierGroupParams{OriginLogicalCastleID: *parameters.Origin, DestinationLogicalCastleID: *parameters.Destination, SoldierAmount: *parameters.Soldiers})
+		raw, err := json.Marshal(commandHandlers.SendSoldierGroupParams{OriginPersistentCastleID: *parameters.Origin, DestinationPersistentCastleID: *parameters.Destination, SoldierAmount: *parameters.Soldiers})
 		if err != nil {
 			return nil, err
 		}
@@ -330,10 +330,10 @@ func generationState(game *models.Game, generation *models.Generation, player mo
 		}
 	}
 	for _, castle := range generation.Map.Castles {
-		state.Generation.Castles = append(state.Generation.Castles, models.CastleView{ID: castle.LogicalCastleID, TeamColor: castle.TeamColor, Soldiers: castle.SoldierAmount, X: castle.Position.P.X, Y: castle.Position.P.Y})
+		state.Generation.Castles = append(state.Generation.Castles, models.CastleView{ID: castle.PersistentCastleID, TeamColor: castle.TeamColor, Soldiers: castle.SoldierAmount, X: castle.Position.P.X, Y: castle.Position.P.Y})
 	}
 	for _, group := range generation.SoldierGroups {
-		state.Generation.SoldierGroups = append(state.Generation.SoldierGroups, models.SoldierGroupView{ID: group.LogicalSoldierGroupID, TeamColor: group.TeamColor, Soldiers: group.SoldierAmount, X: group.Position.P.X, Y: group.Position.P.Y, OriginLogicalCastleID: group.OriginCastle.LogicalCastleID, DestinationLogicalCastleID: group.DestinationCastle.LogicalCastleID, ClashRadius: group.EffectiveClashRadius()})
+		state.Generation.SoldierGroups = append(state.Generation.SoldierGroups, models.SoldierGroupView{ID: group.PersistentSoldierGroupID, TeamColor: group.TeamColor, Soldiers: group.SoldierAmount, X: group.Position.P.X, Y: group.Position.P.Y, OriginPersistentCastleID: group.OriginCastle.PersistentCastleID, DestinationPersistentCastleID: group.DestinationCastle.PersistentCastleID, ClashRadius: group.EffectiveClashRadius()})
 	}
 	sort.Slice(state.Generation.Castles, func(left, right int) bool {
 		return state.Generation.Castles[left].ID < state.Generation.Castles[right].ID

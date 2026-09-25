@@ -9,24 +9,24 @@ import (
 )
 
 type SendSoldierGroupParams struct {
-	OriginLogicalCastleID      uint
-	DestinationLogicalCastleID uint
-	SoldierAmount              uint
+	OriginPersistentCastleID      uint `json:"origin_persistent_castle_id"`
+	DestinationPersistentCastleID uint `json:"destination_persistent_castle_id"`
+	SoldierAmount                 uint `json:"soldier_amount"`
 }
 
 func SendSoldierGroupHandler(db *gorm.DB, generation *models.Generation, parameters SendSoldierGroupParams) error {
 	if parameters.SoldierAmount == 0 {
 		return fmt.Errorf("soldier amount must be greater than zero")
 	}
-	if parameters.OriginLogicalCastleID == parameters.DestinationLogicalCastleID {
+	if parameters.OriginPersistentCastleID == parameters.DestinationPersistentCastleID {
 		return fmt.Errorf("origin and destination castles must differ")
 	}
-	originCastle, err := dal.GetCastleFromGeneration(generation, parameters.OriginLogicalCastleID)
+	originCastle, err := dal.GetCastleFromGeneration(generation, parameters.OriginPersistentCastleID)
 	if err != nil {
 		return err
 	}
 
-	destinationCastle, err := dal.GetCastleFromGeneration(generation, parameters.DestinationLogicalCastleID)
+	destinationCastle, err := dal.GetCastleFromGeneration(generation, parameters.DestinationPersistentCastleID)
 	if err != nil {
 		return err
 	}
