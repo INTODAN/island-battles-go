@@ -44,14 +44,14 @@ func TestGetLatestGeneration(t *testing.T) {
 	}
 }
 
-func TestUniqueLogicalCastleID(t *testing.T) {
+func TestUniquePersistentCastleID(t *testing.T) {
 	db := testutils.InitTestDB(t)
 	generationID := testutils.CreateGenerationForTest(t, db)
 	generation, err := dal.GetGeneration(db, generationID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if generation.Map.Castles[0].LogicalCastleID == generation.Map.Castles[1].LogicalCastleID {
+	if generation.Map.Castles[0].PersistentCastleID == generation.Map.Castles[1].PersistentCastleID {
 		t.Fatal("Castle IDs are not unique")
 	}
 }

@@ -8,12 +8,12 @@ import (
 )
 
 type UpgradeCastleParams struct {
-	LogicalCastleID uint               `json:"logical_castle_id"`
-	UpgradeType     models.UpgradeType `json:"upgrade_type"`
+	PersistentCastleID uint               `json:"persistent_castle_id"`
+	UpgradeType        models.UpgradeType `json:"upgrade_type"`
 }
 
 func UpgradeCastleHandler(database *gorm.DB, generation *models.Generation, parameters UpgradeCastleParams) error {
-	castle, err := dal.GetCastleFromGeneration(generation, parameters.LogicalCastleID)
+	castle, err := dal.GetCastleFromGeneration(generation, parameters.PersistentCastleID)
 	if err != nil {
 		return err
 	}

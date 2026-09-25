@@ -201,10 +201,10 @@ func velocity(movement internal.SoldierGroupMoveDelta) pgtype.Vec2 {
 }
 
 // A team survives only when it outnumbers all opposing teams together. Resolve
-// losses in logical group order, independent of database or map iteration order.
+// losses in persistent group ID order, independent of database or map iteration order.
 func resolveClash(clash *internal.Clash) {
 	sort.SliceStable(clash.Participants, func(left, right int) bool {
-		return clash.Participants[left].SoldierGroup.LogicalSoldierGroupID < clash.Participants[right].SoldierGroup.LogicalSoldierGroupID
+		return clash.Participants[left].SoldierGroup.PersistentSoldierGroupID < clash.Participants[right].SoldierGroup.PersistentSoldierGroupID
 	})
 	totals := map[uint]uint{}
 	for _, participant := range clash.Participants {

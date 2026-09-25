@@ -8,13 +8,13 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-func GetCastleFromGeneration(generation *models.Generation, logicalCastleID uint) (*models.Castle, error) {
+func GetCastleFromGeneration(generation *models.Generation, persistentCastleID uint) (*models.Castle, error) {
 	for i := range generation.Map.Castles {
-		if generation.Map.Castles[i].LogicalCastleID == logicalCastleID {
+		if generation.Map.Castles[i].PersistentCastleID == persistentCastleID {
 			return &generation.Map.Castles[i], nil
 		}
 	}
-	return nil, fmt.Errorf("castle with LogicalCastleID %d not found in generation %d", logicalCastleID, generation.ID)
+	return nil, fmt.Errorf("castle with PersistentCastleID %d not found in generation %d", persistentCastleID, generation.ID)
 }
 
 func UpdateCastleSoldierGroupAmount(db *gorm.DB, castle *models.Castle, soldierAmount uint) error {

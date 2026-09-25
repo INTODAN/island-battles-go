@@ -32,8 +32,8 @@ class MyPlayer(Player):
         )
         if own is not None and enemy is not None:
             await commands_receiver.send_soldier_group(
-                origin_logical_castle_id=own.id,
-                destination_logical_castle_id=enemy.id,
+                origin_castle_id=own.id,
+                destination_castle_id=enemy.id,
                 soldier_amount=1,
             )
 
@@ -55,9 +55,21 @@ The full example is in [examples/player.py](examples/player.py). Obtain the gues
 
 If a strategy needs its own `__init__`, call `super().__init__(team_color)` before initializing its additional state.
 
-`Generation` exposes only `id`, `castles`, and `soldier_groups`. These public snapshot models are frozen Pydantic models; nested collections such as `castles` and `soldier_groups` are tuples. Castle and group values are read directly from `generation.castles` and `generation.soldier_groups`. Transport identity and submission status stay inside the client rather than leaking into the strategy API. `client.generation`, `start()`, and `refresh()` expose the current `Generation` snapshot.
+`Generation` exposes only `id`, `castles`, and `soldier_groups`. These public snapshot models are frozen Pydantic models, while `castles` and `soldier_groups` are mutable Python lists. Castle and group values are read directly from `generation.castles` and `generation.soldier_groups`. Transport identity and submission status stay inside the client rather than leaking into the strategy API. `client.generation`, `start()`, and `refresh()` expose the current `Generation` snapshot.
 
-The client owns authentication, the personal player-channel subscription, reconnect recovery, state reconciliation, and turn completion. It calls `on_generation` serially with a fresh `CommandReceiver` scoped to that callback. Call `await commands_receiver.send_soldier_group(origin_logical_castle_id, destination_logical_castle_id, soldier_amount)` to send one group; it returns `None`. To send multiple groups, await one call per group. Castle IDs must be non-negative integers and the soldier amount must be a positive integer. The receiver expires when the callback returns or raises. Returning successfully completes the turn automatically, even without sending any soldiers; an exception or cancellation leaves it open.
+`Castle` and `SoldierGroup` provide `distance(other)` for straight-line distance in map units and `compare_team(other)` returning `TeamType.friendly`, `TeamType.neutral`, or `TeamType.enemy` (import `TeamType` from `island_battles_client`). A target with team color `0` is always neutral, including when both entities are neutral. Otherwise, equal team colors are friendly and different colors are enemies.
+
+`SoldierGroup` requires a `destination_castle: Castle` at construction and provides `distance_left()` with no arguments. The client looks up the destination by its persistent ID in the server response and passes that castle when constructing each group. Distances are floating-point map units, not travel times or generation counts; speed and clash radius do not affect them. All public numeric fields use plain `int` or `float` annotations and are required, including group coordinates, `origin_castle_id`, `destination_castle_id`, and clash radius.
+
+```python
+origin, target = generation.castles[:2]
+distance = origin.distance(target)
+relationship = origin.compare_team(target)
+for group in generation.soldier_groups:
+    remaining = group.distance_left()
+```
+
+The client owns authentication, the personal player-channel subscription, reconnect recovery, state reconciliation, and turn completion. It calls `on_generation` serially with a fresh `CommandReceiver` scoped to that callback. Call `await commands_receiver.send_soldier_group(origin_castle_id, destination_castle_id, soldier_amount)` to send one group; it returns `None`. To send multiple groups, await one call per group. Castle IDs must be non-negative integers and the soldier amount must be a positive integer. The receiver expires when the callback returns or raises. Returning successfully completes the turn automatically, even without sending any soldiers; an exception or cancellation leaves it open.
 
 Each call is pinned to its callback's generation. The SDK creates the request UUID internally and reuses the exact request when retrying a transport failure. A subsequent call, even with identical parameters, sends a new group. Player code only supplies the two castle IDs and soldier amount; authentication, request IDs, and completion belong to the SDK. The SDK also deduplicates repeated events and reconciles authorized HTTP state after subscription or reconnect. The existing `game.next_generation` wire event is unchanged. No periodic polling is enabled by default; `refresh()` can request an explicit read.
 

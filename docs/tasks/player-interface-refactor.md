@@ -6,7 +6,7 @@
 - `IslandBattlesClient(base_url, credential, lobby_id, *, player_factory: Callable[[int], Player], ...)` owns authentication, subscriptions, reconciliation, and turn completion. After the first authorized state read it calls the factory once with the frozen team color. A player that adds its own constructor calls `super().__init__(team_color)`.
 - The public `Generation` has only `id`, `castles`, and `soldier_groups`. Transport identity and submission metadata remain in an internal envelope. `client.generation`, `start()`, and `refresh()` expose the lean model; `client.player` exposes the constructed strategy.
 - All public snapshot models and internal wire models are frozen Pydantic models. Nested collections are tuples; IDs and counts reject booleans/string coercion.
-- A fresh `CommandReceiver` is supplied per callback. Its async `send_soldier_group(origin_logical_castle_id, destination_logical_castle_id, soldier_amount)` method returns `None` and sends one group for that callback's original generation. The SDK owns request UUID creation and retries; no public order model, batch method, or request-ID parameter is needed. Receivers reject use after the callback ends. The player has no `end_turn`; successful return completes once, while exceptions/cancellation do not complete.
+- A fresh `CommandReceiver` is supplied per callback. Its async `send_soldier_group(origin_castle_id, destination_castle_id, soldier_amount)` method returns `None` and sends one group for that callback's original generation. The SDK owns request UUID creation and retries; no public order model, batch method, or request-ID parameter is needed. Receivers reject use after the callback ends. The player has no `end_turn`; successful return completes once, while exceptions/cancellation do not complete.
 - Keep the existing HTTP and Centrifugo wire protocol, authorization, UUID retries, serial callback execution, reconnect recovery, and no default polling.
 
 ## Subtasks and ownership
@@ -29,7 +29,7 @@
 4. Integration and verification (primary).
    - Update dependency lock; inspect the final public API and migration for stale names.
    - Run SDK tests, Ruff/format/type checks, and the focused live acceptance test.
-   - Confirm the independent browser demo remains compatible with the unchanged wire protocol.
+   - Confirm the independent browser demo uses the current server API field names.
 
 ## Verification
 

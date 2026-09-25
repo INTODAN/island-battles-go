@@ -19,7 +19,7 @@ type SoldierGroup struct {
 	DestinationCastle Castle `json:"-"`
 
 	GenerationID             uint
-	LogicalSoldierGroupID    uint
+	PersistentSoldierGroupID uint
 	TeamColor                uint
 	MovementPauseGenerations uint         `json:"movement_pause_generations" gorm:"not null;default:0"`
 	ClashRadius              float64      `json:"clash_radius" gorm:"not null;default:0.25;check:clash_radius > 0"`

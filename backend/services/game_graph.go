@@ -91,7 +91,7 @@ func BuildGraphForGeneration(generation *models.Generation, index int, totalGens
 
 		nodes = append(
 			nodes, opts.GraphNode{
-				Name:       fmt.Sprintf("castle_%d", castle.LogicalCastleID),
+				Name:       fmt.Sprintf("castle_%d", castle.PersistentCastleID),
 				Value:      float32(castle.SoldierAmount),
 				X:          float32(castle.Position.P.X) + halfWidth,
 				Y:          float32(castle.Position.P.Y) + halfHeight,
@@ -108,7 +108,7 @@ func BuildGraphForGeneration(generation *models.Generation, index int, totalGens
 
 		nodes = append(
 			nodes, opts.GraphNode{
-				Name:       fmt.Sprintf("soldier_group_%d", soldierGroup.LogicalSoldierGroupID),
+				Name:       fmt.Sprintf("soldier_group_%d", soldierGroup.PersistentSoldierGroupID),
 				Value:      float32(soldierGroup.SoldierAmount),
 				X:          float32(soldierGroup.Position.P.X) + halfWidth,
 				Y:          float32(soldierGroup.Position.P.Y) + halfHeight,

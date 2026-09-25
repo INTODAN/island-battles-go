@@ -18,8 +18,8 @@ class CommandReceiver:
 
     async def send_soldier_group(
         self,
-        origin_logical_castle_id: int,
-        destination_logical_castle_id: int,
+        origin_castle_id: int,
+        destination_castle_id: int,
         soldier_amount: int,
     ) -> None:
         """Send one group immediately; await this before the callback returns."""
@@ -28,8 +28,8 @@ class CommandReceiver:
                 "command receiver is closed; use it only during on_generation"
             )
         parameters = {
-            "origin_logical_castle_id": origin_logical_castle_id,
-            "destination_logical_castle_id": destination_logical_castle_id,
+            "origin_castle_id": origin_castle_id,
+            "destination_castle_id": destination_castle_id,
             "soldier_amount": soldier_amount,
         }
         for name, value in parameters.items():
@@ -41,6 +41,10 @@ class CommandReceiver:
         await self._submit(
             {
                 "command_type": "send_soldier_group",
-                "parameters": parameters,
+                "parameters": {
+                    "origin_persistent_castle_id": origin_castle_id,
+                    "destination_persistent_castle_id": destination_castle_id,
+                    "soldier_amount": soldier_amount,
+                },
             }
         )
