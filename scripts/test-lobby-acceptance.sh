@@ -2,6 +2,10 @@
 # Exercise the shared lobby suite against the Island Battles host application.
 set -euo pipefail
 repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-exec "$repository_root/lobby/scripts/test-acceptance.sh" \
+export GOCACHE="${GOCACHE:-/tmp/lobby-go-cache}"
+export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/lobby-uv-cache}"
+# The host suite imports both Python clients and their locked dependencies.
+exec uv run --project "$repository_root/clients/island-battles-python" --locked --group integration \
+  python "$repository_root/lobby/integration/run.py" \
   --server-root "$repository_root" --server-package ./backend \
   --env-prefix ISLAND_BATTLES_ --extra-tests "$repository_root/integration/island_battles"

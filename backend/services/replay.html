@@ -25,12 +25,13 @@ input { flex: 1; min-width: 100px; accent-color: #3464e0; }
 </head>
 <body>
 <h1>Island Battles</h1>
-<p>Automatic battle · Circles are castles; moving dots are troops. Numbers show soldiers.</p>
+<p>Circles are castles; moving dots are troops. Numbers show soldiers.</p>
 <div id="teams"></div>
 <svg id="battlefield" viewBox="0 0 800 600" role="img" aria-label="Battlefield showing castles and moving troops"></svg>
 <div class="controls">
 <button id="play" type="button">Pause</button>
 <button id="result" type="button">Show result</button>
+<button id="live" type="button" hidden>Follow live</button>
 <label id="turn" for="timeline"></label>
 <input id="timeline" type="range" min="0" value="0" aria-label="Replay turn">
 </div>
@@ -43,9 +44,14 @@ const colors = ["#3464e0", "#d94d5b", "#288562", "#9560cb", "#b37914", "#24828f"
 const field = document.getElementById("battlefield");
 const slider = document.getElementById("timeline");
 const play = document.getElementById("play");
-const lastTurn = replay.frames.length - 1;
-let turn = 0;
-let playing = true;
+let lastTurn = replay.frames.length - 1;
+let latestGeneration = replay.frames[lastTurn]?.generation_id || 0;
+let followingLive = latestGeneration > 0;
+let turn = followingLive ? lastTurn : 0;
+let playing = !followingLive;
+const live = document.getElementById("live");
+live.hidden = !followingLive;
+if (followingLive) document.getElementById("result").textContent = "Latest generation";
 slider.max = lastTurn;
 const color = (team) => colors[(team - 1) % colors.length] || "#8290a4";
 const worldScale = 100;
@@ -95,13 +101,29 @@ function render() {
     scoreLabels.get(team.color).textContent = `${castles.length} castles · ${soldiers} soldiers`;
   }
   slider.value = turn;
-  document.getElementById("turn").textContent = `Turn ${turn} / ${lastTurn}`;
-  document.getElementById("outcome").textContent = turn === lastTurn ? replay.outcome : "Watching the battle…";
+  document.getElementById("turn").textContent = `Generation ${turn + 1} / ${lastTurn + 1}`;
+  document.getElementById("outcome").textContent = followingLive ? "Live · Waiting for both players’ next turn" : turn === lastTurn ? replay.outcome : "Watching recorded generations…";
   play.textContent = playing ? "Pause" : turn === lastTurn ? "Replay" : "Play";
+  live.textContent = followingLive ? "● Live" : "Follow live";
+  live.setAttribute("aria-pressed", String(followingLive));
 }
-play.addEventListener("click", () => { if (turn === lastTurn) turn = 0; playing = !playing; render(); });
-slider.addEventListener("input", () => { turn = Number(slider.value); playing = false; render(); });
-document.getElementById("result").addEventListener("click", () => { turn = lastTurn; playing = false; render(); });
+play.addEventListener("click", () => { followingLive = false; if (turn === lastTurn) turn = 0; playing = !playing; render(); });
+slider.addEventListener("input", () => { turn = Number(slider.value); playing = false; followingLive = false; render(); });
+document.getElementById("result").addEventListener("click", () => { turn = lastTurn; playing = false; followingLive = false; render(); });
+live.addEventListener("click", () => { followingLive = true; playing = false; turn = lastTurn; render(); });
+window.addEventListener("message", (event) => {
+  if (event.source !== window.parent || event.data?.type !== "island-battles.generation") return;
+  const state = event.data.state;
+  if (state?.game_id !== replay.game_id || state.generation_id <= latestGeneration || !state.generation) return;
+  latestGeneration = state.generation_id;
+  const node = (entry) => ({ id: entry.id, color: entry.team_color, soldiers: entry.soldiers, x: entry.x, y: entry.y, clash_radius: entry.clash_radius });
+  replay.frames.push({ generation_id: latestGeneration, castles: state.generation.castles.map(node), groups: state.generation.soldier_groups.map(node) });
+  lastTurn = replay.frames.length - 1;
+  slider.max = lastTurn;
+  live.hidden = false;
+  if (followingLive) turn = lastTurn;
+  render();
+});
 setInterval(() => {
   if (!playing) return;
   if (turn < lastTurn) turn++;

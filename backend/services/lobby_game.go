@@ -7,7 +7,6 @@ import (
 	"sort"
 
 	"islandBattles/backend/dal"
-	"islandBattles/backend/dal/commandHandlers"
 	"islandBattles/backend/models"
 	"islandBattles/lobby/domain"
 
@@ -15,17 +14,58 @@ import (
 	"gorm.io/gorm"
 )
 
-const spectatorTurns = 60
-
-// RunLobbyGame creates one automatic, bounded simulation for the frozen roster.
-// Replays and concurrent starts reuse its saved result, including after restart.
+// RunLobbyGame initializes one playable generation for the frozen roster.
+// Repeated and concurrent starts reuse the committed state.
 func RunLobbyGame(database *gorm.DB, snapshot domain.Snapshot) (models.BindingResult, error) {
 	binding, err := dal.BindLobbyGame(database, snapshot)
 	if err != nil {
 		return models.BindingResult{}, err
 	}
-	err = dal.StoreGameReplayOnce(database, binding.GameID, func(transaction *gorm.DB) ([]byte, error) {
-		return simulateLobbyGame(transaction, binding, snapshot)
+	err = dal.WithLockedGame(database, binding.GameID, func(transaction *gorm.DB, game *models.Game) error {
+		// A saved replay also identifies old completed spectator games.
+		if len(game.Replay) > 0 {
+			return nil
+		}
+		if len(snapshot.StartRoster) == 0 {
+			return fmt.Errorf("cannot initialize an empty roster")
+		}
+		replay, gameMap := prepareLobbyGame(binding, snapshot)
+		players := make([]models.FrozenGamePlayer, 0, len(snapshot.StartRoster))
+		for _, entry := range snapshot.StartRoster {
+			color := models.NeutralTeamColor
+			for _, team := range binding.Teams {
+				if team.TeamID == entry.TeamID {
+					color = team.TeamColor
+					break
+				}
+			}
+			if color == models.NeutralTeamColor {
+				return fmt.Errorf("frozen player has no team binding")
+			}
+			players = append(players, models.FrozenGamePlayer{GameID: binding.GameID, PlayerID: entry.PlayerID, TeamColor: color})
+		}
+		if err := dal.StoreFrozenPlayers(transaction, players); err != nil {
+			return err
+		}
+		generation := models.Generation{GameID: binding.GameID, Map: gameMap}
+		generationID, err := dal.CreateGeneration(transaction, &generation)
+		if err != nil {
+			return err
+		}
+		current, err := dal.GetGeneration(transaction, generationID)
+		if err != nil {
+			return err
+		}
+		replay.Frames = append(replay.Frames, playableReplayFrame(current))
+		replay.Outcome = "Waiting for player turns"
+		raw, err := json.Marshal(replay)
+		if err != nil {
+			return err
+		}
+		if err := dal.SaveGameReplay(transaction, game, raw); err != nil {
+			return err
+		}
+		return queueGenerationNotifications(transaction, game, current, players)
 	})
 	return binding, err
 }
@@ -46,8 +86,9 @@ type replayNode struct {
 }
 
 type replayFrame struct {
-	Castles []replayNode `json:"castles"`
-	Groups  []replayNode `json:"groups"`
+	GenerationID uint         `json:"generation_id,omitempty"`
+	Castles      []replayNode `json:"castles"`
+	Groups       []replayNode `json:"groups"`
 }
 
 type gameReplay struct {
@@ -57,7 +98,7 @@ type gameReplay struct {
 	Outcome string        `json:"outcome"`
 }
 
-func simulateLobbyGame(database *gorm.DB, binding models.BindingResult, snapshot domain.Snapshot) ([]byte, error) {
+func prepareLobbyGame(binding models.BindingResult, snapshot domain.Snapshot) (gameReplay, models.Map) {
 	replay := gameReplay{GameID: binding.GameID, Teams: []replayTeam{}, Frames: []replayFrame{}}
 	gameMap := models.Map{MapFields: models.MapFields{MapName: "Lobby battle", PlayerAmount: uint(len(snapshot.StartRoster)), PlaneSizeX: 8, PlaneSizeY: 6}}
 	for _, team := range binding.Teams {
@@ -95,76 +136,31 @@ func simulateLobbyGame(database *gorm.DB, binding models.BindingResult, snapshot
 			SoldierAmount: 30,
 		})
 	}
-	generation := models.Generation{GameID: binding.GameID, Map: gameMap}
-	generationID, err := dal.CreateGeneration(database, &generation)
+	return replay, gameMap
+}
+
+func playableReplayFrame(generation *models.Generation) replayFrame {
+	frame := replayFrame{GenerationID: generation.ID, Castles: []replayNode{}, Groups: []replayNode{}}
+	for _, castle := range generation.Map.Castles {
+		frame.Castles = append(frame.Castles, replayNode{ID: castle.LogicalCastleID, Color: castle.TeamColor, Soldiers: castle.SoldierAmount, X: castle.Position.P.X, Y: castle.Position.P.Y})
+	}
+	for _, group := range generation.SoldierGroups {
+		frame.Groups = append(frame.Groups, replayNode{ID: group.LogicalSoldierGroupID, Color: group.TeamColor, Soldiers: group.SoldierAmount, X: group.Position.P.X, Y: group.Position.P.Y, ClashRadius: group.EffectiveClashRadius()})
+	}
+	sort.Slice(frame.Castles, func(left, right int) bool { return frame.Castles[left].ID < frame.Castles[right].ID })
+	sort.Slice(frame.Groups, func(left, right int) bool { return frame.Groups[left].ID < frame.Groups[right].ID })
+	return frame
+}
+
+func appendPlayableReplay(database *gorm.DB, game *models.Game, generation *models.Generation) error {
+	var replay gameReplay
+	if err := json.Unmarshal(game.Replay, &replay); err != nil {
+		return err
+	}
+	replay.Frames = append(replay.Frames, playableReplayFrame(generation))
+	raw, err := json.Marshal(replay)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	for turn := 0; turn <= spectatorTurns; turn++ {
-		current, err := dal.GetGeneration(database, generationID)
-		if err != nil {
-			return nil, err
-		}
-		// Stable ordering also breaks equal-distance targeting ties consistently.
-		sort.Slice(current.Map.Castles, func(left, right int) bool {
-			return current.Map.Castles[left].LogicalCastleID < current.Map.Castles[right].LogicalCastleID
-		})
-		frame := replayFrame{Castles: []replayNode{}, Groups: []replayNode{}}
-		activeTeams := map[uint]bool{}
-		for _, castle := range current.Map.Castles {
-			frame.Castles = append(frame.Castles, replayNode{ID: castle.LogicalCastleID, Color: castle.TeamColor, Soldiers: castle.SoldierAmount, X: castle.Position.P.X, Y: castle.Position.P.Y})
-			activeTeams[castle.TeamColor] = true
-		}
-		for _, group := range current.SoldierGroups {
-			frame.Groups = append(frame.Groups, replayNode{ID: group.LogicalSoldierGroupID, Color: group.TeamColor, Soldiers: group.SoldierAmount, X: group.Position.P.X, Y: group.Position.P.Y, ClashRadius: group.EffectiveClashRadius()})
-			if group.SoldierAmount > 0 {
-				activeTeams[group.TeamColor] = true
-			}
-		}
-		replay.Frames = append(replay.Frames, frame)
-		if len(activeTeams) == 1 {
-			for _, team := range replay.Teams {
-				if activeTeams[team.Color] {
-					replay.Outcome = team.Name + " wins"
-				}
-			}
-			break
-		}
-		if turn == spectatorTurns {
-			replay.Outcome = "Turn limit reached — no winner"
-			break
-		}
-		commands := []models.CommandFields{}
-		for _, castle := range current.Map.Castles {
-			// Stagger the teams' attacks. Players never submit these commands.
-			if turn%6 != int(castle.TeamColor-1)%2*3 || castle.SoldierAmount < 4 {
-				continue
-			}
-			var target *models.Castle
-			nearest := math.Inf(1)
-			for index := range current.Map.Castles {
-				candidate := &current.Map.Castles[index]
-				if candidate.TeamColor == castle.TeamColor {
-					continue
-				}
-				distance := math.Hypot(candidate.Position.P.X-castle.Position.P.X, candidate.Position.P.Y-castle.Position.P.Y)
-				if distance < nearest {
-					target, nearest = candidate, distance
-				}
-			}
-			if target == nil {
-				continue
-			}
-			parameters, err := json.Marshal(commandHandlers.SendSoldierGroupParams{OriginLogicalCastleID: castle.LogicalCastleID, DestinationLogicalCastleID: target.LogicalCastleID, SoldierAmount: castle.SoldierAmount / 2})
-			if err != nil {
-				return nil, err
-			}
-			commands = append(commands, models.CommandFields{CommandType: models.SendSoldierGroup, Parameters: parameters})
-		}
-		generationID, err = MigrateGeneration(database, binding.GameID, commands)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return json.Marshal(replay)
+	return dal.SaveGameReplay(database, game, raw)
 }

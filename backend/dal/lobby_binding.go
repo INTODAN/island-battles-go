@@ -10,7 +10,7 @@ import (
 )
 
 // BindLobbyGame persists a game and its simulation colors from a snapshot that
-// application.GameBinding has already authorized and validated. Color zero is neutral.
+// application.GameBinding has already authorized and validated. models.NeutralTeamColor is reserved.
 func BindLobbyGame(database *gorm.DB, snapshot domain.Snapshot) (models.BindingResult, error) {
 	teams := make([]models.TeamBinding, len(snapshot.Teams))
 	for index, team := range snapshot.Teams {

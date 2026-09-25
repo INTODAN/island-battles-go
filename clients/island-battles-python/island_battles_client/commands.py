@@ -1,0 +1,46 @@
+"""Commands scoped to one invocation of a player's generation callback."""
+
+from collections.abc import Awaitable, Callable
+from typing import Any
+
+from .errors import GameError
+
+
+class CommandReceiver:
+    """Submit commands for the current callback; the SDK completes the turn."""
+
+    def __init__(self, submit: Callable[[dict[str, Any]], Awaitable[None]]) -> None:
+        self._submit = submit
+        self._closed = False
+
+    def _close(self) -> None:
+        self._closed = True
+
+    async def send_soldier_group(
+        self,
+        origin_logical_castle_id: int,
+        destination_logical_castle_id: int,
+        soldier_amount: int,
+    ) -> None:
+        """Send one group immediately; await this before the callback returns."""
+        if self._closed:
+            raise GameError(
+                "command receiver is closed; use it only during on_generation"
+            )
+        parameters = {
+            "origin_logical_castle_id": origin_logical_castle_id,
+            "destination_logical_castle_id": destination_logical_castle_id,
+            "soldier_amount": soldier_amount,
+        }
+        for name, value in parameters.items():
+            if type(value) is not int:
+                raise TypeError(f"{name} must be an integer")
+            minimum = 1 if name == "soldier_amount" else 0
+            if value < minimum:
+                raise ValueError(f"{name} must be at least {minimum}")
+        await self._submit(
+            {
+                "command_type": "send_soldier_group",
+                "parameters": parameters,
+            }
+        )

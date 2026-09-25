@@ -55,7 +55,7 @@ func TestBindStartedLobbyCreatesStableTeamMap(t *testing.T) {
 	if err := db.Where(&models.TeamBindingRecord{GameID: result.GameID}).Order("team_order").Find(&records).Error; err != nil {
 		t.Fatal(err)
 	}
-	if len(records) != 2 || records[0].TeamColor == 0 || records[1].TeamColor == 0 {
+	if len(records) != 2 || records[0].TeamColor == models.NeutralTeamColor || records[1].TeamColor == models.NeutralTeamColor {
 		t.Fatalf("persisted mappings = %#v", records)
 	}
 }
@@ -140,73 +140,56 @@ func TestBindLobbyRequiresHostAndStartedIslandScope(t *testing.T) {
 	assertBindingCounts(t, db, scope.LobbyID, 0, 0)
 }
 
-func TestBindRunsAutomaticBattleAndSavesReplay(t *testing.T) {
-	db := testutils.InitTestDB(t)
+func TestBindInitializesOnePlayableGenerationAndReplay(t *testing.T) {
+	database := testutils.InitTestDB(t)
 	principal, scope, snapshot := startedSnapshot()
-	result, err := newGameBinding(t, db, snapshot).Bind(context.Background(), principal, scope)
+	binding := newGameBinding(t, database, snapshot)
+	result, err := binding.Bind(context.Background(), principal, scope)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var generations int64
-	if err := db.Model(&models.Generation{}).Count(&generations).Error; err != nil {
-		t.Fatal(err)
-	}
-	if generations < 2 || generations > 61 {
-		t.Fatalf("automatic battle created %d generations", generations)
-	}
-	game, err := dal.GetGameByID(db, result.GameID)
+	game, err := dal.GetGameByID(database, result.GameID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(game.Generations[0].Map.Castles) != 2 {
-		t.Fatal("missing player castles")
+	if len(game.Generations) != 1 || len(game.Generations[0].Map.Castles) != 2 {
+		t.Fatalf("initial state = %+v", game)
+	}
+	for _, castle := range game.Generations[0].Map.Castles {
+		if castle.SoldierAmount != 30 {
+			t.Fatal("wrong initial soldiers")
+		}
 	}
 	var replay struct {
-		Teams []struct {
-			Players []string `json:"players"`
-		} `json:"teams"`
-		Frames []struct {
-			Groups []struct {
-				Color       uint    `json:"color"`
-				Soldiers    uint    `json:"soldiers"`
-				X           float64 `json:"x"`
-				ClashRadius float64 `json:"clash_radius"`
-			} `json:"groups"`
-		} `json:"frames"`
-		Outcome string `json:"outcome"`
+		Frames []json.RawMessage `json:"frames"`
+		Teams  []json.RawMessage `json:"teams"`
 	}
 	if err := json.Unmarshal(game.Replay, &replay); err != nil {
 		t.Fatal(err)
 	}
-	if int64(len(replay.Frames)) != generations || replay.Outcome == "" || len(replay.Teams) != 2 || replay.Teams[0].Players[0] != "Host" || replay.Teams[1].Players[0] != "Guest" {
-		t.Fatalf("incomplete replay: %+v", replay)
+	if len(replay.Frames) != 1 || len(replay.Teams) != 2 {
+		t.Fatalf("initial replay = %s", game.Replay)
 	}
-	moved := false
-	for _, frame := range replay.Frames {
-		moved = moved || len(frame.Groups) > 0
-	}
-	if !moved {
-		t.Fatal("automatic battle never sent troops")
-	}
-	// The first opposing groups (15 Blue vs 16 Red) meet during turn 6.
-	// Neither group has less than half the other, so the surviving Red soldier
-	// stops at the midpoint between their contact positions for this turn.
-	if len(replay.Frames) <= 6 || len(replay.Frames[5].Groups) != 2 || len(replay.Frames[6].Groups) != 1 {
-		t.Fatal("the first clash was not reflected in the replay")
-	}
-	survivor := replay.Frames[6].Groups[0]
-	if survivor.Color != 2 || survivor.Soldiers != 1 || survivor.X != 0.75 || survivor.ClashRadius != 0.25 {
-		t.Fatalf("unexpected first clash survivor: %+v", survivor)
-	}
-	if _, err := newGameBinding(t, db, snapshot).Bind(context.Background(), principal, scope); err != nil {
+	var players int64
+	var notifications int64
+	if err := database.Model(&models.FrozenGamePlayer{}).Count(&players).Error; err != nil {
 		t.Fatal(err)
 	}
-	reloaded, err := dal.GetGameByID(db, result.GameID)
+	if err := database.Model(&models.GenerationNotification{}).Count(&notifications).Error; err != nil {
+		t.Fatal(err)
+	}
+	if players != 2 || notifications != 2 {
+		t.Fatalf("players=%d notifications=%d", players, notifications)
+	}
+	if _, err := binding.Bind(context.Background(), principal, scope); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := dal.GetGameByID(database, result.GameID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(reloaded.Generations) != len(game.Generations) || !bytes.Equal(reloaded.Replay, game.Replay) {
-		t.Fatal("retry reran the battle")
+	if len(reloaded.Generations) != 1 || !bytes.Equal(reloaded.Replay, game.Replay) {
+		t.Fatal("retry changed initialized game")
 	}
 }
 
@@ -279,7 +262,7 @@ func TestBindRejectsIncompletePersistedMapping(t *testing.T) {
 	assertBindingCounts(t, db, scope.LobbyID, 1, 1)
 }
 
-func TestFailedSimulationRollsBackAndCanBeRetried(t *testing.T) {
+func TestFailedInitializationRollsBackAndCanBeRetried(t *testing.T) {
 	database := testutils.InitTestDB(t)
 	principal, scope, snapshot := startedSnapshot()
 	service := newGameBinding(t, database, snapshot)
@@ -289,7 +272,7 @@ func TestFailedSimulationRollsBackAndCanBeRetried(t *testing.T) {
 	if err := database.Callback().Create().Before("gorm:create").Register(callback, func(transaction *gorm.DB) {
 		if transaction.Statement.Table == "generations" {
 			created++
-			if created == 3 {
+			if created == 1 {
 				transaction.AddError(failure)
 			}
 		}
@@ -306,6 +289,15 @@ func TestFailedSimulationRollsBackAndCanBeRetried(t *testing.T) {
 	}
 	if generations != 0 {
 		t.Fatalf("left %d partial generations", generations)
+	}
+	for _, model := range []any{&models.Map{}, &models.Castle{}, &models.FrozenGamePlayer{}, &models.GenerationNotification{}} {
+		var count int64
+		if err := database.Model(model).Count(&count).Error; err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("left %d partial %T records", count, model)
+		}
 	}
 	replay, err := dal.GetLobbyGameReplay(database, scope.LobbyID)
 	if err != nil || len(replay) != 0 {
