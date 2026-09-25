@@ -1,7 +1,7 @@
 import asyncio
 import json
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID
 
 import httpx
 import pytest
@@ -14,7 +14,6 @@ from island_battles_client import (
     GameProtocolError,
     IslandBattlesClient,
     Player,
-    SoldierGroupOrder,
 )
 
 LOBBY = "00000000-0000-0000-0000-000000000001"
@@ -206,18 +205,7 @@ async def test_orders_then_automatic_completion_empty_turn_and_dedup():
         async def on_generation(self, generation, commands):
             await super().on_generation(generation, commands)
             if generation.id == 1:
-                assert (
-                    await commands.send_soldier_groups(
-                        [
-                            SoldierGroupOrder(
-                                origin_logical_castle_id=0,
-                                destination_logical_castle_id=1,
-                                soldier_amount=5,
-                            )
-                        ]
-                    )
-                    is None
-                )
+                assert await commands.send_soldier_group(0, 1, 5) is None
             else:
                 server.advance_on_complete = False
 
@@ -330,29 +318,34 @@ async def test_cancelled_wait_and_close_cancel_callback_without_completion():
     assert server.posts == []
 
 
-async def test_request_uuid_payload_survive_transport_retry_and_explicit_replay():
+async def test_generated_uuid_survives_retry_but_new_calls_send_distinct_groups():
     server = Server()
     async with client(server, WaitingPlayer) as game:
         await seen(game)
         receiver = await game.player.receivers.get()
         server.transport_failures = 1
-        request_id = uuid4()
-        await receiver.send_soldier_group(0, 1, 3, request_id=request_id)
-        attempts = [
-            json.loads(call.content)
-            for call in server.calls
-            if call.url.path == "/generation/commands"
+        await receiver.send_soldier_group(0, 1, 3)
+        assert len(server.posts) == 2
+        first, retry = server.posts
+        assert first == retry
+        assert UUID(first["request_id"]).version == 4
+        assert first["commands"] == [
+            {
+                "command_type": "send_soldier_group",
+                "parameters": {
+                    "origin_logical_castle_id": 0,
+                    "destination_logical_castle_id": 1,
+                    "soldier_amount": 3,
+                },
+            }
         ]
-        assert len(attempts) == 2
-        assert attempts[0] == attempts[1]
-        assert attempts[0]["request_id"] == str(request_id)
-        server.generation = 2
-        await game.refresh()
-        await receiver.send_soldier_group(0, 1, 3, request_id=request_id)
-        assert server.posts[-1] == attempts[0]
-        with pytest.raises(GameError) as conflict:
-            await receiver.send_soldier_group(0, 1, 4, request_id=request_id)
-        assert conflict.value.status == 409
+        assert first["complete"] is False
+        await receiver.send_soldier_group(0, 1, 3)
+        assert len(server.posts) == 3
+        second = server.posts[-1]
+        assert second["request_id"] != first["request_id"]
+        assert second["commands"] == first["commands"]
+        assert second["generation_id"] == first["generation_id"] == 1
 
 
 async def test_late_same_generation_get_cannot_undo_submitted_state():
@@ -577,13 +570,6 @@ async def test_public_generation_is_lean_frozen_and_nested_values_are_tuples():
             generation.soldier_groups[0].soldiers = 999
         with pytest.raises(TypeError):
             generation.castles[0] = generation.castles[1]
-        order = SoldierGroupOrder(
-            origin_logical_castle_id=0,
-            destination_logical_castle_id=1,
-            soldier_amount=5,
-        )
-        with pytest.raises(ValidationError):
-            order.soldier_amount = 99
 
 
 @pytest.mark.parametrize(
@@ -612,22 +598,29 @@ async def test_malformed_wire_castle_rejected(field, bad):
 
 
 @pytest.mark.parametrize(
-    "field,bad",
+    "field,bad,error",
     [
-        ("origin_logical_castle_id", True),
-        ("destination_logical_castle_id", "1"),
-        ("soldier_amount", False),
-        ("soldier_amount", "5"),
+        ("origin_logical_castle_id", True, TypeError),
+        ("destination_logical_castle_id", "1", TypeError),
+        ("soldier_amount", False, TypeError),
+        ("soldier_amount", "5", TypeError),
+        ("origin_logical_castle_id", -1, ValueError),
+        ("destination_logical_castle_id", -1, ValueError),
+        ("soldier_amount", 0, ValueError),
+        ("soldier_amount", -1, ValueError),
     ],
 )
-def test_order_rejects_coercion_and_requires_keywords(field, bad):
+async def test_send_rejects_invalid_parameters_before_sending(field, bad, error):
     values = {
         "origin_logical_castle_id": 0,
         "destination_logical_castle_id": 1,
         "soldier_amount": 5,
     }
     values[field] = bad
-    with pytest.raises(ValidationError):
-        SoldierGroupOrder(**values)
-    with pytest.raises((TypeError, ValidationError)):
-        SoldierGroupOrder(0, 1, 5)
+    server = Server()
+    async with client(server, WaitingPlayer) as game:
+        await seen(game)
+        receiver = await game.player.receivers.get()
+        with pytest.raises(error):
+            await receiver.send_soldier_group(**values)
+        assert server.posts == []

@@ -9,7 +9,6 @@ from island_battles_client import (
     Generation,
     IslandBattlesClient,
     Player,
-    SoldierGroupOrder,
 )
 
 
@@ -38,14 +37,10 @@ class ExamplePlayer(Player):
             None,
         )
         if own is not None and target is not None:
-            await commands_receiver.send_soldier_groups(
-                [
-                    SoldierGroupOrder(
-                        origin_logical_castle_id=own.id,
-                        destination_logical_castle_id=target.id,
-                        soldier_amount=1,
-                    )
-                ]
+            await commands_receiver.send_soldier_group(
+                origin_logical_castle_id=own.id,
+                destination_logical_castle_id=target.id,
+                soldier_amount=1,
             )
 
 

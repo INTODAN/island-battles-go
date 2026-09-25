@@ -14,7 +14,6 @@ from .models import (
     Castle,
     Generation,
     SoldierGroup,
-    SoldierGroupOrder,
 )
 from .player import Player
 
@@ -31,5 +30,4 @@ __all__ = [
     "IslandBattlesClient",
     "Player",
     "SoldierGroup",
-    "SoldierGroupOrder",
 ]

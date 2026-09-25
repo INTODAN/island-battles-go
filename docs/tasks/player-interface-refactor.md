@@ -5,8 +5,8 @@
 - `Player` is an abstract base class with `async on_generation(generation: Generation, commands: CommandReceiver) -> None` marked abstract. Its shared `__init__(team_color)` assigns `self.team_color` directly; subclasses inherit this initializer and must implement the callback. No networking, command methods, or inherited lifecycle.
 - `IslandBattlesClient(base_url, credential, lobby_id, *, player_factory: Callable[[int], Player], ...)` owns authentication, subscriptions, reconciliation, and turn completion. After the first authorized state read it calls the factory once with the frozen team color. A player that adds its own constructor calls `super().__init__(team_color)`.
 - The public `Generation` has only `id`, `castles`, and `soldier_groups`. Transport identity and submission metadata remain in an internal envelope. `client.generation`, `start()`, and `refresh()` expose the lean model; `client.player` exposes the constructed strategy.
-- All public snapshot/order models and internal wire models are frozen Pydantic models. Nested collections are tuples; IDs and counts reject booleans/string coercion. `SoldierGroupOrder` uses keyword arguments.
-- A fresh `CommandReceiver` is supplied per callback. Its async `send_soldier_groups` and `send_soldier_group` methods return `None` and send commands for that callback's original generation. Receivers reject use after the callback ends. The player has no `end_turn`; successful return completes once, while exceptions/cancellation do not complete.
+- All public snapshot models and internal wire models are frozen Pydantic models. Nested collections are tuples; IDs and counts reject booleans/string coercion.
+- A fresh `CommandReceiver` is supplied per callback. Its async `send_soldier_group(origin_logical_castle_id, destination_logical_castle_id, soldier_amount)` method returns `None` and sends one group for that callback's original generation. The SDK owns request UUID creation and retries; no public order model, batch method, or request-ID parameter is needed. Receivers reject use after the callback ends. The player has no `end_turn`; successful return completes once, while exceptions/cancellation do not complete.
 - Keep the existing HTTP and Centrifugo wire protocol, authorization, UUID retries, serial callback execution, reconnect recovery, and no default polling.
 
 ## Subtasks and ownership
@@ -34,7 +34,8 @@
 ## Verification
 
 - Completed the SDK, example, documentation, and test migrations.
-- SDK regression suite: 26 tests passed, including frozen nested models, immutable team identity, receiver expiry, callback completion, generation pinning, retries, and reconnects.
+- SDK regression suite: 30 tests passed after simplifying commands to direct single-group calls, including frozen nested models, immutable team identity, receiver expiry, callback completion, generation pinning, generated request-ID retries, parameter validation, and reconnects.
 - Ruff, formatting, and ty checks passed for the SDK and example; SDK test lint/format checks also passed.
 - Live acceptance: 17 existing cases passed on the first run. After correcting fixture registration in the two migrated gameplay tests, their focused rerun passed both cases against real PostgreSQL and Centrifugo.
 - The host acceptance runner uses the SDK's locked integration dependency group so both clients and Pydantic are installed. The shared lobby package and browser wire protocol are unchanged.
+- The single-group API passed the focused live two-player generation test; request IDs are generated only inside the SDK and reused unchanged on transport retries.

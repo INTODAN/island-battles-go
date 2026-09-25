@@ -13,13 +13,12 @@ from island_battles_client import (
     Generation,
     IslandBattlesClient,
     Player,
-    SoldierGroupOrder,
 )
 
 
 class MyPlayer(Player):
     async def on_generation(
-        self, generation: Generation, commands: CommandReceiver
+        self, generation: Generation, commands_receiver: CommandReceiver
     ) -> None:
         own = next(
             (castle for castle in generation.castles
@@ -32,13 +31,11 @@ class MyPlayer(Player):
             None,
         )
         if own is not None and enemy is not None:
-            await commands.send_soldier_groups([
-                SoldierGroupOrder(
-                    origin_logical_castle_id=own.id,
-                    destination_logical_castle_id=enemy.id,
-                    soldier_amount=1,
-                )
-            ])
+            await commands_receiver.send_soldier_group(
+                origin_logical_castle_id=own.id,
+                destination_logical_castle_id=enemy.id,
+                soldier_amount=1,
+            )
 
 
 async def main() -> None:
@@ -58,11 +55,11 @@ The full example is in [examples/player.py](examples/player.py). Obtain the gues
 
 If a strategy needs its own `__init__`, call `super().__init__(team_color)` before initializing its additional state.
 
-`Generation` exposes only `id`, `castles`, and `soldier_groups`. These public snapshot and order models are frozen Pydantic models; nested collections such as `castles` and `soldier_groups` are tuples. Castle and group values are read directly from `generation.castles` and `generation.soldier_groups`. Transport identity and submission status stay inside the client rather than leaking into the strategy API. `client.generation`, `start()`, and `refresh()` expose the current `Generation` snapshot.
+`Generation` exposes only `id`, `castles`, and `soldier_groups`. These public snapshot models are frozen Pydantic models; nested collections such as `castles` and `soldier_groups` are tuples. Castle and group values are read directly from `generation.castles` and `generation.soldier_groups`. Transport identity and submission status stay inside the client rather than leaking into the strategy API. `client.generation`, `start()`, and `refresh()` expose the current `Generation` snapshot.
 
-The client owns authentication, the personal player-channel subscription, reconnect recovery, state reconciliation, and turn completion. It calls `on_generation` serially with a fresh `CommandReceiver` scoped to that callback. Use `await commands.send_soldier_groups([...])` with frozen `SoldierGroupOrder` models, or `await commands.send_soldier_group(origin_id, destination_id, amount)` to submit orders for that generation. Both methods return `None`. The receiver expires as soon as the callback returns or raises, so it cannot be saved for later use. A successful callback return completes the turn automatically, including a callback that submits no commands. An exception or cancellation does not complete the turn. Player code does not call `end_turn` or pass generation IDs to command methods.
+The client owns authentication, the personal player-channel subscription, reconnect recovery, state reconciliation, and turn completion. It calls `on_generation` serially with a fresh `CommandReceiver` scoped to that callback. Call `await commands_receiver.send_soldier_group(origin_logical_castle_id, destination_logical_castle_id, soldier_amount)` to send one group; it returns `None`. To send multiple groups, await one call per group. Castle IDs must be non-negative integers and the soldier amount must be a positive integer. The receiver expires when the callback returns or raises. Returning successfully completes the turn automatically, even without sending any soldiers; an exception or cancellation leaves it open.
 
-Each submission is pinned to the generation whose callback received the receiver. An optional `request_id` lets the caller repeat the identical batch within that callback's generation; reusing an ID for a changed batch or a different generation is rejected. The SDK also preserves its generated request UUID and identical payload through automatic transport retries. It deduplicates repeated events and reconciles authorized HTTP state after subscription or reconnect. Push delivery is at least once; HTTP state remains authoritative. The existing `game.next_generation` wire event is unchanged. No periodic polling is enabled by default; `refresh()` can request an explicit read.
+Each call is pinned to its callback's generation. The SDK creates the request UUID internally and reuses the exact request when retrying a transport failure. A subsequent call, even with identical parameters, sends a new group. Player code only supplies the two castle IDs and soldier amount; authentication, request IDs, and completion belong to the SDK. The SDK also deduplicates repeated events and reconciles authorized HTTP state after subscription or reconnect. The existing `game.next_generation` wire event is unchanged. No periodic polling is enabled by default; `refresh()` can request an explicit read.
 
 The full HTTP contract, authorization rules, reservation checks, retry behavior and status codes are documented in the [backend README](../../backend/README.md). The browser's **New demo lobby** uses its own JavaScript player strategy. See the [demo walkthrough](../../lobby/frontend/README.md).
 

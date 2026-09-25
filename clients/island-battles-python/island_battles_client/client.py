@@ -122,7 +122,6 @@ class IslandBattlesClient:
         self._state: GenerationState | None = None
         self._expected_identity: tuple[int, str, str, int] | None = None
         self._last_queued_generation = 0
-        self._request_payloads: dict[UUID, dict[str, Any]] = {}
         self._start_lock = asyncio.Lock()
         self._command_lock = asyncio.Lock()
         self._reconcile_lock = asyncio.Lock()
@@ -414,20 +413,14 @@ class IslandBattlesClient:
                 finally:
                     receiver._close()
                 if not self._closed:
-                    await self._register(
-                        [], True, request_id=None, generation_id=state.generation_id
-                    )
+                    await self._register([], True, generation_id=state.generation_id)
             finally:
                 receiver._close()
                 self._callbacks.task_done()
 
     def _receiver(self, generation_id: int) -> CommandReceiver:
-        async def submit(
-            commands: list[dict[str, Any]], request_id: UUID | str | None
-        ) -> None:
-            await self._register(
-                commands, False, request_id=request_id, generation_id=generation_id
-            )
+        async def submit(command: dict[str, Any]) -> None:
+            await self._register([command], False, generation_id=generation_id)
 
         return CommandReceiver(submit)
 
@@ -436,44 +429,29 @@ class IslandBattlesClient:
         commands: list[dict[str, Any]],
         complete: bool,
         *,
-        request_id: UUID | str | None,
         generation_id: int,
     ) -> GenerationState:
         self._check_open()
         async with self._command_lock:
             if self._state is None:
                 raise GameError("client has not synchronized")
-            if (
-                complete
-                and request_id is None
-                and (
-                    generation_id < self._state.generation_id
-                    or (
-                        generation_id == self._state.generation_id
-                        and self._state.submitted
-                    )
+            if complete and (
+                generation_id < self._state.generation_id
+                or (
+                    generation_id == self._state.generation_id and self._state.submitted
                 )
             ):
                 # A callback or concurrent request may have already sealed this
                 # turn. Check under the command lock to avoid a second completion.
                 return self._state
-            identifier = uuid4() if request_id is None else UUID(str(request_id))
-            previous = self._request_payloads.get(identifier)
             payload = {
                 "game_id": self._state.game_id,
                 "generation_id": generation_id,
-                "request_id": str(identifier),
+                "request_id": str(uuid4()),
                 "complete": complete,
                 "commands": commands,
             }
-            if previous is not None:
-                if previous != payload:
-                    raise GameError(
-                        "request UUID already used with a different batch", 409
-                    )
-                payload = previous
-            else:
-                self._request_payloads[identifier] = payload
+            # The transport retries this exact payload, including its generated UUID.
             result = await self._request(
                 "POST", "/generation/commands", payload=payload, retry_transport=True
             )

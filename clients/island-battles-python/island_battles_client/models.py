@@ -47,11 +47,3 @@ class Generation(_FrozenModel):
     id: _PositiveInt
     castles: tuple[Castle, ...]
     soldier_groups: tuple[SoldierGroup, ...]
-
-
-class SoldierGroupOrder(_FrozenModel):
-    """Send soldiers between logical castle IDs; castle ID zero is valid."""
-
-    origin_logical_castle_id: _NonNegativeInt
-    destination_logical_castle_id: _NonNegativeInt
-    soldier_amount: _PositiveInt

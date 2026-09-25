@@ -8,7 +8,7 @@ import httpx
 import pytest
 from integration.test_live import BASE, control_backend, sql
 from integration.test_live import guests as guests_fixture
-from island_battles_client import IslandBattlesClient, Player, SoldierGroupOrder
+from island_battles_client import IslandBattlesClient, Player
 from test_lobby_binding import started_lobby
 
 guests = guests_fixture
@@ -23,9 +23,9 @@ class ObservingPlayer(Player):
 
     async def on_generation(self, generation, commands):
         await self.generations.put(generation)
-        orders = await self.orders.get()
-        if orders:
-            await commands.send_soldier_groups(orders)
+        order = await self.orders.get()
+        if order is not None:
+            await commands.send_soldier_group(*order)
 
 
 async def observed(player):
@@ -63,15 +63,7 @@ async def test_commands_wait_for_every_player_and_push_next_generation(guests):
             for castle in initial.castles
             if castle.team_color != first.player.team_color
         )
-        await first.player.orders.put(
-            [
-                SoldierGroupOrder(
-                    origin_logical_castle_id=origin.id,
-                    destination_logical_castle_id=target.id,
-                    soldier_amount=5,
-                )
-            ]
-        )
+        await first.player.orders.put((origin.id, target.id, 5))
         await submitted(first)
         assert (
             await sql(
@@ -80,9 +72,7 @@ async def test_commands_wait_for_every_player_and_push_next_generation(guests):
             == "1"
         )
         assert first.player.generations.empty() and second.player.generations.empty()
-        await second.player.orders.put(
-            []
-        )  # Returning without orders automatically passes.
+        await second.player.orders.put(None)  # Returning without orders passes.
         advanced, other_advanced = await asyncio.gather(
             observed(first), observed(second)
         )
