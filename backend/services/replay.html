@@ -20,7 +20,7 @@ button:focus-visible, input:focus-visible { outline: 3px solid #aac4ff; outline-
 input { flex: 1; min-width: 100px; accent-color: #3464e0; }
 #turn { white-space: nowrap; font-size: .82rem; }
 #outcome { margin-top: 14px; font-weight: 600; color: #202d40; }
-#clashes { margin-top: 10px; color: #824309; }
+#clashes { margin-top: 10px; color: #824309; overflow-wrap: anywhere; }
 @media (max-width: 450px) { body { padding: 12px; } .controls input { flex-basis: 100%; order: 1; } }
 </style>
 </head>
@@ -179,6 +179,17 @@ setInterval(() => {
   render(true);
 }, 500);
 render();
+// Let the host fit the embedded view as summaries wrap or team cards resize.
+// Body height is intrinsic, so resizing the frame does not impose a minimum.
+if (window.parent !== window) {
+  let reportedHeight = 0;
+  new ResizeObserver(() => {
+    const height = Math.ceil(document.body.getBoundingClientRect().height);
+    if (height === reportedHeight) return;
+    reportedHeight = height;
+    window.parent.postMessage({ type: "game.result-size", height }, "*");
+  }).observe(document.body);
+}
 </script>
 </body>
 </html>
