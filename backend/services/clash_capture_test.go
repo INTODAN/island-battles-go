@@ -144,6 +144,9 @@ func TestArrivedArmyDoesNotClashWithNewSpawn(t *testing.T) {
 	if len(generation.SoldierGroups) != 1 || generation.SoldierGroups[0].TeamColor != 2 || generation.SoldierGroups[0].SoldierAmount != 1 {
 		t.Fatal("new spawn should remain a separate traveling group")
 	}
+	if len(generation.Clashes) != 0 {
+		t.Fatal("arrival incorrectly emitted a clash event")
+	}
 }
 
 func TestMultipleArrivalsUseUpdatedCastle(t *testing.T) {

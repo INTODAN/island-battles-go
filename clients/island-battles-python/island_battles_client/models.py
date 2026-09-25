@@ -41,9 +41,30 @@ class SoldierGroup(_FrozenModel):
     y: _Coordinate | None = None
 
 
+class ClashParticipant(_FrozenModel):
+    """One group's contact position and casualties for a recorded clash."""
+
+    group_id: _NonNegativeInt
+    team_color: _NonNegativeInt
+    x: _Coordinate
+    y: _Coordinate
+    clash_radius: Annotated[float, Field(strict=True, gt=0, allow_inf_nan=False)]
+    soldiers_before: _NonNegativeInt
+    soldiers_after: _NonNegativeInt
+
+
+class Clash(_FrozenModel):
+    """A combat event, with an ID scoped to its generation and a turn fraction."""
+
+    id: _PositiveInt
+    time: Annotated[float, Field(strict=True, ge=0, le=1, allow_inf_nan=False)]
+    participants: tuple[ClashParticipant, ...]
+
+
 class Generation(_FrozenModel):
     """One board snapshot, without authentication or transport metadata."""
 
     id: _PositiveInt
     castles: tuple[Castle, ...]
     soldier_groups: tuple[SoldierGroup, ...]
+    clashes: tuple[Clash, ...] = ()

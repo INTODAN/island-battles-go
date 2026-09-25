@@ -2,7 +2,8 @@
 
 Design proposal for [issue #10](https://github.com/INTODAN/island-battles-go/issues/10).
 Open [the interactive comparison](clash-indicators.html) in a browser; it is a
-self-contained mockup with synthetic data, not a change to the game renderer.
+self-contained mockup with synthetic data. The selected effect is also implemented
+in the real lobby battlefield and saved replays.
 
 ## Options
 
@@ -40,39 +41,40 @@ are hard to distinguish.
   Castle attacks/captures should eventually have distinct markers; friendly
   arrivals should never be labelled as clashes.
 
-## Implementation outline
+## Game integration
 
-The current views draw snapshots: [the SVG replay](../backend/services/replay.html)
-replaces its battlefield contents for each frame, and
-[the ECharts graph](../backend/services/game_graph.go) builds one chart per
-generation. Neither receives a clash history. A vanished group could have been
-defeated or arrived at a castle, so comparing snapshots is not a reliable event
-source.
+The [SVG replay](../backend/services/replay.html) renders recorded clash events in
+both live games and saved history. A vanished group could have been defeated or
+arrived at a castle, so comparing snapshots is not a reliable event source.
+The separate [ECharts debug graph](../backend/services/game_graph.go) still shows
+generation snapshots without clash overlays.
 
 The simulation already calculates ordered clashes with a time within the turn,
 participant positions, and remaining soldiers in
 [`internal.Clash`](../backend/dal/commandHandlers/move_soldier_groups/internal/models.go).
-Use those results as the event source:
+The integration uses those results as the event source:
 
 1. Capture immutable event values during resolution, before group updates or
-   deletion. Include a stable event ID, resulting generation, turn fraction,
+   deletion. Include an event ID scoped to its generation, turn fraction,
    logical group ID, team, contact position, and soldier counts before and after
    each clash. Explicitly capture the count before **each event**: a group can
    participate in multiple clashes in one turn, so its starting generation count
    is insufficient for later losses. Do not retain mutable group pointers.
-2. Persist events atomically with the resulting generation. Retries must not
-   duplicate events. Store logical participant IDs as values so deleting a
+2. Persist events as JSON atomically with the resulting generation. Command retries
+   reuse the saved events. Store logical participant IDs as values so deleting a
    defeated group cannot remove its event history.
 3. Add optional clash events to saved replay frames and the authorized generation
    response used by live play. Older replays with no events remain renderable;
-   show no inferred clashes for them. Update the API schema and client artifacts
-   alongside a future implementation.
-4. Render a separate overlay in both views. Put group outlines at their recorded
-   contact positions and the impact ring at the mean participant position.
+   show no inferred clashes for them. The generated Huma schema and Python client
+   expose the event records as well.
+4. Render a separate overlay in the lobby view. Put group outlines at their recorded
+   contact positions and the impact ring at the mean participant position. Move
+   overlapping outlines aside with a leader to their contact point, keeping live
+   troop numbers readable. Combine losses above groups surviving the full turn.
    Keep overlays out of soldier totals, selection, and collision logic. The
    animation must not change simulation timing or clash-stop upgrades.
 
-## Checks for a future implementation
+## Verification cases
 
 - Unequal clash: only surviving participants get loss labels, matching their
   actual before/after counts. Defeated participants get a dashed outline with ×,

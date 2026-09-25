@@ -12,6 +12,8 @@ from .errors import (
 from .models import (
     NEUTRAL_TEAM_COLOR,
     Castle,
+    Clash,
+    ClashParticipant,
     Generation,
     SoldierGroup,
 )
@@ -20,6 +22,8 @@ from .player import Player
 __all__ = [
     "NEUTRAL_TEAM_COLOR",
     "Castle",
+    "Clash",
+    "ClashParticipant",
     "CommandReceiver",
     "GameAuthenticationError",
     "GameClientClosedError",

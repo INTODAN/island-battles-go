@@ -69,6 +69,7 @@ type GenerationState struct {
 type GenerationView struct {
 	Castles       []CastleView       `json:"castles"`
 	SoldierGroups []SoldierGroupView `json:"soldier_groups"`
+	Clashes       []ClashEvent       `json:"clashes,omitempty"`
 }
 
 type CastleView struct {

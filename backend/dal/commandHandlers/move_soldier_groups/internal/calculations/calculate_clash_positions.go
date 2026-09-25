@@ -85,6 +85,7 @@ func CalculateClashPositions(movements []internal.SoldierGroupMoveDelta) ([]inte
 			}
 			clashes[clashIndex].Participants = append(clashes[clashIndex].Participants, internal.ClashParticipant{
 				SoldierGroup: movement.SoldierGroup, Position: positionAt(movement, nextTime), RemainingSoldiers: remaining[movement.SoldierGroup],
+				SoldiersBefore: remaining[movement.SoldierGroup],
 			})
 		}
 		for index := firstClash; index < len(clashes); index++ {

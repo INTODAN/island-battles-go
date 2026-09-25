@@ -5,8 +5,6 @@ from uuid import UUID
 
 import httpx
 import pytest
-from pydantic import ValidationError
-
 from island_battles_client import (
     GameAuthenticationError,
     GameClientClosedError,
@@ -15,6 +13,7 @@ from island_battles_client import (
     IslandBattlesClient,
     Player,
 )
+from pydantic import ValidationError
 
 LOBBY = "00000000-0000-0000-0000-000000000001"
 PLAYER = "00000000-0000-0000-0000-000000000002"
@@ -555,7 +554,12 @@ async def test_public_generation_is_lean_frozen_and_nested_values_are_tuples():
     async with client(server, WaitingPlayer) as game:
         generation = await seen(game)
         assert game.generation == generation
-        assert set(type(generation).model_fields) == {"id", "castles", "soldier_groups"}
+        assert set(type(generation).model_fields) == {
+            "id",
+            "castles",
+            "soldier_groups",
+            "clashes",
+        }
         assert isinstance(generation.castles, tuple)
         assert isinstance(generation.soldier_groups, tuple)
         assert generation.soldier_groups[0].id == 0
@@ -624,3 +628,48 @@ async def test_send_rejects_invalid_parameters_before_sending(field, bad, error)
         with pytest.raises(error):
             await receiver.send_soldier_group(**values)
         assert server.posts == []
+
+
+def test_generation_preserves_clash_history_and_accepts_older_states():
+    from island_battles_client import Clash, ClashParticipant
+    from island_battles_client._protocol import GenerationState
+
+    payload = state()
+    assert GenerationState.parse(payload).public_generation().clashes == ()
+    payload["generation"]["clashes"] = [
+        {
+            "id": 1,
+            "time": 0.75,
+            "participants": [
+                {
+                    "group_id": 0,
+                    "team_color": 1,
+                    "x": -0.125,
+                    "y": 0,
+                    "clash_radius": 0.25,
+                    "soldiers_before": 20,
+                    "soldiers_after": 10,
+                },
+                {
+                    "group_id": 1,
+                    "team_color": 2,
+                    "x": 0.125,
+                    "y": 0,
+                    "clash_radius": 0.25,
+                    "soldiers_before": 10,
+                    "soldiers_after": 0,
+                },
+            ],
+        }
+    ]
+    generation = GenerationState.parse(payload).public_generation()
+    clash = generation.clashes[0]
+    assert isinstance(clash, Clash)
+    assert isinstance(clash.participants[0], ClashParticipant)
+    assert clash.participants[0].soldiers_after == 10
+    assert clash.participants[1].soldiers_after == 0
+    with pytest.raises(ValidationError):
+        clash.participants[0].soldiers_after = 100
+    payload["generation"]["clashes"][0]["time"] = 2
+    with pytest.raises(GameProtocolError):
+        GenerationState.parse(payload)

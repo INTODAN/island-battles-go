@@ -324,6 +324,7 @@ func validateCommands(generation *models.Generation, teamColor uint, inputs []mo
 
 func generationState(game *models.Game, generation *models.Generation, player models.FrozenGamePlayer, inputs []models.GenerationInput) models.GenerationState {
 	state := models.GenerationState{GameID: game.ID, LobbyID: *game.LobbyID, GenerationID: generation.ID, PlayerID: player.PlayerID, TeamColor: player.TeamColor, Channel: "player:" + player.PlayerID, Generation: models.GenerationView{Castles: []models.CastleView{}, SoldierGroups: []models.SoldierGroupView{}}}
+	state.Generation.Clashes = generation.Clashes
 	for _, input := range inputs {
 		if input.PlayerID == player.PlayerID {
 			state.Submitted = input.Completed
