@@ -183,12 +183,14 @@ render();
 // Body height is intrinsic, so resizing the frame does not impose a minimum.
 if (window.parent !== window) {
   let reportedHeight = 0;
-  new ResizeObserver(() => {
+  const reportSize = () => {
     const height = Math.ceil(document.body.getBoundingClientRect().height);
     if (height === reportedHeight) return;
     reportedHeight = height;
     window.parent.postMessage({ type: "game.result-size", height }, "*");
-  }).observe(document.body);
+  };
+  new ResizeObserver(reportSize).observe(document.body);
+  reportSize();
 }
 </script>
 </body>
