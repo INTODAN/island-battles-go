@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clash indicators · Design comparison</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #f5f7fb; color: #202d40; font: 16px/1.5 system-ui, sans-serif; }
+  main { max-width: 1320px; margin: auto; padding: 40px 24px; }
+  h1 { margin: 4px 0 8px; font-size: clamp(26px, 4vw, 38px); letter-spacing: -.04em; }
+  h2 { margin: 12px 0 4px; font-size: 19px; }
+  p { margin: 0 0 16px; }
+  .eyebrow { color: #52667b; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
+  .intro { max-width: 760px; color: #52667b; }
+  .controls { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 18px; background: white; border: 1px solid #dce3ec; border-radius: 12px; margin: 24px 0; }
+  button, select { font: inherit; padding: 8px 12px; border-radius: 7px; border: 1px solid #c6d8e7; background: #fff; color: #202d40; }
+  button { background: #305dc7; color: white; cursor: pointer; min-width: 104px; }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid #b37914; outline-offset: 3px; }
+  .timeline { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 200px; }
+  input { flex: 1; width: 100%; accent-color: #305dc7; }
+  output { min-width: 80px; font-size: 14px; }
+  .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+  article { background: white; border: 1px solid #dce3ec; border-radius: 14px; overflow: hidden; }
+  article.recommended { border: 2px solid #305dc7; }
+  .heading { padding: 20px 20px 12px; min-height: 170px; }
+  .tag { color: #305dc7; background: #edf2fb; border-radius: 5px; padding: 3px 7px; font-size: 12px; font-weight: 650; }
+  .heading p, .note { color: #52667b; font-size: 14px; }
+  svg { width: 100%; display: block; background: #edf5fb; }
+  .summary { padding: 16px 20px; min-height: 104px; font-size: 14px; border-bottom: 1px solid #edf2fb; }
+  .note { padding: 16px 20px; margin: 0; }
+  footer { margin-top: 24px; max-width: 850px; color: #52667b; font-size: 14px; }
+  a { color: #305dc7; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } .heading { min-height: 0; } svg { max-height: 270px; } main { padding: 24px 16px; } }
+</style>
+</head>
+<body>
+<main>
+  <div class="eyebrow">Island Battles · Issue #10 · Design study</div>
+  <h1>Make every clash readable.</h1>
+  <p class="intro">Watch all three clash effects side by side. The demo repeats automatically, with a pause at the result. Pause or drag the slider to inspect any moment.</p>
+  <div class="controls">
+    <label for="scenario">Encounter</label>
+    <select id="scenario"><option value="unequal">40 vs 25 · Blue survives</option><option value="equal">25 vs 25 · Both defeated</option></select>
+    <button id="play" type="button">Play all</button>
+    <button id="restart" type="button">Restart demo</button>
+    <label for="timeline">Progress</label>
+    <div class="timeline"><input id="timeline" type="range" min="0" max="100" value="100"><output id="phase" for="timeline">Result</output></div>
+  </div>
+  <div class="grid">
+    <article data-mode="ring">
+      <div class="heading"><span class="tag">01 · Minimal</span><h2>Impact ring + losses</h2><p>A pulse marks the clash. Numbers explain the cost.</p></div>
+      <svg viewBox="0 0 420 290" role="img" aria-label="Impact ring concept"></svg>
+      <div class="summary"></div>
+      <p class="note">Quiet and compact. A defeated group still vanishes quickly.</p>
+    </article>
+    <article data-mode="outline" class="recommended">
+      <div class="heading"><span class="tag">02 · Selected</span><h2>Leave a defeated outline</h2><p>Survivors show their losses. A dashed outline and × mark defeated groups.</p></div>
+      <svg viewBox="0 0 420 290" role="img" aria-label="Defeated outline concept"></svg>
+      <div class="summary"></div>
+      <p class="note">Losses above survivors only. Defeated groups keep just their outline and ×.</p>
+    </article>
+    <article data-mode="marker">
+      <div class="heading"><span class="tag">03 · Inspectable</span><h2>Mark the clash</h2><p>A crossed-swords marker anchors a compact battle report.</p></div>
+      <svg viewBox="0 0 420 290" role="img" aria-label="Clash marker concept"></svg>
+      <div class="summary"></div>
+      <p class="note">Useful for busy turns. Details remain visible without hovering.</p>
+    </article>
+  </div>
+  <footer>
+    <p>Illustrative encounter with synthetic data and slowed playback. Markers belong to the resulting turn and clear on the next turn. Dashed outlines represent defeated groups, never active troops. Reduced-motion mode shows static results.</p>
+    <a href="clash-indicators.md">Read the implementation proposal</a>
+  </footer>
+</main>
+<script>
+  'use strict';
+  const timeline = document.querySelector('#timeline');
+  const scenario = document.querySelector('#scenario');
+  const play = document.querySelector('#play');
+  const phase = document.querySelector('#phase');
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+  let animation = null;
+  let startedAt = 0;
+
+  function element(parent, name, attributes, text) {
+    const node = document.createElementNS('http://www.w3.org/2000/svg', name);
+    for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
+    if (text !== undefined) node.textContent = text;
+    parent.append(node);
+    return node;
+  }
+
+  function label(parent, x, y, text, attributes = {}) {
+    return element(parent, 'text', { x, y, fill: '#202d40', 'text-anchor': 'middle', 'font-size': 14, 'font-family': 'system-ui, sans-serif', ...attributes }, text);
+  }
+
+  function swords(parent, x, y) {
+    element(parent, 'circle', { cx: x, cy: y, r: 17, fill: '#fff7df', stroke: '#8b600a' });
+    element(parent, 'path', { d: `M ${x-7} ${y-8} L ${x+7} ${y+8} M ${x+7} ${y-8} L ${x-7} ${y+8} M ${x-9} ${y+3} L ${x-3} ${y+9} M ${x+3} ${y+9} L ${x+9} ${y+3}`, fill: 'none', stroke: '#8b600a', 'stroke-width': 2.5 });
+  }
+
+  function render() {
+    const progress = Number(timeline.value);
+    const equal = scenario.value === 'equal';
+    const blueBefore = equal ? 25 : 40;
+    const impact = progress >= 40;
+    const resolved = progress >= 60;
+    const settling = Math.min(1, Math.max(0, (progress - 60) / 40));
+    phase.value = progress < 40 ? 'Approach' : progress < 60 ? 'Impact' : progress < 100 ? 'Resolving' : 'Result';
+    for (const card of document.querySelectorAll('article')) {
+      const mode = card.dataset.mode;
+      const field = card.querySelector('svg');
+      field.replaceChildren();
+      element(field, 'line', { x1: 30, y1: 145, x2: 390, y2: 145, stroke: '#c6d8e7', 'stroke-width': 2, 'stroke-dasharray': '6 7' });
+      label(field, 70, 32, 'BLUE', { fill: '#305dc7', 'font-size': 12, 'font-weight': 700 });
+      label(field, 350, 32, 'RED', { fill: '#b53644', 'font-size': 12, 'font-weight': 700 });
+      if (impact && mode !== 'marker') {
+        element(field, 'circle', { cx: 210, cy: 145, r: 44 + 20 * settling, fill: 'none', stroke: '#8b600a', 'stroke-width': resolved ? 2 : 4, opacity: 1 - .7 * settling });
+      }
+      for (const team of ['blue', 'red']) {
+        const blue = team === 'blue';
+        const contactX = blue ? 185 : 235;
+        const startX = blue ? 70 : 350;
+        const x = startX + (contactX - startX) * Math.min(1, progress / 40);
+        const survivesClash = blue && !equal;
+        const defeated = resolved && !survivesClash;
+        const color = blue ? '#3464e0' : '#d94d5b';
+        if (defeated && mode === 'outline') {
+          element(field, 'circle', { cx: x, cy: 145, r: 24, fill: 'none', stroke: color, 'stroke-width': 2, 'stroke-dasharray': '4 4', 'data-kind': 'defeated-outline' });
+          label(field, x, 151, '×', { fill: color, 'font-size': 23 });
+        } else if (!defeated) {
+          element(field, 'circle', { cx: x, cy: 145, r: 24, fill: color, stroke: '#fff', 'stroke-width': 2, 'data-kind': 'soldier-group' });
+          label(field, x, 150, resolved ? 15 : blue ? blueBefore : 25, { fill: '#fff', 'font-weight': 700 });
+        }
+        if (impact && (mode === 'ring' || (mode === 'outline' && survivesClash))) {
+          label(field, x, 104 - 10 * settling, '−25', { fill: '#824309', 'font-weight': 700 });
+        }
+      }
+      if (impact) {
+        if (mode === 'marker') {
+          swords(field, 210, 80);
+          label(field, 210, 221, `Blue ${blueBefore} → ${equal ? 0 : 15} · Red 25 → 0`, { 'font-weight': 650 });
+        } else if (resolved && mode === 'ring') swords(field, 210, 242);
+      }
+      const summary = !impact
+        ? `Blue ${blueBefore} approaches Red 25.`
+        : `Clash: Blue ${blueBefore} → ${equal ? 0 : 15}; Red 25 → 0. ${equal ? 'Both groups defeated.' : 'Red defeated. Blue survives with 15 soldiers.'}`;
+      card.querySelector('.summary').textContent = summary;
+      field.setAttribute('aria-label', `${card.querySelector('h2').textContent}. ${phase.value}. ${summary}`);
+    }
+  }
+
+  function stop() {
+    if (animation !== null) cancelAnimationFrame(animation);
+    animation = null;
+    play.textContent = 'Play all';
+  }
+
+  function tick(now) {
+    const elapsed = now - startedAt;
+    if (elapsed >= 4600) startedAt = now;
+    timeline.value = Math.min(100, (now - startedAt) / 30);
+    render();
+    animation = requestAnimationFrame(tick);
+  }
+
+  function start(restart = false) {
+    stop();
+    if (reducedMotion.matches) { timeline.value = 100; render(); return; }
+    if (restart || Number(timeline.value) >= 100) timeline.value = 0;
+    startedAt = performance.now() - Number(timeline.value) * 30;
+    play.textContent = 'Pause';
+    render();
+    animation = requestAnimationFrame(tick);
+  }
+
+  play.addEventListener('click', () => {
+    if (animation !== null) stop();
+    else start();
+  });
+  document.querySelector('#restart').addEventListener('click', () => start(true));
+  timeline.addEventListener('input', () => { stop(); render(); });
+  scenario.addEventListener('change', () => start(true));
+  reducedMotion.addEventListener('change', () => { stop(); render(); });
+  start(true);
+</script>
+</body>
+</html>
