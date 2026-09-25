@@ -56,12 +56,12 @@ The integration uses those results as the event source:
 
 1. Capture immutable event values during resolution, before group updates or
    deletion. Include an event ID scoped to its generation, turn fraction,
-   logical group ID, team, contact position, and soldier counts before and after
+   persistent group ID, team, contact position, and soldier counts before and after
    each clash. Explicitly capture the count before **each event**: a group can
    participate in multiple clashes in one turn, so its starting generation count
    is insufficient for later losses. Do not retain mutable group pointers.
 2. Persist events as JSON atomically with the resulting generation. Command retries
-   reuse the saved events. Store logical participant IDs as values so deleting a
+   reuse the saved events. Store persistent participant IDs as values so deleting a
    defeated group cannot remove its event history.
 3. Add optional clash events to saved replay frames and the authorized generation
    response used by live play. Older replays with no events remain renderable;

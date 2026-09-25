@@ -81,12 +81,12 @@ type CastleView struct {
 }
 
 type SoldierGroupView struct {
-	ID                         uint    `json:"id"`
-	TeamColor                  uint    `json:"team_color"`
-	Soldiers                   uint    `json:"soldiers"`
-	X                          float64 `json:"x"`
-	Y                          float64 `json:"y"`
-	OriginLogicalCastleID      uint    `json:"origin_logical_castle_id"`
-	DestinationLogicalCastleID uint    `json:"destination_logical_castle_id"`
-	ClashRadius                float64 `json:"clash_radius"`
+	ID                            uint    `json:"id"`
+	TeamColor                     uint    `json:"team_color"`
+	Soldiers                      uint    `json:"soldiers"`
+	X                             float64 `json:"x"`
+	Y                             float64 `json:"y"`
+	OriginPersistentCastleID      uint    `json:"origin_persistent_castle_id"`
+	DestinationPersistentCastleID uint    `json:"destination_persistent_castle_id"`
+	ClashRadius                   float64 `json:"clash_radius"`
 }

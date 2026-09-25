@@ -30,7 +30,7 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 	}, game.Replay)
 	huma.Register(api, huma.Operation{
 		OperationID: "getIslandLobbyGeneration", Path: "/game/from-lobby/{lobby_id}/generation", Method: http.MethodGet,
-		Summary: "Read the current generation for a roster player", Description: "Requires a current authorized lobby snapshot and frozen roster membership. Returns logical castle IDs, troop state, recorded clashes with per-participant before/after counts, and your turn completion flag.",
+		Summary: "Read the current generation for a roster player", Description: "Requires a current authorized lobby snapshot and frozen roster membership. Returns persistent castle IDs, troop state, recorded clashes with per-participant before/after counts, and your turn completion flag.",
 		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
 	}, game.CurrentGeneration)
 	huma.Register(api, huma.Operation{

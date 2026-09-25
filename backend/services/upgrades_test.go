@@ -41,8 +41,8 @@ func TestCastleUpgradesAffectOnlyNewSoldierGroups(t *testing.T) {
 		}
 		return models.CommandFields{CommandType: commandType, Parameters: raw}
 	}
-	send := command(models.SendSoldierGroup, commandHandlers.SendSoldierGroupParams{OriginLogicalCastleID: 0, DestinationLogicalCastleID: 1, SoldierAmount: 10})
-	upgrade := command(models.UpgradeCastle, commandHandlers.UpgradeCastleParams{LogicalCastleID: 0, UpgradeType: models.SpeedUpgrade})
+	send := command(models.SendSoldierGroup, commandHandlers.SendSoldierGroupParams{OriginPersistentCastleID: 0, DestinationPersistentCastleID: 1, SoldierAmount: 10})
+	upgrade := command(models.UpgradeCastle, commandHandlers.UpgradeCastleParams{PersistentCastleID: 0, UpgradeType: models.SpeedUpgrade})
 	beforeID, err := services.MigrateGeneration(database, gameID, []models.CommandFields{send})
 	if err != nil {
 		t.Fatal(err)
@@ -78,7 +78,7 @@ func TestCastleUpgradesAffectOnlyNewSoldierGroups(t *testing.T) {
 	}
 	for _, group := range after.SoldierGroups {
 		expectedLevel, expectedX := 1, 1.0
-		if group.LogicalSoldierGroupID == 1 {
+		if group.PersistentSoldierGroupID == 1 {
 			expectedLevel, expectedX = 4, 2
 		}
 		if group.Upgrades[models.SpeedUpgrade] != expectedLevel || group.Position.P.X != expectedX {
@@ -95,7 +95,7 @@ func TestCastleUpgradesAffectOnlyNewSoldierGroups(t *testing.T) {
 	}
 	for _, group := range next.SoldierGroups {
 		expectedLevel, expectedX := 1, 1.5
-		if group.LogicalSoldierGroupID == 1 {
+		if group.PersistentSoldierGroupID == 1 {
 			expectedLevel, expectedX = 4, 4
 		}
 		if group.Upgrades[models.SpeedUpgrade] != expectedLevel || group.Position.P.X != expectedX {
@@ -107,7 +107,7 @@ func TestCastleUpgradesAffectOnlyNewSoldierGroups(t *testing.T) {
 		expected error
 	}{
 		{upgrade, models.ErrUpgradeMaxLevel},
-		{command(models.UpgradeCastle, commandHandlers.UpgradeCastleParams{LogicalCastleID: 0, UpgradeType: "unknown"}), models.ErrInvalidUpgrade},
+		{command(models.UpgradeCastle, commandHandlers.UpgradeCastleParams{PersistentCastleID: 0, UpgradeType: "unknown"}), models.ErrInvalidUpgrade},
 	} {
 		var beforeCount, afterCount int64
 		if err := database.Model(&models.Generation{}).Count(&beforeCount).Error; err != nil {
@@ -148,11 +148,11 @@ func TestUnaffordableUpgradeRollsBackEarlierCommands(t *testing.T) {
 	if err := dal.UpdateCastleSoldierGroupAmount(database, castle, 40); err != nil {
 		t.Fatal(err)
 	}
-	upgradeParameters, err := json.Marshal(commandHandlers.UpgradeCastleParams{LogicalCastleID: 0, UpgradeType: models.SpeedUpgrade})
+	upgradeParameters, err := json.Marshal(commandHandlers.UpgradeCastleParams{PersistentCastleID: 0, UpgradeType: models.SpeedUpgrade})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sendParameters, err := json.Marshal(commandHandlers.SendSoldierGroupParams{OriginLogicalCastleID: 0, DestinationLogicalCastleID: 1, SoldierAmount: 15})
+	sendParameters, err := json.Marshal(commandHandlers.SendSoldierGroupParams{OriginPersistentCastleID: 0, DestinationPersistentCastleID: 1, SoldierAmount: 15})
 	if err != nil {
 		t.Fatal(err)
 	}

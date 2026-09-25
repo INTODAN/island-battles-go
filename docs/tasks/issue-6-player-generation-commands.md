@@ -13,7 +13,7 @@ Starting an Island Battles lobby initializes generation one. Every player in the
 3. Commands may arrive incrementally. `complete: true` seals that player's turn; an empty array is valid. An omitted `complete` defaults to true for a convenient one-batch turn. Python `send_soldier_groups` uses false; `end_turn` uses true.
 4. Reject an invalid batch atomically with an indicative HTTP error; none of its commands are stored or executed and it does not complete the turn. Previously accepted batches remain intact.
 5. A request UUID identifies one immutable batch for one player and generation. Exact retries are successful without appending or advancing twice; changed payloads under the same UUID conflict. Stale new requests and commands after completion conflict.
-6. `send_soldier_group` is initially the only public command. Internal movement, production, and cleanup remain server-only. Validate parameter presence/types, positive count, distinct existing logical castles, ownership, and cumulative available soldiers, including reservations by teammates.
+6. `send_soldier_group` is initially the only public command. Internal movement, production, and cleanup remain server-only. Validate parameter presence/types, positive count, distinct existing persistent castles, ownership, and cumulative available soldiers, including reservations by teammates.
 7. Serialize submissions and migration with a database lock on the game row. Submission, readiness, new generation, and notification rows commit together. Engine errors roll everything in that attempt back.
 8. The initial state and every migrated state have durable notifications. Publish to existing authenticated `player:<player_uuid>` channels so the generic lobby protocol stays unchanged. Delivery is at least once; client deduplicates by game and generation.
 9. The SDK subscribes before HTTP reconciliation and periodically refreshes the authorized current state to recover missing pushes or restarts. It invokes callbacks serially and does not repeat the callback for a generation.
@@ -27,12 +27,12 @@ Starting an Island Battles lobby initializes generation one. Every player in the
 {"game_id":1,"lobby_id":"uuid","generation_id":1,"player_id":"uuid","team_color":1,"channel":"player:uuid","submitted":false,"generation":{"castles":[{"id":0,"team_color":1,"soldiers":30,"x":-2,"y":0}],"soldier_groups":[]}}
 ```
 
-Castle/group `id` values are logical IDs (zero is valid). Soldier group views also include origin/destination logical castle IDs and clash radius when useful. Never expose pending opponents' orders in state.
+Castle/group `id` values are persistent IDs (zero is valid). Soldier group views also include origin/destination persistent castle IDs and clash radius when useful. Never expose pending opponents' orders in state.
 
 `POST /generation/commands`, operation ID `registerGenerationCommand`:
 
 ```json
-{"game_id":1,"generation_id":1,"request_id":"uuid","complete":true,"commands":[{"command_type":"send_soldier_group","parameters":{"origin_logical_castle_id":0,"destination_logical_castle_id":1,"soldier_amount":5}}]}
+{"game_id":1,"generation_id":1,"request_id":"uuid","complete":true,"commands":[{"command_type":"send_soldier_group","parameters":{"origin_persistent_castle_id":0,"destination_persistent_castle_id":1,"soldier_amount":5}}]}
 ```
 
 Response: current `GenerationState`. On the last completion this is the new generation with `submitted:false`. Exact retries can return the latest authorized state. Errors use Huma problem JSON with meaningful detail and status: 401 authentication; 404 inaccessible/missing game; 403 forbidden command/ownership; 409 stale generation, sealed turn, UUID payload conflict or insufficient reserved soldiers; 422 invalid parameters.
@@ -66,7 +66,7 @@ Persistence contract for the delivery worker: exported `models.GenerationNotific
 
 ### T04 — define public state and strict command conversion (strong agent; backend core)
 - Use snake_case transport DTOs separate from legacy engine structs.
-- Include logical castle IDs despite the legacy model hiding those IDs in JSON.
+- Include persistent castle IDs despite the legacy model hiding those IDs in JSON.
 - Include enough castle and soldier-group information for a strategy to choose valid orders.
 - Reject server-only/unknown types, malformed parameters, missing IDs (zero is valid), zero soldiers and self-targeting.
 - Convert validated public sends to existing engine CommandFields only internally.

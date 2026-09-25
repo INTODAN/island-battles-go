@@ -9,7 +9,7 @@ export function singleSoldierCommands(state) {
   if (!origin || !enemy) return [];
   return [{
     command_type: "send_soldier_group",
-    parameters: { origin_logical_castle_id: origin.id, destination_logical_castle_id: enemy.id, soldier_amount: 1 },
+    parameters: { origin_persistent_castle_id: origin.id, destination_persistent_castle_id: enemy.id, soldier_amount: 1 },
   }];
 }
 
@@ -102,7 +102,7 @@ export class ExamplePlayer {
       this.receive(result);
       const order = submitted.commands[0]?.parameters;
       this.onStatus("Example player running", order
-        ? `Sent 1 soldier: Castle ${order.origin_logical_castle_id + 1} → Castle ${order.destination_logical_castle_id + 1}.`
+        ? `Sent 1 soldier: Castle ${order.origin_persistent_castle_id + 1} → Castle ${order.destination_persistent_castle_id + 1}.`
         : "No enemy castle or available soldiers. Passed this turn.");
     } catch (error) {
       if (this.stopped) return;

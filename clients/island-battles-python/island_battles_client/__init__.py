@@ -11,16 +11,19 @@ from .errors import (
 )
 from .models import (
     NEUTRAL_TEAM_COLOR,
+    BoardEntity,
     Castle,
     Clash,
     ClashParticipant,
     Generation,
     SoldierGroup,
+    TeamType,
 )
 from .player import Player
 
 __all__ = [
     "NEUTRAL_TEAM_COLOR",
+    "BoardEntity",
     "Castle",
     "Clash",
     "ClashParticipant",
@@ -34,4 +37,5 @@ __all__ = [
     "IslandBattlesClient",
     "Player",
     "SoldierGroup",
+    "TeamType",
 ]

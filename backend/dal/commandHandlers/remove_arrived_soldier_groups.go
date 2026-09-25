@@ -20,11 +20,11 @@ func RemoveArrivedSoldierGroupsHandler(
 	// refreshed generation so an earlier arrival's damage/capture is preserved.
 	soldierGroups := append([]models.SoldierGroup(nil), generation.SoldierGroups...)
 	sort.SliceStable(soldierGroups, func(left, right int) bool {
-		return soldierGroups[left].LogicalSoldierGroupID < soldierGroups[right].LogicalSoldierGroupID
+		return soldierGroups[left].PersistentSoldierGroupID < soldierGroups[right].PersistentSoldierGroupID
 	})
 	for _, soldierGroup := range soldierGroups {
 		if soldierGroup.Position == soldierGroup.DestinationCastle.Position {
-			castle, err := dal.GetCastleFromGeneration(generation, soldierGroup.DestinationCastle.LogicalCastleID)
+			castle, err := dal.GetCastleFromGeneration(generation, soldierGroup.DestinationCastle.PersistentCastleID)
 			if err != nil {
 				return err
 			}

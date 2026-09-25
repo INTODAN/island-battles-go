@@ -26,7 +26,7 @@ func MoveSoldierGroupsHandler(db *gorm.DB, generation *models.Generation, parame
 		for _, participant := range clash.Participants {
 			group := participant.SoldierGroup
 			event.Participants = append(event.Participants, models.ClashParticipant{
-				GroupID: group.LogicalSoldierGroupID, TeamColor: group.TeamColor,
+				GroupID: group.PersistentSoldierGroupID, TeamColor: group.TeamColor,
 				X: participant.Position.P.X, Y: participant.Position.P.Y, ClashRadius: group.EffectiveClashRadius(),
 				SoldiersBefore: participant.SoldiersBefore, SoldiersAfter: participant.RemainingSoldiers,
 			})

@@ -34,8 +34,8 @@ Players read their authorized current state with `GET /game/from-lobby/{lobby_id
     {
       "command_type": "send_soldier_group",
       "parameters": {
-        "origin_logical_castle_id": 0,
-        "destination_logical_castle_id": 1,
+        "origin_persistent_castle_id": 0,
+        "destination_persistent_castle_id": 1,
         "soldier_amount": 5
       }
     }
@@ -51,15 +51,15 @@ The response is the caller's current `GenerationState`. The final player's compl
 
 `GET /game/from-lobby/{lobby_id}/replay` shows authorized members the recorded generation history. New games save their initial frame and append a frame after each completed turn. Previously saved spectator replays remain available.
 
-Clashes are saved atomically with each generation and included in generation snapshots, live notifications, and replay frames as optional `clashes` arrays. Each event has a generation-local `id`, a `time` fraction within the turn, and participant records with logical `group_id`, `team_color`, contact `x`/`y`, `clash_radius`, `soldiers_before`, and `soldiers_after`. Counts describe each individual contact, including multiple clashes by the same group in one turn. Old generations and replays without events remain readable.
+Clashes are saved atomically with each generation and included in generation snapshots, live notifications, and replay frames as optional `clashes` arrays. Each event has a generation-local `id`, a `time` fraction within the turn, and participant records with persistent `group_id`, `team_color`, contact `x`/`y`, `clash_radius`, `soldiers_before`, and `soldiers_after`. Counts describe each individual contact, including multiple clashes by the same group in one turn. Old generations and replays without events remain readable.
 
 The lobby battlefield pulses an impact ring, shows loss numbers only above surviving troops, and leaves a dashed outline with × for defeated groups. Defeated markers stay at their recorded contact positions, including when they overlap other troops or castles. Losses from multiple clashes are combined above each surviving troop. Effects remain visible while paused and clear on the next generation; scrubbing restores static effects, and reduced-motion settings disable the pulse. Combat mechanics and soldier totals are unaffected.
 
-Soldier groups have a persisted `ClashRadius`, defaulting to **0.25 world units**, which is copied to subsequent generations. Enemies clash when their center-to-center distance reaches either group's radius (the larger radius, rather than their sum). Contacts resolve in time order using troop counts before casualties. If one group has strictly less than half the other's soldiers, the survivor completes its movement. Otherwise the groups stop at the midpoint between their contact positions for the generation; exactly half also stops. In a simultaneous connected clash, any comparable opposing pair causes a stop at the average participant position. Paths are recalculated after a stop so survivors can still fight later enemies. Dead and empty groups cannot participate in later clashes. Simultaneous connected contacts resolve together; each team loses up to the combined opposing force, with losses assigned in logical group order.
+Soldier groups have a persisted `ClashRadius`, defaulting to **0.25 world units**, which is copied to subsequent generations. Enemies clash when their center-to-center distance reaches either group's radius (the larger radius, rather than their sum). Contacts resolve in time order using troop counts before casualties. If one group has strictly less than half the other's soldiers, the survivor completes its movement. Otherwise the groups stop at the midpoint between their contact positions for the generation; exactly half also stops. In a simultaneous connected clash, any comparable opposing pair causes a stop at the average participant position. Paths are recalculated after a stop so survivors can still fight later enemies. Dead and empty groups cannot participate in later clashes. Simultaneous connected contacts resolve together; each team loses up to the combined opposing force, with losses assigned in persistent group ID order.
 
 Each group's `clash_stop_generations` upgrade controls its own pause duration: **level 1 → 3 generations**, **level 2 → 2**, and **level 3 → 1**, including the clash generation. Troops copy this level when spawned, so upgrading the castle does not change existing troops. Each group persists its remaining `MovementPauseGenerations`, which is copied across generations and decremented when it stays still. Smaller attacks do not restart or extend an existing pause. Existing records without this upgrade use level 1; already-running pause counters retain their remaining duration.
 
-Groups leave field combat when they reach their destination, including arrivals exactly tied with contact. Already-arrived groups cannot clash with newly spawned troops. Short trips retain normal movement speed until arrival. At the end of the turn, castle arrivals resolve in logical group order against the updated castle state, preserving earlier damage, captures, and reinforcements. Sending zero soldiers or sending to the same castle is rejected.
+Groups leave field combat when they reach their destination, including arrivals exactly tied with contact. Already-arrived groups cannot clash with newly spawned troops. Short trips retain normal movement speed until arrival. At the end of the turn, castle arrivals resolve in persistent group ID order against the updated castle state, preserving earlier damage, captures, and reinforcements. Sending zero soldiers or sending to the same castle is rejected.
 
 The replay draws troop circles using their stored radius and castle circles with a visual-only radius of **0.5 units**, with the same world scale on both axes. Existing troop rows receive the default radius during migration; saved replays retain their original simulation results.
 
@@ -86,7 +86,7 @@ The internal migration engine accepts `upgrade_castle` to increase a castle's up
 ```json
 {
   "CommandType": "upgrade_castle",
-  "Parameters": {"logical_castle_id": 0, "upgrade_type": "speed"}
+  "Parameters": {"persistent_castle_id": 0, "upgrade_type": "speed"}
 }
 ```
 
@@ -110,3 +110,5 @@ go test -race ./lobby/... ./backend/lobbyadapter/... ./backend/dal/...
 ```
 
 Database tests require a Docker-compatible runtime and use disposable PostgreSQL. The live runner supports Linux Docker or Podman, creates unique test containers, and preserves failure logs. It never uses the configured developer database.
+
+Backend Go models use `PersistentCastleID` and `PersistentSoldierGroupID` for IDs that remain stable across generations. Their database columns are `persistent_castle_id` and `persistent_soldier_group_id`. API commands and soldier-group views use `origin_persistent_castle_id` and `destination_persistent_castle_id`; castle upgrades use `persistent_castle_id`.
