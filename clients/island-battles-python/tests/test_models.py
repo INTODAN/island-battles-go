@@ -1,6 +1,8 @@
 import math
 
 import pytest
+from pydantic import ValidationError
+
 from island_battles_client import (
     Castle,
     GameProtocolError,
@@ -9,7 +11,6 @@ from island_battles_client import (
     TeamType,
 )
 from island_battles_client._protocol import GenerationState
-from pydantic import ValidationError
 
 
 def make_entity(entity_type, **values):
@@ -90,11 +91,12 @@ def test_compare_team(origin_type, other_type, origin_team, other_team, expected
 
 
 def generation_data():
+    destination = {"id": 0, "team_color": 2, "soldiers": 10, "x": 3, "y": 4}
     data = {
         "id": 1,
         "castles": [
             {"id": 7, "team_color": 1, "soldiers": 10, "x": -3, "y": -4},
-            {"id": 0, "team_color": 2, "soldiers": 10, "x": 3, "y": 4},
+            destination,
         ],
         "soldier_groups": [
             {
@@ -103,13 +105,13 @@ def generation_data():
                 "soldiers": 5,
                 "origin_castle_id": 7,
                 "destination_castle_id": 0,
+                "destination_castle": destination,
                 "clash_radius": 0.5,
                 "x": 0,
                 "y": 0,
             }
         ],
     }
-    data["soldier_groups"][0]["destination_castle"] = data["castles"][1]
     return data
 
 
@@ -123,6 +125,8 @@ def test_distance_left_survives_roundtrip():
         == 5
     )
     with pytest.raises(ValidationError, match="frozen"):
+        # Intentionally exercise Pydantic's runtime immutability guard.
+        # ty: ignore[invalid-assignment]
         generation.soldier_groups[0].x = 100
 
 
@@ -168,11 +172,11 @@ def wire_state(data):
     return GenerationState.parse(
         {
             "game_id": 1,
-            "lobby_id": "lobby",
+            "lobby_id": "11111111-1111-4111-8111-111111111111",
             "generation_id": generation_id,
-            "player_id": "player",
+            "player_id": "22222222-2222-4222-8222-222222222222",
             "team_color": 1,
-            "channel": "player:player",
+            "channel": "player:22222222-2222-4222-8222-222222222222",
             "submitted": False,
             "generation": data,
         }

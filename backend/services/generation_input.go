@@ -348,11 +348,9 @@ func generationState(game *models.Game, generation *models.Generation, player mo
 func queueGenerationNotifications(database *gorm.DB, game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer) error {
 	notifications := make([]models.GenerationNotification, 0, len(players))
 	for _, player := range players {
-		payload, err := json.Marshal(struct {
-			SchemaVersion int                    `json:"schema_version"`
-			Type          string                 `json:"type"`
-			State         models.GenerationState `json:"state"`
-		}{1, "game.next_generation", generationState(game, generation, player, nil)})
+		payload, err := json.Marshal(models.GameNextGeneration{
+			SchemaVersion: 1, Type: "game.next_generation", State: generationState(game, generation, player, nil),
+		})
 		if err != nil {
 			return err
 		}

@@ -5,6 +5,8 @@ from uuid import UUID
 
 import httpx
 import pytest
+from pydantic import ValidationError
+
 from island_battles_client import (
     GameAuthenticationError,
     GameClientClosedError,
@@ -13,7 +15,6 @@ from island_battles_client import (
     IslandBattlesClient,
     Player,
 )
-from pydantic import ValidationError
 
 LOBBY = "00000000-0000-0000-0000-000000000001"
 PLAYER = "00000000-0000-0000-0000-000000000002"
@@ -103,7 +104,12 @@ class Server:
         assert request.headers["Authorization"] == "Bearer guest-secret"
         if request.url.path == "/lobby/v1/connection-token":
             return httpx.Response(
-                200, json={"token": "connection-token", "websocket_url": "ws://test/ws"}
+                200,
+                json={
+                    "token": "connection-token",
+                    "websocket_url": "ws://test/ws",
+                    "expires_at": "2030-01-01T00:00:00Z",
+                },
             )
         if request.method == "GET":
             self.gets += 1
@@ -156,9 +162,9 @@ class RecordingPlayer(Player):
         self.seen = asyncio.Queue()
         self.receivers = asyncio.Queue()
 
-    async def on_generation(self, generation, commands):
+    async def on_generation(self, generation, commands_receiver):
         await self.seen.put(generation)
-        await self.receivers.put(commands)
+        await self.receivers.put(commands_receiver)
 
 
 class WaitingPlayer(RecordingPlayer):
@@ -166,8 +172,8 @@ class WaitingPlayer(RecordingPlayer):
         super().__init__(team_color)
         self.release = asyncio.Event()
 
-    async def on_generation(self, generation, commands):
-        await super().on_generation(generation, commands)
+    async def on_generation(self, generation, commands_receiver):
+        await super().on_generation(generation, commands_receiver)
         await self.release.wait()
 
 
@@ -201,10 +207,10 @@ async def test_orders_then_automatic_completion_empty_turn_and_dedup():
     server.advance_on_complete = True
 
     class OrderingPlayer(RecordingPlayer):
-        async def on_generation(self, generation, commands):
-            await super().on_generation(generation, commands)
+        async def on_generation(self, generation, commands_receiver):
+            await super().on_generation(generation, commands_receiver)
             if generation.id == 1:
-                assert await commands.send_soldier_group(0, 1, 5) is None
+                assert await commands_receiver.send_soldier_group(0, 1, 5) is None
             else:
                 server.advance_on_complete = False
 
@@ -371,12 +377,12 @@ async def test_receiver_keeps_original_generation_during_reconcile():
     started, release = asyncio.Event(), asyncio.Event()
 
     class BlockingPlayer(RecordingPlayer):
-        async def on_generation(self, generation, commands):
-            await super().on_generation(generation, commands)
+        async def on_generation(self, generation, commands_receiver):
+            await super().on_generation(generation, commands_receiver)
             if generation.id == 1:
                 started.set()
                 await release.wait()
-                await commands.send_soldier_group(0, 1, 1)
+                await commands_receiver.send_soldier_group(0, 1, 1)
             else:
                 await asyncio.Future()  # Keep the next turn open for inspection.
 
@@ -450,9 +456,9 @@ async def test_empty_callback_completes_with_same_uuid_after_transport_retry():
 
 async def test_failed_callback_does_not_complete_partial_commands():
     class FailingPlayer(Player):
-        async def on_generation(self, generation, commands):
-            self.receiver = commands
-            await commands.send_soldier_group(0, 1, 1)
+        async def on_generation(self, generation, commands_receiver):
+            self.receiver = commands_receiver
+            await commands_receiver.send_soldier_group(0, 1, 1)
             raise RuntimeError("strategy failed")
 
     server = Server()
@@ -684,6 +690,8 @@ def test_generation_preserves_clash_history_and_accepts_older_states():
     assert survivor.destination_castle is generation.castles[1]
     assert survivor.distance_left() == pytest.approx(2.125)
     with pytest.raises(ValidationError):
+        # Intentionally exercise Pydantic's runtime immutability guard.
+        # ty: ignore[invalid-assignment]
         clash.participants[0].soldiers_after = 100
     payload["generation"]["clashes"][0]["time"] = 2
     with pytest.raises(GameProtocolError):

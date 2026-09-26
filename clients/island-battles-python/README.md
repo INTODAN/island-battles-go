@@ -1,6 +1,6 @@
 # Island Battles Python player client
 
-An asyncio client for authenticated generation turns. It uses the existing lobby guest bearer credential and connection-token endpoint. Install with `uv sync --locked` (Python 3.14 or later). Keep the authenticated generic `LobbyClient` joined and running while the game client plays: it owns the lobby heartbeat and lease. Closing it can revoke game access after the lease expires.
+An asyncio client for authenticated generation turns, with HTTP operations and wire models generated from the public Huma contract. The handwritten wrapper implements the [shared SDK behavior specification](../../docs/sdk/behavior.md) and runs the [shared conformance scenarios](../conformance/scenarios.json). It uses the existing lobby guest bearer credential and connection-token endpoint. Install with `uv sync --locked` (Python 3.14 or later). Keep the authenticated generic `LobbyClient` joined and running while the game client plays: it owns the lobby heartbeat and lease. Closing it can revoke game access after the lease expires.
 
 Subclass `Player` and implement `async on_generation(generation, commands) -> None`. The shared `Player.__init__(team_color)` assigns `self.team_color` directly, so a strategy needs no constructor or property unless it has additional setup. `Player` is an abstract base class: subclasses must implement `on_generation` before they can be instantiated. It contains no networking or command implementation. The client reads the first authorized generation state, obtains the frozen team color, and calls `player_factory(team_color)` once to build the strategy:
 
@@ -21,13 +21,19 @@ class MyPlayer(Player):
         self, generation: Generation, commands_receiver: CommandReceiver
     ) -> None:
         own = next(
-            (castle for castle in generation.castles
-             if castle.team_color == self.team_color and castle.soldiers > 0),
+            (
+                castle
+                for castle in generation.castles
+                if castle.team_color == self.team_color and castle.soldiers > 0
+            ),
             None,
         )
         enemy = next(
-            (castle for castle in generation.castles
-             if castle.team_color not in (NEUTRAL_TEAM_COLOR, self.team_color)),
+            (
+                castle
+                for castle in generation.castles
+                if castle.team_color not in (NEUTRAL_TEAM_COLOR, self.team_color)
+            ),
             None,
         )
         if own is not None and enemy is not None:
@@ -75,10 +81,42 @@ Each call is pinned to its callback's generation. The SDK creates the request UU
 
 The full HTTP contract, authorization rules, reservation checks, retry behavior and status codes are documented in the [backend README](../../backend/README.md). The browser's **New demo lobby** uses its own JavaScript player strategy. See the [demo walkthrough](../../lobby/frontend/README.md).
 
-Run SDK tests with `uv run --locked pytest -q`. The example is checked with Ruff and ty:
+Run SDK tests with `uv run --locked pytest -q`. From this SDK directory, check the entire project, including tests, scripts, examples, and generated code, with Ruff and ty:
 
 ```sh
-uv run --locked ruff check island_battles_client examples
-uv run --locked ruff format --check island_battles_client examples
-uv run --locked ty check island_battles_client examples --error-on-warning
+uv run --locked ruff check .
+uv run --locked ruff format --check .
+uv run --locked ty check --error-on-warning
 ```
+
+
+## Contract generation
+
+The internal `generated/island_game_api_client` package is replaceable generated output,
+like the generic lobby Python SDK. It owns paths, authentication support, HTTP operations,
+request serialization, and wire models, including `GameNextGeneration`. Do not edit it
+by hand. The public `island_battles_client` wrapper owns lifecycle, reconciliation,
+callbacks, request retry identity, and strategy model conveniences.
+
+Run from the repository root:
+
+```sh
+go run ./cmd/export-game-openapi
+uv run --project clients/island-battles-python/tools --locked python clients/island-battles-python/scripts/generate.py
+uv run --project clients/island-battles-python/tools --locked python clients/island-battles-python/scripts/generate.py --check
+```
+
+Generation pins `openapi-python-client` and its formatter in `tools/uv.lock`, fails on
+warnings, and verifies that the offline export matches `api/game/openapi.json`.
+`--check` generates into a temporary directory and reports drift without rewriting files.
+The generator also bundles the exported contract as a package resource. Since generated
+attrs classes deserialize without enforcing all schema constraints, the wrapper validates
+raw responses and events against that resource before accepting state. JSON integer
+fields reject booleans, floats, and strings; coordinates must be finite. There is no
+second handwritten wire schema to keep synchronized.
+
+The wrapper owns and closes an injected `httpx.AsyncClient`; it configures that client's
+base URL, bearer header, and error response hook. Realtime uses the official
+`centrifuge-python` client. Shared conformance checks, generation drift checks, and the
+existing Python behavior/model tests run together with `uv run --locked pytest -q` from
+this directory.

@@ -1,7 +1,12 @@
 """Commands scoped to one invocation of a player's generation callback."""
 
 from collections.abc import Awaitable, Callable
-from typing import Any
+
+from island_game_api_client.models import (
+    PublicGenerationCommand,
+    PublicGenerationCommandCommandType,
+    SendSoldierGroupParameters,
+)
 
 from .errors import GameError
 
@@ -9,7 +14,9 @@ from .errors import GameError
 class CommandReceiver:
     """Submit commands for the current callback; the SDK completes the turn."""
 
-    def __init__(self, submit: Callable[[dict[str, Any]], Awaitable[None]]) -> None:
+    def __init__(
+        self, submit: Callable[[PublicGenerationCommand], Awaitable[None]]
+    ) -> None:
         self._submit = submit
         self._closed = False
 
@@ -39,12 +46,12 @@ class CommandReceiver:
             if value < minimum:
                 raise ValueError(f"{name} must be at least {minimum}")
         await self._submit(
-            {
-                "command_type": "send_soldier_group",
-                "parameters": {
-                    "origin_persistent_castle_id": origin_castle_id,
-                    "destination_persistent_castle_id": destination_castle_id,
-                    "soldier_amount": soldier_amount,
-                },
-            }
+            PublicGenerationCommand(
+                command_type=PublicGenerationCommandCommandType.SEND_SOLDIER_GROUP,
+                parameters=SendSoldierGroupParameters(
+                    origin_persistent_castle_id=origin_castle_id,
+                    destination_persistent_castle_id=destination_castle_id,
+                    soldier_amount=soldier_amount,
+                ),
+            )
         )

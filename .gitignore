@@ -35,3 +35,7 @@ go.work.sum
 __pycache__/
 .pytest_cache/
 *.egg-info/
+
+# TypeScript SDK dependencies and build output
+node_modules/
+clients/island-battles-typescript/dist/

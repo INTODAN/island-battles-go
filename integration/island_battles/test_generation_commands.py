@@ -136,7 +136,7 @@ async def test_rejection_retry_restart_and_public_migration_bypass(guests):
                     "commands": [{"command_type": forbidden, "parameters": {}}],
                 },
             )
-            assert rejected.status_code == 403, rejected.text
+            assert rejected.status_code == 422, rejected.text
         send = {
             "command_type": "send_soldier_group",
             "parameters": {

@@ -1,0 +1,283 @@
+{
+  "$defs": {
+    "CastleView": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "int64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "soldiers": {
+          "format": "int64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "team_color": {
+          "format": "int64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "y": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "team_color",
+        "soldiers",
+        "x",
+        "y"
+      ],
+      "type": "object"
+    },
+    "ClashEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "format": "int64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "participants": {
+          "items": {
+            "$ref": "#/$defs/ClashParticipant"
+          },
+          "type": "array"
+        },
+        "time": {
+          "format": "double",
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "time",
+        "participants"
+      ],
+      "type": "object"
+    },
+    "ClashParticipant": {
+      "additionalProperties": false,
+      "properties": {
+        "clash_radius": {
+          "format": "double",
+          "minimum": 0,
+          "type": "number"
+        },
+        "group_id": {
+          "format": "int64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "soldiers_after": {
+          "format": "int64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "soldiers_before": {
+          "format": "int64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "team_color": {
+          "format": "int64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "y": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "group_id",
+        "team_color",
+        "x",
+        "y",
+        "clash_radius",
+        "soldiers_before",
+        "soldiers_after"
+      ],
+      "type": "object"
+    },
+    "GenerationState": {
+      "additionalProperties": false,
+      "properties": {
+        "$schema": {
+          "description": "A URL to the JSON Schema for this object.",
+          "examples": [
+            "https://example.com/GenerationState.json"
+          ],
+          "format": "uri",
+          "readOnly": true,
+          "type": "string"
+        },
+        "channel": {
+          "pattern": "^player:[0-9a-fA-F-]{36}$",
+          "type": "string"
+        },
+        "game_id": {
+          "format": "int64",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "generation": {
+          "$ref": "#/$defs/GenerationView"
+        },
+        "generation_id": {
+          "format": "int64",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "lobby_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "player_id": {
+          "format": "uuid",
+          "type": "string"
+        },
+        "submitted": {
+          "type": "boolean"
+        },
+        "team_color": {
+          "format": "int64",
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "game_id",
+        "lobby_id",
+        "generation_id",
+        "player_id",
+        "team_color",
+        "channel",
+        "submitted",
+        "generation"
+      ],
+      "type": "object"
+    },
+    "GenerationView": {
+      "additionalProperties": false,
+      "properties": {
+        "castles": {
+          "items": {
+            "$ref": "#/$defs/CastleView"
+          },
+          "type": "array"
+        },
+        "clashes": {
+          "items": {
+            "$ref": "#/$defs/ClashEvent"
+          },
+          "type": "array"
+        },
+        "soldier_groups": {
+          "items": {
+            "$ref": "#/$defs/SoldierGroupView"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "castles",
+        "soldier_groups"
+      ],
+      "type": "object"
+    },
+    "SoldierGroupView": {
+      "additionalProperties": false,
+      "properties": {
+        "clash_radius": {
+          "format": "double",
+          "minimum": 0,
+          "type": "number"
+        },
+        "destination_persistent_castle_id": {
+          "format": "int64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "format": "int64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "origin_persistent_castle_id": {
+          "format": "int64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "soldiers": {
+          "format": "int64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "team_color": {
+          "format": "int64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "x": {
+          "format": "double",
+          "type": "number"
+        },
+        "y": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "team_color",
+        "soldiers",
+        "x",
+        "y",
+        "origin_persistent_castle_id",
+        "destination_persistent_castle_id",
+        "clash_radius"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "enum": [
+        1
+      ],
+      "format": "int64",
+      "type": "integer"
+    },
+    "state": {
+      "$ref": "#/$defs/GenerationState"
+    },
+    "type": {
+      "enum": [
+        "game.next_generation"
+      ],
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "type",
+    "state"
+  ],
+  "title": "GameNextGeneration",
+  "type": "object"
+}

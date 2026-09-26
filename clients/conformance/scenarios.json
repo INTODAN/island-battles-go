@@ -1,0 +1,1101 @@
+{
+  "version": 1,
+  "scope": "game",
+  "scenarios": [
+    {
+      "id": "empty-turn-and-duplicates",
+      "requirements": [
+        "START-1",
+        "TURN-1",
+        "TURN-2",
+        "SYNC-2"
+      ],
+      "steps": [
+        {
+          "action": "start"
+        },
+        {
+          "action": "assert",
+          "callbacks": [
+            1
+          ],
+          "factory_colors": [
+            1
+          ],
+          "startup_order": true
+        },
+        {
+          "action": "return"
+        },
+        {
+          "action": "assert",
+          "requests": [
+            {
+              "game_id": 7,
+              "generation_id": 1,
+              "complete": true,
+              "commands": []
+            }
+          ]
+        },
+        {
+          "action": "publish"
+        },
+        {
+          "action": "publish"
+        },
+        {
+          "action": "assert",
+          "callbacks": [
+            1
+          ],
+          "requests": [
+            {
+              "game_id": 7,
+              "generation_id": 1,
+              "complete": true,
+              "commands": []
+            }
+          ]
+        },
+        {
+          "action": "expired_send"
+        },
+        {
+          "action": "close"
+        },
+        {
+          "action": "assert",
+          "closed": true
+        }
+      ]
+    },
+    {
+      "id": "command-retry-identity",
+      "requirements": [
+        "CMD-1",
+        "CMD-2"
+      ],
+      "steps": [
+        {
+          "action": "start"
+        },
+        {
+          "action": "server",
+          "transport_failures": 1
+        },
+        {
+          "action": "send",
+          "origin": 0,
+          "destination": 1,
+          "amount": 5
+        },
+        {
+          "action": "send",
+          "origin": 0,
+          "destination": 1,
+          "amount": 5
+        },
+        {
+          "action": "assert",
+          "requests": [
+            {
+              "game_id": 7,
+              "generation_id": 1,
+              "complete": false,
+              "commands": [
+                {
+                  "command_type": "send_soldier_group",
+                  "parameters": {
+                    "origin_persistent_castle_id": 0,
+                    "destination_persistent_castle_id": 1,
+                    "soldier_amount": 5
+                  }
+                }
+              ]
+            },
+            {
+              "game_id": 7,
+              "generation_id": 1,
+              "complete": false,
+              "commands": [
+                {
+                  "command_type": "send_soldier_group",
+                  "parameters": {
+                    "origin_persistent_castle_id": 0,
+                    "destination_persistent_castle_id": 1,
+                    "soldier_amount": 5
+                  }
+                }
+              ]
+            },
+            {
+              "game_id": 7,
+              "generation_id": 1,
+              "complete": false,
+              "commands": [
+                {
+                  "command_type": "send_soldier_group",
+                  "parameters": {
+                    "origin_persistent_castle_id": 0,
+                    "destination_persistent_castle_id": 1,
+                    "soldier_amount": 5
+                  }
+                }
+              ]
+            }
+          ],
+          "same_requests": [
+            [
+              0,
+              1
+            ]
+          ],
+          "different_request_ids": [
+            [
+              0,
+              2
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "completion-retry-identity",
+      "requirements": [
+        "CMD-2",
+        "TURN-2"
+      ],
+      "steps": [
+        {
+          "action": "start"
+        },
+        {
+          "action": "server",
+          "transport_failures": 1
+        },
+        {
+          "action": "return"
+        },
+        {
+          "action": "assert",
+          "requests": [
+            {
+              "game_id": 7,
+              "generation_id": 1,
+              "complete": true,
+              "commands": []
+            },
+            {
+              "game_id": 7,
+              "generation_id": 1,
+              "complete": true,
+              "commands": []
+            }
+          ],
+          "same_requests": [
+            [
+              0,
+              1
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "failed-callback-keeps-turn-open",
+      "requirements": [
+        "TURN-2",
+        "LIFE-1"
+      ],
+      "steps": [
+        {
+          "action": "start"
+        },
+        {
+          "action": "send",
+          "origin": 0,
+          "destination": 1,
+          "amount": 5
+        },
+        {
+          "action": "fail"
+        },
+        {
+          "action": "wait_error",
+          "error": "strategy"
+        },
+        {
+          "action": "expired_send"
+        },
+        {
+          "action": "assert",
+          "requests": [
+            {
+              "game_id": 7,
+              "generation_id": 1,
+              "complete": false,
+              "commands": [
+                {
+                  "command_type": "send_soldier_group",
+                  "parameters": {
+                    "origin_persistent_castle_id": 0,
+                    "destination_persistent_castle_id": 1,
+                    "soldier_amount": 5
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "close-cancels-open-callback",
+      "requirements": [
+        "LIFE-2",
+        "TURN-2"
+      ],
+      "steps": [
+        {
+          "action": "start"
+        },
+        {
+          "action": "close"
+        },
+        {
+          "action": "close"
+        },
+        {
+          "action": "assert",
+          "callbacks": [
+            1
+          ],
+          "requests": [],
+          "closed": true
+        },
+        {
+          "action": "refresh",
+          "error": "closed"
+        }
+      ]
+    },
+    {
+      "id": "submitted-turn-is-not-replayed",
+      "requirements": [
+        "TURN-1"
+      ],
+      "initial": {
+        "submitted": true
+      },
+      "steps": [
+        {
+          "action": "start"
+        },
+        {
+          "action": "assert",
+          "callbacks": [],
+          "requests": [],
+          "factory_colors": [
+            1
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reconnect-recovers-missed-generation",
+      "requirements": [
+        "SYNC-1",
+        "TURN-1"
+      ],
+      "steps": [
+        {
+          "action": "start"
+        },
+        {
+          "action": "return"
+        },
+        {
+          "action": "server",
+          "state": {
+            "generation_id": 2,
+            "submitted": false
+          }
+        },
+        {
+          "action": "reconnect"
+        },
+        {
+          "action": "assert",
+          "callbacks": [
+            1,
+            2
+          ],
+          "generation": 2,
+          "factory_colors": [
+            1
+          ]
+        },
+        {
+          "action": "return"
+        },
+        {
+          "action": "assert",
+          "requests": [
+            {
+              "game_id": 7,
+              "generation_id": 1,
+              "complete": true,
+              "commands": []
+            },
+            {
+              "game_id": 7,
+              "generation_id": 2,
+              "complete": true,
+              "commands": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "foreign-and-unsupported-events",
+      "requirements": [
+        "AUTH-1",
+        "SYNC-2"
+      ],
+      "steps": [
+        {
+          "action": "start"
+        },
+        {
+          "action": "publish",
+          "state": {
+            "generation_id": 9,
+            "player_id": "00000000-0000-0000-0000-000000000003"
+          }
+        },
+        {
+          "action": "publish",
+          "state": {
+            "generation_id": 9,
+            "lobby_id": "00000000-0000-0000-0000-000000000003"
+          }
+        },
+        {
+          "action": "publish",
+          "state": {
+            "generation_id": 9,
+            "team_color": 2
+          }
+        },
+        {
+          "action": "publish",
+          "state": {
+            "generation_id": 9
+          },
+          "schema_version": 2
+        },
+        {
+          "action": "publish",
+          "state": {
+            "generation_id": 9
+          },
+          "schema_version": true
+        },
+        {
+          "action": "publish",
+          "state": {
+            "generation_id": 9
+          },
+          "type": "other"
+        },
+        {
+          "action": "assert",
+          "callbacks": [
+            1
+          ],
+          "generation": 1,
+          "requests": []
+        }
+      ]
+    },
+    {
+      "id": "generation-scoping-and-serial-callbacks",
+      "requirements": [
+        "CMD-1",
+        "TURN-1",
+        "TURN-2"
+      ],
+      "steps": [
+        {
+          "action": "start"
+        },
+        {
+          "action": "server",
+          "state": {
+            "generation_id": 2,
+            "submitted": false
+          }
+        },
+        {
+          "action": "refresh"
+        },
+        {
+          "action": "assert",
+          "callbacks": [
+            1
+          ],
+          "generation": 2
+        },
+        {
+          "action": "send",
+          "origin": 0,
+          "destination": 1,
+          "amount": 5
+        },
+        {
+          "action": "assert",
+          "requests": [
+            {
+              "game_id": 7,
+              "generation_id": 1,
+              "complete": false,
+              "commands": [
+                {
+                  "command_type": "send_soldier_group",
+                  "parameters": {
+                    "origin_persistent_castle_id": 0,
+                    "destination_persistent_castle_id": 1,
+                    "soldier_amount": 5
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "action": "return"
+        },
+        {
+          "action": "assert",
+          "callbacks": [
+            1,
+            2
+          ],
+          "requests": [
+            {
+              "game_id": 7,
+              "generation_id": 1,
+              "complete": false,
+              "commands": [
+                {
+                  "command_type": "send_soldier_group",
+                  "parameters": {
+                    "origin_persistent_castle_id": 0,
+                    "destination_persistent_castle_id": 1,
+                    "soldier_amount": 5
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "action": "return"
+        },
+        {
+          "action": "assert",
+          "requests": [
+            {
+              "game_id": 7,
+              "generation_id": 1,
+              "complete": false,
+              "commands": [
+                {
+                  "command_type": "send_soldier_group",
+                  "parameters": {
+                    "origin_persistent_castle_id": 0,
+                    "destination_persistent_castle_id": 1,
+                    "soldier_amount": 5
+                  }
+                }
+              ]
+            },
+            {
+              "game_id": 7,
+              "generation_id": 2,
+              "complete": true,
+              "commands": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "late-state-does-not-reopen-turn",
+      "requirements": [
+        "SYNC-2",
+        "TURN-1"
+      ],
+      "steps": [
+        {
+          "action": "start"
+        },
+        {
+          "action": "server",
+          "state": {
+            "submitted": true
+          }
+        },
+        {
+          "action": "refresh"
+        },
+        {
+          "action": "server",
+          "state": {
+            "submitted": false
+          }
+        },
+        {
+          "action": "refresh"
+        },
+        {
+          "action": "publish"
+        },
+        {
+          "action": "return"
+        },
+        {
+          "action": "assert",
+          "callbacks": [
+            1
+          ],
+          "generation": 1,
+          "requests": []
+        }
+      ]
+    },
+    {
+      "id": "older-state-does-not-regress",
+      "requirements": [
+        "SYNC-2"
+      ],
+      "steps": [
+        {
+          "action": "start"
+        },
+        {
+          "action": "server",
+          "state": {
+            "generation_id": 2
+          }
+        },
+        {
+          "action": "refresh"
+        },
+        {
+          "action": "server",
+          "state": {
+            "generation_id": 1
+          }
+        },
+        {
+          "action": "refresh"
+        },
+        {
+          "action": "publish"
+        },
+        {
+          "action": "assert",
+          "callbacks": [
+            1
+          ],
+          "generation": 2
+        }
+      ]
+    },
+    {
+      "id": "http-authentication-fails-before-player",
+      "requirements": [
+        "AUTH-1",
+        "LIFE-2"
+      ],
+      "steps": [
+        {
+          "action": "server",
+          "get_status": 401
+        },
+        {
+          "action": "start",
+          "error": "authentication"
+        },
+        {
+          "action": "assert",
+          "callbacks": [],
+          "factory_colors": [],
+          "requests": [],
+          "closed": true
+        }
+      ]
+    },
+    {
+      "id": "http-identity-change-is-rejected",
+      "requirements": [
+        "AUTH-1"
+      ],
+      "steps": [
+        {
+          "action": "start"
+        },
+        {
+          "action": "server",
+          "state": {
+            "team_color": 2
+          }
+        },
+        {
+          "action": "refresh",
+          "error": "protocol"
+        },
+        {
+          "action": "assert",
+          "factory_colors": [
+            1
+          ],
+          "generation": 1
+        }
+      ]
+    },
+    {
+      "id": "invalid-command-is-not-sent",
+      "requirements": [
+        "CMD-1"
+      ],
+      "steps": [
+        {
+          "action": "start"
+        },
+        {
+          "action": "send",
+          "origin": true,
+          "destination": 1,
+          "amount": 5,
+          "error": "validation"
+        },
+        {
+          "action": "send",
+          "origin": 0,
+          "destination": "1",
+          "amount": 5,
+          "error": "validation"
+        },
+        {
+          "action": "send",
+          "origin": 0,
+          "destination": 1,
+          "amount": 0,
+          "error": "validation"
+        },
+        {
+          "action": "send",
+          "origin": -1,
+          "destination": 1,
+          "amount": 5,
+          "error": "validation"
+        },
+        {
+          "action": "assert",
+          "requests": []
+        }
+      ]
+    },
+    {
+      "id": "http-command-errors-are-not-retried",
+      "requirements": [
+        "CMD-2",
+        "LIFE-1"
+      ],
+      "steps": [
+        {
+          "action": "start"
+        },
+        {
+          "action": "server",
+          "post_status": 503
+        },
+        {
+          "action": "send",
+          "origin": 0,
+          "destination": 1,
+          "amount": 5,
+          "error": "transport"
+        },
+        {
+          "action": "assert",
+          "requests": [
+            {
+              "game_id": 7,
+              "generation_id": 1,
+              "complete": false,
+              "commands": [
+                {
+                  "command_type": "send_soldier_group",
+                  "parameters": {
+                    "origin_persistent_castle_id": 0,
+                    "destination_persistent_castle_id": 1,
+                    "soldier_amount": 5
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "completion-error-surfaces",
+      "requirements": [
+        "TURN-2",
+        "LIFE-1"
+      ],
+      "steps": [
+        {
+          "action": "start"
+        },
+        {
+          "action": "server",
+          "post_status": 403
+        },
+        {
+          "action": "return"
+        },
+        {
+          "action": "wait_error",
+          "error": "http"
+        },
+        {
+          "action": "assert",
+          "requests": [
+            {
+              "game_id": 7,
+              "generation_id": 1,
+              "complete": true,
+              "commands": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "valid-push-needs-no-http-read",
+      "requirements": [
+        "SYNC-1",
+        "SYNC-2"
+      ],
+      "steps": [
+        {
+          "action": "start"
+        },
+        {
+          "action": "return"
+        },
+        {
+          "action": "mark_gets"
+        },
+        {
+          "action": "server",
+          "state": {
+            "generation_id": 2,
+            "submitted": false
+          }
+        },
+        {
+          "action": "publish"
+        },
+        {
+          "action": "assert",
+          "callbacks": [
+            1,
+            2
+          ],
+          "generation": 2,
+          "unchanged_gets": true
+        }
+      ]
+    },
+    {
+      "id": "boolean-numeric-field",
+      "requirements": [
+        "MODEL-1",
+        "AUTH-1"
+      ],
+      "initial": {
+        "generation": {
+          "castles": [
+            {
+              "id": 0,
+              "team_color": 1,
+              "soldiers": true,
+              "x": -2,
+              "y": 0
+            },
+            {
+              "id": 1,
+              "team_color": 2,
+              "soldiers": 30,
+              "x": 2,
+              "y": 0
+            }
+          ],
+          "soldier_groups": []
+        }
+      },
+      "steps": [
+        {
+          "action": "start",
+          "error": "protocol"
+        },
+        {
+          "action": "assert",
+          "factory_colors": [],
+          "callbacks": [],
+          "requests": [],
+          "closed": true
+        }
+      ]
+    },
+    {
+      "id": "missing-required-coordinate",
+      "requirements": [
+        "MODEL-1",
+        "AUTH-1"
+      ],
+      "initial": {
+        "generation": {
+          "castles": [
+            {
+              "id": 0,
+              "team_color": 1,
+              "soldiers": 30,
+              "y": 0
+            },
+            {
+              "id": 1,
+              "team_color": 2,
+              "soldiers": 30,
+              "x": 2,
+              "y": 0
+            }
+          ],
+          "soldier_groups": []
+        }
+      },
+      "steps": [
+        {
+          "action": "start",
+          "error": "protocol"
+        },
+        {
+          "action": "assert",
+          "factory_colors": [],
+          "callbacks": [],
+          "requests": [],
+          "closed": true
+        }
+      ]
+    },
+    {
+      "id": "malformed-push-is-ignored",
+      "requirements": [
+        "AUTH-1",
+        "SYNC-2"
+      ],
+      "steps": [
+        {
+          "action": "start"
+        },
+        {
+          "action": "publish",
+          "state": {
+            "generation_id": 2,
+            "generation": {
+              "castles": [
+                {
+                  "id": 0,
+                  "team_color": 1,
+                  "soldiers": true,
+                  "x": -2,
+                  "y": 0
+                },
+                {
+                  "id": 1,
+                  "team_color": 2,
+                  "soldiers": 30,
+                  "x": 2,
+                  "y": 0
+                }
+              ],
+              "soldier_groups": []
+            }
+          }
+        },
+        {
+          "action": "assert",
+          "generation": 1,
+          "callbacks": [
+            1
+          ]
+        }
+      ]
+    },
+    {
+      "id": "transport-retry-budget",
+      "requirements": [
+        "CMD-2"
+      ],
+      "steps": [
+        {
+          "action": "start"
+        },
+        {
+          "action": "server",
+          "transport_failures": 3
+        },
+        {
+          "action": "send",
+          "origin": 0,
+          "destination": 1,
+          "amount": 5,
+          "error": "transport"
+        },
+        {
+          "action": "assert",
+          "requests": [
+            {
+              "game_id": 7,
+              "generation_id": 1,
+              "complete": false,
+              "commands": [
+                {
+                  "command_type": "send_soldier_group",
+                  "parameters": {
+                    "origin_persistent_castle_id": 0,
+                    "destination_persistent_castle_id": 1,
+                    "soldier_amount": 5
+                  }
+                }
+              ]
+            },
+            {
+              "game_id": 7,
+              "generation_id": 1,
+              "complete": false,
+              "commands": [
+                {
+                  "command_type": "send_soldier_group",
+                  "parameters": {
+                    "origin_persistent_castle_id": 0,
+                    "destination_persistent_castle_id": 1,
+                    "soldier_amount": 5
+                  }
+                }
+              ]
+            },
+            {
+              "game_id": 7,
+              "generation_id": 1,
+              "complete": false,
+              "commands": [
+                {
+                  "command_type": "send_soldier_group",
+                  "parameters": {
+                    "origin_persistent_castle_id": 0,
+                    "destination_persistent_castle_id": 1,
+                    "soldier_amount": 5
+                  }
+                }
+              ]
+            }
+          ],
+          "same_requests": [
+            [
+              0,
+              1
+            ],
+            [
+              1,
+              2
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reconciliation-outage-recovers",
+      "requirements": [
+        "SYNC-1"
+      ],
+      "steps": [
+        {
+          "action": "start"
+        },
+        {
+          "action": "return"
+        },
+        {
+          "action": "server",
+          "get_status": 503,
+          "state": {
+            "generation_id": 2,
+            "submitted": false
+          }
+        },
+        {
+          "action": "reconnect"
+        },
+        {
+          "action": "assert",
+          "callbacks": [
+            1
+          ]
+        },
+        {
+          "action": "server",
+          "get_status": 0
+        },
+        {
+          "action": "assert",
+          "callbacks": [
+            1,
+            2
+          ],
+          "generation": 2
+        }
+      ]
+    },
+    {
+      "id": "reconciliation-auth-failure-surfaces",
+      "requirements": [
+        "AUTH-1",
+        "LIFE-1"
+      ],
+      "steps": [
+        {
+          "action": "start"
+        },
+        {
+          "action": "server",
+          "get_status": 401
+        },
+        {
+          "action": "reconnect"
+        },
+        {
+          "action": "wait_error",
+          "error": "authentication"
+        }
+      ]
+    }
+  ]
+}

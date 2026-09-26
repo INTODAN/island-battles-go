@@ -1,62 +1,110 @@
-"""Private wire envelopes; player callbacks receive only game data."""
+"""Validate the exported contract and adapt generated wire models for strategies."""
 
-from typing import Annotated, Self
+import json
+import math
+from dataclasses import dataclass
+from functools import lru_cache
+from importlib.resources import files
+from typing import Self
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError
+from island_game_api_client.models import GameNextGeneration
+from island_game_api_client.models import GenerationState as WireGenerationState
+from island_game_api_client.types import Unset
+from jsonschema import Draft202012Validator, FormatChecker, ValidationError, validators
 
 from .errors import GameProtocolError
 from .models import Castle, Clash, Generation, SoldierGroup
 
-_PositiveInt = Annotated[int, Field(strict=True, gt=0)]
-_Identifier = Annotated[str, Field(strict=True, min_length=1)]
+# The generator's attrs models deserialize but do not enforce JSON Schema bounds.
+# Use the exported contract, bundled by generation, instead of duplicating DTOs.
+_CONTRACT = json.loads(
+    files("island_game_api_client").joinpath("openapi.json").read_text()
+)
+_StrictValidator = validators.extend(
+    Draft202012Validator,
+    type_checker=Draft202012Validator.TYPE_CHECKER.redefine_many(
+        {
+            "integer": lambda checker, value: type(value) is int,
+            "number": lambda checker, value: (
+                type(value) is int or (type(value) is float and math.isfinite(value))
+            ),
+        }
+    ),
+)
 
 
-class _SoldierGroupContents(BaseModel):
-    """Wire group data references its destination by ID only."""
-
-    model_config = ConfigDict(frozen=True, strict=True, allow_inf_nan=False)
-
-    id: int
-    team_color: int
-    soldiers: int
-    x: float
-    y: float
-    origin_persistent_castle_id: int
-    destination_persistent_castle_id: int
-    clash_radius: float
+@lru_cache
+def _validator(schema_name: str):
+    return _StrictValidator(
+        {
+            "$ref": f"#/components/schemas/{schema_name}",
+            "components": _CONTRACT["components"],
+        },
+        format_checker=FormatChecker(),
+    )
 
 
-class _GenerationContents(BaseModel):
-    model_config = ConfigDict(frozen=True)
+def validate_wire(data: object, schema_name: str) -> None:
+    try:
+        _validator(schema_name).validate(data)
+    except ValidationError as exc:
+        raise GameProtocolError(f"invalid {schema_name} response") from exc
 
-    castles: list[Castle]
-    soldier_groups: list[_SoldierGroupContents]
-    clashes: list[Clash] = Field(default_factory=list)
 
+@dataclass(frozen=True)
+class GenerationState:
+    """Private adapter around the generated state; no handwritten wire fields."""
 
-class GenerationState(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    game_id: _PositiveInt
-    lobby_id: _Identifier
-    generation_id: _PositiveInt
-    player_id: _Identifier
-    team_color: _PositiveInt
-    channel: _Identifier
-    submitted: StrictBool
-    generation: _GenerationContents
+    wire: WireGenerationState
 
     @classmethod
     def parse(cls, data: object) -> Self:
-        try:
-            return cls.model_validate(data)
-        except ValidationError as exc:
-            raise GameProtocolError("invalid generation state") from exc
+        validate_wire(data, "GenerationState")
+        assert isinstance(data, dict)
+        return cls(WireGenerationState.from_dict(data))
+
+    @classmethod
+    def parse_event(cls, data: object) -> Self:
+        validate_wire(data, "GameNextGeneration")
+        assert isinstance(data, dict)
+        return cls(GameNextGeneration.from_dict(data).state)
+
+    @property
+    def game_id(self) -> int:
+        return self.wire.game_id
+
+    @property
+    def lobby_id(self) -> str:
+        return str(self.wire.lobby_id)
+
+    @property
+    def generation_id(self) -> int:
+        return self.wire.generation_id
+
+    @property
+    def player_id(self) -> str:
+        return str(self.wire.player_id)
+
+    @property
+    def team_color(self) -> int:
+        return self.wire.team_color
+
+    @property
+    def channel(self) -> str:
+        return self.wire.channel
+
+    @property
+    def submitted(self) -> bool:
+        return self.wire.submitted
 
     def public_generation(self) -> Generation:
-        castles_by_id = {castle.id: castle for castle in self.generation.castles}
+        castles = [
+            Castle.model_validate(castle.to_dict())
+            for castle in self.wire.generation.castles
+        ]
+        castles_by_id = {castle.id: castle for castle in castles}
         soldier_groups = []
-        for group in self.generation.soldier_groups:
+        for group in self.wire.generation.soldier_groups:
             destination = castles_by_id.get(group.destination_persistent_castle_id)
             if destination is None:
                 raise GameProtocolError("soldier group destination castle is missing")
@@ -73,9 +121,12 @@ class GenerationState(BaseModel):
                     destination_castle=destination,
                 )
             )
+        clashes = self.wire.generation.clashes
         return Generation(
             id=self.generation_id,
-            castles=self.generation.castles,
+            castles=castles,
             soldier_groups=soldier_groups,
-            clashes=self.generation.clashes,
+            clashes=[]
+            if isinstance(clashes, Unset)
+            else [Clash.model_validate(clash.to_dict()) for clash in clashes],
         )

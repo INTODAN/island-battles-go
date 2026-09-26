@@ -1,0 +1,41 @@
+# SDK behavior specification
+
+Version: 1. Scope: authenticated Island Battles generation-turn SDKs and their boundary with the reusable lobby SDK. Go/Huma registration is the source of truth for wire schemas; this document defines client behavior across requests, events, and callbacks. Changes to observable behavior start here and in the shared conformance scenarios before implementation in every applicable SDK.
+
+## Generated contract and public interface
+
+- **WIRE-1**: Generate HTTP operations and wire models from the checked-in public game OpenAPI contract. Export it offline from the same Go/Huma registration used by the server. Publish the named `game.next_generation` JSON Schema as well. Generation is reproducible with pinned tools and a non-mutating drift check. No hand-edited generated output.
+- **WIRE-2**: Public game operations read the authorized current generation and register a command batch. Connection tokens come from the existing generic lobby endpoint. Bearer guest credentials and Centrifugo connection tokens are distinct. Never log credentials or raw response bodies in public errors.
+- **WIRE-3**: Only `send_soldier_group` is a public command type. Its parameters require origin/destination persistent castle IDs and soldier amount. Unknown command types and malformed parameter shapes are HTTP 422 schema failures; authorization failures for structurally valid commands remain HTTP 403. Internal simulation commands are not part of the public contract.
+- **MODEL-1**: Strategies receive a generation ID, castles, soldier groups, and clashes. Game/lobby/player identifiers, channel, credentials, and turn submission status belong to the runtime, not the strategy snapshot. Public models may use idiomatic names, but retain the same values and units. Castles and groups use persistent IDs, including zero. Generation IDs and game IDs are positive. Missing clashes mean an empty list; missing required coordinates or malformed numbers are errors. Do not coerce booleans or strings into numbers. Coordinates must be finite.
+- **MODEL-2**: Group destinations resolve to the castle with the corresponding persistent ID in the same snapshot; a missing destination is a protocol error. Distance helpers return Euclidean map units, not travel time. A target with team color zero is neutral; otherwise equal teams are friendly and unequal teams are enemies. Clash IDs are generation-local; times are fractions from zero to one; participant IDs survive group deletion.
+- **MODEL-3**: Snapshot record fields are immutable. Collections follow the language's documented collection conventions (Python uses mutable lists); this does not authorize mutation of the runtime's identity or submission state.
+
+## Startup and authority
+
+- **AUTH-1**: Authenticate before constructing a player. The first valid authorized state fixes lobby, game, player, personal `player:<player_id>` channel, and team. Construct the player exactly once per client instance with that team. Reject a player factory that returns a different team. HTTP state inconsistent with that identity is a protocol error; malformed, foreign, or unsupported realtime events are ignored.
+- **START-1**: Obtain a connection token, connect, discover the authorized player channel over HTTP, subscribe with recovery/position tracking, wait for subscription acknowledgment, then fetch authoritative HTTP state. Do not start player callbacks before that reconciliation. Bound subscription waiting and clean up on startup failure.
+- **SYNC-1**: Reconcile with HTTP on subscription/reconnection and explicit refresh. Retry temporary reconciliation transport/server failures with bounded backoff. HTTP authentication failures terminate background work observably. Polling is disabled by default; an explicitly configured positive refresh interval may enable it.
+- **SYNC-2**: Only handle event type `game.next_generation` with integer schema version 1 and valid matching state. Valid event state may update the board directly; receiving an event need not trigger HTTP. Never regress to an older generation or change submitted=true to false in the same generation due to a late event/response.
+
+## Callback and command lifecycle
+
+- **TURN-1**: Callbacks run serially. Schedule a generation at most once per client instance, suppress already submitted generations, and skip queued generations superseded before execution. Recovery need not replay every missed generation. These are in-session guarantees, not exactly-once execution across process restarts.
+- **CMD-1**: The command receiver belongs to one callback and retains its generation ID even if state advances during that callback. `send_soldier_group` validates nonnegative integer castle IDs and a positive integer amount before sending; booleans and numeric strings are invalid. Each call submits one command immediately, with complete=false, and returns no strategy-facing transport state.
+- **CMD-2**: Each separate submission gets a fresh UUID. Retry a command transport failure with the exact same UUID and payload, including automatic completion requests. The default is three total attempts with bounded exponential backoff. Do not automatically retry HTTP error statuses as command transport failures. Separate identical player commands have distinct UUIDs. Server idempotency is distinct from callback deduplication.
+- **TURN-2**: Successful callback return automatically completes that callback's turn using an empty command batch, including callbacks that sent no commands. If the turn is already submitted or has been superseded, do not submit another completion. An exception or cancellation leaves the turn open, even after partial commands. Close the receiver when the callback exits; subsequent use fails before issuing HTTP.
+- **LIFE-1**: Surface background callback, completion, and permanent reconciliation failures through wait/run. Preserve useful safe HTTP status and detail. HTTP 401 is an authentication error; HTTP 429 and 5xx are temporary transport/service errors for reconciliation. Invalid JSON or schema data is a protocol error.
+- **LIFE-2**: Close is idempotent, stops background work, cancels an active callback without completing its turn, unsubscribes/disconnects, and releases owned HTTP resources. A closed client's operations fail. Document the ownership of injected transports and support cancellation without resource leaks.
+
+## Generic lobby boundary
+
+- **LOBBY-1**: Lobby SDK behavior stays generic: guest sessions, teams, readiness, membership, leases, connection token refresh, invalidation reconciliation, and cleanup. Game SDKs consume an existing guest credential and lobby ID; they do not create guest identities or join lobbies implicitly.
+- **LOBBY-2**: Keep the generic lobby client joined and running during gameplay. It owns its lease and heartbeats, renews while connected, reconciles membership, and releases its own lease on close. Closing a game client does not leave lobby membership. The lobby's standalone schema and generator remain independent of game semantics.
+
+## Conformance and evolution
+
+The [shared scenarios](../../clients/conformance/scenarios.json) contain stimuli and expected observations, with [state.json](../../clients/conformance/state.json) as the wire fixture. Each full game SDK must execute every game scenario through its real runtime and generated transport using a language adapter. Generic lobby-only SDKs are outside game scenario scope and retain their existing suites. Adapters control HTTP/realtime inputs and player actions; they must not implement reconciliation or retry policy themselves.
+
+Use semantic JSON equality and request-identity relationships rather than literal random UUIDs. Synchronize races with explicit barriers and event-loop progress; elapsed sleeps must not determine success. Keep a smaller real-backend/Centrifugo integration suite for boundaries fake transports cannot prove. Report any skipped or unverified checks.
+
+To change behavior: update this document, update shared scenarios, update Huma source contracts where needed, regenerate clients, then update every affected SDK and consumer. See `README.md` in this directory for the SDK inventory and verification commands.

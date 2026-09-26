@@ -11,8 +11,19 @@ from uuid import UUID, uuid4
 
 import centrifuge
 import httpx
+from island_game_api_client.api.island_battles import (
+    get_island_lobby_generation,
+    register_generation_command,
+)
+from island_game_api_client.api.lobby import create_lobby_connection_token
+from island_game_api_client.client import AuthenticatedClient
+from island_game_api_client.models import (
+    ConnectionTokenInputBody,
+    PublicGenerationCommand,
+    RegisterGenerationCommands,
+)
 
-from ._protocol import GenerationState
+from ._protocol import GenerationState, validate_wire
 from .commands import CommandReceiver
 from .errors import (
     GameAuthenticationError,
@@ -59,14 +70,7 @@ class _SubscriptionEvents(centrifuge.SubscriptionEventHandler):
             data = ctx.pub.data
             if isinstance(data, (str, bytes)):
                 data = json.loads(data)
-            if not isinstance(data, dict) or data.get("type") != "game.next_generation":
-                return
-            if (
-                type(data.get("schema_version")) is not int
-                or data["schema_version"] != 1
-            ):
-                return
-            event = GenerationState.parse(data["state"])
+            event = GenerationState.parse_event(data)
             self.owner._validate_identity(event)
             self.owner._install(event)
         except KeyError, TypeError, ValueError, GameProtocolError:
@@ -112,6 +116,11 @@ class IslandBattlesClient:
         self._http = http_client or httpx.AsyncClient(
             base_url=self.base_url, timeout=10
         )
+        self._http.base_url = self.base_url
+        self._http.headers["Authorization"] = f"Bearer {self.credential}"
+        self._http.event_hooks["response"].append(self._check_response)
+        self._api = AuthenticatedClient(base_url=self.base_url, token=credential)
+        self._api.set_async_httpx_client(self._http)
         self._sdk_factory = sdk_factory
         self._sleep = sleep
         self._refresh_interval = refresh_interval
@@ -179,63 +188,76 @@ class IslandBattlesClient:
             self._failure = error
             self._failed.set()
 
+    async def _check_response(self, response: httpx.Response) -> None:
+        # Run before generated error deserialization: even an invalid error body
+        # must preserve the HTTP status and its authentication/retry semantics.
+        if response.status_code < 400:
+            return
+        await response.aread()
+        try:
+            problem = response.json()
+        except ValueError, TypeError:
+            problem = {}
+        detail = problem.get("detail") if isinstance(problem, dict) else None
+        if not isinstance(detail, str) or not detail:
+            detail = f"request failed ({response.status_code})"
+        error_class = (
+            GameAuthenticationError
+            if response.status_code == 401
+            else GameTransportError
+            if response.status_code == 429 or response.status_code >= 500
+            else GameError
+        )
+        error = error_class(detail, response.status_code)
+        if isinstance(error, GameAuthenticationError):
+            self._fail(error)
+        raise error
+
     async def _request(
         self,
-        method: str,
-        path: str,
+        operation: Any,
+        schema_name: str,
         *,
-        payload: dict[str, Any] | None = None,
         retry_transport: bool = False,
+        **kwargs: Any,
     ) -> Any:
         self._check_open()
         attempts = self._retry_attempts if retry_transport else 1
         for attempt in range(attempts):
             try:
-                response = await self._http.request(
-                    method,
-                    f"{self.base_url}{path}",
-                    headers={"Authorization": f"Bearer {self.credential}"},
-                    json=payload,
-                )
+                response = await operation.asyncio_detailed(client=self._api, **kwargs)
             except httpx.TransportError as exc:
                 if attempt + 1 == attempts:
                     raise GameTransportError("network error") from exc
                 await self._sleep(min(0.1 * 2**attempt, 1.0))
                 continue
-            if response.status_code >= 400:
-                try:
-                    problem = response.json()
-                except ValueError, TypeError:
-                    problem = {}
-                detail = problem.get("detail") if isinstance(problem, dict) else None
-                if not isinstance(detail, str) or not detail:
-                    detail = f"request failed ({response.status_code})"
-                error_class = (
-                    GameAuthenticationError
-                    if response.status_code == 401
-                    else GameTransportError
-                    if response.status_code == 429 or response.status_code >= 500
-                    else GameError
-                )
-                error = error_class(detail, response.status_code)
-                if isinstance(error, GameAuthenticationError):
-                    self._fail(error)
-                raise error
+            except (KeyError, ValueError, TypeError, AttributeError) as exc:
+                raise GameProtocolError("invalid HTTP response") from exc
             try:
-                return response.json()
+                data = json.loads(response.content)
             except (ValueError, TypeError) as exc:
                 raise GameProtocolError("invalid JSON response") from exc
+            validate_wire(data, schema_name)
+            if response.parsed is None:
+                raise GameProtocolError("unsupported HTTP response")
+            return response.parsed
         raise AssertionError("unreachable retry state")
 
     async def _connection_token(self) -> tuple[str, str]:
-        data = await self._request("POST", "/lobby/v1/connection-token", payload={})
-        if (
-            not isinstance(data, dict)
-            or not isinstance(data.get("token"), str)
-            or not isinstance(data.get("websocket_url"), str)
-        ):
-            raise GameProtocolError("invalid connection-token response")
-        return data["token"], data["websocket_url"]
+        token = await self._request(
+            create_lobby_connection_token,
+            "ConnectionToken",
+            body=ConnectionTokenInputBody(),
+        )
+        return token.token, token.websocket_url
+
+    async def _read_state(self) -> GenerationState:
+        wire = await self._request(
+            get_island_lobby_generation,
+            "GenerationState",
+            lobby_id=UUID(self.lobby_id),
+        )
+        return GenerationState(wire)
 
     async def _get_token(self) -> str:
         try:
@@ -288,12 +310,7 @@ class IslandBattlesClient:
         return state
 
     async def _fetch_state(self) -> GenerationState:
-        data = await self._request(
-            "GET", f"/game/from-lobby/{self.lobby_id}/generation"
-        )
-        if not isinstance(data, dict):
-            raise GameProtocolError("invalid generation state")
-        return self._install(GenerationState.parse(data))
+        return self._install(await self._read_state())
 
     async def refresh(self) -> Generation:
         """Fetch the authorized state and schedule any new generation callback."""
@@ -324,12 +341,7 @@ class IslandBattlesClient:
                 # personal channel is derivable from the verified session only
                 # after this read, so fetch once to discover it, then reconcile
                 # again after the subscription acknowledgment.
-                discovery = await self._request(
-                    "GET", f"/game/from-lobby/{self.lobby_id}/generation"
-                )
-                if not isinstance(discovery, dict):
-                    raise GameProtocolError("invalid generation state")
-                initial = GenerationState.parse(discovery)
+                initial = await self._read_state()
                 self._validate_identity(initial)
                 self._expected_identity = (
                     initial.game_id,
@@ -419,14 +431,14 @@ class IslandBattlesClient:
                 self._callbacks.task_done()
 
     def _receiver(self, generation_id: int) -> CommandReceiver:
-        async def submit(command: dict[str, Any]) -> None:
+        async def submit(command: PublicGenerationCommand) -> None:
             await self._register([command], False, generation_id=generation_id)
 
         return CommandReceiver(submit)
 
     async def _register(
         self,
-        commands: list[dict[str, Any]],
+        commands: list[PublicGenerationCommand],
         complete: bool,
         *,
         generation_id: int,
@@ -444,20 +456,21 @@ class IslandBattlesClient:
                 # A callback or concurrent request may have already sealed this
                 # turn. Check under the command lock to avoid a second completion.
                 return self._state
-            payload = {
-                "game_id": self._state.game_id,
-                "generation_id": generation_id,
-                "request_id": str(uuid4()),
-                "complete": complete,
-                "commands": commands,
-            }
-            # The transport retries this exact payload, including its generated UUID.
-            result = await self._request(
-                "POST", "/generation/commands", payload=payload, retry_transport=True
+            body = RegisterGenerationCommands(
+                game_id=self._state.game_id,
+                generation_id=generation_id,
+                request_id=uuid4(),
+                complete=complete,
+                commands=commands,
             )
-            if not isinstance(result, dict):
-                raise GameProtocolError("invalid generation state")
-            return self._install(GenerationState.parse(result))
+            # Retries reuse this same generated body, including its request UUID.
+            wire = await self._request(
+                register_generation_command,
+                "GenerationState",
+                body=body,
+                retry_transport=True,
+            )
+            return self._install(GenerationState(wire))
 
     async def wait(self) -> None:
         """Wait until closed or a background callback/reconciliation fails."""

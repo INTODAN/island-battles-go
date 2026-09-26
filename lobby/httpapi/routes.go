@@ -25,7 +25,7 @@ func Register(api huma.API, app domain.Application, authenticator domain.Authent
 	protected := huma.NewGroup(group)
 	protected.UseMiddleware(authenticate(authenticator))
 	huma.Register(group, operation(http.MethodPost, "/sessions", "createLobbySession", http.StatusCreated, nil, "Create a guest session", "Creates one guest identity and bearer credential."), handler.session)
-	huma.Register(protected, operation(http.MethodPost, "/connection-token", "createLobbyConnectionToken", http.StatusOK, lobbyBearer, "Create a connection token", "Creates an authenticated Centrifugo connection token; it never creates or joins a lobby."), handler.token)
+	RegisterConnectionToken(api, authenticator, issuer)
 	huma.Register(protected, operation(http.MethodPost, "/lobbies", "createLobby", http.StatusCreated, lobbyBearer, "Create a lobby", "Creates a lobby. Repeating the same request_id and payload returns the committed snapshot."), handler.create)
 	huma.Register(protected, operation(http.MethodPost, "/memberships", "joinLobby", http.StatusOK, lobbyBearer, "Join a lobby", "Joins by game key and join code; started lobbies allow only frozen-roster rejoin."), handler.join)
 	huma.Register(protected, operation(http.MethodGet, "/games/{game_key}/lobbies/{lobby_id}", "getLobby", http.StatusOK, lobbyBearer, "Get a lobby", "Returns the caller-authorized lobby snapshot."), handler.snapshot)
@@ -37,6 +37,23 @@ func Register(api huma.API, app domain.Application, authenticator domain.Authent
 	huma.Register(protected, operation(http.MethodDelete, "/games/{game_key}/lobbies/{lobby_id}/leases/{client_instance_id}", "releaseLobbyLease", http.StatusNoContent, lobbyBearer, "Release a lease", "Releases one client lease without leaving durable membership."), handler.release)
 	registerProblemResponses(api)
 }
+
+// RegisterConnectionToken exposes the shared authenticated token operation for
+// game SDK exports without adding lobby management operations to their contract.
+func RegisterConnectionToken(api huma.API, authenticator domain.Authenticator, issuer domain.ConnectionTokenIssuer) {
+	specification := api.OpenAPI()
+	if specification.Components.SecuritySchemes == nil {
+		specification.Components.SecuritySchemes = map[string]*huma.SecurityScheme{}
+	}
+	specification.Components.SecuritySchemes["LobbyBearer"] = &huma.SecurityScheme{Type: "http", Scheme: "bearer", Description: "Guest bearer credential issued by POST /lobby/v1/sessions. This is distinct from a Centrifugo connection JWT."}
+	handler := handlers{authenticator: authenticator, issuer: issuer}
+	group := huma.NewGroup(api, basePath)
+	group.UseMiddleware(validationProblems)
+	group.UseMiddleware(authenticate(authenticator))
+	huma.Register(group, operation(http.MethodPost, "/connection-token", "createLobbyConnectionToken", http.StatusOK, lobbyBearer, "Create a connection token", "Creates an authenticated Centrifugo connection token; it never creates or joins a lobby."), handler.token)
+	registerProblemResponses(api)
+}
+
 func operation(method, path, identifier string, status int, security []map[string][]string, summary, description string) huma.Operation {
 	return huma.Operation{Method: method, Path: path, OperationID: identifier, DefaultStatus: status, Tags: []string{"Lobby"}, Summary: summary, Description: description, Security: security, Errors: []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusConflict, http.StatusUnprocessableEntity, http.StatusInternalServerError, http.StatusServiceUnavailable}}
 }

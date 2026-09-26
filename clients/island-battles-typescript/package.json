@@ -1,0 +1,44 @@
+{
+  "name": "@island-battles/client",
+  "version": "0.1.0",
+  "description": "Contract-generated Island Battles transport and generation-turn runtime",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "generate": "node scripts/generate.mjs",
+    "generate:check": "node scripts/generate.mjs --check",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test --test-isolation=none test/*.test.mjs",
+    "format": "biome format --write .",
+    "format:check": "biome format --error-on-warnings .",
+    "check": "biome check --error-on-warnings .",
+    "check:fix": "biome check --write --error-on-warnings ."
+  },
+  "dependencies": {
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "centrifuge": "5.7.4",
+    "openapi-fetch": "0.17.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.0",
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3",
+    "@biomejs/biome": "2.5.14"
+  }
+}

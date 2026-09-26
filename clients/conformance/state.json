@@ -1,0 +1,28 @@
+{
+  "game_id": 7,
+  "lobby_id": "00000000-0000-0000-0000-000000000001",
+  "generation_id": 1,
+  "player_id": "00000000-0000-0000-0000-000000000002",
+  "team_color": 1,
+  "channel": "player:00000000-0000-0000-0000-000000000002",
+  "submitted": false,
+  "generation": {
+    "castles": [
+      {
+        "id": 0,
+        "team_color": 1,
+        "soldiers": 30,
+        "x": -2,
+        "y": 0
+      },
+      {
+        "id": 1,
+        "team_color": 2,
+        "soldiers": 30,
+        "x": 2,
+        "y": 0
+      }
+    ],
+    "soldier_groups": []
+  }
+}

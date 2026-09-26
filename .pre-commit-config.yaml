@@ -9,6 +9,13 @@ repos:
 
   - repo: local
     hooks:
+      - id: sdk-contracts
+        name: SDK contracts, generated clients, and conformance
+        entry: ./scripts/check-sdks.sh
+        language: system
+        files: '^(backend/|api/game/|cmd/export-game-openapi/|clients/|lobby/(api/|httpapi/|cmd/export-lobby-openapi/|clients/lobby-python/)|docs/sdk/|scripts/check-sdks\.sh)'
+        pass_filenames: false
+
       - id: go-fmt
         name: go fmt
         entry: go fmt ./... ./lobby/...

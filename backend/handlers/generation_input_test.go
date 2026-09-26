@@ -71,7 +71,7 @@ func TestGenerationHTTPAuthenticationValidationAndStatus(t *testing.T) {
 		t.Fatalf("invalid=%d %s", response.Code, response.Body.String())
 	}
 	forbidden := fmt.Sprintf(`{"game_id":%d,"generation_id":%d,"request_id":%q,"commands":[{"command_type":"move_soldier_groups","parameters":{}}]}`, state.GameID, state.GenerationID, uuid.NewString())
-	if response := api.Post("/generation/commands", "Authorization: Bearer valid", strings.NewReader(forbidden)); response.Code != 403 {
+	if response := api.Post("/generation/commands", "Authorization: Bearer valid", strings.NewReader(forbidden)); response.Code != 422 {
 		t.Fatalf("forbidden=%d %s", response.Code, response.Body.String())
 	}
 	response = api.Post("/generation/commands", "Authorization: Bearer valid", strings.NewReader(request))

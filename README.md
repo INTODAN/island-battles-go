@@ -8,12 +8,16 @@
 *   **API Framework:** [Huma v2](https://github.com/danielgtaylor/huma) with [Chi](https://github.com/go-chi/chi) router.
 *   **Real-time Messaging:** [Centrifugo](https://centrifugal.dev/) (v6).
 *   **Database:** PostgreSQL (v18-alpine) with [GORM](https://gorm.io/).
-*   **Clients:** Generated Python HTTP SDK with an asyncio Centrifugo companion, plus a Go connection example.
+*   **Clients:** Contract-generated Python and TypeScript game transports with Centrifugo player runtimes, a generated Python lobby SDK, and a Go lobby connection example. See the [SDK specification, inventory, and shared tests](docs/sdk/README.md).
 
 ## Project Structure
 
 - `lobby/`: Independent generic lobby component: Go module, clients, API artifacts, transport configuration, docs, and shared test tooling. See [its README](lobby/README.md).
 - `backend/`: Island Battles game logic and wiring to the generic lobby module.
+- `api/game/`: Public game OpenAPI and event contracts exported offline from Go/Huma.
+- `clients/`: Python and TypeScript game SDKs with generated transports and handwritten player runtimes.
+- `clients/conformance/`: Shared executable scenarios and fixtures for every game SDK.
+- `docs/sdk/`: Shared behavior specification, SDK inventory, and development guide.
 - `integration/island_battles/`: Host-specific lobby/game binding acceptance checks.
 - `scripts/test-lobby-acceptance.sh`: Runs the shared acceptance suite against the Island Battles host, including its game-specific checks.
 - `go.work`: Connects the host and lobby Go modules for local development.
@@ -36,7 +40,7 @@ Use the [Python lobby client walkthrough](lobby/clients/lobby-python/README.md) 
 
 ## Architecture Notes
 
-The [multiplayer architecture decision](lobby/docs/multiplayer-architecture.md) explains the design, and the [task pack](lobby/docs/tasks/generic-lobby/README.md) records contracts, edge cases and agent assignments. Guest credentials identify players; opening a socket does not create or join a room. Generic lobby HTTP commands commit their state and durable invalidations together. Island Battles generation notifications use a separate durable game event queue. Centrifugo reconnects and recovers transport history; clients reconcile authorized HTTP snapshots after subscribing and periodically.
+The [multiplayer architecture decision](lobby/docs/multiplayer-architecture.md) explains the design, and the [task pack](lobby/docs/tasks/generic-lobby/README.md) records contracts, edge cases and agent assignments. Guest credentials identify players; opening a socket does not create or join a room. Generic lobby HTTP commands commit their state and durable invalidations together. Island Battles generation notifications use a separate durable game event queue. Centrifugo reconnects and recovers transport history; game clients reconcile authorized HTTP snapshots after subscribing or reconnecting, with polling disabled by default.
 
 Teams and readiness belong to the generic lobby. Starting freezes a roster. The Island Battles adapter initializes generation one with a castle and 30 soldiers for each occupied team. Every player in that frozen roster registers commands and completes their turn; the game advances once all roster players have completed. Disconnected players remain part of the turn barrier and must reconnect to submit or complete their turn. The generic lobby has no dependency on the game simulation.
 
@@ -48,6 +52,7 @@ Teams and readiness belong to the generic lobby. Starting freezes a roster. The 
 *   **Check OpenAPI:** `go run ./lobby/cmd/export-lobby-openapi --output lobby/api/openapi.json --events-output lobby/api/events.json --check`
 *   **Python unit tests:** `uv run --project lobby/clients/lobby-python --locked pytest lobby/clients/lobby-python/tests`
 *   **Gameplay SDK tests:** `uv run --project clients/island-battles-python --locked pytest clients/island-battles-python/tests`
+*   **All SDK contracts and conformance:** `npm ci --prefix clients/island-battles-typescript`, then `./scripts/check-sdks.sh` (requires Node 24, Python 3.14 with uv, and Go).
 *   **Live acceptance (Linux Docker or Podman):** `./scripts/test-lobby-acceptance.sh`
 
 ## Testing & Visualization

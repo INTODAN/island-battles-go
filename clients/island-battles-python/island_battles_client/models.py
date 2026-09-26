@@ -31,11 +31,11 @@ class BoardEntity(_FrozenModel):
     x: float
     y: float
 
-    def distance(self, other: "Castle | SoldierGroup") -> float:
+    def distance(self, other: Castle | SoldierGroup) -> float:
         """Return straight-line distance in map units."""
         return hypot(other.x - self.x, other.y - self.y)
 
-    def compare_team(self, other: "Castle | SoldierGroup") -> TeamType:
+    def compare_team(self, other: Castle | SoldierGroup) -> TeamType:
         """Classify other; a neutral target is neutral even when self is neutral."""
         if other.team_color == NEUTRAL_TEAM_COLOR:
             return TeamType.neutral

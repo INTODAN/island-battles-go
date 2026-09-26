@@ -1,0 +1,6 @@
+project_name_override: island-game-api-client
+package_name_override: island_game_api_client
+package_version_override: 1.0.0
+post_hooks:
+  - "ruff check --fix --unsafe-fixes ."
+  - "ruff format ."

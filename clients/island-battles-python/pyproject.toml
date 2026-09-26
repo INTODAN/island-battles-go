@@ -7,6 +7,8 @@ dependencies = [
     "centrifuge-python==0.6.0",
     "httpx>=0.27,<1",
     "pydantic>=2.12,<3",
+    "jsonschema>=4.26,<5",
+    "island-game-api-client",
 ]
 
 [dependency-groups]
@@ -19,6 +21,7 @@ dev = [
 integration = ["lobby-python"]
 
 [tool.uv.sources]
+island-game-api-client = { path = "generated", editable = true }
 lobby-python = { path = "../../lobby/clients/lobby-python", editable = true }
 lobby-api-client = { path = "../../lobby/clients/lobby-python/generated", editable = true }
 

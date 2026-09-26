@@ -28,15 +28,29 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 		Description: "Current lobby members can view saved generations, including clash effects with survivor losses and defeated troop outlines. Older replays without clash events remain viewable.",
 		Tags:        []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
 	}, game.Replay)
+	RegisterPlayerRoutes(api, game)
+}
+
+// RegisterPlayerRoutes installs the game SDK surface, without lobby management,
+// replay, map editing, or trusted proxy routes. Offline exports use the same code.
+func RegisterPlayerRoutes(api huma.API, game *handlers.LobbyGame) {
+	specification := api.OpenAPI()
+	if specification.Components.SecuritySchemes == nil {
+		specification.Components.SecuritySchemes = map[string]*huma.SecurityScheme{}
+	}
+	specification.Components.SecuritySchemes["LobbyBearer"] = &huma.SecurityScheme{Type: "http", Scheme: "bearer", Description: "Guest bearer credential issued by POST /lobby/v1/sessions. This is distinct from a Centrifugo connection JWT."}
+	specification.Components.Schemas.Schema(reflect.TypeOf(models.GameNextGeneration{}), true, "GameNextGeneration")
 	huma.Register(api, huma.Operation{
 		OperationID: "getIslandLobbyGeneration", Path: "/game/from-lobby/{lobby_id}/generation", Method: http.MethodGet,
 		Summary: "Read the current generation for a roster player", Description: "Requires a current authorized lobby snapshot and frozen roster membership. Returns persistent castle IDs, troop state, recorded clashes with per-participant before/after counts, and your turn completion flag.",
 		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
+		Errors: []int{400, 401, 403, 404, 409, 422, 500, 503},
 	}, game.CurrentGeneration)
 	huma.Register(api, huma.Operation{
 		OperationID: "registerGenerationCommand", Path: "/generation/commands", Method: http.MethodPost,
-		Summary: "Register an atomic player command batch and optionally complete the turn", Description: "Only owned send_soldier_group commands are accepted. Complete defaults to true; an empty batch can complete a turn. The last frozen roster completion advances exactly once. Retry the same request UUID and payload safely; changed payloads and stale new requests conflict.",
+		Summary: "Register an atomic player command batch and optionally complete the turn", Description: "Only owned send_soldier_group commands are accepted. Command parameters require nonnegative integer castle IDs and a positive integer soldier amount; unknown commands and malformed payloads fail schema validation with 422. Complete defaults to true; an empty batch can complete a turn. The last frozen roster completion advances exactly once. Retry the same request UUID and payload safely; changed payloads and stale new requests conflict.",
 		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
+		Errors: []int{400, 401, 403, 404, 409, 422, 500, 503},
 	}, game.RegisterGenerationCommands)
 }
 
