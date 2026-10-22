@@ -128,7 +128,7 @@ func TestClashEventsReachSnapshotsReplayAndNotifications(t *testing.T) {
 			}
 			var replay struct {
 				Frames []struct {
-					Clashes []models.ClashEvent `json:"clashes"`
+					Clashes []models.Clash `json:"clashes"`
 				} `json:"frames"`
 			}
 			if err := json.Unmarshal(game.Replay, &replay); err != nil {

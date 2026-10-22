@@ -1,6 +1,7 @@
 package dal
 
 import (
+	"fmt"
 	"islandBattles/backend/models"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -19,33 +20,54 @@ func UpdateSoldierGroupAmount(db *gorm.DB, soldierGroup *models.SoldierGroup, ne
 	return db.Save(soldierGroup).Error
 }
 
+// CreateSoldierGroup assigns the game's next persistent ID. IDs stay unique for
+// the whole game, including after their groups are defeated or arrive.
 func CreateSoldierGroup(db *gorm.DB, soldierGroup *models.SoldierGroup) (uint, error) {
 	if err := soldierGroup.Upgrades.Validate(); err != nil {
 		return 0, err
 	}
 	soldierGroup.Upgrades = soldierGroup.Upgrades.Clone()
-	var lastGroups []models.SoldierGroup
-	err := db.Where(&models.SoldierGroup{GenerationID: soldierGroup.GenerationID}).
-		Order(clause.OrderByColumn{Column: clause.Column{Name: "persistent_soldier_group_id"}, Desc: true}).
-		Limit(1).
-		Find(&lastGroups).Error
-
-	if err != nil {
-		return 0, err
-	}
-
-	if len(lastGroups) > 0 {
-		soldierGroup.PersistentSoldierGroupID = lastGroups[0].PersistentSoldierGroupID + 1
-	} else {
-		soldierGroup.PersistentSoldierGroupID = 0
-	}
-
-	err = db.Create(&soldierGroup).Error
-
+	soldierGroup.ClashRadius = soldierGroup.EffectiveClashRadius()
+	err := db.Transaction(func(transaction *gorm.DB) error {
+		persistentID, err := reserveSoldierGroupID(transaction, soldierGroup.GenerationID)
+		if err != nil {
+			return err
+		}
+		soldierGroup.PersistentSoldierGroupID = persistentID
+		return transaction.Create(soldierGroup).Error
+	})
 	if err != nil {
 		return 0, err
 	}
 	return soldierGroup.ID, nil
+}
+
+// reserveSoldierGroupID locks the generation's game so concurrent spawns cannot
+// receive the same ID.
+func reserveSoldierGroupID(transaction *gorm.DB, generationID uint) (uint, error) {
+	if generationID == 0 {
+		return 0, fmt.Errorf("soldier group must belong to a persisted generation")
+	}
+	var generations []models.Generation
+	if err := transaction.Select("ID", "GameID").Where(&models.Generation{Model: gorm.Model{ID: generationID}}).Limit(1).Find(&generations).Error; err != nil {
+		return 0, err
+	}
+	if len(generations) == 0 || generations[0].GameID == 0 {
+		return 0, fmt.Errorf("generation %d does not belong to a game", generationID)
+	}
+	var games []models.Game
+	if err := transaction.Clauses(clause.Locking{Strength: "UPDATE"}).Select("ID", "NextSoldierGroupID").
+		Where(&models.Game{Model: gorm.Model{ID: generations[0].GameID}}).Limit(1).Find(&games).Error; err != nil {
+		return 0, err
+	}
+	if len(games) == 0 {
+		return 0, fmt.Errorf("game %d not found", generations[0].GameID)
+	}
+	persistentID := games[0].NextSoldierGroupID
+	if err := transaction.Model(&games[0]).Update("NextSoldierGroupID", persistentID+1).Error; err != nil {
+		return 0, err
+	}
+	return persistentID, nil
 }
 
 func DuplicateSoldierGroup(db *gorm.DB, migratedGenerationID uint, originSoldierGroupID uint) (uint, error) {

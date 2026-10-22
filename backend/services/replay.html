@@ -30,9 +30,9 @@ input { flex: 1; min-width: 100px; accent-color: #3464e0; }
 <div id="teams"></div>
 <svg id="battlefield" viewBox="0 0 800 600" role="img" aria-label="Battlefield showing castles and moving troops"></svg>
 <div class="controls">
-<button id="play" type="button">Pause</button>
-<button id="result" type="button">Show result</button>
-<button id="live" type="button" hidden>Follow live</button>
+<button id="play" type="button">Play</button>
+<button id="result" type="button">Latest generation</button>
+<button id="live" type="button">● Live</button>
 <label id="turn" for="timeline"></label>
 <input id="timeline" type="range" min="0" value="0" aria-label="Replay turn">
 </div>
@@ -47,13 +47,11 @@ const field = document.getElementById("battlefield");
 const slider = document.getElementById("timeline");
 const play = document.getElementById("play");
 let lastTurn = replay.frames.length - 1;
-let latestGeneration = replay.frames[lastTurn]?.generation_id || 0;
-let followingLive = latestGeneration > 0;
-let turn = followingLive ? lastTurn : 0;
-let playing = !followingLive;
+let latestGeneration = replay.frames[lastTurn].generation_id;
+let followingLive = true;
+let turn = lastTurn;
+let playing = false;
 const live = document.getElementById("live");
-live.hidden = !followingLive;
-if (followingLive) document.getElementById("result").textContent = "Latest generation";
 slider.max = lastTurn;
 const color = (team) => colors[(team - 1) % colors.length] || "#8290a4";
 const worldScale = 100;
@@ -83,7 +81,7 @@ function svg(tag, attributes, text) {
 function renderClashes(frame, animate) {
   const losses = new Map();
   const summaries = [];
-  for (const clash of frame.clashes || []) {
+  for (const clash of frame.clashes) {
     if (!clash.participants.length) continue;
     const positions = clash.participants.map(point);
     const center = positions.reduce(([x, y], [nextX, nextY]) => [x + nextX / positions.length, y + nextY / positions.length], [0, 0]);
@@ -116,7 +114,7 @@ function renderClashes(frame, animate) {
     const lost = losses.get(group.id);
     if (!lost) continue;
     const [x, y] = point(group);
-    const label = svg("text", { x, y: y - (group.clash_radius ?? .25) * worldScale - 12, "text-anchor": "middle", "font-size": 16, "font-weight": 700, fill: "#824309", "data-kind": "clash-loss", "pointer-events": "none" }, `−${lost}`);
+    const label = svg("text", { x, y: y - group.clash_radius * worldScale - 12, "text-anchor": "middle", "font-size": 16, "font-weight": 700, fill: "#824309", "data-kind": "clash-loss", "pointer-events": "none" }, `−${lost}`);
     if (animate && !reducedMotion.matches) label.animate([{ opacity: 0, transform: "translateY(8px)" }, { opacity: 1, transform: "translateY(0)" }], { duration: 350 });
   }
   document.getElementById("clashes").textContent = summaries.join(". ");
@@ -139,7 +137,7 @@ function render(animateClashes = false) {
   }
   for (const group of frame.groups) {
     const [x, y] = point(group);
-    svg("circle", { cx: x, cy: y, r: (group.clash_radius ?? 0.25) * worldScale, fill: color(group.color), stroke: "#fff", "stroke-width": 2, "data-kind": "soldier-group" });
+    svg("circle", { cx: x, cy: y, r: group.clash_radius * worldScale, fill: color(group.color), stroke: "#fff", "stroke-width": 2, "data-kind": "soldier-group" });
     svg("text", { x, y: y + 5, "text-anchor": "middle", "font-size": 13, "font-weight": 700, fill: "white" }, group.soldiers);
   }
   renderClashes(frame, animate);
@@ -165,10 +163,9 @@ window.addEventListener("message", (event) => {
   if (state?.game_id !== replay.game_id || state.generation_id <= latestGeneration || !state.generation) return;
   latestGeneration = state.generation_id;
   const node = (entry) => ({ id: entry.id, color: entry.team_color, soldiers: entry.soldiers, x: entry.x, y: entry.y, clash_radius: entry.clash_radius });
-  replay.frames.push({ generation_id: latestGeneration, castles: state.generation.castles.map(node), groups: state.generation.soldier_groups.map(node), clashes: state.generation.clashes || [] });
+  replay.frames.push({ generation_id: latestGeneration, castles: state.generation.castles.map(node), groups: state.generation.soldier_groups.map(node), clashes: state.generation.clashes });
   lastTurn = replay.frames.length - 1;
   slider.max = lastTurn;
-  live.hidden = false;
   if (followingLive) turn = lastTurn;
   render(followingLive);
 });

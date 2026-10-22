@@ -1,0 +1,10 @@
+[project]
+name = "island-battles-python-generator-tools"
+version = "1.0.0"
+requires-python = ">=3.14"
+dependencies = [
+    "datamodel-code-generator[ruff]==0.86.0",
+]
+
+[tool.uv]
+package = false

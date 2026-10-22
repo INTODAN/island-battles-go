@@ -131,13 +131,13 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
     { name = "ruff" },
     { name = "ty" },
 ]
 integration = [
     { name = "lobby-python" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
 ]
 
 [package.metadata]
@@ -149,12 +149,14 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "pytest", specifier = ">=8.0,<9" },
-    { name = "pytest-asyncio", specifier = ">=0.24,<1" },
     { name = "ruff", specifier = ">=0.16.9" },
     { name = "ty", specifier = ">=0.0.84" },
 ]
-integration = [{ name = "lobby-python", editable = "../../lobby/clients/lobby-python" }]
+integration = [
+    { name = "lobby-python", editable = "../../lobby/clients/lobby-python" },
+    { name = "pytest", specifier = ">=8.0,<9" },
+    { name = "pytest-asyncio", specifier = ">=0.24,<1" },
+]
 
 [[package]]
 name = "lobby-api-client"

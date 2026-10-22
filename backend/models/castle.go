@@ -9,7 +9,7 @@ type CastleFields struct {
 	TeamColor          uint
 	Position           pgtype.Point `gorm:"type:point"`
 	PersistentCastleID uint         `json:"-"`
-	Upgrades           Upgrades     `json:"upgrades,omitempty" gorm:"serializer:json;type:jsonb;not null;default:'{\"speed\":1,\"clash_stop_generations\":1}'"`
+	Upgrades           Upgrades     `json:"upgrades,omitempty" gorm:"serializer:json;type:jsonb;not null"`
 }
 
 func (fields CastleFields) Clone() CastleFields {

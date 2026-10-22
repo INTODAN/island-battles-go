@@ -140,8 +140,8 @@ async def test_rejection_retry_restart_and_public_migration_bypass(guests):
         send = {
             "command_type": "send_soldier_group",
             "parameters": {
-                "origin_persistent_castle_id": target["id"],
-                "destination_persistent_castle_id": origin["id"],
+                "origin_castle_id": target["id"],
+                "destination_castle_id": origin["id"],
                 "soldier_amount": 5,
             },
         }
@@ -165,8 +165,8 @@ async def test_rejection_retry_restart_and_public_migration_bypass(guests):
             ).status_code == 404
 
         send["parameters"].update(
-            origin_persistent_castle_id=origin["id"],
-            destination_persistent_castle_id=target["id"],
+            origin_castle_id=origin["id"],
+            destination_castle_id=target["id"],
         )
         batch["commands"] = [send]
         accepted = await http.post("/generation/commands", headers=headers, json=batch)

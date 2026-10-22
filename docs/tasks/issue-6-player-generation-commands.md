@@ -17,7 +17,7 @@ Starting an Island Battles lobby initializes generation one. Every player in the
 7. Serialize submissions and migration with a database lock on the game row. Submission, readiness, new generation, and notification rows commit together. Engine errors roll everything in that attempt back.
 8. The initial state and every migrated state have durable notifications. Publish to existing authenticated `player:<player_uuid>` channels so the generic lobby protocol stays unchanged. Delivery is at least once; client deduplicates by game and generation.
 9. The SDK subscribes before HTTP reconciliation and periodically refreshes the authorized current state to recover missing pushes or restarts. It invokes callbacks serially and does not repeat the callback for a generation.
-10. Remove public raw generation-create/migrate routes to close the permission/barrier bypass. Preserve internal simulation helpers for trusted tests. Old saved spectator replays remain readable; new games present their initialized/current replay history if available.
+10. Remove public raw generation-create/migrate routes to close the permission/barrier bypass. Preserve internal simulation helpers for trusted tests. New games present their initialized/current replay history.
 
 ## Shared wire contract (agents must coordinate changes)
 
@@ -32,7 +32,7 @@ Castle/group `id` values are persistent IDs (zero is valid). Soldier group views
 `POST /generation/commands`, operation ID `registerGenerationCommand`:
 
 ```json
-{"game_id":1,"generation_id":1,"request_id":"uuid","complete":true,"commands":[{"command_type":"send_soldier_group","parameters":{"origin_persistent_castle_id":0,"destination_persistent_castle_id":1,"soldier_amount":5}}]}
+{"game_id":1,"generation_id":1,"request_id":"uuid","complete":true,"commands":[{"command_type":"send_soldier_group","parameters":{"origin_castle_id":0,"destination_castle_id":1,"soldier_amount":5}}]}
 ```
 
 Response: current `GenerationState`. On the last completion this is the new generation with `submitted:false`. Exact retries can return the latest authorized state. Errors use Huma problem JSON with meaningful detail and status: 401 authentication; 404 inaccessible/missing game; 403 forbidden command/ownership; 409 stale generation, sealed turn, UUID payload conflict or insufficient reserved soldiers; 422 invalid parameters.

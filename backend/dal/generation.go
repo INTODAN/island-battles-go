@@ -28,7 +28,7 @@ func CreateGeneration(db *gorm.DB, generation *models.Generation) (uint, error) 
 }
 
 // StoreGenerationClashes saves the turn's combat history in the migration transaction.
-func StoreGenerationClashes(database *gorm.DB, generation *models.Generation, clashes []models.ClashEvent) error {
+func StoreGenerationClashes(database *gorm.DB, generation *models.Generation, clashes []models.Clash) error {
 	generation.Clashes = clashes
 	return database.Model(generation).Select("Clashes").Updates(generation).Error
 }

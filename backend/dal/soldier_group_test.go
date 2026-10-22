@@ -207,30 +207,57 @@ func TestClashRadiusDefaultAndMigration(t *testing.T) {
 	}
 }
 
-func TestExistingSoldierGroupsReceiveDefaultRadius(t *testing.T) {
+// A defeated or arrived group leaves no row in later generations, but its ID
+// still appears in recorded clashes, so new groups must never inherit it.
+func TestPersistentSoldierGroupIDsAreNeverReassigned(t *testing.T) {
 	database := testutils.InitTestDB(t)
 	generationID := testutils.CreateGenerationForTest(t, database)
 	generation, err := dal.GetGeneration(database, generationID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := commandHandlers.SendSoldierGroupHandler(database, generation, commandHandlers.SendSoldierGroupParams{OriginPersistentCastleID: 0, DestinationPersistentCastleID: 1, SoldierAmount: 2}); err != nil {
+	parameters := commandHandlers.SendSoldierGroupParams{OriginPersistentCastleID: 0, DestinationPersistentCastleID: 1, SoldierAmount: 1}
+	for range 2 {
+		if err := commandHandlers.SendSoldierGroupHandler(database, generation, parameters); err != nil {
+			t.Fatal(err)
+		}
+		if err := dal.RefreshGeneration(database, generation); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var departedID uint
+	for _, group := range generation.SoldierGroups {
+		departedID = max(departedID, group.PersistentSoldierGroupID)
+	}
+	for _, group := range generation.SoldierGroups {
+		if group.PersistentSoldierGroupID == departedID {
+			if err := dal.DeleteSoldierGroup(database, group.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	migratedID, err := services.MigrateGeneration(database, generation.GameID, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
-	// Recreate the prior schema, then apply the same model migration as startup.
-	if err := database.Migrator().DropColumn(&models.SoldierGroup{}, "ClashRadius"); err != nil {
+	migrated, err := dal.GetGeneration(database, migratedID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := database.AutoMigrate(&models.SoldierGroup{}); err != nil {
+	if err := commandHandlers.SendSoldierGroupHandler(database, migrated, parameters); err != nil {
 		t.Fatal(err)
 	}
-	var loaded []models.SoldierGroup
-	// Use a new query shape after deliberately changing the schema in this
-	// connection; existing SELECT * prepared statements describe the old columns.
-	if err := database.Select("clash_radius").Where(&models.SoldierGroup{GenerationID: generationID}).Find(&loaded).Error; err != nil {
+	if err := dal.RefreshGeneration(database, migrated); err != nil {
 		t.Fatal(err)
 	}
-	if len(loaded) != 1 || loaded[0].ClashRadius != .25 {
-		t.Fatalf("existing row was not defaulted: %+v", loaded)
+	seen := map[uint]bool{}
+	for _, group := range migrated.SoldierGroups {
+		if group.PersistentSoldierGroupID == departedID {
+			t.Fatalf("new group reused departed group ID %d", departedID)
+		}
+		if seen[group.PersistentSoldierGroupID] {
+			t.Fatalf("duplicate group ID %d", group.PersistentSoldierGroupID)
+		}
+		seen[group.PersistentSoldierGroupID] = true
 	}
 }

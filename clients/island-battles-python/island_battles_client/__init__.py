@@ -7,6 +7,7 @@ from .errors import (
     GameClientClosedError,
     GameError,
     GameProtocolError,
+    GameReceiverClosedError,
     GameTransportError,
 )
 from .models import (
@@ -32,6 +33,7 @@ __all__ = [
     "GameClientClosedError",
     "GameError",
     "GameProtocolError",
+    "GameReceiverClosedError",
     "GameTransportError",
     "Generation",
     "IslandBattlesClient",

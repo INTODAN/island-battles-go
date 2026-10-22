@@ -61,7 +61,7 @@ func batch(state models.GenerationState, complete bool, commands ...models.Publi
 	return models.RegisterGenerationCommands{GameID: state.GameID, GenerationID: state.GenerationID, RequestID: uuid.NewString(), Complete: &complete, Commands: commands}
 }
 func send(origin, destination, amount uint) models.PublicGenerationCommand {
-	raw, _ := json.Marshal(map[string]uint{"origin_persistent_castle_id": origin, "destination_persistent_castle_id": destination, "soldier_amount": amount})
+	raw, _ := json.Marshal(map[string]uint{"origin_castle_id": origin, "destination_castle_id": destination, "soldier_amount": amount})
 	return models.PublicGenerationCommand{CommandType: models.SendSoldierGroup, Parameters: raw}
 }
 func assertTurnStatus(t *testing.T, err error, status int) {
@@ -174,9 +174,9 @@ func TestGenerationCommandValidationAndAuthorization(t *testing.T) {
 		{"server command", models.PublicGenerationCommand{CommandType: models.MoveSoldierGroups, Parameters: json.RawMessage(`{}`)}, 403},
 		{"unknown command", models.PublicGenerationCommand{CommandType: "oops", Parameters: json.RawMessage(`{}`)}, 403},
 		{"ownership", send(1, 0, 1), 403}, {"missing castle", send(0, 123, 1), 422}, {"self target", send(0, 0, 1), 422}, {"zero amount", send(0, 1, 0), 422},
-		{"missing zero ID", models.PublicGenerationCommand{CommandType: models.SendSoldierGroup, Parameters: json.RawMessage(`{"destination_persistent_castle_id":1,"soldier_amount":1}`)}, 422},
-		{"fraction", models.PublicGenerationCommand{CommandType: models.SendSoldierGroup, Parameters: json.RawMessage(`{"origin_persistent_castle_id":0,"destination_persistent_castle_id":1,"soldier_amount":1.5}`)}, 422},
-		{"negative", models.PublicGenerationCommand{CommandType: models.SendSoldierGroup, Parameters: json.RawMessage(`{"origin_persistent_castle_id":0,"destination_persistent_castle_id":1,"soldier_amount":-1}`)}, 422},
+		{"missing zero ID", models.PublicGenerationCommand{CommandType: models.SendSoldierGroup, Parameters: json.RawMessage(`{"destination_castle_id":1,"soldier_amount":1}`)}, 422},
+		{"fraction", models.PublicGenerationCommand{CommandType: models.SendSoldierGroup, Parameters: json.RawMessage(`{"origin_castle_id":0,"destination_castle_id":1,"soldier_amount":1.5}`)}, 422},
+		{"negative", models.PublicGenerationCommand{CommandType: models.SendSoldierGroup, Parameters: json.RawMessage(`{"origin_castle_id":0,"destination_castle_id":1,"soldier_amount":-1}`)}, 422},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {

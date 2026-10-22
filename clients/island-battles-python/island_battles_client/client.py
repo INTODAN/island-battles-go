@@ -11,8 +11,15 @@ from uuid import UUID, uuid4
 
 import centrifuge
 import httpx
+from pydantic import ValidationError
 
-from ._protocol import GenerationState
+from ._generated import (
+    ConnectionToken,
+    GenerationEvent,
+    GenerationState,
+    PublicGenerationCommand,
+    RegisterGenerationCommands,
+)
 from .commands import CommandReceiver
 from .errors import (
     GameAuthenticationError,
@@ -23,6 +30,13 @@ from .errors import (
 )
 from .models import Generation
 from .player import Player
+
+
+def _parse_state(data: object) -> GenerationState:
+    try:
+        return GenerationState.model_validate(data)
+    except ValidationError as exc:
+        raise GameProtocolError("invalid generation state") from exc
 
 
 class _ConnectionEvents(centrifuge.ClientEventHandler):
@@ -59,17 +73,10 @@ class _SubscriptionEvents(centrifuge.SubscriptionEventHandler):
             data = ctx.pub.data
             if isinstance(data, (str, bytes)):
                 data = json.loads(data)
-            if not isinstance(data, dict) or data.get("type") != "game.next_generation":
-                return
-            if (
-                type(data.get("schema_version")) is not int
-                or data["schema_version"] != 1
-            ):
-                return
-            event = GenerationState.parse(data["state"])
-            self.owner._validate_identity(event)
-            self.owner._install(event)
-        except KeyError, TypeError, ValueError, GameProtocolError:
+            event = GenerationEvent.model_validate(data)
+            self.owner._validate_identity(event.state)
+            self.owner._install(event.state)
+        except TypeError, ValueError, GameProtocolError:
             # Malformed or foreign publications are ignored; HTTP is authoritative.
             return
 
@@ -120,7 +127,7 @@ class IslandBattlesClient:
         self._sdk = None
         self._subscription = None
         self._state: GenerationState | None = None
-        self._expected_identity: tuple[int, str, str, int] | None = None
+        self._expected_identity: tuple[int, UUID, str, int] | None = None
         self._last_queued_generation = 0
         self._start_lock = asyncio.Lock()
         self._command_lock = asyncio.Lock()
@@ -139,7 +146,7 @@ class IslandBattlesClient:
     @property
     def generation(self) -> Generation | None:
         """The latest board snapshot, without transport metadata."""
-        return self._state.public_generation() if self._state is not None else None
+        return self._state.generation if self._state is not None else None
 
     @property
     def player(self) -> Player | None:
@@ -229,13 +236,11 @@ class IslandBattlesClient:
 
     async def _connection_token(self) -> tuple[str, str]:
         data = await self._request("POST", "/lobby/v1/connection-token", payload={})
-        if (
-            not isinstance(data, dict)
-            or not isinstance(data.get("token"), str)
-            or not isinstance(data.get("websocket_url"), str)
-        ):
-            raise GameProtocolError("invalid connection-token response")
-        return data["token"], data["websocket_url"]
+        try:
+            token = ConnectionToken.model_validate(data)
+        except ValidationError as exc:
+            raise GameProtocolError("invalid connection-token response") from exc
+        return token.token, str(token.websocket_url)
 
     async def _get_token(self) -> str:
         try:
@@ -247,7 +252,7 @@ class IslandBattlesClient:
 
     def _validate_identity(self, state: GenerationState) -> None:
         if (
-            state.lobby_id != self.lobby_id
+            str(state.lobby_id) != self.lobby_id
             or state.channel != f"player:{state.player_id}"
         ):
             raise GameProtocolError(
@@ -291,9 +296,7 @@ class IslandBattlesClient:
         data = await self._request(
             "GET", f"/game/from-lobby/{self.lobby_id}/generation"
         )
-        if not isinstance(data, dict):
-            raise GameProtocolError("invalid generation state")
-        return self._install(GenerationState.parse(data))
+        return self._install(_parse_state(data))
 
     async def refresh(self) -> Generation:
         """Fetch the authorized state and schedule any new generation callback."""
@@ -302,7 +305,7 @@ class IslandBattlesClient:
             raise GameError("client has not synchronized")
         async with self._reconcile_lock:
             state = await self._fetch_state()
-            return state.public_generation()
+            return state.generation
 
     async def start(self) -> Generation:
         """Subscribe, await acknowledgment, then fetch authoritative state."""
@@ -311,7 +314,7 @@ class IslandBattlesClient:
                 self._check_open()
                 if self._started:
                     assert self._state is not None
-                    return self._state.public_generation()
+                    return self._state.generation
                 token, address = await self._connection_token()
                 self._sdk = self._sdk_factory(
                     address,
@@ -327,9 +330,7 @@ class IslandBattlesClient:
                 discovery = await self._request(
                     "GET", f"/game/from-lobby/{self.lobby_id}/generation"
                 )
-                if not isinstance(discovery, dict):
-                    raise GameProtocolError("invalid generation state")
-                initial = GenerationState.parse(discovery)
+                initial = _parse_state(discovery)
                 self._validate_identity(initial)
                 self._expected_identity = (
                     initial.game_id,
@@ -368,7 +369,7 @@ class IslandBattlesClient:
                 if self._refresh_interval is not None:
                     self._spawn(self._periodic_worker())
                 self._spawn(self._callback_worker())
-                return state.public_generation()
+                return state.generation
         except BaseException:
             await self.close()
             raise
@@ -407,9 +408,7 @@ class IslandBattlesClient:
                 ):
                     continue
                 try:
-                    await self._player.on_generation(
-                        state.public_generation(), receiver
-                    )
+                    await self._player.on_generation(state.generation, receiver)
                 finally:
                     receiver._close()
                 if not self._closed:
@@ -419,14 +418,14 @@ class IslandBattlesClient:
                 self._callbacks.task_done()
 
     def _receiver(self, generation_id: int) -> CommandReceiver:
-        async def submit(command: dict[str, Any]) -> None:
+        async def submit(command: PublicGenerationCommand) -> None:
             await self._register([command], False, generation_id=generation_id)
 
         return CommandReceiver(submit)
 
     async def _register(
         self,
-        commands: list[dict[str, Any]],
+        commands: list[PublicGenerationCommand],
         complete: bool,
         *,
         generation_id: int,
@@ -444,20 +443,18 @@ class IslandBattlesClient:
                 # A callback or concurrent request may have already sealed this
                 # turn. Check under the command lock to avoid a second completion.
                 return self._state
-            payload = {
-                "game_id": self._state.game_id,
-                "generation_id": generation_id,
-                "request_id": str(uuid4()),
-                "complete": complete,
-                "commands": commands,
-            }
+            payload = RegisterGenerationCommands(
+                game_id=self._state.game_id,
+                generation_id=generation_id,
+                request_id=uuid4(),
+                complete=complete,
+                commands=commands,
+            ).model_dump(mode="json", by_alias=True, exclude_none=True)
             # The transport retries this exact payload, including its generated UUID.
             result = await self._request(
                 "POST", "/generation/commands", payload=payload, retry_transport=True
             )
-            if not isinstance(result, dict):
-                raise GameProtocolError("invalid generation state")
-            return self._install(GenerationState.parse(result))
+            return self._install(_parse_state(result))
 
     async def wait(self) -> None:
         """Wait until closed or a background callback/reconciliation fails."""

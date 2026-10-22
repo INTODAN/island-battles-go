@@ -22,7 +22,7 @@ func RunLobbyGame(database *gorm.DB, snapshot domain.Snapshot) (models.BindingRe
 		return models.BindingResult{}, err
 	}
 	err = dal.WithLockedGame(database, binding.GameID, func(transaction *gorm.DB, game *models.Game) error {
-		// A saved replay also identifies old completed spectator games.
+		// A saved replay means the game is already initialized.
 		if len(game.Replay) > 0 {
 			return nil
 		}
@@ -86,10 +86,10 @@ type replayNode struct {
 }
 
 type replayFrame struct {
-	GenerationID uint                `json:"generation_id,omitempty"`
-	Castles      []replayNode        `json:"castles"`
-	Groups       []replayNode        `json:"groups"`
-	Clashes      []models.ClashEvent `json:"clashes,omitempty"`
+	GenerationID uint           `json:"generation_id"`
+	Castles      []replayNode   `json:"castles"`
+	Groups       []replayNode   `json:"groups"`
+	Clashes      []models.Clash `json:"clashes"`
 }
 
 type gameReplay struct {
@@ -133,7 +133,7 @@ func prepareLobbyGame(binding models.BindingResult, snapshot domain.Snapshot) (g
 	for index, team := range replay.Teams {
 		angle := math.Pi + 2*math.Pi*float64(index)/float64(len(replay.Teams))
 		gameMap.Castles = append(gameMap.Castles, models.Castle{
-			CastleFields:  models.CastleFields{TeamColor: team.Color, PersistentCastleID: uint(index), Position: pgtype.Point{P: pgtype.Vec2{X: 2 * math.Cos(angle), Y: 2 * math.Sin(angle)}, Valid: true}},
+			CastleFields:  models.CastleFields{TeamColor: team.Color, PersistentCastleID: uint(index), Position: pgtype.Point{P: pgtype.Vec2{X: 2 * math.Cos(angle), Y: 2 * math.Sin(angle)}, Valid: true}, Upgrades: models.Upgrades{}.Clone()},
 			SoldierAmount: 30,
 		})
 	}
@@ -141,7 +141,7 @@ func prepareLobbyGame(binding models.BindingResult, snapshot domain.Snapshot) (g
 }
 
 func playableReplayFrame(generation *models.Generation) replayFrame {
-	frame := replayFrame{GenerationID: generation.ID, Castles: []replayNode{}, Groups: []replayNode{}, Clashes: generation.Clashes}
+	frame := replayFrame{GenerationID: generation.ID, Castles: []replayNode{}, Groups: []replayNode{}, Clashes: publishedClashes(generation)}
 	for _, castle := range generation.Map.Castles {
 		frame.Castles = append(frame.Castles, replayNode{ID: castle.PersistentCastleID, Color: castle.TeamColor, Soldiers: castle.SoldierAmount, X: castle.Position.P.X, Y: castle.Position.P.Y})
 	}

@@ -9,6 +9,8 @@ description: Apply Island Battles conventions when adding or changing Go backend
 
 - Register Huma v2 operations in `backend/routes/`; keep HTTP handlers in `backend/handlers/`, game logic in `backend/services/`, and persistence in `backend/dal/`.
 - When an endpoint's public behavior changes, update its Huma `Summary` and `Description` to match. Internal refactors do not require documentation edits.
+- Player API types live in `backend/models/generation_input.go` and are published without their `View` suffix. After changing them, run `go run ./backend/cmd/export-openapi --output backend/api/openapi.json` and regenerate the Python models with `clients/island-battles-python/scripts/generate.py`.
+- Breaking the API or schema is preferred over compatibility code; follow the [breaking-changes skill](../breaking-changes/SKILL.md). GORM `AutoMigrate` adds columns but never renames them, so a rename strands existing development data; reset it rather than migrating it.
 - Use descriptive domain variable names, such as `soldierGroup` rather than `sg`, following the [repository conventions](../../../README.md#code-philosophies).
 
 ## GORM conventions

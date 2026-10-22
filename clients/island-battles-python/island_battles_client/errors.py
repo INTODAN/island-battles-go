@@ -23,3 +23,8 @@ class GameProtocolError(GameError):
 class GameClientClosedError(GameError):
     def __init__(self):
         super().__init__("client closed")
+
+
+class GameReceiverClosedError(GameError):
+    def __init__(self):
+        super().__init__("command receiver is closed; use it only during on_generation")

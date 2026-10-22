@@ -20,9 +20,9 @@ func MoveSoldierGroupsHandler(db *gorm.DB, generation *models.Generation, parame
 	if err != nil {
 		return err
 	}
-	clashes := make([]models.ClashEvent, 0, len(clashPositions))
+	clashes := make([]models.Clash, 0, len(clashPositions))
 	for index, clash := range clashPositions {
-		event := models.ClashEvent{ID: uint(index + 1), Time: clash.Time}
+		event := models.Clash{ID: uint(index + 1), Time: clash.Time}
 		for _, participant := range clash.Participants {
 			group := participant.SoldierGroup
 			event.Participants = append(event.Participants, models.ClashParticipant{

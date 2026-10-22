@@ -63,10 +63,9 @@ The integration uses those results as the event source:
 2. Persist events as JSON atomically with the resulting generation. Command retries
    reuse the saved events. Store persistent participant IDs as values so deleting a
    defeated group cannot remove its event history.
-3. Add optional clash events to saved replay frames and the authorized generation
-   response used by live play. Older replays with no events remain renderable;
-   show no inferred clashes for them. The generated Huma schema and Python client
-   expose the event records as well.
+3. Add clash events to saved replay frames and the authorized generation response
+   used by live play. The generated Huma schema and Python client expose the
+   event records as well.
 4. Render a separate overlay in the lobby view. Put group outlines at their recorded
    contact positions and the impact ring at the mean participant position. Keep
    markers at those exact positions even when they overlap other objects, without

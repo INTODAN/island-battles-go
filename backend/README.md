@@ -34,8 +34,8 @@ Players read their authorized current state with `GET /game/from-lobby/{lobby_id
     {
       "command_type": "send_soldier_group",
       "parameters": {
-        "origin_persistent_castle_id": 0,
-        "destination_persistent_castle_id": 1,
+        "origin_castle_id": 0,
+        "destination_castle_id": 1,
         "soldier_amount": 5
       }
     }
@@ -49,19 +49,19 @@ Each request UUID identifies one immutable batch for one player and generation. 
 
 The response is the caller's current `GenerationState`. The final player's completion returns the new generation. Every roster player also receives a durable `game.next_generation` event on their authenticated personal `player:<player_uuid>` channel. Delivery is at least once, so clients deduplicate by game and generation. The [Island Battles Python client](../clients/island-battles-python/README.md) builds a strategy through `player_factory(team_color)` after its first authorized state read. Strategies subclass the abstract `Player` base class and receive typed generation snapshots and a callback-scoped command receiver; a successful callback return automatically completes the turn. Its public snapshots omit transport and submission metadata, and its receiver sends one soldier group per call using direct castle IDs and a soldier amount for the callback's generation. The client reconciles authorized HTTP state on subscription/reconnect. The browser demo uses the same wire events. Neither game client polls by default. The generic lobby protocol is unchanged.
 
-`GET /game/from-lobby/{lobby_id}/replay` shows authorized members the recorded generation history. New games save their initial frame and append a frame after each completed turn. Previously saved spectator replays remain available.
+`GET /game/from-lobby/{lobby_id}/replay` shows authorized members the recorded generation history. Games save their initial frame and append a frame after each completed turn.
 
-Clashes are saved atomically with each generation and included in generation snapshots, live notifications, and replay frames as optional `clashes` arrays. Each event has a generation-local `id`, a `time` fraction within the turn, and participant records with persistent `group_id`, `team_color`, contact `x`/`y`, `clash_radius`, `soldiers_before`, and `soldiers_after`. Counts describe each individual contact, including multiple clashes by the same group in one turn. Old generations and replays without events remain readable.
+Clashes are saved atomically with each generation. Generation snapshots, live notifications and replay frames always include a `clashes` array, empty for turns without combat. Each event has a generation-local `id`, a `time` fraction within the turn, and participant records with `group_id`, `team_color`, contact `x`/`y`, `clash_radius`, `soldiers_before`, and `soldiers_after`. Counts describe each individual contact, including multiple clashes by the same group in one turn. The stored and published form is the same `models.Clash`.
 
 The lobby battlefield pulses an impact ring, shows loss numbers only above surviving troops, and leaves a dashed outline with × for defeated groups. Defeated markers stay at their recorded contact positions, including when they overlap other troops or castles. Losses from multiple clashes are combined above each surviving troop. Effects remain visible while paused and clear on the next generation; scrubbing restores static effects, and reduced-motion settings disable the pulse. Combat mechanics and soldier totals are unaffected.
 
 Soldier groups have a persisted `ClashRadius`, defaulting to **0.25 world units**, which is copied to subsequent generations. Enemies clash when their center-to-center distance reaches either group's radius (the larger radius, rather than their sum). Contacts resolve in time order using troop counts before casualties. If one group has strictly less than half the other's soldiers, the survivor completes its movement. Otherwise the groups stop at the midpoint between their contact positions for the generation; exactly half also stops. In a simultaneous connected clash, any comparable opposing pair causes a stop at the average participant position. Paths are recalculated after a stop so survivors can still fight later enemies. Dead and empty groups cannot participate in later clashes. Simultaneous connected contacts resolve together; each team loses up to the combined opposing force, with losses assigned in persistent group ID order.
 
-Each group's `clash_stop_generations` upgrade controls its own pause duration: **level 1 → 3 generations**, **level 2 → 2**, and **level 3 → 1**, including the clash generation. Troops copy this level when spawned, so upgrading the castle does not change existing troops. Each group persists its remaining `MovementPauseGenerations`, which is copied across generations and decremented when it stays still. Smaller attacks do not restart or extend an existing pause. Existing records without this upgrade use level 1; already-running pause counters retain their remaining duration.
+Each group's `clash_stop_generations` upgrade controls its own pause duration: **level 1 → 3 generations**, **level 2 → 2**, and **level 3 → 1**, including the clash generation. Troops copy this level when spawned, so upgrading the castle does not change existing troops. Each group persists its remaining `MovementPauseGenerations`, which is copied across generations and decremented when it stays still. Smaller attacks do not restart or extend an existing pause.
 
 Groups leave field combat when they reach their destination, including arrivals exactly tied with contact. Already-arrived groups cannot clash with newly spawned troops. Short trips retain normal movement speed until arrival. At the end of the turn, castle arrivals resolve in persistent group ID order against the updated castle state, preserving earlier damage, captures, and reinforcements. Sending zero soldiers or sending to the same castle is rejected.
 
-The replay draws troop circles using their stored radius and castle circles with a visual-only radius of **0.5 units**, with the same world scale on both axes. Existing troop rows receive the default radius during migration; saved replays retain their original simulation results.
+The replay draws troop circles using their stored radius and castle circles with a visual-only radius of **0.5 units**, with the same world scale on both axes.
 
 The Island Battles adapter wraps the generic start operation. Generic lobby start freezes the roster first; game initialization uses that roster and persists generation one and its player/team bindings. Concurrent or repeated starts reuse the initialized game. Other game keys are unaffected.
 
@@ -79,14 +79,14 @@ The active host receives `game_id`, `lobby_id` and a stable team UUID/order/colo
 
 ## Castle upgrades
 
-Castles and soldier groups persist an `upgrades` map, such as `{"speed":1,"clash_stop_generations":1}`. Each upgrade type defines its own level effects, fixed soldier costs, and maximum in `models/upgrades.go`. Speed currently has four levels: **1 → 0.5**, **2 → 1**, **3 → 1.5**, and **4 → 2** world units per turn. The `clash_stop_generations` type has three levels, reducing stoppage from **3** to **2** to **1** generations. Purchasing its levels **2** and **3** costs **10** and **20 soldiers**. Omitted upgrades and existing database records default to level 1. Map templates can provide initial castle levels. Purchasing speed levels **2**, **3**, and **4** costs **10**, **20**, and **30 soldiers**, respectively; the default level 1 has no purchase cost.
+Castles and soldier groups persist an `upgrades` map, such as `{"speed":1,"clash_stop_generations":1}`. Each upgrade type defines its own level effects, fixed soldier costs, and maximum in `models/upgrades.go`. Speed currently has four levels: **1 → 0.5**, **2 → 1**, **3 → 1.5**, and **4 → 2** world units per turn. The `clash_stop_generations` type has three levels, reducing stoppage from **3** to **2** to **1** generations. Purchasing its levels **2** and **3** costs **10** and **20 soldiers**. Omitted upgrades default to level 1, and every created castle and group stores all of its levels. Map templates can provide initial castle levels. Purchasing speed levels **2**, **3**, and **4** costs **10**, **20**, and **30 soldiers**, respectively; the default level 1 has no purchase cost.
 
 The internal migration engine accepts `upgrade_castle` to increase a castle's upgrade by one level. Public player submissions currently allow only `send_soldier_group`; the raw `/generation/migrate` endpoint is removed. Trusted server code can pass this command to `services.MigrateGeneration`:
 
 ```json
 {
   "CommandType": "upgrade_castle",
-  "Parameters": {"persistent_castle_id": 0, "upgrade_type": "speed"}
+  "Parameters": {"castle_id": 0, "upgrade_type": "speed"}
 }
 ```
 
@@ -96,9 +96,9 @@ Commands execute in the supplied order before movement. Sending troops after upg
 
 ## Schema and recovery
 
-Startup initializes the generic lobby tables, current game tables, and game-team bindings for a fresh schema. It does not import retired connection records or create compatibility data. New games use the nullable unique `lobby_id` link. Creating or joining a lobby does not create a game; starting an Island Battles lobby initializes generation one.
+Startup initializes the generic lobby tables, current game tables, and game-team bindings. Existing data is not migrated: when a schema change strands it, reset the development database (see the [breaking-changes skill](../.agents/skills/breaking-changes/SKILL.md)). New games use the nullable unique `lobby_id` link. Creating or joining a lobby does not create a game; starting an Island Battles lobby initializes generation one.
 
-The lobby outbox retries publication after Centrifugo failure. Generation notifications are also persisted with the state transition and retried by the publisher; they contain the recipient's authorized generation state and are sent only to that player's personal channel. Clients reconcile authorized snapshots after subscription/reconnect, so missed pushes and restarts recover through HTTP state. Existing saved spectator replays remain readable.
+The lobby outbox retries publication after Centrifugo failure. Generation notifications are also persisted with the state transition and retried by the publisher; they contain the recipient's authorized generation state and are sent only to that player's personal channel. Clients reconcile authorized snapshots after subscription/reconnect, so missed pushes and restarts recover through HTTP state.
 
 ## Verification
 
@@ -111,4 +111,12 @@ go test -race ./lobby/... ./backend/lobbyadapter/... ./backend/dal/...
 
 Database tests require a Docker-compatible runtime and use disposable PostgreSQL. The live runner supports Linux Docker or Podman, creates unique test containers, and preserves failure logs. It never uses the configured developer database.
 
-Backend Go models use `PersistentCastleID` and `PersistentSoldierGroupID` for IDs that remain stable across generations. Their database columns are `persistent_castle_id` and `persistent_soldier_group_id`. API commands and soldier-group views use `origin_persistent_castle_id` and `destination_persistent_castle_id`; castle upgrades use `persistent_castle_id`.
+Castle and soldier group IDs stay stable across generations. Backend Go models call them `PersistentCastleID` and `PersistentSoldierGroupID`, stored in `persistent_castle_id` and `persistent_soldier_group_id`; the API calls them `id`, `origin_castle_id`, `destination_castle_id`, `group_id` and, for castle upgrades, `castle_id`. Soldier group IDs come from a per-game counter (`games.next_soldier_group_id`), so a defeated or arrived group's ID is never reassigned.
+
+## Player API document
+
+[`api/openapi.json`](api/openapi.json) describes the operations a player client calls and the `GenerationEvent` pushed on its channel. Player clients are generated from it; see the [conformance suite](../clients/conformance/README.md) for the behavior they implement by hand. API view types are published without their `View` suffix (`CastleView` becomes `Castle`). After changing them, update the document; a test fails while it is stale:
+
+```sh
+go run ./backend/cmd/export-openapi --output backend/api/openapi.json
+```

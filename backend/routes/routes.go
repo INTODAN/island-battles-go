@@ -11,10 +11,21 @@ import (
 	"islandBattles/lobby/httpapi"
 	"net/http"
 	"reflect"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 	"gorm.io/datatypes"
 )
+
+// NewAPIConfig names API view types without their View suffix, so generated
+// clients receive domain names such as Castle and Generation.
+func NewAPIConfig(title, version string) huma.Config {
+	config := huma.DefaultConfig(title, version)
+	config.Components.Schemas = huma.NewMapRegistry("#/components/schemas/", func(t reflect.Type, hint string) string {
+		return strings.TrimSuffix(huma.DefaultSchemaNamer(t, hint), "View")
+	})
+	return config
+}
 
 // SetupLobbyRoutes embeds reusable lobby commands and the explicit game binding.
 // Centrifugo's trusted proxy endpoints are registered separately from OpenAPI.
@@ -25,19 +36,28 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 	huma.Register(api, huma.Operation{
 		OperationID: "getIslandLobbyReplay", Path: "/game/from-lobby/{lobby_id}/replay", Method: http.MethodGet,
 		Summary:     "View the Island Battles replay history for a started lobby",
-		Description: "Current lobby members can view saved generations, including clash effects with survivor losses and defeated troop outlines. Older replays without clash events remain viewable.",
+		Description: "Current lobby members can view saved generations, including clash effects with survivor losses and defeated troop outlines.",
 		Tags:        []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
 	}, game.Replay)
 	huma.Register(api, huma.Operation{
 		OperationID: "getIslandLobbyGeneration", Path: "/game/from-lobby/{lobby_id}/generation", Method: http.MethodGet,
-		Summary: "Read the current generation for a roster player", Description: "Requires a current authorized lobby snapshot and frozen roster membership. Returns persistent castle IDs, troop state, recorded clashes with per-participant before/after counts, and your turn completion flag.",
+		Summary: "Read the current generation for a roster player", Description: "Requires a current authorized lobby snapshot and frozen roster membership. Returns castle and soldier group IDs, which are never reassigned within a game, troop state, recorded clashes with per-participant before/after counts, and your turn completion flag.",
 		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
 	}, game.CurrentGeneration)
 	huma.Register(api, huma.Operation{
 		OperationID: "registerGenerationCommand", Path: "/generation/commands", Method: http.MethodPost,
-		Summary: "Register an atomic player command batch and optionally complete the turn", Description: "Only owned send_soldier_group commands are accepted. Complete defaults to true; an empty batch can complete a turn. The last frozen roster completion advances exactly once. Retry the same request UUID and payload safely; changed payloads and stale new requests conflict.",
+		Summary: "Register an atomic player command batch and optionally complete the turn", Description: "Only owned send_soldier_group commands are accepted; other command types are forbidden (403). Complete defaults to true; an empty batch can complete a turn. The last frozen roster completion advances exactly once. Retry the same request UUID and payload safely; changed payloads and stale new requests conflict.",
 		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
+		// The service validates the body itself so forbidden command types and
+		// unowned castles keep their 403 status instead of a schema 422.
+		SkipValidateBody: true,
 	}, game.RegisterGenerationCommands)
+	registry := api.OpenAPI().Components.Schemas
+	command := registry.Map()["PublicGenerationCommand"]
+	command.Properties["command_type"].Enum = []any{string(models.SendSoldierGroup)}
+	command.Properties["parameters"] = registry.Schema(reflect.TypeOf(models.SendSoldierGroupParameters{}), true, "")
+	// Published on each roster player's personal channel rather than over HTTP.
+	registry.Schema(reflect.TypeOf(models.GenerationEvent{}), true, "")
 }
 
 func SetupRoutes(api huma.API, env *handlers.Env) {

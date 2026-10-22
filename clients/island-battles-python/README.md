@@ -55,11 +55,11 @@ The full example is in [examples/player.py](examples/player.py). Obtain the gues
 
 If a strategy needs its own `__init__`, call `super().__init__(team_color)` before initializing its additional state.
 
-`Generation` exposes `id`, `castles`, `soldier_groups`, and `clashes`. These public snapshot models are frozen Pydantic models; nested collections are mutable Python lists. Each `Clash` has a generation-local ID, a time fraction within the turn, and `ClashParticipant` records containing persistent group IDs, teams, contact positions, radii, and soldier counts before and after combat. Older states without clash events expose an empty list. Castle and group values are read directly from `generation.castles` and `generation.soldier_groups`. Transport identity and submission status stay inside the client rather than leaking into the strategy API. `client.generation`, `start()`, and `refresh()` expose the current `Generation` snapshot.
+`Generation` exposes `id`, `castles`, `soldier_groups`, and `clashes`. These models are generated from the backend's [player OpenAPI document](../../backend/api/openapi.json) into `island_battles_client/_generated.py`, so their fields, types and constraints match the server. They are frozen Pydantic models, and nested collections are tuples. Each `Clash` has a generation-local ID, a time fraction within the turn, and `ClashParticipant` records containing group IDs, teams, contact positions, radii, and soldier counts before and after combat. Castle and group IDs are never reassigned within a game, so a group ID in a clash never refers to a later group. Transport identity and submission status stay inside the client rather than leaking into the strategy API. `client.generation`, `start()`, and `refresh()` expose the current `Generation` snapshot.
 
-`Castle` and `SoldierGroup` provide `distance(other)` for straight-line distance in map units and `compare_team(other)` returning `TeamType.friendly`, `TeamType.neutral`, or `TeamType.enemy` (import `TeamType` from `island_battles_client`). A target with team color `0` is always neutral, including when both entities are neutral. Otherwise, equal team colors are friendly and different colors are enemies.
+`Castle` and `SoldierGroup` provide `distance(other)` for straight-line distance in map units and `compare_team(other)` returning `TeamType.friendly`, `TeamType.neutral`, or `TeamType.enemy` (import `TeamType` from `island_battles_client`). A target with team color `0` is always neutral, including when both entities are neutral. Otherwise, equal team colors are friendly and different colors are enemies. These utilities are the only model code written by hand; they live in `_entities.py`, which the generated classes extend.
 
-`SoldierGroup` requires a `destination_castle: Castle` at construction and provides `distance_left()` with no arguments. The client looks up the destination by its persistent ID in the server response and passes that castle when constructing each group. Distances are floating-point map units, not travel times or generation counts; speed and clash radius do not affect them. All public numeric fields use plain `int` or `float` annotations and are required, including group coordinates, `origin_castle_id`, `destination_castle_id`, and clash radius.
+`SoldierGroup.destination_castle` is the castle with `destination_castle_id` in the same generation, linked when the generation is validated; a generation whose group points at a missing castle is rejected. `distance_left()` takes no arguments and measures to that castle. Distances are floating-point map units, not travel times or generation counts; speed and clash radius do not affect them.
 
 ```python
 origin, target = generation.castles[:2]
@@ -69,16 +69,36 @@ for group in generation.soldier_groups:
     remaining = group.distance_left()
 ```
 
-The client owns authentication, the personal player-channel subscription, reconnect recovery, state reconciliation, and turn completion. It calls `on_generation` serially with a fresh `CommandReceiver` scoped to that callback. Call `await commands_receiver.send_soldier_group(origin_castle_id, destination_castle_id, soldier_amount)` to send one group; it returns `None`. To send multiple groups, await one call per group. Castle IDs must be non-negative integers and the soldier amount must be a positive integer. The receiver expires when the callback returns or raises. Returning successfully completes the turn automatically, even without sending any soldiers; an exception or cancellation leaves it open.
+The client owns authentication, the personal player-channel subscription, reconnect recovery, state reconciliation, and turn completion. It calls `on_generation` serially with a fresh `CommandReceiver` scoped to that callback. Call `await commands_receiver.send_soldier_group(origin_castle_id, destination_castle_id, soldier_amount)` to send one group; it returns `None`. To send multiple groups, await one call per group. Arguments are validated against the generated `SendSoldierGroupParameters` before any request: castle IDs must be non-negative integers and the soldier amount a positive integer, otherwise `pydantic.ValidationError` is raised. The receiver expires when the callback returns or raises; later calls raise `GameReceiverClosedError`. Returning successfully completes the turn automatically, even without sending any soldiers; an exception or cancellation leaves it open.
 
 Each call is pinned to its callback's generation. The SDK creates the request UUID internally and reuses the exact request when retrying a transport failure. A subsequent call, even with identical parameters, sends a new group. Player code only supplies the two castle IDs and soldier amount; authentication, request IDs, and completion belong to the SDK. The SDK also deduplicates repeated events and reconciles authorized HTTP state after subscription or reconnect. The existing `game.next_generation` wire event is unchanged. No periodic polling is enabled by default; `refresh()` can request an explicit read.
 
 The full HTTP contract, authorization rules, reservation checks, retry behavior and status codes are documented in the [backend README](../../backend/README.md). The browser's **New demo lobby** uses its own JavaScript player strategy. See the [demo walkthrough](../../lobby/frontend/README.md).
 
-Run SDK tests with `uv run --locked pytest -q`. The example is checked with Ruff and ty:
+## Regenerating the models
+
+Change the Go API types in `backend/models`, then export the document and regenerate:
 
 ```sh
-uv run --locked ruff check island_battles_client examples
-uv run --locked ruff format --check island_battles_client examples
-uv run --locked ty check island_battles_client examples --error-on-warning
+go run ./backend/cmd/export-openapi --output backend/api/openapi.json
+uv run --project clients/island-battles-python/tools --locked python clients/island-battles-python/scripts/generate.py
+```
+
+Pass `--check` to `generate.py` to fail when either file is stale.
+
+## Verification
+
+Behavior is verified by the language-agnostic [client conformance suite](../conformance/README.md), through [conformance/adapter.py](conformance/adapter.py); there are no Python-only tests. From the repository root:
+
+```sh
+uv run --project clients/conformance --locked pytest clients/conformance/tests/test_models.py
+./scripts/test-client-conformance.sh
+```
+
+The SDK, adapter and example are checked with Ruff and ty from this directory:
+
+```sh
+uv run --locked ruff check island_battles_client examples scripts conformance
+uv run --locked ruff format --check island_battles_client examples scripts conformance
+uv run --locked ty check island_battles_client examples conformance --error-on-warning
 ```

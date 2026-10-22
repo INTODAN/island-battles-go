@@ -8,12 +8,14 @@
 *   **API Framework:** [Huma v2](https://github.com/danielgtaylor/huma) with [Chi](https://github.com/go-chi/chi) router.
 *   **Real-time Messaging:** [Centrifugo](https://centrifugal.dev/) (v6).
 *   **Database:** PostgreSQL (v18-alpine) with [GORM](https://gorm.io/).
-*   **Clients:** Generated Python HTTP SDK with an asyncio Centrifugo companion, plus a Go connection example.
+*   **Clients:** Python lobby and gameplay SDKs generated from checked-in OpenAPI documents, with asyncio Centrifugo runtimes, a language-agnostic client conformance suite, and a Go connection example.
 
 ## Project Structure
 
 - `lobby/`: Independent generic lobby component: Go module, clients, API artifacts, transport configuration, docs, and shared test tooling. See [its README](lobby/README.md).
-- `backend/`: Island Battles game logic and wiring to the generic lobby module.
+- `backend/`: Island Battles game logic and wiring to the generic lobby module. `backend/api/openapi.json` is the player API that gameplay clients are generated from.
+- `clients/island-battles-python/`: The Python gameplay SDK. Its models are generated; only the turn runtime and model utilities are hand-written.
+- `clients/conformance/`: Language-agnostic tests that verify any gameplay client through a JSON Lines adapter.
 - `integration/island_battles/`: Host-specific lobby/game binding acceptance checks.
 - `scripts/test-lobby-acceptance.sh`: Runs the shared acceptance suite against the Island Battles host, including its game-specific checks.
 - `go.work`: Connects the host and lobby Go modules for local development.
@@ -45,9 +47,11 @@ Teams and readiness belong to the generic lobby. Starting freezes a roster. The 
 *   **Lint/Verify (Go):** `go vet ./... ./lobby/...`
 *   **Format:** `go fmt ./... ./lobby/...`
 *   **Test (disposable PostgreSQL containers):** `go test ./... ./lobby/...`
-*   **Check OpenAPI:** `go run ./lobby/cmd/export-lobby-openapi --output lobby/api/openapi.json --events-output lobby/api/events.json --check`
+*   **Check OpenAPI:** `go run ./lobby/cmd/export-lobby-openapi --output lobby/api/openapi.json --events-output lobby/api/events.json --check` and `go run ./backend/cmd/export-openapi --output backend/api/openapi.json --check`
+*   **Check generated gameplay models:** `uv run --project clients/island-battles-python/tools --locked python clients/island-battles-python/scripts/generate.py --check`
 *   **Python unit tests:** `uv run --project lobby/clients/lobby-python --locked pytest lobby/clients/lobby-python/tests`
-*   **Gameplay SDK tests:** `uv run --project clients/island-battles-python --locked pytest clients/island-battles-python/tests`
+*   **Gameplay client conformance (offline):** `uv run --project clients/conformance --locked pytest clients/conformance/tests/test_models.py`
+*   **Gameplay client conformance (live, Linux Docker or Podman):** `./scripts/test-client-conformance.sh ["<adapter command>"]`
 *   **Live acceptance (Linux Docker or Podman):** `./scripts/test-lobby-acceptance.sh`
 
 ## Testing & Visualization
@@ -83,3 +87,4 @@ This loop (Modify Code -> Run Test with Export -> Refresh Browser) is the recomm
 3. use verbose variable names, no abbreviations.
 4. when changing any function, make sure to update the summaries in the huma routes if necessary.
 5. Prefer `Limit(1).Find(&slice)` over `First(&struct)` to gracefully handle non-existent records without checking for `gorm.ErrRecordNotFound`.
+6. Prefer clean breaking changes to compatibility code. Change the API, events and schema directly and have users upgrade their clients; do not add aliases, fallbacks or data migrations for old clients or old data. See the [breaking-changes skill](.agents/skills/breaking-changes/SKILL.md).

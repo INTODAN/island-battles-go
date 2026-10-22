@@ -1,0 +1,32 @@
+[project]
+name = "island-battles-client-conformance"
+version = "1.0.0"
+description = "Language-agnostic conformance suite for Island Battles player clients"
+requires-python = ">=3.14"
+dependencies = [
+    "aiohttp>=3.12,<4",
+    "httpx>=0.27,<1",
+    "pytest>=8.0,<9",
+    "pytest-asyncio>=0.24,<1",
+    # Live tests reuse the lobby acceptance fixtures to start games.
+    "lobby-python",
+]
+
+[dependency-groups]
+dev = ["ruff>=0.16.9"]
+
+[tool.uv.sources]
+lobby-python = { path = "../../lobby/clients/lobby-python", editable = true }
+lobby-api-client = { path = "../../lobby/clients/lobby-python/generated", editable = true }
+
+[tool.uv.build-backend]
+module-name = "island_conformance"
+module-root = ""
+
+[build-system]
+requires = ["uv_build>=0.11.0,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

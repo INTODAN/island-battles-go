@@ -26,7 +26,6 @@ import (
 	lobbypostgres "islandBattles/lobby/postgres"
 	"islandBattles/lobby/realtime"
 
-	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/httplog/v3"
@@ -104,7 +103,7 @@ func run(ctx context.Context, config dependencies.Config, logger *slog.Logger) e
 	}
 	router := chi.NewMux()
 	router.Use(httplog.RequestLogger(logger, &httplog.Options{Level: slog.LevelInfo, Schema: httplog.SchemaOTEL.Concise(true)}))
-	api := humachi.New(router, huma.DefaultConfig("Island Battles Go Backend", "1.0.0"))
+	api := humachi.New(router, routes.NewAPIConfig("Island Battles Go Backend", "1.0.0"))
 	environment := handlers.Env{DB: database}
 	routes.SetupRoutes(api, &environment)
 	routes.SetupLobbyRoutes(api, lobbyService, authentication, gameBinding, &handlers.LobbyGame{Database: database, Lobbies: lobbyService, Authenticator: authentication})

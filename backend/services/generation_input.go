@@ -279,11 +279,7 @@ func validateCommands(generation *models.Generation, teamColor uint, inputs []mo
 		if command.CommandType != models.SendSoldierGroup {
 			return nil, reject(403, "only send_soldier_group is a player command")
 		}
-		var parameters struct {
-			Origin      *uint `json:"origin_persistent_castle_id"`
-			Destination *uint `json:"destination_persistent_castle_id"`
-			Soldiers    *uint `json:"soldier_amount"`
-		}
+		var parameters models.SendSoldierGroupParameters
 		decoder := json.NewDecoder(bytes.NewReader(command.Parameters))
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(&parameters); err != nil {
@@ -293,27 +289,27 @@ func validateCommands(generation *models.Generation, teamColor uint, inputs []mo
 		if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 			return nil, reject(422, "invalid parameters")
 		}
-		if parameters.Origin == nil || parameters.Destination == nil || parameters.Soldiers == nil || *parameters.Soldiers == 0 {
-			return nil, reject(422, "origin_persistent_castle_id, destination_persistent_castle_id and positive soldier_amount are required")
+		if parameters.OriginCastleID == nil || parameters.DestinationCastleID == nil || parameters.SoldierAmount == nil || *parameters.SoldierAmount == 0 {
+			return nil, reject(422, "origin_castle_id, destination_castle_id and positive soldier_amount are required")
 		}
-		if *parameters.Origin == *parameters.Destination {
+		if *parameters.OriginCastleID == *parameters.DestinationCastleID {
 			return nil, reject(422, "origin and destination must differ")
 		}
-		origin, exists := castles[*parameters.Origin]
+		origin, exists := castles[*parameters.OriginCastleID]
 		if !exists {
 			return nil, reject(422, "origin castle does not exist in this generation")
 		}
-		if _, exists := castles[*parameters.Destination]; !exists {
+		if _, exists := castles[*parameters.DestinationCastleID]; !exists {
 			return nil, reject(422, "destination castle does not exist in this generation")
 		}
 		if origin.TeamColor != teamColor {
 			return nil, reject(403, "origin castle is not owned by your team")
 		}
-		if *parameters.Soldiers > available[*parameters.Origin] {
+		if *parameters.SoldierAmount > available[*parameters.OriginCastleID] {
 			return nil, reject(409, "insufficient soldiers after accepted team reservations")
 		}
-		available[*parameters.Origin] -= *parameters.Soldiers
-		raw, err := json.Marshal(commandHandlers.SendSoldierGroupParams{OriginPersistentCastleID: *parameters.Origin, DestinationPersistentCastleID: *parameters.Destination, SoldierAmount: *parameters.Soldiers})
+		available[*parameters.OriginCastleID] -= *parameters.SoldierAmount
+		raw, err := json.Marshal(commandHandlers.SendSoldierGroupParams{OriginPersistentCastleID: *parameters.OriginCastleID, DestinationPersistentCastleID: *parameters.DestinationCastleID, SoldierAmount: *parameters.SoldierAmount})
 		if err != nil {
 			return nil, err
 		}
@@ -323,8 +319,8 @@ func validateCommands(generation *models.Generation, teamColor uint, inputs []mo
 }
 
 func generationState(game *models.Game, generation *models.Generation, player models.FrozenGamePlayer, inputs []models.GenerationInput) models.GenerationState {
-	state := models.GenerationState{GameID: game.ID, LobbyID: *game.LobbyID, GenerationID: generation.ID, PlayerID: player.PlayerID, TeamColor: player.TeamColor, Channel: "player:" + player.PlayerID, Generation: models.GenerationView{Castles: []models.CastleView{}, SoldierGroups: []models.SoldierGroupView{}}}
-	state.Generation.Clashes = generation.Clashes
+	state := models.GenerationState{GameID: game.ID, LobbyID: *game.LobbyID, GenerationID: generation.ID, PlayerID: player.PlayerID, TeamColor: player.TeamColor, Channel: "player:" + player.PlayerID,
+		Generation: models.GenerationView{ID: generation.ID, Castles: []models.CastleView{}, SoldierGroups: []models.SoldierGroupView{}, Clashes: publishedClashes(generation)}}
 	for _, input := range inputs {
 		if input.PlayerID == player.PlayerID {
 			state.Submitted = input.Completed
@@ -334,7 +330,7 @@ func generationState(game *models.Game, generation *models.Generation, player mo
 		state.Generation.Castles = append(state.Generation.Castles, models.CastleView{ID: castle.PersistentCastleID, TeamColor: castle.TeamColor, Soldiers: castle.SoldierAmount, X: castle.Position.P.X, Y: castle.Position.P.Y})
 	}
 	for _, group := range generation.SoldierGroups {
-		state.Generation.SoldierGroups = append(state.Generation.SoldierGroups, models.SoldierGroupView{ID: group.PersistentSoldierGroupID, TeamColor: group.TeamColor, Soldiers: group.SoldierAmount, X: group.Position.P.X, Y: group.Position.P.Y, OriginPersistentCastleID: group.OriginCastle.PersistentCastleID, DestinationPersistentCastleID: group.DestinationCastle.PersistentCastleID, ClashRadius: group.EffectiveClashRadius()})
+		state.Generation.SoldierGroups = append(state.Generation.SoldierGroups, models.SoldierGroupView{ID: group.PersistentSoldierGroupID, TeamColor: group.TeamColor, Soldiers: group.SoldierAmount, X: group.Position.P.X, Y: group.Position.P.Y, OriginCastleID: group.OriginCastle.PersistentCastleID, DestinationCastleID: group.DestinationCastle.PersistentCastleID, ClashRadius: group.EffectiveClashRadius()})
 	}
 	sort.Slice(state.Generation.Castles, func(left, right int) bool {
 		return state.Generation.Castles[left].ID < state.Generation.Castles[right].ID
@@ -345,14 +341,15 @@ func generationState(game *models.Game, generation *models.Generation, player mo
 	return state
 }
 
+// publishedClashes is an empty list rather than null before the first turn.
+func publishedClashes(generation *models.Generation) []models.Clash {
+	return append([]models.Clash{}, generation.Clashes...)
+}
+
 func queueGenerationNotifications(database *gorm.DB, game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer) error {
 	notifications := make([]models.GenerationNotification, 0, len(players))
 	for _, player := range players {
-		payload, err := json.Marshal(struct {
-			SchemaVersion int                    `json:"schema_version"`
-			Type          string                 `json:"type"`
-			State         models.GenerationState `json:"state"`
-		}{1, "game.next_generation", generationState(game, generation, player, nil)})
+		payload, err := json.Marshal(models.GenerationEvent{SchemaVersion: models.GenerationEventSchemaVersion, Type: models.GenerationEventType, State: generationState(game, generation, player, nil)})
 		if err != nil {
 			return err
 		}

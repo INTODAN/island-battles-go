@@ -8,7 +8,7 @@ import (
 )
 
 type UpgradeCastleParams struct {
-	PersistentCastleID uint               `json:"persistent_castle_id"`
+	PersistentCastleID uint               `json:"castle_id"`
 	UpgradeType        models.UpgradeType `json:"upgrade_type"`
 }
 

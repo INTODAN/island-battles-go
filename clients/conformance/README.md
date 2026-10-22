@@ -1,0 +1,69 @@
+# Player client conformance
+
+This suite verifies an Island Battles player client in any language. The client is driven through a small adapter process that speaks JSON Lines on stdin and stdout, so the tests never import client code. The [Python adapter](../island-battles-python/conformance/adapter.py) is the reference implementation.
+
+## Writing a client
+
+Generate the data models and request types from [`backend/api/openapi.json`](../../backend/api/openapi.json). It contains the three player operations, the `GenerationEvent` pushed over Centrifugo, and every constraint the server applies. Do not hand-write wire types. Treat unknown response fields as allowed so newer servers stay compatible.
+
+Hand-write only the behavior below. Each rule has live tests in [`tests/live/test_turns.py`](tests/live/test_turns.py).
+
+1. **Start.** Request a connection token, connect to Centrifugo, read `GET /game/from-lobby/{lobby_id}/generation` to learn your `player:{player_id}` channel and team color, subscribe, wait for the subscription acknowledgment, then read the generation again.
+2. **Callbacks.** Invoke the strategy once per generation, serially, with a command receiver scoped to that callback. Never invoke it for a generation that is already submitted, including after a restart.
+3. **Commands.** Validate arguments against the generated `SendSoldierGroupParameters` before sending. Post each call as its own batch, with `complete: false` and a new request UUID.
+4. **Completion.** When the callback returns, post an empty batch with `complete: true`. When it raises, or the client closes during the callback, leave the turn open. The receiver rejects calls after its callback ends.
+5. **Retries.** When a request fails without a response, retry the identical body, including its request UUID; the server applies it once. Report HTTP error responses to the strategy instead of retrying them.
+6. **Events.** Accept a publication only if it validates as `GenerationEvent` (`schema_version` 1, type `game.next_generation`) and its game, lobby, player, channel and team match the client. Ignore everything else.
+7. **State.** Install a state only if its generation is newer, or if it is the same generation and does not undo `submitted: true`. A late read must not reopen a completed turn.
+8. **Recovery.** Read the generation again after every connect, reconnect or resubscribe, and retry failed reads with backoff. The player channel keeps no history, so this read is the only way to recover a missed push. Do not poll while idle.
+9. **Utilities.** Implement `distance(other)`, `compare_team(other)` and `distance_left()` as methods on the generated models. Their rules are defined by [`island_conformance/reference.py`](island_conformance/reference.py), not by any client. A generation whose group's destination castle is missing is invalid.
+
+## Adapter protocol
+
+Each line is one JSON object with a `type`. Replies and events can interleave, so the runner matches messages by type. Write logs to stderr only.
+
+Messages from the runner:
+
+| Type | Fields | Effect |
+| --- | --- | --- |
+| `evaluate` | `id`, `generation` (wire `Generation`) | Parse it with the client's public model and reply `evaluation`. Needs no server. |
+| `start` | `base_url`, `credential`, `lobby_id` | Start the client. The strategy reports each callback and waits for `finish` or `fail`. |
+| `send_soldier_group` | `origin_castle_id`, `destination_castle_id`, `soldier_amount` | Call the current receiver, or the most recent expired one, with the values as given, which may be invalid or missing. Reply `sent` or `send_failed`. |
+| `finish` | | Return from the current callback. |
+| `fail` | | Raise from the current callback. |
+| `close` | | Close the client without completing an open turn, reply `closed`, and exit. |
+
+Messages from the adapter:
+
+| Type | Fields |
+| --- | --- |
+| `evaluation` | `id` and `ok`. When `ok` is true, also `generation` (the public model serialized with wire field names), and `distances` and `relations` matrices over the castles followed by the soldier groups (`relations[i][j]` is `entity[i].compare_team(entity[j])`), and `distance_left` per soldier group. |
+| `started` | `team_color` |
+| `generation` | `generation`, serialized like `evaluation.generation` |
+| `sent` | |
+| `send_failed`, `stopped` | `error`: `kind`, `status` (HTTP status or null) and `detail` |
+| `closed` | |
+
+Error kinds are `invalid_argument` (rejected before any request), `rejected` (a 4xx other than 401), `authentication`, `transport`, `protocol`, `receiver_closed`, `closed`, and `player` (the strategy raised). `stopped` reports a client that ended on its own, for example after a failed callback or a rejected credential.
+
+## Running
+
+The offline tier needs only the adapter. It checks parsing and the utilities in two ways, both against the reference implementation:
+
+- [`fixtures/models.json`](fixtures/models.json) holds hand-picked valid and invalid boards. It is generated by `island_conformance/fixtures.py`, and a test fails when it no longer matches the reference. After changing a board or a rule, run `uv run --project clients/conformance python -m island_conformance.fixtures`.
+- 300 random boards from a fixed seed cover shared positions, groups at their destination, neutral castles, whole-number coordinates, unknown fields, and missing destinations. A failure prints the seed, board number and board. Set `ISLAND_BATTLES_CONFORMANCE_SEED` or `ISLAND_BATTLES_CONFORMANCE_BOARDS` to explore further.
+
+Run it with:
+
+```sh
+uv run --project clients/conformance --locked pytest clients/conformance/tests/test_models.py
+```
+
+The live tier builds the backend and starts disposable PostgreSQL and Centrifugo containers. The client under test plays one seat behind a proxy that drops responses, injects server errors and delays reads; the runner plays the other seat over HTTP and stops Centrifugo or publishes foreign events where a test needs it. Both tiers run with:
+
+```sh
+./scripts/test-client-conformance.sh                       # the Python client
+./scripts/test-client-conformance.sh "node my-adapter.mjs" # another client
+```
+
+Set `ISLAND_BATTLES_CLIENT_COMMAND` to use another adapter with the offline command. The live tier needs Go, uv, Python 3.14 and Linux Docker or Podman, like the [lobby acceptance suite](../../lobby/integration/README.md).

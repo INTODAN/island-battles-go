@@ -29,7 +29,7 @@ async function until(predicate) {
 
 test("one soldier from the first available owned castle to the first enemy", () => {
   assert.deepEqual(singleSoldierCommands(initial()), [{ command_type: "send_soldier_group", parameters: {
-    origin_persistent_castle_id: 0, destination_persistent_castle_id: 1, soldier_amount: 1,
+    origin_castle_id: 0, destination_castle_id: 1, soldier_amount: 1,
   } }]);
   const empty = initial();
   empty.generation.castles[1].soldiers = 0;

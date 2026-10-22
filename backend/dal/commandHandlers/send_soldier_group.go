@@ -9,8 +9,8 @@ import (
 )
 
 type SendSoldierGroupParams struct {
-	OriginPersistentCastleID      uint `json:"origin_persistent_castle_id"`
-	DestinationPersistentCastleID uint `json:"destination_persistent_castle_id"`
+	OriginPersistentCastleID      uint `json:"origin_castle_id"`
+	DestinationPersistentCastleID uint `json:"destination_castle_id"`
 	SoldierAmount                 uint `json:"soldier_amount"`
 }
 

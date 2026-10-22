@@ -11,5 +11,5 @@ type Generation struct {
 	Map           Map
 	Commands      []Command
 	SoldierGroups []SoldierGroup
-	Clashes       []ClashEvent `gorm:"serializer:json;type:jsonb"`
+	Clashes       []Clash `gorm:"serializer:json;type:jsonb"`
 }
