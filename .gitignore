@@ -35,3 +35,6 @@ go.work.sum
 __pycache__/
 .pytest_cache/
 *.egg-info/
+
+# Playwright MCP snapshots, logs and screenshots
+.playwright-mcp/

@@ -79,6 +79,8 @@ Since Go tests cannot natively verify the correctness of the interactive JavaScr
 
 This loop (Modify Code -> Run Test with Export -> Refresh Browser) is the recommended way to debug visualization logic.
 
+To check the lobby UI, the demo game or the replay in a real browser through Playwright, follow the [browser-testing skill](.agents/skills/browser-testing/SKILL.md).
+
 ## Code philosophies
 
 1. ALWAYS use go structs when performing queries, never use strings for queries (DON'T DO "game_id = ?"), and same for OrderBy,
