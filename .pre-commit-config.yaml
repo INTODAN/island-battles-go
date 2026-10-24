@@ -11,7 +11,8 @@ repos:
     hooks:
       - id: go-fmt
         name: go fmt
-        entry: go fmt ./... ./lobby/...
+        # go fmt doesn't read go.work, so the lobby module is formatted separately.
+        entry: sh -c 'go fmt ./... && go -C lobby fmt ./...'
         language: system
         types: [go]
         pass_filenames: false # go fmt runs on whole project by default
