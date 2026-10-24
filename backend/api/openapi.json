@@ -39,6 +39,47 @@
         ],
         "type": "object"
       },
+      "CastleTemplate": {
+        "additionalProperties": false,
+        "properties": {
+          "starting_soldier_amount": {
+            "description": "Soldiers in the castle when a game starts. Defaults to neutral_starting_soldier_amount.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "team_color": {
+            "description": "Owning team colour, from 1 to player_amount; 0 is neutral.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "upgrades": {
+            "additionalProperties": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "description": "Starting level of each upgrade type. Omitted types start at level 1.",
+            "type": "object"
+          },
+          "x": {
+            "description": "Distance from the centre of the plane, between -plane_size_x/2 and plane_size_x/2.",
+            "format": "double",
+            "type": "number"
+          },
+          "y": {
+            "description": "Distance from the centre of the plane, between -plane_size_y/2 and plane_size_y/2.",
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "team_color",
+          "x",
+          "y"
+        ],
+        "type": "object"
+      },
       "Clash": {
         "additionalProperties": false,
         "properties": {
@@ -369,6 +410,57 @@
         ],
         "type": "object"
       },
+      "MapTemplate": {
+        "additionalProperties": false,
+        "properties": {
+          "castles": {
+            "description": "Each castle's position in the list is its castle ID in every game built from the map.",
+            "items": {
+              "$ref": "#/components/schemas/CastleTemplate"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "map_name": {
+            "description": "Name of the map, unique among default maps.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "neutral_starting_soldier_amount": {
+            "description": "Soldiers in every castle, owned or neutral, that sets no starting_soldier_amount.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "plane_size_x": {
+            "description": "Width of the plane, which is centred on the origin.",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "plane_size_y": {
+            "description": "Height of the plane, which is centred on the origin.",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "player_amount": {
+            "description": "Players the map is made for. Castle team colours run from 1 to player_amount.",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "castles",
+          "map_name",
+          "player_amount",
+          "plane_size_y",
+          "plane_size_x",
+          "neutral_starting_soldier_amount"
+        ],
+        "type": "object"
+      },
       "Problem": {
         "additionalProperties": false,
         "properties": {
@@ -570,7 +662,7 @@
     }
   },
   "info": {
-    "description": "Operations a player client calls during a started game. After every turn, each roster player's Centrifugo channel `player:{player_id}` receives a `GenerationEvent`. Clients reconcile with the generation read after subscribing or reconnecting; HTTP state is authoritative.",
+    "description": "Operations a player client calls during a started game. After every turn, each roster player's Centrifugo channel `player:{player_id}` receives a `GenerationEvent`. Clients reconcile with the generation read after subscribing or reconnecting; HTTP state is authoritative. `MapTemplate` is the map file format, which `POST /map/create` accepts.",
     "title": "Island Battles Player API",
     "version": "1.0.0"
   },

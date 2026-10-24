@@ -29,6 +29,9 @@ type Castle struct {
 type CastleTemplate struct {
 	gorm.Model
 	CastleFields
-	MapTemplateID uint
-	MapTemplate   MapTemplate
+	// StartingSoldierAmount is NULL when the castle starts with the template's
+	// NeutralStartingSoldierAmount, including every row stored before it existed.
+	StartingSoldierAmount *uint
+	MapTemplateID         uint
+	MapTemplate           MapTemplate
 }

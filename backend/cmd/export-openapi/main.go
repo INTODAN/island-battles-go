@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -27,7 +28,8 @@ const (
 	schemaRefPrefix = "#/components/schemas/"
 	apiDescription  = "Operations a player client calls during a started game. After every turn, each roster player's " +
 		"Centrifugo channel `player:{player_id}` receives a `GenerationEvent`. Clients reconcile with the generation " +
-		"read after subscribing or reconnecting; HTTP state is authoritative."
+		"read after subscribing or reconnecting; HTTP state is authoritative. `MapTemplate` is the map file format, " +
+		"which `POST /map/create` accepts."
 )
 
 // PlayerOperations are the endpoints a gameplay client uses. Lobby setup has
@@ -36,6 +38,9 @@ var PlayerOperations = []string{"createLobbyConnectionToken", "getIslandLobbyGen
 
 // PlayerEventSchemas are delivered by Centrifugo rather than HTTP responses.
 var PlayerEventSchemas = []string{"GenerationEvent"}
+
+// MapFileSchemas describe the map file format, the body of POST /map/create.
+var MapFileSchemas = []string{"MapTemplate"}
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
@@ -92,14 +97,16 @@ func run(args []string, stdout, stderr io.Writer) error {
 }
 
 // BuildPlayerOpenAPI registers the production routes, keeps the player
-// operations, and drops schemas they do not reference. No handler is called
-// while registering, so nil dependencies are sufficient.
+// operations and the map file format, and drops schemas they do not
+// reference. No handler is called while registering, so nil dependencies are
+// sufficient.
 func BuildPlayerOpenAPI() ([]byte, error) {
 	config := routes.NewAPIConfig(apiTitle, apiVersion)
 	config.OpenAPIPath = ""
 	config.DocsPath = ""
 	config.SchemasPath = ""
 	api := humachi.New(chi.NewRouter(), config)
+	routes.SetupRoutes(api, &handlers.Env{})
 	routes.SetupLobbyRoutes(api, nil, nil, nil, &handlers.LobbyGame{})
 	api.OpenAPI().Info.Description = apiDescription
 
@@ -114,7 +121,7 @@ func BuildPlayerOpenAPI() ([]byte, error) {
 	if err := keepOperations(document, PlayerOperations); err != nil {
 		return nil, err
 	}
-	if err := keepReferencedSchemas(document, PlayerEventSchemas); err != nil {
+	if err := keepReferencedSchemas(document, slices.Concat(PlayerEventSchemas, MapFileSchemas)); err != nil {
 		return nil, err
 	}
 	compact, err := json.Marshal(document)

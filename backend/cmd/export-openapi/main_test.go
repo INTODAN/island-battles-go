@@ -53,7 +53,7 @@ func TestPlayerOpenAPIPublishesGeneratableModels(t *testing.T) {
 		t.Fatalf("unexpected operations: %v", operations)
 	}
 	schemas := document.Components.Schemas
-	for _, name := range []string{"Generation", "Castle", "SoldierGroup", "Clash", "ClashParticipant", "GenerationState", "GenerationEvent", "SendSoldierGroupParameters"} {
+	for _, name := range []string{"Generation", "Castle", "SoldierGroup", "Clash", "ClashParticipant", "GenerationState", "GenerationEvent", "SendSoldierGroupParameters", "MapTemplate", "CastleTemplate"} {
 		if _, exists := schemas[name]; !exists {
 			t.Fatalf("schema %s is missing", name)
 		}
@@ -62,7 +62,7 @@ func TestPlayerOpenAPIPublishesGeneratableModels(t *testing.T) {
 	if command["parameters"].Ref != schemaRefPrefix+"SendSoldierGroupParameters" || len(command["command_type"].Enum) != 1 {
 		t.Fatalf("player command is not typed: %+v", command)
 	}
-	for _, name := range []string{"Generation", "Clash", "SendSoldierGroupParameters", "SoldierGroup"} {
+	for _, name := range []string{"Generation", "Clash", "SendSoldierGroupParameters", "SoldierGroup", "MapTemplate", "CastleTemplate"} {
 		for property, schema := range schemas[name].Properties {
 			if types, isList := schema.Type.([]any); isList {
 				t.Fatalf("%s.%s is nullable: %v", name, property, types)
