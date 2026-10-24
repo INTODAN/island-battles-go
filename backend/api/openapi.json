@@ -578,7 +578,7 @@
   "paths": {
     "/game/from-lobby/{lobby_id}/generation": {
       "get": {
-        "description": "Requires a current authorized lobby snapshot and frozen roster membership. Returns castle and soldier group IDs, which are never reassigned within a game, troop state, recorded clashes with per-participant before/after counts, and your turn completion flag.",
+        "description": "Requires a place on the game's frozen roster. The game does not consult the lobby, so access continues after the lobby is deleted. Returns castle and soldier group IDs, which are never reassigned within a game, troop state, recorded clashes with per-participant before/after counts, and your turn completion flag.",
         "operationId": "getIslandLobbyGeneration",
         "parameters": [
           {
@@ -633,7 +633,7 @@
     },
     "/generation/commands": {
       "post": {
-        "description": "Only owned send_soldier_group commands are accepted; other command types are forbidden (403). Complete defaults to true; an empty batch can complete a turn. The last frozen roster completion advances exactly once. Retry the same request UUID and payload safely; changed payloads and stale new requests conflict.",
+        "description": "Requires a place on the game's frozen roster; the lobby is not consulted. Only owned send_soldier_group commands are accepted; other command types are forbidden (403). Complete defaults to true; an empty batch can complete a turn. The last frozen roster completion advances exactly once. Retry the same request UUID and payload safely; changed payloads and stale new requests conflict.",
         "operationId": "registerGenerationCommand",
         "parameters": [
           {

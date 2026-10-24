@@ -2,8 +2,6 @@ package handlers
 
 import (
 	"context"
-	"errors"
-	"islandBattles/backend/dal"
 	"islandBattles/backend/services"
 	"islandBattles/lobby/domain"
 
@@ -11,10 +9,9 @@ import (
 	"gorm.io/gorm"
 )
 
-// LobbyGame serves saved spectator results only to current lobby members.
+// LobbyGame serves a started game to its frozen roster without reading the lobby.
 type LobbyGame struct {
 	Database      *gorm.DB
-	Lobbies       domain.SnapshotReader
 	Authenticator domain.Authenticator
 }
 
@@ -26,19 +23,10 @@ func (handler *LobbyGame) Replay(ctx context.Context, input *struct {
 	if err != nil {
 		return nil, huma.Error401Unauthorized("authentication required")
 	}
-	snapshot, err := handler.Lobbies.Snapshot(ctx, verified.Principal, domain.Scope{GameKey: "island-battles", LobbyID: input.LobbyID})
+	service := services.GenerationService{Database: handler.Database}
+	replay, err := service.Replay(ctx, verified.Principal, input.LobbyID)
 	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return nil, huma.Error404NotFound("lobby not found")
-		}
-		return nil, huma.Error503ServiceUnavailable("lobby is temporarily unavailable")
-	}
-	if snapshot.Lobby.Phase != domain.PhaseStarted {
-		return nil, huma.Error409Conflict("lobby has not started")
-	}
-	replay, err := dal.GetLobbyGameReplay(handler.Database.WithContext(ctx), input.LobbyID)
-	if err != nil {
-		return nil, huma.Error503ServiceUnavailable("game result is temporarily unavailable")
+		return nil, generationHTTPError(err)
 	}
 	if len(replay) == 0 {
 		return nil, huma.Error404NotFound("game result is not ready")

@@ -29,32 +29,6 @@ func reject(status int, detail string) error { return &GenerationError{Status: s
 
 type GenerationService struct {
 	Database *gorm.DB
-	Lobbies  domain.SnapshotReader
-}
-
-func (service *GenerationService) authorize(ctx context.Context, principal domain.Principal, game *models.Game) error {
-	if game == nil || game.LobbyID == nil {
-		return reject(404, "game not found")
-	}
-	snapshot, err := service.Lobbies.Snapshot(ctx, principal, domain.Scope{GameKey: "island-battles", LobbyID: *game.LobbyID})
-	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return reject(404, "game not found")
-		}
-		return err
-	}
-	if snapshot.Lobby.ID != *game.LobbyID || snapshot.Lobby.GameKey != "island-battles" {
-		return reject(404, "game not found")
-	}
-	if snapshot.Lobby.Phase != domain.PhaseStarted {
-		return reject(409, "lobby has not started")
-	}
-	for _, player := range snapshot.StartRoster {
-		if player.PlayerID == principal.PlayerID {
-			return nil
-		}
-	}
-	return reject(404, "game not found")
 }
 
 func (service *GenerationService) Current(ctx context.Context, principal domain.Principal, lobbyID string) (models.GenerationState, error) {
@@ -84,8 +58,8 @@ func (service *GenerationService) Current(ctx context.Context, principal domain.
 		if err != nil {
 			return err
 		}
-		state = generationState(locked, generation, player, inputs)
-		return nil
+		state, err = generationState(locked, generation, player, inputs)
+		return err
 	})
 	return state, err
 }
@@ -151,8 +125,8 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 			if previous.PayloadHash != payloadHash {
 				return reject(409, "request_id was already used for a different payload")
 			}
-			state = generationState(locked, generation, player, inputs)
-			return nil
+			state, err = generationState(locked, generation, player, inputs)
+			return err
 		}
 		if generation.ID != request.GenerationID {
 			return reject(409, "generation is no longer current")
@@ -225,8 +199,8 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 				return err
 			}
 		}
-		state = generationState(locked, generation, player, inputs)
-		return nil
+		state, err = generationState(locked, generation, player, inputs)
+		return err
 	})
 	return state, err
 }
@@ -317,21 +291,29 @@ func validateCommands(generation *models.Generation, teamColor uint, inputs []mo
 	return commands, nil
 }
 
-func generationState(game *models.Game, generation *models.Generation, player models.FrozenGamePlayer, inputs []models.GenerationInput) models.GenerationState {
-	state := models.GenerationState{GameID: game.ID, LobbyID: *game.LobbyID, GenerationID: generation.ID, PlayerID: player.PlayerID, TeamColor: player.TeamColor, Channel: "player:" + player.PlayerID,
+func generationState(game *models.Game, generation *models.Generation, player models.FrozenGamePlayer, inputs []models.GenerationInput) (models.GenerationState, error) {
+	channel, err := domain.PlayerChannel(player.PlayerID)
+	if err != nil {
+		return models.GenerationState{}, err
+	}
+	state := models.GenerationState{GameID: game.ID, LobbyID: *game.LobbyID, GenerationID: generation.ID, PlayerID: player.PlayerID, TeamColor: player.TeamColor, Channel: channel,
 		Generation: generationView(generation)}
 	for _, input := range inputs {
 		if input.PlayerID == player.PlayerID {
 			state.Submitted = input.Completed
 		}
 	}
-	return state
+	return state, nil
 }
 
 func queueGenerationNotifications(database *gorm.DB, game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer) error {
 	notifications := make([]models.GenerationNotification, 0, len(players))
 	for _, player := range players {
-		payload, err := json.Marshal(models.GenerationEvent{SchemaVersion: models.GenerationEventSchemaVersion, Type: models.GenerationEventType, State: generationState(game, generation, player, nil)})
+		state, err := generationState(game, generation, player, nil)
+		if err != nil {
+			return err
+		}
+		payload, err := json.Marshal(models.GenerationEvent{SchemaVersion: models.GenerationEventSchemaVersion, Type: models.GenerationEventType, State: state})
 		if err != nil {
 			return err
 		}

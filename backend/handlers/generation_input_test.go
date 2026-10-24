@@ -29,12 +29,6 @@ func (authentication commandAuthentication) Authenticate(_ context.Context, auth
 	return domain.SessionVerification{Principal: authentication.principal}, nil
 }
 
-type commandLobby struct{ snapshot domain.Snapshot }
-
-func (reader commandLobby) Snapshot(context.Context, domain.Principal, domain.Scope) (domain.Snapshot, error) {
-	return reader.snapshot, nil
-}
-
 func TestGenerationHTTPAuthenticationValidationAndStatus(t *testing.T) {
 	database := testutils.InitTestDB(t)
 	playerID, lobbyID, teamID := uuid.NewString(), uuid.NewString(), uuid.NewString()
@@ -43,7 +37,7 @@ func TestGenerationHTTPAuthenticationValidationAndStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := handlers.LobbyGame{Database: database, Lobbies: commandLobby{snapshot}, Authenticator: commandAuthentication{domain.Principal{PlayerID: playerID}}}
+	handler := handlers.LobbyGame{Database: database, Authenticator: commandAuthentication{domain.Principal{PlayerID: playerID}}}
 	_, api := humatest.New(t)
 	huma.Register(api, huma.Operation{OperationID: "testCurrent", Method: "GET", Path: "/game/from-lobby/{lobby_id}/generation"}, handler.CurrentGeneration)
 	huma.Register(api, huma.Operation{OperationID: "registerGenerationCommand", Method: "POST", Path: "/generation/commands"}, handler.RegisterGenerationCommands)

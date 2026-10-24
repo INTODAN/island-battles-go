@@ -16,19 +16,9 @@ import (
 	"islandBattles/lobby/domain"
 )
 
-type generationSnapshots struct {
-	snapshot domain.Snapshot
-	err      error
-}
-
-func (reader generationSnapshots) Snapshot(context.Context, domain.Principal, domain.Scope) (domain.Snapshot, error) {
-	return reader.snapshot, reader.err
-}
-
 type turnFixture struct {
 	database *gorm.DB
 	service  *services.GenerationService
-	snapshot domain.Snapshot
 	players  []domain.Principal
 	state    models.GenerationState
 }
@@ -47,12 +37,12 @@ func newTurnFixture(t *testing.T, teammates bool) turnFixture {
 	if _, err := services.RunLobbyGame(database, snapshot); err != nil {
 		t.Fatal(err)
 	}
-	service := &services.GenerationService{Database: database, Lobbies: generationSnapshots{snapshot: snapshot}}
+	service := &services.GenerationService{Database: database}
 	state, err := service.Current(context.Background(), players[0], lobbyID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return turnFixture{database, service, snapshot, players, state}
+	return turnFixture{database, service, players, state}
 }
 func batch(state models.GenerationState, complete bool, commands ...models.PublicGenerationCommand) models.RegisterGenerationCommands {
 	if commands == nil {
@@ -99,7 +89,7 @@ func TestGenerationTurnsAtomicReservationsRetriesAndRestart(t *testing.T) {
 		t.Fatal("incremental request sealed or advanced")
 	}
 	// A reconstructed service must reserve persisted teammate commands.
-	fixture.service = &services.GenerationService{Database: fixture.database, Lobbies: generationSnapshots{snapshot: fixture.snapshot}}
+	fixture.service = &services.GenerationService{Database: fixture.database}
 	if _, err := fixture.service.Register(ctx, fixture.players[2], batch(fixture.state, true, send(0, 1, 11))); err == nil {
 		t.Fatal("accepted teammate overbooking")
 	} else {
@@ -189,14 +179,7 @@ func TestGenerationCommandValidationAndAuthorization(t *testing.T) {
 	assertTurnStatus(t, err, 404)
 	_, err = fixture.service.Current(ctx, outsider, fixture.state.LobbyID)
 	assertTurnStatus(t, err, 404)
-	// Even a forged snapshot cannot add an outsider to the persisted roster.
-	forged := fixture.snapshot
-	forged.StartRoster = append(forged.StartRoster, domain.StartRosterEntry{PlayerID: outsider.PlayerID, TeamID: forged.Teams[0].ID})
-	forgedService := services.GenerationService{Database: fixture.database, Lobbies: generationSnapshots{snapshot: forged}}
-	_, err = forgedService.Register(ctx, outsider, batch(fixture.state, true))
-	assertTurnStatus(t, err, 404)
-	unauthorized := services.GenerationService{Database: fixture.database, Lobbies: generationSnapshots{err: domain.ErrNotFound}}
-	_, err = unauthorized.Register(ctx, fixture.players[0], batch(fixture.state, true))
+	_, err = fixture.service.Replay(ctx, outsider, fixture.state.LobbyID)
 	assertTurnStatus(t, err, 404)
 	stale := batch(fixture.state, true)
 	stale.GenerationID += 100
@@ -211,6 +194,32 @@ func TestGenerationCommandValidationAndAuthorization(t *testing.T) {
 	_, err = fixture.service.Register(ctx, fixture.players[0], foreign)
 	assertTurnStatus(t, err, 404)
 	assertTurnCounts(t, fixture.database, 1, 0, 0, 2)
+}
+
+// A player on another game's roster is still an outsider to this game.
+func TestGenerationRejectsAnotherGamesRoster(t *testing.T) {
+	fixture := newTurnFixture(t, false)
+	ctx := context.Background()
+	otherLobby, teamOne, teamTwo := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	elsewhere := domain.Principal{PlayerID: uuid.NewString()}
+	other := domain.Snapshot{Lobby: domain.Lobby{ID: otherLobby, GameKey: "island-battles", Phase: domain.PhaseStarted}, Teams: []domain.Team{{ID: teamOne, Order: 1}, {ID: teamTwo, Order: 2}}, StartRoster: domain.StartRoster{{PlayerID: elsewhere.PlayerID, TeamID: teamOne}, {PlayerID: uuid.NewString(), TeamID: teamTwo}}}
+	if _, err := services.RunLobbyGame(fixture.database, other); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.service.Current(ctx, elsewhere, otherLobby); err != nil {
+		t.Fatalf("own game read: %v", err)
+	}
+	if replay, err := fixture.service.Replay(ctx, elsewhere, otherLobby); err != nil || len(replay) == 0 {
+		t.Fatalf("own game replay: %v", err)
+	}
+	_, err := fixture.service.Register(ctx, elsewhere, batch(fixture.state, true))
+	assertTurnStatus(t, err, 404)
+	_, err = fixture.service.Current(ctx, elsewhere, fixture.state.LobbyID)
+	assertTurnStatus(t, err, 404)
+	_, err = fixture.service.Replay(ctx, elsewhere, fixture.state.LobbyID)
+	assertTurnStatus(t, err, 404)
+	// Both games still sit at their first generation with nothing submitted.
+	assertTurnCounts(t, fixture.database, 2, 0, 0, 4)
 }
 
 func TestGenerationConcurrentCompletionsAdvanceOnce(t *testing.T) {

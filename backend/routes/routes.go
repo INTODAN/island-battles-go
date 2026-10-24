@@ -36,17 +36,17 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 	huma.Register(api, huma.Operation{
 		OperationID: "getIslandLobbyReplay", Path: "/game/from-lobby/{lobby_id}/replay", Method: http.MethodGet,
 		Summary:     "View the Island Battles replay history for a started lobby",
-		Description: "Current lobby members can view saved generations, including clash effects with survivor losses and defeated troop outlines.",
+		Description: "Players on the game's frozen roster can view saved generations, including clash effects with survivor losses and defeated troop outlines. The game does not consult the lobby, so access continues after the lobby is deleted.",
 		Tags:        []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
 	}, game.Replay)
 	huma.Register(api, huma.Operation{
 		OperationID: "getIslandLobbyGeneration", Path: "/game/from-lobby/{lobby_id}/generation", Method: http.MethodGet,
-		Summary: "Read the current generation for a roster player", Description: "Requires a current authorized lobby snapshot and frozen roster membership. Returns castle and soldier group IDs, which are never reassigned within a game, troop state, recorded clashes with per-participant before/after counts, and your turn completion flag.",
+		Summary: "Read the current generation for a roster player", Description: "Requires a place on the game's frozen roster. The game does not consult the lobby, so access continues after the lobby is deleted. Returns castle and soldier group IDs, which are never reassigned within a game, troop state, recorded clashes with per-participant before/after counts, and your turn completion flag.",
 		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
 	}, game.CurrentGeneration)
 	huma.Register(api, huma.Operation{
 		OperationID: "registerGenerationCommand", Path: "/generation/commands", Method: http.MethodPost,
-		Summary: "Register an atomic player command batch and optionally complete the turn", Description: "Only owned send_soldier_group commands are accepted; other command types are forbidden (403). Complete defaults to true; an empty batch can complete a turn. The last frozen roster completion advances exactly once. Retry the same request UUID and payload safely; changed payloads and stale new requests conflict.",
+		Summary: "Register an atomic player command batch and optionally complete the turn", Description: "Requires a place on the game's frozen roster; the lobby is not consulted. Only owned send_soldier_group commands are accepted; other command types are forbidden (403). Complete defaults to true; an empty batch can complete a turn. The last frozen roster completion advances exactly once. Retry the same request UUID and payload safely; changed payloads and stale new requests conflict.",
 		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
 		// The service validates the body itself so forbidden command types and
 		// unowned castles keep their 403 status instead of a schema 422.
