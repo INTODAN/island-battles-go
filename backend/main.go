@@ -111,7 +111,11 @@ func run(ctx context.Context, config dependencies.Config, logger *slog.Logger) e
 	router.Get("/lobby/ui", func(response http.ResponseWriter, request *http.Request) {
 		http.Redirect(response, request, "/lobby/ui/", http.StatusTemporaryRedirect)
 	})
-	router.Handle("/lobby/ui/*", http.StripPrefix("/lobby/ui/", frontend.Handler()))
+	lobbyFrontend, err := frontend.Handler([]frontend.Game{lobbyadapter.FrontendGame()})
+	if err != nil {
+		return err
+	}
+	router.Handle("/lobby/ui/*", http.StripPrefix("/lobby/ui/", lobbyFrontend))
 	router.Handle("/game/demo/*", http.StripPrefix("/game/demo/", demo.Handler()))
 	router.Get("/healthz", func(response http.ResponseWriter, request *http.Request) { response.WriteHeader(http.StatusNoContent) })
 	server := &http.Server{Addr: config.HTTPAddr, Handler: router, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}

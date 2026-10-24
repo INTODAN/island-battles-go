@@ -12,6 +12,18 @@ Open `/lobby/ui/` for the [temporary two-player lobby frontend](../lobby/fronten
 
 Compose mounts PostgreSQL 18's parent data directory at `/var/lib/postgresql`.
 
+## Browser demo
+
+The backend lists Island Battles in the lobby frontend's game catalog with [`lobbyadapter.FrontendGame`](lobbyadapter/frontend.go), and serves the browser [example player](demo/example-player.mjs) under `/game/demo/`. Once a lobby starts, the frontend shows the lobby replay from `/game/from-lobby/{lobby_id}/replay`, which takes new generations from the page's `lobby.game-state` messages.
+
+For the quickest test, open `/lobby/ui/` and click **New demo lobby**. It creates Alex on Blue in the current tab, opens Sam on Red in a second tab, marks both ready, and starts automatically. Both tabs run the example player: send one soldier from the first available owned castle to the first enemy castle, then finish the turn. Players submit immediately when a generation arrives, without an artificial client delay. Replay playback has its own viewing pace. Failed requests still use retry backoff.
+
+The board follows new generations live. **Pause this player** stops that tab from submitting its next turn; the other player then waits at the turn barrier. **Resume this player** continues. The timeline lets you review previous generations; **Follow live** returns to the newest state. Keep both tabs open. A matching, fully typed Python implementation is in [`examples/player.py`](../clients/island-battles-python/examples/player.py).
+
+Manually created or joined lobbies wait for commands through the [Island Battles Python client](../clients/island-battles-python/README.md); only demo invitations let the browser example player submit turns. Disconnected players remain part of the turn barrier.
+
+Run the browser player's strategy, deduplication, retry and no-polling checks from the repository root with `node backend/demo/example-player.test.mjs`.
+
 ## Lobby lifecycle
 
 A guest session lasts 24 hours. Create/join is explicit and scoped by game key. Registered example games are `island-battles` and `quiz-demo`. Each guest consumes one seat even with several simultaneous client instances. Each instance heartbeats every 15 seconds into a 45-second lease; when all leases end, membership retains its team, readiness and host position through a 60-second grace period. A five-second sweeper and command-time normalization apply persisted deadlines after restart. Closing a client releases its own lease; leaving removes the identity's membership across devices.
