@@ -2,9 +2,9 @@ package dal_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -49,7 +49,7 @@ func TestMapTemplateMigrationsFreshInstall(t *testing.T) {
 
 func TestMapTemplateMigrationsAdoptSchemaCreatedBeforeVersioning(t *testing.T) {
 	legacy := legacyMapTemplates(t)
-	templateID := createExampleMapTemplate(t, legacy)
+	templateID := insertLegacyMapTemplate(t, legacy)
 
 	// Migration 1 has no IF NOT EXISTS clauses, so running it here would fail.
 	if err := dal.MigrateMapTemplates(context.Background(), legacy); err != nil {
@@ -63,9 +63,13 @@ func TestMapTemplateMigrationsAdoptSchemaCreatedBeforeVersioning(t *testing.T) {
 	if err := legacy.Preload("CastleTemplates").First(&saved, templateID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if len(saved.CastleTemplates) == 0 {
-		t.Fatalf("map template after adoption = %#v, want its castles", saved)
+	if len(saved.CastleTemplates) != 2 {
+		t.Fatalf("map template after adoption = %#v, want its 2 castles", saved)
 	}
+	// Castles stored before starting_soldier_amount existed start with the
+	// template's neutral count, and the adopted tables take the new column.
+	assertTemplateStartsWith(t, legacy, templateID, map[uint]uint{0: 15, 1: 15})
+	assertTemplateStartsWith(t, legacy, createExampleMapTemplate(t, legacy, 30), map[uint]uint{0: 30, 1: 15})
 
 	fresh := testutils.InitEmptyTestDB(t)
 	if err := dal.MigrateMapTemplates(context.Background(), fresh); err != nil {
@@ -73,6 +77,31 @@ func TestMapTemplateMigrationsAdoptSchemaCreatedBeforeVersioning(t *testing.T) {
 	}
 	got, want := mapTemplateSchema(t, legacy), mapTemplateSchema(t, fresh)
 	if !slices.Equal(got, want) {
+		t.Fatalf("adopted schema = %v\nfresh schema = %v", got, want)
+	}
+}
+
+// A database that GORM AutoMigrate gave starting_soldier_amount before
+// migration 2 existed keeps the column and its counts.
+func TestMapTemplateMigrationsAdoptSchemaWithStartingSoldiers(t *testing.T) {
+	legacy := legacyMapTemplates(t, `ALTER TABLE castle_templates ADD COLUMN starting_soldier_amount bigint`)
+	templateID := insertLegacyMapTemplate(t, legacy)
+	if err := legacy.Exec(`UPDATE castle_templates SET starting_soldier_amount = 40 WHERE persistent_castle_id = 0`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := dal.MigrateMapTemplates(context.Background(), legacy); err != nil {
+		t.Fatalf("migrate legacy map templates: %v", err)
+	}
+	if history := mapTemplateHistory(t, legacy); len(history) != len(mapTemplateMigrationNames(t, dal.MapTemplateMigrations().Files)) || !history[0].Adopted || history[1].Adopted {
+		t.Fatalf("history = %+v, want version 1 adopted and the rest run", history)
+	}
+	assertTemplateStartsWith(t, legacy, templateID, map[uint]uint{0: 40, 1: 15})
+
+	fresh := testutils.InitEmptyTestDB(t)
+	if err := dal.MigrateMapTemplates(context.Background(), fresh); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := mapTemplateSchema(t, legacy), mapTemplateSchema(t, fresh); !slices.Equal(got, want) {
 		t.Fatalf("adopted schema = %v\nfresh schema = %v", got, want)
 	}
 }
@@ -106,7 +135,7 @@ func TestMapTemplateMigrationsRefuseToAdoptOutdatedSchema(t *testing.T) {
 
 func TestMapTemplateMigrationsApplyNewMigrationToExistingDatabase(t *testing.T) {
 	db := testutils.InitTestDB(t)
-	templateID := createExampleMapTemplate(t, db)
+	templateID := createExampleMapTemplate(t, db, 15)
 
 	set := dal.MapTemplateMigrations()
 	names := mapTemplateMigrationNames(t, set.Files)
@@ -178,17 +207,54 @@ func legacyMapTemplates(t *testing.T, changes ...string) *gorm.DB {
 	return legacy
 }
 
-func createExampleMapTemplate(t *testing.T, db *gorm.DB) uint {
+// createExampleMapTemplate stores the example map file, starting its first
+// castle with firstCastleSoldiers. Every count gets its own map name.
+func createExampleMapTemplate(t *testing.T, db *gorm.DB, firstCastleSoldiers uint) uint {
 	t.Helper()
-	var mapTemplate models.MapTemplate
-	if err := json.Unmarshal([]byte(testutils.MapExampleInput), &mapTemplate); err != nil {
+	mapTemplate, err := models.DecodeMapTemplate([]byte(testutils.MapExampleInput))
+	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := dal.CreateMapTemplate(db, &mapTemplate)
+	mapTemplate.MapName = fmt.Sprintf("%s-%d", mapTemplate.MapName, firstCastleSoldiers)
+	mapTemplate.Castles[0].StartingSoldierAmount = &firstCastleSoldiers
+	id, err := dal.CreateMapTemplate(db, mapTemplate)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return id
+}
+
+// insertLegacyMapTemplate stores a two-castle template the way code from
+// before versioning did, without the columns that later migrations add.
+func insertLegacyMapTemplate(t *testing.T, db *gorm.DB) uint {
+	t.Helper()
+	var templateID uint
+	if err := db.Raw(`INSERT INTO map_templates (created_at, updated_at, map_name, player_amount, plane_size_y, plane_size_x, neutral_starting_soldier_amount)
+VALUES (now(), now(), 'legacy', 2, 6, 8, 15) RETURNING id`).Scan(&templateID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(`INSERT INTO castle_templates (created_at, updated_at, team_color, "position", persistent_castle_id, upgrades, map_template_id)
+VALUES (now(), now(), 1, point(-3, 0), 0, '{}', ?), (now(), now(), 2, point(3, 0), 1, '{}', ?)`, templateID, templateID).Error; err != nil {
+		t.Fatal(err)
+	}
+	return templateID
+}
+
+// assertTemplateStartsWith builds a game map from a stored template and
+// compares each castle's starting soldiers by castle ID.
+func assertTemplateStartsWith(t *testing.T, db *gorm.DB, templateID uint, want map[uint]uint) {
+	t.Helper()
+	var template models.MapTemplate
+	if err := db.Preload(clause.Associations).First(&template, templateID).Error; err != nil {
+		t.Fatal(err)
+	}
+	got := map[uint]uint{}
+	for _, castle := range models.BuildMap(template.View()).Castles {
+		got[castle.PersistentCastleID] = castle.SoldierAmount
+	}
+	if !maps.Equal(got, want) {
+		t.Fatalf("template %d starting soldiers = %v, want %v", templateID, got, want)
+	}
 }
 
 func mapTemplateHistory(t *testing.T, db *gorm.DB) []mapTemplateHistoryRow {
