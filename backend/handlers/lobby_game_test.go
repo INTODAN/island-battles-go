@@ -70,9 +70,18 @@ func TestStartedGameServesItsRosterWithoutTheLobby(t *testing.T) {
 	if _, err := services.RunLobbyGame(database, snapshot); err != nil {
 		t.Fatal(err)
 	}
+	// Carol plays a different game, so she is on a roster but not on this one.
+	carol, otherLobby, green, yellow := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	if _, err := services.RunLobbyGame(database, domain.Snapshot{
+		Lobby:       domain.Lobby{ID: otherLobby, GameKey: "island-battles", Phase: domain.PhaseStarted},
+		Teams:       []domain.Team{{ID: green, Name: "Green", Order: 1}, {ID: yellow, Name: "Yellow", Order: 2}},
+		StartRoster: domain.StartRoster{{PlayerID: carol, TeamID: green, TeamOrder: 1}, {PlayerID: uuid.NewString(), TeamID: yellow, TeamOrder: 2}},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	dropLobbyTables(t, database)
 	handler := handlers.LobbyGame{Database: database, Authenticator: bearerPlayers{
-		"Bearer alice": {PlayerID: alice}, "Bearer bob": {PlayerID: bob}, "Bearer outsider": {PlayerID: uuid.NewString()},
+		"Bearer alice": {PlayerID: alice}, "Bearer bob": {PlayerID: bob}, "Bearer outsider": {PlayerID: uuid.NewString()}, "Bearer carol": {PlayerID: carol},
 	}}
 	_, api := humatest.New(t)
 	huma.Register(api, huma.Operation{OperationID: "replay", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/replay"}, handler.Replay)
@@ -103,8 +112,9 @@ func TestStartedGameServesItsRosterWithoutTheLobby(t *testing.T) {
 		request := fmt.Sprintf(`{"game_id":%d,"generation_id":%d,"request_id":%q,"commands":[%s]}`, initial.GameID, initial.GenerationID, uuid.NewString(), body)
 		return api.Post("/generation/commands", "Authorization: "+credential, strings.NewReader(request))
 	}
-	// Callers off the roster are rejected, and unknown credentials stay unauthenticated.
-	for credential, want := range map[string]int{"Bearer outsider": http.StatusNotFound, "Bearer stranger": http.StatusUnauthorized} {
+	// Callers off this game's roster are rejected, even when another game's
+	// roster has them, and unknown credentials stay unauthenticated.
+	for credential, want := range map[string]int{"Bearer outsider": http.StatusNotFound, "Bearer carol": http.StatusNotFound, "Bearer stranger": http.StatusUnauthorized} {
 		if response := api.Get(statePath, "Authorization: "+credential); response.Code != want {
 			t.Fatalf("%s read=%d", credential, response.Code)
 		}
@@ -116,7 +126,10 @@ func TestStartedGameServesItsRosterWithoutTheLobby(t *testing.T) {
 		}
 	}
 	if response := api.Get("/game/from-lobby/"+uuid.NewString()+"/replay", "Authorization: Bearer alice"); response.Code != http.StatusNotFound {
-		t.Fatalf("other lobby replay=%d", response.Code)
+		t.Fatalf("unknown lobby replay=%d", response.Code)
+	}
+	if response := api.Get("/game/from-lobby/"+otherLobby+"/generation", "Authorization: Bearer carol"); response.Code != http.StatusOK {
+		t.Fatalf("carol's own game read=%d %s", response.Code, response.Body.String())
 	}
 
 	order := fmt.Sprintf(`{"command_type":"send_soldier_group","parameters":{"origin_castle_id":%d,"destination_castle_id":%d,"soldier_amount":5}}`, origin, target)
@@ -138,14 +151,14 @@ func TestStartedGameServesItsRosterWithoutTheLobby(t *testing.T) {
 	if replay.Code != http.StatusOK || !strings.Contains(replay.Body.String(), "Alice") || !strings.Contains(replay.Body.String(), "Bob") {
 		t.Fatalf("replay=%d %s", replay.Code, replay.Body.String())
 	}
-	saved, err := dal.GetLobbyGameReplay(database, lobbyID)
+	saved, err := dal.FindLobbyGame(database, lobbyID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var frames struct {
 		Frames []json.RawMessage `json:"frames"`
 	}
-	if err := json.Unmarshal(saved, &frames); err != nil || len(frames.Frames) != 2 {
+	if err := json.Unmarshal(saved.Replay, &frames); err != nil || len(frames.Frames) != 2 {
 		t.Fatalf("frames=%d err=%v", len(frames.Frames), err)
 	}
 }

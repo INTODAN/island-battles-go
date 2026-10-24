@@ -9,7 +9,7 @@ Worktree: `issue-6-player-generation-commands`; branch: `feature/6-player-genera
 Starting an Island Battles lobby initializes generation one. Every player in the frozen start roster can register commands for the current generation, then explicitly complete their turn. The last completion advances the game exactly once and persists a next-generation notification for every roster player. A Python subclass receives `next_generation` callbacks and submits commands over authenticated HTTP.
 
 1. Identity comes from the existing guest bearer credential. Team comes from the frozen roster and persisted team/color binding; no caller-supplied player or team is trusted.
-2. Read/write game access also requires a current authorized lobby snapshot. Frozen roster, rather than current connections, defines the turn barrier. Disconnection does not silently skip a player.
+2. After start, read/write game access and saved replays authorize from the game's frozen roster alone; a started game never reads its lobby, so it stays playable after the lobby is deleted. Frozen roster, rather than current connections, defines the turn barrier. Disconnection does not silently skip a player.
 3. Commands may arrive incrementally. `complete: true` seals that player's turn; an empty array is valid. An omitted `complete` defaults to true for a convenient one-batch turn. Python `send_soldier_groups` uses false; `end_turn` uses true.
 4. Reject an invalid batch atomically with an indicative HTTP error; none of its commands are stored or executed and it does not complete the turn. Previously accepted batches remain intact.
 5. A request UUID identifies one immutable batch for one player and generation. Exact retries are successful without appending or advancing twice; changed payloads under the same UUID conflict. Stale new requests and commands after completion conflict.
@@ -73,7 +73,7 @@ Persistence contract for the delivery worker: exported `models.GenerationNotific
 
 ### T05 — implement authorization and reservation validation (strong agent; backend core; after T04)
 - Authenticate in handler and pass the verified principal to service.
-- Load game, require its Island Battles lobby snapshot, started phase and frozen roster membership.
+- Load the game and require frozen roster membership for that game; do not read the lobby snapshot after start.
 - Derive team color server-side, validate origin belongs to that color in the requested current generation.
 - Aggregate reservations from every accepted player's commands, including same-team players.
 - Reject a whole incoming batch without marking complete if any element is invalid.

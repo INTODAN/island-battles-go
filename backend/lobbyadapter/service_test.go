@@ -299,15 +299,13 @@ func TestFailedInitializationRollsBackAndCanBeRetried(t *testing.T) {
 			t.Fatalf("left %d partial %T records", count, model)
 		}
 	}
-	replay, err := dal.GetLobbyGameReplay(database, scope.LobbyID)
-	if err != nil || len(replay) != 0 {
-		t.Fatalf("partial replay: %s; error: %v", replay, err)
+	if game, err := dal.FindLobbyGame(database, scope.LobbyID); err != nil || len(game.Replay) != 0 {
+		t.Fatalf("partial replay: %+v; error: %v", game, err)
 	}
 	if _, err := service.Bind(context.Background(), principal, scope); err != nil {
 		t.Fatal(err)
 	}
-	replay, err = dal.GetLobbyGameReplay(database, scope.LobbyID)
-	if err != nil || len(replay) == 0 {
+	if game, err := dal.FindLobbyGame(database, scope.LobbyID); err != nil || len(game.Replay) == 0 {
 		t.Fatalf("retry did not save replay: %v", err)
 	}
 	assertBindingCounts(t, database, scope.LobbyID, 1, 2)
