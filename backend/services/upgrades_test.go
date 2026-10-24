@@ -10,20 +10,18 @@ import (
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
-
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 func TestCastleUpgradesAffectOnlyNewSoldierGroups(t *testing.T) {
 	database := testutils.InitTestDB(t)
-	template := models.MapTemplate{
-		MapFields: models.MapFields{MapName: "upgrade-snapshots", PlayerAmount: 2, PlaneSizeX: 24, PlaneSizeY: 4, NeutralStartingSoldierAmount: 100},
-		CastleTemplates: []models.CastleTemplate{
-			{CastleFields: models.CastleFields{TeamColor: 1, Position: pgtype.Point{P: pgtype.Vec2{X: 0, Y: 1}, Valid: true}}},
-			{CastleFields: models.CastleFields{TeamColor: 2, Position: pgtype.Point{P: pgtype.Vec2{X: 20, Y: 1}, Valid: true}}},
+	template := models.MapTemplateView{
+		MapFields: models.MapFields{MapName: "upgrade-snapshots", PlayerAmount: 2, PlaneSizeX: 40, PlaneSizeY: 4, NeutralStartingSoldierAmount: 100},
+		Castles: []models.CastleTemplateView{
+			{TeamColor: 1, X: 0, Y: 1},
+			{TeamColor: 2, X: 20, Y: 1},
 		},
 	}
-	templateID, err := dal.CreateMapTemplate(database, &template)
+	templateID, err := dal.CreateMapTemplate(database, template)
 	if err != nil {
 		t.Fatal(err)
 	}

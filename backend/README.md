@@ -106,6 +106,32 @@ Use `"upgrade_type":"clash_stop_generations"` in the same command to reduce futu
 
 Commands execute in the supplied order before movement. Sending troops after upgrading copies the new levels; troops sent before upgrading retain the old levels. Every group keeps its own snapshot throughout later turns. The castle must have enough soldiers at the moment the command executes. The purchase atomically deducts the target level's cost and advances the upgrade; an exact balance is allowed and leaves zero soldiers before normal turn production. Insufficient soldiers, maximum levels, unknown upgrade types and invalid levels return typed model errors. A rejected command rolls back the whole turn. The temporary lobby displays recorded generations; the Python gameplay client submits player turns.
 
+## Map files
+
+A map file is the JSON that `POST /map/create` stores as a default map, published as the `MapTemplate` schema in [`api/openapi.json`](api/openapi.json):
+
+```json
+{
+  "map_name": "crossing",
+  "player_amount": 2,
+  "plane_size_x": 8,
+  "plane_size_y": 6,
+  "neutral_starting_soldier_amount": 10,
+  "castles": [
+    {"team_color": 1, "x": -3, "y": 0, "starting_soldier_amount": 30, "upgrades": {"speed": 2}},
+    {"team_color": 2, "x": 3, "y": 0, "starting_soldier_amount": 30},
+    {"team_color": 0, "x": 0, "y": 2.5}
+  ]
+}
+```
+
+- The plane is centred on the origin, so a castle's `x` lies from `-plane_size_x/2` to `plane_size_x/2` and its `y` from `-plane_size_y/2` to `plane_size_y/2`. The replay and the game graph draw it the same way.
+- `team_color` runs from 1 to `player_amount`, and 0 is neutral.
+- A castle without `starting_soldier_amount` starts with `neutral_starting_soldier_amount`. Omitted upgrades start at level 1.
+- A castle's position in `castles` is its castle ID in every game built from the map.
+
+`models/map_template.go` holds the format and the two functions every map source uses: `models.ValidateMapTemplate` checks a map without storing it and returns a `*models.MapTemplateError` that lists each invalid field, such as `castles[2].x`; `models.BuildMap` builds the game map. `/map/create` answers an invalid map with 422 and one error per field, stores nothing, and answers a `map_name` that another map uses with 409. Stored templates keep working: games built from them are not validated again, and castles stored before `starting_soldier_amount` existed start with `neutral_starting_soldier_amount`.
+
 ## Schema and recovery
 
 Startup first applies two sets of versioned SQL migrations, which keep existing rows: the lobby's (`lobby/postgres/migrations/`, recorded in `lobby_schema_migrations`) and the map templates' (`backend/dal/migrations/`, recorded in `map_template_schema_migrations`). Each set runs in one transaction under a PostgreSQL advisory lock, so concurrent starts wait for each other. A database created before the schema was versioned is recorded at migration 1 without running it, but only if it has every table and column that migration 1 creates; otherwise startup fails and names what is missing. Startup then AutoMigrates the game tables and game-team bindings, and drops the retired `generation_notifications` table. Game data is not migrated: when a schema change strands it, reset the game tables (see the [breaking-changes skill](../.agents/skills/breaking-changes/SKILL.md)). New games use the nullable unique `lobby_id` link. Creating or joining a lobby does not create a game; starting an Island Battles lobby initializes generation one.
@@ -149,7 +175,7 @@ With Ryuk off, normal runs still remove their containers through `t.Cleanup`. An
 
 ## Player API document
 
-[`api/openapi.json`](api/openapi.json) describes the operations a player client calls and the `GenerationEvent` pushed on its channel. Player clients are generated from it; see the [conformance suite](../clients/conformance/README.md) for the behavior they implement by hand. API view types are published without their `View` suffix (`CastleView` becomes `Castle`). After changing them, update the document; a test fails while it is stale:
+[`api/openapi.json`](api/openapi.json) describes the operations a player client calls, the `GenerationEvent` pushed on its channel and the `MapTemplate` [map file format](#map-files). Player clients are generated from it; see the [conformance suite](../clients/conformance/README.md) for the behavior they implement by hand. API view types are published without their `View` suffix (`CastleView` becomes `Castle`). After changing them, update the document; a test fails while it is stale:
 
 ```sh
 go run ./backend/cmd/export-openapi --output backend/api/openapi.json

@@ -7,6 +7,15 @@ import (
 	"testing"
 )
 
+func TestMapCreateAcceptsTheMapFileFormat(t *testing.T) {
+	_, api := humatest.New(t, routes.NewAPIConfig("test", "1.0.0"))
+	routes.SetupRoutes(api, &handlers.Env{})
+	body := api.OpenAPI().Paths["/map/create"].Post.RequestBody.Content["application/json"].Schema
+	if body.Ref != "#/components/schemas/MapTemplate" {
+		t.Fatalf("/map/create body is %q, not the MapTemplate schema", body.Ref)
+	}
+}
+
 func TestRawGenerationMutationRoutesAreRemoved(t *testing.T) {
 	_, api := humatest.New(t)
 	routes.SetupRoutes(api, &handlers.Env{})

@@ -10,12 +10,12 @@ import (
 )
 
 func getExampleMapTemplate(t *testing.T, db *gorm.DB, mapInput string) uint {
-	var mapTemplate models.MapTemplate
+	var mapTemplate models.MapTemplateView
 	err := json.Unmarshal([]byte(mapInput), &mapTemplate)
 	if err != nil {
 		t.Fatal(err)
 	}
-	mapTemplateID, err := dal.CreateMapTemplate(db, &mapTemplate)
+	mapTemplateID, err := dal.CreateMapTemplate(db, mapTemplate)
 	if err != nil {
 		t.Fatal(err)
 	}

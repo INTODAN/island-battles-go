@@ -4,12 +4,14 @@ import (
 	"gorm.io/gorm"
 )
 
+// MapFields are shared by game maps and map templates, and are the top-level
+// fields of the map file format. The plane is centred on the origin.
 type MapFields struct {
-	MapName                      string `json:"map_name"`
-	PlayerAmount                 uint   `json:"player_amount" default:"2"`
-	PlaneSizeY                   uint   `json:"plane_size_y"`
-	PlaneSizeX                   uint   `json:"plane_size_x"`
-	NeutralStartingSoldierAmount uint   `json:"neutral_starting_soldier_amount" default:"15"`
+	MapName                      string `json:"map_name" minLength:"1" doc:"Name of the map, unique among default maps."`
+	PlayerAmount                 uint   `json:"player_amount" minimum:"1" doc:"Players the map is made for. Castle team colours run from 1 to player_amount."`
+	PlaneSizeY                   uint   `json:"plane_size_y" minimum:"1" doc:"Height of the plane, which is centred on the origin."`
+	PlaneSizeX                   uint   `json:"plane_size_x" minimum:"1" doc:"Width of the plane, which is centred on the origin."`
+	NeutralStartingSoldierAmount uint   `json:"neutral_starting_soldier_amount" doc:"Soldiers in every castle, owned or neutral, that sets no starting_soldier_amount."`
 }
 
 type Map struct {
@@ -18,6 +20,8 @@ type Map struct {
 	Castles []Castle `json:"castles"`
 }
 
+// MapTemplate stores a default map. Convert it to and from the map file
+// format with View and NewMapTemplate.
 type MapTemplate struct {
 	gorm.Model
 	MapFields

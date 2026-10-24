@@ -19,11 +19,11 @@ import (
 func captureFixture(t *testing.T) (*gorm.DB, *models.Generation) {
 	t.Helper()
 	database := testutils.InitTestDB(t)
-	template := models.MapTemplate{MapFields: models.MapFields{MapName: "clash-capture", PlayerAmount: 2, PlaneSizeX: 10, PlaneSizeY: 4, NeutralStartingSoldierAmount: 100}, CastleTemplates: []models.CastleTemplate{
-		{CastleFields: models.CastleFields{TeamColor: 1, Position: pgtype.Point{P: pgtype.Vec2{X: 0, Y: 1}, Valid: true}}},
-		{CastleFields: models.CastleFields{TeamColor: 2, Position: pgtype.Point{P: pgtype.Vec2{X: 3, Y: 1}, Valid: true}}},
+	template := models.MapTemplateView{MapFields: models.MapFields{MapName: "clash-capture", PlayerAmount: 2, PlaneSizeX: 10, PlaneSizeY: 4, NeutralStartingSoldierAmount: 100}, Castles: []models.CastleTemplateView{
+		{TeamColor: 1, X: 0, Y: 1},
+		{TeamColor: 2, X: 3, Y: 1},
 	}}
-	templateID, err := dal.CreateMapTemplate(database, &template)
+	templateID, err := dal.CreateMapTemplate(database, template)
 	if err != nil {
 		t.Fatal(err)
 	}

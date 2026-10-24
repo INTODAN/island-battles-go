@@ -8,61 +8,31 @@ import (
 	"islandBattles/backend/models"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type CreateMapTemplateResult struct {
-	MapTemplateID uint
+type CreateMapTemplateRequest struct {
+	Body models.MapTemplateView
 }
 
 type CreateMapTemplateResponse struct {
 	Body struct {
-		Result CreateMapTemplateResult
+		MapTemplateID uint `json:"map_template_id"`
 	}
-}
-
-type InputCastle struct {
-	models.CastleFields
-	RawPosition string       `json:"Position" example:"(x,y)"`
-	Position    pgtype.Point `json:"-"`
-}
-
-type CreateMapTemplateRequest struct {
-	Body struct {
-		models.MapFields
-		Castles []InputCastle `json:"castles"`
-	}
-}
-
-func (input *InputCastle) Resolve(ctx huma.Context, prefix *huma.PathBuffer) []error {
-	var point pgtype.Point
-	if err := point.Scan(input.RawPosition); err != nil {
-		return []error{fmt.Errorf("invalid position format: %w", err)}
-	}
-	input.Position = point
-	return nil
 }
 
 func (env *Env) CreateMapTemplate(ctx context.Context, input *CreateMapTemplateRequest) (*CreateMapTemplateResponse, error) {
-	var castleTemplates []models.CastleTemplate
-
-	for _, inputCastle := range input.Body.Castles {
-		castleTemplate := models.CastleTemplate{
-			CastleFields: inputCastle.CastleFields,
-		}
-		castleTemplates = append(castleTemplates, castleTemplate)
-	}
-
-	mapTemplateID, err := dal.CreateMapTemplate(env.DB, &models.MapTemplate{MapFields: input.Body.MapFields, CastleTemplates: castleTemplates})
-	if err != nil {
-		if errors.Is(err, models.ErrInvalidUpgrade) {
-			return nil, huma.Error422UnprocessableEntity(err.Error())
-		}
+	mapTemplateID, err := dal.CreateMapTemplate(env.DB, input.Body)
+	var invalidTemplate *models.MapTemplateError
+	switch {
+	case errors.As(err, &invalidTemplate):
+		return nil, huma.Error422UnprocessableEntity("invalid map template", invalidTemplate.Located("body")...)
+	case errors.Is(err, dal.ErrMapTemplateNameTaken):
+		return nil, huma.Error409Conflict("map name is already taken", &huma.ErrorDetail{Location: "body.map_name", Value: input.Body.MapName, Message: "another map template uses this name"})
+	case err != nil:
 		fmt.Println("Error when creating MapTemplate: ", err)
 		return nil, huma.Error500InternalServerError(err.Error())
 	}
 	resp := &CreateMapTemplateResponse{}
-	resp.Body.Result = CreateMapTemplateResult{MapTemplateID: mapTemplateID}
-
+	resp.Body.MapTemplateID = mapTemplateID
 	return resp, nil
 }

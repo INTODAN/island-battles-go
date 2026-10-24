@@ -1,6 +1,7 @@
 package dal
 
 import (
+	"errors"
 	"fmt"
 	"islandBattles/backend/models"
 
@@ -8,49 +9,39 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-func CreateMapTemplate(db *gorm.DB, mapTemplate *models.MapTemplate) (uint, error) {
-	// Check if a map template with the same name already exists
-	var count int64
-	db.Where(&models.MapTemplate{MapFields: models.MapFields{MapName: mapTemplate.MapName}}).Count(&count)
+// ErrMapTemplateNameTaken rejects a template whose map_name another template uses.
+var ErrMapTemplateNameTaken = errors.New("map template name is already taken")
 
-	if count > 0 {
-		return 0, fmt.Errorf("map template with name '%s' already exists", mapTemplate.MapName)
-	}
-
-	for i := range mapTemplate.CastleTemplates {
-		if err := mapTemplate.CastleTemplates[i].Upgrades.Validate(); err != nil {
-			return 0, err
-		}
-		mapTemplate.CastleTemplates[i].PersistentCastleID = uint(i)
-		mapTemplate.CastleTemplates[i].Upgrades = mapTemplate.CastleTemplates[i].Upgrades.Clone()
-	}
-
-	err := db.Create(&mapTemplate).Error
-	if err != nil {
+// CreateMapTemplate validates a map file and stores it as a default map. An
+// invalid template returns a *models.MapTemplateError and stores nothing.
+func CreateMapTemplate(db *gorm.DB, template models.MapTemplateView) (uint, error) {
+	if err := models.ValidateMapTemplate(template); err != nil {
 		return 0, err
 	}
-	return mapTemplate.ID, nil
+	var count int64
+	if err := db.Model(&models.MapTemplate{}).Where(&models.MapTemplate{MapFields: models.MapFields{MapName: template.MapName}}).Count(&count).Error; err != nil {
+		return 0, err
+	}
+	if count > 0 {
+		return 0, fmt.Errorf("%w: %q", ErrMapTemplateNameTaken, template.MapName)
+	}
+	stored := models.NewMapTemplate(template)
+	if err := db.Create(&stored).Error; err != nil {
+		return 0, err
+	}
+	return stored.ID, nil
 }
 
+// CreateMapFromTemplate stores a new game map built from a stored template.
+// Stored templates are not validated again, so templates saved before a
+// validation rule existed keep working.
 func CreateMapFromTemplate(db *gorm.DB, templateID uint) (uint, error) {
 	var template models.MapTemplate
 	if err := db.Preload(clause.Associations).First(&template, templateID).Error; err != nil {
 		return 0, err
 	}
 
-	newMap := models.Map{
-		MapFields: template.MapFields,
-	}
-
-	var castles []models.Castle
-	for _, ct := range template.CastleTemplates {
-		castles = append(castles, models.Castle{
-			CastleFields:  ct.Clone(),
-			SoldierAmount: template.NeutralStartingSoldierAmount,
-		})
-	}
-	newMap.Castles = castles
-
+	newMap := models.BuildMap(template.View())
 	if err := db.Create(&newMap).Error; err != nil {
 		return 0, err
 	}
