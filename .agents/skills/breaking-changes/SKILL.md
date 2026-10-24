@@ -14,7 +14,7 @@ Two kinds of stored data are never reset:
 - **Lobby data:** every `lobby_*` table. The lobby is shared by other games, so resetting or breaking its data would break them too.
 - **Map templates:** `map_templates` and `castle_templates`. Default maps are kept forever.
 
-Change their schema only through a new versioned migration (#23) that keeps existing rows working, with a data migration or backfill where needed. Never edit an applied migration. Everything below about resetting data applies only to game data.
+Change their schema only through a new versioned migration that keeps existing rows working, with a data migration or backfill where needed. Add the next numbered `NNNN_description.sql` file to `lobby/postgres/migrations/` for lobby tables, or to `backend/dal/migrations/` for map templates, and update the GORM record or model in the same change. Never edit an applied migration. Everything below about resetting data applies only to game data.
 
 ## Do
 
