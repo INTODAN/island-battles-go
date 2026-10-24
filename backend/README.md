@@ -109,9 +109,30 @@ go test -race ./lobby/... ./backend/lobbyadapter/... ./backend/dal/...
 ./scripts/test-lobby-acceptance.sh
 ```
 
-Database tests require a Docker-compatible runtime and use disposable PostgreSQL. The live runner supports Linux Docker or Podman, creates unique test containers, and preserves failure logs. It never uses the configured developer database.
+Database tests require a Docker-compatible runtime and use disposable PostgreSQL. On rootless Podman, set the runtime up first as described in [Database tests on rootless Podman](#database-tests-on-rootless-podman). The live runner supports Linux Docker or Podman, creates unique test containers, and preserves failure logs. It never uses the configured developer database.
 
 Castle and soldier group IDs stay stable across generations. Backend Go models call them `PersistentCastleID` and `PersistentSoldierGroupID`, stored in `persistent_castle_id` and `persistent_soldier_group_id`; the API calls them `id`, `origin_castle_id`, `destination_castle_id`, `group_id` and, for castle upgrades, `castle_id`. Soldier group IDs come from a per-game counter (`games.next_soldier_group_id`), so a defeated or arrived group's ID is never reassigned.
+
+### Database tests on rootless Podman
+
+The Go database tests start their PostgreSQL containers through testcontainers-go. Rootless Podman runs them without code changes once two things are set up.
+
+1. Enable Podman's Docker-compatible API socket. It's off by default:
+   ```sh
+   systemctl --user enable --now podman.socket
+   ```
+2. Point testcontainers at the socket and disable Ryuk, its cleanup container. Ryuk doesn't run on rootless Podman, so with it enabled every database test fails with a `reaper:` error. To configure the shell:
+   ```sh
+   export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock
+   export TESTCONTAINERS_RYUK_DISABLED=true
+   ```
+   IDEs started from the desktop often don't load shell rc files. To configure the terminal and IDEs at once, put the same settings in `~/.testcontainers.properties` instead, replacing `<uid>` with the output of `id -u`:
+   ```properties
+   docker.host=unix:///run/user/<uid>/podman/podman.sock
+   ryuk.disabled=true
+   ```
+
+With Ryuk off, normal runs still remove their containers through `t.Cleanup`. An interrupted run (Ctrl+C, stopping the run in an IDE, or a test timeout) leaves its PostgreSQL containers behind. List them with `podman ps -a --filter label=org.testcontainers=true` and remove them with `podman rm -f`. Don't use `podman container prune` for this: if they're stopped, it also removes the `island-battles-dev-db` and `island-battles-dev-centrifugo` containers that `scripts/dev.sh` creates.
 
 ## Player API document
 
