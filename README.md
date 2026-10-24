@@ -89,4 +89,4 @@ To check the lobby UI, the demo game or the replay in a real browser through Pla
 3. use verbose variable names, no abbreviations.
 4. when changing any function, make sure to update the summaries in the huma routes if necessary.
 5. Prefer `Limit(1).Find(&slice)` over `First(&struct)` to gracefully handle non-existent records without checking for `gorm.ErrRecordNotFound`.
-6. Prefer clean breaking changes to compatibility code. Change the API, events and schema directly and have users upgrade their clients; do not add aliases, fallbacks or data migrations for old clients or old data. See the [breaking-changes skill](.agents/skills/breaking-changes/SKILL.md).
+6. Prefer clean breaking changes to compatibility code. Change the API, events and schema directly and have users upgrade their clients; do not add aliases, fallbacks or data migrations for old clients or old game data. Lobby data and map templates are the exception: they are never reset, so change their schema only through versioned migrations that keep existing rows. See the [breaking-changes skill](.agents/skills/breaking-changes/SKILL.md).
