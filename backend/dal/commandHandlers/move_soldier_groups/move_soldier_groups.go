@@ -16,28 +16,15 @@ func MoveSoldierGroupsHandler(db *gorm.DB, generation *models.Generation, parame
 	if err != nil {
 		return err
 	}
-	clashPositions, err := calculations.CalculateClashPositions(soldierGroupsPositions)
+	clashes, err := calculations.CalculateClashPositions(soldierGroupsPositions)
 	if err != nil {
 		return err
 	}
-	clashes := make([]models.Clash, 0, len(clashPositions))
-	for index, clash := range clashPositions {
-		event := models.Clash{ID: uint(index + 1), Time: clash.Time}
-		for _, participant := range clash.Participants {
-			group := participant.SoldierGroup
-			event.Participants = append(event.Participants, models.ClashParticipant{
-				GroupID: group.PersistentSoldierGroupID, TeamColor: group.TeamColor,
-				X: participant.Position.P.X, Y: participant.Position.P.Y, ClashRadius: group.EffectiveClashRadius(),
-				SoldiersBefore: participant.SoldiersBefore, SoldiersAfter: participant.RemainingSoldiers,
-			})
-		}
-		clashes = append(clashes, event)
-	}
-	if err := dal.StoreGenerationClashes(db, generation, clashes); err != nil {
+	if err := dal.StoreGenerationClashes(db, generation, calculations.ClashEvents(clashes)); err != nil {
 		return err
 	}
 
-	err = db_updates.UpdateSoldierGroupAmounts(db, clashPositions)
+	err = db_updates.UpdateSoldierGroupAmounts(db, clashes)
 	if err != nil {
 		return err
 	}

@@ -84,8 +84,7 @@ func CalculateClashPositions(movements []internal.SoldierGroupMoveDelta) ([]inte
 				clashes = append(clashes, internal.Clash{Time: nextTime})
 			}
 			clashes[clashIndex].Participants = append(clashes[clashIndex].Participants, internal.ClashParticipant{
-				SoldierGroup: movement.SoldierGroup, Position: positionAt(movement, nextTime), RemainingSoldiers: remaining[movement.SoldierGroup],
-				SoldiersBefore: remaining[movement.SoldierGroup],
+				SoldierGroup: movement.SoldierGroup, Position: positionAt(movement, nextTime), SoldiersBefore: remaining[movement.SoldierGroup],
 			})
 		}
 		for index := firstClash; index < len(clashes); index++ {
@@ -115,7 +114,7 @@ func CalculateClashPositions(movements []internal.SoldierGroupMoveDelta) ([]inte
 			}
 			resolveClash(clash)
 			for _, participant := range clash.Participants {
-				remaining[participant.SoldierGroup] = participant.RemainingSoldiers
+				remaining[participant.SoldierGroup] = participant.SoldiersAfter
 			}
 		}
 		// Each clash eliminates at least one opposing team, so recomputing cannot
@@ -125,15 +124,35 @@ func CalculateClashPositions(movements []internal.SoldierGroupMoveDelta) ([]inte
 	return clashes, nil
 }
 
-// Compare pre-casualty group counts. Exactly half still stops; subtraction avoids
-// rounding odd counts or overflowing when testing twice the smaller count.
+// ClashEvents numbers resolved clashes in time order and converts them into the
+// events stored with the generation.
+func ClashEvents(clashes []internal.Clash) []models.Clash {
+	events := make([]models.Clash, 0, len(clashes))
+	for index, clash := range clashes {
+		event := models.Clash{ID: uint(index + 1), Time: clash.Time, Participants: make([]models.ClashParticipant, 0, len(clash.Participants))}
+		for _, participant := range clash.Participants {
+			group := participant.SoldierGroup
+			event.Participants = append(event.Participants, models.ClashParticipant{
+				GroupID: group.PersistentSoldierGroupID, TeamColor: group.TeamColor,
+				X: participant.Position.P.X, Y: participant.Position.P.Y, ClashRadius: group.EffectiveClashRadius(),
+				SoldiersBefore: participant.SoldiersBefore, SoldiersAfter: participant.SoldiersAfter,
+			})
+		}
+		events = append(events, event)
+	}
+	return events
+}
+
+// Compare pre-casualty group counts, so resolving the clash first does not change
+// the result. Exactly half still stops; subtraction avoids rounding odd counts or
+// overflowing when testing twice the smaller count.
 func shouldStop(clash *internal.Clash) bool {
 	for left, participant := range clash.Participants {
 		for _, opponent := range clash.Participants[left+1:] {
 			if participant.SoldierGroup.TeamColor == opponent.SoldierGroup.TeamColor {
 				continue
 			}
-			smaller, larger := min(participant.RemainingSoldiers, opponent.RemainingSoldiers), max(participant.RemainingSoldiers, opponent.RemainingSoldiers)
+			smaller, larger := min(participant.SoldiersBefore, opponent.SoldiersBefore), max(participant.SoldiersBefore, opponent.SoldiersBefore)
 			if smaller >= larger-smaller {
 				return true
 			}
@@ -203,13 +222,14 @@ func velocity(movement internal.SoldierGroupMoveDelta) pgtype.Vec2 {
 
 // A team survives only when it outnumbers all opposing teams together. Resolve
 // losses in persistent group ID order, independent of database or map iteration order.
+// Losses are computed from SoldiersBefore, and SoldiersAfter is the only count this writes.
 func resolveClash(clash *internal.Clash) {
 	sort.SliceStable(clash.Participants, func(left, right int) bool {
 		return clash.Participants[left].SoldierGroup.PersistentSoldierGroupID < clash.Participants[right].SoldierGroup.PersistentSoldierGroupID
 	})
 	totals := map[uint]uint{}
 	for _, participant := range clash.Participants {
-		totals[participant.SoldierGroup.TeamColor] += participant.RemainingSoldiers
+		totals[participant.SoldierGroup.TeamColor] += participant.SoldiersBefore
 	}
 	losses := map[uint]uint{}
 	for team, total := range totals {
@@ -223,8 +243,8 @@ func resolveClash(clash *internal.Clash) {
 	for index := range clash.Participants {
 		participant := &clash.Participants[index]
 		team := participant.SoldierGroup.TeamColor
-		loss := min(participant.RemainingSoldiers, losses[team])
-		participant.RemainingSoldiers -= loss
+		loss := min(participant.SoldiersBefore, losses[team])
+		participant.SoldiersAfter = participant.SoldiersBefore - loss
 		losses[team] -= loss
 	}
 }
