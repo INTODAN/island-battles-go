@@ -111,10 +111,11 @@ async def test_other_game_never_creates_island_state(guests):
 async def test_island_schema_survives_restart():
     tables = await sql("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")
     lobby_tables = {table for table in tables.splitlines() if table.startswith("lobby_")}
+    # Postgres holds only state: no table holds game events waiting to be sent.
     assert set(tables.splitlines()) == lobby_tables | {
         "games", "maps", "castles", "castle_templates", "map_templates", "map_template_schema_migrations",
         "generations", "soldier_groups", "commands", "island_game_team_bindings",
-        "frozen_game_players", "generation_inputs", "generation_requests", "generation_notifications",
+        "frozen_game_players", "generation_inputs", "generation_requests",
     }
     columns = await sql("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='games' ORDER BY ordinal_position")
     assert set(columns.splitlines()) == {"id", "created_at", "updated_at", "deleted_at", "lobby_id", "replay", "next_soldier_group_id"}

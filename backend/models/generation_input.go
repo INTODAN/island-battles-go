@@ -32,16 +32,6 @@ type GenerationRequest struct {
 	CreatedAt    time.Time
 }
 
-type GenerationNotification struct {
-	ID           uint   `gorm:"primaryKey"`
-	GameID       uint   `gorm:"not null"`
-	GenerationID uint   `gorm:"not null;uniqueIndex:ux_generation_notification_player"`
-	PlayerID     string `gorm:"type:uuid;not null;uniqueIndex:ux_generation_notification_player"`
-	Payload      []byte `gorm:"type:jsonb;not null"`
-	PublishedAt  *time.Time
-	CreatedAt    time.Time
-}
-
 // PublicGenerationCommand keeps raw parameters so the service can decode them
 // strictly and reject other command types with 403. The published schema
 // describes them as SendSoldierGroupParameters.

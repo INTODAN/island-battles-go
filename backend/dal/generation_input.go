@@ -81,9 +81,6 @@ func FindGenerationRequest(database *gorm.DB, gameID uint, playerID, requestID s
 func StoreGenerationRequest(database *gorm.DB, request *models.GenerationRequest) error {
 	return database.Create(request).Error
 }
-func StoreGenerationNotifications(database *gorm.DB, notifications []models.GenerationNotification) error {
-	return database.Create(&notifications).Error
-}
 func SaveGameReplay(database *gorm.DB, game *models.Game, replay []byte) error {
 	return database.Model(game).Updates(&models.Game{Replay: replay}).Error
 }

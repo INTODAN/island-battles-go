@@ -137,23 +137,18 @@ func TestClashEventsReachSnapshotsReplayAndNotifications(t *testing.T) {
 			if len(replay.Frames) != 5 || !reflect.DeepEqual(replay.Frames[4].Clashes, state.Generation.Clashes) {
 				t.Fatal("saved replay lost or duplicated events")
 			}
-			var notifications []models.GenerationNotification
-			if err := fixture.database.Where(&models.GenerationNotification{GenerationID: state.GenerationID}).Find(&notifications).Error; err != nil {
-				t.Fatal(err)
-			}
-			if len(notifications) != 2 {
-				t.Fatal("expected a notification for each player")
-			}
-			for _, notification := range notifications {
-				var event struct {
-					State models.GenerationState `json:"state"`
+			pushed := 0
+			for _, event := range fixture.publisher.GenerationEvents(t) {
+				if event.State.GenerationID != state.GenerationID {
+					continue
 				}
-				if err := json.Unmarshal(notification.Payload, &event); err != nil {
-					t.Fatal(err)
-				}
+				pushed++
 				if !reflect.DeepEqual(event.State.Generation.Clashes, state.Generation.Clashes) {
 					t.Fatal("live notification lost events")
 				}
+			}
+			if pushed != 2 {
+				t.Fatal("expected a notification for each player")
 			}
 		})
 	}

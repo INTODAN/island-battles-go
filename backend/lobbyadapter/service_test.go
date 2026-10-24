@@ -143,7 +143,8 @@ func TestBindLobbyRequiresHostAndStartedIslandScope(t *testing.T) {
 func TestBindInitializesOnePlayableGenerationAndReplay(t *testing.T) {
 	database := testutils.InitTestDB(t)
 	principal, scope, snapshot := startedSnapshot()
-	binding := newGameBinding(t, database, snapshot)
+	publisher := &testutils.RecordedPublisher{}
+	binding := newPublishingGameBinding(t, database, snapshot, publisher)
 	result, err := binding.Bind(context.Background(), principal, scope)
 	if err != nil {
 		t.Fatal(err)
@@ -171,15 +172,12 @@ func TestBindInitializesOnePlayableGenerationAndReplay(t *testing.T) {
 		t.Fatalf("initial replay = %s", game.Replay)
 	}
 	var players int64
-	var notifications int64
 	if err := database.Model(&models.FrozenGamePlayer{}).Count(&players).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := database.Model(&models.GenerationNotification{}).Count(&notifications).Error; err != nil {
-		t.Fatal(err)
-	}
-	if players != 2 || notifications != 2 {
-		t.Fatalf("players=%d notifications=%d", players, notifications)
+	events := publisher.GenerationEvents(t)
+	if players != 2 || len(events) != 2 || events[0].State.PlayerID == events[1].State.PlayerID || events[0].State.GenerationID != game.Generations[0].ID {
+		t.Fatalf("players=%d events=%+v", players, events)
 	}
 	if _, err := binding.Bind(context.Background(), principal, scope); err != nil {
 		t.Fatal(err)
@@ -188,8 +186,8 @@ func TestBindInitializesOnePlayableGenerationAndReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(reloaded.Generations) != 1 || !bytes.Equal(reloaded.Replay, game.Replay) {
-		t.Fatal("retry changed initialized game")
+	if len(reloaded.Generations) != 1 || !bytes.Equal(reloaded.Replay, game.Replay) || len(publisher.Publications()) != 2 {
+		t.Fatal("retry changed initialized game or pushed it again")
 	}
 }
 
@@ -205,7 +203,12 @@ func startedSnapshot() (domain.Principal, domain.Scope, domain.Snapshot) {
 
 func newGameBinding(t *testing.T, db *gorm.DB, snapshot domain.Snapshot) *application.GameBinding[models.BindingResult] {
 	t.Helper()
-	service, err := lobbyadapter.NewService(db, snapshotApplication{snapshot: snapshot})
+	return newPublishingGameBinding(t, db, snapshot, &testutils.RecordedPublisher{})
+}
+
+func newPublishingGameBinding(t *testing.T, db *gorm.DB, snapshot domain.Snapshot, publisher *testutils.RecordedPublisher) *application.GameBinding[models.BindingResult] {
+	t.Helper()
+	service, err := lobbyadapter.NewService(db, snapshotApplication{snapshot: snapshot}, publisher)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +268,8 @@ func TestBindRejectsIncompletePersistedMapping(t *testing.T) {
 func TestFailedInitializationRollsBackAndCanBeRetried(t *testing.T) {
 	database := testutils.InitTestDB(t)
 	principal, scope, snapshot := startedSnapshot()
-	service := newGameBinding(t, database, snapshot)
+	publisher := &testutils.RecordedPublisher{}
+	service := newPublishingGameBinding(t, database, snapshot, publisher)
 	failure := errors.New("injected generation failure")
 	created := 0
 	callback := "test:fail-simulation"
@@ -290,7 +294,10 @@ func TestFailedInitializationRollsBackAndCanBeRetried(t *testing.T) {
 	if generations != 0 {
 		t.Fatalf("left %d partial generations", generations)
 	}
-	for _, model := range []any{&models.Map{}, &models.Castle{}, &models.FrozenGamePlayer{}, &models.GenerationNotification{}} {
+	if len(publisher.Publications()) != 0 {
+		t.Fatal("pushed a generation that rolled back")
+	}
+	for _, model := range []any{&models.Map{}, &models.Castle{}, &models.FrozenGamePlayer{}} {
 		var count int64
 		if err := database.Model(model).Count(&count).Error; err != nil {
 			t.Fatal(err)

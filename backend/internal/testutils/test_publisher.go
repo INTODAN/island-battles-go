@@ -1,0 +1,49 @@
+package testutils
+
+import (
+	"context"
+	"encoding/json"
+	"sync"
+	"testing"
+
+	"islandBattles/backend/models"
+	"islandBattles/lobby/realtime"
+)
+
+// RecordedPublisher keeps what services push to Centrifugo after a commit.
+// Err makes every push fail, as an unreachable Centrifugo would.
+type RecordedPublisher struct {
+	mutex        sync.Mutex
+	publications []realtime.Publication
+	Err          error
+}
+
+func (publisher *RecordedPublisher) Publish(_ context.Context, publications ...realtime.Publication) error {
+	publisher.mutex.Lock()
+	defer publisher.mutex.Unlock()
+	publisher.publications = append(publisher.publications, publications...)
+	return publisher.Err
+}
+
+func (publisher *RecordedPublisher) Publications() []realtime.Publication {
+	publisher.mutex.Lock()
+	defer publisher.mutex.Unlock()
+	return append([]realtime.Publication{}, publisher.publications...)
+}
+
+// GenerationEvents decodes every pushed game.next_generation event in order.
+func (publisher *RecordedPublisher) GenerationEvents(t *testing.T) []models.GenerationEvent {
+	t.Helper()
+	var events []models.GenerationEvent
+	for _, publication := range publisher.Publications() {
+		var event models.GenerationEvent
+		if err := json.Unmarshal(publication.Data, &event); err != nil {
+			t.Fatal(err)
+		}
+		if publication.Channel != event.State.Channel {
+			t.Fatalf("event for %s was pushed to %s", event.State.Channel, publication.Channel)
+		}
+		events = append(events, event)
+	}
+	return events
+}

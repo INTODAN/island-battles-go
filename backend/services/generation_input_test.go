@@ -17,10 +17,11 @@ import (
 )
 
 type turnFixture struct {
-	database *gorm.DB
-	service  *services.GenerationService
-	players  []domain.Principal
-	state    models.GenerationState
+	database  *gorm.DB
+	publisher *testutils.RecordedPublisher
+	service   *services.GenerationService
+	players   []domain.Principal
+	state     models.GenerationState
 }
 
 func newTurnFixture(t *testing.T, teammates bool) turnFixture {
@@ -34,15 +35,16 @@ func newTurnFixture(t *testing.T, teammates bool) turnFixture {
 		players = append(players, domain.Principal{PlayerID: uuid.NewString()})
 		snapshot.StartRoster = append(snapshot.StartRoster, domain.StartRosterEntry{PlayerID: players[2].PlayerID, TeamID: teamOne})
 	}
-	if _, err := services.RunLobbyGame(database, snapshot); err != nil {
+	publisher := &testutils.RecordedPublisher{}
+	if _, err := services.RunLobbyGame(context.Background(), database, publisher, snapshot); err != nil {
 		t.Fatal(err)
 	}
-	service := &services.GenerationService{Database: database}
+	service := &services.GenerationService{Database: database, Publisher: publisher}
 	state, err := service.Current(context.Background(), players[0], lobbyID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return turnFixture{database, service, players, state}
+	return turnFixture{database, publisher, service, players, state}
 }
 func batch(state models.GenerationState, complete bool, commands ...models.PublicGenerationCommand) models.RegisterGenerationCommands {
 	if commands == nil {
@@ -61,19 +63,25 @@ func assertTurnStatus(t *testing.T, err error, status int) {
 		t.Fatalf("error=%v, want status %d", err, status)
 	}
 }
-func assertTurnCounts(t *testing.T, database *gorm.DB, generations, inputs, requests, notifications int64) {
+
+// assertTurnCounts checks stored turn state and the generation events pushed so
+// far, one per roster player for each generation.
+func assertTurnCounts(t *testing.T, fixture turnFixture, generations, inputs, requests int64, pushed int) {
 	t.Helper()
 	for _, check := range []struct {
 		model    any
 		expected int64
-	}{{&models.Generation{}, generations}, {&models.GenerationInput{}, inputs}, {&models.GenerationRequest{}, requests}, {&models.GenerationNotification{}, notifications}} {
+	}{{&models.Generation{}, generations}, {&models.GenerationInput{}, inputs}, {&models.GenerationRequest{}, requests}} {
 		var count int64
-		if err := database.Model(check.model).Count(&count).Error; err != nil {
+		if err := fixture.database.Model(check.model).Count(&count).Error; err != nil {
 			t.Fatal(err)
 		}
 		if count != check.expected {
 			t.Fatalf("%T count=%d want=%d", check.model, count, check.expected)
 		}
+	}
+	if published := len(fixture.publisher.Publications()); published != pushed {
+		t.Fatalf("pushed %d generation events, want %d", published, pushed)
 	}
 }
 
@@ -89,7 +97,7 @@ func TestGenerationTurnsAtomicReservationsRetriesAndRestart(t *testing.T) {
 		t.Fatal("incremental request sealed or advanced")
 	}
 	// A reconstructed service must reserve persisted teammate commands.
-	fixture.service = &services.GenerationService{Database: fixture.database}
+	fixture.service = &services.GenerationService{Database: fixture.database, Publisher: fixture.publisher}
 	if _, err := fixture.service.Register(ctx, fixture.players[2], batch(fixture.state, true, send(0, 1, 11))); err == nil {
 		t.Fatal("accepted teammate overbooking")
 	} else {
@@ -98,7 +106,7 @@ func TestGenerationTurnsAtomicReservationsRetriesAndRestart(t *testing.T) {
 	invalid := batch(fixture.state, true, send(0, 1, 5), send(0, 1, 6))
 	_, err = fixture.service.Register(ctx, fixture.players[2], invalid)
 	assertTurnStatus(t, err, 409)
-	assertTurnCounts(t, fixture.database, 1, 1, 1, 3)
+	assertTurnCounts(t, fixture, 1, 1, 1, 3)
 	if _, err = fixture.service.Register(ctx, fixture.players[0], first); err != nil {
 		t.Fatal(err)
 	}
@@ -134,21 +142,23 @@ func TestGenerationTurnsAtomicReservationsRetriesAndRestart(t *testing.T) {
 	}
 	_, err = fixture.service.Register(ctx, fixture.players[0], batch(fixture.state, true))
 	assertTurnStatus(t, err, 409)
-	assertTurnCounts(t, fixture.database, 2, 3, 4, 6)
-	var notifications []models.GenerationNotification
-	if err := fixture.database.Find(&notifications).Error; err != nil {
-		t.Fatal(err)
+	assertTurnCounts(t, fixture, 2, 3, 4, 6)
+	// Each roster player was pushed the initial generation, then the next one.
+	recipients := map[uint]map[string]bool{}
+	for _, event := range fixture.publisher.GenerationEvents(t) {
+		if event.Type != "game.next_generation" || event.State.Submitted || len(event.State.Generation.Castles) != 2 {
+			t.Fatalf("bad event: %+v", event)
+		}
+		if recipients[event.State.GenerationID] == nil {
+			recipients[event.State.GenerationID] = map[string]bool{}
+		}
+		recipients[event.State.GenerationID][event.State.PlayerID] = true
 	}
-	for _, notification := range notifications {
-		var event struct {
-			Type  string                 `json:"type"`
-			State models.GenerationState `json:"state"`
-		}
-		if err := json.Unmarshal(notification.Payload, &event); err != nil {
-			t.Fatal(err)
-		}
-		if event.Type != "game.next_generation" || event.State.PlayerID != notification.PlayerID || event.State.GenerationID != notification.GenerationID || event.State.Submitted || len(event.State.Generation.Castles) != 2 {
-			t.Fatalf("bad event: %s", notification.Payload)
+	for _, generationID := range []uint{fixture.state.GenerationID, next.GenerationID} {
+		for _, player := range fixture.players {
+			if !recipients[generationID][player.PlayerID] {
+				t.Fatalf("generation %d was not pushed to %s: %v", generationID, player.PlayerID, recipients)
+			}
 		}
 	}
 }
@@ -193,7 +203,7 @@ func TestGenerationCommandValidationAndAuthorization(t *testing.T) {
 	foreign.GameID = detachedID
 	_, err = fixture.service.Register(ctx, fixture.players[0], foreign)
 	assertTurnStatus(t, err, 404)
-	assertTurnCounts(t, fixture.database, 1, 0, 0, 2)
+	assertTurnCounts(t, fixture, 1, 0, 0, 2)
 }
 
 // A player on another game's roster is still an outsider to this game.
@@ -203,7 +213,7 @@ func TestGenerationRejectsAnotherGamesRoster(t *testing.T) {
 	otherLobby, teamOne, teamTwo := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	elsewhere := domain.Principal{PlayerID: uuid.NewString()}
 	other := domain.Snapshot{Lobby: domain.Lobby{ID: otherLobby, GameKey: "island-battles", Phase: domain.PhaseStarted}, Teams: []domain.Team{{ID: teamOne, Order: 1}, {ID: teamTwo, Order: 2}}, StartRoster: domain.StartRoster{{PlayerID: elsewhere.PlayerID, TeamID: teamOne}, {PlayerID: uuid.NewString(), TeamID: teamTwo}}}
-	if _, err := services.RunLobbyGame(fixture.database, other); err != nil {
+	if _, err := services.RunLobbyGame(ctx, fixture.database, fixture.publisher, other); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := fixture.service.Current(ctx, elsewhere, otherLobby); err != nil {
@@ -219,7 +229,7 @@ func TestGenerationRejectsAnotherGamesRoster(t *testing.T) {
 	_, err = fixture.service.Replay(ctx, elsewhere, fixture.state.LobbyID)
 	assertTurnStatus(t, err, 404)
 	// Both games still sit at their first generation with nothing submitted.
-	assertTurnCounts(t, fixture.database, 2, 0, 0, 4)
+	assertTurnCounts(t, fixture, 2, 0, 0, 4)
 }
 
 func TestGenerationConcurrentCompletionsAdvanceOnce(t *testing.T) {
@@ -248,7 +258,7 @@ func TestGenerationConcurrentCompletionsAdvanceOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	assertTurnCounts(t, fixture.database, 2, 2, 2, 4)
+	assertTurnCounts(t, fixture, 2, 2, 2, 4)
 }
 
 func TestGenerationMigrationFailureRollsBackFinalRequest(t *testing.T) {
@@ -272,7 +282,7 @@ func TestGenerationMigrationFailureRollsBackFinalRequest(t *testing.T) {
 	if !errors.Is(err, failure) {
 		t.Fatalf("err=%v", err)
 	}
-	assertTurnCounts(t, fixture.database, 1, 1, 1, 2)
+	assertTurnCounts(t, fixture, 1, 1, 1, 2)
 	current, err := fixture.service.Current(ctx, fixture.players[1], fixture.state.LobbyID)
 	if err != nil || current.Submitted {
 		t.Fatalf("current=%+v err=%v", current, err)
@@ -283,45 +293,27 @@ func TestGenerationMigrationFailureRollsBackFinalRequest(t *testing.T) {
 	if _, err := fixture.service.Register(ctx, fixture.players[1], final); err != nil {
 		t.Fatal(err)
 	}
-	assertTurnCounts(t, fixture.database, 2, 2, 2, 4)
+	assertTurnCounts(t, fixture, 2, 2, 2, 4)
 }
 
-func TestGenerationNotificationFailureRollsBackMigration(t *testing.T) {
+func TestGenerationPushFailureKeepsCommittedTurn(t *testing.T) {
 	fixture := newTurnFixture(t, false)
 	ctx := context.Background()
 	if _, err := fixture.service.Register(ctx, fixture.players[0], batch(fixture.state, true)); err != nil {
 		t.Fatal(err)
 	}
-	failure := errors.New("injected notification failure")
-	callback := "test:fail-turn-notification"
-	if err := fixture.database.Callback().Create().Before("gorm:create").Register(callback, func(transaction *gorm.DB) {
-		if transaction.Statement.Table == "generation_notifications" {
-			_ = transaction.AddError(failure)
-		}
-	}); err != nil {
-		t.Fatal(err)
+	// Centrifugo is unreachable: the push fails after its retries, but the turn
+	// stands and players read the new generation over HTTP.
+	fixture.publisher.Err = errors.New("centrifugo unreachable")
+	next, err := fixture.service.Register(ctx, fixture.players[1], batch(fixture.state, true))
+	if err != nil || next.GenerationID == fixture.state.GenerationID {
+		t.Fatalf("next=%+v err=%v", next, err)
 	}
-	t.Cleanup(func() { _ = fixture.database.Callback().Create().Remove(callback) })
-	final := batch(fixture.state, true)
-	_, err := fixture.service.Register(ctx, fixture.players[1], final)
-	if !errors.Is(err, failure) {
-		t.Fatalf("err=%v", err)
+	assertTurnCounts(t, fixture, 2, 2, 2, 4)
+	current, err := fixture.service.Current(ctx, fixture.players[0], fixture.state.LobbyID)
+	if err != nil || current.GenerationID != next.GenerationID {
+		t.Fatalf("current=%+v err=%v", current, err)
 	}
-	assertTurnCounts(t, fixture.database, 1, 1, 1, 2)
-	var maps int64
-	if err := fixture.database.Model(&models.Map{}).Count(&maps).Error; err != nil {
-		t.Fatal(err)
-	}
-	if maps != 1 {
-		t.Fatalf("migration left %d maps", maps)
-	}
-	if err := fixture.database.Callback().Create().Remove(callback); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := fixture.service.Register(ctx, fixture.players[1], final); err != nil {
-		t.Fatal(err)
-	}
-	assertTurnCounts(t, fixture.database, 2, 2, 2, 4)
 }
 
 func TestGenerationCapRejectsCommandsForTheLastGeneration(t *testing.T) {

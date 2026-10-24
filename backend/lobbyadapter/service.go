@@ -14,12 +14,12 @@ import (
 )
 
 // NewService binds started Island Battles lobbies through the shared service.
-func NewService(database *gorm.DB, lobbies domain.SnapshotReader) (*application.GameBinding[models.BindingResult], error) {
-	if database == nil {
-		return nil, errors.New("lobby adapter: nil database")
+func NewService(database *gorm.DB, lobbies domain.SnapshotReader, publisher services.Publisher) (*application.GameBinding[models.BindingResult], error) {
+	if database == nil || publisher == nil {
+		return nil, errors.New("lobby adapter: nil database or publisher")
 	}
 	return application.NewGameBinding("island-battles", lobbies, func(ctx context.Context, snapshot domain.Snapshot) (models.BindingResult, error) {
-		return services.RunLobbyGame(database.WithContext(ctx), snapshot)
+		return services.RunLobbyGame(ctx, database, publisher, snapshot)
 	})
 }
 

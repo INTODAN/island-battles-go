@@ -33,11 +33,12 @@ func TestGenerationHTTPAuthenticationValidationAndStatus(t *testing.T) {
 	database := testutils.InitTestDB(t)
 	playerID, lobbyID, teamID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted}, Teams: []domain.Team{{ID: teamID, Order: 1}}, StartRoster: domain.StartRoster{{PlayerID: playerID, TeamID: teamID}}}
-	binding, err := services.RunLobbyGame(database, snapshot)
+	publisher := &testutils.RecordedPublisher{}
+	binding, err := services.RunLobbyGame(context.Background(), database, publisher, snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := handlers.LobbyGame{Database: database, Authenticator: commandAuthentication{domain.Principal{PlayerID: playerID}}}
+	handler := handlers.LobbyGame{Database: database, Authenticator: commandAuthentication{domain.Principal{PlayerID: playerID}}, Publisher: publisher}
 	_, api := humatest.New(t)
 	huma.Register(api, huma.Operation{OperationID: "testCurrent", Method: "GET", Path: "/game/from-lobby/{lobby_id}/generation"}, handler.CurrentGeneration)
 	huma.Register(api, huma.Operation{OperationID: "registerGenerationCommand", Method: "POST", Path: "/generation/commands"}, handler.RegisterGenerationCommands)

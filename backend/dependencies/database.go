@@ -38,9 +38,14 @@ func initializeSchema(ctx context.Context, db *gorm.DB) error {
 		return fmt.Errorf("migrate map template schema: %w", err)
 	}
 	err := db.WithContext(ctx).AutoMigrate(&models.Game{}, &models.Map{}, &models.Castle{},
-		&models.Generation{}, &models.SoldierGroup{}, &models.Command{}, &models.TeamBindingRecord{}, &models.FrozenGamePlayer{}, &models.GenerationInput{}, &models.GenerationRequest{}, &models.GenerationNotification{})
+		&models.Generation{}, &models.SoldierGroup{}, &models.Command{}, &models.TeamBindingRecord{}, &models.FrozenGamePlayer{}, &models.GenerationInput{}, &models.GenerationRequest{})
 	if err != nil {
 		return fmt.Errorf("initialize game schema: %w", err)
+	}
+	// Generation events are pushed after their turn commits, so the table that
+	// queued them is gone. It held only game data.
+	if err := db.WithContext(ctx).Exec(`DROP TABLE IF EXISTS generation_notifications`).Error; err != nil {
+		return fmt.Errorf("drop generation_notifications: %w", err)
 	}
 	return nil
 }
