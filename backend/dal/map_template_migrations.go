@@ -23,7 +23,7 @@ func MapTemplateMigrations() postgres.MigrationSet {
 	if err != nil {
 		panic(err) // The directory name is a valid constant.
 	}
-	return postgres.MigrationSet{HistoryTable: "map_template_schema_migrations", Files: files, AdoptTable: "map_templates"}
+	return postgres.MigrationSet{HistoryTable: "map_template_schema_migrations", Files: files, Adopt: true}
 }
 
 // MigrateMapTemplates brings the map template tables to the latest version.

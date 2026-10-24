@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"testing/fstest"
@@ -26,7 +27,11 @@ type mapTemplateHistoryRow struct {
 }
 
 func TestMapTemplateMigrationsFreshInstall(t *testing.T) {
-	db := testutils.InitTestDB(t)
+	// No AutoMigrate runs here, so model fields the migrations lack show up.
+	db := testutils.InitEmptyTestDB(t)
+	if err := dal.MigrateMapTemplates(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
 	history := mapTemplateHistory(t, db)
 	names := mapTemplateMigrationNames(t, dal.MapTemplateMigrations().Files)
 	if len(history) != len(names) {
@@ -43,14 +48,7 @@ func TestMapTemplateMigrationsFreshInstall(t *testing.T) {
 }
 
 func TestMapTemplateMigrationsAdoptSchemaCreatedBeforeVersioning(t *testing.T) {
-	legacy := testutils.InitEmptyTestDB(t)
-	content, err := os.ReadFile("testdata/legacy_map_templates.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := legacy.Exec(string(content)).Error; err != nil {
-		t.Fatalf("create legacy map templates: %v", err)
-	}
+	legacy := legacyMapTemplates(t)
 	templateID := createExampleMapTemplate(t, legacy)
 
 	// Migration 1 has no IF NOT EXISTS clauses, so running it here would fail.
@@ -76,6 +74,33 @@ func TestMapTemplateMigrationsAdoptSchemaCreatedBeforeVersioning(t *testing.T) {
 	got, want := mapTemplateSchema(t, legacy), mapTemplateSchema(t, fresh)
 	if !slices.Equal(got, want) {
 		t.Fatalf("adopted schema = %v\nfresh schema = %v", got, want)
+	}
+}
+
+func TestMapTemplateMigrationsRefuseToAdoptPartialSchema(t *testing.T) {
+	// GORM's AutoMigrate wasn't atomic, so it could leave only map_templates.
+	legacy := legacyMapTemplates(t, `DROP TABLE castle_templates`)
+
+	err := dal.MigrateMapTemplates(context.Background(), legacy)
+	if err == nil || !strings.HasPrefix(err.Error(), dal.MapTemplateMigrations().HistoryTable+": ") ||
+		!strings.Contains(err.Error(), "has map_templates but lacks castle_templates") {
+		t.Fatalf("migrate partial schema error = %v, want castle_templates named", err)
+	}
+	if legacy.Migrator().HasTable("castle_templates") || legacy.Migrator().HasTable(dal.MapTemplateMigrations().HistoryTable) {
+		t.Fatal("a refused adoption changed the database")
+	}
+}
+
+func TestMapTemplateMigrationsRefuseToAdoptOutdatedSchema(t *testing.T) {
+	// Older AutoMigrate runs had neither column.
+	legacy := legacyMapTemplates(t, `ALTER TABLE castle_templates DROP COLUMN persistent_castle_id, DROP COLUMN upgrades`)
+
+	err := dal.MigrateMapTemplates(context.Background(), legacy)
+	if err == nil || !strings.Contains(err.Error(), "lacks castle_templates.persistent_castle_id, castle_templates.upgrades,") {
+		t.Fatalf("migrate outdated schema error = %v, want the missing columns named", err)
+	}
+	if legacy.Migrator().HasTable(dal.MapTemplateMigrations().HistoryTable) {
+		t.Fatal("a refused adoption recorded history")
 	}
 }
 
@@ -134,6 +159,23 @@ func TestConcurrentMapTemplateMigrationsOfEmptyDatabaseAllSucceed(t *testing.T) 
 	if history, names := mapTemplateHistory(t, db), mapTemplateMigrationNames(t, dal.MapTemplateMigrations().Files); len(history) != len(names) {
 		t.Fatalf("history = %+v, want one row for each of %v", history, names)
 	}
+}
+
+// legacyMapTemplates returns a database with the map template tables as they
+// were before versioning, changed by the given statements.
+func legacyMapTemplates(t *testing.T, changes ...string) *gorm.DB {
+	t.Helper()
+	legacy := testutils.InitEmptyTestDB(t)
+	content, err := os.ReadFile("testdata/legacy_map_templates.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range append([]string{string(content)}, changes...) {
+		if err := legacy.Exec(statement).Error; err != nil {
+			t.Fatalf("create legacy map templates: %v", err)
+		}
+	}
+	return legacy
 }
 
 func createExampleMapTemplate(t *testing.T, db *gorm.DB) uint {
