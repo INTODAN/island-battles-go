@@ -6,10 +6,10 @@ import (
 	"testing"
 
 	"islandBattles/backend/dal"
-	"islandBattles/backend/dal/commandHandlers"
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
+	"islandBattles/backend/simulation"
 )
 
 func TestCastleUpgradesAffectOnlyNewSoldierGroups(t *testing.T) {
@@ -39,8 +39,8 @@ func TestCastleUpgradesAffectOnlyNewSoldierGroups(t *testing.T) {
 		}
 		return models.CommandFields{CommandType: commandType, Parameters: raw}
 	}
-	send := command(models.SendSoldierGroup, commandHandlers.SendSoldierGroupParams{OriginPersistentCastleID: 0, DestinationPersistentCastleID: 1, SoldierAmount: 10})
-	upgrade := command(models.UpgradeCastle, commandHandlers.UpgradeCastleParams{PersistentCastleID: 0, UpgradeType: models.SpeedUpgrade})
+	send := command(models.SendSoldierGroup, simulation.SendSoldierGroupParams{OriginPersistentCastleID: 0, DestinationPersistentCastleID: 1, SoldierAmount: 10})
+	upgrade := command(models.UpgradeCastle, simulation.UpgradeCastleParams{PersistentCastleID: 0, UpgradeType: models.SpeedUpgrade})
 	beforeID, err := services.MigrateGeneration(database, gameID, []models.CommandFields{send})
 	if err != nil {
 		t.Fatal(err)
@@ -105,7 +105,7 @@ func TestCastleUpgradesAffectOnlyNewSoldierGroups(t *testing.T) {
 		expected error
 	}{
 		{upgrade, models.ErrUpgradeMaxLevel},
-		{command(models.UpgradeCastle, commandHandlers.UpgradeCastleParams{PersistentCastleID: 0, UpgradeType: "unknown"}), models.ErrInvalidUpgrade},
+		{command(models.UpgradeCastle, simulation.UpgradeCastleParams{PersistentCastleID: 0, UpgradeType: "unknown"}), models.ErrInvalidUpgrade},
 	} {
 		var beforeCount, afterCount int64
 		if err := database.Model(&models.Generation{}).Count(&beforeCount).Error; err != nil {
@@ -146,11 +146,11 @@ func TestUnaffordableUpgradeRollsBackEarlierCommands(t *testing.T) {
 	if err := dal.UpdateCastleSoldierGroupAmount(database, castle, 40); err != nil {
 		t.Fatal(err)
 	}
-	upgradeParameters, err := json.Marshal(commandHandlers.UpgradeCastleParams{PersistentCastleID: 0, UpgradeType: models.SpeedUpgrade})
+	upgradeParameters, err := json.Marshal(simulation.UpgradeCastleParams{PersistentCastleID: 0, UpgradeType: models.SpeedUpgrade})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sendParameters, err := json.Marshal(commandHandlers.SendSoldierGroupParams{OriginPersistentCastleID: 0, DestinationPersistentCastleID: 1, SoldierAmount: 15})
+	sendParameters, err := json.Marshal(simulation.SendSoldierGroupParams{OriginPersistentCastleID: 0, DestinationPersistentCastleID: 1, SoldierAmount: 15})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,5 +170,68 @@ func TestUnaffordableUpgradeRollsBackEarlierCommands(t *testing.T) {
 	}
 	if generation.ID != generationID || len(generation.SoldierGroups) != 0 || castle.SoldierAmount != 40 || castle.Upgrades[models.SpeedUpgrade] != 1 {
 		t.Fatalf("failed turn did not roll back: castle=%+v generation=%+v", castle, generation)
+	}
+}
+
+// Concurrent turns of one game run one after the other, so the second turn
+// spends the balance the first one left instead of a stale one.
+func TestConcurrentTurnsCannotSpendStaleBalance(t *testing.T) {
+	database := testutils.InitTestDB(t)
+	generationID := testutils.CreateGenerationForTest(t, database)
+	generation, err := dal.GetGeneration(database, generationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	castle, err := dal.GetCastleFromGeneration(generation, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dal.UpdateCastleSoldierGroupAmount(database, castle, 10); err != nil {
+		t.Fatal(err)
+	}
+	parameters, err := json.Marshal(simulation.UpgradeCastleParams{PersistentCastleID: 0, UpgradeType: models.SpeedUpgrade})
+	if err != nil {
+		t.Fatal(err)
+	}
+	upgrade := []models.CommandFields{{CommandType: models.UpgradeCastle, Parameters: parameters}}
+	results := make(chan error, 2)
+	start := make(chan struct{})
+	for range 2 {
+		go func() {
+			<-start
+			_, err := services.MigrateGeneration(database, generation.GameID, upgrade)
+			results <- err
+		}()
+	}
+	close(start)
+	succeeded, rejected := 0, 0
+	for range 2 {
+		err := <-results
+		if err == nil {
+			succeeded++
+		} else if errors.Is(err, models.ErrInsufficientSoldiers) {
+			rejected++
+		} else {
+			t.Fatal(err)
+		}
+	}
+	if succeeded != 1 || rejected != 1 {
+		t.Fatalf("success=%d rejection=%d", succeeded, rejected)
+	}
+	var generations int64
+	if err := database.Model(&models.Generation{}).Where(&models.Generation{GameID: generation.GameID}).Count(&generations).Error; err != nil {
+		t.Fatal(err)
+	}
+	latest, err := dal.GetLatestGenerationForGame(database, generation.GameID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	castle, err = dal.GetCastleFromGeneration(latest, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The purchase empties the castle, and the turn's growth adds one soldier.
+	if generations != 2 || castle.SoldierAmount != 1 || castle.Upgrades[models.SpeedUpgrade] != 2 {
+		t.Fatalf("concurrent turns forked or lost a deduction: generations=%d castle=%+v", generations, castle)
 	}
 }

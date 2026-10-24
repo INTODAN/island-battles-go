@@ -89,6 +89,10 @@ The active host receives `game_id`, `lobby_id` and a stable team UUID/order/colo
 
 `lobbyadapter` selects the Island Battles game key, connects game persistence to the shared binding service, and registers the game endpoint. It uses types directly from `models`, without aliases. Authorization and HTTP handling are delegated to the [shared game-binding helpers](../lobby/README.md#binding-a-game-to-a-started-lobby). Island Battles persistence lives in `dal/lobby_binding.go`; its only translation is from generic team UUID/order to simulation colors 1..N, with `models.NeutralTeamColor` (0) reserved for neutral. Clients expose the same value as `NEUTRAL_TEAM_COLOR`.
 
+## Turn simulation
+
+`services.MigrateGeneration` plays a turn in three steps. `dal.LoadGameState` locks the game and reads its latest generation once. `simulation.Simulate` applies the turn's commands, then the end-of-turn steps (movement and clashes, castle growth, arrivals), to the in-memory `simulation.GameState` and returns the clashes as events. `dal.SaveGeneration` stores the result as the next generation with one batched insert per table. The game rules live only in `backend/simulation`, which never touches the database, so its tests run without Postgres.
+
 ## Castle upgrades
 
 Castles and soldier groups persist an `upgrades` map, such as `{"speed":1,"clash_stop_generations":1}`. Each upgrade type defines its own level effects, fixed soldier costs, and maximum in `models/upgrades.go`. Speed currently has four levels: **1 → 0.5**, **2 → 1**, **3 → 1.5**, and **4 → 2** world units per turn. The `clash_stop_generations` type has three levels, reducing stoppage from **3** to **2** to **1** generations. Purchasing its levels **2** and **3** costs **10** and **20 soldiers**. Omitted upgrades default to level 1, and every created castle and group stores all of its levels. Map templates can provide initial castle levels. Purchasing speed levels **2**, **3**, and **4** costs **10**, **20**, and **30 soldiers**, respectively; the default level 1 has no purchase cost.

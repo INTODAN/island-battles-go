@@ -1,11 +1,10 @@
-package calculations
+package simulation
 
 import (
 	"fmt"
 	"math"
 	"sort"
 
-	"islandBattles/backend/dal/commandHandlers/move_soldier_groups/internal"
 	"islandBattles/backend/models"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -13,25 +12,25 @@ import (
 
 const epsilon = 1e-9
 
-// CalculateClashPositions resolves contacts in time order and updates movement
+// calculateClashPositions resolves contacts in time order and updates movement
 // plans when a balanced clash stops groups. Recheck paths after every clash so
 // stopped survivors remain vulnerable to later enemies.
-func CalculateClashPositions(movements []internal.SoldierGroupMoveDelta) ([]internal.Clash, error) {
+func calculateClashPositions(movements []soldierGroupMoveDelta) ([]resolvedClash, error) {
 	type contact struct {
 		time        float64
 		left, right int
 	}
-	remaining := make(map[*models.SoldierGroup]uint, len(movements))
-	movementIndices := make(map[*models.SoldierGroup]int, len(movements))
+	remaining := make(map[*SoldierGroup]uint, len(movements))
+	movementIndices := make(map[*SoldierGroup]int, len(movements))
 	for index, movement := range movements {
 		radius := movement.SoldierGroup.EffectiveClashRadius()
 		if radius < 0 || math.IsNaN(radius) || math.IsInf(radius, 0) {
 			return nil, fmt.Errorf("invalid soldier group clash radius: %v", radius)
 		}
-		remaining[movement.SoldierGroup] = movement.SoldierGroup.SoldierAmount
+		remaining[movement.SoldierGroup] = movement.SoldierGroup.Soldiers
 		movementIndices[movement.SoldierGroup] = index
 	}
-	clashes := []internal.Clash{}
+	clashes := []resolvedClash{}
 	currentTime := 0.0
 	for {
 		contacts := []contact{}
@@ -81,9 +80,9 @@ func CalculateClashPositions(movements []internal.SoldierGroupMoveDelta) ([]inte
 			if !exists {
 				clashIndex = len(clashes)
 				components[component] = clashIndex
-				clashes = append(clashes, internal.Clash{Time: nextTime})
+				clashes = append(clashes, resolvedClash{Time: nextTime})
 			}
-			clashes[clashIndex].Participants = append(clashes[clashIndex].Participants, internal.ClashParticipant{
+			clashes[clashIndex].Participants = append(clashes[clashIndex].Participants, clashParticipant{
 				SoldierGroup: movement.SoldierGroup, Position: positionAt(movement, nextTime), SoldiersBefore: remaining[movement.SoldierGroup],
 			})
 		}
@@ -105,7 +104,7 @@ func CalculateClashPositions(movements []internal.SoldierGroupMoveDelta) ([]inte
 					movement := &movements[movementIndices[participant.SoldierGroup]]
 					movement.Start, movement.End, movement.StartTime = midpoint, midpoint, nextTime
 					movement.ArrivalTime = nil
-					if midpoint == movement.SoldierGroup.DestinationCastle.Position {
+					if midpoint == movement.Destination {
 						time := nextTime
 						movement.ArrivalTime = &time
 					}
@@ -124,16 +123,16 @@ func CalculateClashPositions(movements []internal.SoldierGroupMoveDelta) ([]inte
 	return clashes, nil
 }
 
-// ClashEvents numbers resolved clashes in time order and converts them into the
-// events stored with the generation.
-func ClashEvents(clashes []internal.Clash) []models.Clash {
+// clashEvents numbers resolved clashes in time order, starting at firstID, and
+// converts them into the events stored with the generation.
+func clashEvents(clashes []resolvedClash, firstID uint) []models.Clash {
 	events := make([]models.Clash, 0, len(clashes))
 	for index, clash := range clashes {
-		event := models.Clash{ID: uint(index + 1), Time: clash.Time, Participants: make([]models.ClashParticipant, 0, len(clash.Participants))}
+		event := models.Clash{ID: firstID + uint(index), Time: clash.Time, Participants: make([]models.ClashParticipant, 0, len(clash.Participants))}
 		for _, participant := range clash.Participants {
 			group := participant.SoldierGroup
 			event.Participants = append(event.Participants, models.ClashParticipant{
-				GroupID: group.PersistentSoldierGroupID, TeamColor: group.TeamColor,
+				GroupID: group.ID, TeamColor: group.TeamColor,
 				X: participant.Position.P.X, Y: participant.Position.P.Y, ClashRadius: group.EffectiveClashRadius(),
 				SoldiersBefore: participant.SoldiersBefore, SoldiersAfter: participant.SoldiersAfter,
 			})
@@ -146,7 +145,7 @@ func ClashEvents(clashes []internal.Clash) []models.Clash {
 // Compare pre-casualty group counts, so resolving the clash first does not change
 // the result. Exactly half still stops; subtraction avoids rounding odd counts or
 // overflowing when testing twice the smaller count.
-func shouldStop(clash *internal.Clash) bool {
+func shouldStop(clash *resolvedClash) bool {
 	for left, participant := range clash.Participants {
 		for _, opponent := range clash.Participants[left+1:] {
 			if participant.SoldierGroup.TeamColor == opponent.SoldierGroup.TeamColor {
@@ -163,10 +162,10 @@ func shouldStop(clash *internal.Clash) bool {
 
 // Solve |relativeStart + time*relativeVelocity| <= radius for the first time
 // in [0,1]. Closest approach avoids dividing by nearly stationary axes.
-func contactTimeFrom(left, right internal.SoldierGroupMoveDelta, radius, from float64) (float64, bool) {
+func contactTimeFrom(left, right soldierGroupMoveDelta, radius, from float64) (float64, bool) {
 	// Arrival wins a tie with contact, including a group already at its castle.
 	endTime := math.Inf(1)
-	for _, movement := range []internal.SoldierGroupMoveDelta{left, right} {
+	for _, movement := range []soldierGroupMoveDelta{left, right} {
 		if movement.ArrivalTime != nil {
 			endTime = math.Min(endTime, *movement.ArrivalTime)
 		}
@@ -198,7 +197,7 @@ func contactTimeFrom(left, right internal.SoldierGroupMoveDelta, radius, from fl
 	return math.Max(0, math.Min(1, from+entryTime)), true
 }
 
-func positionAt(movement internal.SoldierGroupMoveDelta, time float64) pgtype.Point {
+func positionAt(movement soldierGroupMoveDelta, time float64) pgtype.Point {
 	if movement.ArrivalTime != nil && time >= *movement.ArrivalTime {
 		return movement.End
 	}
@@ -209,7 +208,7 @@ func positionAt(movement internal.SoldierGroupMoveDelta, time float64) pgtype.Po
 	}, Valid: true}
 }
 
-func velocity(movement internal.SoldierGroupMoveDelta) pgtype.Vec2 {
+func velocity(movement soldierGroupMoveDelta) pgtype.Vec2 {
 	duration := 1.0 - movement.StartTime
 	if movement.ArrivalTime != nil {
 		duration = *movement.ArrivalTime - movement.StartTime
@@ -223,9 +222,9 @@ func velocity(movement internal.SoldierGroupMoveDelta) pgtype.Vec2 {
 // A team survives only when it outnumbers all opposing teams together. Resolve
 // losses in persistent group ID order, independent of database or map iteration order.
 // Losses are computed from SoldiersBefore, and SoldiersAfter is the only count this writes.
-func resolveClash(clash *internal.Clash) {
+func resolveClash(clash *resolvedClash) {
 	sort.SliceStable(clash.Participants, func(left, right int) bool {
-		return clash.Participants[left].SoldierGroup.PersistentSoldierGroupID < clash.Participants[right].SoldierGroup.PersistentSoldierGroupID
+		return clash.Participants[left].SoldierGroup.ID < clash.Participants[right].SoldierGroup.ID
 	})
 	totals := map[uint]uint{}
 	for _, participant := range clash.Participants {

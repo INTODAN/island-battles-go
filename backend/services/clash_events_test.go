@@ -158,16 +158,17 @@ func TestClashEventsRollBackWithFailedTurn(t *testing.T) {
 	database, generation := captureFixture(t)
 	captureGroup(t, database, generation, 1, 10, 1)
 	captureGroup(t, database, generation, 2, 5, 1.25)
-	failure := errors.New("cannot delete defeated troop")
+	// The surviving troop is saved after the generation and its clash events.
+	failure := errors.New("cannot store surviving troop")
 	callback := "test:fail-after-clash-events"
-	if err := database.Callback().Delete().Before("gorm:delete").Register(callback, func(transaction *gorm.DB) {
+	if err := database.Callback().Create().Before("gorm:create").Register(callback, func(transaction *gorm.DB) {
 		if transaction.Statement.Table == "soldier_groups" {
 			_ = transaction.AddError(failure)
 		}
 	}); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = database.Callback().Delete().Remove(callback) })
+	t.Cleanup(func() { _ = database.Callback().Create().Remove(callback) })
 	if _, err := services.MigrateGeneration(database, generation.GameID, nil); !errors.Is(err, failure) {
 		t.Fatalf("expected injected failure, got %v", err)
 	}

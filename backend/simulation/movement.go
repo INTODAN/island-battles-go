@@ -1,15 +1,15 @@
-package internal
+package simulation
 
 import (
-	"islandBattles/backend/models"
-
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-type SoldierGroupMoveDelta struct {
+type soldierGroupMoveDelta struct {
 	Start        pgtype.Point
 	End          pgtype.Point
-	SoldierGroup *models.SoldierGroup
+	SoldierGroup *SoldierGroup
+	// Destination is the position of the group's destination castle.
+	Destination pgtype.Point
 	// Nil means the destination is beyond this turn; otherwise this is the
 	// fraction of the turn at which the group leaves the field.
 	ArrivalTime      *float64
@@ -17,8 +17,8 @@ type SoldierGroupMoveDelta struct {
 	PauseGenerations uint
 }
 
-type ClashParticipant struct {
-	SoldierGroup *models.SoldierGroup
+type clashParticipant struct {
+	SoldierGroup *SoldierGroup
 	Position     pgtype.Point
 	// SoldiersBefore is the group's count at contact. Nothing changes it later.
 	SoldiersBefore uint
@@ -27,8 +27,8 @@ type ClashParticipant struct {
 	SoldiersAfter uint
 }
 
-// Clash groups simultaneous contacts, retaining each group's own position.
-type Clash struct {
+// resolvedClash groups simultaneous contacts, retaining each group's own position.
+type resolvedClash struct {
 	Time         float64
-	Participants []ClashParticipant
+	Participants []clashParticipant
 }

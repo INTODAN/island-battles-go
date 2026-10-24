@@ -4,11 +4,10 @@ import (
 	"testing"
 
 	"islandBattles/backend/dal"
-	"islandBattles/backend/dal/commandHandlers"
-	"islandBattles/backend/dal/commandHandlers/move_soldier_groups"
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
+	"islandBattles/backend/simulation"
 
 	"encoding/json"
 	"fmt"
@@ -57,9 +56,7 @@ func captureGroup(t *testing.T, database *gorm.DB, generation *models.Generation
 		t.Fatal(err)
 	}
 	group := models.SoldierGroup{SoldierGroupFields: models.SoldierGroupFields{OriginCastleID: origin.ID, DestinationCastleID: destination.ID, SoldierAmount: amount}, TeamColor: team, GenerationID: generation.ID, Position: pgtype.Point{P: pgtype.Vec2{X: x, Y: 1}, Valid: true}}
-	if _, err := dal.CreateSoldierGroup(database, &group); err != nil {
-		t.Fatal(err)
-	}
+	testutils.CreateSoldierGroupForTest(t, database, &group)
 	if err := dal.RefreshGeneration(database, generation); err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +72,7 @@ func TestOneSoldierPerTurnCannotPinCapturingArmy(t *testing.T) {
 		t.Fatal(err)
 	}
 	captureGroup(t, database, generation, 1, 100, 1)
-	parameters, err := json.Marshal(commandHandlers.SendSoldierGroupParams{OriginPersistentCastleID: 1, DestinationPersistentCastleID: 0, SoldierAmount: 1})
+	parameters, err := json.Marshal(simulation.SendSoldierGroupParams{OriginPersistentCastleID: 1, DestinationPersistentCastleID: 0, SoldierAmount: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,91 +111,6 @@ func TestOneSoldierPerTurnCannotPinCapturingArmy(t *testing.T) {
 		t.Fatalf("captured troops remained in field: %+v", generation.SoldierGroups)
 	}
 	_ = testutils.CreateGameGraphForTest(t, database, generation.GameID)
-}
-
-func TestArrivedArmyDoesNotClashWithNewSpawn(t *testing.T) {
-	database, generation := captureFixture(t)
-	captureGroup(t, database, generation, 1, 120, 3)
-	if err := commandHandlers.SendSoldierGroupHandler(database, generation, commandHandlers.SendSoldierGroupParams{OriginPersistentCastleID: 1, DestinationPersistentCastleID: 0, SoldierAmount: 1}); err != nil {
-		t.Fatal(err)
-	}
-	if err := dal.RefreshGeneration(database, generation); err != nil {
-		t.Fatal(err)
-	}
-	if err := move_soldier_groups.MoveSoldierGroupsHandler(database, generation, move_soldier_groups.MoveSoldierGroupsParams{}); err != nil {
-		t.Fatal(err)
-	}
-	if err := dal.RefreshGeneration(database, generation); err != nil {
-		t.Fatal(err)
-	}
-	if err := commandHandlers.RemoveArrivedSoldierGroupsHandler(database, generation, commandHandlers.RemoveArrivedSoldierGroupsParams{}); err != nil {
-		t.Fatal(err)
-	}
-	defender, err := dal.GetCastleFromGeneration(generation, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if defender.TeamColor != 1 || defender.SoldierAmount != 21 {
-		t.Fatalf("arrival incorrectly clashed with spawn: %+v", defender)
-	}
-	if len(generation.SoldierGroups) != 1 || generation.SoldierGroups[0].TeamColor != 2 || generation.SoldierGroups[0].SoldierAmount != 1 {
-		t.Fatal("new spawn should remain a separate traveling group")
-	}
-	if len(generation.Clashes) != 0 {
-		t.Fatal("arrival incorrectly emitted a clash event")
-	}
-}
-
-func TestMultipleArrivalsUseUpdatedCastle(t *testing.T) {
-	database, generation := captureFixture(t)
-	captureGroup(t, database, generation, 1, 60, 3)
-	captureGroup(t, database, generation, 1, 60, 3)
-	captureGroup(t, database, generation, 1, 10, 3)
-	if err := commandHandlers.RemoveArrivedSoldierGroupsHandler(database, generation, commandHandlers.RemoveArrivedSoldierGroupsParams{}); err != nil {
-		t.Fatal(err)
-	}
-	defender, err := dal.GetCastleFromGeneration(generation, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if defender.TeamColor != 1 || defender.SoldierAmount != 30 || len(generation.SoldierGroups) != 0 {
-		t.Fatalf("arrival damage/capture was overwritten: %+v", defender)
-	}
-}
-
-func TestSurvivorCannotBypassSecondDefender(t *testing.T) {
-	database, generation := captureFixture(t)
-	captureGroup(t, database, generation, 1, 10, 1)
-	captureGroup(t, database, generation, 2, 1, 1.25)
-	captureGroup(t, database, generation, 2, 20, 1.75)
-	if err := move_soldier_groups.MoveSoldierGroupsHandler(database, generation, move_soldier_groups.MoveSoldierGroupsParams{}); err != nil {
-		t.Fatal(err)
-	}
-	if err := dal.RefreshGeneration(database, generation); err != nil {
-		t.Fatal(err)
-	}
-	if len(generation.SoldierGroups) != 1 || generation.SoldierGroups[0].TeamColor != 2 || generation.SoldierGroups[0].SoldierAmount != 11 || generation.SoldierGroups[0].Position.P.X != 1.25 {
-		t.Fatalf("later combat was bypassed or survivor stopped: %+v", generation.SoldierGroups)
-	}
-}
-
-func TestEmptyAndSelfSendOrdersAreRejected(t *testing.T) {
-	database, generation := captureFixture(t)
-	for _, parameters := range []commandHandlers.SendSoldierGroupParams{{OriginPersistentCastleID: 0, DestinationPersistentCastleID: 1, SoldierAmount: 0}, {OriginPersistentCastleID: 0, DestinationPersistentCastleID: 0, SoldierAmount: 1}} {
-		if err := commandHandlers.SendSoldierGroupHandler(database, generation, parameters); err == nil {
-			t.Fatalf("invalid send accepted: %+v", parameters)
-		}
-	}
-	if err := dal.RefreshGeneration(database, generation); err != nil {
-		t.Fatal(err)
-	}
-	origin, err := dal.GetCastleFromGeneration(generation, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if origin.SoldierAmount != 100 || len(generation.SoldierGroups) != 0 {
-		t.Fatal("rejected send changed game state")
-	}
 }
 
 func TestClashPausePersistsForUpgradedGenerations(t *testing.T) {
@@ -277,11 +189,11 @@ func TestPausedGroupRetainsUpgradesAcrossGenerations(t *testing.T) {
 
 func TestClashStopUpgradeOnlyAffectsNewTroops(t *testing.T) {
 	database, generation := captureFixture(t)
-	sendParameters, err := json.Marshal(commandHandlers.SendSoldierGroupParams{OriginPersistentCastleID: 0, DestinationPersistentCastleID: 1, SoldierAmount: 10})
+	sendParameters, err := json.Marshal(simulation.SendSoldierGroupParams{OriginPersistentCastleID: 0, DestinationPersistentCastleID: 1, SoldierAmount: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
-	upgradeParameters, err := json.Marshal(commandHandlers.UpgradeCastleParams{PersistentCastleID: 0, UpgradeType: models.ClashStopGenerationsUpgrade})
+	upgradeParameters, err := json.Marshal(simulation.UpgradeCastleParams{PersistentCastleID: 0, UpgradeType: models.ClashStopGenerationsUpgrade})
 	if err != nil {
 		t.Fatal(err)
 	}

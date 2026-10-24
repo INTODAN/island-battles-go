@@ -44,10 +44,8 @@ func (env *Env) CreateGenerationFromTemplate(ctx context.Context, input *CreateG
 	return resp, nil
 }
 
-// MigrateGeneration Takes the previous generation and creates the new generation.
-// First, duplicates the map with a deep copy in the db.
-// Then applies the default command, which is increasing the soldier group amount of each castle.
-// Then, iterates through the commands, apply each of the command's changes.
+// MigrateGeneration plays one turn of the game with the given commands and
+// stores the result as the next generation; see services.MigrateGeneration.
 func (env *Env) MigrateGeneration(ctx context.Context, input *MigrateGenerationRequest) (*NewGenerationResponse, error) {
 	generationID, err := services.MigrateGeneration(env.DB.WithContext(ctx), input.Body.GameID, input.Body.Commands)
 	if err != nil {

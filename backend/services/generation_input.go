@@ -11,8 +11,8 @@ import (
 	"io"
 
 	"islandBattles/backend/dal"
-	"islandBattles/backend/dal/commandHandlers"
 	"islandBattles/backend/models"
+	"islandBattles/backend/simulation"
 	"islandBattles/lobby/domain"
 	"islandBattles/lobby/realtime"
 
@@ -267,7 +267,7 @@ func validateCommands(generation *models.Generation, teamColor uint, inputs []mo
 			return nil, err
 		}
 		for _, command := range commands {
-			var parameters commandHandlers.SendSoldierGroupParams
+			var parameters simulation.SendSoldierGroupParams
 			if err := json.Unmarshal(command.Parameters, &parameters); err != nil {
 				return nil, err
 			}
@@ -312,7 +312,7 @@ func validateCommands(generation *models.Generation, teamColor uint, inputs []mo
 			return nil, reject(409, "insufficient soldiers after accepted team reservations")
 		}
 		available[*parameters.OriginCastleID] -= *parameters.SoldierAmount
-		raw, err := json.Marshal(commandHandlers.SendSoldierGroupParams{OriginPersistentCastleID: *parameters.OriginCastleID, DestinationPersistentCastleID: *parameters.DestinationCastleID, SoldierAmount: *parameters.SoldierAmount})
+		raw, err := json.Marshal(simulation.SendSoldierGroupParams{OriginPersistentCastleID: *parameters.OriginCastleID, DestinationPersistentCastleID: *parameters.DestinationCastleID, SoldierAmount: *parameters.SoldierAmount})
 		if err != nil {
 			return nil, err
 		}
