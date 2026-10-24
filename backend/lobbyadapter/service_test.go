@@ -1,9 +1,7 @@
 package lobbyadapter_test
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"reflect"
 	"sync"
@@ -161,15 +159,10 @@ func TestBindInitializesOnePlayableGenerationAndReplay(t *testing.T) {
 			t.Fatal("wrong initial soldiers")
 		}
 	}
-	var replay struct {
-		Frames []json.RawMessage `json:"frames"`
-		Teams  []json.RawMessage `json:"teams"`
-	}
-	if err := json.Unmarshal(game.Replay, &replay); err != nil {
-		t.Fatal(err)
-	}
-	if len(replay.Frames) != 1 || len(replay.Teams) != 2 {
-		t.Fatalf("initial replay = %s", game.Replay)
+	// The game keeps the replay's teams, because its lobby is deleted later.
+	teams := []models.GameTeam{{Color: 1, Name: "Blue", Players: []string{"Host"}}, {Color: 2, Name: "Red", Players: []string{"Guest"}}}
+	if !reflect.DeepEqual(game.Teams, teams) || game.Outcome != nil {
+		t.Fatalf("initial teams = %+v, outcome = %+v", game.Teams, game.Outcome)
 	}
 	var players int64
 	if err := database.Model(&models.FrozenGamePlayer{}).Count(&players).Error; err != nil {
@@ -186,7 +179,7 @@ func TestBindInitializesOnePlayableGenerationAndReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(reloaded.Generations) != 1 || !bytes.Equal(reloaded.Replay, game.Replay) || len(publisher.Publications()) != 2 {
+	if len(reloaded.Generations) != 1 || !reflect.DeepEqual(reloaded.Teams, game.Teams) || len(publisher.Publications()) != 2 {
 		t.Fatal("retry changed initialized game or pushed it again")
 	}
 }
@@ -306,14 +299,14 @@ func TestFailedInitializationRollsBackAndCanBeRetried(t *testing.T) {
 			t.Fatalf("left %d partial %T records", count, model)
 		}
 	}
-	if game, err := dal.FindLobbyGame(database, scope.LobbyID); err != nil || len(game.Replay) != 0 {
-		t.Fatalf("partial replay: %+v; error: %v", game, err)
+	if game, err := dal.FindLobbyGame(database, scope.LobbyID); err != nil || len(game.Teams) != 0 {
+		t.Fatalf("partial teams: %+v; error: %v", game, err)
 	}
 	if _, err := service.Bind(context.Background(), principal, scope); err != nil {
 		t.Fatal(err)
 	}
-	if game, err := dal.FindLobbyGame(database, scope.LobbyID); err != nil || len(game.Replay) == 0 {
-		t.Fatalf("retry did not save replay: %v", err)
+	if game, err := dal.FindLobbyGame(database, scope.LobbyID); err != nil || len(game.Teams) == 0 {
+		t.Fatalf("retry did not save teams: %v", err)
 	}
 	assertBindingCounts(t, database, scope.LobbyID, 1, 2)
 }

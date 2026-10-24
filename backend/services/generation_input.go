@@ -218,9 +218,6 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 			if events, err = generationEvents(locked, generation, players); err != nil {
 				return err
 			}
-			if err := appendPlayableReplay(transaction, locked, generation); err != nil {
-				return err
-			}
 		}
 		state, err = generationState(locked, generation, player, inputs)
 		return err

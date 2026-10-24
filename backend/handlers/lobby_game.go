@@ -29,7 +29,7 @@ func (handler *LobbyGame) Replay(ctx context.Context, input *struct {
 	if err != nil {
 		return nil, generationHTTPError(err)
 	}
-	if len(replay) == 0 {
+	if len(replay.Frames) == 0 {
 		return nil, huma.Error404NotFound("game result is not ready")
 	}
 	html, err := services.RenderGameReplay(replay)

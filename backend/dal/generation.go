@@ -54,6 +54,22 @@ func CountGenerationsForGame(db *gorm.DB, gameID uint) (int64, error) {
 	return count, err
 }
 
+// LoadGameGenerations returns every generation of a game in ID order, loaded
+// with WithFullGeneration. Preloads are batched across generations, so the
+// number of queries does not grow with the length of the game.
+func LoadGameGenerations(db *gorm.DB, gameID uint) ([]models.Generation, error) {
+	// GORM drops zero-valued struct conditions, which would match every game.
+	if gameID == 0 {
+		return nil, nil
+	}
+	var generations []models.Generation
+	err := db.Scopes(WithFullGeneration).
+		Where(&models.Generation{GameID: gameID}).
+		Order(clause.OrderByColumn{Column: clause.Column{Name: "id"}}).
+		Find(&generations).Error
+	return generations, err
+}
+
 func CreateGenerationFromTemplate(db *gorm.DB, mapTemplateID uint, gameID uint) (uint, error) {
 	mapID, err := CreateMapFromTemplate(db, mapTemplateID)
 	if err != nil {

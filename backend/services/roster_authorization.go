@@ -25,14 +25,22 @@ func (service *GenerationService) authorize(ctx context.Context, principal domai
 	return nil
 }
 
-// Replay returns the saved replay of a lobby's game to its roster players.
-func (service *GenerationService) Replay(ctx context.Context, principal domain.Principal, lobbyID string) ([]byte, error) {
-	game, err := dal.FindLobbyGame(service.Database.WithContext(ctx), lobbyID)
+// Replay derives the replay of a lobby's game from its stored generations,
+// for its roster players. It takes no game lock: stored generations never
+// change, and the game is read first, so a concurrent turn can at most add a
+// frame to an older outcome.
+func (service *GenerationService) Replay(ctx context.Context, principal domain.Principal, lobbyID string) (GameReplay, error) {
+	database := service.Database.WithContext(ctx)
+	game, err := dal.FindLobbyGame(database, lobbyID)
 	if err != nil {
-		return nil, err
+		return GameReplay{}, err
 	}
 	if err := service.authorize(ctx, principal, game); err != nil {
-		return nil, err
+		return GameReplay{}, err
 	}
-	return game.Replay, nil
+	generations, err := dal.LoadGameGenerations(database, game.ID)
+	if err != nil {
+		return GameReplay{}, err
+	}
+	return gameReplay(game, generations), nil
 }

@@ -2,7 +2,6 @@ package services_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -122,20 +121,13 @@ func TestClashEventsReachSnapshotsReplayAndNotifications(t *testing.T) {
 			if retry.GenerationID != state.GenerationID || !reflect.DeepEqual(retry.Generation.Clashes, state.Generation.Clashes) {
 				t.Fatal("retry changed clash events")
 			}
-			game, err := dal.GetGameByID(fixture.database, state.GameID)
+			// The replay reads the events from generations.clashes, their only copy.
+			replay, err := fixture.service.Replay(ctx, fixture.players[0], state.LobbyID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			var replay struct {
-				Frames []struct {
-					Clashes []models.Clash `json:"clashes"`
-				} `json:"frames"`
-			}
-			if err := json.Unmarshal(game.Replay, &replay); err != nil {
-				t.Fatal(err)
-			}
 			if len(replay.Frames) != 5 || !reflect.DeepEqual(replay.Frames[4].Clashes, state.Generation.Clashes) {
-				t.Fatal("saved replay lost or duplicated events")
+				t.Fatal("replay lost or duplicated events")
 			}
 			pushed := 0
 			for _, event := range fixture.publisher.GenerationEvents(t) {

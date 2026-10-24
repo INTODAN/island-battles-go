@@ -36,7 +36,7 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 	huma.Register(api, huma.Operation{
 		OperationID: "getIslandLobbyReplay", Path: "/game/from-lobby/{lobby_id}/replay", Method: http.MethodGet,
 		Summary:     "View the Island Battles replay history for a started lobby",
-		Description: "Players on the game's frozen roster can view saved generations, including clash effects with survivor losses and defeated troop outlines. The game does not consult the lobby, so access continues after the lobby is deleted.",
+		Description: "Players on the game's frozen roster can view every stored generation of the game, built from the generations on each request, including clash effects with survivor losses and defeated troop outlines. The game does not consult the lobby, so access continues after the lobby is deleted.",
 		Tags:        []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
 	}, game.Replay)
 	huma.Register(api, huma.Operation{

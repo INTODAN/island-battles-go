@@ -13,7 +13,6 @@ import (
 	"github.com/danielgtaylor/huma/v2/humatest"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
-	"islandBattles/backend/dal"
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/models"
@@ -151,14 +150,15 @@ func TestStartedGameServesItsRosterWithoutTheLobby(t *testing.T) {
 	if replay.Code != http.StatusOK || !strings.Contains(replay.Body.String(), "Alice") || !strings.Contains(replay.Body.String(), "Bob") {
 		t.Fatalf("replay=%d %s", replay.Code, replay.Body.String())
 	}
-	saved, err := dal.FindLobbyGame(database, lobbyID)
-	if err != nil {
-		t.Fatal(err)
+	// The page embeds one frame per stored generation, the last one being the
+	// generation the turn just produced.
+	_, embedded, found := strings.Cut(replay.Body.String(), "const replay = ")
+	embedded, _, _ = strings.Cut(embedded, ";\n")
+	var page services.GameReplay
+	if err := json.Unmarshal([]byte(embedded), &page); !found || err != nil {
+		t.Fatalf("embedded replay %q: %v", embedded, err)
 	}
-	var frames struct {
-		Frames []json.RawMessage `json:"frames"`
-	}
-	if err := json.Unmarshal(saved.Replay, &frames); err != nil || len(frames.Frames) != 2 {
-		t.Fatalf("frames=%d err=%v", len(frames.Frames), err)
+	if len(page.Frames) != 2 || page.Frames[1].ID != next.GenerationID || page.GameID != initial.GameID {
+		t.Fatalf("replay page = %+v", page)
 	}
 }
