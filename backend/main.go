@@ -106,7 +106,7 @@ func run(ctx context.Context, config dependencies.Config, logger *slog.Logger) e
 	api := humachi.New(router, routes.NewAPIConfig("Island Battles Go Backend", "1.0.0"))
 	environment := handlers.Env{DB: database}
 	routes.SetupRoutes(api, &environment)
-	routes.SetupLobbyRoutes(api, lobbyService, authentication, gameBinding, &handlers.LobbyGame{Database: database, Lobbies: lobbyService, Authenticator: authentication})
+	routes.SetupLobbyRoutes(api, lobbyService, authentication, gameBinding, &handlers.LobbyGame{Database: database, Authenticator: authentication})
 	proxy.Register(router)
 	router.Get("/lobby/ui", func(response http.ResponseWriter, request *http.Request) {
 		http.Redirect(response, request, "/lobby/ui/", http.StatusTemporaryRedirect)

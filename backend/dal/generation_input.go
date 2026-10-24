@@ -40,6 +40,22 @@ func LoadFrozenPlayers(database *gorm.DB, gameID uint) ([]models.FrozenGamePlaye
 	err := database.Where(&models.FrozenGamePlayer{GameID: gameID}).Order(clause.OrderByColumn{Column: clause.Column{Name: "player_id"}}).Find(&players).Error
 	return players, err
 }
+
+// FindFrozenPlayer returns nil when the player is not on the game's roster.
+func FindFrozenPlayer(database *gorm.DB, gameID uint, playerID string) (*models.FrozenGamePlayer, error) {
+	// GORM drops zero-valued struct conditions, which would match any roster.
+	if gameID == 0 || playerID == "" {
+		return nil, nil
+	}
+	var players []models.FrozenGamePlayer
+	if err := database.Where(&models.FrozenGamePlayer{GameID: gameID, PlayerID: playerID}).Limit(1).Find(&players).Error; err != nil {
+		return nil, err
+	}
+	if len(players) == 0 {
+		return nil, nil
+	}
+	return &players[0], nil
+}
 func StoreFrozenPlayers(database *gorm.DB, players []models.FrozenGamePlayer) error {
 	return database.Create(&players).Error
 }
