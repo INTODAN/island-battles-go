@@ -58,7 +58,7 @@ async def test_island_schema_survives_restart():
     tables = await sql("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")
     lobby_tables = {table for table in tables.splitlines() if table.startswith("lobby_")}
     assert set(tables.splitlines()) == lobby_tables | {
-        "games", "maps", "castles", "castle_templates", "map_templates",
+        "games", "maps", "castles", "castle_templates", "map_templates", "map_template_schema_migrations",
         "generations", "soldier_groups", "commands", "island_game_team_bindings",
         "frozen_game_players", "generation_inputs", "generation_requests", "generation_notifications",
     }

@@ -1,0 +1,3 @@
+# Migration checksums cover the exact bytes, so a CRLF checkout must not
+# rewrite them.
+*.sql text eol=lf
