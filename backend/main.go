@@ -56,7 +56,7 @@ func run(ctx context.Context, config dependencies.Config, logger *slog.Logger) e
 	defer func() { _ = sqlDatabase.Close() }()
 	clock := domain.SystemClock{}
 	identifiers := domain.CryptoIdentifiers{}
-	policy := domain.DefaultPolicy("island-battles", "quiz-demo")
+	policy := domain.DefaultPolicy(lobbyadapter.Registration(), domain.GameRegistration{Key: "quiz-demo"})
 	// Requests push their own committed changes, so nothing runs between requests.
 	publisher, err := realtime.NewPublisher(dependencies.ConnectCentrifugoClient(config), logger, realtime.DefaultPushRetry())
 	if err != nil {
