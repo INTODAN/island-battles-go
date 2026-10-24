@@ -121,7 +121,7 @@ The Go database tests start their PostgreSQL containers through testcontainers-g
    ```sh
    systemctl --user enable --now podman.socket
    ```
-2. Point testcontainers at the socket and disable Ryuk, its cleanup container. Ryuk doesn't run on rootless Podman, so with it enabled every database test fails with a `reaper:` error. To configure the shell:
+2. Point testcontainers at the socket and disable Ryuk, its cleanup container. Ryuk asks for Docker's default `bridge` network, which rootless Podman calls `podman`, so with it enabled every database test fails with a `reaper:` error. To configure the shell:
    ```sh
    export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/podman/podman.sock
    export TESTCONTAINERS_RYUK_DISABLED=true
@@ -131,6 +131,7 @@ The Go database tests start their PostgreSQL containers through testcontainers-g
    docker.host=unix:///run/user/<uid>/podman/podman.sock
    ryuk.disabled=true
    ```
+   testcontainers-go v0.40.0 resolves the Docker host in this order: its `tc.host` setting, the `DOCKER_HOST` variable, the Docker context, `/var/run/docker.sock`, and only then the `docker.host` property. If `/var/run/docker.sock` exists, for example from the `podman-docker` package, it wins over the property.
 
 With Ryuk off, normal runs still remove their containers through `t.Cleanup`. An interrupted run (Ctrl+C, stopping the run in an IDE, or a test timeout) leaves its PostgreSQL containers behind. List them with `podman ps -a --filter label=org.testcontainers=true` and remove them with `podman rm -f`. Don't use `podman container prune` for this: if they're stopped, it also removes the `island-battles-dev-db` and `island-battles-dev-centrifugo` containers that `scripts/dev.sh` creates.
 
