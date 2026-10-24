@@ -160,7 +160,7 @@ slider.addEventListener("input", () => { turn = Number(slider.value); playing = 
 document.getElementById("result").addEventListener("click", () => { turn = lastTurn; playing = false; followingLive = false; render(); });
 live.addEventListener("click", () => { followingLive = true; playing = false; turn = lastTurn; render(); });
 window.addEventListener("message", (event) => {
-  if (event.source !== window.parent || event.data?.type !== "island-battles.generation") return;
+  if (event.source !== window.parent || event.data?.type !== "lobby.game-state" || event.data.game_key !== "island-battles") return;
   const state = event.data.state;
   if (state?.game_id !== replay.game_id || !state.generation || state.generation.id <= latestGeneration) return;
   // Saved frames have the same shape as live generations.
