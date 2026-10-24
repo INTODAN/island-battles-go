@@ -1,81 +1,37 @@
 package services
 
 import (
-	"fmt"
 	"islandBattles/backend/dal"
-	"islandBattles/backend/dal/commandHandlers"
 	"islandBattles/backend/models"
+	"islandBattles/backend/simulation"
 
 	"gorm.io/gorm"
 )
 
-// MigrateGeneration commits the whole turn or rolls it back when a command is rejected.
+// MigrateGeneration plays one turn: it loads the latest generation once, applies
+// the commands and the end-of-turn steps in memory, and saves the result as the
+// next generation. A rejected command rolls back the whole turn.
 func MigrateGeneration(database *gorm.DB, gameID uint, commands []models.CommandFields) (uint, error) {
+	turnCommands := append(append([]models.CommandFields{}, commands...), simulation.EndOfTurnCommands()...)
+	decodedCommands, err := simulation.DecodeCommands(turnCommands)
+	if err != nil {
+		return 0, err
+	}
 	var generationID uint
-	err := database.Transaction(func(transaction *gorm.DB) error {
-		var err error
-		generationID, err = migrateGeneration(transaction, gameID, commands)
+	err = database.Transaction(func(transaction *gorm.DB) error {
+		state, err := dal.LoadGameState(transaction, gameID)
+		if err != nil {
+			return err
+		}
+		next, events, err := simulation.Simulate(state, decodedCommands)
+		if err != nil {
+			return err
+		}
+		generationID, err = dal.SaveGeneration(transaction, gameID, next, turnCommands, simulation.Clashes(events))
 		return err
 	})
 	if err != nil {
 		return 0, err
 	}
 	return generationID, nil
-}
-
-func migrateGeneration(db *gorm.DB, GameID uint, commands []models.CommandFields) (uint, error) {
-	previousGeneration, err := dal.GetLatestGenerationForGame(db, GameID)
-	if err != nil {
-		return 0, err
-	}
-
-	// Duplicate the map with a deep copy
-	newMapID, err := dal.DuplicateMap(db, previousGeneration.MapID)
-	if err != nil {
-		return 0, err
-	}
-
-	// Create the new generation linking to the new map
-	migratedGeneration := models.Generation{
-		GameID: previousGeneration.GameID,
-		MapID:  newMapID,
-	}
-	migratedGenerationID, err := dal.CreateGeneration(db, &migratedGeneration)
-	if err != nil {
-		return 0, err
-	}
-
-	for _, soldierGroup := range previousGeneration.SoldierGroups {
-		_, err := dal.DuplicateSoldierGroup(db, migratedGenerationID, soldierGroup.ID)
-		if err != nil {
-			return 0, err
-		}
-	}
-	increaseSoldiersAmountCommand := models.CommandFields{
-		CommandType: models.IncreaseSoldierAmount,
-		Parameters:  []byte("{}")}
-
-	moveSoldierGroupsCommand := models.CommandFields{
-		CommandType: models.MoveSoldierGroups,
-		Parameters:  []byte("{}"),
-	}
-
-	removeArrivedSoldierGroupsCommand := models.CommandFields{
-		CommandType: models.RemoveArrivedSoldierGroups,
-		Parameters:  []byte("{}"),
-	}
-
-	commands = append(commands, moveSoldierGroupsCommand)
-	commands = append(commands, increaseSoldiersAmountCommand)
-	commands = append(commands, removeArrivedSoldierGroupsCommand)
-
-	// Iterate through the provided commands and apply their changes
-	for _, cmd := range commands {
-		err := commandHandlers.ProcessCommand(db, &cmd, migratedGenerationID)
-		if err != nil {
-			fmt.Println("Error processing command:", err)
-			return 0, err
-		}
-	}
-	return migratedGenerationID, nil
 }

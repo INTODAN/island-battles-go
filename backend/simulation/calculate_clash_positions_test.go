@@ -1,7 +1,6 @@
-package calculations
+package simulation
 
 import (
-	"islandBattles/backend/dal/commandHandlers/move_soldier_groups/internal"
 	"islandBattles/backend/models"
 	"math"
 	"testing"
@@ -12,29 +11,29 @@ import (
 func TestCalculateClashPositions(t *testing.T) {
 	tests := []struct {
 		name            string
-		positions       []internal.SoldierGroupMoveDelta
+		positions       []soldierGroupMoveDelta
 		expectedClashes int // number of distinct clash points
 	}{
 		{
 			name:            "No soldier groups",
-			positions:       []internal.SoldierGroupMoveDelta{},
+			positions:       []soldierGroupMoveDelta{},
 			expectedClashes: 0,
 		},
 		{
 			name: "Head-on collision",
-			positions: []internal.SoldierGroupMoveDelta{
+			positions: []soldierGroupMoveDelta{
 				{
 					Start: pgtype.Point{P: pgtype.Vec2{X: 0, Y: 0}, Valid: true},
 					End:   pgtype.Point{P: pgtype.Vec2{X: 2, Y: 0}, Valid: true},
-					SoldierGroup: &models.SoldierGroup{
-						SoldierGroupFields: models.SoldierGroupFields{SoldierAmount: 10}, TeamColor: 1,
+					SoldierGroup: &SoldierGroup{
+						Soldiers: 10, TeamColor: 1,
 					},
 				},
 				{
 					Start: pgtype.Point{P: pgtype.Vec2{X: 2, Y: 0}, Valid: true},
 					End:   pgtype.Point{P: pgtype.Vec2{X: 0, Y: 0}, Valid: true},
-					SoldierGroup: &models.SoldierGroup{
-						SoldierGroupFields: models.SoldierGroupFields{SoldierAmount: 10}, TeamColor: 2,
+					SoldierGroup: &SoldierGroup{
+						Soldiers: 10, TeamColor: 2,
 					},
 				},
 			},
@@ -42,19 +41,19 @@ func TestCalculateClashPositions(t *testing.T) {
 		},
 		{
 			name: "Same team - no collision",
-			positions: []internal.SoldierGroupMoveDelta{
+			positions: []soldierGroupMoveDelta{
 				{
 					Start: pgtype.Point{P: pgtype.Vec2{X: 0, Y: 0}, Valid: true},
 					End:   pgtype.Point{P: pgtype.Vec2{X: 2, Y: 0}, Valid: true},
-					SoldierGroup: &models.SoldierGroup{
-						SoldierGroupFields: models.SoldierGroupFields{SoldierAmount: 10}, TeamColor: 1,
+					SoldierGroup: &SoldierGroup{
+						Soldiers: 10, TeamColor: 1,
 					},
 				},
 				{
 					Start: pgtype.Point{P: pgtype.Vec2{X: 2, Y: 0}, Valid: true},
 					End:   pgtype.Point{P: pgtype.Vec2{X: 0, Y: 0}, Valid: true},
-					SoldierGroup: &models.SoldierGroup{
-						SoldierGroupFields: models.SoldierGroupFields{SoldierAmount: 10}, TeamColor: 1,
+					SoldierGroup: &SoldierGroup{
+						Soldiers: 10, TeamColor: 1,
 					},
 				},
 			},
@@ -62,19 +61,19 @@ func TestCalculateClashPositions(t *testing.T) {
 		},
 		{
 			name: "Crossing paths but at different times",
-			positions: []internal.SoldierGroupMoveDelta{
+			positions: []soldierGroupMoveDelta{
 				{
 					Start: pgtype.Point{P: pgtype.Vec2{X: 0, Y: 0}, Valid: true},
 					End:   pgtype.Point{P: pgtype.Vec2{X: 10, Y: 10}, Valid: true},
-					SoldierGroup: &models.SoldierGroup{
-						SoldierGroupFields: models.SoldierGroupFields{SoldierAmount: 10}, TeamColor: 1,
+					SoldierGroup: &SoldierGroup{
+						Soldiers: 10, TeamColor: 1,
 					},
 				},
 				{
 					Start: pgtype.Point{P: pgtype.Vec2{X: 0, Y: 10}, Valid: true},
 					End:   pgtype.Point{P: pgtype.Vec2{X: 10, Y: 11}, Valid: true}, // Moves mostly horizontal
-					SoldierGroup: &models.SoldierGroup{
-						SoldierGroupFields: models.SoldierGroupFields{SoldierAmount: 10}, TeamColor: 2,
+					SoldierGroup: &SoldierGroup{
+						Soldiers: 10, TeamColor: 2,
 					},
 				},
 			},
@@ -82,19 +81,19 @@ func TestCalculateClashPositions(t *testing.T) {
 		},
 		{
 			name: "Orthogonal collision at (5,5)",
-			positions: []internal.SoldierGroupMoveDelta{
+			positions: []soldierGroupMoveDelta{
 				{
 					Start: pgtype.Point{P: pgtype.Vec2{X: 0, Y: 5}, Valid: true},
 					End:   pgtype.Point{P: pgtype.Vec2{X: 10, Y: 5}, Valid: true},
-					SoldierGroup: &models.SoldierGroup{
-						SoldierGroupFields: models.SoldierGroupFields{SoldierAmount: 10}, TeamColor: 1,
+					SoldierGroup: &SoldierGroup{
+						Soldiers: 10, TeamColor: 1,
 					},
 				},
 				{
 					Start: pgtype.Point{P: pgtype.Vec2{X: 5, Y: 0}, Valid: true},
 					End:   pgtype.Point{P: pgtype.Vec2{X: 5, Y: 10}, Valid: true},
-					SoldierGroup: &models.SoldierGroup{
-						SoldierGroupFields: models.SoldierGroupFields{SoldierAmount: 10}, TeamColor: 2,
+					SoldierGroup: &SoldierGroup{
+						Soldiers: 10, TeamColor: 2,
 					},
 				},
 			},
@@ -102,19 +101,19 @@ func TestCalculateClashPositions(t *testing.T) {
 		},
 		{
 			name: "Never meeting, traveling same vector distance",
-			positions: []internal.SoldierGroupMoveDelta{
+			positions: []soldierGroupMoveDelta{
 				{
 					Start: pgtype.Point{P: pgtype.Vec2{X: 0, Y: 5}, Valid: true},
 					End:   pgtype.Point{P: pgtype.Vec2{X: 10, Y: 5}, Valid: true},
-					SoldierGroup: &models.SoldierGroup{
-						SoldierGroupFields: models.SoldierGroupFields{SoldierAmount: 10}, TeamColor: 1,
+					SoldierGroup: &SoldierGroup{
+						Soldiers: 10, TeamColor: 1,
 					},
 				},
 				{
 					Start: pgtype.Point{P: pgtype.Vec2{X: 0, Y: 0}, Valid: true},
 					End:   pgtype.Point{P: pgtype.Vec2{X: 10, Y: 0}, Valid: true},
-					SoldierGroup: &models.SoldierGroup{
-						SoldierGroupFields: models.SoldierGroupFields{SoldierAmount: 10}, TeamColor: 2,
+					SoldierGroup: &SoldierGroup{
+						Soldiers: 10, TeamColor: 2,
 					},
 				},
 			},
@@ -125,7 +124,7 @@ func TestCalculateClashPositions(t *testing.T) {
 	for _, testCase := range tests {
 		t.Run(
 			testCase.name, func(t *testing.T) {
-				clashes, err := CalculateClashPositions(testCase.positions)
+				clashes, err := calculateClashPositions(testCase.positions)
 				if err != nil {
 					t.Fatalf("Unexpected error: %v", err)
 				}
@@ -157,11 +156,11 @@ func TestClashesWithCoordinateRounding(t *testing.T) {
 				}
 				return pgtype.Point{P: pgtype.Vec2{X: x, Y: y}, Valid: true}
 			}
-			positions := []internal.SoldierGroupMoveDelta{
-				{Start: point(0.5, -2.143131898507865e-16), End: point(1, -3.0616169978683787e-16), SoldierGroup: &models.SoldierGroup{SoldierGroupFields: models.SoldierGroupFields{SoldierAmount: 10}, TeamColor: 1}},
-				{Start: point(1, -3.0616169978683787e-16+offset), End: point(0.5, -2.143131898507865e-16+offset), SoldierGroup: &models.SoldierGroup{SoldierGroupFields: models.SoldierGroupFields{SoldierAmount: 10}, TeamColor: 2}},
+			positions := []soldierGroupMoveDelta{
+				{Start: point(0.5, -2.143131898507865e-16), End: point(1, -3.0616169978683787e-16), SoldierGroup: &SoldierGroup{Soldiers: 10, TeamColor: 1}},
+				{Start: point(1, -3.0616169978683787e-16+offset), End: point(0.5, -2.143131898507865e-16+offset), SoldierGroup: &SoldierGroup{Soldiers: 10, TeamColor: 2}},
 			}
-			clashes, err := CalculateClashPositions(positions)
+			clashes, err := calculateClashPositions(positions)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -210,11 +209,11 @@ func TestRadiusContactDuringMovement(t *testing.T) {
 			if scenario.sameTeam {
 				rightTeam = 1
 			}
-			movements := []internal.SoldierGroupMoveDelta{
-				{Start: scenario.leftStart, End: scenario.leftEnd, SoldierGroup: &models.SoldierGroup{SoldierGroupFields: models.SoldierGroupFields{SoldierAmount: 10}, TeamColor: 1, ClashRadius: scenario.leftRadius}},
-				{Start: scenario.rightStart, End: scenario.rightEnd, SoldierGroup: &models.SoldierGroup{SoldierGroupFields: models.SoldierGroupFields{SoldierAmount: 10}, TeamColor: rightTeam, ClashRadius: scenario.rightRadius}},
+			movements := []soldierGroupMoveDelta{
+				{Start: scenario.leftStart, End: scenario.leftEnd, SoldierGroup: &SoldierGroup{Soldiers: 10, TeamColor: 1, ClashRadius: scenario.leftRadius}},
+				{Start: scenario.rightStart, End: scenario.rightEnd, SoldierGroup: &SoldierGroup{Soldiers: 10, TeamColor: rightTeam, ClashRadius: scenario.rightRadius}},
 			}
-			clashes, err := CalculateClashPositions(movements)
+			clashes, err := calculateClashPositions(movements)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -230,14 +229,14 @@ func TestRadiusContactDuringMovement(t *testing.T) {
 }
 
 func TestSimultaneousClashesAndEarlierContacts(t *testing.T) {
-	movement := func(start, end float64, team uint) internal.SoldierGroupMoveDelta {
-		return internal.SoldierGroupMoveDelta{Start: pgtype.Point{P: pgtype.Vec2{X: start}, Valid: true}, End: pgtype.Point{P: pgtype.Vec2{X: end}, Valid: true}, SoldierGroup: &models.SoldierGroup{SoldierGroupFields: models.SoldierGroupFields{SoldierAmount: 10}, TeamColor: team}}
+	movement := func(start, end float64, team uint) soldierGroupMoveDelta {
+		return soldierGroupMoveDelta{Start: pgtype.Point{P: pgtype.Vec2{X: start}, Valid: true}, End: pgtype.Point{P: pgtype.Vec2{X: end}, Valid: true}, SoldierGroup: &SoldierGroup{Soldiers: 10, TeamColor: team}}
 	}
-	clashes, err := CalculateClashPositions([]internal.SoldierGroupMoveDelta{movement(-.25, -.25, 1), movement(0, 0, 2), movement(.25, .25, 1)})
+	clashes, err := calculateClashPositions([]soldierGroupMoveDelta{movement(-.25, -.25, 1), movement(0, 0, 2), movement(.25, .25, 1)})
 	if err != nil || len(clashes) != 1 || len(clashes[0].Participants) != 3 {
 		t.Fatalf("simultaneous contacts must share a clash: %+v, %v", clashes, err)
 	}
-	clashes, err = CalculateClashPositions([]internal.SoldierGroupMoveDelta{movement(0, 2, 1), movement(.25, .25, 2), movement(1, 1, 2)})
+	clashes, err = calculateClashPositions([]soldierGroupMoveDelta{movement(0, 2, 1), movement(.25, .25, 2), movement(1, 1, 2)})
 	if err != nil || len(clashes) != 1 || len(clashes[0].Participants) != 2 {
 		t.Fatalf("a destroyed group must not clash farther along its original path: %+v, %v", clashes, err)
 	}

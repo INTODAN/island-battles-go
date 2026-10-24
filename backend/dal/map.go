@@ -63,37 +63,3 @@ func CreateMapFromTemplate(db *gorm.DB, templateID uint) (uint, error) {
 
 	return newMap.ID, nil
 }
-
-func DuplicateMap(db *gorm.DB, originalMapID uint) (uint, error) {
-	var originalMap models.Map
-	if err := db.Preload(clause.Associations).First(&originalMap, originalMapID).Error; err != nil {
-		return 0, err
-	}
-
-	newMap := models.Map{
-		MapFields: originalMap.MapFields,
-	}
-
-	var newCastles []models.Castle
-	for _, originalCastle := range originalMap.Castles {
-		newCastles = append(newCastles, models.Castle{
-			CastleFields:  originalCastle.Clone(),
-			SoldierAmount: originalCastle.SoldierAmount,
-		})
-	}
-	newMap.Castles = newCastles
-
-	if err := db.Create(&newMap).Error; err != nil {
-		return 0, err
-	}
-
-	return newMap.ID, nil
-}
-
-func GetMap(db *gorm.DB, mapID uint) (*models.Map, error) {
-	var m models.Map
-	if err := db.Preload(clause.Associations).First(&m, mapID).Error; err != nil {
-		return nil, err
-	}
-	return &m, nil
-}

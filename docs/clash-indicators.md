@@ -51,7 +51,8 @@ generation snapshots without clash overlays.
 
 The simulation already calculates ordered clashes with a time within the turn,
 participant positions, and remaining soldiers in
-[`internal.Clash`](../backend/dal/commandHandlers/move_soldier_groups/internal/models.go).
+[`resolvedClash`](../backend/simulation/movement.go), and returns them from
+`simulation.Simulate` as clash events.
 The integration uses those results as the event source:
 
 1. Capture immutable event values during resolution, before group updates or

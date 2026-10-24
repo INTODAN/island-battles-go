@@ -1,38 +1,42 @@
-package calculations
+package simulation
 
 import (
-	"islandBattles/backend/dal/commandHandlers/move_soldier_groups/internal"
 	"islandBattles/backend/models"
 	"math"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-func CalculateInitialPositions(soldierGroups []models.SoldierGroup) ([]internal.SoldierGroupMoveDelta, error) {
-	var soldierGroupsPositions []internal.SoldierGroupMoveDelta
+// calculateInitialPositions plans every group's movement in persistent ID order.
+func calculateInitialPositions(state *GameState) ([]soldierGroupMoveDelta, error) {
+	var soldierGroupsPositions []soldierGroupMoveDelta
 
-	for i := range soldierGroups {
-		soldierGroup := &soldierGroups[i]
+	for _, soldierGroup := range state.SortedSoldierGroups() {
+		destination, err := state.castle(soldierGroup.DestinationCastleID)
+		if err != nil {
+			return nil, err
+		}
 		speed, err := soldierGroup.Upgrades.Value(models.SpeedUpgrade)
 		if err != nil {
 			return nil, err
 		}
-		newPosition := moveTowards(soldierGroup.Position, soldierGroup.DestinationCastle.Position, speed)
+		newPosition := moveTowards(soldierGroup.Position, destination.Position, speed)
 		var pauseGenerations uint
 		if soldierGroup.MovementPauseGenerations > 0 {
 			newPosition = soldierGroup.Position
 			pauseGenerations = soldierGroup.MovementPauseGenerations - 1
 		}
 		var arrivalTime *float64
-		if newPosition == soldierGroup.DestinationCastle.Position {
+		if newPosition == destination.Position {
 			time := math.Hypot(newPosition.P.X-soldierGroup.Position.P.X, newPosition.P.Y-soldierGroup.Position.P.Y) / speed
 			arrivalTime = &time
 		}
 		soldierGroupsPositions = append(
-			soldierGroupsPositions, internal.SoldierGroupMoveDelta{
+			soldierGroupsPositions, soldierGroupMoveDelta{
 				Start:            soldierGroup.Position,
 				End:              newPosition,
 				SoldierGroup:     soldierGroup,
+				Destination:      destination.Position,
 				ArrivalTime:      arrivalTime,
 				PauseGenerations: pauseGenerations,
 			},

@@ -1,4 +1,4 @@
-package calculations
+package simulation
 
 import (
 	"islandBattles/backend/models"
@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"gorm.io/gorm"
 )
 
 func TestMoveTowards(t *testing.T) {
@@ -31,57 +30,46 @@ func TestMoveTowards(t *testing.T) {
 func TestCalculateInitialPositions(t *testing.T) {
 	tests := []struct {
 		name             string
-		soldierGroups    []models.SoldierGroup
+		soldierGroups    []SoldierGroup
+		destination      pgtype.Point
 		expectedCount    int
 		expectedDistance float64
 	}{
 		{
 			name:             "Empty list",
-			soldierGroups:    []models.SoldierGroup{},
+			soldierGroups:    []SoldierGroup{},
 			expectedCount:    0,
 			expectedDistance: 0,
 		},
 		{
 			name: "Single soldier group moving diagonally",
-			soldierGroups: []models.SoldierGroup{
+			soldierGroups: []SoldierGroup{
 				{
-					Model: gorm.Model{ID: 1},
+					ID: 1,
 					Position: pgtype.Point{
 						P:     pgtype.Vec2{X: 0, Y: 0},
 						Valid: true,
 					},
-					DestinationCastle: models.Castle{
-						CastleFields: models.CastleFields{
-							Position: pgtype.Point{
-								P:     pgtype.Vec2{X: 10, Y: 10},
-								Valid: true,
-							},
-						},
-					},
+					DestinationCastleID: 1,
 				},
 			},
+			destination:      pgtype.Point{P: pgtype.Vec2{X: 10, Y: 10}, Valid: true},
 			expectedCount:    1,
 			expectedDistance: 0.5,
 		},
 		{
 			name: "Single soldier group about to reach destination",
-			soldierGroups: []models.SoldierGroup{
+			soldierGroups: []SoldierGroup{
 				{
-					Model: gorm.Model{ID: 1},
+					ID: 1,
 					Position: pgtype.Point{
 						P:     pgtype.Vec2{X: 9.7, Y: 0},
 						Valid: true,
 					},
-					DestinationCastle: models.Castle{
-						CastleFields: models.CastleFields{
-							Position: pgtype.Point{
-								P:     pgtype.Vec2{X: 10, Y: 0},
-								Valid: true,
-							},
-						},
-					},
+					DestinationCastleID: 1,
 				},
 			},
+			destination:      pgtype.Point{P: pgtype.Vec2{X: 10, Y: 0}, Valid: true},
 			expectedCount:    1,
 			expectedDistance: 0.3,
 		},
@@ -90,7 +78,8 @@ func TestCalculateInitialPositions(t *testing.T) {
 	for _, testCase := range tests {
 		t.Run(
 			testCase.name, func(t *testing.T) {
-				result, err := CalculateInitialPositions(testCase.soldierGroups)
+				state := stateWithGroups(testCase.destination, testCase.soldierGroups...)
+				result, err := calculateInitialPositions(&state)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -103,7 +92,7 @@ func TestCalculateInitialPositions(t *testing.T) {
 					sg := testCase.soldierGroups[0]
 					res := result[0]
 
-					if res.SoldierGroup != &testCase.soldierGroups[0] {
+					if res.SoldierGroup != state.SoldierGroups[sg.ID] {
 						t.Errorf("Expected SoldierGroup pointer to match")
 					}
 
@@ -128,12 +117,12 @@ func TestCalculateInitialPositions(t *testing.T) {
 
 func TestMovementUsesGroupUpgradeSnapshot(t *testing.T) {
 	for level, speed := range []float64{.5, 1, 1.5, 2} {
-		group := models.SoldierGroup{
-			Upgrades:          models.Upgrades{models.SpeedUpgrade: level + 1},
-			Position:          pgtype.Point{P: pgtype.Vec2{X: 0, Y: 0}, Valid: true},
-			DestinationCastle: models.Castle{CastleFields: models.CastleFields{Position: pgtype.Point{P: pgtype.Vec2{X: 3, Y: 4}, Valid: true}}},
+		group := SoldierGroup{
+			Upgrades: models.Upgrades{models.SpeedUpgrade: level + 1},
+			Position: pgtype.Point{P: pgtype.Vec2{X: 0, Y: 0}, Valid: true},
 		}
-		movements, err := CalculateInitialPositions([]models.SoldierGroup{group})
+		state := stateWithGroups(pgtype.Point{P: pgtype.Vec2{X: 3, Y: 4}, Valid: true}, group)
+		movements, err := calculateInitialPositions(&state)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -141,10 +130,28 @@ func TestMovementUsesGroupUpgradeSnapshot(t *testing.T) {
 		if math.Abs(math.Hypot(position.X, position.Y)-speed) > 1e-9 {
 			t.Fatalf("level %d moved %v", level+1, position)
 		}
-		group.DestinationCastle.Position.P = pgtype.Vec2{X: .1, Y: .1}
-		movements, err = CalculateInitialPositions([]models.SoldierGroup{group})
-		if err != nil || movements[0].End != group.DestinationCastle.Position {
+		destination := pgtype.Point{P: pgtype.Vec2{X: .1, Y: .1}, Valid: true}
+		state = stateWithGroups(destination, group)
+		movements, err = calculateInitialPositions(&state)
+		if err != nil || movements[0].End != destination {
 			t.Fatal("overshot destination")
 		}
 	}
+}
+
+// stateWithGroups places the groups on a board whose castle 0 is at origin and
+// castle 1, every group's destination, is at destination.
+func stateWithGroups(destination pgtype.Point, groups ...SoldierGroup) GameState {
+	state := GameState{
+		Castles: map[uint]*Castle{
+			0: {ID: 0, Position: pgtype.Point{Valid: true}},
+			1: {ID: 1, Position: destination},
+		},
+		SoldierGroups: map[uint]*SoldierGroup{},
+	}
+	for _, group := range groups {
+		group.DestinationCastleID = 1
+		state.SoldierGroups[group.ID] = &group
+	}
+	return state
 }

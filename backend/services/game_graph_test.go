@@ -3,10 +3,10 @@ package services_test
 import (
 	"encoding/json"
 	"islandBattles/backend/dal"
-	"islandBattles/backend/dal/commandHandlers"
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
+	"islandBattles/backend/simulation"
 	"testing"
 )
 
@@ -40,7 +40,7 @@ func TestGameGraphWithSoldierGroups(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	sendSoldierGroupParams := commandHandlers.SendSoldierGroupParams{
+	sendSoldierGroupParams := simulation.SendSoldierGroupParams{
 		SoldierAmount:                 10,
 		OriginPersistentCastleID:      generation.Map.Castles[0].PersistentCastleID,
 		DestinationPersistentCastleID: generation.Map.Castles[1].PersistentCastleID,
@@ -74,7 +74,7 @@ func TestGameGraphWithSoldierGroups(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	sendSoldierGroupParams = commandHandlers.SendSoldierGroupParams{
+	sendSoldierGroupParams = simulation.SendSoldierGroupParams{
 		SoldierAmount:                 20,
 		OriginPersistentCastleID:      generation.Map.Castles[1].PersistentCastleID,
 		DestinationPersistentCastleID: generation.Map.Castles[0].PersistentCastleID,

@@ -5,10 +5,15 @@ description: Use Island Battles PostgreSQL fixtures and graph exports when testi
 
 # Game-state testing
 
+## Rule tests
+
+Game rules live in `backend/simulation` and run on an in-memory `simulation.GameState`. Test a rule by building a state and calling `simulation.Simulate` with the commands under test; these tests need no database. Use `simulation.EndOfTurnCommands()` when a scenario plays whole turns. See [the simulation tests](../../../backend/simulation/simulate_test.go).
+
 ## Database fixtures
 
 - [testutils.InitTestDB(t)](../../../backend/internal/testutils/test_database.go) starts a disposable PostgreSQL container and registers cleanup. Docker must be available; the image may need to be pulled. These tests do not need the Compose database.
 - [CreateGenerationForTest(t, db) and CreateComplexGenerationForTest(t, db)](../../../backend/internal/testutils/test_generation.go) return a **generation ID**. Load the generation through `dal.GetGeneration` when you need its state or `GameID`.
+- [CreateSoldierGroupForTest(t, db, group)](../../../backend/internal/testutils/test_soldier_group.go) places a group directly in a generation, as if it had been sent earlier, with the next persistent group ID.
 - Service tests using these helpers belong to the external `services_test` package: `testutils` itself imports `services`.
 - Use database-backed scenarios when the behavior depends on persisted state or generation transitions. Assert the relevant state changes; graph exports are an additional diagnostic for cases that benefit from visualization.
 
