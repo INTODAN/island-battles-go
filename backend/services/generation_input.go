@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"sort"
 
 	"islandBattles/backend/dal"
 	"islandBattles/backend/dal/commandHandlers"
@@ -320,30 +319,13 @@ func validateCommands(generation *models.Generation, teamColor uint, inputs []mo
 
 func generationState(game *models.Game, generation *models.Generation, player models.FrozenGamePlayer, inputs []models.GenerationInput) models.GenerationState {
 	state := models.GenerationState{GameID: game.ID, LobbyID: *game.LobbyID, GenerationID: generation.ID, PlayerID: player.PlayerID, TeamColor: player.TeamColor, Channel: "player:" + player.PlayerID,
-		Generation: models.GenerationView{ID: generation.ID, Castles: []models.CastleView{}, SoldierGroups: []models.SoldierGroupView{}, Clashes: publishedClashes(generation)}}
+		Generation: generationView(generation)}
 	for _, input := range inputs {
 		if input.PlayerID == player.PlayerID {
 			state.Submitted = input.Completed
 		}
 	}
-	for _, castle := range generation.Map.Castles {
-		state.Generation.Castles = append(state.Generation.Castles, models.CastleView{ID: castle.PersistentCastleID, TeamColor: castle.TeamColor, Soldiers: castle.SoldierAmount, X: castle.Position.P.X, Y: castle.Position.P.Y})
-	}
-	for _, group := range generation.SoldierGroups {
-		state.Generation.SoldierGroups = append(state.Generation.SoldierGroups, models.SoldierGroupView{ID: group.PersistentSoldierGroupID, TeamColor: group.TeamColor, Soldiers: group.SoldierAmount, X: group.Position.P.X, Y: group.Position.P.Y, OriginCastleID: group.OriginCastle.PersistentCastleID, DestinationCastleID: group.DestinationCastle.PersistentCastleID, ClashRadius: group.EffectiveClashRadius()})
-	}
-	sort.Slice(state.Generation.Castles, func(left, right int) bool {
-		return state.Generation.Castles[left].ID < state.Generation.Castles[right].ID
-	})
-	sort.Slice(state.Generation.SoldierGroups, func(left, right int) bool {
-		return state.Generation.SoldierGroups[left].ID < state.Generation.SoldierGroups[right].ID
-	})
 	return state
-}
-
-// publishedClashes is an empty list rather than null before the first turn.
-func publishedClashes(generation *models.Generation) []models.Clash {
-	return append([]models.Clash{}, generation.Clashes...)
 }
 
 func queueGenerationNotifications(database *gorm.DB, game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer) error {
