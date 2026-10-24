@@ -20,7 +20,6 @@ import (
 	"islandBattles/backend/services"
 	"islandBattles/lobby/application"
 	"islandBattles/lobby/auth"
-	"islandBattles/lobby/delivery"
 	"islandBattles/lobby/domain"
 	"islandBattles/lobby/frontend"
 	lobbypostgres "islandBattles/lobby/postgres"
@@ -60,7 +59,17 @@ func run(ctx context.Context, config dependencies.Config, logger *slog.Logger) e
 	clock := domain.SystemClock{}
 	identifiers := domain.CryptoIdentifiers{}
 	policy := domain.DefaultPolicy("island-battles", "quiz-demo")
-	store, err := lobbypostgres.NewStore(database, clock, identifiers)
+	centrifugoClient := dependencies.ConnectCentrifugoClient(config)
+	// Lobby requests push their own committed changes, so no lobby work runs between requests.
+	publisher, err := realtime.NewPublisher(centrifugoClient, logger, realtime.DefaultPushRetry())
+	if err != nil {
+		return err
+	}
+	postgresStore, err := lobbypostgres.NewStore(database, clock)
+	if err != nil {
+		return err
+	}
+	store, err := application.NewPublishingStore(postgresStore, publisher)
 	if err != nil {
 		return err
 	}
@@ -88,19 +97,6 @@ func run(ctx context.Context, config dependencies.Config, logger *slog.Logger) e
 	if err != nil {
 		return err
 	}
-	centrifugoClient := dependencies.ConnectCentrifugoClient(config)
-	transport, err := realtime.NewTransport(centrifugoClient)
-	if err != nil {
-		return err
-	}
-	publisher, err := delivery.NewWorker(store, transport, clock, delivery.DefaultConfig())
-	if err != nil {
-		return err
-	}
-	sweeper, err := application.NewSweeper(store, clock, policy, 64)
-	if err != nil {
-		return err
-	}
 	router := chi.NewMux()
 	router.Use(httplog.RequestLogger(logger, &httplog.Options{Level: slog.LevelInfo, Schema: httplog.SchemaOTEL.Concise(true)}))
 	api := humachi.New(router, routes.NewAPIConfig("Island Battles Go Backend", "1.0.0"))
@@ -122,11 +118,9 @@ func run(ctx context.Context, config dependencies.Config, logger *slog.Logger) e
 	workerContext, stopWorkers := context.WithCancel(ctx)
 	defer stopWorkers()
 	var workers sync.WaitGroup
-	report := func(err error) { logger.Error("Lobby background work failed; will retry", "error", err) }
+	report := func(err error) { logger.Error("Generation delivery failed; will retry", "error", err) }
 	generationPublisher := &services.GenerationDelivery{Database: database, Publisher: centrifugoClient}
-	workers.Add(3)
-	go func() { defer workers.Done(); publisher.Run(workerContext, report) }()
-	go func() { defer workers.Done(); sweeper.Run(workerContext, report) }()
+	workers.Add(1)
 	go func() { defer workers.Done(); generationPublisher.Run(workerContext, report) }()
 	shutdownDone := make(chan struct{})
 	go func() {

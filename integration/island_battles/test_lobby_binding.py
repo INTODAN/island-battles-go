@@ -52,8 +52,7 @@ async def test_start_initializes_one_generation_and_binding_is_idempotent(guests
 
 async def delete_lobby(lobby_id):
     """Delete a lobby's rows, keeping guest sessions, as lobby retention will."""
-    tables = set((await sql("SELECT tablename FROM pg_tables WHERE schemaname='public'")).splitlines())
-    dependents = [table for table in ("lobby_outbox", "lobby_start_roster", "lobby_leases", "lobby_memberships", "lobby_teams") if table in tables]
+    dependents = ("lobby_start_roster", "lobby_leases", "lobby_memberships", "lobby_teams")
     # Locking the room first makes concurrent heartbeats wait, then find no lobby.
     await sql(
         f"SELECT 1 FROM lobby_rooms WHERE id='{lobby_id}' FOR UPDATE; "
