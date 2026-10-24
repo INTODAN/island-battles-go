@@ -20,7 +20,9 @@ button:focus-visible, input:focus-visible { outline: 3px solid #aac4ff; outline-
 input { flex: 1; min-width: 100px; accent-color: #3464e0; }
 #turn { white-space: nowrap; font-size: .82rem; }
 #outcome { margin-top: 14px; font-weight: 600; color: #202d40; }
-#clashes { margin-top: 10px; color: #824309; overflow-wrap: anywhere; }
+/* Keep a line for the summary even with no clashes. The host resizes the frame only after a size message, so growing
+   the page here shows a scrollbar for a frame. A fixed line height stops fallback glyphs such as → from adding height. */
+#clashes { margin-top: 10px; min-height: 1lh; line-height: 1.4; color: #824309; overflow-wrap: anywhere; }
 @media (max-width: 450px) { body { padding: 12px; } .controls input { flex-basis: 100%; order: 1; } }
 </style>
 </head>
