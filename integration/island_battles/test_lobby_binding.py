@@ -4,16 +4,16 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from lobby_client import Scope
+from lobby_client import LobbyError, Scope
 
 from integration.test_live import BASE, create, control_backend, guests, sql
 
 pytestmark = pytest.mark.asyncio
 
 
-async def started_lobby(guests, game_key):
+async def started_lobby(guests, game_key, game_settings=None):
     alice, bob = await guests("Alice"), await guests("Bob")
-    room = await create(alice, game_key)
+    room = await create(alice, game_key, game_settings)
     scope = Scope.from_snapshot(room)
     await bob.join_lobby(game_key=scope.game_key, join_code=room.lobby.join_code)
     await alice.select_team(scope, room.teams[0].id)
@@ -26,6 +26,7 @@ async def started_lobby(guests, game_key):
 
 async def test_start_initializes_one_generation_and_binding_is_idempotent(guests):
     alice, bob, scope = await started_lobby(guests, "island-battles")
+    assert (await alice.snapshot(scope)).lobby.game_settings.to_dict() == {}
     assert await sql(f"SELECT count(*) FROM games WHERE lobby_id='{scope.lobby_id}' AND replay IS NOT NULL") == "1"
     async with httpx.AsyncClient(base_url=BASE, headers={"Authorization": f"Bearer {alice.credential}"}) as adapter:
         first = await adapter.post("/game/from-lobby", json={"game_key": scope.game_key, "lobby_id": scope.lobby_id})
@@ -106,6 +107,21 @@ async def test_roster_keeps_game_access_after_lobby_is_deleted(guests):
 async def test_other_game_never_creates_island_state(guests):
     _, _, scope = await started_lobby(guests, "quiz-demo")
     assert await sql(f"SELECT count(*) FROM games WHERE lobby_id='{scope.lobby_id}'") == "0"
+
+
+async def test_game_settings_reach_the_started_snapshot(guests):
+    settings = {"rounds": 3, "theme": {"name": "space", "dark": True}}
+    _, bob, scope = await started_lobby(guests, "quiz-demo", settings)
+    started = await bob.snapshot(scope)
+    assert started.lobby.phase == "started"
+    assert started.lobby.game_settings.to_dict() == settings
+
+
+async def test_island_battles_rejects_settings_it_does_not_know(guests):
+    alice = await guests("Alice")
+    with pytest.raises(LobbyError) as rejected:
+        await create(alice, "island-battles", {"map": "archipelago"})
+    assert (rejected.value.code, rejected.value.status) == ("invalid_game_settings", 422)
 
 
 async def test_island_schema_survives_restart():

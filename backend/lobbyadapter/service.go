@@ -18,7 +18,7 @@ func NewService(database *gorm.DB, lobbies domain.SnapshotReader, publisher serv
 	if database == nil || publisher == nil {
 		return nil, errors.New("lobby adapter: nil database or publisher")
 	}
-	return application.NewGameBinding("island-battles", lobbies, func(ctx context.Context, snapshot domain.Snapshot) (models.BindingResult, error) {
+	return application.NewGameBinding(GameKey, lobbies, func(ctx context.Context, snapshot domain.Snapshot) (models.BindingResult, error) {
 		return services.RunLobbyGame(ctx, database, publisher, snapshot)
 	})
 }
@@ -38,7 +38,7 @@ func (service *gameStartingApplication) Start(ctx context.Context, principal dom
 	if err != nil {
 		return domain.Snapshot{}, err
 	}
-	if scope.GameKey == "island-battles" {
+	if scope.GameKey == GameKey {
 		if _, err := service.binding.Bind(ctx, principal, scope); err != nil {
 			return domain.Snapshot{}, err
 		}
