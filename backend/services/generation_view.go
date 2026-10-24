@@ -10,6 +10,10 @@ import (
 // states, their notifications and replay frames all use it, so they share one
 // JSON shape. Castles and soldier groups are sorted by persistent ID, and every
 // list is empty rather than null.
+//
+// It expects a generation loaded with dal.WithFullGeneration, meaning
+// Map.Castles, SoldierGroups.OriginCastle and SoldierGroups.DestinationCastle.
+// Without that preload the origin and destination castle IDs silently become 0.
 func generationView(generation *models.Generation) models.GenerationView {
 	view := models.GenerationView{
 		ID:            generation.ID,
