@@ -4,6 +4,8 @@ import (
 	"github.com/danielgtaylor/huma/v2/humatest"
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/routes"
+	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -13,6 +15,14 @@ func TestMapCreateAcceptsTheMapFileFormat(t *testing.T) {
 	body := api.OpenAPI().Paths["/map/create"].Post.RequestBody.Content["application/json"].Schema
 	if body.Ref != "#/components/schemas/MapTemplate" {
 		t.Fatalf("/map/create body is %q, not the MapTemplate schema", body.Ref)
+	}
+	if _, linked := api.OpenAPI().Components.Schemas.SchemaFromRef(body.Ref).Properties["$schema"]; linked {
+		t.Fatal("the map file format publishes Huma's $schema link property")
+	}
+	// Validation rejects the body before the handler would reach the database.
+	linkedFile := `{"$schema":"https://example.com/MapTemplate.json","map_name":"linked","player_amount":1,"plane_size_x":2,"plane_size_y":2,"neutral_starting_soldier_amount":1,"castles":[{"team_color":1,"x":0,"y":0}]}`
+	if response := api.Post("/map/create", strings.NewReader(linkedFile)); response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "body.$schema") {
+		t.Fatalf("a map file with $schema got status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 

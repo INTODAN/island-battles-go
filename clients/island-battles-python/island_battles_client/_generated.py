@@ -249,13 +249,6 @@ class MapTemplate(GameModel):
     model_config = ConfigDict(
         extra="ignore",
     )
-    field_schema: Annotated[
-        AnyUrl | None,
-        Field(alias="$schema", examples=["https://example.com/MapTemplate.json"]),
-    ] = None
-    """
-    A URL to the JSON Schema for this object.
-    """
     castles: Annotated[Sequence[CastleTemplate], Field(min_length=1)]
     """
     Each castle's position in the list is its castle ID in every game built from the map.

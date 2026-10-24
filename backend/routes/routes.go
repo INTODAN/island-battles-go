@@ -70,6 +70,19 @@ func SetupRoutes(api huma.API, env *handlers.Env) {
 			"Castle team colours run from 1 to player_amount, and 0 is neutral. A castle without starting_soldier_amount starts with neutral_starting_soldier_amount. " +
 			"Castle upgrades are a map of upgrade type to level. Omitted upgrades default to level 1; speed supports levels 1 through 4, and clash_stop_generations supports levels 1 through 3. " +
 			"An invalid map returns 422 with an error for each invalid field and is not stored. A map_name that another map uses returns 409."}, env.CreateMapTemplate)
+	dropSchemaLink(api, reflect.TypeFor[models.MapTemplateView]())
 	huma.Register(api, huma.Operation{Path: "/game/{id}/graph", Method: http.MethodGet, DefaultStatus: http.StatusOK,
 		Summary: "Get a graph visualization of the game."}, env.GetGameGraph)
+}
+
+// dropSchemaLink removes the read-only $schema property that Huma's schema
+// link transformer adds to every request body schema. A map file is a file
+// format rather than a linked API resource, so its schema lists only the
+// file's own keys, and a body that sends $schema is rejected like any other
+// unknown key.
+func dropSchemaLink(api huma.API, bodyType reflect.Type) {
+	registry := api.OpenAPI().Components.Schemas
+	schema := registry.SchemaFromRef(registry.Schema(bodyType, true, "").Ref)
+	delete(schema.Properties, "$schema")
+	schema.PrecomputeMessages()
 }

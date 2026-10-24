@@ -413,15 +413,6 @@
       "MapTemplate": {
         "additionalProperties": false,
         "properties": {
-          "$schema": {
-            "description": "A URL to the JSON Schema for this object.",
-            "examples": [
-              "https://example.com/MapTemplate.json"
-            ],
-            "format": "uri",
-            "readOnly": true,
-            "type": "string"
-          },
           "castles": {
             "description": "Each castle's position in the list is its castle ID in every game built from the map.",
             "items": {
