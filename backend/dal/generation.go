@@ -54,6 +54,12 @@ func GetLatestGenerationForGame(db *gorm.DB, gameID uint) (*models.Generation, e
 	return &generation, nil
 }
 
+func CountGenerationsForGame(db *gorm.DB, gameID uint) (int64, error) {
+	var count int64
+	err := db.Model(&models.Generation{}).Where(&models.Generation{GameID: gameID}).Count(&count).Error
+	return count, err
+}
+
 func CreateGenerationFromTemplate(db *gorm.DB, mapTemplateID uint, gameID uint) (uint, error) {
 	mapID, err := CreateMapFromTemplate(db, mapTemplateID)
 	if err != nil {

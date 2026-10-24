@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 
 	"islandBattles/backend/dal"
@@ -26,6 +27,11 @@ type GenerationError struct {
 
 func (err *GenerationError) Error() string   { return err.Detail }
 func reject(status int, detail string) error { return &GenerationError{Status: status, Detail: detail} }
+
+// MaxGenerations caps a game. Turns are not paced, so bots play as fast as round
+// trips allow; commands for the last generation are rejected, so no game grows
+// past it.
+const MaxGenerations = 300
 
 type GenerationService struct {
 	Database *gorm.DB
@@ -130,6 +136,13 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 		}
 		if generation.ID != request.GenerationID {
 			return reject(409, "generation is no longer current")
+		}
+		generations, err := dal.CountGenerationsForGame(transaction, locked.ID)
+		if err != nil {
+			return err
+		}
+		if generations >= MaxGenerations {
+			return reject(409, fmt.Sprintf("game reached its limit of %d generations", MaxGenerations))
 		}
 		input := models.GenerationInput{GenerationID: generation.ID, PlayerID: principal.PlayerID, Commands: []byte("[]")}
 		for _, candidate := range inputs {

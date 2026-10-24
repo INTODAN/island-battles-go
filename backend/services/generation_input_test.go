@@ -323,3 +323,45 @@ func TestGenerationNotificationFailureRollsBackMigration(t *testing.T) {
 	}
 	assertTurnCounts(t, fixture.database, 2, 2, 2, 4)
 }
+
+func TestGenerationCapRejectsCommandsForTheLastGeneration(t *testing.T) {
+	fixture := newTurnFixture(t, false)
+	ctx := context.Background()
+	initial, err := dal.GetGeneration(fixture.database, fixture.state.GenerationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Earlier turns only need to exist, so these stand-ins share the board.
+	played := make([]models.Generation, services.MaxGenerations-2)
+	for index := range played {
+		played[index] = models.Generation{GameID: fixture.state.GameID, MapID: initial.MapID}
+	}
+	if err := fixture.database.Create(&played).Error; err != nil {
+		t.Fatal(err)
+	}
+	penultimate, err := fixture.service.Current(ctx, fixture.players[0], fixture.state.LobbyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var last models.GenerationState
+	for _, player := range fixture.players {
+		if last, err = fixture.service.Register(ctx, player, batch(penultimate, true)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if last.GenerationID == penultimate.GenerationID {
+		t.Fatal("the generation before the cap did not advance")
+	}
+	_, err = fixture.service.Register(ctx, fixture.players[0], batch(last, true))
+	assertTurnStatus(t, err, 409)
+	var generations int64
+	if err := fixture.database.Model(&models.Generation{}).Where(&models.Generation{GameID: fixture.state.GameID}).Count(&generations).Error; err != nil {
+		t.Fatal(err)
+	}
+	if generations != services.MaxGenerations {
+		t.Fatalf("game has %d generations, want %d", generations, services.MaxGenerations)
+	}
+	if current, err := fixture.service.Current(ctx, fixture.players[1], fixture.state.LobbyID); err != nil || current.GenerationID != last.GenerationID || current.Submitted {
+		t.Fatalf("capped game cannot be read: %+v %v", current, err)
+	}
+}

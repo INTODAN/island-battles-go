@@ -633,7 +633,7 @@
     },
     "/generation/commands": {
       "post": {
-        "description": "Requires a place on the game's frozen roster; the lobby is not consulted. Only owned send_soldier_group commands are accepted; other command types are forbidden (403). Complete defaults to true; an empty batch can complete a turn. The last frozen roster completion advances exactly once. Retry the same request UUID and payload safely; changed payloads and stale new requests conflict.",
+        "description": "Requires a place on the game's frozen roster; the lobby is not consulted. Only owned send_soldier_group commands are accepted; other command types are forbidden (403). Complete defaults to true; an empty batch can complete a turn. The last frozen roster completion advances exactly once. A game stops at 300 generations, and commands for its last generation conflict. Retry the same request UUID and payload safely; changed payloads and stale new requests conflict.",
         "operationId": "registerGenerationCommand",
         "parameters": [
           {
