@@ -2,11 +2,14 @@ package models
 
 import (
 	"cmp"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"math"
+	"reflect"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -33,13 +36,14 @@ type CastleTemplateView struct {
 // MapTemplateError rejects a map template and lists every invalid field.
 type MapTemplateError struct {
 	// Details locate each problem relative to the template, such as castles[2].x.
+	// A problem with the whole template has an empty location.
 	Details []*huma.ErrorDetail
 }
 
 func (err *MapTemplateError) Error() string {
 	problems := make([]string, len(err.Details))
 	for index, detail := range err.Details {
-		problems[index] = detail.Location + " " + detail.Message
+		problems[index] = strings.TrimSpace(detail.Location + " " + detail.Message)
 	}
 	return "invalid map template: " + strings.Join(problems, "; ")
 }
@@ -49,9 +53,56 @@ func (err *MapTemplateError) Error() string {
 func (err *MapTemplateError) Located(location string) []error {
 	located := make([]error, len(err.Details))
 	for index, detail := range err.Details {
-		located[index] = &huma.ErrorDetail{Message: detail.Message, Location: location + "." + detail.Location, Value: detail.Value}
+		at := location
+		if detail.Location != "" {
+			at += "." + detail.Location
+		}
+		located[index] = &huma.ErrorDetail{Message: detail.Message, Location: at, Value: detail.Value}
 	}
 	return located
+}
+
+// mapFileSchema is the JSON Schema of the map file format, built from the same
+// struct tags as the published MapTemplate schema.
+var mapFileSchema = sync.OnceValues(func() (huma.Registry, *huma.Schema) {
+	registry := huma.NewMapRegistry("#/components/schemas/", huma.DefaultSchemaNamer)
+	return registry, registry.Schema(reflect.TypeFor[MapTemplateView](), false, "")
+})
+
+// DecodeMapTemplate strictly decodes a map file and validates it, so the
+// result is ready for BuildMap. Unlike encoding/json, it rejects unknown keys
+// and missing required fields instead of ignoring them or reading them as
+// zero, checking the JSON against the same schema that POST /map/create
+// enforces. Every rejection, including malformed JSON, is a *MapTemplateError.
+// A missing field is reported at the object that lacks it, with an empty
+// location for the top level.
+func DecodeMapTemplate(data []byte) (MapTemplateView, error) {
+	var document any
+	if err := json.Unmarshal(data, &document); err != nil {
+		return MapTemplateView{}, &MapTemplateError{Details: []*huma.ErrorDetail{{Message: "must be valid JSON: " + err.Error()}}}
+	}
+	registry, schema := mapFileSchema()
+	result := &huma.ValidateResult{}
+	huma.Validate(registry, schema, huma.NewPathBuffer(nil, 0), huma.ModeWriteToServer, document, result)
+	if len(result.Errors) > 0 {
+		details := make([]*huma.ErrorDetail, 0, len(result.Errors))
+		for _, err := range result.Errors {
+			detail, isDetail := err.(*huma.ErrorDetail)
+			if !isDetail {
+				detail = &huma.ErrorDetail{Message: err.Error()}
+			}
+			details = append(details, detail)
+		}
+		return MapTemplateView{}, &MapTemplateError{Details: details}
+	}
+	var template MapTemplateView
+	if err := json.Unmarshal(data, &template); err != nil {
+		return MapTemplateView{}, &MapTemplateError{Details: []*huma.ErrorDetail{{Message: err.Error()}}}
+	}
+	if err := ValidateMapTemplate(template); err != nil {
+		return MapTemplateView{}, err
+	}
+	return template, nil
 }
 
 // ValidateMapTemplate checks a map file without storing it: its name and

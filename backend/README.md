@@ -130,7 +130,7 @@ A map file is the JSON that `POST /map/create` stores as a default map, publishe
 - A castle without `starting_soldier_amount` starts with `neutral_starting_soldier_amount`. Omitted upgrades start at level 1.
 - A castle's position in `castles` is its castle ID in every game built from the map.
 
-`models/map_template.go` holds the format and the two functions every map source uses: `models.ValidateMapTemplate` checks a map without storing it and returns a `*models.MapTemplateError` that lists each invalid field, such as `castles[2].x`; `models.BuildMap` builds the game map. `/map/create` answers an invalid map with 422 and one error per field, stores nothing, and answers a `map_name` that another map uses with 409. Stored templates keep working: games built from them are not validated again, and castles stored before `starting_soldier_amount` existed start with `neutral_starting_soldier_amount`.
+`models/map_template.go` holds the format and the functions every map source uses: `models.ValidateMapTemplate` checks a map without storing it and returns a `*models.MapTemplateError` that lists each invalid field, such as `castles[2].x`; `models.BuildMap` builds the game map. Read map files with `models.DecodeMapTemplate`, not plain `encoding/json`: it rejects unknown keys and missing required fields, which `encoding/json` ignores or reads as 0, then validates the map. `/map/create` answers an invalid map with 422 and one error per field, stores nothing, and answers a `map_name` that another map uses with 409. Stored templates keep working: games built from them are not validated again, and castles stored before `starting_soldier_amount` existed start with `neutral_starting_soldier_amount`.
 
 ## Schema and recovery
 

@@ -97,3 +97,53 @@ func TestValidateMapTemplateNeedsCastles(t *testing.T) {
 		t.Fatalf("expected player_amount and castles to be rejected, got %v", err)
 	}
 }
+
+func TestDecodeMapTemplateReadsAMapFile(t *testing.T) {
+	var expected MapTemplateView
+	if err := json.Unmarshal([]byte(exampleMapFile), &expected); err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeMapTemplate([]byte(exampleMapFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(decoded, expected) {
+		t.Fatalf("decoded %+v, want %+v", decoded, expected)
+	}
+}
+
+// encoding/json reads a missing field as zero and ignores unknown keys;
+// DecodeMapTemplate rejects both, like the POST /map/create body schema.
+func TestDecodeMapTemplateRejectsWhatEncodingJSONAccepts(t *testing.T) {
+	missingRequired := func(property string) string {
+		return "expected required property " + property + " to be present"
+	}
+	tests := []struct {
+		name     string
+		file     string
+		location string
+		message  string
+	}{
+		{"missing neutral soldiers", `{"map_name":"a","player_amount":2,"plane_size_x":4,"plane_size_y":4,"castles":[{"team_color":1,"x":0,"y":0}]}`, "", missingRequired("neutral_starting_soldier_amount")},
+		{"missing x", `{"map_name":"a","player_amount":2,"plane_size_x":4,"plane_size_y":4,"neutral_starting_soldier_amount":1,"castles":[{"team_color":1,"y":0}]}`, "castles[0]", missingRequired("x")},
+		{"missing y", `{"map_name":"a","player_amount":2,"plane_size_x":4,"plane_size_y":4,"neutral_starting_soldier_amount":1,"castles":[{"team_color":1,"x":0}]}`, "castles[0]", missingRequired("y")},
+		{"missing team colour", `{"map_name":"a","player_amount":2,"plane_size_x":4,"plane_size_y":4,"neutral_starting_soldier_amount":1,"castles":[{"x":0,"y":0}]}`, "castles[0]", missingRequired("team_color")},
+		{"unknown map key", `{"map_name":"a","player_amount":2,"plane_size_x":4,"plane_size_y":4,"neutral_starting_soldier_amount":1,"castles":[{"team_color":1,"x":0,"y":0}],"plane_size_z":4}`, "plane_size_z", "unexpected property"},
+		{"unknown castle key", `{"map_name":"a","player_amount":2,"plane_size_x":4,"plane_size_y":4,"neutral_starting_soldier_amount":1,"castles":[{"team_color":1,"x":0,"y":0,"position":"(0,0)"}]}`, "castles[0].position", "unexpected property"},
+		{"wrong type", `{"map_name":"a","player_amount":2,"plane_size_x":4,"plane_size_y":4,"neutral_starting_soldier_amount":1,"castles":[{"team_color":1,"x":"0","y":0}]}`, "castles[0].x", "expected number"},
+		{"outside the plane", `{"map_name":"a","player_amount":2,"plane_size_x":4,"plane_size_y":4,"neutral_starting_soldier_amount":1,"castles":[{"team_color":1,"x":3,"y":0}]}`, "castles[0].x", "must be inside the plane, from -2 to 2"},
+		{"malformed", `{"map_name":"a",`, "", "must be valid JSON: unexpected end of JSON input"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := DecodeMapTemplate([]byte(test.file))
+			var invalidTemplate *MapTemplateError
+			if !errors.As(err, &invalidTemplate) {
+				t.Fatalf("expected a MapTemplateError, got %v", err)
+			}
+			if len(invalidTemplate.Details) != 1 || invalidTemplate.Details[0].Location != test.location || invalidTemplate.Details[0].Message != test.message {
+				t.Fatalf("got %v, want %q at %q", err, test.message, test.location)
+			}
+		})
+	}
+}
