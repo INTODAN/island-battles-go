@@ -63,3 +63,11 @@ func CreateMapFromTemplate(db *gorm.DB, templateID uint) (uint, error) {
 
 	return newMap.ID, nil
 }
+
+func GetMap(db *gorm.DB, mapID uint) (*models.Map, error) {
+	var m models.Map
+	if err := db.Preload(clause.Associations).First(&m, mapID).Error; err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
