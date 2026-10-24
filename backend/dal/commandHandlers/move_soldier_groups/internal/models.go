@@ -18,10 +18,13 @@ type SoldierGroupMoveDelta struct {
 }
 
 type ClashParticipant struct {
-	SoldierGroup      *models.SoldierGroup
-	Position          pgtype.Point
-	SoldiersBefore    uint
-	RemainingSoldiers uint
+	SoldierGroup *models.SoldierGroup
+	Position     pgtype.Point
+	// SoldiersBefore is the group's count at contact. Nothing changes it later.
+	SoldiersBefore uint
+	// SoldiersAfter is the group's count once the clash is resolved. Only
+	// resolving the clash sets it.
+	SoldiersAfter uint
 }
 
 // Clash groups simultaneous contacts, retaining each group's own position.
