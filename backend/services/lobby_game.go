@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"sort"
 
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
@@ -56,7 +55,7 @@ func RunLobbyGame(database *gorm.DB, snapshot domain.Snapshot) (models.BindingRe
 		if err != nil {
 			return err
 		}
-		replay.Frames = append(replay.Frames, playableReplayFrame(current))
+		replay.Frames = append(replay.Frames, generationView(current))
 		replay.Outcome = "Waiting for player turns"
 		raw, err := json.Marshal(replay)
 		if err != nil {
@@ -76,31 +75,17 @@ type replayTeam struct {
 	Players []string `json:"players"`
 }
 
-type replayNode struct {
-	ID          uint    `json:"id"`
-	Color       uint    `json:"color"`
-	Soldiers    uint    `json:"soldiers"`
-	X           float64 `json:"x"`
-	Y           float64 `json:"y"`
-	ClashRadius float64 `json:"clash_radius,omitempty"`
-}
-
-type replayFrame struct {
-	GenerationID uint           `json:"generation_id"`
-	Castles      []replayNode   `json:"castles"`
-	Groups       []replayNode   `json:"groups"`
-	Clashes      []models.Clash `json:"clashes"`
-}
-
+// gameReplay saves one frame per generation in the board view that players
+// receive, so the replay page shows saved and live generations alike.
 type gameReplay struct {
-	GameID  uint          `json:"game_id"`
-	Teams   []replayTeam  `json:"teams"`
-	Frames  []replayFrame `json:"frames"`
-	Outcome string        `json:"outcome"`
+	GameID  uint                    `json:"game_id"`
+	Teams   []replayTeam            `json:"teams"`
+	Frames  []models.GenerationView `json:"frames"`
+	Outcome string                  `json:"outcome"`
 }
 
 func prepareLobbyGame(binding models.BindingResult, snapshot domain.Snapshot) (gameReplay, models.Map) {
-	replay := gameReplay{GameID: binding.GameID, Teams: []replayTeam{}, Frames: []replayFrame{}}
+	replay := gameReplay{GameID: binding.GameID, Teams: []replayTeam{}, Frames: []models.GenerationView{}}
 	gameMap := models.Map{MapFields: models.MapFields{MapName: "Lobby battle", PlayerAmount: uint(len(snapshot.StartRoster)), PlaneSizeX: 8, PlaneSizeY: 6}}
 	for _, team := range binding.Teams {
 		players := []string{}
@@ -140,25 +125,12 @@ func prepareLobbyGame(binding models.BindingResult, snapshot domain.Snapshot) (g
 	return replay, gameMap
 }
 
-func playableReplayFrame(generation *models.Generation) replayFrame {
-	frame := replayFrame{GenerationID: generation.ID, Castles: []replayNode{}, Groups: []replayNode{}, Clashes: publishedClashes(generation)}
-	for _, castle := range generation.Map.Castles {
-		frame.Castles = append(frame.Castles, replayNode{ID: castle.PersistentCastleID, Color: castle.TeamColor, Soldiers: castle.SoldierAmount, X: castle.Position.P.X, Y: castle.Position.P.Y})
-	}
-	for _, group := range generation.SoldierGroups {
-		frame.Groups = append(frame.Groups, replayNode{ID: group.PersistentSoldierGroupID, Color: group.TeamColor, Soldiers: group.SoldierAmount, X: group.Position.P.X, Y: group.Position.P.Y, ClashRadius: group.EffectiveClashRadius()})
-	}
-	sort.Slice(frame.Castles, func(left, right int) bool { return frame.Castles[left].ID < frame.Castles[right].ID })
-	sort.Slice(frame.Groups, func(left, right int) bool { return frame.Groups[left].ID < frame.Groups[right].ID })
-	return frame
-}
-
 func appendPlayableReplay(database *gorm.DB, game *models.Game, generation *models.Generation) error {
 	var replay gameReplay
 	if err := json.Unmarshal(game.Replay, &replay); err != nil {
 		return err
 	}
-	replay.Frames = append(replay.Frames, playableReplayFrame(generation))
+	replay.Frames = append(replay.Frames, generationView(generation))
 	raw, err := json.Marshal(replay)
 	if err != nil {
 		return err

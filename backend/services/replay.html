@@ -47,7 +47,7 @@ const field = document.getElementById("battlefield");
 const slider = document.getElementById("timeline");
 const play = document.getElementById("play");
 let lastTurn = replay.frames.length - 1;
-let latestGeneration = replay.frames[lastTurn].generation_id;
+let latestGeneration = replay.frames[lastTurn].id;
 let followingLive = true;
 let turn = lastTurn;
 let playing = false;
@@ -110,7 +110,7 @@ function renderClashes(frame, animate) {
   }
   // Aggregate losses when a surviving group fought more than once this turn.
   // A group that died later or arrived at a castle has no active troop label.
-  for (const group of frame.groups) {
+  for (const group of frame.soldier_groups) {
     const lost = losses.get(group.id);
     if (!lost) continue;
     const [x, y] = point(group);
@@ -131,19 +131,19 @@ function render(animateClashes = false) {
   }
   for (const castle of frame.castles) {
     const [x, y] = point(castle);
-    svg("circle", { cx: x, cy: y, r: castleRadius * worldScale, fill: "#fff", stroke: color(castle.color), "stroke-width": 3, "data-kind": "castle" });
-    svg("text", { x, y: y + 8, "text-anchor": "middle", "font-size": 26, "font-weight": 700, fill: color(castle.color) }, castle.soldiers);
+    svg("circle", { cx: x, cy: y, r: castleRadius * worldScale, fill: "#fff", stroke: color(castle.team_color), "stroke-width": 3, "data-kind": "castle" });
+    svg("text", { x, y: y + 8, "text-anchor": "middle", "font-size": 26, "font-weight": 700, fill: color(castle.team_color) }, castle.soldiers);
     svg("text", { x, y: y + 72, "text-anchor": "middle", "font-size": 17, fill: "#52667b" }, `Castle ${castle.id + 1}`);
   }
-  for (const group of frame.groups) {
+  for (const group of frame.soldier_groups) {
     const [x, y] = point(group);
-    svg("circle", { cx: x, cy: y, r: group.clash_radius * worldScale, fill: color(group.color), stroke: "#fff", "stroke-width": 2, "data-kind": "soldier-group" });
+    svg("circle", { cx: x, cy: y, r: group.clash_radius * worldScale, fill: color(group.team_color), stroke: "#fff", "stroke-width": 2, "data-kind": "soldier-group" });
     svg("text", { x, y: y + 5, "text-anchor": "middle", "font-size": 13, "font-weight": 700, fill: "white" }, group.soldiers);
   }
   renderClashes(frame, animate);
   for (const team of replay.teams) {
-    const castles = frame.castles.filter((castle) => castle.color === team.color);
-    const soldiers = [...castles, ...frame.groups.filter((group) => group.color === team.color)].reduce((total, node) => total + node.soldiers, 0);
+    const castles = frame.castles.filter((castle) => castle.team_color === team.color);
+    const soldiers = [...castles, ...frame.soldier_groups.filter((group) => group.team_color === team.color)].reduce((total, node) => total + node.soldiers, 0);
     scoreLabels.get(team.color).textContent = `${castles.length} castles · ${soldiers} soldiers`;
   }
   slider.value = turn;
@@ -160,10 +160,10 @@ live.addEventListener("click", () => { followingLive = true; playing = false; tu
 window.addEventListener("message", (event) => {
   if (event.source !== window.parent || event.data?.type !== "island-battles.generation") return;
   const state = event.data.state;
-  if (state?.game_id !== replay.game_id || state.generation_id <= latestGeneration || !state.generation) return;
-  latestGeneration = state.generation_id;
-  const node = (entry) => ({ id: entry.id, color: entry.team_color, soldiers: entry.soldiers, x: entry.x, y: entry.y, clash_radius: entry.clash_radius });
-  replay.frames.push({ generation_id: latestGeneration, castles: state.generation.castles.map(node), groups: state.generation.soldier_groups.map(node), clashes: state.generation.clashes });
+  if (state?.game_id !== replay.game_id || !state.generation || state.generation.id <= latestGeneration) return;
+  // Saved frames have the same shape as live generations.
+  latestGeneration = state.generation.id;
+  replay.frames.push(state.generation);
   lastTurn = replay.frames.length - 1;
   slider.max = lastTurn;
   if (followingLive) turn = lastTurn;
