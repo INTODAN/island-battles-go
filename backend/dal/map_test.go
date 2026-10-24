@@ -3,9 +3,11 @@ package dal_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/models"
+	"sync"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -52,6 +54,60 @@ func TestCreateMapTemplate(t *testing.T) {
 	_, err = dal.CreateMapTemplate(db, mapTemplate)
 	if !errors.Is(err, dal.ErrMapTemplateNameTaken) {
 		t.Fatalf("Expected a taken name on second creation, got %v", err)
+	}
+}
+
+// map_templates has no unique index on map_name, so only the advisory lock in
+// CreateMapTemplate keeps concurrent creates from storing the same name twice.
+func TestCreateMapTemplateStoresANameOnceUnderConcurrentCreates(t *testing.T) {
+	db := testutils.InitTestDB(t)
+	const creators, rounds = 8, 10
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Open every connection up front so the creators race on the database
+	// rather than on dialling it.
+	sqlDB.SetMaxIdleConns(creators)
+	var warm sync.WaitGroup
+	for range creators {
+		warm.Go(func() { _ = db.Exec("SELECT pg_sleep(0.05)").Error })
+	}
+	warm.Wait()
+
+	for round := range rounds {
+		template := models.MapTemplateView{
+			MapFields: models.MapFields{MapName: fmt.Sprintf("contested-%d", round), PlayerAmount: 2, PlaneSizeX: 4, PlaneSizeY: 4, NeutralStartingSoldierAmount: 10},
+			Castles:   []models.CastleTemplateView{{TeamColor: 1, X: -1, Y: 0}, {TeamColor: 2, X: 1, Y: 0}},
+		}
+		start := make(chan struct{})
+		errs := make([]error, creators)
+		var group sync.WaitGroup
+		for creator := range creators {
+			group.Go(func() {
+				<-start
+				_, errs[creator] = dal.CreateMapTemplate(db, template)
+			})
+		}
+		close(start)
+		group.Wait()
+
+		created := 0
+		for creator, err := range errs {
+			switch {
+			case err == nil:
+				created++
+			case !errors.Is(err, dal.ErrMapTemplateNameTaken):
+				t.Fatalf("round %d: creator %d failed: %v", round, creator, err)
+			}
+		}
+		var stored int64
+		if err := db.Model(&models.MapTemplate{}).Where("map_name = ?", template.MapName).Count(&stored).Error; err != nil {
+			t.Fatal(err)
+		}
+		if created != 1 || stored != 1 {
+			t.Fatalf("round %d: %d of %d concurrent creates succeeded and %d templates named %q were stored, want 1", round, created, creators, stored, template.MapName)
+		}
 	}
 }
 
