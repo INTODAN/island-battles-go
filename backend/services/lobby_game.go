@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -8,18 +9,22 @@ import (
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
 	"islandBattles/lobby/domain"
+	"islandBattles/lobby/realtime"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"gorm.io/gorm"
 )
 
-// RunLobbyGame initializes one playable generation for the frozen roster.
-// Repeated and concurrent starts reuse the committed state.
-func RunLobbyGame(database *gorm.DB, snapshot domain.Snapshot) (models.BindingResult, error) {
+// RunLobbyGame initializes one playable generation for the frozen roster and
+// pushes it to every roster player. Repeated and concurrent starts reuse the
+// committed state.
+func RunLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, snapshot domain.Snapshot) (models.BindingResult, error) {
+	database = database.WithContext(ctx)
 	binding, err := dal.BindLobbyGame(database, snapshot)
 	if err != nil {
 		return models.BindingResult{}, err
 	}
+	var events []realtime.Publication
 	err = dal.WithLockedGame(database, binding.GameID, func(transaction *gorm.DB, game *models.Game) error {
 		// A saved replay means the game is already initialized.
 		if len(game.Replay) > 0 {
@@ -64,9 +69,17 @@ func RunLobbyGame(database *gorm.DB, snapshot domain.Snapshot) (models.BindingRe
 		if err := dal.SaveGameReplay(transaction, game, raw); err != nil {
 			return err
 		}
-		return queueGenerationNotifications(transaction, game, current, players)
+		events, err = generationEvents(game, current, players)
+		return err
 	})
-	return binding, err
+	if err != nil {
+		return binding, err
+	}
+	if len(events) > 0 {
+		// The game has committed. A failed push is logged and does not fail the start.
+		_ = publisher.Publish(ctx, events...)
+	}
+	return binding, nil
 }
 
 type replayTeam struct {

@@ -52,8 +52,7 @@ async def test_start_initializes_one_generation_and_binding_is_idempotent(guests
 
 async def delete_lobby(lobby_id):
     """Delete a lobby's rows, keeping guest sessions, as lobby retention will."""
-    tables = set((await sql("SELECT tablename FROM pg_tables WHERE schemaname='public'")).splitlines())
-    dependents = [table for table in ("lobby_outbox", "lobby_start_roster", "lobby_leases", "lobby_memberships", "lobby_teams") if table in tables]
+    dependents = ("lobby_start_roster", "lobby_leases", "lobby_memberships", "lobby_teams")
     # Locking the room first makes concurrent heartbeats wait, then find no lobby.
     await sql(
         f"SELECT 1 FROM lobby_rooms WHERE id='{lobby_id}' FOR UPDATE; "
@@ -112,10 +111,11 @@ async def test_other_game_never_creates_island_state(guests):
 async def test_island_schema_survives_restart():
     tables = await sql("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")
     lobby_tables = {table for table in tables.splitlines() if table.startswith("lobby_")}
+    # Postgres holds only state: no table holds game events waiting to be sent.
     assert set(tables.splitlines()) == lobby_tables | {
         "games", "maps", "castles", "castle_templates", "map_templates", "map_template_schema_migrations",
         "generations", "soldier_groups", "commands", "island_game_team_bindings",
-        "frozen_game_players", "generation_inputs", "generation_requests", "generation_notifications",
+        "frozen_game_players", "generation_inputs", "generation_requests",
     }
     columns = await sql("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='games' ORDER BY ordinal_position")
     assert set(columns.splitlines()) == {"id", "created_at", "updated_at", "deleted_at", "lobby_id", "replay", "next_soldier_group_id"}

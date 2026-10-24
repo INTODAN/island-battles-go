@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
@@ -17,10 +16,8 @@ import (
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/routes"
-	"islandBattles/backend/services"
 	"islandBattles/lobby/application"
 	"islandBattles/lobby/auth"
-	"islandBattles/lobby/delivery"
 	"islandBattles/lobby/domain"
 	"islandBattles/lobby/frontend"
 	lobbypostgres "islandBattles/lobby/postgres"
@@ -60,7 +57,16 @@ func run(ctx context.Context, config dependencies.Config, logger *slog.Logger) e
 	clock := domain.SystemClock{}
 	identifiers := domain.CryptoIdentifiers{}
 	policy := domain.DefaultPolicy("island-battles", "quiz-demo")
-	store, err := lobbypostgres.NewStore(database, clock, identifiers)
+	// Requests push their own committed changes, so nothing runs between requests.
+	publisher, err := realtime.NewPublisher(dependencies.ConnectCentrifugoClient(config), logger, realtime.DefaultPushRetry())
+	if err != nil {
+		return err
+	}
+	postgresStore, err := lobbypostgres.NewStore(database, clock)
+	if err != nil {
+		return err
+	}
+	store, err := application.NewPublishingStore(postgresStore, publisher)
 	if err != nil {
 		return err
 	}
@@ -76,7 +82,7 @@ func run(ctx context.Context, config dependencies.Config, logger *slog.Logger) e
 	if err != nil {
 		return err
 	}
-	gameBinding, err := lobbyadapter.NewService(database, lobbyService)
+	gameBinding, err := lobbyadapter.NewService(database, lobbyService, publisher)
 	if err != nil {
 		return err
 	}
@@ -88,25 +94,12 @@ func run(ctx context.Context, config dependencies.Config, logger *slog.Logger) e
 	if err != nil {
 		return err
 	}
-	centrifugoClient := dependencies.ConnectCentrifugoClient(config)
-	transport, err := realtime.NewTransport(centrifugoClient)
-	if err != nil {
-		return err
-	}
-	publisher, err := delivery.NewWorker(store, transport, clock, delivery.DefaultConfig())
-	if err != nil {
-		return err
-	}
-	sweeper, err := application.NewSweeper(store, clock, policy, 64)
-	if err != nil {
-		return err
-	}
 	router := chi.NewMux()
 	router.Use(httplog.RequestLogger(logger, &httplog.Options{Level: slog.LevelInfo, Schema: httplog.SchemaOTEL.Concise(true)}))
 	api := humachi.New(router, routes.NewAPIConfig("Island Battles Go Backend", "1.0.0"))
 	environment := handlers.Env{DB: database}
 	routes.SetupRoutes(api, &environment)
-	routes.SetupLobbyRoutes(api, lobbyService, authentication, gameBinding, &handlers.LobbyGame{Database: database, Authenticator: authentication})
+	routes.SetupLobbyRoutes(api, lobbyService, authentication, gameBinding, &handlers.LobbyGame{Database: database, Authenticator: authentication, Publisher: publisher})
 	proxy.Register(router)
 	router.Get("/lobby/ui", func(response http.ResponseWriter, request *http.Request) {
 		http.Redirect(response, request, "/lobby/ui/", http.StatusTemporaryRedirect)
@@ -119,19 +112,12 @@ func run(ctx context.Context, config dependencies.Config, logger *slog.Logger) e
 	router.Handle("/game/demo/*", http.StripPrefix("/game/demo/", demo.Handler()))
 	router.Get("/healthz", func(response http.ResponseWriter, request *http.Request) { response.WriteHeader(http.StatusNoContent) })
 	server := &http.Server{Addr: config.HTTPAddr, Handler: router, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
-	workerContext, stopWorkers := context.WithCancel(ctx)
-	defer stopWorkers()
-	var workers sync.WaitGroup
-	report := func(err error) { logger.Error("Lobby background work failed; will retry", "error", err) }
-	generationPublisher := &services.GenerationDelivery{Database: database, Publisher: centrifugoClient}
-	workers.Add(3)
-	go func() { defer workers.Done(); publisher.Run(workerContext, report) }()
-	go func() { defer workers.Done(); sweeper.Run(workerContext, report) }()
-	go func() { defer workers.Done(); generationPublisher.Run(workerContext, report) }()
+	serverContext, stopServer := context.WithCancel(ctx)
+	defer stopServer()
 	shutdownDone := make(chan struct{})
 	go func() {
 		defer close(shutdownDone)
-		<-workerContext.Done()
+		<-serverContext.Done()
 		shutdownContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdownContext); err != nil {
@@ -141,9 +127,8 @@ func run(ctx context.Context, config dependencies.Config, logger *slog.Logger) e
 	}()
 	logger.Info("Listening", "address", config.HTTPAddr)
 	serveError := server.ListenAndServe()
-	stopWorkers()
+	stopServer()
 	<-shutdownDone
-	workers.Wait()
 	if serveError != nil && !errors.Is(serveError, http.ErrServerClosed) {
 		return fmt.Errorf("serve HTTP: %w", serveError)
 	}

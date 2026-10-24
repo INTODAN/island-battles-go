@@ -13,6 +13,7 @@ import (
 type LobbyGame struct {
 	Database      *gorm.DB
 	Authenticator domain.Authenticator
+	Publisher     services.Publisher
 }
 
 func (handler *LobbyGame) Replay(ctx context.Context, input *struct {

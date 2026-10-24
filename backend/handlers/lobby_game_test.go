@@ -67,12 +67,12 @@ func TestStartedGameServesItsRosterWithoutTheLobby(t *testing.T) {
 		Members:     []domain.Member{{PlayerID: alice, DisplayName: "Alice"}, {PlayerID: bob, DisplayName: "Bob"}},
 	}
 	// Binding at start is the only time the game reads its lobby.
-	if _, err := services.RunLobbyGame(database, snapshot); err != nil {
+	if _, err := services.RunLobbyGame(context.Background(), database, &testutils.RecordedPublisher{}, snapshot); err != nil {
 		t.Fatal(err)
 	}
 	// Carol plays a different game, so she is on a roster but not on this one.
 	carol, otherLobby, green, yellow := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
-	if _, err := services.RunLobbyGame(database, domain.Snapshot{
+	if _, err := services.RunLobbyGame(context.Background(), database, &testutils.RecordedPublisher{}, domain.Snapshot{
 		Lobby:       domain.Lobby{ID: otherLobby, GameKey: "island-battles", Phase: domain.PhaseStarted},
 		Teams:       []domain.Team{{ID: green, Name: "Green", Order: 1}, {ID: yellow, Name: "Yellow", Order: 2}},
 		StartRoster: domain.StartRoster{{PlayerID: carol, TeamID: green, TeamOrder: 1}, {PlayerID: uuid.NewString(), TeamID: yellow, TeamOrder: 2}},
@@ -80,7 +80,7 @@ func TestStartedGameServesItsRosterWithoutTheLobby(t *testing.T) {
 		t.Fatal(err)
 	}
 	dropLobbyTables(t, database)
-	handler := handlers.LobbyGame{Database: database, Authenticator: bearerPlayers{
+	handler := handlers.LobbyGame{Database: database, Publisher: &testutils.RecordedPublisher{}, Authenticator: bearerPlayers{
 		"Bearer alice": {PlayerID: alice}, "Bearer bob": {PlayerID: bob}, "Bearer outsider": {PlayerID: uuid.NewString()}, "Bearer carol": {PlayerID: carol},
 	}}
 	_, api := humatest.New(t)

@@ -24,7 +24,7 @@ func (handler *LobbyGame) CurrentGeneration(ctx context.Context, input *struct {
 	if err != nil {
 		return nil, huma.Error401Unauthorized("authentication required")
 	}
-	service := services.GenerationService{Database: handler.Database}
+	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher}
 	state, err := service.Current(ctx, verified.Principal, input.LobbyID)
 	if err != nil {
 		return nil, generationHTTPError(err)
@@ -37,7 +37,7 @@ func (handler *LobbyGame) RegisterGenerationCommands(ctx context.Context, input 
 	if err != nil {
 		return nil, huma.Error401Unauthorized("authentication required")
 	}
-	service := services.GenerationService{Database: handler.Database}
+	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher}
 	state, err := service.Register(ctx, verified.Principal, input.Body)
 	if err != nil {
 		return nil, generationHTTPError(err)

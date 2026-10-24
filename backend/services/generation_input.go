@@ -7,12 +7,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 
 	"islandBattles/backend/dal"
 	"islandBattles/backend/dal/commandHandlers"
 	"islandBattles/backend/models"
 	"islandBattles/lobby/domain"
+	"islandBattles/lobby/realtime"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -27,8 +29,21 @@ type GenerationError struct {
 func (err *GenerationError) Error() string   { return err.Detail }
 func reject(status int, detail string) error { return &GenerationError{Status: status, Detail: detail} }
 
+// MaxGenerations caps a game. Turns are not paced, so bots play as fast as round
+// trips allow; commands for the last generation are rejected, so no game grows
+// past it.
+const MaxGenerations = 300
+
+// Publisher pushes committed game events to Centrifugo right after their
+// transaction. realtime.Publisher retries briefly and logs what still fails;
+// clients recover a missed event by re-reading their state over HTTP.
+type Publisher interface {
+	Publish(context.Context, ...realtime.Publication) error
+}
+
 type GenerationService struct {
-	Database *gorm.DB
+	Database  *gorm.DB
+	Publisher Publisher
 }
 
 func (service *GenerationService) Current(ctx context.Context, principal domain.Principal, lobbyID string) (models.GenerationState, error) {
@@ -100,6 +115,7 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 		return models.GenerationState{}, err
 	}
 	var state models.GenerationState
+	var events []realtime.Publication
 	err = dal.WithLockedGame(database, request.GameID, func(transaction *gorm.DB, locked *models.Game) error {
 		players, err := dal.LoadFrozenPlayers(transaction, locked.ID)
 		if err != nil {
@@ -130,6 +146,13 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 		}
 		if generation.ID != request.GenerationID {
 			return reject(409, "generation is no longer current")
+		}
+		generations, err := dal.CountGenerationsForGame(transaction, locked.ID)
+		if err != nil {
+			return err
+		}
+		if generations >= MaxGenerations {
+			return reject(409, fmt.Sprintf("game reached its limit of %d generations", MaxGenerations))
 		}
 		input := models.GenerationInput{GenerationID: generation.ID, PlayerID: principal.PlayerID, Commands: []byte("[]")}
 		for _, candidate := range inputs {
@@ -192,7 +215,7 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 				return err
 			}
 			inputs = nil
-			if err := queueGenerationNotifications(transaction, locked, generation, players); err != nil {
+			if events, err = generationEvents(locked, generation, players); err != nil {
 				return err
 			}
 			if err := appendPlayableReplay(transaction, locked, generation); err != nil {
@@ -202,7 +225,14 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 		state, err = generationState(locked, generation, player, inputs)
 		return err
 	})
-	return state, err
+	if err != nil {
+		return models.GenerationState{}, err
+	}
+	if len(events) > 0 {
+		// The turn has committed. A failed push is logged and does not fail the request.
+		_ = service.Publisher.Publish(ctx, events...)
+	}
+	return state, nil
 }
 
 func commandPayloadHash(request models.RegisterGenerationCommands) (string, error) {
@@ -306,18 +336,24 @@ func generationState(game *models.Game, generation *models.Generation, player mo
 	return state, nil
 }
 
-func queueGenerationNotifications(database *gorm.DB, game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer) error {
-	notifications := make([]models.GenerationNotification, 0, len(players))
+// generationEvents builds each roster player's event for a new generation, for
+// pushing to their personal channel once the transaction commits.
+func generationEvents(game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer) ([]realtime.Publication, error) {
+	events := make([]realtime.Publication, 0, len(players))
 	for _, player := range players {
+		channel, err := domain.PlayerChannel(player.PlayerID)
+		if err != nil {
+			return nil, err
+		}
 		state, err := generationState(game, generation, player, nil)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		payload, err := json.Marshal(models.GenerationEvent{SchemaVersion: models.GenerationEventSchemaVersion, Type: models.GenerationEventType, State: state})
 		if err != nil {
-			return err
+			return nil, err
 		}
-		notifications = append(notifications, models.GenerationNotification{GameID: game.ID, GenerationID: generation.ID, PlayerID: player.PlayerID, Payload: payload})
+		events = append(events, realtime.Publication{Channel: channel, Data: payload})
 	}
-	return dal.StoreGenerationNotifications(database, notifications)
+	return events, nil
 }
