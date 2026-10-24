@@ -252,7 +252,7 @@ func TestGenerationMigrationFailureRollsBackFinalRequest(t *testing.T) {
 	callback := "test:fail-turn-command"
 	if err := fixture.database.Callback().Create().Before("gorm:create").Register(callback, func(transaction *gorm.DB) {
 		if transaction.Statement.Table == "soldier_groups" {
-			transaction.AddError(failure)
+			_ = transaction.AddError(failure)
 		}
 	}); err != nil {
 		t.Fatal(err)
@@ -287,7 +287,7 @@ func TestGenerationNotificationFailureRollsBackMigration(t *testing.T) {
 	callback := "test:fail-turn-notification"
 	if err := fixture.database.Callback().Create().Before("gorm:create").Register(callback, func(transaction *gorm.DB) {
 		if transaction.Statement.Table == "generation_notifications" {
-			transaction.AddError(failure)
+			_ = transaction.AddError(failure)
 		}
 	}); err != nil {
 		t.Fatal(err)

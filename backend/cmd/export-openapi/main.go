@@ -80,9 +80,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(temporary.Name())
+	defer func() { _ = os.Remove(temporary.Name()) }()
 	if _, err := temporary.Write(document); err != nil {
-		temporary.Close()
+		_ = temporary.Close()
 		return err
 	}
 	if err := temporary.Close(); err != nil {

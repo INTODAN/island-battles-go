@@ -167,7 +167,7 @@ func TestClashEventsRollBackWithFailedTurn(t *testing.T) {
 	callback := "test:fail-after-clash-events"
 	if err := database.Callback().Delete().Before("gorm:delete").Register(callback, func(transaction *gorm.DB) {
 		if transaction.Statement.Table == "soldier_groups" {
-			transaction.AddError(failure)
+			_ = transaction.AddError(failure)
 		}
 	}); err != nil {
 		t.Fatal(err)

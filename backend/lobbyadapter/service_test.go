@@ -233,7 +233,7 @@ func TestBindMappingFailureRollsBackGame(t *testing.T) {
 	callback := "test:fail-team-bindings"
 	if err := db.Callback().Create().Before("gorm:create").Register(callback, func(transaction *gorm.DB) {
 		if transaction.Statement.Table == "island_game_team_bindings" {
-			transaction.AddError(failure)
+			_ = transaction.AddError(failure)
 		}
 	}); err != nil {
 		t.Fatal(err)
@@ -273,7 +273,7 @@ func TestFailedInitializationRollsBackAndCanBeRetried(t *testing.T) {
 		if transaction.Statement.Table == "generations" {
 			created++
 			if created == 1 {
-				transaction.AddError(failure)
+				_ = transaction.AddError(failure)
 			}
 		}
 	}); err != nil {

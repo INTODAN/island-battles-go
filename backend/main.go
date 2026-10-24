@@ -56,7 +56,7 @@ func run(ctx context.Context, config dependencies.Config, logger *slog.Logger) e
 	if err != nil {
 		return err
 	}
-	defer sqlDatabase.Close()
+	defer func() { _ = sqlDatabase.Close() }()
 	clock := domain.SystemClock{}
 	identifiers := domain.CryptoIdentifiers{}
 	policy := domain.DefaultPolicy("island-battles", "quiz-demo")
