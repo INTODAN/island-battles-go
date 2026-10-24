@@ -290,6 +290,7 @@ class Problem(GameModel):
         "stale_membership",
         "idempotency_conflict",
         "invalid_input",
+        "invalid_game_settings",
         "unavailable",
         "internal_error",
     ]
