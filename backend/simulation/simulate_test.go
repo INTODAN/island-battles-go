@@ -214,6 +214,20 @@ func TestSentGroupsTakeNewIDsAndSnapshotTheirCastle(t *testing.T) {
 	}
 }
 
+func TestSendRejectsATakenGroupID(t *testing.T) {
+	state := captureState()
+	placeGroup(&state, 2, 5, 2)
+	// Corrupt data: the next ID already belongs to group 0.
+	state.NextSoldierGroupID = 0
+	send := simulation.SendSoldierGroupParams{OriginPersistentCastleID: 0, DestinationPersistentCastleID: 1, SoldierAmount: 4}
+	if _, _, err := simulation.Simulate(state, []simulation.Command{send}); err == nil {
+		t.Fatal("send overwrote an existing group")
+	}
+	if group := state.SoldierGroups[0]; group.TeamColor != 2 || group.Soldiers != 5 {
+		t.Fatalf("existing group changed: %+v", group)
+	}
+}
+
 func TestUpgradeCostAndAffordability(t *testing.T) {
 	for index, cost := range []uint{10, 20, 30} {
 		level := index + 1

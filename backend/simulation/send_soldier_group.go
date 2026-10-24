@@ -36,6 +36,10 @@ func (parameters SendSoldierGroupParams) apply(state *GameState, events []Event)
 	if err := upgrades.Validate(); err != nil {
 		return events, err
 	}
+	// Only corrupt data can hold a group with the next ID; never overwrite it.
+	if _, exists := state.SoldierGroups[state.NextSoldierGroupID]; exists {
+		return events, fmt.Errorf("soldier group %d already exists", state.NextSoldierGroupID)
+	}
 	originCastle.Soldiers -= parameters.SoldierAmount
 	state.SoldierGroups[state.NextSoldierGroupID] = &SoldierGroup{
 		ID:                  state.NextSoldierGroupID,
