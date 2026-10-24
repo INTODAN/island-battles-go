@@ -140,8 +140,24 @@ func TestTurnStatementsDoNotGrowWithGroupsOrCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	send := models.CommandFields{CommandType: models.SendSoldierGroup, Parameters: parameters}
+	var template models.MapTemplateView
+	if err := json.Unmarshal([]byte(testutils.MapExampleInput), &template); err != nil {
+		t.Fatal(err)
+	}
+	templateID, err := dal.CreateMapTemplate(database, template)
+	if err != nil {
+		t.Fatal(err)
+	}
 	statements := func(commands []models.CommandFields) map[string]int {
-		generation, err := dal.GetGeneration(database, testutils.CreateGenerationForTest(t, database))
+		gameID, err := dal.CreateGame(database)
+		if err != nil {
+			t.Fatal(err)
+		}
+		generationID, err := dal.CreateGenerationFromTemplate(database, templateID, gameID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		generation, err := dal.GetGeneration(database, generationID)
 		if err != nil {
 			t.Fatal(err)
 		}
