@@ -134,3 +134,25 @@ test("transport failures back off and pause cancels the pending retry", async (c
   await delay(110);
   assert.equal(attempts, 1, "paused retry must not submit");
 });
+
+test("game.ended shows the outcome and submits no further turn", async (context) => {
+  const subscription = new Subscription();
+  const commands = [];
+  const statuses = [];
+  const outcome = { reason: "last_team_standing", winner_team_color: 1, summary: "Blue wins as the last team standing" };
+  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", credential: "test", subscription,
+    onStatus: (title, detail) => statuses.push([title, detail]),
+    fetcher: async (url, options) => {
+      if (options.method !== "GET") commands.push(JSON.parse(options.body));
+      return { ok: true, json: async () => ({ ...initial(), submitted: true }) };
+    },
+  });
+  context.after(() => player.stop());
+  player.start();
+  await until(() => statuses.length > 0 && !player.refreshing);
+  subscription.emit("publication", { data: { schema_version: 1, type: "game.ended", state: { ...initial(), generation_id: 2, outcome } } });
+  await delay(30);
+  assert.equal(commands.length, 0, "a finished game has no turn to submit");
+  assert.equal(player.state.generation_id, 2);
+  assert.deepEqual(statuses.at(-1), ["Game over", outcome.summary]);
+});

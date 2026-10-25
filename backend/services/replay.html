@@ -50,7 +50,8 @@ const slider = document.getElementById("timeline");
 const play = document.getElementById("play");
 let lastTurn = replay.frames.length - 1;
 let latestGeneration = replay.frames[lastTurn].id;
-let followingLive = true;
+// A finished game has no live generations left to follow.
+let followingLive = !replay.ended;
 let turn = lastTurn;
 let playing = false;
 const live = document.getElementById("live");
@@ -160,6 +161,7 @@ function render(animateClashes = false) {
   play.textContent = playing ? "Pause" : turn === lastTurn ? "Replay" : "Play";
   live.textContent = followingLive ? "● Live" : "Follow live";
   live.setAttribute("aria-pressed", String(followingLive));
+  live.hidden = replay.ended;
 }
 play.addEventListener("click", () => { followingLive = false; if (turn === lastTurn) turn = 0; playing = !playing; render(); });
 slider.addEventListener("input", () => { turn = Number(slider.value); playing = false; followingLive = false; render(); });
@@ -168,14 +170,25 @@ live.addEventListener("click", () => { followingLive = true; playing = false; tu
 window.addEventListener("message", (event) => {
   if (event.source !== window.parent || event.data?.type !== "lobby.game-state" || event.data.game_key !== "island-battles") return;
   const state = event.data.state;
-  if (state?.game_id !== replay.game_id || !state.generation || state.generation.id <= latestGeneration) return;
-  // Saved frames have the same shape as live generations.
-  latestGeneration = state.generation.id;
-  replay.frames.push(state.generation);
-  lastTurn = replay.frames.length - 1;
-  slider.max = lastTurn;
-  if (followingLive) turn = lastTurn;
-  render(followingLive);
+  if (replay.ended || state?.game_id !== replay.game_id || !state.generation) return;
+  const newer = state.generation.id > latestGeneration;
+  if (!newer && !state.outcome) return;
+  const animate = followingLive;
+  if (newer) {
+    // Saved frames have the same shape as live generations.
+    latestGeneration = state.generation.id;
+    replay.frames.push(state.generation);
+    lastTurn = replay.frames.length - 1;
+    slider.max = lastTurn;
+    if (followingLive) turn = lastTurn;
+  }
+  // The generation that ends the game is its last; show how it ended.
+  if (state.outcome) {
+    replay.ended = true;
+    replay.outcome = state.outcome.summary;
+    followingLive = false;
+  }
+  render(animate);
 });
 setInterval(() => {
   if (!playing) return;

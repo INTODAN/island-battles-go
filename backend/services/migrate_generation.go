@@ -12,18 +12,27 @@ import (
 // the commands and the end-of-turn steps in memory, and saves the result as the
 // next generation. A rejected command rolls back the whole turn.
 func MigrateGeneration(database *gorm.DB, gameID uint, commands []models.CommandFields) (uint, error) {
+	generationID, _, err := migrateGeneration(database, gameID, commands)
+	return generationID, err
+}
+
+// migrateGeneration is MigrateGeneration, and also returns the new board so
+// the turn can apply the end rule to it.
+func migrateGeneration(database *gorm.DB, gameID uint, commands []models.CommandFields) (uint, simulation.GameState, error) {
 	turnCommands := append(append([]models.CommandFields{}, commands...), simulation.EndOfTurnCommands()...)
 	decodedCommands, err := simulation.DecodeCommands(turnCommands)
 	if err != nil {
-		return 0, err
+		return 0, simulation.GameState{}, err
 	}
 	var generationID uint
+	var next simulation.GameState
 	err = database.Transaction(func(transaction *gorm.DB) error {
 		state, err := dal.LoadGameState(transaction, gameID)
 		if err != nil {
 			return err
 		}
-		next, events, err := simulation.Simulate(state, decodedCommands)
+		var events []simulation.Event
+		next, events, err = simulation.Simulate(state, decodedCommands)
 		if err != nil {
 			return err
 		}
@@ -31,7 +40,7 @@ func MigrateGeneration(database *gorm.DB, gameID uint, commands []models.Command
 		return err
 	})
 	if err != nil {
-		return 0, err
+		return 0, simulation.GameState{}, err
 	}
-	return generationID, nil
+	return generationID, next, nil
 }

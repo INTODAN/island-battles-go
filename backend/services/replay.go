@@ -23,12 +23,14 @@ type GameReplay struct {
 	Teams   []models.GameTeam       `json:"teams"`
 	Frames  []models.GenerationView `json:"frames"`
 	Outcome string                  `json:"outcome"`
+	// Ended says the game has an outcome, so the last frame is final.
+	Ended bool `json:"ended"`
 }
 
 // gameReplay builds the replay of a game from its generations in ID order,
 // as dal.LoadGameGenerations returns them.
 func gameReplay(game *models.Game, generations []models.Generation) GameReplay {
-	replay := GameReplay{GameID: game.ID, Teams: game.Teams, Frames: make([]models.GenerationView, 0, len(generations)), Outcome: describeOutcome(game)}
+	replay := GameReplay{GameID: game.ID, Teams: game.Teams, Frames: make([]models.GenerationView, 0, len(generations)), Outcome: describeOutcome(game), Ended: game.Outcome != nil}
 	if replay.Teams == nil {
 		replay.Teams = []models.GameTeam{}
 	}

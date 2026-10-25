@@ -74,7 +74,10 @@ export class ExamplePlayer {
 
   scheduleTurn() {
     if (this.stopped || this.inFlight || this.commandRetry || this.refreshing || this.refreshRetry || !this.state) return;
-    if (!this.enabled) {
+    if (this.state.outcome) {
+      // The final generation has no turn to play.
+      this.onStatus("Game over", this.state.outcome.summary);
+    } else if (!this.enabled) {
       this.onStatus("Paused", "This player will wait before submitting its next turn.");
     } else if (this.state.submitted) {
       this.onStatus("Turn submitted", "Waiting for the other player to finish.");
@@ -85,7 +88,7 @@ export class ExamplePlayer {
   }
 
   async submitTurn() {
-    if (this.stopped || this.inFlight || !this.enabled || !this.state || this.state.submitted) return;
+    if (this.stopped || this.inFlight || !this.enabled || !this.state || this.state.submitted || this.state.outcome) return;
     this.inFlight = true;
     try {
       if (!this.pending) {
@@ -148,7 +151,8 @@ export class ExamplePlayer {
     // Reconcile only at subscription/reconnect. New generations arrive in full.
     this.subscription.on("subscribed", () => { void this.refresh(); });
     this.subscription.on("publication", ({ data }) => {
-      if (data?.schema_version === 1 && data.type === "game.next_generation" && data.state) this.receive(data.state);
+      // game.ended carries the final generation and the outcome.
+      if (data?.schema_version === 1 && ["game.next_generation", "game.ended"].includes(data.type) && data.state) this.receive(data.state);
     });
     this.subscription.subscribe();
   }

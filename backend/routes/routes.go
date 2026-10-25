@@ -5,6 +5,7 @@ import (
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/models"
+	"islandBattles/backend/services"
 	"islandBattles/lobby/application"
 	"islandBattles/lobby/auth"
 	"islandBattles/lobby/domain"
@@ -37,17 +38,20 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 	huma.Register(api, huma.Operation{
 		OperationID: "getIslandLobbyReplay", Path: "/game/from-lobby/{lobby_id}/replay", Method: http.MethodGet,
 		Summary:     "View the Island Battles replay history for a started lobby",
-		Description: "Players on the game's frozen roster can view every stored generation of the game, built from the generations on each request, including clash effects with survivor losses and defeated troop outlines. The game does not consult the lobby, so access continues after the lobby is deleted.",
+		Description: "Players on the game's frozen roster can view every stored generation of the game, built from the generations on each request, including clash effects with survivor losses and defeated troop outlines, and the outcome once the game has ended. The game does not consult the lobby, so access continues after the lobby is deleted.",
 		Tags:        []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
 	}, game.Replay)
 	huma.Register(api, huma.Operation{
 		OperationID: "getIslandLobbyGeneration", Path: "/game/from-lobby/{lobby_id}/generation", Method: http.MethodGet,
-		Summary: "Read the current generation for a roster player", Description: "Requires a place on the game's frozen roster. The game does not consult the lobby, so access continues after the lobby is deleted. Returns castle and soldier group IDs, which are never reassigned within a game, troop state, recorded clashes with per-participant before/after counts, and your turn completion flag.",
+		Summary: "Read the current generation for a roster player", Description: "Requires a place on the game's frozen roster. The game does not consult the lobby, so access continues after the lobby is deleted. Returns castle and soldier group IDs, which are never reassigned within a game, troop state, recorded clashes with per-participant before/after counts, your turn completion flag, and the outcome once the game has ended. A finished game stays readable.",
 		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
 	}, game.CurrentGeneration)
 	huma.Register(api, huma.Operation{
 		OperationID: "registerGenerationCommand", Path: "/generation/commands", Method: http.MethodPost,
-		Summary: "Register an atomic player command batch and optionally complete the turn", Description: "Requires a place on the game's frozen roster; the lobby is not consulted. Only owned send_soldier_group commands are accepted; other command types are forbidden (403). Complete defaults to true; an empty batch can complete a turn. The last frozen roster completion advances exactly once. A game stops at 300 generations, and commands for its last generation conflict. Retry the same request UUID and payload safely; changed payloads and stale new requests conflict.",
+		Summary: "Register an atomic player command batch and optionally complete the turn", Description: "Requires a place on the game's frozen roster; the lobby is not consulted. Only owned send_soldier_group commands are accepted; other command types are forbidden (403). Complete defaults to true; an empty batch can complete a turn. The last frozen roster completion advances exactly once. " +
+			"The game ends after the turn that leaves one team with castles or soldier groups, a draw when the last teams are eliminated in the same turn, or after the turn that creates generation 300, where the team with the most castles wins. " +
+			"That turn's generation is the last, its state carries the outcome, and every later command conflicts (409) with problem type " + services.GameEndedProblemType + ". " +
+			"Retry the same request UUID and payload safely, also after the game ended; changed payloads and stale new requests conflict.",
 		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
 		// The service validates the body itself so forbidden command types and
 		// unowned castles keep their 403 status instead of a schema 422.
@@ -59,6 +63,7 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 	command.Properties["parameters"] = registry.Schema(reflect.TypeOf(models.SendSoldierGroupParameters{}), true, "")
 	// Published on each roster player's personal channel rather than over HTTP.
 	registry.Schema(reflect.TypeOf(models.GenerationEvent{}), true, "")
+	registry.Schema(reflect.TypeOf(models.GameEndedEvent{}), true, "")
 	// Sent inside the generic lobby create request as its game_settings.
 	settings := registry.SchemaFromRef(registry.Schema(reflect.TypeOf(models.LobbySettings{}), true, "").Ref)
 	settings.Description = "Island Battles game_settings for a lobby create request. Choose at most one map: map_template_id or map. The map must be made for exactly the lobby's teams: player_amount equal to the team count, and castle team colours exactly 1 to that count, in team order, with 0 for neutral castles. Without a map the game starts on a generated map. An invalid choice fails lobby creation with invalid_game_settings, and its detail names each invalid field, such as game_settings.map.castles[0].x."
