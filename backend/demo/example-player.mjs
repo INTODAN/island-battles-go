@@ -1,6 +1,9 @@
 // Castles and soldiers with this color belong to no player team.
 export const NEUTRAL_TEAM_COLOR = 0;
 
+// The problem type of the 409 that rejects commands for a finished game.
+export const GAME_ENDED_PROBLEM = "urn:island-battles:problem:game-ended";
+
 // A deliberately small strategy: send one soldier, then finish this turn.
 export function singleSoldierCommands(state) {
   const castles = [...state.generation.castles].sort((left, right) => left.id - right.id);
@@ -18,6 +21,10 @@ export class ExamplePlayer {
     onState = () => {}, onStatus = () => {}, retryDelay = 500, fetcher = (...args) => globalThis.fetch(...args) }) {
     Object.assign(this, { lobbyID, playerID, credential, subscription, enabled, pending, savePending, onState, onStatus, retryDelay, fetcher });
     this.stopped = false;
+    // Set once the server rejects a command because the game has ended.
+    this.ended = false;
+    // Why the server's rejection paused this player, until it is resumed.
+    this.attention = null;
     this.inFlight = false;
     this.commandRetry = null;
     this.commandFailures = 0;
@@ -45,6 +52,7 @@ export class ExamplePlayer {
       if (!response.ok) {
         const error = new Error(result.detail || "Could not load this generation.");
         error.status = response.status;
+        error.type = result.type;
         throw error;
       }
       return result;
@@ -74,11 +82,13 @@ export class ExamplePlayer {
 
   scheduleTurn() {
     if (this.stopped || this.inFlight || this.commandRetry || this.refreshing || this.refreshRetry || !this.state) return;
-    if (this.state.outcome) {
+    if (this.ended || this.state.outcome) {
       // The final generation has no turn to play.
-      this.onStatus("Game over", this.state.outcome.summary);
+      this.onStatus("Game over", this.state.outcome?.summary || "The game has ended.");
     } else if (!this.enabled) {
-      this.onStatus("Paused", "This player will wait before submitting its next turn.");
+      // A rejected turn pauses the player until it is resumed.
+      if (this.attention) this.onStatus("Player needs attention", this.attention);
+      else this.onStatus("Paused", "This player will wait before submitting its next turn.");
     } else if (this.state.submitted) {
       this.onStatus("Turn submitted", "Waiting for the other player to finish.");
     } else {
@@ -88,7 +98,7 @@ export class ExamplePlayer {
   }
 
   async submitTurn() {
-    if (this.stopped || this.inFlight || !this.enabled || !this.state || this.state.submitted || this.state.outcome) return;
+    if (this.stopped || this.inFlight || !this.enabled || !this.state || this.state.submitted || this.ended || this.state.outcome) return;
     this.inFlight = true;
     try {
       if (!this.pending) {
@@ -109,12 +119,23 @@ export class ExamplePlayer {
         : "No enemy castle or available soldiers. Passed this turn.");
     } catch (error) {
       if (this.stopped) return;
-      if (error.status === 409) {
+      if (error.status === 409 && error.type === GAME_ENDED_PROBLEM) {
+        // A finished game accepts no commands; read its final state once.
+        this.remember(null);
+        this.ended = true;
+        await this.refresh();
+      } else if (error.status === 409) {
+        const rejected = this.pending?.generation_id;
         this.remember(null);
         await this.refresh();
+        // Retry only a stale turn. The same open turn would be rejected again.
+        if (this.refreshFailures === 0 && this.state?.generation_id === rejected && !this.state.submitted && !this.state.outcome) {
+          this.attention = error.message;
+          this.enabled = false;
+        }
       } else if ([401, 403, 404, 422].includes(error.status)) {
+        this.attention = error.message;
         this.enabled = false;
-        this.onStatus("Player needs attention", error.message);
       } else {
         // A lost command response is retried with the original UUID and body.
         this.onStatus("Reconnecting", "The same turn will be retried when the server responds.");
@@ -159,6 +180,7 @@ export class ExamplePlayer {
 
   setEnabled(enabled) {
     this.enabled = enabled;
+    this.attention = null;
     clearTimeout(this.commandRetry);
     this.commandRetry = null;
     if (enabled && !this.state) void this.refresh();
