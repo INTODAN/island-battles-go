@@ -38,3 +38,9 @@ __pycache__/
 
 # Playwright MCP snapshots, logs and screenshots
 .playwright-mcp/
+
+# Deployment settings, generated secrets, the Lambda environment, database dumps
+# and the smoke test's guest credential (deploy/README.md), and the Ansible
+# collections scripts/vm.sh installs
+deploy/local/
+deploy/ansible/.collections/

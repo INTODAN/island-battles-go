@@ -1,0 +1,10 @@
+# {{ ansible_managed }}
+# TYPE   DATABASE                USER                    ADDRESS     METHOD
+
+# `docker compose exec db ...` on the VM: dumps, restores and role setup.
+local    all                     all                                 trust
+
+# The backend on Lambda, over the internet: TLS and a password only, and only
+# for its own role and database. Everything else is rejected.
+hostssl  {{ postgres_database }}  {{ postgres_app_role }}  0.0.0.0/0   scram-sha-256
+hostssl  {{ postgres_database }}  {{ postgres_app_role }}  ::/0        scram-sha-256

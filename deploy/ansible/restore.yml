@@ -1,0 +1,11 @@
+---
+# Restores a dump into the VM's database. Usage: scripts/vm.sh restore <ip> <dump>
+- name: Restore a dump into the VM's database
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Restore the dump
+      ansible.builtin.import_role:
+        name: app
+        tasks_from: restore

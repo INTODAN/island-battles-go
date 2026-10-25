@@ -1,0 +1,33 @@
+---
+# Commands run in the Compose project directory on the VM.
+app_db_exec: [docker, compose, exec, -T, db]
+# psql as the `postgres` superuser, through the container's local socket.
+app_superuser_psql: "{{ app_db_exec + ['psql', '--no-psqlrc', '--username', 'postgres'] }}"
+# psql as the backend's role over TCP, the way the Lambda connects. The password
+# arrives on stdin, so it never appears in a command line, an environment
+# variable that sudo logs, or `ps`. The trailing `psql` is the script's $0.
+app_backend_psql:
+  - docker
+  - compose
+  - exec
+  - -T
+  - db
+  - sh
+  - -c
+  - read -r PGPASSWORD && export PGPASSWORD && exec psql --no-psqlrc "$@"
+  - psql
+app_backend_conninfo: host=127.0.0.1 port=5432 dbname={{ postgres_database }} user={{ postgres_app_role }}
+app_backend_ssl_query: SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()
+# Written when a move locks the backend out of this VM's database (dump.yml).
+# Deploys and restores refuse a VM that has it.
+app_moved_away_marker: "{{ vm_app_dir }}/moved-away"
+# The files the deploy reads its secrets from (group_vars/all.yml, and the
+# Postgres TLS files in main.yml). Missing ones are only generated on request.
+app_secret_files:
+  - "{{ deploy_secrets_dir }}/postgres_superuser_password"
+  - "{{ deploy_secrets_dir }}/postgres_app_password"
+  - "{{ deploy_secrets_dir }}/centrifugo_api_key"
+  - "{{ deploy_secrets_dir }}/connection_token_hmac_secret"
+  - "{{ deploy_secrets_dir }}/lobby_proxy_secret"
+  - "{{ app_postgres_tls_dir }}/server.key"
+  - "{{ app_postgres_tls_dir }}/server.crt"

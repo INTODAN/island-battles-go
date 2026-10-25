@@ -1,0 +1,50 @@
+---
+# Shared by every VM playbook. The developer's own settings (the domain, the
+# Lambda Function URL) come from deploy/local/vm.yml, which scripts/vm.sh passes
+# with -e. See deploy/vm.example.yml.
+
+# Lightsail's Ubuntu images log in as `ubuntu`, with passwordless sudo.
+ansible_user: ubuntu
+
+# Gitignored directory on the developer machine for the settings, the generated
+# secrets, the Lambda environment and database dumps.
+deploy_local_dir: "{{ (playbook_dir ~ '/../local') | ansible.builtin.realpath }}"
+deploy_secrets_dir: "{{ deploy_local_dir }}/secrets"
+deploy_dumps_dir: "{{ deploy_local_dir }}/dumps"
+
+# The single DNS record (#30): an A record from vm.<domain> to the static IP.
+vm_hostname: "vm.{{ deploy_domain }}"
+# The address vm_hostname must resolve to. It defaults to the VM being deployed.
+# When preparing a replacement VM before the static IP moves to it, pass the
+# static IP here instead.
+vm_static_ip: "{{ inventory_hostname }}"
+
+# Where the Compose project lives on the VM, and who owns it.
+vm_app_dir: /opt/island-battles
+vm_deploy_user: deploy
+
+# The database and the role the backend connects as. The role owns the database
+# but is not a superuser. The `postgres` superuser only connects through the
+# container's local socket.
+postgres_database: island_battles
+postgres_app_role: island_battles
+postgres_port: 5432
+
+# Secrets are generated once on the developer machine and reused on every deploy
+# and on every replacement VM, so issued connection tokens stay valid. Letters
+# and digits only, so they are safe in URLs, env files and TOML.
+postgres_superuser_password: >-
+  {{ lookup('ansible.builtin.password', deploy_secrets_dir ~ '/postgres_superuser_password',
+     length=48, chars=['ascii_letters', 'digits']) }}
+postgres_app_password: >-
+  {{ lookup('ansible.builtin.password', deploy_secrets_dir ~ '/postgres_app_password',
+     length=48, chars=['ascii_letters', 'digits']) }}
+centrifugo_api_key: >-
+  {{ lookup('ansible.builtin.password', deploy_secrets_dir ~ '/centrifugo_api_key',
+     length=48, chars=['ascii_letters', 'digits']) }}
+connection_token_hmac_secret: >-
+  {{ lookup('ansible.builtin.password', deploy_secrets_dir ~ '/connection_token_hmac_secret',
+     length=64, chars=['ascii_letters', 'digits']) }}
+lobby_proxy_secret: >-
+  {{ lookup('ansible.builtin.password', deploy_secrets_dir ~ '/lobby_proxy_secret',
+     length=48, chars=['ascii_letters', 'digits']) }}
