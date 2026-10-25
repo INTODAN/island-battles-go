@@ -219,7 +219,7 @@ func TestGenerationRejectsAnotherGamesRoster(t *testing.T) {
 	if _, err := fixture.service.Current(ctx, elsewhere, otherLobby); err != nil {
 		t.Fatalf("own game read: %v", err)
 	}
-	if replay, err := fixture.service.Replay(ctx, elsewhere, otherLobby); err != nil || len(replay) == 0 {
+	if replay, err := fixture.service.Replay(ctx, elsewhere, otherLobby); err != nil || len(replay.Frames) == 0 {
 		t.Fatalf("own game replay: %v", err)
 	}
 	_, err := fixture.service.Register(ctx, elsewhere, batch(fixture.state, true))

@@ -81,8 +81,17 @@ func FindGenerationRequest(database *gorm.DB, gameID uint, playerID, requestID s
 func StoreGenerationRequest(database *gorm.DB, request *models.GenerationRequest) error {
 	return database.Create(request).Error
 }
-func SaveGameReplay(database *gorm.DB, game *models.Game, replay []byte) error {
-	return database.Model(game).Updates(&models.Game{Replay: replay}).Error
+
+// SaveGameTeams stores the replay's teams when the game is initialized.
+func SaveGameTeams(database *gorm.DB, game *models.Game, teams []models.GameTeam) error {
+	game.Teams = teams
+	return database.Model(game).Select("Teams").Updates(game).Error
+}
+
+// SaveGameOutcome records how the game ended. The replay shows it from then on.
+func SaveGameOutcome(database *gorm.DB, game *models.Game, outcome models.GameOutcome) error {
+	game.Outcome = &outcome
+	return database.Model(game).Select("Outcome").Updates(game).Error
 }
 
 func FindGame(database *gorm.DB, gameID uint) (*models.Game, error) {

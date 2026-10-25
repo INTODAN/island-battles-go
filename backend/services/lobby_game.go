@@ -2,7 +2,6 @@ package services
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 
@@ -26,14 +25,14 @@ func RunLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 	}
 	var events []realtime.Publication
 	err = dal.WithLockedGame(database, binding.GameID, func(transaction *gorm.DB, game *models.Game) error {
-		// A saved replay means the game is already initialized.
-		if len(game.Replay) > 0 {
+		// Teams are saved with the first generation, so they mark an initialized game.
+		if len(game.Teams) > 0 {
 			return nil
 		}
 		if len(snapshot.StartRoster) == 0 {
 			return fmt.Errorf("cannot initialize an empty roster")
 		}
-		replay, gameMap := prepareLobbyGame(binding, snapshot)
+		teams, gameMap := prepareLobbyGame(binding, snapshot)
 		players := make([]models.FrozenGamePlayer, 0, len(snapshot.StartRoster))
 		for _, entry := range snapshot.StartRoster {
 			color := models.NeutralTeamColor
@@ -60,13 +59,7 @@ func RunLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 		if err != nil {
 			return err
 		}
-		replay.Frames = append(replay.Frames, generationView(current))
-		replay.Outcome = "Waiting for player turns"
-		raw, err := json.Marshal(replay)
-		if err != nil {
-			return err
-		}
-		if err := dal.SaveGameReplay(transaction, game, raw); err != nil {
+		if err := dal.SaveGameTeams(transaction, game, teams); err != nil {
 			return err
 		}
 		events, err = generationEvents(game, current, players)
@@ -82,23 +75,10 @@ func RunLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 	return binding, nil
 }
 
-type replayTeam struct {
-	Color   uint     `json:"color"`
-	Name    string   `json:"name"`
-	Players []string `json:"players"`
-}
-
-// gameReplay saves one frame per generation in the board view that players
-// receive, so the replay page shows saved and live generations alike.
-type gameReplay struct {
-	GameID  uint                    `json:"game_id"`
-	Teams   []replayTeam            `json:"teams"`
-	Frames  []models.GenerationView `json:"frames"`
-	Outcome string                  `json:"outcome"`
-}
-
-func prepareLobbyGame(binding models.BindingResult, snapshot domain.Snapshot) (gameReplay, models.Map) {
-	replay := gameReplay{GameID: binding.GameID, Teams: []replayTeam{}, Frames: []models.GenerationView{}}
+// prepareLobbyGame copies the replay's teams out of the lobby, which the game
+// never reads again, and places one castle per team.
+func prepareLobbyGame(binding models.BindingResult, snapshot domain.Snapshot) ([]models.GameTeam, models.Map) {
+	teams := []models.GameTeam{}
 	gameMap := models.Map{MapFields: models.MapFields{MapName: "Lobby battle", PlayerAmount: uint(len(snapshot.StartRoster)), PlaneSizeX: 8, PlaneSizeY: 6}}
 	for _, team := range binding.Teams {
 		players := []string{}
@@ -126,27 +106,14 @@ func prepareLobbyGame(binding models.BindingResult, snapshot domain.Snapshot) (g
 				break
 			}
 		}
-		replay.Teams = append(replay.Teams, replayTeam{Color: team.TeamColor, Name: name, Players: players})
+		teams = append(teams, models.GameTeam{Color: team.TeamColor, Name: name, Players: players})
 	}
-	for index, team := range replay.Teams {
-		angle := math.Pi + 2*math.Pi*float64(index)/float64(len(replay.Teams))
+	for index, team := range teams {
+		angle := math.Pi + 2*math.Pi*float64(index)/float64(len(teams))
 		gameMap.Castles = append(gameMap.Castles, models.Castle{
 			CastleFields:  models.CastleFields{TeamColor: team.Color, PersistentCastleID: uint(index), Position: pgtype.Point{P: pgtype.Vec2{X: 2 * math.Cos(angle), Y: 2 * math.Sin(angle)}, Valid: true}, Upgrades: models.Upgrades{}.Clone()},
 			SoldierAmount: 30,
 		})
 	}
-	return replay, gameMap
-}
-
-func appendPlayableReplay(database *gorm.DB, game *models.Game, generation *models.Generation) error {
-	var replay gameReplay
-	if err := json.Unmarshal(game.Replay, &replay); err != nil {
-		return err
-	}
-	replay.Frames = append(replay.Frames, generationView(generation))
-	raw, err := json.Marshal(replay)
-	if err != nil {
-		return err
-	}
-	return dal.SaveGameReplay(database, game, raw)
+	return teams, gameMap
 }

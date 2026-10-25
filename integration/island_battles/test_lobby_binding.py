@@ -27,7 +27,7 @@ async def started_lobby(guests, game_key, game_settings=None):
 async def test_start_initializes_one_generation_and_binding_is_idempotent(guests):
     alice, bob, scope = await started_lobby(guests, "island-battles")
     assert (await alice.snapshot(scope)).lobby.game_settings.to_dict() == {}
-    assert await sql(f"SELECT count(*) FROM games WHERE lobby_id='{scope.lobby_id}' AND replay IS NOT NULL") == "1"
+    assert await sql(f"SELECT count(*) FROM games WHERE lobby_id='{scope.lobby_id}' AND jsonb_array_length(teams) = 2 AND outcome IS NULL") == "1"
     async with httpx.AsyncClient(base_url=BASE, headers={"Authorization": f"Bearer {alice.credential}"}) as adapter:
         first = await adapter.post("/game/from-lobby", json={"game_key": scope.game_key, "lobby_id": scope.lobby_id})
         replay = await adapter.post("/game/from-lobby", json={"game_key": scope.game_key, "lobby_id": scope.lobby_id})
@@ -101,7 +101,9 @@ async def test_roster_keeps_game_access_after_lobby_is_deleted(guests):
             replay = await http.get(replay_path, headers=bearer(player))
             assert replay.status_code == 200, replay.text
             assert "Alice" in replay.text and "Bob" in replay.text
-    assert await sql(f"SELECT jsonb_array_length(replay->'frames') FROM games WHERE lobby_id='{scope.lobby_id}'") == "2"
+            # One frame per stored generation, derived when the page is read.
+            assert replay.text.count('"castles":') == 2
+    assert await sql(f"SELECT count(*) FROM generations JOIN games ON games.id = generations.game_id WHERE games.lobby_id='{scope.lobby_id}'") == "2"
 
 
 async def test_other_game_never_creates_island_state(guests):
@@ -134,6 +136,6 @@ async def test_island_schema_survives_restart():
         "frozen_game_players", "generation_inputs", "generation_requests",
     }
     columns = await sql("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='games' ORDER BY ordinal_position")
-    assert set(columns.splitlines()) == {"id", "created_at", "updated_at", "deleted_at", "lobby_id", "replay", "next_soldier_group_id"}
+    assert set(columns.splitlines()) == {"id", "created_at", "updated_at", "deleted_at", "lobby_id", "teams", "outcome", "next_soldier_group_id"}
     await control_backend(signal.SIGUSR1)
     assert await sql("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename") == tables
