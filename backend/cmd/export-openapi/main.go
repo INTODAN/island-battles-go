@@ -29,18 +29,21 @@ const (
 	apiDescription  = "Operations a player client calls during a started game. After every turn, each roster player's " +
 		"Centrifugo channel `player:{player_id}` receives a `GenerationEvent`. Clients reconcile with the generation " +
 		"read after subscribing or reconnecting; HTTP state is authoritative. `MapTemplate` is the map file format, " +
-		"which `POST /map/create` accepts."
+		"which `POST /map/create` accepts. `LobbySettings` is the `game_settings` object of an Island Battles lobby create " +
+		"request; `GET /map/templates` lists the default maps it can choose."
 )
 
-// PlayerOperations are the endpoints a gameplay client uses. Lobby setup has
-// its own generated SDK in lobby/api/openapi.json.
-var PlayerOperations = []string{"createLobbyConnectionToken", "getIslandLobbyGeneration", "registerGenerationCommand"}
+// PlayerOperations are the endpoints a gameplay client uses, and the default
+// map list for choosing a lobby's map. Lobby setup has its own generated SDK
+// in lobby/api/openapi.json.
+var PlayerOperations = []string{"createLobbyConnectionToken", "getIslandLobbyGeneration", "registerGenerationCommand", "listMapTemplates"}
 
 // PlayerEventSchemas are delivered by Centrifugo rather than HTTP responses.
 var PlayerEventSchemas = []string{"GenerationEvent"}
 
-// MapFileSchemas describe the map file format, the body of POST /map/create.
-var MapFileSchemas = []string{"MapTemplate"}
+// MapFileSchemas describe the map file format, the body of POST /map/create,
+// and the lobby game_settings that choose a map.
+var MapFileSchemas = []string{"MapTemplate", "LobbySettings"}
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {

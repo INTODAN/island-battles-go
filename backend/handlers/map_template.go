@@ -70,3 +70,26 @@ func ValidateMapTemplate(_ context.Context, input *ValidateMapTemplateRequest) (
 	}
 	return response, nil
 }
+
+type ListMapTemplatesResponse struct {
+	Body struct {
+		Maps []models.MapTemplateSummaryView `json:"maps" nullable:"false"`
+	}
+}
+
+// ListMapTemplates lists the default maps that a lobby can start on.
+func (env *Env) ListMapTemplates(ctx context.Context, _ *struct{}) (*ListMapTemplatesResponse, error) {
+	templates, err := dal.ListMapTemplates(env.DB.WithContext(ctx))
+	if err != nil {
+		fmt.Println("Error when listing MapTemplates: ", err)
+		return nil, huma.Error500InternalServerError("could not list default maps")
+	}
+	response := &ListMapTemplatesResponse{}
+	response.Body.Maps = []models.MapTemplateSummaryView{}
+	for _, template := range templates {
+		if summary, ok := template.Summary(); ok {
+			response.Body.Maps = append(response.Body.Maps, summary)
+		}
+	}
+	return response, nil
+}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2/humatest"
@@ -59,5 +60,43 @@ func TestCreateMapTemplateHTTP(t *testing.T) {
 
 	if duplicate := api.Post("/map/create", json.RawMessage(testutils.MapExampleInput)); duplicate.Code != http.StatusConflict {
 		t.Fatalf("duplicate name status=%d body=%s", duplicate.Code, duplicate.Body.String())
+	}
+}
+
+func TestListMapTemplatesHTTP(t *testing.T) {
+	database := testutils.InitTestDB(t)
+	_, api := humatest.New(t)
+	routes.SetupRoutes(api, &handlers.Env{DB: database})
+
+	empty := api.Get("/map/templates")
+	if empty.Code != http.StatusOK || strings.Join(strings.Fields(empty.Body.String()), "") != `{"maps":[]}` {
+		t.Fatalf("empty list status=%d body=%s", empty.Code, empty.Body.String())
+	}
+	for _, mapFile := range []string{
+		`{"map_name":"Zigzag","player_amount":3,"plane_size_x":12,"plane_size_y":9,"neutral_starting_soldier_amount":5,"castles":[{"team_color":1,"x":0,"y":0},{"team_color":2,"x":1,"y":0},{"team_color":3,"x":2,"y":0},{"team_color":0,"x":3,"y":0}]}`,
+		testutils.MapExampleInput,
+		// Colour 2 owns no castle, so the map fits no lobby.
+		`{"map_name":"Gap","player_amount":3,"plane_size_x":4,"plane_size_y":4,"neutral_starting_soldier_amount":5,"castles":[{"team_color":1,"x":0,"y":0},{"team_color":3,"x":1,"y":0}]}`,
+	} {
+		if created := api.Post("/map/create", json.RawMessage(mapFile)); created.Code != http.StatusOK {
+			t.Fatalf("create status=%d body=%s", created.Code, created.Body.String())
+		}
+	}
+	listed := api.Get("/map/templates")
+	var result struct {
+		Maps []models.MapTemplateSummaryView `json:"maps"`
+	}
+	if err := json.Unmarshal(listed.Body.Bytes(), &result); err != nil || listed.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s err=%v", listed.Code, listed.Body.String(), err)
+	}
+	for index := range result.Maps {
+		result.Maps[index].MapTemplateID = 0
+	}
+	expected := []models.MapTemplateSummaryView{
+		{MapName: "Zigzag", TeamCount: 3, PlaneSizeX: 12, PlaneSizeY: 9, CastleCount: 4},
+		{MapName: "my-first-map", TeamCount: 2, PlaneSizeX: 8, PlaneSizeY: 6, CastleCount: 2},
+	}
+	if !reflect.DeepEqual(result.Maps, expected) {
+		t.Fatalf("maps = %+v, want %+v", result.Maps, expected)
 	}
 }

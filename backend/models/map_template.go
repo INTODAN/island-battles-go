@@ -238,3 +238,29 @@ func (castle CastleTemplateView) fields(index int) CastleFields {
 		Upgrades:           castle.Upgrades.Clone(),
 	}
 }
+
+// MapTemplateSummaryView describes a default map in the list that the lobby's
+// create form offers, published as MapTemplateSummary.
+type MapTemplateSummaryView struct {
+	MapTemplateID uint   `json:"map_template_id" doc:"Choose the map by passing this ID as game_settings.map_template_id when creating a lobby."`
+	MapName       string `json:"map_name"`
+	TeamCount     int    `json:"team_count" doc:"Teams the map is made for, its player_amount. A lobby on this map has exactly this many teams, in team colour order."`
+	PlaneSizeX    uint   `json:"plane_size_x"`
+	PlaneSizeY    uint   `json:"plane_size_y"`
+	CastleCount   int    `json:"castle_count" doc:"Castles on the map, team and neutral."`
+}
+
+// Summary describes a stored template for the default map list. ok is false
+// when the template's team colours are not exactly 1 to player_amount, so the
+// map fits no lobby.
+func (template MapTemplate) Summary() (summary MapTemplateSummaryView, ok bool) {
+	teams, ok := MapTeamCount(template.View())
+	return MapTemplateSummaryView{
+		MapTemplateID: template.ID,
+		MapName:       template.MapName,
+		TeamCount:     teams,
+		PlaneSizeX:    template.PlaneSizeX,
+		PlaneSizeY:    template.PlaneSizeY,
+		CastleCount:   len(template.CastleTemplates),
+	}, ok
+}

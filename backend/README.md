@@ -14,7 +14,7 @@ Compose mounts PostgreSQL 18's parent data directory at `/var/lib/postgresql`.
 
 ## Browser demo
 
-The backend lists Island Battles in the lobby frontend's game catalog with [`lobbyadapter.FrontendGame`](lobbyadapter/frontend.go), and serves the browser [example player](demo/example-player.mjs) under `/game/demo/`. Once a lobby starts, the frontend shows the lobby replay from `/game/from-lobby/{lobby_id}/replay`, which takes new generations from the page's `lobby.game-state` messages.
+The backend lists Island Battles in the lobby frontend's game catalog with [`lobbyadapter.FrontendGame`](lobbyadapter/frontend.go), and serves the browser [example player](demo/example-player.mjs) and the create form's [map choice](demo/lobby-settings.mjs) under `/game/demo/`. Once a lobby starts, the frontend shows the lobby replay from `/game/from-lobby/{lobby_id}/replay`, which takes new generations from the page's `lobby.game-state` messages.
 
 For the quickest test, open `/lobby/ui/` and click **New demo lobby**. It creates Alex on Blue in the current tab, opens Sam on Red in a second tab, marks both ready, and starts automatically. Both tabs run the example player: send one soldier from the first available owned castle to the first enemy castle, then finish the turn. Players submit immediately when a generation arrives, without an artificial client delay. Replay playback has its own viewing pace. Failed requests still use retry backoff.
 
@@ -22,11 +22,11 @@ The board follows new generations live. **Pause this player** stops that tab fro
 
 Manually created or joined lobbies wait for commands through the [Island Battles Python client](../clients/island-battles-python/README.md); only demo invitations let the browser example player submit turns. Disconnected players remain part of the turn barrier.
 
-Run the browser player's strategy, deduplication, retry and no-polling checks from the repository root with `node backend/demo/example-player.test.mjs`.
+Run the browser player's strategy, deduplication, retry and no-polling checks from the repository root with `node backend/demo/example-player.test.mjs`, and the map choice's checks with `node backend/demo/lobby-settings.test.mjs`.
 
 ## Lobby lifecycle
 
-A guest session lasts 24 hours. Create/join is explicit and scoped by game key. Registered example games are `island-battles` and `quiz-demo`. A create request may carry a `game_settings` object, which the game checks at creation and receives, compacted with sorted keys, in the started snapshot. Settings never change after creation. Island Battles takes no settings yet and accepts only an empty object; `quiz-demo` has no game behind it and accepts any object. Each guest consumes one seat even with several simultaneous client instances. Each instance heartbeats every 15 seconds into a 45-second lease; when all leases end, membership retains its team, readiness and host position through a 60-second grace period. There is no background sweeper. Every lobby request, including the heartbeat, and every Centrifugo subscription refresh applies due deadlines first and pushes the result. Connected members therefore see a peer's expiry within one heartbeat or refresh, and a lobby nobody is connected to catches up on its next access. Deadlines are persisted, so they also apply after a restart. Closing a client releases its own lease; leaving removes the identity's membership across devices.
+A guest session lasts 24 hours. Create/join is explicit and scoped by game key. Registered example games are `island-battles` and `quiz-demo`. A create request may carry a `game_settings` object, which the game checks at creation and receives, compacted with sorted keys, in the started snapshot. Settings never change after creation. Island Battles reads them as its [map choice](#choosing-a-lobbys-map); `quiz-demo` has no game behind it and accepts any object. Each guest consumes one seat even with several simultaneous client instances. Each instance heartbeats every 15 seconds into a 45-second lease; when all leases end, membership retains its team, readiness and host position through a 60-second grace period. There is no background sweeper. Every lobby request, including the heartbeat, and every Centrifugo subscription refresh applies due deadlines first and pushes the result. Connected members therefore see a peer's expiry within one heartbeat or refresh, and a lobby nobody is connected to catches up on its next access. Deadlines are persisted, so they also apply after a restart. Closing a client releases its own lease; leaving removes the identity's membership across devices.
 
 The host is the earliest active joiner. Team changes clear readiness. At least two members are required to start; all active members must choose a team, become ready and have a live lease. Starting freezes the roster; only roster players can subsequently rejoin that started room. An empty waiting room closes. Expired guest credentials require an explicit new session and do not transfer ownership.
 
@@ -145,6 +145,18 @@ Open `/map/builder/` to build a map in the browser, from the [`mapbuilder`](mapb
 The page holds no copy of the map rules. Each edit sends the file to `POST /map/validate`, and the page shows each problem next to the castle and field it names. **Download map** saves exactly the text that the server last accepted; while the map is invalid or unchecked, the button is disabled and the page says why. **Open map file** loads a file to keep editing; a downloaded file reopens unchanged. A hint names any team from 1 to `player_amount` that owns no castle, because lobbies are expected to need one for each team, but it doesn't block the download.
 
 Run the page logic's checks from the repository root with `node backend/mapbuilder/builder.test.mjs`.
+
+### Choosing a lobby's map
+
+An Island Battles lobby starts on the map its `game_settings` choose, published as the `LobbySettings` schema:
+
+- `{"map_template_id": 4}` picks a default map. `GET /map/templates` lists them with each map's name, `team_count`, plane size and castle count.
+- `{"map": {...}}` carries a whole map file, such as one downloaded from the map builder. It must pass `models.DecodeMapTemplate`.
+- `{}`, or no settings, starts on the generated map, with one castle per team that has players.
+
+Pass at most one of the two. The map sets the lobby's teams and its neutral castles, so a lobby on a map with `player_amount` N has exactly N teams, and the map's castle team colours are exactly 1 to N, with 0 neutral. The lobby's first team plays colour 1, its second colour 2, and so on. `GET /map/templates` leaves out stored maps whose colours skip one, because they fit no lobby. A bad choice fails lobby creation with `invalid_game_settings`, and the detail names every invalid field, such as `game_settings.map_template_id: no default map has ID 9` or `game_settings.map.castles[2].x: must be inside the plane, from -5 to 5`. Settings are capped at the lobby's 16 KiB, which holds a map file of over a hundred castles.
+
+The lobby frontend's create form offers the same choice through the catalog's settings module, [`demo/lobby-settings.mjs`](demo/lobby-settings.mjs): the generated map, a default map, or a loaded map file. Picking a map fills in one team per colour, named after the colour the board draws (Blue, Red, Green, Purple, Amber, Teal), with one seat each, and the room shows the chosen map's name.
 
 ## Schema and recovery
 

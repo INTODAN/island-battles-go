@@ -245,6 +245,37 @@ class GenerationState(GameModel):
     team_color: Annotated[StrictInt, Field(ge=1)]
 
 
+class ListMapTemplatesResponseBody(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    field_schema: Annotated[
+        AnyUrl | None,
+        Field(
+            alias="$schema",
+            examples=["https://example.com/ListMapTemplatesResponseBody.json"],
+        ),
+    ] = None
+    """
+    A URL to the JSON Schema for this object.
+    """
+    maps: Sequence[MapTemplateSummary]
+
+
+class LobbySettings(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    map: MapTemplate | None = None
+    """
+    Start on this map file. Cannot be combined with map_template_id.
+    """
+    map_template_id: Annotated[StrictInt | None, Field(ge=1)] = None
+    """
+    Start on this default map, a map_template_id from GET /map/templates. Cannot be combined with map.
+    """
+
+
 class MapTemplate(GameModel):
     model_config = ConfigDict(
         extra="ignore",
@@ -272,6 +303,27 @@ class MapTemplate(GameModel):
     player_amount: Annotated[StrictInt, Field(ge=1)]
     """
     Players the map is made for. Castle team colours run from 1 to player_amount.
+    """
+
+
+class MapTemplateSummary(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    castle_count: StrictInt
+    """
+    Castles on the map, team and neutral.
+    """
+    map_name: StrictStr
+    map_template_id: Annotated[StrictInt, Field(ge=0)]
+    """
+    Choose the map by passing this ID as game_settings.map_template_id when creating a lobby.
+    """
+    plane_size_x: Annotated[StrictInt, Field(ge=0)]
+    plane_size_y: Annotated[StrictInt, Field(ge=0)]
+    team_count: StrictInt
+    """
+    Teams the map is made for, its player_amount. A lobby on this map has exactly this many teams, in team colour order.
     """
 
 

@@ -59,6 +59,10 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 	command.Properties["parameters"] = registry.Schema(reflect.TypeOf(models.SendSoldierGroupParameters{}), true, "")
 	// Published on each roster player's personal channel rather than over HTTP.
 	registry.Schema(reflect.TypeOf(models.GenerationEvent{}), true, "")
+	// Sent inside the generic lobby create request as its game_settings.
+	settings := registry.SchemaFromRef(registry.Schema(reflect.TypeOf(models.LobbySettings{}), true, "").Ref)
+	settings.Description = "Island Battles game_settings for a lobby create request. Choose at most one map: map_template_id or map. The map must be made for exactly the lobby's teams: player_amount equal to the team count, and castle team colours exactly 1 to that count, in team order, with 0 for neutral castles. Without a map the game starts on a generated map. An invalid choice fails lobby creation with invalid_game_settings, and its detail names each invalid field, such as game_settings.map.castles[0].x."
+	api.OpenAPI().Paths["/lobby/v1/lobbies"].Post.Description += " Island Battles reads game_settings as the LobbySettings schema."
 }
 
 func SetupRoutes(api huma.API, env *handlers.Env) {
@@ -81,6 +85,11 @@ func SetupRoutes(api huma.API, env *handlers.Env) {
 		// rejects it and every problem comes back in the response.
 		SkipValidateBody: true, MaxBodyBytes: 1 << 20, BodyReadTimeout: 5 * time.Second}, handlers.ValidateMapTemplate)
 	api.OpenAPI().Paths["/map/validate"].Post.RequestBody.Content["application/json"].Schema = &huma.Schema{Ref: "#/components/schemas/MapTemplate"}
+	huma.Register(api, huma.Operation{OperationID: "listMapTemplates", Path: "/map/templates", Method: http.MethodGet,
+		Summary: "List the default maps a lobby can start on.",
+		Description: "Lists every default map whose castle team colours are exactly 1 to player_amount, ordered by name. " +
+			"Choose one when creating an Island Battles lobby by passing its map_template_id in game_settings, with exactly team_count teams. " +
+			"Maps whose team colours skip a colour fit no lobby and are left out."}, env.ListMapTemplates)
 	huma.Register(api, huma.Operation{Path: "/game/{id}/graph", Method: http.MethodGet, DefaultStatus: http.StatusOK,
 		Summary: "Get a graph visualization of the game."}, env.GetGameGraph)
 }

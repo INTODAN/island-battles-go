@@ -71,3 +71,30 @@ func GetMap(db *gorm.DB, mapID uint) (*models.Map, error) {
 	}
 	return &m, nil
 }
+
+// FindMapTemplate loads a stored template with its castles. found is false
+// when no template has the ID.
+func FindMapTemplate(db *gorm.DB, templateID uint) (template models.MapTemplate, found bool, err error) {
+	if templateID == 0 {
+		// A zero ID would leave the filter empty and match any template.
+		return models.MapTemplate{}, false, nil
+	}
+	var templates []models.MapTemplate
+	if err := db.Preload(clause.Associations).Where(&models.MapTemplate{Model: gorm.Model{ID: templateID}}).Limit(1).Find(&templates).Error; err != nil {
+		return models.MapTemplate{}, false, err
+	}
+	if len(templates) == 0 {
+		return models.MapTemplate{}, false, nil
+	}
+	return templates[0], true, nil
+}
+
+// ListMapTemplates loads every stored template with its castles, ordered by
+// name and then ID.
+func ListMapTemplates(db *gorm.DB) ([]models.MapTemplate, error) {
+	var templates []models.MapTemplate
+	err := db.Preload(clause.Associations).
+		Order(clause.OrderBy{Columns: []clause.OrderByColumn{{Column: clause.Column{Name: "map_name"}}, {Column: clause.Column{Name: "id"}}}}).
+		Find(&templates).Error
+	return templates, err
+}
