@@ -2,6 +2,7 @@ package models
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 )
@@ -16,7 +17,7 @@ func TestMapTemplateErrorsAreCapped(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 	details := invalidTemplate.Details
-	if len(details) != MaxMapTemplateProblems+1 || details[MaxMapTemplateProblems-1].Location != "castles[99].x" {
+	if len(details) != MaxMapTemplateProblems+1 || details[MaxMapTemplateProblems-1].Location != fmt.Sprintf("castles[%d].x", MaxMapTemplateProblems-1) {
 		t.Fatalf("%d details, the last kept at %q", len(details), details[len(details)-2].Location)
 	}
 	if last := details[MaxMapTemplateProblems]; last.Location != "" || last.Message != "and 50 more problems" {

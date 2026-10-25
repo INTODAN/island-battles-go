@@ -13,6 +13,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/jackc/pgx/v5/pgtype"
+	"islandBattles/lobby/httpapi"
 )
 
 // MapTemplateView is the map file format, published as MapTemplate. The same
@@ -86,23 +87,18 @@ func DecodeMapTemplate(data []byte) (MapTemplateView, error) {
 	result := &huma.ValidateResult{}
 	huma.Validate(registry, schema, huma.NewPathBuffer(nil, 0), huma.ModeWriteToServer, document, result)
 	if len(result.Errors) > 0 {
-		details := make([]*huma.ErrorDetail, 0, min(len(result.Errors), MaxMapTemplateProblems+1))
-		for _, err := range result.Errors[:min(len(result.Errors), MaxMapTemplateProblems)] {
-			schemaDetail, isDetail := err.(*huma.ErrorDetail)
+		details := make([]*huma.ErrorDetail, len(result.Errors))
+		for index, err := range result.Errors {
+			detail, isDetail := err.(*huma.ErrorDetail)
 			if !isDetail {
-				details = append(details, &huma.ErrorDetail{Message: err.Error()})
-				continue
+				detail = &huma.ErrorDetail{Message: err.Error()}
 			}
-			// Huma sets the value of some errors, such as an unexpected
-			// property, to the whole enclosing object. Echoing or formatting it
-			// would copy the file once per problem, so only scalars are kept.
-			detail := &huma.ErrorDetail{Message: schemaDetail.Message, Location: schemaDetail.Location}
-			if isScalar(schemaDetail.Value) {
-				detail.Value = schemaDetail.Value
-			}
-			details = append(details, detail)
+			details[index] = detail
 		}
-		return MapTemplateView{}, &MapTemplateError{Details: limitProblems(details, len(result.Errors))}
+		// Huma sets the value of some errors, such as an unexpected property,
+		// to the whole enclosing object. LimitErrorDetails drops those values,
+		// so the file isn't copied once per problem.
+		return MapTemplateView{}, &MapTemplateError{Details: httpapi.LimitErrorDetails(details)}
 	}
 	var template MapTemplateView
 	if err := json.Unmarshal(data, &template); err != nil {
@@ -115,26 +111,10 @@ func DecodeMapTemplate(data []byte) (MapTemplateView, error) {
 }
 
 // MaxMapTemplateProblems is how many problems a *MapTemplateError lists. A
-// final detail counts the rest, so a large invalid file can't produce an
-// equally large list of errors.
-const MaxMapTemplateProblems = 100
-
-// limitProblems keeps the first MaxMapTemplateProblems of total problems and
-// counts the rest in a final detail without a location.
-func limitProblems(details []*huma.ErrorDetail, total int) []*huma.ErrorDetail {
-	if total <= MaxMapTemplateProblems {
-		return details
-	}
-	return append(details[:MaxMapTemplateProblems], &huma.ErrorDetail{Message: fmt.Sprintf("and %d more problems", total-MaxMapTemplateProblems)})
-}
-
-func isScalar(value any) bool {
-	switch value.(type) {
-	case nil, string, float64, bool, json.Number:
-		return true
-	}
-	return false
-}
+// final detail counts the rest, "and N more problems", so a large invalid file
+// can't produce an equally large list of errors. With that detail the list
+// fills httpapi.MaxErrorDetails, the bound on every problem response.
+const MaxMapTemplateProblems = httpapi.MaxErrorDetails - 1
 
 // ValidateMapTemplate checks a map file without storing it: its name and
 // sizes, that every castle lies inside the plane, the castles' team colours and
@@ -181,7 +161,7 @@ func ValidateMapTemplate(template MapTemplateView) error {
 		}
 	}
 	if len(details) > 0 {
-		return &MapTemplateError{Details: limitProblems(details, len(details))}
+		return &MapTemplateError{Details: httpapi.LimitErrorDetails(details)}
 	}
 	return nil
 }
