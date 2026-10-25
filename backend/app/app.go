@@ -14,6 +14,7 @@ import (
 	"islandBattles/backend/dependencies"
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/lobbyadapter"
+	"islandBattles/backend/mapbuilder"
 	"islandBattles/backend/routes"
 	"islandBattles/lobby/application"
 	"islandBattles/lobby/auth"
@@ -104,5 +105,13 @@ func registerPages(router chi.Router) error {
 	}
 	router.Handle("/lobby/ui/*", http.StripPrefix("/lobby/ui/", lobbyFrontend))
 	router.Handle("/game/demo/*", http.StripPrefix("/game/demo/", demo.Handler()))
+	mapBuilder, err := mapbuilder.Handler()
+	if err != nil {
+		return err
+	}
+	router.Get("/map/builder", func(response http.ResponseWriter, request *http.Request) {
+		http.Redirect(response, request, "/map/builder/", http.StatusTemporaryRedirect)
+	})
+	router.Handle("/map/builder/*", http.StripPrefix("/map/builder/", mapBuilder))
 	return nil
 }

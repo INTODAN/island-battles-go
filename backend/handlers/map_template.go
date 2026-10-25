@@ -37,3 +37,36 @@ func (env *Env) CreateMapTemplate(ctx context.Context, input *CreateMapTemplateR
 	resp.Body.MapTemplateID = mapTemplateID
 	return resp, nil
 }
+
+type ValidateMapTemplateRequest struct {
+	// RawBody keeps the exact bytes, so the check is the strict decoding that
+	// reading a map file uses rather than Huma's body parsing.
+	RawBody []byte `contentType:"application/json"`
+}
+
+// MapTemplateValidation is the result of checking a map file.
+type MapTemplateValidation struct {
+	Valid  bool                `json:"valid" doc:"Whether the map file passes every check."`
+	Errors []*huma.ErrorDetail `json:"errors" nullable:"false" doc:"One entry per problem, located relative to the map file, such as castles[2].x. A problem with the whole file has no location."`
+}
+
+type ValidateMapTemplateResponse struct {
+	Body MapTemplateValidation
+}
+
+// ValidateMapTemplate checks a map file with models.DecodeMapTemplate and
+// stores nothing. An invalid map is a successful check, so it answers 200 and
+// lists the problems.
+func ValidateMapTemplate(_ context.Context, input *ValidateMapTemplateRequest) (*ValidateMapTemplateResponse, error) {
+	response := &ValidateMapTemplateResponse{Body: MapTemplateValidation{Valid: true, Errors: []*huma.ErrorDetail{}}}
+	_, err := models.DecodeMapTemplate(input.RawBody)
+	var invalidTemplate *models.MapTemplateError
+	switch {
+	case errors.As(err, &invalidTemplate):
+		response.Body.Valid = false
+		response.Body.Errors = invalidTemplate.Details
+	case err != nil:
+		return nil, err
+	}
+	return response, nil
+}

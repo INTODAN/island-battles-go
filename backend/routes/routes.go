@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"gorm.io/datatypes"
@@ -71,6 +72,15 @@ func SetupRoutes(api huma.API, env *handlers.Env) {
 			"Castle upgrades are a map of upgrade type to level. Omitted upgrades default to level 1; speed supports levels 1 through 4, and clash_stop_generations supports levels 1 through 3. " +
 			"An invalid map returns 422 with an error for each invalid field and is not stored. A map_name that another map uses returns 409."}, env.CreateMapTemplate)
 	dropSchemaLink(api, reflect.TypeFor[models.MapTemplateView]())
+	huma.Register(api, huma.Operation{Path: "/map/validate", Method: http.MethodPost, DefaultStatus: http.StatusOK,
+		Summary: "Check a map file without storing it.",
+		Description: "The body is a map file, the MapTemplate schema, checked exactly as a map file is read: unknown keys, missing fields and wrong types are problems, then the same rules as /map/create apply. " +
+			"Nothing is stored, and the map_name may be one that a default map already uses. " +
+			"Any non-empty body, even malformed JSON, returns 200: valid is true for a map that passes, and otherwise errors lists the problems, located relative to the file, such as castles[2].x. Past 100 problems, a last entry without a location counts the rest. The map builder at /map/builder/ uses it while editing.",
+		// The handler decodes the raw body itself, so Huma neither parses nor
+		// rejects it and every problem comes back in the response.
+		SkipValidateBody: true, MaxBodyBytes: 1 << 20, BodyReadTimeout: 5 * time.Second}, handlers.ValidateMapTemplate)
+	api.OpenAPI().Paths["/map/validate"].Post.RequestBody.Content["application/json"].Schema = &huma.Schema{Ref: "#/components/schemas/MapTemplate"}
 	huma.Register(api, huma.Operation{Path: "/game/{id}/graph", Method: http.MethodGet, DefaultStatus: http.StatusOK,
 		Summary: "Get a graph visualization of the game."}, env.GetGameGraph)
 }

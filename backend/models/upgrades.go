@@ -32,6 +32,16 @@ var upgradeLevels = map[UpgradeType][]upgradeLevel{
 
 type Upgrades map[UpgradeType]int
 
+// UpgradeMaxLevels returns each upgrade type's highest level. Every type
+// starts at level 1.
+func UpgradeMaxLevels() map[UpgradeType]int {
+	maxLevels := make(map[UpgradeType]int, len(upgradeLevels))
+	for upgradeType, levels := range upgradeLevels {
+		maxLevels[upgradeType] = len(levels)
+	}
+	return maxLevels
+}
+
 func (upgrades Upgrades) Level(upgradeType UpgradeType) (int, error) {
 	values, exists := upgradeLevels[upgradeType]
 	if !exists {

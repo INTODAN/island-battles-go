@@ -26,6 +26,15 @@ func TestMapCreateAcceptsTheMapFileFormat(t *testing.T) {
 	}
 }
 
+func TestMapValidateDocumentsTheMapFileFormat(t *testing.T) {
+	_, api := humatest.New(t, routes.NewAPIConfig("test", "1.0.0"))
+	routes.SetupRoutes(api, &handlers.Env{})
+	content := api.OpenAPI().Paths["/map/validate"].Post.RequestBody.Content
+	if len(content) != 1 || content["application/json"].Schema.Ref != "#/components/schemas/MapTemplate" {
+		t.Fatalf("/map/validate body is not documented as the MapTemplate schema: %+v", content)
+	}
+}
+
 func TestRawGenerationMutationRoutesAreRemoved(t *testing.T) {
 	_, api := humatest.New(t)
 	routes.SetupRoutes(api, &handlers.Env{})
