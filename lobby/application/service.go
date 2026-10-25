@@ -105,3 +105,24 @@ func unavailable(cause error) error {
 }
 
 var _ domain.Application = (*Service)(nil)
+
+// snapshot builds the player's view of the room with its game's start rules.
+func (service *Service) snapshot(aggregate domain.Aggregate, playerID string) (domain.Snapshot, error) {
+	snapshot, err := domain.BuildSnapshot(aggregate, playerID)
+	if err != nil {
+		return domain.Snapshot{}, err
+	}
+	return service.withStartRules(snapshot)
+}
+
+// withStartRules fills the snapshot's start rules from the game's
+// registration. A room whose game is no longer registered fails like any
+// request for an unregistered game.
+func (service *Service) withStartRules(snapshot domain.Snapshot) (domain.Snapshot, error) {
+	game, err := service.policy.Game(snapshot.Lobby.GameKey)
+	if err != nil {
+		return domain.Snapshot{}, err
+	}
+	snapshot.StartRules = game.StartRules
+	return snapshot, nil
+}

@@ -95,10 +95,6 @@ func prepareLobbyGame(binding models.BindingResult, snapshot domain.Snapshot) ([
 			}
 			players = append(players, name)
 		}
-		// Empty configured teams do not take part in the battle.
-		if len(players) == 0 {
-			continue
-		}
 		name := fmt.Sprintf("Team %d", team.TeamOrder)
 		for _, lobbyTeam := range snapshot.Teams {
 			if lobbyTeam.ID == team.TeamID {

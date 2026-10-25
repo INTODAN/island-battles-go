@@ -287,6 +287,7 @@ class Problem(GameModel):
         "team_full",
         "phase_conflict",
         "not_ready",
+        "empty_teams",
         "stale_membership",
         "idempotency_conflict",
         "invalid_input",
@@ -296,6 +297,10 @@ class Problem(GameModel):
     ]
     detail: StrictStr
     status: StrictInt
+    team_ids: Sequence[StrictStr] | None = None
+    """
+    The teams the error is about. For empty_teams, the teams that still need a player, in team order.
+    """
     title: StrictStr
 
 

@@ -310,3 +310,9 @@ func TestFailedInitializationRollsBackAndCanBeRetried(t *testing.T) {
 	}
 	assertBindingCounts(t, database, scope.LobbyID, 1, 2)
 }
+
+func TestRegistrationRequiresEveryTeamFilled(t *testing.T) {
+	if !lobbyadapter.Registration().StartRules.EveryTeamNeedsMember {
+		t.Fatal("Island Battles can start with an empty team")
+	}
+}
