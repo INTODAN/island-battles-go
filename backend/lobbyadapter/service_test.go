@@ -312,7 +312,7 @@ func TestFailedInitializationRollsBackAndCanBeRetried(t *testing.T) {
 }
 
 func TestRegistrationRequiresEveryTeamFilled(t *testing.T) {
-	if !lobbyadapter.Registration().StartRules.EveryTeamNeedsMember {
+	if !lobbyadapter.Registration(nil).StartRules.EveryTeamNeedsMember {
 		t.Fatal("Island Battles can start with an empty team")
 	}
 }

@@ -36,10 +36,10 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger) (ht
 	clock := domain.SystemClock{}
 	identifiers := domain.CryptoIdentifiers{}
 	policy := domain.DefaultPolicy(
-		lobbyadapter.Registration(),
+		lobbyadapter.Registration(database),
 		// quiz-demo only shows that a second game can share the lobby. With no
 		// game behind it to read settings, it accepts any object.
-		domain.GameRegistration{Key: "quiz-demo", ValidateSettings: func(context.Context, json.RawMessage) error { return nil }},
+		domain.GameRegistration{Key: "quiz-demo", ValidateSettings: func(context.Context, json.RawMessage, []domain.TeamDefinition) error { return nil }},
 	)
 	// Requests push their own committed changes, so nothing runs between requests.
 	publisher, err := realtime.NewPublisher(dependencies.ConnectCentrifugoClient(config), logger, realtime.DefaultPushRetry())

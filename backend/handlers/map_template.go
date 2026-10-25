@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
+	"islandBattles/lobby/domain"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/httplog/v3"
@@ -67,6 +68,31 @@ func ValidateMapTemplate(_ context.Context, input *ValidateMapTemplateRequest) (
 		response.Body.Errors = invalidTemplate.Details
 	case err != nil:
 		return nil, err
+	}
+	return response, nil
+}
+
+type ListMapTemplatesResponse struct {
+	Body struct {
+		Maps []models.MapTemplateSummaryView `json:"maps" nullable:"false"`
+	}
+}
+
+// ListMapTemplates lists the default maps that a lobby can start on: maps
+// whose team colours are exactly 1 to player_amount, made for a team count
+// that a lobby allows.
+func (env *Env) ListMapTemplates(ctx context.Context, _ *struct{}) (*ListMapTemplatesResponse, error) {
+	templates, err := dal.ListMapTemplates(env.DB.WithContext(ctx))
+	if err != nil {
+		fmt.Println("Error when listing MapTemplates: ", err)
+		return nil, huma.Error500InternalServerError("could not list default maps")
+	}
+	response := &ListMapTemplatesResponse{}
+	response.Body.Maps = []models.MapTemplateSummaryView{}
+	for _, template := range templates {
+		if summary, ok := template.Summary(); ok && summary.TeamCount >= domain.MinTeams && summary.TeamCount <= domain.MaxTeams {
+			response.Body.Maps = append(response.Body.Maps, summary)
+		}
 	}
 	return response, nil
 }

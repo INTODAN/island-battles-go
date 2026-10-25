@@ -15,7 +15,8 @@ import (
 )
 
 // RunLobbyGame initializes one playable generation for the frozen roster and
-// pushes it to every roster player. Repeated and concurrent starts reuse the
+// pushes it to every roster player. The generation starts on the map that the
+// lobby's settings choose, or on the generated map without a choice. Repeated and concurrent starts reuse the
 // committed state.
 func RunLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, snapshot domain.Snapshot) (models.BindingResult, error) {
 	database = database.WithContext(ctx)
@@ -33,6 +34,15 @@ func RunLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 			return fmt.Errorf("cannot initialize an empty roster")
 		}
 		teams, gameMap := prepareLobbyGame(binding, snapshot)
+		// The lobby checked the settings at creation; a default map is loaded
+		// from its template here.
+		chosenMap, err := LobbyMap(transaction, snapshot.Lobby.GameSettings, len(snapshot.Teams))
+		if err != nil {
+			return fmt.Errorf("lobby map: %w", err)
+		}
+		if chosenMap != nil {
+			gameMap = models.BuildMap(*chosenMap)
+		}
 		players := make([]models.FrozenGamePlayer, 0, len(snapshot.StartRoster))
 		for _, entry := range snapshot.StartRoster {
 			color := models.NeutralTeamColor

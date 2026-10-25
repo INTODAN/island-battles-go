@@ -126,6 +126,70 @@ async def test_island_battles_rejects_settings_it_does_not_know(guests):
     assert (rejected.value.code, rejected.value.status) == ("invalid_game_settings", 422)
 
 
+def strait_map(name):
+    return {
+        "map_name": name, "player_amount": 2, "plane_size_x": 10, "plane_size_y": 6,
+        "neutral_starting_soldier_amount": 5,
+        "castles": [
+            {"team_color": 1, "x": -4, "y": 0, "starting_soldier_amount": 40},
+            {"team_color": 0, "x": 0, "y": 0},
+            {"team_color": 2, "x": 4, "y": 1, "starting_soldier_amount": 40},
+        ],
+    }
+
+
+async def started_map(lobby_id):
+    return await sql(
+        "SELECT m.map_name || ':' || string_agg(c.team_color || '/' || c.soldier_amount, ',' ORDER BY c.persistent_castle_id) "
+        "FROM games g JOIN generations ge ON ge.game_id = g.id JOIN maps m ON m.id = ge.map_id "
+        f"JOIN castles c ON c.map_id = m.id WHERE g.lobby_id = '{lobby_id}' GROUP BY m.map_name"
+    )
+
+
+async def test_lobby_starts_on_a_chosen_default_map(guests):
+    name = f"Strait {uuid4()}"
+    async with httpx.AsyncClient(base_url=BASE) as client:
+        created = await client.post("/map/create", json=strait_map(name))
+        assert created.status_code == 200, created.text
+        template_id = created.json()["map_template_id"]
+        listed = (await client.get("/map/templates")).json()["maps"]
+    assert {"map_template_id": template_id, "map_name": name, "team_count": 2,
+            "plane_size_x": 10, "plane_size_y": 6, "castle_count": 3} in listed
+    _, bob, scope = await started_lobby(guests, "island-battles", {"map_template_id": template_id})
+    assert (await bob.snapshot(scope)).lobby.game_settings.to_dict() == {"map_template_id": template_id}
+    assert await started_map(scope.lobby_id) == f"{name}:1/40,0/5,2/40"
+
+
+async def test_lobby_starts_on_a_loaded_map_file(guests):
+    name = f"Loaded {uuid4()}"
+    _, _, scope = await started_lobby(guests, "island-battles", {"map": strait_map(name)})
+    assert await started_map(scope.lobby_id) == f"{name}:1/40,0/5,2/40"
+
+
+async def test_lobby_without_a_map_starts_on_the_generated_map(guests):
+    _, _, scope = await started_lobby(guests, "island-battles")
+    assert await started_map(scope.lobby_id) == "Lobby battle:1/30,2/30"
+
+
+async def test_island_battles_rejects_a_bad_map_choice(guests):
+    alice = await guests("Alice")
+    three_teams = strait_map("Three")
+    three_teams["player_amount"] = 3
+    three_teams["castles"][1]["team_color"] = 3
+    outside = strait_map("Outside")
+    outside["castles"][2]["x"] = 6
+    for settings, detail in [
+        ({"map_template_id": 2**53}, f"game_settings.map_template_id: no default map has ID {2**53}"),
+        ({"map": outside}, "game_settings.map.castles[2].x: must be inside the plane, from -5 to 5"),
+        ({"map": three_teams}, 'game_settings.map: map "Three" has player_amount 3'),
+        ({"map": strait_map("Both"), "map_template_id": 1}, "game_settings.map: cannot be combined with map_template_id"),
+    ]:
+        with pytest.raises(LobbyError) as rejected:
+            await create(alice, "island-battles", settings)
+        assert (rejected.value.code, rejected.value.status) == ("invalid_game_settings", 422)
+        assert str(rejected.value.detail).startswith(detail), rejected.value.detail
+
+
 async def test_island_schema_survives_restart():
     tables = await sql("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")
     lobby_tables = {table for table in tables.splitlines() if table.startswith("lobby_")}

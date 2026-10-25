@@ -410,6 +410,47 @@
         ],
         "type": "object"
       },
+      "ListMapTemplatesResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/ListMapTemplatesResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "maps": {
+            "items": {
+              "$ref": "#/components/schemas/MapTemplateSummary"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "maps"
+        ],
+        "type": "object"
+      },
+      "LobbySettings": {
+        "additionalProperties": false,
+        "description": "Island Battles game_settings for a lobby create request. Choose at most one map: map_template_id or map. The map must be made for exactly the lobby's teams: player_amount equal to the team count, and castle team colours exactly 1 to that count, in team order, with 0 for neutral castles. Without a map the game starts on a generated map. An invalid choice fails lobby creation with invalid_game_settings, and its detail names each invalid field, such as game_settings.map.castles[0].x.",
+        "properties": {
+          "map": {
+            "$ref": "#/components/schemas/MapTemplate",
+            "description": "Start on this map file. Cannot be combined with map_template_id."
+          },
+          "map_template_id": {
+            "description": "Start on this default map, a map_template_id from GET /map/templates. Cannot be combined with map.",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
       "MapTemplate": {
         "additionalProperties": false,
         "properties": {
@@ -458,6 +499,49 @@
           "plane_size_y",
           "plane_size_x",
           "neutral_starting_soldier_amount"
+        ],
+        "type": "object"
+      },
+      "MapTemplateSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "castle_count": {
+            "description": "Castles on the map, team and neutral.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "map_name": {
+            "type": "string"
+          },
+          "map_template_id": {
+            "description": "Choose the map by passing this ID as game_settings.map_template_id when creating a lobby.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "plane_size_x": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "plane_size_y": {
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "team_count": {
+            "description": "Teams the map is made for, its player_amount. A lobby on this map has exactly this many teams, in team colour order.",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "map_template_id",
+          "map_name",
+          "team_count",
+          "plane_size_x",
+          "plane_size_y",
+          "castle_count"
         ],
         "type": "object"
       },
@@ -674,7 +758,7 @@
     }
   },
   "info": {
-    "description": "Operations a player client calls during a started game. After every turn, each roster player's Centrifugo channel `player:{player_id}` receives a `GenerationEvent`. Clients reconcile with the generation read after subscribing or reconnecting; HTTP state is authoritative. `MapTemplate` is the map file format, which `POST /map/create` accepts.",
+    "description": "Operations a player client calls during a started game. After every turn, each roster player's Centrifugo channel `player:{player_id}` receives a `GenerationEvent`. Clients reconcile with the generation read after subscribing or reconnecting; HTTP state is authoritative. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the `game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose.",
     "title": "Island Battles Player API",
     "version": "1.0.0"
   },
@@ -896,6 +980,35 @@
         "tags": [
           "Lobby"
         ]
+      }
+    },
+    "/map/templates": {
+      "get": {
+        "description": "Lists every default map whose castle team colours are exactly 1 to player_amount, ordered by name. Choose one when creating an Island Battles lobby by passing its map_template_id in game_settings, with exactly team_count teams. Maps that fit no lobby are left out: those whose team colours skip a colour, and those made for fewer than 2 or more than 16 teams.",
+        "operationId": "listMapTemplates",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListMapTemplatesResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List the default maps a lobby can start on."
       }
     }
   }
