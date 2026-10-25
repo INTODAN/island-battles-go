@@ -23,7 +23,8 @@ func TestReplayEscapesPlayerNames(t *testing.T) {
 	if strings.Contains(html, "<script>alert(1)</script>") {
 		t.Fatal("unescaped user text in replay HTML")
 	}
-	if !strings.Contains(html, `</script>`) {
+	// The JSON encoder escapes the name's angle brackets, so it cannot close the script.
+	if !strings.Contains(html, "\\u003c/script\\u003e\\u003cscript\\u003ealert(1)") {
 		t.Fatal("expected escaped script terminator")
 	}
 }
@@ -135,6 +136,8 @@ func TestReplayShowsTheRecordedOutcome(t *testing.T) {
 		{models.GameOutcome{Reason: models.GameOutcomeLastTeamStanding, WinnerTeamColor: &winner}, game.Teams[1].Name + " wins as the last team standing"},
 		{models.GameOutcome{Reason: models.GameOutcomeAllEliminated}, "Draw: the last teams were eliminated in the same turn"},
 		{models.GameOutcome{Reason: models.GameOutcomeGenerationCap, WinnerTeamColor: &winner}, game.Teams[1].Name + " wins with the most castles at the generation limit"},
+		// An outcome without a winner is a draw, never "Nobody wins".
+		{models.GameOutcome{Reason: models.GameOutcomeLastTeamStanding}, "Draw"},
 		{models.GameOutcome{Reason: models.GameOutcomeGenerationCap}, "Draw: equal castle counts at the generation limit"},
 	} {
 		if err := dal.SaveGameOutcome(fixture.database, game, test.outcome); err != nil {

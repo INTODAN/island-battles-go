@@ -53,13 +53,10 @@ func initializeSchema(ctx context.Context, db *gorm.DB) error {
 // dropGameReplayColumn removes the replay blob that games no longer store,
 // because replays are derived from their generations. AutoMigrate never drops
 // columns, and a leftover NOT NULL column would make every new game fail to
-// insert. Old replays are game data and are not kept.
+// insert. Old replays are game data and are not kept. One IF EXISTS statement
+// lets processes that start at the same time both succeed.
 func dropGameReplayColumn(ctx context.Context, db *gorm.DB) error {
-	migrator := db.WithContext(ctx).Migrator()
-	if !migrator.HasColumn(&models.Game{}, "replay") {
-		return nil
-	}
-	if err := migrator.DropColumn(&models.Game{}, "replay"); err != nil {
+	if err := db.WithContext(ctx).Exec(`ALTER TABLE games DROP COLUMN IF EXISTS replay`).Error; err != nil {
 		return fmt.Errorf("drop the games replay column: %w", err)
 	}
 	return nil

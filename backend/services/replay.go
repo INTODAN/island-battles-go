@@ -26,7 +26,7 @@ type GameReplay struct {
 }
 
 // gameReplay builds the replay of a game from its generations in ID order,
-// each loaded with dal.WithFullGeneration.
+// as dal.LoadGameGenerations returns them.
 func gameReplay(game *models.Game, generations []models.Generation) GameReplay {
 	replay := GameReplay{GameID: game.ID, Teams: game.Teams, Frames: make([]models.GenerationView, 0, len(generations)), Outcome: describeOutcome(game)}
 	if replay.Teams == nil {
@@ -43,27 +43,30 @@ func describeOutcome(game *models.Game) string {
 	if outcome == nil {
 		return "Waiting for player turns"
 	}
-	winner := "Nobody"
-	if outcome.WinnerTeamColor != nil {
-		winner = fmt.Sprintf("Team %d", *outcome.WinnerTeamColor)
-		for _, team := range game.Teams {
-			if team.Color == *outcome.WinnerTeamColor {
-				winner = team.Name
-				break
-			}
+	// Without a winner the game is a draw, whatever its reason.
+	if outcome.WinnerTeamColor == nil {
+		switch outcome.Reason {
+		case models.GameOutcomeAllEliminated:
+			return "Draw: the last teams were eliminated in the same turn"
+		case models.GameOutcomeGenerationCap:
+			return "Draw: equal castle counts at the generation limit"
+		}
+		return "Draw"
+	}
+	winner := fmt.Sprintf("Team %d", *outcome.WinnerTeamColor)
+	for _, team := range game.Teams {
+		if team.Color == *outcome.WinnerTeamColor {
+			winner = team.Name
+			break
 		}
 	}
-	switch {
-	case outcome.Reason == models.GameOutcomeLastTeamStanding:
+	switch outcome.Reason {
+	case models.GameOutcomeLastTeamStanding:
 		return winner + " wins as the last team standing"
-	case outcome.Reason == models.GameOutcomeAllEliminated:
-		return "Draw: the last teams were eliminated in the same turn"
-	case outcome.Reason == models.GameOutcomeGenerationCap && outcome.WinnerTeamColor != nil:
+	case models.GameOutcomeGenerationCap:
 		return winner + " wins with the most castles at the generation limit"
-	case outcome.Reason == models.GameOutcomeGenerationCap:
-		return "Draw: equal castle counts at the generation limit"
 	}
-	return "Game over"
+	return winner + " wins"
 }
 
 // RenderGameReplay embeds the replay in a self-contained spectator view.
