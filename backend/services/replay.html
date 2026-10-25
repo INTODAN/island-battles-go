@@ -58,7 +58,13 @@ slider.max = lastTurn;
 const color = (team) => colors[(team - 1) % colors.length] || "#8290a4";
 const worldScale = 100;
 const castleRadius = 0.5; // Visual only; castle arrival still uses its center.
-const point = (node) => [400 + node.x * worldScale, 300 + node.y * worldScale];
+// Castles never move, so the first frame's castles bound every frame. The
+// field keeps at least the generated map's 8 by 6 units, with room around
+// each castle for its circle and label.
+const fieldX = Math.max(4, ...replay.frames[0].castles.map((castle) => Math.abs(castle.x) + 1));
+const fieldY = Math.max(3, ...replay.frames[0].castles.map((castle) => Math.abs(castle.y) + 1));
+field.setAttribute("viewBox", `0 0 ${2 * fieldX * worldScale} ${2 * fieldY * worldScale}`);
+const point = (node) => [(fieldX + node.x) * worldScale, (fieldY + node.y) * worldScale];
 const scoreLabels = new Map();
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 let renderedTurn = null;

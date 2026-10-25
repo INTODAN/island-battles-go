@@ -76,9 +76,11 @@ export class SettingsForm {
     this.maps = [];
     this.file = null;
     this.fileError = "";
+    this.mapsError = "";
     this.select = node("select", { id: "map-choice" },
       new Option(`Generated map · ${generatedTeams} teams`, ""), new Option("Load a map file…", "file"));
     this.fileInput = node("input", { type: "file", accept: ".json,application/json", hidden: true });
+    this.fileInput.setAttribute("aria-label", "Map file");
     this.status = node("p", { className: "hint" });
     this.status.setAttribute("role", "status");
     container.append(node("label", {}, "Map", this.select), this.fileInput, this.status);
@@ -92,7 +94,8 @@ export class SettingsForm {
     try {
       this.maps = await loadDefaultMaps();
     } catch {
-      this.status.textContent = "Could not load the default maps. You can still load a map file.";
+      this.mapsError = "Could not load the default maps. You can still load a map file.";
+      this.update();
       return;
     }
     const options = this.maps.map((map) => new Option(describeMap(map.map_name, map.team_count, map.plane_size_x, map.plane_size_y), `template:${map.map_template_id}`));
@@ -117,11 +120,10 @@ export class SettingsForm {
       this.status.textContent = this.fileError || (this.file
         ? `${describeMap(this.file.map_name, this.file.player_amount, this.file.plane_size_x, this.file.plane_size_y)}. Teams: ${teamNames(this.file.player_amount).join(", ")}.`
         : "Choose a map file made with the map builder.");
-    } else if (this.select.value) {
-      const map = this.chosenDefaultMap();
-      this.status.textContent = map ? `Teams: ${teamNames(map.team_count).join(", ")}.` : "";
-    } else if (!this.status.textContent.startsWith("Could not")) {
-      this.status.textContent = "";
+    } else {
+      const map = this.select.value && this.chosenDefaultMap();
+      const teams = `Teams: ${teamNames(map ? map.team_count : generatedTeams).join(", ")}.`;
+      this.status.textContent = this.mapsError ? `${teams} ${this.mapsError}` : teams;
     }
     this.onChange();
   }
