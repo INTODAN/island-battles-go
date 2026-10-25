@@ -44,6 +44,9 @@ func TestLobbyMapIsAMapTemplate(t *testing.T) {
 	}{
 		{name: "two teams", teamPlayers: []int{1, 1}, mapFile: twoTeamLobbyMapFile},
 		{name: "three teams", teamPlayers: []int{2, 1, 1}, mapFile: threeTeamLobbyMapFile},
+		// The lobby refuses to start with an empty team, but the map still
+		// gives every configured team its castle.
+		{name: "a team without players", teamPlayers: []int{2, 0}, mapFile: twoTeamLobbyMapFile},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			binding := models.BindingResult{GameID: 1, LobbyID: "lobby"}
