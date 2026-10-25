@@ -33,7 +33,8 @@ type CastleTemplateView struct {
 	Upgrades              Upgrades `json:"upgrades,omitempty" doc:"Starting level of each upgrade type. Omitted types start at level 1."`
 }
 
-// MapTemplateError rejects a map template and lists every invalid field.
+// MapTemplateError rejects a map template and lists its invalid fields: the
+// first MaxMapTemplateProblems of them, then one detail that counts the rest.
 type MapTemplateError struct {
 	// Details locate each problem relative to the template, such as castles[2].x.
 	// A problem with the whole template has an empty location.
@@ -85,15 +86,23 @@ func DecodeMapTemplate(data []byte) (MapTemplateView, error) {
 	result := &huma.ValidateResult{}
 	huma.Validate(registry, schema, huma.NewPathBuffer(nil, 0), huma.ModeWriteToServer, document, result)
 	if len(result.Errors) > 0 {
-		details := make([]*huma.ErrorDetail, 0, len(result.Errors))
-		for _, err := range result.Errors {
-			detail, isDetail := err.(*huma.ErrorDetail)
+		details := make([]*huma.ErrorDetail, 0, min(len(result.Errors), MaxMapTemplateProblems+1))
+		for _, err := range result.Errors[:min(len(result.Errors), MaxMapTemplateProblems)] {
+			schemaDetail, isDetail := err.(*huma.ErrorDetail)
 			if !isDetail {
-				detail = &huma.ErrorDetail{Message: err.Error()}
+				details = append(details, &huma.ErrorDetail{Message: err.Error()})
+				continue
+			}
+			// Huma sets the value of some errors, such as an unexpected
+			// property, to the whole enclosing object. Echoing or formatting it
+			// would copy the file once per problem, so only scalars are kept.
+			detail := &huma.ErrorDetail{Message: schemaDetail.Message, Location: schemaDetail.Location}
+			if isScalar(schemaDetail.Value) {
+				detail.Value = schemaDetail.Value
 			}
 			details = append(details, detail)
 		}
-		return MapTemplateView{}, &MapTemplateError{Details: details}
+		return MapTemplateView{}, &MapTemplateError{Details: limitProblems(details, len(result.Errors))}
 	}
 	var template MapTemplateView
 	if err := json.Unmarshal(data, &template); err != nil {
@@ -103,6 +112,28 @@ func DecodeMapTemplate(data []byte) (MapTemplateView, error) {
 		return MapTemplateView{}, err
 	}
 	return template, nil
+}
+
+// MaxMapTemplateProblems is how many problems a *MapTemplateError lists. A
+// final detail counts the rest, so a large invalid file can't produce an
+// equally large list of errors.
+const MaxMapTemplateProblems = 100
+
+// limitProblems keeps the first MaxMapTemplateProblems of total problems and
+// counts the rest in a final detail without a location.
+func limitProblems(details []*huma.ErrorDetail, total int) []*huma.ErrorDetail {
+	if total <= MaxMapTemplateProblems {
+		return details
+	}
+	return append(details[:MaxMapTemplateProblems], &huma.ErrorDetail{Message: fmt.Sprintf("and %d more problems", total-MaxMapTemplateProblems)})
+}
+
+func isScalar(value any) bool {
+	switch value.(type) {
+	case nil, string, float64, bool, json.Number:
+		return true
+	}
+	return false
 }
 
 // ValidateMapTemplate checks a map file without storing it: its name and
@@ -150,7 +181,7 @@ func ValidateMapTemplate(template MapTemplateView) error {
 		}
 	}
 	if len(details) > 0 {
-		return &MapTemplateError{Details: details}
+		return &MapTemplateError{Details: limitProblems(details, len(details))}
 	}
 	return nil
 }

@@ -2,14 +2,17 @@ package handlers_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/danielgtaylor/huma/v2/humatest"
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/internal/testutils"
+	"islandBattles/backend/models"
 	"islandBattles/backend/routes"
 )
 
@@ -73,6 +76,79 @@ func TestValidateMapTemplateHTTP(t *testing.T) {
 					t.Fatalf("result=%+v, want one problem at %q", result, test.location)
 				}
 			})
+		}
+	})
+	t.Run("a map file as the map builder downloads it", func(t *testing.T) {
+		// builder.mjs serialize: fixed key order, two-space indent, optional keys only when set.
+		builderFile := `{
+  "map_name": "Test crossing",
+  "player_amount": 2,
+  "plane_size_x": 16,
+  "plane_size_y": 10,
+  "neutral_starting_soldier_amount": 10,
+  "castles": [
+    {
+      "team_color": 1,
+      "x": -5.3,
+      "y": 0,
+      "starting_soldier_amount": 30,
+      "upgrades": {
+        "clash_stop_generations": 2,
+        "speed": 4
+      }
+    },
+    {
+      "team_color": 2,
+      "x": 8,
+      "y": -5,
+      "starting_soldier_amount": 0
+    },
+    {
+      "team_color": 0,
+      "x": 0,
+      "y": 0
+    }
+  ]
+}
+`
+		if result := check(t, builderFile); !result.Valid || len(result.Errors) != 0 {
+			t.Fatalf("builder file rejected: %+v", result)
+		}
+	})
+	t.Run("many unknown keys get a small answer", func(t *testing.T) {
+		// Huma reports an unknown key with the whole enclosing object as its
+		// value. Echoing it once per key made the answer grow with the square
+		// of the number of keys: 400 keys answered 1.48 MB.
+		const unknownKeys = 2000
+		var body strings.Builder
+		body.WriteString(`{"map_name":"a","player_amount":1,"plane_size_x":2,"plane_size_y":2,"neutral_starting_soldier_amount":1,"castles":[{"team_color":1,"x":0,"y":0}]`)
+		for key := range unknownKeys {
+			fmt.Fprintf(&body, `,"unknown_%d":%d`, key, key)
+		}
+		body.WriteString("}")
+		runtime.GC()
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		response := api.Post("/map/validate", strings.NewReader(body.String()))
+		runtime.ReadMemStats(&after)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status=%d", response.Code)
+		}
+		size, allocated := response.Body.Len(), after.TotalAlloc-before.TotalAlloc
+		t.Logf("%d unknown keys: answered %d bytes, allocated %d bytes", unknownKeys, size, allocated)
+		if size > 16<<10 || allocated > 16<<20 {
+			t.Fatalf("answered %d bytes and allocated %d bytes, over 16 KiB or 16 MiB", size, allocated)
+		}
+		var result validation
+		if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		last := result.Errors[len(result.Errors)-1]
+		if result.Valid || len(result.Errors) != models.MaxMapTemplateProblems+1 || last.Location != "" || last.Message != fmt.Sprintf("and %d more problems", unknownKeys-models.MaxMapTemplateProblems) {
+			t.Fatalf("valid=%v, %d errors, last=%+v", result.Valid, len(result.Errors), last)
+		}
+		if !strings.HasPrefix(result.Errors[0].Location, "unknown_") || strings.Contains(response.Body.String(), `"value"`) {
+			t.Fatalf("an unknown key is not reported by name alone: %s", response.Body.String()[:200])
 		}
 	})
 	t.Run("an empty body is a bad request", func(t *testing.T) {

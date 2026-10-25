@@ -76,7 +76,7 @@ func SetupRoutes(api huma.API, env *handlers.Env) {
 		Summary: "Check a map file without storing it.",
 		Description: "The body is a map file, the MapTemplate schema, checked exactly as a map file is read: unknown keys, missing fields and wrong types are problems, then the same rules as /map/create apply. " +
 			"Nothing is stored, and the map_name may be one that a default map already uses. " +
-			"Any non-empty body, even malformed JSON, returns 200: valid is true for a map that passes, and otherwise errors lists every problem, located relative to the file, such as castles[2].x. The map builder at /map/builder/ uses it while editing.",
+			"Any non-empty body, even malformed JSON, returns 200: valid is true for a map that passes, and otherwise errors lists the problems, located relative to the file, such as castles[2].x. Past 100 problems, a last entry without a location counts the rest. The map builder at /map/builder/ uses it while editing.",
 		// The handler decodes the raw body itself, so Huma neither parses nor
 		// rejects it and every problem comes back in the response.
 		SkipValidateBody: true, MaxBodyBytes: 1 << 20, BodyReadTimeout: 5 * time.Second}, handlers.ValidateMapTemplate)

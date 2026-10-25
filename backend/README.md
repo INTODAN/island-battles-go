@@ -136,7 +136,7 @@ A map file is the JSON that `POST /map/create` stores as a default map, publishe
 
 `models/map_template.go` holds the format and the functions every map source uses: `models.ValidateMapTemplate` checks a map without storing it and returns a `*models.MapTemplateError` that lists each invalid field, such as `castles[2].x`; `models.BuildMap` builds the game map. Read map files with `models.DecodeMapTemplate`, not plain `encoding/json`: it rejects unknown keys and missing required fields, which `encoding/json` ignores or reads as 0, then validates the map. `/map/create` answers an invalid map with 422 and one error per field, stores nothing, and answers a `map_name` that another map uses with 409. Stored templates keep working: games built from them are not validated again, and castles stored before `starting_soldier_amount` existed start with `neutral_starting_soldier_amount`.
 
-`POST /map/validate` checks a map file with `models.DecodeMapTemplate` and stores nothing, so it is safe to leave public. Any non-empty body answers 200 with `{"valid": ..., "errors": [...]}`, each error located relative to the file, such as `castles[2].x`. A `map_name` that a default map already uses is not a problem here.
+`POST /map/validate` checks a map file with `models.DecodeMapTemplate` and stores nothing, so it is safe to leave public. Any non-empty body answers 200 with `{"valid": ..., "errors": [...]}`, each error located relative to the file, such as `castles[2].x`. A `*models.MapTemplateError` lists at most 100 problems and counts the rest in a last detail, and it echoes only scalar values, never a whole object, so a large invalid file gets a small answer. A `map_name` that a default map already uses is not a problem here.
 
 ### Map builder
 
