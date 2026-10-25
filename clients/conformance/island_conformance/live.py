@@ -8,6 +8,8 @@ from uuid import uuid4
 import httpx
 
 COMMANDS = "/generation/commands"
+# The server ends a game with the turn that creates this generation.
+MAX_GENERATIONS = 300
 
 
 @dataclass
@@ -35,7 +37,10 @@ class Match:
         return response.json()
 
     async def complete(self, seat: Seat, commands=()) -> dict:
-        state = await self.read(seat)
+        return await self.submit(seat, await self.read(seat), commands)
+
+    async def submit(self, seat: Seat, state: dict, commands=()) -> dict:
+        """Complete the seat's turn for the generation of state."""
         response = await self.http.post(
             COMMANDS,
             headers={"Authorization": f"Bearer {seat.credential}"},
@@ -49,6 +54,14 @@ class Match:
         )
         assert response.status_code == 200, response.text
         return response.json()
+
+    async def play_turns(self, turns: int) -> dict:
+        """Play whole turns for both seats over HTTP; return the latest state."""
+        state = await self.read(self.alice)
+        for _ in range(turns):
+            await self.submit(self.alice, state)
+            state = await self.submit(self.bob, state)
+        return state
 
     async def wait_submitted(self, seat: Seat, timeout: float = 20) -> dict:
         async with asyncio.timeout(timeout):

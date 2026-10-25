@@ -35,15 +35,34 @@ func (publisher *RecordedPublisher) Publications() []realtime.Publication {
 func (publisher *RecordedPublisher) GenerationEvents(t *testing.T) []models.GenerationEvent {
 	t.Helper()
 	var events []models.GenerationEvent
+	for _, event := range publisher.events(t, models.GenerationEventType) {
+		events = append(events, models.GenerationEvent(event))
+	}
+	return events
+}
+
+// GameEndedEvents decodes every pushed game.ended event in order.
+func (publisher *RecordedPublisher) GameEndedEvents(t *testing.T) []models.GameEndedEvent {
+	t.Helper()
+	return publisher.events(t, models.GameEndedEventType)
+}
+
+// events decodes the pushed events of one type, checking that each went to
+// its player's channel. Both event types share one shape.
+func (publisher *RecordedPublisher) events(t *testing.T, eventType string) []models.GameEndedEvent {
+	t.Helper()
+	var events []models.GameEndedEvent
 	for _, publication := range publisher.Publications() {
-		var event models.GenerationEvent
+		var event models.GameEndedEvent
 		if err := json.Unmarshal(publication.Data, &event); err != nil {
 			t.Fatal(err)
 		}
 		if publication.Channel != event.State.Channel {
 			t.Fatalf("event for %s was pushed to %s", event.State.Channel, publication.Channel)
 		}
-		events = append(events, event)
+		if event.Type == eventType {
+			events = append(events, event)
+		}
 	}
 	return events
 }

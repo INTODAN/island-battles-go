@@ -83,8 +83,20 @@ func TestGenerationHTTPAuthenticationValidationAndStatus(t *testing.T) {
 	if response := api.Post("/generation/commands", "Authorization: Bearer valid", strings.NewReader(request)); response.Code != 200 {
 		t.Fatalf("retry=%d %s", response.Code, response.Body.String())
 	}
-	stale := fmt.Sprintf(`{"game_id":%d,"generation_id":%d,"request_id":%q,"commands":[]}`, state.GameID, state.GenerationID, uuid.NewString())
-	if response := api.Post("/generation/commands", "Authorization: Bearer valid", strings.NewReader(stale)); response.Code != 409 {
-		t.Fatalf("stale=%d %s", response.Code, response.Body.String())
+	// The only team is the last team standing, so its first turn ends the game.
+	if next.Outcome == nil || next.Outcome.Reason != models.GameOutcomeLastTeamStanding {
+		t.Fatalf("a one-team game did not end: %+v", next.Outcome)
+	}
+	stale := fmt.Sprintf(`{"game_id":%d,"generation_id":%d,"request_id":%q,"commands":[]}`, state.GameID, next.GenerationID, uuid.NewString())
+	response = api.Post("/generation/commands", "Authorization: Bearer valid", strings.NewReader(stale))
+	var problem huma.ErrorModel
+	if err := json.Unmarshal(response.Body.Bytes(), &problem); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != 409 || problem.Type != services.GameEndedProblemType || !strings.HasPrefix(problem.Detail, "the game has ended: ") {
+		t.Fatalf("ended=%d %s", response.Code, response.Body.String())
+	}
+	if response := api.Get(path, "Authorization: Bearer valid"); response.Code != 200 || !strings.Contains(response.Body.String(), `"outcome":{"reason":"last_team_standing"`) {
+		t.Fatalf("finished read=%d %s", response.Code, response.Body.String())
 	}
 }

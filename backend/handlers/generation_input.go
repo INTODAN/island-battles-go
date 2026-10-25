@@ -8,6 +8,7 @@ import (
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
 	"islandBattles/lobby/domain"
+	"net/http"
 )
 
 type GenerationStateResponse struct{ Body models.GenerationState }
@@ -48,7 +49,7 @@ func (handler *LobbyGame) RegisterGenerationCommands(ctx context.Context, input 
 func generationHTTPError(err error) error {
 	var rejection *services.GenerationError
 	if errors.As(err, &rejection) {
-		return huma.NewError(rejection.Status, rejection.Detail)
+		return &huma.ErrorModel{Type: rejection.Type, Title: http.StatusText(rejection.Status), Status: rejection.Status, Detail: rejection.Detail}
 	}
 	if errors.Is(err, domain.ErrNotFound) {
 		return huma.Error404NotFound("game not found")

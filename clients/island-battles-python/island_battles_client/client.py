@@ -15,6 +15,8 @@ from pydantic import ValidationError
 
 from ._generated import (
     ConnectionToken,
+    GameEndedEvent,
+    GameOutcome,
     GenerationEvent,
     GenerationState,
     PublicGenerationCommand,
@@ -73,7 +75,11 @@ class _SubscriptionEvents(centrifuge.SubscriptionEventHandler):
             data = ctx.pub.data
             if isinstance(data, (str, bytes)):
                 data = json.loads(data)
-            event = GenerationEvent.model_validate(data)
+            # The turn that ends the game pushes game.ended instead.
+            ended = isinstance(data, dict) and data.get("type") == "game.ended"
+            event = (GameEndedEvent if ended else GenerationEvent).model_validate(data)
+            if ended and event.state.outcome is None:
+                raise GameProtocolError("game.ended without an outcome")
             self.owner._validate_identity(event.state)
             self.owner._install(event.state)
         except TypeError, ValueError, GameProtocolError:
@@ -87,6 +93,8 @@ class IslandBattlesClient:
     The client owns an injected ``http_client`` and closes it. ``player_factory``
     receives the authenticated team color once at startup. The resulting player's
     callbacks run serially; successful return automatically completes the turn.
+    When the game ends, the player's ``on_game_ended`` runs once and ``wait()``
+    and ``run()`` return.
     """
 
     def __init__(
@@ -152,6 +160,11 @@ class IslandBattlesClient:
     def player(self) -> Player | None:
         """The strategy created after the first authorized state read."""
         return self._player
+
+    @property
+    def outcome(self) -> GameOutcome | None:
+        """How the game ended, or None while it runs."""
+        return self._state.outcome if self._state is not None else None
 
     async def __aenter__(self) -> Self:
         await self.start()
@@ -400,6 +413,14 @@ class IslandBattlesClient:
         assert self._player is not None
         while not self._closed:
             state = await self._callbacks.get()
+            if state.outcome is not None:
+                # The final generation has no turn: report the end, then stop.
+                try:
+                    await self._player.on_game_ended(state.outcome, state.generation)
+                finally:
+                    self._callbacks.task_done()
+                self._stopped.set()
+                return
             receiver = self._receiver(state.generation_id)
             try:
                 if self._state is not None and (

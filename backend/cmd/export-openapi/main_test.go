@@ -53,7 +53,7 @@ func TestPlayerOpenAPIPublishesGeneratableModels(t *testing.T) {
 		t.Fatalf("unexpected operations: %v", operations)
 	}
 	schemas := document.Components.Schemas
-	for _, name := range []string{"Generation", "Castle", "SoldierGroup", "Clash", "ClashParticipant", "GenerationState", "GenerationEvent", "SendSoldierGroupParameters", "MapTemplate", "CastleTemplate"} {
+	for _, name := range []string{"Generation", "Castle", "SoldierGroup", "Clash", "ClashParticipant", "GenerationState", "GenerationEvent", "GameEndedEvent", "GameOutcome", "SendSoldierGroupParameters", "MapTemplate", "CastleTemplate"} {
 		if _, exists := schemas[name]; !exists {
 			t.Fatalf("schema %s is missing", name)
 		}

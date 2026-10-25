@@ -62,21 +62,40 @@ type GenerationState struct {
 	GenerationID uint           `json:"generation_id" minimum:"1"`
 	PlayerID     string         `json:"player_id" format:"uuid"`
 	TeamColor    uint           `json:"team_color" minimum:"1"`
-	Channel      string         `json:"channel" doc:"Your personal Centrifugo channel, which receives GenerationEvent."`
+	Channel      string         `json:"channel" doc:"Your personal Centrifugo channel, which receives GenerationEvent after each turn and GameEndedEvent after the last one."`
 	Submitted    bool           `json:"submitted" doc:"Whether you completed this generation's turn."`
 	Generation   GenerationView `json:"generation"`
+	// Outcome is nil, and left out, while the game runs.
+	Outcome *GameOutcomeView `json:"outcome,omitempty" doc:"How the game ended. Absent while the game runs. A finished game keeps its final generation and rejects every command."`
+}
+
+// GameOutcomeView is how a finished game ended.
+type GameOutcomeView struct {
+	Reason          GameOutcomeReason `json:"reason" enum:"last_team_standing,all_eliminated,generation_cap" doc:"last_team_standing: one team was left after every other team lost all its castles and soldier groups. all_eliminated: the last teams were eliminated in the same turn, a draw. generation_cap: the game reached its last generation; the team with the most castles won, and equal counts are a draw."`
+	WinnerTeamColor *uint             `json:"winner_team_color" minimum:"1" nullable:"true" doc:"The winning team, or null for a draw."`
+	Summary         string            `json:"summary" doc:"The outcome in one sentence, naming the winning team."`
 }
 
 const (
 	GenerationEventSchemaVersion = 1
 	GenerationEventType          = "game.next_generation"
+	GameEndedEventType           = "game.ended"
 )
 
-// GenerationEvent is published on the player's personal channel after a turn.
+// GenerationEvent is published on the player's personal channel after a turn
+// that did not end the game.
 type GenerationEvent struct {
 	SchemaVersion int             `json:"schema_version" enum:"1"`
 	Type          string          `json:"type" enum:"game.next_generation"`
 	State         GenerationState `json:"state"`
+}
+
+// GameEndedEvent replaces GenerationEvent for the turn that ends the game, and
+// is the game's last event.
+type GameEndedEvent struct {
+	SchemaVersion int             `json:"schema_version" enum:"1"`
+	Type          string          `json:"type" enum:"game.ended"`
+	State         GenerationState `json:"state" doc:"The final generation, with its outcome."`
 }
 
 // API views are published without their View suffix, e.g. as Castle.

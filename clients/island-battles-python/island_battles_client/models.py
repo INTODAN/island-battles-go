@@ -5,7 +5,14 @@ distance and team utilities are inherited from ``_entities``.
 """
 
 from ._entities import NEUTRAL_TEAM_COLOR, BoardEntity, TeamType
-from ._generated import Castle, Clash, ClashParticipant, Generation, SoldierGroup
+from ._generated import (
+    Castle,
+    Clash,
+    ClashParticipant,
+    GameOutcome,
+    Generation,
+    SoldierGroup,
+)
 
 __all__ = [
     "NEUTRAL_TEAM_COLOR",
@@ -13,6 +20,7 @@ __all__ = [
     "Castle",
     "Clash",
     "ClashParticipant",
+    "GameOutcome",
     "Generation",
     "SoldierGroup",
     "TeamType",

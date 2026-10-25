@@ -30,7 +30,7 @@ func newTurnFixture(t *testing.T, teammates bool) turnFixture {
 	lobbyID := uuid.NewString()
 	teamOne, teamTwo := uuid.NewString(), uuid.NewString()
 	players := []domain.Principal{{PlayerID: uuid.NewString()}, {PlayerID: uuid.NewString()}}
-	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted}, Teams: []domain.Team{{ID: teamOne, Order: 1}, {ID: teamTwo, Order: 2}}, StartRoster: domain.StartRoster{{PlayerID: players[0].PlayerID, TeamID: teamOne}, {PlayerID: players[1].PlayerID, TeamID: teamTwo}}}
+	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted}, Teams: []domain.Team{{ID: teamOne, Order: 1, Name: "Blue"}, {ID: teamTwo, Order: 2, Name: "Red"}}, StartRoster: domain.StartRoster{{PlayerID: players[0].PlayerID, TeamID: teamOne}, {PlayerID: players[1].PlayerID, TeamID: teamTwo}}}
 	if teammates {
 		players = append(players, domain.Principal{PlayerID: uuid.NewString()})
 		snapshot.StartRoster = append(snapshot.StartRoster, domain.StartRosterEntry{PlayerID: players[2].PlayerID, TeamID: teamOne})
@@ -316,7 +316,9 @@ func TestGenerationPushFailureKeepsCommittedTurn(t *testing.T) {
 	}
 }
 
-func TestGenerationCapRejectsCommandsForTheLastGeneration(t *testing.T) {
+// The turn that creates the last generation ends the game, and with equal
+// castle counts the game is a draw.
+func TestGenerationCapEndsTheGame(t *testing.T) {
 	fixture := newTurnFixture(t, false)
 	ctx := context.Background()
 	initial, err := dal.GetGeneration(fixture.database, fixture.state.GenerationID)
@@ -344,8 +346,15 @@ func TestGenerationCapRejectsCommandsForTheLastGeneration(t *testing.T) {
 	if last.GenerationID == penultimate.GenerationID {
 		t.Fatal("the generation before the cap did not advance")
 	}
+	draw := models.GameOutcomeView{Reason: models.GameOutcomeGenerationCap, Summary: "Draw: equal castle counts at the generation limit"}
+	if penultimate.Outcome != nil || last.Outcome == nil || *last.Outcome != draw {
+		t.Fatalf("outcome before the cap = %+v, at the cap = %+v", penultimate.Outcome, last.Outcome)
+	}
+	if ended := fixture.publisher.GameEndedEvents(t); len(ended) != len(fixture.players) || ended[0].State.GenerationID != last.GenerationID {
+		t.Fatalf("game.ended events = %+v", ended)
+	}
 	_, err = fixture.service.Register(ctx, fixture.players[0], batch(last, true))
-	assertTurnStatus(t, err, 409)
+	assertGameEnded(t, err)
 	var generations int64
 	if err := fixture.database.Model(&models.Generation{}).Where(&models.Generation{GameID: fixture.state.GameID}).Count(&generations).Error; err != nil {
 		t.Fatal(err)

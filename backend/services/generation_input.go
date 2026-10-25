@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 
 	"islandBattles/backend/dal"
@@ -24,14 +23,22 @@ import (
 type GenerationError struct {
 	Status int
 	Detail string
+	// Type is the problem type of a rejection that clients tell apart from
+	// others with the same status, such as GameEndedProblemType. Empty means
+	// about:blank.
+	Type string
 }
 
 func (err *GenerationError) Error() string   { return err.Detail }
 func reject(status int, detail string) error { return &GenerationError{Status: status, Detail: detail} }
 
+// GameEndedProblemType is the problem type of the 409 that rejects commands
+// for a finished game.
+const GameEndedProblemType = "urn:island-battles:problem:game-ended"
+
 // MaxGenerations caps a game. Turns are not paced, so bots play as fast as round
-// trips allow; commands for the last generation are rejected, so no game grows
-// past it.
+// trips allow. The turn that creates the last generation ends the game, so no
+// game grows past it.
 const MaxGenerations = 300
 
 // Publisher pushes committed game events to Centrifugo right after their
@@ -144,15 +151,11 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 			state, err = generationState(locked, generation, player, inputs)
 			return err
 		}
+		if locked.Outcome != nil {
+			return &GenerationError{Status: 409, Detail: "the game has ended: " + describeOutcome(locked), Type: GameEndedProblemType}
+		}
 		if generation.ID != request.GenerationID {
 			return reject(409, "generation is no longer current")
-		}
-		generations, err := dal.CountGenerationsForGame(transaction, locked.ID)
-		if err != nil {
-			return err
-		}
-		if generations >= MaxGenerations {
-			return reject(409, fmt.Sprintf("game reached its limit of %d generations", MaxGenerations))
 		}
 		input := models.GenerationInput{GenerationID: generation.ID, PlayerID: principal.PlayerID, Commands: []byte("[]")}
 		for _, candidate := range inputs {
@@ -206,9 +209,19 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 				}
 				allCommands = append(allCommands, playerCommands...)
 			}
-			generationID, err := MigrateGeneration(transaction, locked.ID, allCommands)
+			generationID, board, err := migrateGeneration(transaction, locked.ID, allCommands)
 			if err != nil {
 				return err
+			}
+			generations, err := dal.CountGenerationsForGame(transaction, locked.ID)
+			if err != nil {
+				return err
+			}
+			// A game that ends keeps this generation as its last one.
+			if outcome := simulation.Outcome(board, locked.Teams, generations >= MaxGenerations); outcome != nil {
+				if err := dal.SaveGameOutcome(transaction, locked, *outcome); err != nil {
+					return err
+				}
 			}
 			generation, err = dal.GetGeneration(transaction, generationID)
 			if err != nil {
@@ -325,6 +338,9 @@ func generationState(game *models.Game, generation *models.Generation, player mo
 	}
 	state := models.GenerationState{GameID: game.ID, LobbyID: *game.LobbyID, GenerationID: generation.ID, PlayerID: player.PlayerID, TeamColor: player.TeamColor, Channel: channel,
 		Generation: generationView(generation)}
+	if game.Outcome != nil {
+		state.Outcome = &models.GameOutcomeView{Reason: game.Outcome.Reason, WinnerTeamColor: game.Outcome.WinnerTeamColor, Summary: describeOutcome(game)}
+	}
 	for _, input := range inputs {
 		if input.PlayerID == player.PlayerID {
 			state.Submitted = input.Completed
@@ -334,7 +350,8 @@ func generationState(game *models.Game, generation *models.Generation, player mo
 }
 
 // generationEvents builds each roster player's event for a new generation, for
-// pushing to their personal channel once the transaction commits.
+// pushing to their personal channel once the transaction commits. The
+// generation that ends the game is pushed as game.ended instead.
 func generationEvents(game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer) ([]realtime.Publication, error) {
 	events := make([]realtime.Publication, 0, len(players))
 	for _, player := range players {
@@ -346,7 +363,11 @@ func generationEvents(game *models.Game, generation *models.Generation, players 
 		if err != nil {
 			return nil, err
 		}
-		payload, err := json.Marshal(models.GenerationEvent{SchemaVersion: models.GenerationEventSchemaVersion, Type: models.GenerationEventType, State: state})
+		var event any = models.GenerationEvent{SchemaVersion: models.GenerationEventSchemaVersion, Type: models.GenerationEventType, State: state}
+		if state.Outcome != nil {
+			event = models.GameEndedEvent{SchemaVersion: models.GenerationEventSchemaVersion, Type: models.GameEndedEventType, State: state}
+		}
+		payload, err := json.Marshal(event)
 		if err != nil {
 			return nil, err
 		}

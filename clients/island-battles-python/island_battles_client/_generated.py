@@ -196,6 +196,36 @@ class ErrorModel(GameModel):
     """
 
 
+class GameEndedEvent(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    schema_version: Literal[1]
+    state: GenerationState
+    """
+    The final generation, with its outcome.
+    """
+    type: Literal["game.ended"]
+
+
+class GameOutcome(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    reason: Literal["last_team_standing", "all_eliminated", "generation_cap"]
+    """
+    last_team_standing: one team was left after every other team lost all its castles and soldier groups. all_eliminated: the last teams were eliminated in the same turn, a draw. generation_cap: the game reached its last generation; the team with the most castles won, and equal counts are a draw.
+    """
+    summary: StrictStr
+    """
+    The outcome in one sentence, naming the winning team.
+    """
+    winner_team_color: Annotated[StrictInt | None, Field(ge=1)]
+    """
+    The winning team, or null for a draw.
+    """
+
+
 class Generation(GenerationBase):
     model_config = ConfigDict(
         extra="ignore",
@@ -231,12 +261,16 @@ class GenerationState(GameModel):
     """
     channel: StrictStr
     """
-    Your personal Centrifugo channel, which receives GenerationEvent.
+    Your personal Centrifugo channel, which receives GenerationEvent after each turn and GameEndedEvent after the last one.
     """
     game_id: Annotated[StrictInt, Field(ge=1)]
     generation: Generation
     generation_id: Annotated[StrictInt, Field(ge=1)]
     lobby_id: UUID
+    outcome: GameOutcome | None = None
+    """
+    How the game ended. Absent while the game runs. A finished game keeps its final generation and rejects every command.
+    """
     player_id: UUID
     submitted: StrictBool
     """

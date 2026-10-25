@@ -27,10 +27,11 @@ const (
 	apiVersion      = "1.0.0"
 	schemaRefPrefix = "#/components/schemas/"
 	apiDescription  = "Operations a player client calls during a started game. After every turn, each roster player's " +
-		"Centrifugo channel `player:{player_id}` receives a `GenerationEvent`. Clients reconcile with the generation " +
-		"read after subscribing or reconnecting; HTTP state is authoritative. `MapTemplate` is the map file format, " +
-		"which `POST /map/create` accepts. `LobbySettings` is the `game_settings` object of an Island Battles lobby create " +
-		"request; `GET /map/templates` lists the default maps it can choose."
+		"Centrifugo channel `player:{player_id}` receives a `GenerationEvent`, except after the turn that ends the game, " +
+		"which pushes a `GameEndedEvent` with the final generation and its outcome instead. Clients reconcile with the " +
+		"generation read after subscribing or reconnecting; HTTP state is authoritative, and its `outcome` is set once the " +
+		"game has ended. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the " +
+		"`game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose."
 )
 
 // PlayerOperations are the endpoints a gameplay client uses, and the default
@@ -39,7 +40,7 @@ const (
 var PlayerOperations = []string{"createLobbyConnectionToken", "getIslandLobbyGeneration", "registerGenerationCommand", "listMapTemplates"}
 
 // PlayerEventSchemas are delivered by Centrifugo rather than HTTP responses.
-var PlayerEventSchemas = []string{"GenerationEvent"}
+var PlayerEventSchemas = []string{"GenerationEvent", "GameEndedEvent"}
 
 // MapFileSchemas describe the map file format, the body of POST /map/create,
 // and the lobby game_settings that choose a map.

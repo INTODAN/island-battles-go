@@ -288,6 +288,67 @@
         },
         "type": "object"
       },
+      "GameEndedEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "enum": [
+              1
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "state": {
+            "$ref": "#/components/schemas/GenerationState",
+            "description": "The final generation, with its outcome."
+          },
+          "type": {
+            "enum": [
+              "game.ended"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "type",
+          "state"
+        ],
+        "type": "object"
+      },
+      "GameOutcome": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "description": "last_team_standing: one team was left after every other team lost all its castles and soldier groups. all_eliminated: the last teams were eliminated in the same turn, a draw. generation_cap: the game reached its last generation; the team with the most castles won, and equal counts are a draw.",
+            "enum": [
+              "last_team_standing",
+              "all_eliminated",
+              "generation_cap"
+            ],
+            "type": "string"
+          },
+          "summary": {
+            "description": "The outcome in one sentence, naming the winning team.",
+            "type": "string"
+          },
+          "winner_team_color": {
+            "description": "The winning team, or null for a draw.",
+            "format": "int64",
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "reason",
+          "winner_team_color",
+          "summary"
+        ],
+        "type": "object"
+      },
       "Generation": {
         "additionalProperties": false,
         "properties": {
@@ -364,7 +425,7 @@
             "type": "string"
           },
           "channel": {
-            "description": "Your personal Centrifugo channel, which receives GenerationEvent.",
+            "description": "Your personal Centrifugo channel, which receives GenerationEvent after each turn and GameEndedEvent after the last one.",
             "type": "string"
           },
           "game_id": {
@@ -383,6 +444,10 @@
           "lobby_id": {
             "format": "uuid",
             "type": "string"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/GameOutcome",
+            "description": "How the game ended. Absent while the game runs. A finished game keeps its final generation and rejects every command."
           },
           "player_id": {
             "format": "uuid",
@@ -758,7 +823,7 @@
     }
   },
   "info": {
-    "description": "Operations a player client calls during a started game. After every turn, each roster player's Centrifugo channel `player:{player_id}` receives a `GenerationEvent`. Clients reconcile with the generation read after subscribing or reconnecting; HTTP state is authoritative. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the `game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose.",
+    "description": "Operations a player client calls during a started game. After every turn, each roster player's Centrifugo channel `player:{player_id}` receives a `GenerationEvent`, except after the turn that ends the game, which pushes a `GameEndedEvent` with the final generation and its outcome instead. Clients reconcile with the generation read after subscribing or reconnecting; HTTP state is authoritative, and its `outcome` is set once the game has ended. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the `game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose.",
     "title": "Island Battles Player API",
     "version": "1.0.0"
   },
@@ -766,7 +831,7 @@
   "paths": {
     "/game/from-lobby/{lobby_id}/generation": {
       "get": {
-        "description": "Requires a place on the game's frozen roster. The game does not consult the lobby, so access continues after the lobby is deleted. Returns castle and soldier group IDs, which are never reassigned within a game, troop state, recorded clashes with per-participant before/after counts, and your turn completion flag.",
+        "description": "Requires a place on the game's frozen roster. The game does not consult the lobby, so access continues after the lobby is deleted. Returns castle and soldier group IDs, which are never reassigned within a game, troop state, recorded clashes with per-participant before/after counts, your turn completion flag, and the outcome once the game has ended. A finished game stays readable.",
         "operationId": "getIslandLobbyGeneration",
         "parameters": [
           {
@@ -821,7 +886,7 @@
     },
     "/generation/commands": {
       "post": {
-        "description": "Requires a place on the game's frozen roster; the lobby is not consulted. Only owned send_soldier_group commands are accepted; other command types are forbidden (403). Complete defaults to true; an empty batch can complete a turn. The last frozen roster completion advances exactly once. A game stops at 300 generations, and commands for its last generation conflict. Retry the same request UUID and payload safely; changed payloads and stale new requests conflict.",
+        "description": "Requires a place on the game's frozen roster; the lobby is not consulted. Only owned send_soldier_group commands are accepted; other command types are forbidden (403). Complete defaults to true; an empty batch can complete a turn. The last frozen roster completion advances exactly once. The game ends after the turn that leaves one team with castles or soldier groups, a draw when the last teams are eliminated in the same turn, or after the turn that creates generation 300, where the team with the most castles wins. That turn's generation is the last, its state carries the outcome, and every later command conflicts (409) with problem type urn:island-battles:problem:game-ended. Retry the same request UUID and payload safely, also after the game ended; changed payloads and stale new requests conflict.",
         "operationId": "registerGenerationCommand",
         "parameters": [
           {
