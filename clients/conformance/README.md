@@ -4,7 +4,7 @@ This suite verifies an Island Battles player client in any language. The client 
 
 ## Writing a client
 
-Generate the data models and request types from [`backend/api/openapi.json`](../../backend/api/openapi.json). It contains the three player operations, the `GenerationEvent` pushed over Centrifugo, and every constraint the server applies. Do not hand-write wire types. Treat unknown response fields as allowed so newer servers stay compatible.
+Generate the data models and request types from [`backend/api/openapi.json`](../../backend/api/openapi.json). It contains the three player operations, the `GenerationEvent` and `GameEndedEvent` pushed over Centrifugo, and every constraint the server applies. Do not hand-write wire types. Treat unknown response fields as allowed so newer servers stay compatible.
 
 Hand-write only the behavior below. Each rule has live tests in [`tests/live/test_turns.py`](tests/live/test_turns.py).
 
@@ -13,10 +13,11 @@ Hand-write only the behavior below. Each rule has live tests in [`tests/live/tes
 3. **Commands.** Validate arguments against the generated `SendSoldierGroupParameters` before sending. Post each call as its own batch, with `complete: false` and a new request UUID.
 4. **Completion.** When the callback returns, post an empty batch with `complete: true`. When it raises, or the client closes during the callback, leave the turn open. The receiver rejects calls after its callback ends.
 5. **Retries.** When a request fails without a response, retry the identical body, including its request UUID; the server applies it once. Report HTTP error responses to the strategy instead of retrying them.
-6. **Events.** Accept a publication only if it validates as `GenerationEvent` (`schema_version` 1, type `game.next_generation`) and its game, lobby, player, channel and team match the client. Ignore everything else.
+6. **Events.** Accept a publication only if it validates as `GenerationEvent` (`schema_version` 1, type `game.next_generation`) or `GameEndedEvent` (type `game.ended`, with an `outcome` in its state) and its game, lobby, player, channel and team match the client. Ignore everything else.
 7. **State.** Install a state only if its generation is newer, or if it is the same generation and does not undo `submitted: true`. A late read must not reopen a completed turn.
 8. **Recovery.** Read the generation again after every connect, reconnect or resubscribe, and retry failed reads with backoff. The player channel keeps no history, so this read is the only way to recover a missed push. Do not poll while idle.
-9. **Utilities.** Implement `distance(other)`, `compare_team(other)` and `distance_left()` as methods on the generated models. Their rules are defined by [`island_conformance/reference.py`](island_conformance/reference.py), not by any client. A generation whose group's destination castle is missing is invalid.
+9. **End.** A state with an `outcome`, from `game.ended` or from HTTP, is the final generation of a finished game. Do not invoke the strategy for it or send any command; report the outcome and the final board to the strategy once, then stop. A client that starts on a finished game reports the end the same way. The server rejects commands for a finished game with 409 and problem type `urn:island-battles:problem:game-ended`.
+10. **Utilities.** Implement `distance(other)`, `compare_team(other)` and `distance_left()` as methods on the generated models. Their rules are defined by [`island_conformance/reference.py`](island_conformance/reference.py), not by any client. A generation whose group's destination castle is missing is invalid.
 
 ## Adapter protocol
 
@@ -40,6 +41,7 @@ Messages from the adapter:
 | `evaluation` | `id` and `ok`. When `ok` is true, also `generation` (the public model serialized with wire field names), and `distances` and `relations` matrices over the castles followed by the soldier groups (`relations[i][j]` is `entity[i].compare_team(entity[j])`), and `distance_left` per soldier group. |
 | `started` | `team_color` |
 | `generation` | `generation`, serialized like `evaluation.generation` |
+| `ended` | `outcome` (wire `GameOutcome`) and the final `generation`, serialized like `evaluation.generation` |
 | `sent` | |
 | `send_failed`, `stopped` | `error`: `kind`, `status` (HTTP status or null) and `detail` |
 | `closed` | |

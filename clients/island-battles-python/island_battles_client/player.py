@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 
 from .commands import CommandReceiver
-from .models import Generation
+from .models import GameOutcome, Generation
 
 
 class Player(ABC):
@@ -16,3 +16,6 @@ class Player(ABC):
     async def on_generation(
         self, generation: Generation, commands_receiver: CommandReceiver
     ) -> None: ...
+
+    async def on_game_ended(self, outcome: GameOutcome, generation: Generation) -> None:
+        """Called once with the outcome and the final board; the default ignores it."""

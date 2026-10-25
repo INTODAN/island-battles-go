@@ -13,6 +13,7 @@ from island_battles_client import (
     GameAuthenticationError,
     GameClientClosedError,
     GameError,
+    GameOutcome,
     GameProtocolError,
     GameReceiverClosedError,
     GameTransportError,
@@ -56,6 +57,16 @@ class ScriptedPlayer(Player):
         )
         if await self.adapter.decisions.get() == "fail":
             raise RuntimeError("scripted callback failure")
+
+    async def on_game_ended(self, outcome: GameOutcome, generation: Generation) -> None:
+        """Report the outcome and the final board."""
+        self.adapter.emit(
+            {
+                "type": "ended",
+                "outcome": outcome.model_dump(mode="json"),
+                "generation": generation.model_dump(mode="json"),
+            }
+        )
 
 
 class Adapter:

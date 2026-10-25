@@ -9,6 +9,7 @@ from integration.test_live import EVENTS, container
 from island_conformance.adapter import AdapterProcess
 from island_conformance.live import (
     COMMANDS,
+    MAX_GENERATIONS,
     centrifugo,
     enemy_castle,
     eventually,
@@ -332,3 +333,31 @@ async def test_stale_read_cannot_reopen_a_completed_turn(launch, match, proxy):
     await match.complete(match.bob)
     advanced = (await alice.expect("generation"))["generation"]
     assert advanced["id"] == generation["id"] + 1
+
+
+async def test_game_end_reports_the_outcome_and_stops_the_client(launch, match, proxy):
+    # The first generation exists; play every turn but the last over HTTP.
+    await match.play_turns(MAX_GENERATIONS - 2)
+    alice, _, generation = await playing(launch, match)
+    await alice.send({"type": "finish"})
+    await match.wait_submitted(match.alice)
+    final = await match.complete(match.bob)
+    assert final["outcome"] == {
+        "reason": "generation_cap",
+        "winner_team_color": None,
+        "summary": "Draw: equal castle counts at the generation limit",
+    }
+    ended = await alice.expect("ended")
+    assert ended["outcome"] == final["outcome"]
+    assert ended["generation"]["id"] == final["generation_id"] > generation["id"]
+    assert_same_board(ended["generation"], final["generation"])
+    # The final generation has no turn: no callback and no completion.
+    await alice.assert_quiet("generation", 1.5)
+    assert len(completions(proxy)) == 1
+    await alice.close()
+    # A client that starts on a finished game reports the end without a callback.
+    restarted = await launch()
+    await restarted.expect("started")
+    assert (await restarted.expect("ended"))["outcome"] == final["outcome"]
+    await restarted.assert_quiet("generation", 1.5)
+    assert len(completions(proxy)) == 1
