@@ -44,3 +44,9 @@ __pycache__/
 # collections scripts/vm.sh installs
 deploy/local/
 deploy/ansible/.collections/
+
+# Terraform's providers and any state or plan outside deploy/local/. State and
+# plans hold the Lambda's secrets.
+.terraform/
+*.tfstate*
+*.tfplan

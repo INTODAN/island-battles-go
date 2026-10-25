@@ -19,7 +19,7 @@
 - `integration/island_battles/`: Host-specific lobby/game binding acceptance checks.
 - `scripts/test-lobby-acceptance.sh`: Runs the shared acceptance suite against the Island Battles host, including its game-specific checks.
 - `go.work`: Connects the host and lobby Go modules for local development.
-- `deploy/`: Deployment to AWS: the Ansible setup for the Postgres and Centrifugo VM. See [deploy/README.md](deploy/README.md).
+- `deploy/`: Deployment to AWS: the Terraform configuration for the AWS resources, the Ansible setup for the Postgres and Centrifugo VM, and the backend's Lambda deploy. See [deploy/README.md](deploy/README.md).
 
 ## Development Setup
 

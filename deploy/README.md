@@ -9,30 +9,36 @@ Island Battles runs in one AWS region:
   - Centrifugo's API needs TLS and its API key.
 - **DNS:** one record, `vm.<domain>`, points at the VM's static IP. Centrifugo gets a Let's Encrypt certificate for it, and browsers connect to `wss://vm.<domain>/connection/websocket`.
 
-This document covers the VM: setting it up with Ansible, redeploying it and moving to a new VM. #26 describes the architecture.
+This document covers creating the AWS resources with Terraform, setting up the VM with Ansible, deploying the backend to Lambda, backups, redeploys and moving to a new VM. [First deployment, step by step](#first-deployment-step-by-step) puts it all in order. #26 describes the architecture.
 
 ## Files
 
 | Path | What it is |
 |---|---|
-| `scripts/vm.sh` | The entry point for everything below. |
-| `deploy/vm.example.yml` | The settings template. |
+| `scripts/aws.sh` | Creates the AWS resources and deploys the backend to Lambda. |
+| `scripts/vm.sh` | Deploys the VM, moves its database and runs the smoke test. |
+| `deploy/aws.example.tfvars` | The template for the AWS settings. |
+| `deploy/vm.example.yml` | The template for the VM settings. |
+| `deploy/terraform/` | The AWS resources: the Lightsail VM in `vm.tf`, the Lambda in `lambda.tf`, and `observability.tf` for #46. `tests/` checks the configuration offline. |
+| `deploy/check_deploy_plan.py` | Reads the plan for `scripts/aws.sh`: stops a backend deploy that would change more than the backend, and tells an apply whether to run the migrations. |
 | `deploy/ansible/` | The playbooks: `site.yml` deploys, `dump.yml` and `restore.yml` copy the database. The `base` role prepares Ubuntu, and the `app` role deploys the Compose project. |
 | `deploy/smoke.py` | The smoke test that `scripts/vm.sh smoke` runs. |
-| `deploy/local/` | Gitignored. Your settings, the generated secrets, the Lambda's settings, dumps and the smoke test's guest credential. |
+| `deploy/local/` | Gitignored. Your settings, the generated secrets, the Lambda's settings, Terraform's state, the built Lambda, dumps and the smoke test's guest credential. |
 
 ## Prerequisites
 
 - **On your machine:**
+  - Terraform 1.9 or newer, Go, which builds the backend and runs its migrations, and Python 3, for the backend deploy's plan check.
+  - AWS credentials for Terraform, which reads the standard AWS credential chain, e.g. `AWS_PROFILE=<profile>`. They need to manage Lightsail, Lambda and IAM roles. Nothing in the repo stores them.
   - Ansible: `uv tool install ansible-core`. `scripts/vm.sh` installs the collections it needs into `deploy/ansible/.collections/` (gitignored) on first use.
   - [uv](https://docs.astral.sh/uv/), for the smoke test.
   - The instance's SSH key, through `ssh-agent`, `~/.ssh/config` or `ansible_ssh_private_key_file` in the settings.
-- **Lightsail** (#32 creates these with Terraform):
+- **Lightsail** (Terraform creates these, see [AWS resources](#aws-resources)):
   - An Ubuntu 24.04 LTS instance. The 1 GB plan is enough. Both images publish amd64 and arm64 builds.
   - A static IP attached to it.
   - Firewall rules for 22, 443 and 5432. Limit 22 to your own IP if you can. Port 80 stays closed, because Centrifugo answers Let's Encrypt's challenge on 443.
   - Ansible doesn't set up a host firewall: ports that Docker publishes bypass ufw, so the Lightsail firewall is the one that counts.
-- **The Lambda's Function URL** (#38). Centrifugo calls the backend's subscribe proxy through it, and accepts browser connections only from its origin.
+- **The Lambda's Function URL:** `scripts/aws.sh output function_url`. Centrifugo calls the backend's subscribe proxy through it, and accepts browser connections only from its origin.
 - **DNS** (#30): see below.
 
 ### DNS
@@ -52,13 +58,76 @@ Copy `deploy/vm.example.yml` to `deploy/local/vm.yml` and fill it in:
 | Setting | Meaning |
 |---|---|
 | `deploy_domain` | The domain. The VM's hostname is `vm.<deploy_domain>`. |
-| `lambda_function_url` | The backend Lambda's Function URL, e.g. `https://<id>.lambda-url.<region>.on.aws/`. |
+| `lambda_function_url` | The backend Lambda's Function URL, e.g. `https://<id>.lambda-url.<region>.on.aws/`. `scripts/aws.sh output function_url` prints it. |
 | `ansible_ssh_private_key_file` | Optional. The instance's SSH key. |
 | `app_letsencrypt_email` | Optional. The contact address for the Let's Encrypt account. |
 
 Everything else derives from these two: the autocert host whitelist, `ISLAND_BATTLES_CENTRIFUGO_PUBLIC_URL`, the API URL, and Centrifugo's allowed origin and proxy endpoints. Other variables are in `deploy/ansible/group_vars/all.yml` and the roles' `defaults/main.yml`, and any of them can be overridden with `-e name=value`.
 
-## First deploy
+## First deployment, step by step
+
+The pieces depend on each other in a circle. Terraform creates the Lambda, whose Function URL the VM deploy needs for Centrifugo. The VM deploy writes `deploy/local/lambda.env`, which the Lambda needs. The first apply therefore creates the function without its settings, and the backend deploy publishes them once the VM is up:
+
+1. **Check the account's Lambda concurrency limit.** In the Service Quotas console, look up AWS Lambda's "Concurrent executions" for your region. If it's below 1000, read [The concurrency cap](#the-concurrency-cap) first.
+2. **Write the settings.**
+   - Copy `deploy/aws.example.tfvars` to `deploy/local/aws.tfvars` and set the region and your SSH public key ([AWS settings](#aws-settings)).
+   - Copy `deploy/vm.example.yml` to `deploy/local/vm.yml` and set `deploy_domain` ([Settings](#settings)). The Function URL comes in step 4.
+3. **Create the AWS resources:**
+
+   ```sh
+   scripts/aws.sh apply -var allow_missing_lambda_settings=true
+   ```
+
+   It builds the backend and shows the plan: the instance, its firewall, the static IP and its attachment, the key pair, the Lambda's role, the function and its Function URL. Type `yes`. There's no `lambda.env` yet, so it skips the migrations, and the function fails every request until step 7.
+4. **Feed the outputs to the VM deploy.** `scripts/aws.sh output` prints the static IP and the Function URL. Put `function_url` into `deploy/local/vm.yml` as `lambda_function_url`.
+5. **Add the DNS record** `vm.<domain>` for the static IP, and wait until it resolves ([DNS](#dns)).
+6. **Deploy the VM.** Give the new instance a minute to boot first.
+
+   ```sh
+   scripts/vm.sh deploy "$(scripts/aws.sh output static_ip)" -e app_generate_secrets=true
+   ```
+
+   It generates the [secrets](#secrets) and writes `deploy/local/lambda.env` ([First VM deploy](#first-vm-deploy)).
+7. **Deploy the backend:** `scripts/aws.sh deploy`. Its plan only updates the function's settings. The migrations create the schema, then the function gets its settings ([Deploying the backend](#deploying-the-backend)).
+8. **Run the smoke test:** `scripts/vm.sh smoke` ([Smoke test](#smoke-test)).
+9. **Back up `deploy/local/`:** the secrets, Terraform's state, `aws.tfvars`, `vm.yml` and `lambda.env`.
+
+## AWS resources
+
+`deploy/terraform/` creates everything in AWS (#32). The DNS record is the only manual step.
+
+| Resource | Details |
+|---|---|
+| Lightsail instance | Ubuntu 24.04 LTS on the 1 GB plan (`micro_3_0`), IPv4 only, with daily [automatic snapshots](#backups). |
+| Static IP | Attached to the instance named by `static_ip_instance`. Terraform refuses to destroy it, because `vm.<domain>` points at it. |
+| Firewall | 22 from `ssh_allowed_cidrs`, and 443 and 5432 from anywhere. Nothing else, not even 80. |
+| Key pair | Imported from `ssh_public_key`. Without it, Lightsail uses the region's default key, which you download from the Lightsail console. |
+| Lambda | The `provided.al2023` runtime on arm64, 512 MB, a 30-second timeout, a reserved concurrency of 20 and JSON logs. |
+| IAM role | Basic execution only: the function writes its logs and calls nothing else in AWS. |
+| Function URL | Auth type `NONE` and the `RESPONSE_STREAM` invoke mode, which the backend's `lambdaurl` host needs. The provider adds the public invoke permissions. |
+
+There's no CloudFront, ACM certificate, VPC, peering or EventBridge. #46 adds log retention, alarms, a metric filter and a budget in `observability.tf`.
+
+### AWS settings
+
+Copy `deploy/aws.example.tfvars` to `deploy/local/aws.tfvars` and fill in `region` and `ssh_public_key`. `deploy/terraform/variables.tf` describes every other variable, all of which have defaults. If Lightsail rejects your key, use an RSA key: `ssh-keygen -t rsa -b 4096`.
+
+### State
+
+Terraform's state is a local file, `deploy/local/terraform/terraform.tfstate`, gitignored like the rest of `deploy/local/`. `.gitignore` also covers `.terraform/` and `*.tfstate*` anywhere else.
+
+- **The state holds the Lambda's secrets:** its environment, with the database password, Centrifugo's API key, the connection token secret and the proxy secret. Treat it like `deploy/local/secrets/`: back it up with them, and never commit it.
+- **Apply from one machine at a time.** A local state has no locking. Copy the state along with `deploy/local/` when you switch machines or worktrees.
+- **If the state is lost,** the resources keep running, but Terraform no longer knows them. Bring each back with `terraform import` before applying again, or Terraform tries to create them a second time.
+
+### The concurrency cap
+
+Every Lambda instance has its own database pool, so the reserved concurrency caps the backend's Postgres connections ([backend/README.md](../backend/README.md#the-connection-pool)). Terraform checks that **`reserved_concurrency` × `database_max_open_connections` ≤ `postgres_max_connections` − `postgres_spare_connections`**. It also sets `ISLAND_BATTLES_DATABASE_MAX_OPEN_CONNECTIONS` itself, so the two can't drift apart.
+
+- The defaults use at most 20 × 2 = 40 of Postgres's 100 connections. They leave at least 10 free: 3 that Postgres reserves for superusers, 2 for the migrate command, and the rest for administration. A bigger cap still fits under `max_connections`, but every connection costs memory on the 1 GB VM.
+- **Accounts with a low concurrency limit:** Lambda always keeps part of the account's concurrency unreserved, 100 on a normal account. On an account limited to 10, that's all of it, and any reserved concurrency fails with `decreases account's UnreservedConcurrentExecution below its minimum value`. Either request an increase of "Concurrent executions" in Service Quotas, which is free, or set `reserved_concurrency = null`. The account limit is then the cap: 10 × 2 = 20 connections.
+
+## First VM deploy
 
 ```sh
 scripts/vm.sh deploy <static IP> -e app_generate_secrets=true
@@ -81,7 +150,7 @@ The deploy logs in as `ubuntu`, which Lightsail's Ubuntu images use, and:
 5. **Checks** that the role logs in over TLS and is refused without it. It also checks that `https://vm.<domain>/api/info` answers with a valid certificate when called with the API key, and refuses calls without it. That first TLS connection also makes Centrifugo request its certificate.
 6. **Writes** `deploy/local/lambda.env`: the settings the backend Lambda needs to reach the VM.
 
-Then deploy the Lambda (#38) and run the [smoke test](#smoke-test).
+Then [deploy the backend](#deploying-the-backend) and run the [smoke test](#smoke-test).
 
 ### Secrets
 
@@ -94,7 +163,7 @@ The first deploy generates these into `deploy/local/secrets/`. Every later deplo
 
 Back up `deploy/local/secrets/` somewhere safe, such as a password manager, and copy it into every checkout or worktree you deploy from.
 
-A deploy stops if any of these files is missing, because new secrets would replace the live VM's password and keys. Pass `-e app_generate_secrets=true` only for a first deploy, or if the secrets are lost for good. In that case the deploy resets the backend's password and Centrifugo's keys, and you redeploy the Lambda with the new `lambda.env`. Players then need new connection tokens, which clients fetch on their own.
+A deploy stops if any of these files is missing, because new secrets would replace the live VM's password and keys. Pass `-e app_generate_secrets=true` only for a first deploy, or if the secrets are lost for good. In that case the deploy resets the backend's password and Centrifugo's keys, and you redeploy the backend with the new `lambda.env`: `scripts/aws.sh deploy`. Players then need new connection tokens, which clients fetch on their own.
 
 `admin_api_key` was added after the first secrets (#37), so an existing `deploy/local/secrets/` without it fails this check. Run one deploy with `-e app_generate_secrets=true`: it generates only the missing files and reads the others unchanged, so no password or key on the VM changes. Then redeploy the Lambda with the new `lambda.env`.
 
@@ -102,7 +171,7 @@ Nothing secret is committed. Never copy anything from `deploy/local/` into the r
 
 ### The Lambda's settings
 
-`deploy/local/lambda.env` holds the six VM-related settings the backend reads, plus its admin API key (see `backend/dependencies/config.go`). The Lambda deploy (#38) reads it:
+`deploy/local/lambda.env` holds the seven settings the backend reads from the VM deploy, including the admin API key (see `backend/dependencies/config.go`). [`scripts/aws.sh deploy`](#deploying-the-backend) passes every line of it to the Lambda:
 
 | Variable | Value |
 |---|---|
@@ -118,7 +187,39 @@ The URLs use the hostname, not an IP, so they stay the same when you move to a n
 
 `sslmode=require` encrypts the connection but doesn't check the server's certificate. To check it, ship `deploy/local/secrets/postgres-tls/server.crt` with the Lambda and use `sslmode=verify-full&sslrootcert=<path>`. The certificate is issued for `vm.<domain>` and is reused on new VMs.
 
+## Deploying the backend
+
+One command publishes a new backend version (#38):
+
+```sh
+scripts/aws.sh deploy
+```
+
+1. **Builds** `deploy/local/lambda/bootstrap` with the build command from [backend/README.md](../backend/README.md#hosts-and-deploys). Terraform zips it with `archive_file`.
+2. **Plans** the Terraform configuration with `deploy/local/aws.tfvars` and `deploy/local/lambda.env`.
+3. **Checks the plan** with `deploy/check_deploy_plan.py`, which allows only creating or updating resources outside Lightsail. A plan that changes the VM, its firewall or its static IP, or that deletes or replaces anything, such as the Function URL, stops the deploy before the migrations. Review those changes with `scripts/aws.sh apply` instead.
+4. **Migrates the database** from your machine: `go run ./backend/cmd/migrate`, with `ISLAND_BATTLES_DATABASE_URL` from `lambda.env`, straight to Postgres over TLS. The old code serves requests against the new schema until the next step finishes.
+5. **Applies the checked plan:** the new code and settings. Then it prints the Function URL.
+
+It doesn't ask for confirmation, never connects to the VM and never changes a Lightsail resource. The plan file holds the settings, so the script deletes it afterwards.
+
+**Settings:** every `KEY=value` line of `lambda.env` becomes one of the function's environment variables, so a new setting that the VM deploy writes needs no Terraform change. Values are taken literally, without quotes. Plans show the environment only as `(sensitive value)`.
+
+- Run `scripts/aws.sh deploy` again whenever the VM deploy rewrites `lambda.env`, for example after new secrets.
+- `ISLAND_BATTLES_DATABASE_MAX_OPEN_CONNECTIONS` comes from the `database_max_open_connections` variable instead, and Terraform refuses it in `lambda.env` ([The concurrency cap](#the-concurrency-cap)).
+- Non-secret settings of your own, such as the pool's idle time, go in `extra_lambda_environment` in `aws.tfvars`.
+
+**Why Terraform publishes the code,** rather than the AWS CLI with Terraform only creating the function:
+
+- **One owner.** If the CLI published the code and settings, Terraform would have to ignore both. The pool size that Terraform checks against the reserved concurrency would then be set by another tool, and nothing would check the two together.
+- **One tool.** A deploy needs Terraform, Go and Python, which the rest of the deployment already uses, and no AWS CLI.
+- **Checked offline.** `terraform test` covers the settings pass-through and the concurrency check with mocked providers.
+- **The cost:** every deploy plans the whole configuration. That takes a few seconds longer and could pick up unrelated changes, which the plan check stops.
+- Either way the state holds the secrets, because Terraform reads the function's environment into its state even when it ignores changes to it.
+
 ## Redeploy
+
+### The VM
 
 Run the same command again. It's idempotent: when nothing changed, nothing restarts. A changed configuration file recreates only its container. Redeploying the Lambda doesn't touch the VM.
 
@@ -128,6 +229,17 @@ scripts/vm.sh deploy <static IP> -e app_pull=always   # also pull newer image pa
 ```
 
 A Centrifugo restart drops every WebSocket connection together with its in-memory history. Clients reconnect on their own and re-read their state over HTTP.
+
+### The backend
+
+Run `scripts/aws.sh deploy` from the commit you want to publish. See [Deploying the backend](#deploying-the-backend).
+
+### The AWS resources
+
+Change `deploy/local/aws.tfvars` or `deploy/terraform/`, then run `scripts/aws.sh apply`. It shows the plan and applies it only when you type `yes`.
+
+- **Read the plan.** Changing an instance's zone, image or plan replaces it, and replacing an instance deletes its disk and its automatic snapshots. Add a new instance and [move to it](#moving-to-a-new-vm) instead.
+- **It may publish the backend too.** When the plan changes the function, the apply first runs the migrations and then publishes the backend built from your checkout, so run it from the commit you last deployed or a newer one. A plan that leaves the function alone, such as moving the static IP, runs no migrations: in the middle of a move, the old VM refuses the backend.
 
 ## Smoke test
 
@@ -144,11 +256,41 @@ It reads the Function URL from your settings and checks the whole path:
 
 The guest's credential is kept in `deploy/local/smoke-session.json`, and later runs reuse it. After a move to a new VM, that confirms the data came along. Guest credentials expire after 24 hours, and the test replaces one that expires within two hours. If the saved credential is rejected for another reason, delete the file and run the test again.
 
+## Backups
+
+Backups are Lightsail's automatic snapshots (#33). Nothing is uploaded anywhere else.
+
+- **What:** Terraform turns on a daily snapshot of the whole instance at `snapshot_time`, 01:00 UTC by default. Lightsail keeps the last seven. Postgres in a snapshot is crash-consistent, and recovers from it as from a power loss.
+- **Automatic snapshots are deleted with their instance,** unless you copy them to manual snapshots first. In the Lightsail console, open the instance's **Snapshots** tab and choose **Keep snapshot** on an automatic snapshot to copy it. Manual snapshots stay until you delete them, and are billed for storage like the automatic ones. Keep the latest one before you delete an instance, as in step 7 of [Moving to a new VM](#moving-to-a-new-vm).
+- **What they don't cover:** they live in the same account and region as the instance, and a restore loses everything written since the snapshot, up to a day.
+- **Database dumps** are separate, for moving to a new VM: see [Dumps on their own](#dumps-on-their-own).
+
+### Restoring from a snapshot
+
+1. In the Lightsail console, create a new instance from the snapshot, with a new name such as `island-battles-2` and the same plan or a bigger one.
+2. Add it to `vm_instances` in `deploy/local/aws.tfvars`, with the zone and plan you chose, and import it:
+
+   ```sh
+   terraform -chdir=deploy/terraform import -var-file=../local/aws.tfvars 'aws_lightsail_instance.vm["island-battles-2"]' island-battles-2
+   ```
+
+3. Run `scripts/aws.sh apply`. It gives the instance its firewall rules and turns on its automatic snapshots. If the plan wants to replace the imported instance, answer no, and change its `vm_instances` entry until it doesn't.
+4. Continue with steps 5 and 6 of [Moving to a new VM](#moving-to-a-new-vm).
+
 ## Moving to a new VM
 
-Moving copies the database with `pg_dump` and restores it on the new VM (#31). It takes a few minutes of downtime: from the moment the data is copied until the static IP points at the new VM, the backend can't reach a database. Backups are separate: they're Lightsail's automatic snapshots (#33).
+Moving copies the database with `pg_dump` and restores it on the new VM (#31). It takes a few minutes of downtime: from the moment the data is copied until the static IP points at the new VM, the backend can't reach a database. Backups are separate: they're Lightsail's [automatic snapshots](#backups) (#33).
 
-1. **Create the new instance** (#32), without moving the static IP yet. Note its temporary public IP. Lightsail's firewall rules belong to each instance, so the new one needs 22, 443 and 5432 too.
+1. **Create the new instance** without moving the static IP yet. Add it to `vm_instances` in `deploy/local/aws.tfvars`, next to the old one, and leave `static_ip_instance` alone:
+
+   ```hcl
+   vm_instances = {
+     "island-battles-1" = {}
+     "island-battles-2" = {}   # optionally with a bundle_id or blueprint_id of its own
+   }
+   ```
+
+   Run `scripts/aws.sh apply`. The plan only creates the instance and its firewall rules, the same 22, 443 and 5432 as the old one's. `scripts/aws.sh output instance_ips` prints its temporary public IP.
 2. **Deploy it.** `vm.<domain>` still points at the old VM, so tell the DNS check which IP to expect:
 
    ```sh
@@ -168,7 +310,7 @@ Moving copies the database with `pg_dump` and restores it on the new VM (#31). I
    - It dumps the old database to `deploy/local/dumps/` and restores the dump into the new VM's empty database, in one transaction.
    - The restore refuses a dump without tables, and a database that already has tables. To overwrite one, pass `-e app_restore_replace_existing=true`: the restore first saves the database it replaces to `deploy/local/dumps/`.
    - **If the restore fails,** the old VM stays locked and the new database stays empty. Fix the cause and run the same `move-data` command again. To give up on the move instead, unlock the old VM: `scripts/vm.sh deploy <static IP> -e app_unlock_after_move=true`.
-5. **Move the static IP** to the new instance (#32). The DNS record and the Lambda's settings don't change, because both use `vm.<domain>`. The Lambda's next connections reach the new VM.
+5. **Move the static IP** to the new instance: set `static_ip_instance = "island-battles-2"` in `aws.tfvars` and run `scripts/aws.sh apply`. The plan replaces only the static IP's attachment. The DNS record and the Lambda's settings don't change, because both use `vm.<domain>`. The Lambda's next connections reach the new VM.
 6. **Check the new VM:**
 
    ```sh
@@ -177,10 +319,10 @@ Moving copies the database with `pg_dump` and restores it on the new VM (#31). I
    scripts/vm.sh smoke
    ```
 
-   The deploy changes nothing, but it now runs the TLS check, which also gets the new VM's certificate. The smoke test should report that the saved credential still works. The restored schema is the old VM's. If the Lambda deploy (#38) brings newer migrations, its migrate step updates it.
-7. **Delete the old instance** once you're satisfied. To go back to it instead, move the static IP back and run `scripts/vm.sh deploy <static IP> -e app_unlock_after_move=true`. That lets the backend's role log in again and removes the marker. Anything written to the new VM in the meantime isn't copied back.
+   The deploy changes nothing, but it now runs the TLS check, which also gets the new VM's certificate. The smoke test should report that the saved credential still works. The restored schema is the old VM's. If the backend deploy brings newer migrations, its migrate step updates it.
+7. **Delete the old instance** once you're satisfied. First keep its latest automatic snapshot as a manual one, because deleting the instance deletes its automatic snapshots ([Backups](#backups)). Then remove it from `vm_instances` and run `scripts/aws.sh apply`. The plan deletes the instance and its firewall rules. To go back to the old instance instead, set `static_ip_instance` back, run `scripts/aws.sh apply`, and run `scripts/vm.sh deploy <static IP> -e app_unlock_after_move=true`. That lets the backend's role log in again and removes the marker. Anything written to the new VM in the meantime isn't copied back.
 
-If the old VM is gone, there's nothing to dump. Create the new instance from its latest Lightsail snapshot instead (#33), then run steps 5 and 6.
+If the old VM is gone, there's nothing to dump. [Restore the latest snapshot](#restoring-from-a-snapshot) instead, then run steps 5 and 6.
 
 ### Dumps on their own
 
@@ -201,13 +343,26 @@ Dumps use `pg_dump`'s custom format, without owners or grants. The restore makes
   - Read Centrifugo's log on the VM: `cd /opt/island-battles && sudo docker compose logs centrifugo`.
   - After repeated failures, Let's Encrypt blocks new attempts for about an hour.
 - **`REMOTE HOST IDENTIFICATION HAS CHANGED`:** the static IP now points at a different instance. Run `ssh-keygen -R <static IP>`.
+- **`This plan changes more than the backend`:** `scripts/aws.sh deploy` found changes to Lightsail resources, or a deletion, in the plan, and stopped before migrating. Run `scripts/aws.sh apply`, read the plan, and deploy again once it's applied.
+- **`lambda.env is missing`** from Terraform or `scripts/aws.sh`: copy `deploy/local/` from your backup, or run the VM deploy, which writes it. Only the very first apply passes `-var allow_missing_lambda_settings=true`.
+- **`decreases account's UnreservedConcurrentExecution below its minimum value`:** the account's concurrency limit is too low. See [The concurrency cap](#the-concurrency-cap).
+- **The Function URL answers `Internal Server Error`:** read the function's log, the CloudWatch log group `/aws/lambda/<name>`, `/aws/lambda/island-battles` by default. Right after the first apply, the function has no settings yet: run `scripts/aws.sh deploy`. A `Forbidden` means the Function URL's public permissions are missing.
 - **Postgres from your machine:** `psql "host=vm.<domain> dbname=island_battles user=island_battles sslmode=require"`, with the password from `deploy/local/secrets/postgres_app_password`.
 
 ## Validating changes
 
-Never run the playbooks against a host you don't own. To check changes, run these from `deploy/ansible`:
+Never run the playbooks against a host you don't own, and never apply Terraform to an account you don't own. To check changes to the playbooks, run these from `deploy/ansible`:
 
 ```sh
 ansible-lint
 ansible-playbook -i 203.0.113.10, --syntax-check site.yml dump.yml restore.yml
+```
+
+To check changes to the Terraform configuration, run these from the repository root. They need no AWS credentials: the tests mock both providers, so they never call AWS.
+
+```sh
+terraform -chdir=deploy/terraform init -backend=false
+terraform -chdir=deploy/terraform fmt -check -recursive
+terraform -chdir=deploy/terraform validate
+terraform -chdir=deploy/terraform test
 ```
