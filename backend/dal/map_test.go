@@ -68,6 +68,7 @@ func TestCreateMapTemplateStoresANameOnceUnderConcurrentCreates(t *testing.T) {
 	}
 	// Open every connection up front so the creators race on the database
 	// rather than on dialling it.
+	sqlDB.SetMaxOpenConns(creators)
 	sqlDB.SetMaxIdleConns(creators)
 	var warm sync.WaitGroup
 	for range creators {

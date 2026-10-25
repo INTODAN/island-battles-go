@@ -8,6 +8,7 @@ import (
 	"islandBattles/backend/models"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/go-chi/httplog/v3"
 )
 
 type CreateMapTemplateRequest struct {
@@ -29,7 +30,7 @@ func (env *Env) CreateMapTemplate(ctx context.Context, input *CreateMapTemplateR
 	case errors.Is(err, dal.ErrMapTemplateNameTaken):
 		return nil, huma.Error409Conflict("map name is already taken", &huma.ErrorDetail{Location: "body.map_name", Value: input.Body.MapName, Message: "another map template uses this name"})
 	case err != nil:
-		fmt.Println("Error when creating MapTemplate: ", err)
+		_ = httplog.SetError(ctx, fmt.Errorf("create map template: %w", err))
 		return nil, huma.Error500InternalServerError(err.Error())
 	}
 	resp := &CreateMapTemplateResponse{}

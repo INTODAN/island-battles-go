@@ -2,18 +2,26 @@ package services
 
 import (
 	"bytes"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/go-echarts/go-echarts/v2/charts"
 	"github.com/go-echarts/go-echarts/v2/components"
 	"github.com/go-echarts/go-echarts/v2/opts"
 	"gorm.io/gorm"
+)
+
+// The graph page's controls and player are embedded, so the page works from a
+// binary with no source tree beside it, such as on Lambda.
+var (
+	//go:embed graph/controls.html
+	graphControlsHTML string
+	//go:embed graph/script.js
+	graphScriptJS string
 )
 
 func BuildGraphForGeneration(generation *models.Generation, index int, totalGens int) *charts.Graph {
@@ -171,48 +179,6 @@ func GetGameGraph(db *gorm.DB, gameID uint) (string, error) {
 
 	htmlContent := buffer.String()
 
-	possiblePaths := []string{
-		"graph",                            // Relative to backend/services/
-		filepath.Join("services", "graph"), // Relative to backend/
-		filepath.Join("backend", "services", "graph"),  // Relative to project root
-		filepath.Join("..", "services", "graph"),       // Relative to backend/dal
-		filepath.Join("..", "..", "services", "graph"), // Relative to nested folders
-	}
-
-	// Dynamic lookup by finding the project root (where go.mod resides)
-	if cwd, err := os.Getwd(); err == nil {
-		dir := cwd
-		for i := 0; i < 6; i++ {
-			if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-				possiblePaths = append(possiblePaths, filepath.Join(dir, "backend", "services", "graph"))
-				break
-			}
-			parent := filepath.Dir(dir)
-			if parent == dir {
-				break
-			}
-			dir = parent
-		}
-	}
-
-	var controlsHTML, scriptJS string
-	var pathFound bool
-
-	for _, possiblePath := range possiblePaths {
-		controlsHTMLBytes, controlsHTMLErr := os.ReadFile(filepath.Join(possiblePath, "controls.html"))
-		scriptJSBytes, scriptJSErr := os.ReadFile(filepath.Join(possiblePath, "script.js"))
-		if controlsHTMLErr == nil && scriptJSErr == nil {
-			controlsHTML = string(controlsHTMLBytes)
-			scriptJS = string(scriptJSBytes)
-			pathFound = true
-			break
-		}
-	}
-
-	if !pathFound {
-		return "", fmt.Errorf("failed to find template files")
-	}
-
 	rawGenerationsGraphJSON, err := json.Marshal(generationsGraphJSON)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal generation options: %w", err)
@@ -227,10 +193,10 @@ func GetGameGraph(db *gorm.DB, gameID uint) (string, error) {
 </script>
 <script type="module">
     %s
-</script>`, totalGens, string(rawGenerationsGraphJSON), scriptJS,
+</script>`, totalGens, string(rawGenerationsGraphJSON), graphScriptJS,
 	)
 
-	htmlContent = strings.Replace(htmlContent, "<body>", "<body>"+controlsHTML, 1)
+	htmlContent = strings.Replace(htmlContent, "<body>", "<body>"+graphControlsHTML, 1)
 	htmlContent = strings.Replace(htmlContent, "</body>", scriptHTML+"</body>", 1)
 
 	return htmlContent, nil

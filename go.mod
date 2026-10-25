@@ -87,6 +87,9 @@ require (
 	golang.org/x/text v0.32.0 // indirect
 )
 
-require islandBattles/lobby v0.0.0
+require (
+	github.com/aws/aws-lambda-go v1.54.0
+	islandBattles/lobby v0.0.0
+)
 
 replace islandBattles/lobby => ./lobby

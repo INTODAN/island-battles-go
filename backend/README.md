@@ -4,9 +4,9 @@ The Go/Huma server hosts the reusable [`lobby/`](../lobby/README.md) package and
 
 ## Run locally
 
-Follow the [root setup](../README.md#development-setup). All seven backend settings in [`.env.example`](../.env.example) are required: database URL, HTTP address, public WebSocket URL, server-only Centrifugo API URL/key, connection-token signing secret and internal proxy secret. Startup rejects missing values. Public clients receive only their guest credential and short-lived connection JWT.
+Follow the [root setup](../README.md#development-setup). All seven backend settings in [`.env.example`](../.env.example) are required: database URL, HTTP address, public WebSocket URL, server-only Centrifugo API URL/key, connection-token signing secret and internal proxy secret. Startup rejects missing values. Only the HTTP server host reads the HTTP address; the [Lambda host](#hosts-and-deploys) has none. The database pool settings are optional; see [the connection pool](#the-connection-pool). Public clients receive only their guest credential and short-lived connection JWT.
 
-Run `./scripts/dev.sh` from the repository root to load `.env`, start local dependencies with Docker Compose or Podman, and run the backend. If dependencies are already running and the environment is exported, `go run ./backend` also works. `/docs` exposes Huma documentation, `/openapi.json` the combined schema, and `/healthz` HTTP readiness. The lobby-only generated contract is in [`lobby/api/`](../lobby/api/README.md).
+Run `./scripts/dev.sh` from the repository root to load `.env`, start local dependencies with Docker Compose or Podman, migrate the schema and run the backend. If dependencies are already running and the environment is exported, run `go run ./backend/cmd/migrate` and then `go run ./backend`. The backend only connects to the database, so it fails on a database the migrate command hasn't brought up to date. `/docs` exposes Huma documentation, `/openapi.json` the combined schema, and `/healthz` HTTP readiness. The lobby-only generated contract is in [`lobby/api/`](../lobby/api/README.md).
 
 Open `/lobby/ui/` for the [temporary two-player lobby frontend](../lobby/frontend/README.md). It is embedded in the backend and needs no separate frontend build.
 
@@ -138,9 +138,39 @@ A map file is the JSON that `POST /map/create` stores as a default map, publishe
 
 ## Schema and recovery
 
-Startup first applies two sets of versioned SQL migrations, which keep existing rows: the lobby's (`lobby/postgres/migrations/`, recorded in `lobby_schema_migrations`) and the map templates' (`backend/dal/migrations/`, recorded in `map_template_schema_migrations`). Each set runs in one transaction under a PostgreSQL advisory lock, so concurrent starts wait for each other. A database created before the schema was versioned is recorded at migration 1 without running it, but only if it has every table and column that migration 1 creates; otherwise startup fails and names what is missing. Startup then AutoMigrates the game tables and game-team bindings, and drops the retired `generation_notifications` table. Game data is not migrated: when a schema change strands it, reset the game tables (see the [breaking-changes skill](../.agents/skills/breaking-changes/SKILL.md)). New games use the nullable unique `lobby_id` link. Creating or joining a lobby does not create a game; starting an Island Battles lobby initializes generation one.
+The hosts never change the schema. The migrate command, [`cmd/migrate`](cmd/migrate/main.go), does, once per deploy and before the new build serves; `scripts/dev.sh`, the acceptance and conformance runners and the Go test helpers (`testutils.InitTestDB`) run it, or the `dependencies.MigrateSchema` function behind it, first. It reads only `ISLAND_BATTLES_DATABASE_URL` and the optional pool settings. It first applies two sets of versioned SQL migrations, which keep existing rows: the lobby's (`lobby/postgres/migrations/`, recorded in `lobby_schema_migrations`) and the map templates' (`backend/dal/migrations/`, recorded in `map_template_schema_migrations`). Each set runs in one transaction under a PostgreSQL advisory lock, so concurrent runs of a set wait for each other. A database created before the schema was versioned is recorded at migration 1 without running it, but only if it has every table and column that migration 1 creates; otherwise the command fails and names what is missing. It then AutoMigrates the game tables and game-team bindings, drops the retired `generation_notifications` table, and drops the `games.replay` column, because replays are now derived from generations. The game steps take no lock, so never run two migrate commands against one database at once. Running it again finds nothing to do. Game data is not migrated: when a schema change strands it, reset the game tables (see the [breaking-changes skill](../.agents/skills/breaking-changes/SKILL.md)). New games use the nullable unique `lobby_id` link. Creating or joining a lobby does not create a game; starting an Island Battles lobby initializes generation one.
 
 Lobby invalidations and generation events are pushed after their transaction commits, through the lobby's `realtime.Publisher`. It sends a request's messages to Centrifugo's HTTP API in one call and retries what failed twice within about a second. If Centrifugo is still unreachable, it logs an error and the request succeeds anyway, because the change is already committed. Nothing is queued for later. Generation events contain the recipient's authorized generation state and go only to that player's personal channel. Clients reconcile authorized snapshots after subscription/reconnect, so a failed push or a restart recovers through HTTP state.
+
+## Hosts and deploys
+
+[`app.New`](app/app.go) builds the HTTP handler from the configuration and a database connection. Two hosts serve it:
+
+- **The HTTP server,** [`backend/main.go`](main.go), for local development. It listens on `ISLAND_BATTLES_HTTP_ADDR`, shuts down gracefully on SIGINT or SIGTERM and logs in colour through `tint`.
+- **The AWS Lambda function,** [`cmd/lambda`](cmd/lambda/main.go), behind a Function URL. It serves the handler through `lambdaurl`, so the Function URL must use the `RESPONSE_STREAM` invoke mode. Streaming also lets replay and graph pages, which inline JSON that grows with the game, pass Lambda's 6 MB limit on buffered responses; streamed responses may reach 200 MB. It logs JSON lines through `slog`'s JSON handler, which keeps the default `level` key that Lambda's log-level filtering reads.
+
+Build the Lambda for the `provided.al2023` runtime on arm64. The runtime runs the executable named `bootstrap` at the root of the zip:
+
+```sh
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -tags lambda.norpc -trimpath -ldflags='-s -w' -o bootstrap ./backend/cmd/lambda
+zip -j bootstrap.zip bootstrap
+```
+
+A deploy runs `go run ./backend/cmd/migrate` (or the same command built for the deploy machine) against the production database first, then publishes the new code. A cold start runs no DDL. The Lambda has no VPC and reaches PostgreSQL over the internet, which accepts only TLS connections. `sslmode=require` encrypts the connection but doesn't check the server's certificate. To check it, bundle the VM's certificate with the Lambda and use `sslmode=verify-full&sslrootcert=<path>`, as [the deploy guide](../deploy/README.md#the-lambdas-settings) describes. Every page the backend serves, including the lobby UI, the browser demo and `GET /game/{id}/graph`, is embedded in the binary.
+
+### The connection pool
+
+Every process has its own pool, and every Lambda instance is a separate process. These optional settings bound it:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `ISLAND_BATTLES_DATABASE_MAX_OPEN_CONNECTIONS` | 2 | Most connections open at once |
+| `ISLAND_BATTLES_DATABASE_MAX_IDLE_CONNECTIONS` | 2, or the open limit if lower | Most connections kept open while idle |
+| `ISLAND_BATTLES_DATABASE_CONNECTION_MAX_IDLE_TIME` | `1m` | How long an idle connection stays open, as a Go duration |
+
+A Lambda instance serves one request at a time, so the defaults suffice there. Cap the function's reserved concurrency so that **reserved concurrency × max open connections < PostgreSQL `max_connections`** (100 by default), leaving room for the migrate command and administration. For example, with the default of 2 connections, a reserved concurrency of 40 uses at most 80. A frozen Lambda instance keeps its idle connections until it thaws or ends, so count them as open.
+
+If PgBouncer is added later in transaction mode, it must be 1.21 or newer with `max_prepared_statements` set, because pgx uses named prepared statements by default.
 
 ## Verification
 

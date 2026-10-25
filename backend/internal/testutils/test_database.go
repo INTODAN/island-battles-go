@@ -3,6 +3,7 @@ package testutils
 import (
 	"context"
 	"islandBattles/backend/dependencies"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -14,12 +15,17 @@ import (
 )
 
 // InitTestDB starts a disposable PostgreSQL container with the full schema.
+// It connects as the hosts do, with the default pool limits, and migrates as
+// the migrate command does.
 func InitTestDB(t *testing.T) *gorm.DB {
-	db, err := dependencies.InitDB(startTestPostgres(t))
+	db, err := dependencies.InitDB(dependencies.DefaultDatabaseConfig(startTestPostgres(t)), slog.Default())
 	if err != nil {
-		t.Fatalf("initialize test database: %v", err)
+		t.Fatalf("connect test database: %v", err)
 	}
 	closeWithTest(t, db)
+	if err := dependencies.MigrateSchema(context.Background(), db); err != nil {
+		t.Fatalf("migrate test database: %v", err)
+	}
 	return db
 }
 

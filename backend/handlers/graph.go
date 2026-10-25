@@ -6,6 +6,7 @@ import (
 	"islandBattles/backend/services"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/go-chi/httplog/v3"
 )
 
 func (env *Env) GetGameGraph(ctx context.Context, input *struct {
@@ -19,10 +20,9 @@ func (env *Env) GetGameGraph(ctx context.Context, input *struct {
 	return &huma.StreamResponse{
 		Body: func(ctx huma.Context) {
 			ctx.SetHeader("Content-Type", "text/html")
-			_, err := ctx.BodyWriter().Write([]byte(htmlContent))
-			if err != nil {
-				fmt.Printf("error encountered while writing %v", err)
-				return
+			// The status is already sent, so the request's log line carries the error.
+			if _, err := ctx.BodyWriter().Write([]byte(htmlContent)); err != nil {
+				_ = httplog.SetError(ctx.Context(), fmt.Errorf("write game graph: %w", err))
 			}
 		},
 	}, nil
