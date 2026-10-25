@@ -3,7 +3,9 @@ package models
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -102,5 +104,33 @@ func TestCheckMapTeamsNeedsExactlyTheLobbyTeams(t *testing.T) {
 	err := CheckMapTeams(mapWith(3, 1, 2, 0, 3), 2, "map_template_id")
 	if err == nil || err.Error() != `game_settings.map_template_id: map "test" has player_amount 3 and team colours [1 2 3], but this lobby has 2 teams, so it needs player_amount 2 and team colours exactly 1 to 2 (0 is neutral)` {
 		t.Fatalf("message = %v", err)
+	}
+}
+
+// Every castle of a large invalid map is a problem, but the message, which
+// the lobby returns to the client, lists only the first few.
+func TestLobbySettingsErrorListsABoundedNumberOfProblems(t *testing.T) {
+	for _, castleCount := range []int{1000, 2000, 4000} {
+		castles := make([]string, castleCount)
+		for index := range castles {
+			castles[index] = `{"team_color":1,"x":9,"y":9}`
+		}
+		settings := `{"map":{"map_name":"a","player_amount":2,"plane_size_x":4,"plane_size_y":4,"neutral_starting_soldier_amount":1,"castles":[` + strings.Join(castles, ",") + `]}}`
+		_, err := ParseLobbySettings(json.RawMessage(settings))
+		var invalidSettings *LobbySettingsError
+		// DecodeMapTemplate may bound its own details, so count what it returned.
+		if !errors.As(err, &invalidSettings) || len(invalidSettings.Details) <= MaxLobbySettingsProblems {
+			t.Fatalf("%d castles: error %v", castleCount, err)
+		}
+		message := err.Error()
+		if suffix := fmt.Sprintf("; and %d more problems", len(invalidSettings.Details)-MaxLobbySettingsProblems); !strings.HasSuffix(message, suffix) {
+			t.Fatalf("%d castles: message ends %q", castleCount, message[max(0, len(message)-60):])
+		}
+		if strings.Count(message, ": ") != MaxLobbySettingsProblems || len(message) > 2000 {
+			t.Fatalf("%d castles: %d-byte message lists %d problems", castleCount, len(message), strings.Count(message, ": "))
+		}
+	}
+	if err := NewLobbySettingsError("map", "is bad"); err.Error() != "game_settings.map: is bad" {
+		t.Fatalf("one problem = %q", err.Error())
 	}
 }

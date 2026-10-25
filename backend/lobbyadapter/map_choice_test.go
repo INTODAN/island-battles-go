@@ -16,6 +16,7 @@ import (
 	"islandBattles/backend/models"
 	"islandBattles/lobby/domain"
 
+	gormpostgres "gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
@@ -125,5 +126,25 @@ func TestStartWithoutAMapChoiceUsesTheGeneratedMap(t *testing.T) {
 	}
 	if started := game.Generations[0].Map; started.MapName != "Lobby battle" || len(started.Castles) != 2 {
 		t.Fatalf("started map = %+v", started)
+	}
+}
+
+// A lookup that can't reach the database is not the host's mistake, so the
+// lobby reports it as unavailable rather than as invalid settings.
+func TestRegistrationReportsAnUnreachableDatabaseAsUnavailable(t *testing.T) {
+	// Port 1 refuses connections; the ping is skipped so opening succeeds.
+	unreachable, err := gorm.Open(gormpostgres.Open("host=127.0.0.1 port=1 user=nobody dbname=nothing sslmode=disable connect_timeout=2"), &gorm.Config{DisableAutomaticPing: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := domain.DefaultPolicy(lobbyadapter.Registration(unreachable))
+	teams := []domain.TeamDefinition{{Name: "Blue", Capacity: 1}, {Name: "Red", Capacity: 1}}
+	_, err = policy.ValidateGameSettings(context.Background(), lobbyadapter.GameKey, json.RawMessage(`{"map_template_id":1}`), teams)
+	if !errors.Is(err, domain.ErrUnavailable) || domain.ErrorCodeOf(err) == domain.CodeInvalidGameSettings {
+		t.Fatalf("unreachable database = %v", err)
+	}
+	// Choices that need no lookup are still checked without the database.
+	if _, err := policy.ValidateGameSettings(context.Background(), lobbyadapter.GameKey, json.RawMessage(`{"map":`+twoTeamMapFile+`}`), teams); err != nil {
+		t.Fatalf("inline map = %v", err)
 	}
 }

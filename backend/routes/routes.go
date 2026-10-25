@@ -89,7 +89,7 @@ func SetupRoutes(api huma.API, env *handlers.Env) {
 		Summary: "List the default maps a lobby can start on.",
 		Description: "Lists every default map whose castle team colours are exactly 1 to player_amount, ordered by name. " +
 			"Choose one when creating an Island Battles lobby by passing its map_template_id in game_settings, with exactly team_count teams. " +
-			"Maps whose team colours skip a colour fit no lobby and are left out."}, env.ListMapTemplates)
+			"Maps that fit no lobby are left out: those whose team colours skip a colour, and those made for fewer than 2 or more than 16 teams."}, env.ListMapTemplates)
 	huma.Register(api, huma.Operation{Path: "/game/{id}/graph", Method: http.MethodGet, DefaultStatus: http.StatusOK,
 		Summary: "Get a graph visualization of the game."}, env.GetGameGraph)
 }

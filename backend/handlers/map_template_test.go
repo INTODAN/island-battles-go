@@ -2,6 +2,7 @@ package handlers_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"reflect"
 	"strings"
@@ -63,6 +64,15 @@ func TestCreateMapTemplateHTTP(t *testing.T) {
 	}
 }
 
+// A lobby has at most 16 teams, so a map for 17 fits none.
+var seventeenTeamMap = func() string {
+	castles := make([]string, 17)
+	for index := range castles {
+		castles[index] = fmt.Sprintf(`{"team_color":%d,"x":0,"y":0}`, index+1)
+	}
+	return `{"map_name":"Crowd","player_amount":17,"plane_size_x":4,"plane_size_y":4,"neutral_starting_soldier_amount":5,"castles":[` + strings.Join(castles, ",") + `]}`
+}()
+
 func TestListMapTemplatesHTTP(t *testing.T) {
 	database := testutils.InitTestDB(t)
 	_, api := humatest.New(t)
@@ -75,6 +85,9 @@ func TestListMapTemplatesHTTP(t *testing.T) {
 	for _, mapFile := range []string{
 		`{"map_name":"Zigzag","player_amount":3,"plane_size_x":12,"plane_size_y":9,"neutral_starting_soldier_amount":5,"castles":[{"team_color":1,"x":0,"y":0},{"team_color":2,"x":1,"y":0},{"team_color":3,"x":2,"y":0},{"team_color":0,"x":3,"y":0}]}`,
 		testutils.MapExampleInput,
+		// A lobby has at least two teams.
+		`{"map_name":"Solo","player_amount":1,"plane_size_x":4,"plane_size_y":4,"neutral_starting_soldier_amount":5,"castles":[{"team_color":1,"x":0,"y":0}]}`,
+		seventeenTeamMap,
 		// Colour 2 owns no castle, so the map fits no lobby.
 		`{"map_name":"Gap","player_amount":3,"plane_size_x":4,"plane_size_y":4,"neutral_starting_soldier_amount":5,"castles":[{"team_color":1,"x":0,"y":0},{"team_color":3,"x":1,"y":0}]}`,
 	} {

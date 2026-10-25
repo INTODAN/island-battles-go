@@ -30,10 +30,20 @@ type LobbySettingsError struct {
 	Details []*huma.ErrorDetail
 }
 
+// MaxLobbySettingsProblems bounds the problems an error message lists, so a
+// large invalid map can't produce a huge response. The rest are counted.
+const MaxLobbySettingsProblems = 20
+
+// Error lists the first MaxLobbySettingsProblems problems, each as its
+// location and message, and counts any others.
 func (err *LobbySettingsError) Error() string {
-	problems := make([]string, len(err.Details))
-	for index, detail := range err.Details {
+	listed := err.Details[:min(len(err.Details), MaxLobbySettingsProblems)]
+	problems := make([]string, len(listed), len(listed)+1)
+	for index, detail := range listed {
 		problems[index] = detail.Location + ": " + detail.Message
+	}
+	if hidden := len(err.Details) - len(listed); hidden > 0 {
+		problems = append(problems, fmt.Sprintf("and %d more problems", hidden))
 	}
 	return strings.Join(problems, "; ")
 }
