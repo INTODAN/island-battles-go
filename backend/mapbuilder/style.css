@@ -58,7 +58,8 @@ code { font-size: .9em; }
 .castle-card h3 button { background: none; padding: 0; color: inherit; font-weight: 700; }
 .castle-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .castle-fields .wide { grid-column: 1 / -1; }
-.upgrade-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: .82rem; }
+.upgrades { display: grid; gap: 8px; }
+.upgrade-row { display: grid; grid-template-columns: 9.5em minmax(0, 1fr); align-items: center; gap: 8px; font-size: .82rem; }
 .plane .castle { cursor: grab; }
 .plane .castle:active { cursor: grabbing; }
 .plane .castle-label { font-weight: 700; pointer-events: none; }

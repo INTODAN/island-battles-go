@@ -402,24 +402,37 @@ function gridStep(extent) {
   return [1, 2, 5, 10].map((factor) => factor * power).find((step) => step >= rough) ?? 10 * power;
 }
 
+// The background stays in place until the plane or the view changes, so a
+// double-click on an empty spot lands on the same element twice.
+const background = svg("g", { "data-layer": "background" });
+const castleLayer = svg("g", { "data-layer": "castles" });
+plane.append(background, castleLayer);
+let backgroundKey = "";
+
+function renderBackground(view, line) {
+  const key = JSON.stringify([view, map.plane_size_x, map.plane_size_y]);
+  if (key === backgroundKey) return;
+  backgroundKey = key;
+  plane.setAttribute("viewBox", `${view.left} ${view.top} ${view.width} ${view.height}`);
+  background.replaceChildren();
+  if (!isPositive(map.plane_size_x) || !isPositive(map.plane_size_y)) return;
+  const halfWidth = map.plane_size_x / 2;
+  const halfHeight = map.plane_size_y / 2;
+  background.append(svg("rect", { x: -halfWidth, y: -halfHeight, width: map.plane_size_x, height: map.plane_size_y, fill: "#fff", stroke: "#b7c0cf", "stroke-width": line, "data-kind": "plane" }));
+  const step = gridStep(view.extent);
+  const path = [];
+  for (let x = Math.ceil(-halfWidth / step) * step; x <= halfWidth; x += step) path.push(`M${x} ${-halfHeight}V${halfHeight}`);
+  for (let y = Math.ceil(-halfHeight / step) * step; y <= halfHeight; y += step) path.push(`M${-halfWidth} ${y}H${halfWidth}`);
+  if (path.length < 2000) background.append(svg("path", { d: path.join(""), stroke: "#eef1f6", "stroke-width": line, fill: "none", "pointer-events": "none" }));
+  background.append(svg("path", { d: `M${-halfWidth} 0H${halfWidth}M0 ${-halfHeight}V${halfHeight}`, stroke: "#d5dbe5", "stroke-width": line, fill: "none", "pointer-events": "none" }));
+}
+
 function renderPlane() {
   const view = drag?.view ?? computeView();
   const hadFocus = plane.contains(document.activeElement);
-  plane.setAttribute("viewBox", `${view.left} ${view.top} ${view.width} ${view.height}`);
-  plane.replaceChildren();
   const line = view.radius / 12;
-
-  if (isPositive(map.plane_size_x) && isPositive(map.plane_size_y)) {
-    const halfWidth = map.plane_size_x / 2;
-    const halfHeight = map.plane_size_y / 2;
-    plane.append(svg("rect", { x: -halfWidth, y: -halfHeight, width: map.plane_size_x, height: map.plane_size_y, fill: "#fff", stroke: "#b7c0cf", "stroke-width": line, "data-kind": "plane" }));
-    const step = gridStep(view.extent);
-    const path = [];
-    for (let x = Math.ceil(-halfWidth / step) * step; x <= halfWidth; x += step) path.push(`M${x} ${-halfHeight}V${halfHeight}`);
-    for (let y = Math.ceil(-halfHeight / step) * step; y <= halfHeight; y += step) path.push(`M${-halfWidth} ${y}H${halfWidth}`);
-    if (path.length < 2000) plane.append(svg("path", { d: path.join(""), stroke: "#eef1f6", "stroke-width": line, fill: "none", "pointer-events": "none" }));
-    plane.append(svg("path", { d: `M${-halfWidth} 0H${halfWidth}M0 ${-halfHeight}V${halfHeight}`, stroke: "#d5dbe5", "stroke-width": line, fill: "none", "pointer-events": "none" }));
-  }
+  renderBackground(view, line);
+  castleLayer.replaceChildren();
 
   const placed = placeProblems(shownErrors);
   map.castles.forEach((castle, index) => {
@@ -439,7 +452,7 @@ function renderPlane() {
       svg("text", { class: "castle-label", y: view.radius * 0.3, "text-anchor": "middle", "font-size": view.radius * 0.85, fill: color }, soldiers ?? ""),
       svg("text", { class: "castle-id", y: view.radius * 2.05, "text-anchor": "middle", "font-size": view.radius * 0.6 }, `#${index}`),
     );
-    plane.append(group);
+    castleLayer.append(group);
   });
   if (hadFocus && selected !== null) plane.querySelector(`[data-castle="${selected}"]`)?.focus({ preventScroll: true });
 }
