@@ -1,0 +1,11 @@
+---
+# Dumps the VM's database to deploy/local/dumps/. Usage: scripts/vm.sh dump <ip>
+- name: Dump the VM's database
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Dump the database and copy it to the developer machine
+      ansible.builtin.import_role:
+        name: app
+        tasks_from: dump

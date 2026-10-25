@@ -1,0 +1,86 @@
+---
+# Runs before anything changes on the VM.
+- name: Check the settings
+  ansible.builtin.assert:
+    that:
+      - deploy_domain is defined
+      - deploy_domain is ansible.builtin.match('^[a-z0-9.-]+\.[a-z]+$')
+      - lambda_function_url is defined
+      - lambda_function_url is ansible.builtin.match('^https://[^/<>]+/?$')
+    fail_msg: >-
+      Copy deploy/vm.example.yml to deploy/local/vm.yml and set deploy_domain
+      (lowercase, e.g. example.org) and lambda_function_url (https://<id>.lambda-url.<region>.on.aws/).
+    quiet: true
+
+# The password lookups would silently generate any missing secret. On a live VM
+# that resets the backend's password and replaces Centrifugo's keys, so missing
+# secrets are only generated when asked for, on the first deploy.
+- name: Look for the secrets on the developer machine
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    get_checksum: false
+  loop: "{{ app_secret_files }}"
+  register: app_secret_file_status
+  delegate_to: localhost
+  run_once: true
+  become: false
+
+- name: Stop unless the secrets exist or the first deploy may generate them
+  vars:
+    app_missing_secret_files: "{{ app_secret_file_status.results | rejectattr('stat.exists') | map(attribute='item') | list }}"
+  ansible.builtin.assert:
+    that:
+      - app_missing_secret_files | length == 0 or app_generate_secrets | bool
+    fail_msg: >-
+      Missing secrets: {{ app_missing_secret_files | join(', ') }}. Deploying without them would replace
+      the live VM's passwords and keys. Copy deploy/local/secrets/ from where you keep it. Only for a
+      first deploy, or after losing the secrets for good, pass -e app_generate_secrets=true.
+    quiet: true
+  run_once: true
+
+- name: Look for the moved-away marker
+  ansible.builtin.stat:
+    path: "{{ app_moved_away_marker }}"
+    get_checksum: false
+  register: app_moved_away_marker_status
+
+# A move locked the backend out of this VM. Deploying it must not let the
+# backend write here again, or those writes would be lost.
+- name: Stop unless the VM still serves the backend
+  ansible.builtin.assert:
+    that:
+      - not app_moved_away_marker_status.stat.exists or app_unlock_after_move | bool
+    fail_msg: >-
+      {{ inventory_hostname }} was moved away from: `scripts/vm.sh move-data` locked the backend out of
+      its database ({{ app_moved_away_marker }}). Deploy the VM the static IP points at instead. To let
+      the backend use this VM again, for example after a failed move, pass -e app_unlock_after_move=true.
+    quiet: true
+
+- name: Check that the VM runs Ubuntu 24.04 or newer
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.distribution == 'Ubuntu'
+      - ansible_facts.distribution_version is ansible.builtin.version('24.04', '>=')
+    fail_msg: "Expected Ubuntu 24.04 or newer, found {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }}."
+    quiet: true
+
+# Let's Encrypt allows only a few failed validations per hostname per hour, so
+# Centrifugo must not ask for a certificate before the A record is right (#30).
+- name: Resolve the VM's hostname
+  ansible.builtin.command:
+    argv: [getent, ahostsv4, "{{ vm_hostname }}"]
+  register: app_vm_hostname_lookup
+  changed_when: false
+  failed_when: false
+
+- name: Stop unless the VM's hostname points at the static IP
+  vars:
+    app_vm_hostname_addresses: "{{ app_vm_hostname_lookup.stdout_lines | map('split') | map('first') | unique | list }}"
+  ansible.builtin.assert:
+    that:
+      - vm_static_ip in app_vm_hostname_addresses
+    fail_msg: >-
+      {{ vm_hostname }} resolves to [{{ app_vm_hostname_addresses | join(', ') }}], not {{ vm_static_ip }}.
+      Add or fix its A record (deploy/README.md) and wait until it resolves.
+      When preparing a replacement VM, pass -e vm_static_ip=<static IP>.
+    quiet: true

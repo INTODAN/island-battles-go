@@ -1,0 +1,17 @@
+---
+# Settings for scripts/vm.sh. Copy this file to deploy/local/vm.yml, which is
+# gitignored, and replace the placeholders. See deploy/README.md.
+
+# The domain whose vm.<domain> A record points at the VM's static IP.
+deploy_domain: <your-domain>
+
+# The backend Lambda's Function URL. Centrifugo calls its proxy endpoints, and
+# browsers load the lobby UI from its origin.
+lambda_function_url: https://<url-id>.lambda-url.<region>.on.aws/
+
+# Optional: the SSH key for the instance, unless ssh-agent or ~/.ssh/config
+# already provides it.
+# ansible_ssh_private_key_file: ~/.ssh/<lightsail-key>.pem
+
+# Optional: a contact address for the Let's Encrypt account.
+# app_letsencrypt_email: <you@your-domain>

@@ -1,0 +1,23 @@
+-- Creates the backend's role and database, or resets the role's password.
+-- Schema migrations are not run here; the migrate command does that (#29).
+-- Owning the database gives the role CREATE on it, which the migration runner
+-- needs to create its scratch schema on a database without history (#23).
+SELECT format('CREATE ROLE %I LOGIN', '{{ postgres_app_role }}')
+WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{{ postgres_app_role }}')
+\gexec
+
+-- An existing role keeps its LOGIN or NOLOGIN. Moving to a new VM locks the old
+-- VM's role out (dump.yml), and only app_unlock_after_move lets it in again.
+ALTER ROLE "{{ postgres_app_role }}"
+  WITH NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
+  PASSWORD '{{ postgres_app_password }}';
+{% if app_unlock_after_move | bool %}
+
+ALTER ROLE "{{ postgres_app_role }}" LOGIN;
+{% endif %}
+
+SELECT format('CREATE DATABASE %I OWNER %I', '{{ postgres_database }}', '{{ postgres_app_role }}')
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '{{ postgres_database }}')
+\gexec
+
+ALTER DATABASE "{{ postgres_database }}" OWNER TO "{{ postgres_app_role }}";
