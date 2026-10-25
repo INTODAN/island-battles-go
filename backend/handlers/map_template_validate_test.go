@@ -27,7 +27,7 @@ type validation struct {
 func TestValidateMapTemplateHTTP(t *testing.T) {
 	// No database: checking a map stores nothing.
 	_, api := humatest.New(t, routes.NewAPIConfig("test", "1.0.0"))
-	routes.SetupRoutes(api, &handlers.Env{})
+	routes.SetupRoutes(api, &handlers.Env{}, "")
 	check := func(t *testing.T, body string) validation {
 		t.Helper()
 		response := api.Post("/map/validate", strings.NewReader(body))

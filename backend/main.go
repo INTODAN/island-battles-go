@@ -51,7 +51,9 @@ func run(ctx context.Context, config dependencies.Config, address string, logger
 		return err
 	}
 	defer func() { _ = sqlDatabase.Close() }()
-	handler, err := app.New(config, database, logger)
+	// The graph page reads any game without authentication, so only this local
+	// host serves it.
+	handler, err := app.New(config, database, logger, app.WithGameGraph())
 	if err != nil {
 		return err
 	}

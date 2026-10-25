@@ -25,7 +25,7 @@ func TestUpgradeCastleHTTP(t *testing.T) {
 	}
 	_, api := humatest.New(t)
 	environment := &handlers.Env{DB: database}
-	routes.SetupRoutes(api, environment)
+	routes.SetupRoutes(api, environment, "")
 	// Exercise the trusted handler without exposing raw migrations in production.
 	huma.Register(api, huma.Operation{Path: "/test/generation/migrate", Method: http.MethodPost}, environment.MigrateGeneration)
 	castle, err := dal.GetCastleFromGeneration(generation, 0)
@@ -93,7 +93,7 @@ func TestClashStopUpgradeHTTP(t *testing.T) {
 	}
 	_, api := humatest.New(t)
 	environment := &handlers.Env{DB: database}
-	routes.SetupRoutes(api, environment)
+	routes.SetupRoutes(api, environment, "")
 	huma.Register(api, huma.Operation{Path: "/test/generation/migrate", Method: http.MethodPost}, environment.MigrateGeneration)
 	body := fmt.Sprintf(`{"game_id":%d,"commands":[{"CommandType":"upgrade_castle","Parameters":{"castle_id":0,"upgrade_type":"clash_stop_generations"}}]}`, generation.GameID)
 	for _, expected := range []struct {

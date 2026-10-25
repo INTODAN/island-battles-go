@@ -110,7 +110,7 @@ func BuildPlayerOpenAPI() ([]byte, error) {
 	config.DocsPath = ""
 	config.SchemasPath = ""
 	api := humachi.New(chi.NewRouter(), config)
-	routes.SetupRoutes(api, &handlers.Env{})
+	routes.SetupRoutes(api, &handlers.Env{}, "")
 	routes.SetupLobbyRoutes(api, nil, nil, nil, &handlers.LobbyGame{})
 	api.OpenAPI().Info.Description = apiDescription
 
@@ -128,6 +128,7 @@ func BuildPlayerOpenAPI() ([]byte, error) {
 	if err := keepReferencedSchemas(document, slices.Concat(PlayerEventSchemas, MapFileSchemas)); err != nil {
 		return nil, err
 	}
+	keepUsedSecuritySchemes(document)
 	compact, err := json.Marshal(document)
 	if err != nil {
 		return nil, err
@@ -169,6 +170,33 @@ func keepOperations(document map[string]any, operationIDs []string) error {
 		return fmt.Errorf("player operations are not registered: %s", strings.Join(missing, ", "))
 	}
 	return nil
+}
+
+// keepUsedSecuritySchemes drops the schemes no kept operation requires, such
+// as the admin API key, which player clients never hold.
+func keepUsedSecuritySchemes(document map[string]any) {
+	used := map[string]bool{}
+	paths, _ := document["paths"].(map[string]any)
+	for _, item := range paths {
+		methods, _ := item.(map[string]any)
+		for _, operation := range methods {
+			details, _ := operation.(map[string]any)
+			requirements, _ := details["security"].([]any)
+			for _, requirement := range requirements {
+				schemes, _ := requirement.(map[string]any)
+				for name := range schemes {
+					used[name] = true
+				}
+			}
+		}
+	}
+	components, _ := document["components"].(map[string]any)
+	schemes, _ := components["securitySchemes"].(map[string]any)
+	for name := range schemes {
+		if !used[name] {
+			delete(schemes, name)
+		}
+	}
 }
 
 func keepReferencedSchemas(document map[string]any, roots []string) error {

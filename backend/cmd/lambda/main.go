@@ -1,6 +1,6 @@
 // Command lambda serves the HTTP API from AWS Lambda behind a Function URL.
 // The Function URL must use the RESPONSE_STREAM invoke mode, which lambdaurl
-// requires and which lets replay and graph pages exceed Lambda's 6 MB limit
+// requires and which lets replay pages exceed Lambda's 6 MB limit
 // on buffered responses. Build it for the provided.al2023 runtime on arm64:
 //
 //	GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -tags lambda.norpc -trimpath -ldflags='-s -w' -o bootstrap ./backend/cmd/lambda
@@ -22,6 +22,7 @@ import (
 	"islandBattles/backend/dependencies"
 
 	"github.com/aws/aws-lambda-go/lambdaurl"
+	"gorm.io/gorm"
 )
 
 func main() {
@@ -52,5 +53,11 @@ func build(logger *slog.Logger) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
+	return newHandler(config, database, logger)
+}
+
+// newHandler passes no app options, so the public host leaves out the pages
+// that read games without authentication, such as GET /game/{id}/graph.
+func newHandler(config dependencies.Config, database *gorm.DB, logger *slog.Logger) (http.Handler, error) {
 	return app.New(config, database, logger)
 }

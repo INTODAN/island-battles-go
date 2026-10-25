@@ -15,12 +15,16 @@ import (
 	"islandBattles/backend/routes"
 )
 
+const testAdminAPIKey = "test-admin-api-key"
+
+var adminHeader = routes.AdminAPIKeyHeader + ": " + testAdminAPIKey
+
 func TestCreateMapTemplateHTTP(t *testing.T) {
 	database := testutils.InitTestDB(t)
 	_, api := humatest.New(t)
-	routes.SetupRoutes(api, &handlers.Env{DB: database})
+	routes.SetupRoutes(api, &handlers.Env{DB: database}, testAdminAPIKey)
 
-	invalid := api.Post("/map/create", map[string]any{
+	invalid := api.Post("/map/create", adminHeader, map[string]any{
 		"map_name": "invalid", "player_amount": 2, "plane_size_x": 4, "plane_size_y": 4, "neutral_starting_soldier_amount": 10,
 		"castles": []map[string]any{
 			{"team_color": 3, "x": 0, "y": 0},
@@ -48,7 +52,7 @@ func TestCreateMapTemplateHTTP(t *testing.T) {
 		t.Fatalf("invalid map stored: count=%d err=%v", stored, err)
 	}
 
-	created := api.Post("/map/create", json.RawMessage(testutils.MapExampleInput))
+	created := api.Post("/map/create", adminHeader, json.RawMessage(testutils.MapExampleInput))
 	if created.Code != http.StatusOK {
 		t.Fatalf("valid map status=%d body=%s", created.Code, created.Body.String())
 	}
@@ -59,7 +63,7 @@ func TestCreateMapTemplateHTTP(t *testing.T) {
 		t.Fatalf("unexpected result %s: %v", created.Body.String(), err)
 	}
 
-	if duplicate := api.Post("/map/create", json.RawMessage(testutils.MapExampleInput)); duplicate.Code != http.StatusConflict {
+	if duplicate := api.Post("/map/create", adminHeader, json.RawMessage(testutils.MapExampleInput)); duplicate.Code != http.StatusConflict {
 		t.Fatalf("duplicate name status=%d body=%s", duplicate.Code, duplicate.Body.String())
 	}
 }
@@ -76,7 +80,7 @@ var seventeenTeamMap = func() string {
 func TestListMapTemplatesHTTP(t *testing.T) {
 	database := testutils.InitTestDB(t)
 	_, api := humatest.New(t)
-	routes.SetupRoutes(api, &handlers.Env{DB: database})
+	routes.SetupRoutes(api, &handlers.Env{DB: database}, testAdminAPIKey)
 
 	empty := api.Get("/map/templates")
 	if empty.Code != http.StatusOK || strings.Join(strings.Fields(empty.Body.String()), "") != `{"maps":[]}` {
@@ -91,7 +95,7 @@ func TestListMapTemplatesHTTP(t *testing.T) {
 		// Colour 2 owns no castle, so the map fits no lobby.
 		`{"map_name":"Gap","player_amount":3,"plane_size_x":4,"plane_size_y":4,"neutral_starting_soldier_amount":5,"castles":[{"team_color":1,"x":0,"y":0},{"team_color":3,"x":1,"y":0}]}`,
 	} {
-		if created := api.Post("/map/create", json.RawMessage(mapFile)); created.Code != http.StatusOK {
+		if created := api.Post("/map/create", adminHeader, json.RawMessage(mapFile)); created.Code != http.StatusOK {
 			t.Fatalf("create status=%d body=%s", created.Code, created.Body.String())
 		}
 	}

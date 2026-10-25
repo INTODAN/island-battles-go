@@ -89,17 +89,20 @@ The first deploy generates these into `deploy/local/secrets/`. Every later deplo
 
 - The two Postgres passwords.
 - Centrifugo's API key, the connection token secret and the lobby proxy secret. Reusing them keeps issued tokens valid when you move to a new VM.
+- The backend's admin API key, `admin_api_key`. Only the Lambda reads it, from `lambda.env`. Send it in the `X-Admin-API-Key` header to create default maps with `POST /map/create` (see [map files](../backend/README.md#map-files)). Without it, the Lambda refuses every map creation.
 - Postgres's TLS key and its self-signed certificate.
 
 Back up `deploy/local/secrets/` somewhere safe, such as a password manager, and copy it into every checkout or worktree you deploy from.
 
 A deploy stops if any of these files is missing, because new secrets would replace the live VM's password and keys. Pass `-e app_generate_secrets=true` only for a first deploy, or if the secrets are lost for good. In that case the deploy resets the backend's password and Centrifugo's keys, and you redeploy the Lambda with the new `lambda.env`. Players then need new connection tokens, which clients fetch on their own.
 
+`admin_api_key` was added after the first secrets (#37), so an existing `deploy/local/secrets/` without it fails this check. Run one deploy with `-e app_generate_secrets=true`: it generates only the missing files and reads the others unchanged, so no password or key on the VM changes. Then redeploy the Lambda with the new `lambda.env`.
+
 Nothing secret is committed. Never copy anything from `deploy/local/` into the repo.
 
 ### The Lambda's settings
 
-`deploy/local/lambda.env` holds the six VM-related settings the backend reads (see `backend/dependencies/config.go`). The Lambda deploy (#38) reads it:
+`deploy/local/lambda.env` holds the six VM-related settings the backend reads, plus its admin API key (see `backend/dependencies/config.go`). The Lambda deploy (#38) reads it:
 
 | Variable | Value |
 |---|---|
@@ -109,8 +112,9 @@ Nothing secret is committed. Never copy anything from `deploy/local/` into the r
 | `ISLAND_BATTLES_CENTRIFUGO_API_KEY` | Centrifugo's API key |
 | `ISLAND_BATTLES_CONNECTION_TOKEN_HMAC_SECRET` | The connection token secret |
 | `ISLAND_BATTLES_LOBBY_PROXY_SECRET` | The secret Centrifugo sends to the subscribe proxy |
+| `ISLAND_BATTLES_ADMIN_API_KEY` | The admin API key that `POST /map/create` requires |
 
-All of them use the hostname, not an IP, so they stay the same when you move to a new VM.
+The URLs use the hostname, not an IP, so they stay the same when you move to a new VM.
 
 `sslmode=require` encrypts the connection but doesn't check the server's certificate. To check it, ship `deploy/local/secrets/postgres-tls/server.crt` with the Lambda and use `sslmode=verify-full&sslrootcert=<path>`. The certificate is issued for `vm.<domain>` and is reused on new VMs.
 
