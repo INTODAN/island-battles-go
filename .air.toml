@@ -24,7 +24,8 @@ tmp_dir = "C:\\Users\\itaie\\AppData\\Local\\Temp\\island-battles-go"
   poll = false
   poll_interval = 0
   post_cmd = []
-  pre_cmd = []
+  # The backend only connects, so bring the schema up to date before each run.
+  pre_cmd = ["go run ./backend/cmd/migrate"]
   rerun = false
   rerun_delay = 500
   send_interrupt = false

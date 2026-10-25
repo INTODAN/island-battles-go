@@ -12,6 +12,6 @@ if [[ $# -gt 0 ]]; then
 fi
 exec uv run --project "$repository_root/clients/conformance" --locked \
   python "$repository_root/lobby/integration/run.py" \
-  --server-root "$repository_root" --server-package ./backend \
+  --server-root "$repository_root" --server-package ./backend --migrate-package ./backend/cmd/migrate \
   --env-prefix ISLAND_BATTLES_ --extra-tests "$repository_root/clients/conformance/tests" \
   --skip-lobby-suite --pytest-timeout 900

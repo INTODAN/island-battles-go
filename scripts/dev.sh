@@ -58,5 +58,8 @@ else
   exit 1
 fi
 
+# The backend only connects, so bring the schema up to date first, as a
+# deploy does.
+go run ./backend/cmd/migrate
 echo "Starting backend on $ISLAND_BATTLES_HTTP_ADDR; open /lobby/ui/ in your browser."
 exec go run ./backend

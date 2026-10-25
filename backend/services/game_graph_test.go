@@ -7,8 +7,30 @@ import (
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
 	"islandBattles/backend/simulation"
+	"strings"
 	"testing"
 )
+
+// A Lambda bundle holds only the binary, so the graph page must not read its
+// controls or script from the working directory.
+func TestGameGraphNeedsNoSourceTree(t *testing.T) {
+	db := testutils.InitTestDB(t)
+	generationID := testutils.CreateGenerationForTest(t, db)
+	generation, err := dal.GetGeneration(db, generationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(t.TempDir())
+	page, err := services.GetGameGraph(db, generation.GameID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, part := range []string{`id="gen-slider"`, "window.generationsGraphJSON", "echarts.esm.min.js"} {
+		if !strings.Contains(page, part) {
+			t.Fatalf("graph page lacks %q", part)
+		}
+	}
+}
 
 func TestGetGameGraph(t *testing.T) {
 	db := testutils.InitTestDB(t)
