@@ -223,6 +223,14 @@ export async function checkMap(text, fetcher = fetch) {
   return { valid: body.valid, errors: body.errors };
 }
 
+// problemsFor returns the problems to show for text: those of a finished
+// check of that same text, or else the ones already shown, which stay until
+// the next check answers.
+export function problemsFor(text, check, shown) {
+  const finished = check?.state === "valid" || check?.state === "invalid";
+  return finished && check.text === text ? check.errors : shown;
+}
+
 const plural = (count, noun) => `${count} ${noun}${count === 1 ? "" : "s"}`;
 
 // downloadGate decides whether text can be downloaded, given the latest

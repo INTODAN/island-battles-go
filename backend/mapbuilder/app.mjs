@@ -2,7 +2,7 @@
 // the map and turns the page's events into edits.
 import {
   castleRadius, checkMap, describeProblems, downloadGate, dragPosition, fieldLabel, fileName, freeSpot, missingTeams,
-  newMap, openMapFile, placeProblems, problemCastle, serialize, teamColor, upgradeLabel, withoutCastle,
+  newMap, openMapFile, placeProblems, problemCastle, problemsFor, serialize, teamColor, upgradeLabel, withoutCastle,
 } from "./builder.mjs";
 
 const svgNamespace = "http://www.w3.org/2000/svg";
@@ -62,7 +62,16 @@ function showNotice(message, kind = "warning") {
 
 function scheduleCheck({ immediate = false } = {}) {
   const text = serialize(map);
-  if (check?.text === text && check.state !== "failed") return;
+  if (check?.text === text && check.state !== "failed") {
+    // This text has a check already, for example after reopening the same
+    // file, which cleared the problems on screen. Show that check's problems.
+    const problems = problemsFor(text, check, shownErrors);
+    if (problems !== shownErrors) {
+      shownErrors = problems;
+      renderErrors();
+    }
+    return;
+  }
   check = { text, state: "pending" };
   clearTimeout(checkTimer);
   checkTimer = setTimeout(() => runCheck(text), immediate ? 0 : checkDelay);
@@ -509,7 +518,8 @@ plane.addEventListener("keydown", (event) => {
     const castle = map.castles[index];
     moveCastle(index, dragPosition(map, castle.x + dx, castle.y + dy));
     event.preventDefault();
-  } else if (event.key === "Delete" || event.key === "Backspace") {
+  } else if (event.key === "Delete") {
+    // Only Delete, not Backspace, which is too easy to press by accident.
     deleteCastle(index);
     event.preventDefault();
   } else if (event.key === "Enter") {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   checkMap, describeProblems, downloadGate, dragPosition, fileName, freeSpot, mapFile, missingTeams, newMap,
-  openMapFile, placeProblems, serialize, withoutCastle,
+  openMapFile, placeProblems, problemsFor, serialize, withoutCastle,
 } from "./builder.mjs";
 
 const crossing = () => ({
@@ -89,6 +89,20 @@ test("only the exact text the server accepted can be downloaded", () => {
   assert.match(downloadGate(text, { text, state: "invalid", errors: serverErrors }).reason, /Fix 6 problems/);
   assert.match(downloadGate(text, { text, state: "failed", message: "Couldn't reach the server: offline." }).reason, /offline/);
   assert.deepEqual(downloadGate(text, { text, state: "valid", errors: [] }), { ready: true, reason: "" });
+});
+
+test("reopening a file that was already checked shows that check's problems again", () => {
+  const map = crossing();
+  map.castles[1].x = 20;
+  const text = serialize(map);
+  const errors = serverErrors.slice(2, 3);
+  const check = { text, state: "invalid", errors };
+  // Opening a file clears the problems on screen; the same text isn't sent again.
+  assert.equal(problemsFor(serialize(openMapFile(text)), check, []), errors);
+  const shown = [];
+  assert.equal(problemsFor(text, { text, state: "pending" }, shown), shown);
+  assert.equal(problemsFor(text, { text, state: "failed", errors: [] }, shown), shown);
+  assert.equal(problemsFor(`${text} `, check, shown), shown);
 });
 
 test("checkMap sends the text and reads the server's verdict", async () => {
