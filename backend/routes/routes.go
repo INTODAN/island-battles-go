@@ -20,9 +20,11 @@ import (
 )
 
 // NewAPIConfig names API view types without their View suffix, so generated
-// clients receive domain names such as Castle and Generation.
+// clients receive domain names such as Castle and Generation. It also bounds
+// every problem response, as httpapi.BoundErrorDetails describes.
 func NewAPIConfig(title, version string) huma.Config {
 	config := huma.DefaultConfig(title, version)
+	config.Transformers = append(config.Transformers, httpapi.BoundErrorDetails)
 	config.Components.Schemas = huma.NewMapRegistry("#/components/schemas/", func(t reflect.Type, hint string) string {
 		return strings.TrimSuffix(huma.DefaultSchemaNamer(t, hint), "View")
 	})
