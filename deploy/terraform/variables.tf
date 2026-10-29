@@ -101,22 +101,28 @@ variable "lambda_memory_mb" {
 }
 
 variable "lambda_timeout_seconds" {
-  description = "How long one request may run."
+  description = "How long one request may run. The backend ends a request's work 2 seconds before it (backend/cmd/lambda), so a timeout doesn't reset the instance."
   type        = number
   default     = 30
+
+  validation {
+    condition     = var.lambda_timeout_seconds > 2
+    error_message = "lambda_timeout_seconds must be more than the backend's 2-second deadline margin."
+  }
 }
 
 variable "reserved_concurrency" {
   description = <<-EOT
-    The most Lambda instances that run at once. Every instance keeps its own
-    pool of up to database_max_open_connections, so the product must leave
-    postgres_spare_connections free under postgres_max_connections. Set it to
-    null only on an account whose concurrency limit is too low to reserve any
-    (deploy/README.md). The account limit, account_concurrency_limit, is then
-    the cap.
+    The most Lambda instances that run at once, C in the free-tier budget.
+    Every instance keeps its own pool of up to database_max_open_connections,
+    so the product must leave postgres_spare_connections free under
+    postgres_max_connections. Every instance also writes and traces up to its
+    own limits, so C also bounds the month's logs and traces (deploy/README.md).
+    Set it to null only on an account whose concurrency limit is too low to
+    reserve any. The account limit, account_concurrency_limit, is then the cap.
   EOT
   type        = number
-  default     = 20
+  default     = 5
   nullable    = true
 
   validation {
@@ -130,8 +136,9 @@ variable "account_concurrency_limit" {
     The account's Lambda concurrency limit in this region: "Concurrent
     executions" in Service Quotas. It caps the function when
     reserved_concurrency is null, so Terraform checks it against Postgres's
-    connections instead. AWS raises new accounts' limit of 10 on its own, so
-    look it up again before every apply while reserved_concurrency is null.
+    connections and the free-tier budget instead. AWS raises new accounts'
+    limit of 10 on its own, so look it up again before every apply while
+    reserved_concurrency is null.
   EOT
   type        = number
   default     = 10
@@ -201,6 +208,76 @@ variable "extra_lambda_environment" {
 
 variable "lambda_bootstrap_file" {
   description = "The built Lambda executable. Defaults to deploy/local/lambda/bootstrap, where scripts/aws.sh builds it."
+  type        = string
+  default     = null
+}
+
+# Observability within the free tier (#46) -------------------------------------
+
+variable "alert_email" {
+  description = <<-EOT
+    Where the error alarms and the zero-spend budget send their emails. Set it
+    in deploy/local/aws.tfvars and never commit it. Confirm the subscription
+    email that SNS sends after the first apply, or the alarms send nothing.
+  EOT
+  type        = string
+
+  validation {
+    condition     = can(regex("^[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$", var.alert_email))
+    error_message = "alert_email must be an email address."
+  }
+}
+
+variable "log_lines_per_minute" {
+  description = <<-EOT
+    N: the most warning and error lines one Lambda instance writes a minute.
+    Warnings may use N-1 of them. The lines over the limit become one line
+    that counts them. Terraform checks it, with the concurrency cap, against
+    the 1.5 GB a month that logs may take (deploy/README.md).
+  EOT
+  type        = number
+  default     = 5
+
+  validation {
+    condition     = var.log_lines_per_minute >= 2 && floor(var.log_lines_per_minute) == var.log_lines_per_minute
+    error_message = "log_lines_per_minute must be a whole number of at least 2, so an error always has room."
+  }
+}
+
+variable "log_line_bytes" {
+  description = "L: the most bytes of one log line. Longer lines are cut."
+  type        = number
+  default     = 1024
+
+  validation {
+    condition     = var.log_line_bytes >= 512 && floor(var.log_line_bytes) == var.log_line_bytes
+    error_message = "log_line_bytes must be a whole number of at least 512."
+  }
+}
+
+variable "trace_interval_seconds" {
+  description = <<-EOT
+    T: one Lambda instance starts at most one new trace every T seconds, and
+    its first one T seconds after it starts. Terraform checks it, with the
+    concurrency cap, against the 80,000 traces a month that X-Ray may record.
+  EOT
+  type        = number
+  default     = 180
+
+  validation {
+    condition     = var.trace_interval_seconds >= 1 && floor(var.trace_interval_seconds) == var.trace_interval_seconds
+    error_message = "trace_interval_seconds must be a whole number of at least 1."
+  }
+}
+
+variable "collector_layer_arn" {
+  description = <<-EOT
+    The OpenTelemetry collector layer that sends the backend's spans to X-Ray.
+    Defaults to the AWS Distro for OpenTelemetry collector layer for arm64,
+    ver-0-156-0 (ADOT Collector v0.49.0), in var.region (deploy/README.md).
+    An empty string runs the function without the layer, and so without
+    tracing.
+  EOT
   type        = string
   default     = null
 }

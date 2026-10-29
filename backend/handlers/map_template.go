@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
+	"islandBattles/backend/observability"
 	"islandBattles/lobby/domain"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/go-chi/httplog/v3"
 )
 
 type CreateMapTemplateRequest struct {
@@ -31,7 +31,7 @@ func (env *Env) CreateMapTemplate(ctx context.Context, input *CreateMapTemplateR
 	case errors.Is(err, dal.ErrMapTemplateNameTaken):
 		return nil, huma.Error409Conflict("map name is already taken", &huma.ErrorDetail{Location: "body.map_name", Value: input.Body.MapName, Message: "another map template uses this name"})
 	case err != nil:
-		_ = httplog.SetError(ctx, fmt.Errorf("create map template: %w", err))
+		observability.RecordError(ctx, fmt.Errorf("create map template: %w", err))
 		return nil, huma.Error500InternalServerError(err.Error())
 	}
 	resp := &CreateMapTemplateResponse{}
@@ -84,7 +84,7 @@ type ListMapTemplatesResponse struct {
 func (env *Env) ListMapTemplates(ctx context.Context, _ *struct{}) (*ListMapTemplatesResponse, error) {
 	templates, err := dal.ListMapTemplates(env.DB.WithContext(ctx))
 	if err != nil {
-		fmt.Println("Error when listing MapTemplates: ", err)
+		observability.RecordError(ctx, fmt.Errorf("list map templates: %w", err))
 		return nil, huma.Error500InternalServerError("could not list default maps")
 	}
 	response := &ListMapTemplatesResponse{}

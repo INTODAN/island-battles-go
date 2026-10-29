@@ -25,16 +25,30 @@ locals {
   }
   lambda_settings = { for key, values in local.lambda_settings_values : key => values[length(values) - 1] }
 
-  # Terraform sets the pool size itself, so it can check it against the
-  # reserved concurrency below.
-  lambda_pool_setting = "ISLAND_BATTLES_DATABASE_MAX_OPEN_CONNECTIONS"
-  lambda_environment = merge(local.lambda_settings, var.extra_lambda_environment, {
-    (local.lambda_pool_setting) = tostring(var.database_max_open_connections)
-  })
-
   # Without a reservation, the account's own limit caps the function.
   lambda_concurrency_cap      = var.reserved_concurrency == null ? var.account_concurrency_limit : var.reserved_concurrency
   lambda_database_connections = local.lambda_concurrency_cap * var.database_max_open_connections
+
+  # Terraform sets these itself, so it can check them against the
+  # concurrency cap: the pool size against Postgres's connections, and the
+  # log and trace limits against the free tier (observability.tf). The
+  # backend reads the same cap as its concurrency, C, and checks the budget
+  # again when it starts.
+  lambda_terraform_settings = {
+    ISLAND_BATTLES_DATABASE_MAX_OPEN_CONNECTIONS = tostring(var.database_max_open_connections)
+    ISLAND_BATTLES_CONCURRENCY                   = tostring(local.lambda_concurrency_cap)
+    ISLAND_BATTLES_LOG_LINES_PER_MINUTE          = tostring(var.log_lines_per_minute)
+    ISLAND_BATTLES_LOG_LINE_BYTES                = tostring(var.log_line_bytes)
+    ISLAND_BATTLES_TRACE_INTERVAL                = "${var.trace_interval_seconds}s"
+  }
+  lambda_settings_overridden = sort([
+    for key in concat(keys(local.lambda_settings), keys(var.extra_lambda_environment)) : key
+    if contains(keys(local.lambda_terraform_settings), key) || contains(local.collector_setting_names, key)
+  ])
+  lambda_environment = merge(local.lambda_settings, var.extra_lambda_environment, local.lambda_terraform_settings, local.collector_environment)
+  # Lambda refuses a function whose variables, names and values together,
+  # come to more than 4 KB.
+  lambda_environment_bytes = length(join("", [for key, value in local.lambda_environment : "${key}${value}"]))
 }
 
 # The provided.al2023 runtime runs the executable named bootstrap at the root
@@ -47,8 +61,9 @@ data "archive_file" "backend" {
   output_file_mode = "0755"
 }
 
-# Basic execution only: the function writes its logs and calls nothing else in
-# AWS. It reaches Postgres and Centrifugo over the internet.
+# The function writes its logs, and its collector layer sends traces to X-Ray
+# (observability.tf). It calls nothing else in AWS: it reaches Postgres and
+# Centrifugo over the internet.
 resource "aws_iam_role" "lambda" {
   name = "${var.name}-lambda"
   assume_role_policy = jsonencode({
@@ -64,6 +79,12 @@ resource "aws_iam_role" "lambda" {
 resource "aws_iam_role_policy_attachment" "lambda_logs" {
   role       = aws_iam_role.lambda.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+# xray:PutTraceSegments and xray:PutTelemetryRecords, for the collector.
+resource "aws_iam_role_policy_attachment" "lambda_traces" {
+  role       = aws_iam_role.lambda.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
 }
 
 resource "aws_lambda_function" "backend" {
@@ -86,15 +107,31 @@ resource "aws_lambda_function" "backend" {
     variables = sensitive(local.lambda_environment)
   }
 
-  # The backend logs JSON lines with slog's "level" key, which Lambda's level
-  # filtering reads (backend/README.md).
+  # The OpenTelemetry collector, which takes the backend's spans on localhost
+  # and sends them to X-Ray (observability.tf).
+  layers = local.collector_layers
+
+  # The backend logs JSON lines with a "level" and a "timestamp", which
+  # Lambda's level filtering reads. Only warnings and errors reach CloudWatch,
+  # from the backend and from Lambda itself: no request lines, and none of
+  # the start and report lines of every invocation (deploy/README.md).
   logging_config {
     log_format            = "JSON"
-    application_log_level = "INFO"
+    log_group             = aws_cloudwatch_log_group.backend.name
+    application_log_level = "WARN"
     system_log_level      = "WARN"
   }
 
-  depends_on = [aws_iam_role_policy_attachment.lambda_logs]
+  # Lambda's own tracing stays off. Active tracing would sample about one
+  # request a second, some 2.6 million traces a month, over X-Ray's free
+  # 100,000. The backend samples its own traces instead.
+  tracing_config {
+    mode = "PassThrough"
+  }
+
+  # The log group must exist before the first invocation, or Lambda creates
+  # one that keeps its logs forever.
+  depends_on = [aws_iam_role_policy_attachment.lambda_logs, aws_iam_role_policy_attachment.lambda_traces, aws_cloudwatch_log_group.backend]
 
   lifecycle {
     precondition {
@@ -106,8 +143,12 @@ resource "aws_lambda_function" "backend" {
       error_message = "${local.lambda_settings_file} has lines that aren't KEY=value: ${join(", ", [for line in local.lambda_settings_malformed : tostring(line)])} (counting only lines that aren't blank or comments)."
     }
     precondition {
-      condition     = !contains(concat(keys(local.lambda_settings), keys(var.extra_lambda_environment)), local.lambda_pool_setting)
-      error_message = "Set the pool size with the database_max_open_connections variable, not ${local.lambda_pool_setting}, so it is checked against reserved_concurrency."
+      condition     = length(local.lambda_settings_overridden) == 0
+      error_message = "Terraform sets ${join(", ", local.lambda_settings_overridden)} itself, so they're checked against the concurrency cap and the free tier. Remove them from lambda_settings_file and extra_lambda_environment, and set the pool size with database_max_open_connections and the log and trace limits with log_lines_per_minute, log_line_bytes and trace_interval_seconds (deploy/README.md)."
+    }
+    precondition {
+      condition     = local.lambda_environment_bytes <= 4096
+      error_message = "The function's environment comes to ${local.lambda_environment_bytes} bytes, over Lambda's 4 KB."
     }
     precondition {
       condition     = local.lambda_database_connections <= var.postgres_max_connections - var.postgres_spare_connections

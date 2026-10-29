@@ -9,42 +9,64 @@
 //
 // It reads the same environment as the HTTP server host, except for
 // ISLAND_BATTLES_HTTP_ADDR, and runs no schema changes: run the migrate
-// command in backend/cmd/migrate before deploying a new build.
+// command in backend/cmd/migrate before deploying a new build. It also reads
+// the limits that keep its logs and traces inside AWS's free tier
+// (backend/observability), and refuses to serve when their worst case is
+// over the budget.
 package main
 
 import (
-	"io"
+	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"sync"
+	"time"
 
 	"islandBattles/backend/app"
 	"islandBattles/backend/dependencies"
+	"islandBattles/backend/observability"
 
 	"github.com/aws/aws-lambda-go/lambdaurl"
 	"gorm.io/gorm"
 )
 
-func main() {
-	logger := newLogger(os.Stdout)
-	slog.SetDefault(logger)
-	handler, err := build(logger)
-	if err != nil {
-		logger.Error("Backend failed to start", "error", err)
-		os.Exit(1)
-	}
-	lambdaurl.Start(handler)
-}
+// serviceName names the backend's traces in X-Ray.
+const serviceName = "island-battles-backend"
 
-// newLogger writes JSON lines that CloudWatch Logs Insights can query. It
-// keeps slog's default "level" key, which Lambda's log-level filtering reads.
-func newLogger(writer io.Writer) *slog.Logger {
-	return slog.New(slog.NewJSONHandler(writer, &slog.HandlerOptions{Level: slog.LevelInfo}))
+// startRetryInterval spaces out attempts to start after a failed one.
+const startRetryInterval = 10 * time.Second
+
+// deadlineMargin ends a request's work before Lambda's timeout does. A
+// timeout resets the instance and logs a platform line that the instance's
+// limits don't cover.
+const deadlineMargin = 2 * time.Second
+
+func main() {
+	settings, settingsError := observability.LoadSettings(os.LookupEnv)
+	limits := settings
+	if settingsError != nil {
+		// Logs stay limited while the instance refuses to serve.
+		limits = observability.DefaultSettings()
+	}
+	logger, logs := observability.NewLambdaLogger(os.Stdout, limits)
+	slog.SetDefault(logger)
+	instance := newHost(logger, logs, func(ctx context.Context) (http.Handler, error) {
+		if settingsError != nil {
+			return nil, settingsError
+		}
+		return build(ctx, settings, logger)
+	}, time.Now)
+	// The first attempt runs during the cold start.
+	instance.started(context.Background())
+	lambdaurl.Start(instance)
 }
 
 // build runs once per cold start. The pool stays open for the instance's
 // lifetime, so warm invocations reuse its connections.
-func build(logger *slog.Logger) (http.Handler, error) {
+// A failed attempt closes its pool, so the retries don't pile up connections.
+func build(ctx context.Context, settings observability.Settings, logger *slog.Logger) (_ http.Handler, err error) {
 	config, err := dependencies.LoadConfig()
 	if err != nil {
 		return nil, err
@@ -53,11 +75,82 @@ func build(logger *slog.Logger) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newHandler(config, database, logger)
+	defer func() {
+		if err == nil {
+			return
+		}
+		if sqlDatabase, poolError := database.DB(); poolError == nil {
+			_ = sqlDatabase.Close()
+		}
+	}()
+	handler, err := newHandler(config, database, logger)
+	if err != nil {
+		return nil, err
+	}
+	tracing, err := observability.StartTracing(ctx, os.LookupEnv, serviceName, observability.NewIntervalSampler(settings.TraceInterval, time.Now))
+	if err != nil {
+		return nil, fmt.Errorf("start tracing: %w", err)
+	}
+	return tracing.Handler(handler), nil
 }
 
 // newHandler passes no app options, so the public host leaves out the pages
 // that read games without authentication, such as GET /game/{id}/graph.
 func newHandler(config dependencies.Config, database *gorm.DB, logger *slog.Logger) (http.Handler, error) {
 	return app.New(config, database, logger)
+}
+
+// host serves the backend once it has started. Until then it answers 503 and
+// tries to start again at most every startRetryInterval, logging each failure
+// within the instance's limits. Failing the cold start instead would make
+// Lambda retry it, with a platform log line, on every request.
+type host struct {
+	logger  *slog.Logger
+	logs    *observability.LimitedHandler
+	start   func(context.Context) (http.Handler, error)
+	now     func() time.Time
+	mutex   sync.Mutex
+	handler http.Handler
+	tried   time.Time
+}
+
+func newHost(logger *slog.Logger, logs *observability.LimitedHandler, start func(context.Context) (http.Handler, error), now func() time.Time) *host {
+	return &host{logger: logger, logs: logs, start: start, now: now}
+}
+
+func (instance *host) ServeHTTP(response http.ResponseWriter, request *http.Request) {
+	defer func() { _ = instance.logs.Flush() }()
+	handler := instance.started(request.Context())
+	if handler == nil {
+		http.Error(response, "the backend failed to start", http.StatusServiceUnavailable)
+		return
+	}
+	if deadline, ok := request.Context().Deadline(); ok {
+		ctx, cancel := context.WithDeadline(request.Context(), deadline.Add(-deadlineMargin))
+		defer cancel()
+		request = request.WithContext(ctx)
+	}
+	handler.ServeHTTP(response, request)
+}
+
+// started returns the backend's handler, starting it first if it is time to
+// try again, or nil.
+func (instance *host) started(ctx context.Context) http.Handler {
+	instance.mutex.Lock()
+	defer instance.mutex.Unlock()
+	if instance.handler != nil {
+		return instance.handler
+	}
+	now := instance.now()
+	if !instance.tried.IsZero() && now.Sub(instance.tried) < startRetryInterval {
+		return nil
+	}
+	instance.tried = now
+	handler, err := instance.start(ctx)
+	if err != nil {
+		instance.logger.ErrorContext(ctx, "Backend failed to start; it answers 503 until it does", "error", err, "retry_after", startRetryInterval.String())
+		return nil
+	}
+	instance.handler = handler
+	return handler
 }

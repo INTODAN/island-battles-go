@@ -4,18 +4,22 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"islandBattles/backend/app"
 	"islandBattles/backend/dependencies"
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/models"
+	"islandBattles/backend/observability"
 	"islandBattles/backend/retention"
 	"islandBattles/backend/services"
 	"islandBattles/lobby/domain"
@@ -234,17 +238,169 @@ func enlargeGame(t *testing.T, database *gorm.DB, gameID uint) {
 	}
 }
 
-// The log handler must keep slog's default "level" key, because Lambda's
-// log-level filtering reads it from JSON lines.
-func TestLambdaLogsAreJSONWithTheDefaultLevelKey(t *testing.T) {
+// Lambda's log-level filtering reads "level" and an RFC 3339 "timestamp" from
+// JSON lines, and counts a line without a valid timestamp as INFO, which its
+// WARN filter drops. INFO lines, such as request logs, aren't written at all.
+func TestLambdaLogsAreJSONWithTheLevelAndTimestampLambdaReads(t *testing.T) {
 	var output bytes.Buffer
-	newLogger(&output).Info("Request served", "status", 200)
-	newLogger(&output).Debug("Not written")
+	logger, _ := observability.NewLambdaLogger(&output, observability.DefaultSettings())
+	logger.Info("Request served", "status", 200)
+	logger.Warn("Slow query", "duration_ms", 250)
 	var line map[string]any
 	if err := json.Unmarshal(output.Bytes(), &line); err != nil {
-		t.Fatalf("log line is not one JSON object: %q", output.String())
+		t.Fatalf("log output is not one JSON object: %q", output.String())
 	}
-	if line["level"] != "INFO" || line["msg"] != "Request served" || line["status"] != float64(200) {
+	if line["level"] != "WARN" || line["msg"] != "Slow query" || line["duration_ms"] != float64(250) {
 		t.Fatalf("log line = %v", line)
+	}
+	timestamp, ok := line["timestamp"].(string)
+	if _, err := time.Parse(time.RFC3339Nano, timestamp); !ok || err != nil || line["time"] != nil {
+		t.Fatalf("log line has no RFC 3339 timestamp: %v", line)
+	}
+}
+
+// A backend that can't start answers 503 and tries again at most every
+// startRetryInterval, rather than failing the cold start, which Lambda would
+// retry with a platform log line on every request.
+func TestTheLambdaHostAnswers503UntilTheBackendStarts(t *testing.T) {
+	var output bytes.Buffer
+	logger, logs := observability.NewLambdaLogger(&output, observability.DefaultSettings())
+	now := time.Date(2026, 10, 29, 12, 0, 0, 0, time.UTC)
+	attempts := 0
+	instance := newHost(logger, logs, func(context.Context) (http.Handler, error) {
+		attempts++
+		if attempts == 1 {
+			return nil, errors.New("database unreachable")
+		}
+		return http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) { response.WriteHeader(http.StatusNoContent) }), nil
+	}, func() time.Time { return now })
+	serve := func() int {
+		recorder := httptest.NewRecorder()
+		instance.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+		return recorder.Code
+	}
+	if status := serve(); status != http.StatusServiceUnavailable || attempts != 1 {
+		t.Fatalf("first request=%d after %d attempts", status, attempts)
+	}
+	if status := serve(); status != http.StatusServiceUnavailable || attempts != 1 {
+		t.Fatalf("request within the retry interval=%d after %d attempts", status, attempts)
+	}
+	if lines := strings.Count(output.String(), "\n"); lines != 1 || !strings.Contains(output.String(), "database unreachable") {
+		t.Fatalf("logged %d lines: %s", lines, output.String())
+	}
+	now = now.Add(startRetryInterval)
+	if status := serve(); status != http.StatusNoContent || attempts != 2 {
+		t.Fatalf("request after the retry interval=%d after %d attempts", status, attempts)
+	}
+}
+
+// A request's work ends before Lambda's timeout, which would reset the
+// instance and log a platform line outside the instance's limits.
+func TestRequestsEndBeforeTheLambdaTimeout(t *testing.T) {
+	logger, logs := observability.NewLambdaLogger(io.Discard, observability.DefaultSettings())
+	var deadline time.Time
+	instance := newHost(logger, logs, func(context.Context) (http.Handler, error) {
+		return http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) { deadline, _ = request.Context().Deadline() }), nil
+	}, time.Now)
+	timeout := time.Now().Add(30 * time.Second)
+	ctx, cancel := context.WithDeadline(context.Background(), timeout)
+	defer cancel()
+	instance.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/healthz", nil).WithContext(ctx))
+	if !deadline.Equal(timeout.Add(-deadlineMargin)) {
+		t.Fatalf("request deadline = %v, want %v before the invocation's %v", deadline, deadlineMargin, timeout)
+	}
+}
+
+// A request that fails writes one ERROR line, which the error alarm counts,
+// with its operation and the cause that its response leaves out.
+// That covers the answers that leave Huma's transformers out: the lobby's
+// authentication writes its own problem, and the Centrifugo proxy its own 503.
+func TestAFailedRequestLogsOneErrorLineWithItsCause(t *testing.T) {
+	database := testutils.InitTestDB(t)
+	var output bytes.Buffer
+	logger, _ := observability.NewLambdaLogger(&output, observability.DefaultSettings())
+	config := testConfig(t, database)
+	handler, err := newHandler(config, database, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invoke := lambdaurl.Wrap(handler)
+	response, content := call(t, invoke, http.MethodPost, "/lobby/v1/sessions", `{"display_name":"Alice"}`, "")
+	var alice domain.GuestSession
+	if err := json.Unmarshal(content, &alice); response.StatusCode != http.StatusCreated || err != nil {
+		t.Fatalf("create session=%d %s", response.StatusCode, content)
+	}
+	sqlDatabase, err := database.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlDatabase.Close(); err != nil {
+		t.Fatal(err)
+	}
+	proxyRequest := func(t *testing.T) *events.LambdaFunctionURLStreamingResponse {
+		path := "/internal/lobby/centrifugo/subscribe"
+		response, err := invoke(context.Background(), &events.LambdaFunctionURLRequest{
+			RawPath: path,
+			Headers: map[string]string{"content-type": "application/json", "x-lobby-proxy-secret": config.LobbyProxySecret},
+			Body:    `{"client":"client","user":"` + alice.PlayerID + `","channel":"player:` + alice.PlayerID + `"}`,
+			RequestContext: events.LambdaFunctionURLRequestContext{
+				DomainName: "example.lambda-url.eu-west-1.on.aws",
+				HTTP:       events.LambdaFunctionURLRequestContextHTTPDescription{Method: http.MethodPost, Path: path},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.ReadAll(response.Body)
+		return response
+	}
+	for _, test := range []struct {
+		name, route, operation string
+		send                   func(*testing.T) *events.LambdaFunctionURLStreamingResponse
+	}{
+		{"a Huma operation", "/lobby/v1/sessions", "createLobbySession", func(t *testing.T) *events.LambdaFunctionURLStreamingResponse {
+			response, _ := call(t, invoke, http.MethodPost, "/lobby/v1/sessions", `{"display_name":"Bob"}`, "")
+			return response
+		}},
+		{"the lobby's authentication", "/lobby/v1/lobbies", "createLobby", func(t *testing.T) *events.LambdaFunctionURLStreamingResponse {
+			response, _ := call(t, invoke, http.MethodPost, "/lobby/v1/lobbies", `{}`, "Bearer "+alice.AccessToken)
+			return response
+		}},
+		{"the Centrifugo proxy", "/internal/lobby/centrifugo/subscribe", "", proxyRequest},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			output.Reset()
+			if response := test.send(t); response.StatusCode < http.StatusInternalServerError {
+				t.Fatalf("status=%d", response.StatusCode)
+			}
+			var errorLines []map[string]any
+			for _, text := range strings.Split(strings.TrimSpace(output.String()), "\n") {
+				var line map[string]any
+				if err := json.Unmarshal([]byte(text), &line); err != nil {
+					t.Fatalf("log line is not JSON: %q", text)
+				}
+				// The lobby retention pass that ends a lobby request fails too,
+				// and logs its own line.
+				if line["level"] == "ERROR" && line["msg"] != "Lobby retention pass failed" {
+					errorLines = append(errorLines, line)
+				}
+			}
+			if len(errorLines) != 1 || errorLines[0]["route"] != test.route || !strings.Contains(fmt.Sprint(errorLines[0]["errors"]), "database is closed") ||
+				test.operation != "" && errorLines[0]["operation"] != test.operation {
+				t.Fatalf("error lines = %v\nall output: %s", errorLines, output.String())
+			}
+		})
+	}
+}
+
+// Settings whose worst case is over the budget stop the backend from
+// serving, whatever else is configured.
+func TestTheLambdaHostRefusesSettingsOverTheBudget(t *testing.T) {
+	_, err := observability.LoadSettings(func(name string) (string, bool) {
+		value, ok := map[string]string{observability.ConcurrencyEnv: "50"}[name]
+		return value, ok
+	})
+	if err == nil || !strings.Contains(err.Error(), "over the budget") {
+		t.Fatalf("LoadSettings() error = %v, want the budget refused", err)
 	}
 }

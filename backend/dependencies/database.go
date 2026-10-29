@@ -12,10 +12,15 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
+	gormtracing "gorm.io/plugin/opentelemetry/tracing"
 )
 
 // SlowQueryThreshold is how long a query may take before it is logged as slow.
 const SlowQueryThreshold = 200 * time.Millisecond
+
+// ConnectTimeout bounds InitDB's first connection, well under Lambda's
+// 10-second limit on a cold start's init.
+const ConnectTimeout = 5 * time.Second
 
 // InitDB connects to the database with a bounded pool. It runs no DDL, so a
 // Lambda cold start stays fast and concurrent starts don't race; the schema
@@ -24,15 +29,22 @@ const SlowQueryThreshold = 200 * time.Millisecond
 //
 // GORM logs failed and slow queries through logger, so they share the host's
 // format, such as JSON on Lambda. Queries are logged with placeholders rather
-// than their values, which may hold credentials.
+// than their values, which may hold credentials. Failed queries are warnings:
+// some fail as expected, such as a unique violation that answers 409, and a
+// request that fails because of one logs its own error line.
+//
+// Each query gets a span when the request's trace is sampled, also without
+// its values (backend/observability).
 func InitDB(config DatabaseConfig, logger *slog.Logger) (*gorm.DB, error) {
-	queryLogger := gormlogger.NewSlogLogger(logger, gormlogger.Config{
+	queryLogger := gormlogger.NewSlogLogger(slog.New(warningsAtMost{logger.Handler()}), gormlogger.Config{
 		SlowThreshold:             SlowQueryThreshold,
 		LogLevel:                  gormlogger.Warn,
 		IgnoreRecordNotFoundError: true,
 		ParameterizedQueries:      true,
 	})
-	db, err := gorm.Open(postgres.Open(config.URL), &gorm.Config{Logger: queryLogger})
+	// GORM's own ping has no timeout, which could hold a Lambda cold start
+	// past Lambda's 10-second limit on init.
+	db, err := gorm.Open(postgres.Open(config.URL), &gorm.Config{Logger: queryLogger, DisableAutomaticPing: true})
 	if err != nil {
 		return nil, fmt.Errorf("connect database: %w", err)
 	}
@@ -43,7 +55,37 @@ func InitDB(config DatabaseConfig, logger *slog.Logger) (*gorm.DB, error) {
 	sqlDatabase.SetMaxOpenConns(config.MaxOpenConnections)
 	sqlDatabase.SetMaxIdleConns(config.MaxIdleConnections)
 	sqlDatabase.SetConnMaxIdleTime(config.ConnectionMaxIdleTime)
+	ctx, cancel := context.WithTimeout(context.Background(), ConnectTimeout)
+	defer cancel()
+	if err := sqlDatabase.PingContext(ctx); err != nil {
+		_ = sqlDatabase.Close()
+		return nil, fmt.Errorf("connect database: %w", err)
+	}
+	if err := db.Use(gormtracing.NewPlugin(gormtracing.WithoutMetrics(), gormtracing.WithoutQueryVariables())); err != nil {
+		_ = sqlDatabase.Close()
+		return nil, fmt.Errorf("trace database queries: %w", err)
+	}
 	return db, nil
+}
+
+// warningsAtMost writes errors as warnings.
+type warningsAtMost struct{ slog.Handler }
+
+func (handler warningsAtMost) Enabled(ctx context.Context, level slog.Level) bool {
+	return handler.Handler.Enabled(ctx, min(level, slog.LevelWarn))
+}
+
+func (handler warningsAtMost) Handle(ctx context.Context, record slog.Record) error {
+	record.Level = min(record.Level, slog.LevelWarn)
+	return handler.Handler.Handle(ctx, record)
+}
+
+func (handler warningsAtMost) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return warningsAtMost{handler.Handler.WithAttrs(attrs)}
+}
+
+func (handler warningsAtMost) WithGroup(name string) slog.Handler {
+	return warningsAtMost{handler.Handler.WithGroup(name)}
 }
 
 // MigrateSchema brings the database to the schema this build expects. The

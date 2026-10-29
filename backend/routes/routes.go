@@ -5,9 +5,9 @@ import (
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/models"
+	"islandBattles/backend/observability"
 	"islandBattles/backend/services"
 	"islandBattles/lobby/application"
-	"islandBattles/lobby/auth"
 	"islandBattles/lobby/domain"
 	"islandBattles/lobby/httpapi"
 	"net/http"
@@ -21,20 +21,28 @@ import (
 
 // NewAPIConfig names API view types without their View suffix, so generated
 // clients receive domain names such as Castle and Generation. It also bounds
-// every problem response, as httpapi.BoundErrorDetails describes.
+// every problem response, as httpapi.BoundErrorDetails describes, after
+// observability.RecordProblems has kept each 5xx problem whole for the
+// request's error line.
 func NewAPIConfig(title, version string) huma.Config {
 	config := huma.DefaultConfig(title, version)
-	config.Transformers = append(config.Transformers, httpapi.BoundErrorDetails)
+	config.Transformers = append(config.Transformers, observability.RecordProblems, httpapi.BoundErrorDetails)
 	config.Components.Schemas = huma.NewMapRegistry("#/components/schemas/", func(t reflect.Type, hint string) string {
 		return strings.TrimSuffix(huma.DefaultSchemaNamer(t, hint), "View")
 	})
 	return config
 }
 
+// LobbyAuthentication verifies lobby sessions and issues connection tokens.
+type LobbyAuthentication interface {
+	domain.Authenticator
+	domain.ConnectionTokenIssuer
+}
+
 // SetupLobbyRoutes embeds reusable lobby commands and the explicit game binding.
 // Centrifugo's trusted proxy endpoints are registered separately from OpenAPI.
 // Lobby requests end with a lobby retention pass when one is due.
-func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authentication *auth.Service, gameBinding *application.GameBinding[models.BindingResult], retention domain.RetentionRunner, game *handlers.LobbyGame) {
+func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authentication LobbyAuthentication, gameBinding *application.GameBinding[models.BindingResult], retention domain.RetentionRunner, game *handlers.LobbyGame) {
 	httpapi.Register(api, lobbyadapter.WithGameStart(lobbyApplication, gameBinding), authentication, authentication, retention)
 	lobbyadapter.Register(api, gameBinding, authentication)
 	api.OpenAPI().Paths["/lobby/v1/games/{game_key}/lobbies/{lobby_id}/start"].Post.Description += " Island Battles initializes one playable generation and waits for every frozen roster player to complete their turn. Retrying resumes a failed initialization."
