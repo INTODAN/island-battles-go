@@ -17,17 +17,28 @@ vm_instances = {
 }
 static_ip_instance = "island-battles-1"
 
+# Where the error alarms and the zero-spend budget send their emails.
+alert_email = "<your email address>"
+
 # Optional: limit SSH to your own address.
 # ssh_allowed_cidrs = ["<your IP>/32"]
 
 # Optional: how many Lambda instances may run at once. Every one keeps up to
 # database_max_open_connections (2) connections to Postgres, and together they
-# must leave postgres_spare_connections (10) of Postgres's 100 free. Set it to
-# null if the account's concurrency limit is too low to reserve any, and set
-# account_concurrency_limit to that limit. Look the limit up again before each
-# apply: AWS raises it on its own.
-# reserved_concurrency      = 20
+# must leave postgres_spare_connections (10) of Postgres's 100 free. Every one
+# also logs and traces up to its own limits, which must fit the free tier for
+# all of them (deploy/README.md). Set it to null if the account's concurrency
+# limit is too low to reserve any, and set account_concurrency_limit to that
+# limit. Look the limit up again before each apply: AWS raises it on its own.
+# reserved_concurrency      = 5
 # account_concurrency_limit = 10
+
+# Optional: each instance's log and trace limits. The defaults fit 5
+# instances. For 10, such as an unreserved account limit of 10, use 2 lines
+# a minute and a trace every 360 seconds.
+# log_lines_per_minute   = 5
+# log_line_bytes         = 1024
+# trace_interval_seconds = 180
 
 # Optional: further, non-secret environment variables for the Lambda.
 # extra_lambda_environment = {

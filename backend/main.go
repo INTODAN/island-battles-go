@@ -16,12 +16,14 @@ import (
 
 	"islandBattles/backend/app"
 	"islandBattles/backend/dependencies"
+	"islandBattles/backend/observability"
 
 	"github.com/lmittmann/tint"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 func main() {
-	logger := slog.New(tint.NewHandler(os.Stdout, &tint.Options{Level: slog.LevelInfo}))
+	logger := slog.New(observability.WithTraceIDs(tint.NewHandler(os.Stdout, &tint.Options{Level: slog.LevelInfo})))
 	slog.SetDefault(logger)
 	config, err := dependencies.LoadConfig()
 	if err != nil {
@@ -42,6 +44,13 @@ func main() {
 }
 
 func run(ctx context.Context, config dependencies.Config, address string, logger *slog.Logger) error {
+	// Locally, tracing is off unless OTEL_EXPORTER_OTLP_ENDPOINT is set, and
+	// then records every request. The free-tier limits only apply on Lambda.
+	tracing, err := observability.StartTracing(ctx, os.LookupEnv, "island-battles-backend", sdktrace.AlwaysSample())
+	if err != nil {
+		return fmt.Errorf("start tracing: %w", err)
+	}
+	defer func() { _ = tracing.Shutdown(context.Background()) }()
 	database, err := dependencies.InitDB(config.Database, logger)
 	if err != nil {
 		return err
@@ -57,7 +66,7 @@ func run(ctx context.Context, config dependencies.Config, address string, logger
 	if err != nil {
 		return err
 	}
-	server := &http.Server{Addr: address, Handler: handler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
+	server := &http.Server{Addr: address, Handler: tracing.Handler(handler), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 	serverContext, stopServer := context.WithCancel(ctx)
 	defer stopServer()
 	shutdownDone := make(chan struct{})

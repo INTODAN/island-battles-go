@@ -8,9 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
+	"islandBattles/backend/observability"
 	"islandBattles/backend/simulation"
 	"islandBattles/lobby/domain"
 	"islandBattles/lobby/realtime"
@@ -59,6 +61,7 @@ func (service *GenerationService) Current(ctx context.Context, principal domain.
 	if err != nil {
 		return models.GenerationState{}, err
 	}
+	observability.Annotate(ctx, slog.Uint64("game_id", uint64(game.ID)))
 	if err = service.authorize(ctx, principal, game); err != nil {
 		return models.GenerationState{}, err
 	}
@@ -76,6 +79,7 @@ func (service *GenerationService) Current(ctx context.Context, principal domain.
 		if err != nil {
 			return err
 		}
+		observability.Annotate(ctx, slog.Uint64("generation_id", uint64(generation.ID)))
 		inputs, err := dal.LoadGenerationInputs(transaction, generation.ID)
 		if err != nil {
 			return err

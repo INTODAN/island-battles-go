@@ -14,13 +14,17 @@ variables {
     "island-battles-1" = {}
   }
   static_ip_instance = "island-battles-1"
+  alert_email        = "alerts@example.org"
 }
 
 run "passes_every_lambda_setting" {
   command = plan
 
   assert {
-    condition = nonsensitive(aws_lambda_function.backend.environment[0].variables) == tomap({
+    condition = tomap({
+      for key, value in nonsensitive(aws_lambda_function.backend.environment[0].variables) : key => value
+      if !contains(keys(local.collector_environment), key)
+      }) == tomap({
       ISLAND_BATTLES_DATABASE_URL                  = "postgres://island_battles:not-a-secret@vm.example.org:5432/island_battles?sslmode=require"
       ISLAND_BATTLES_CENTRIFUGO_PUBLIC_URL         = "wss://vm.example.org/connection/websocket"
       ISLAND_BATTLES_CENTRIFUGO_API_URL            = "https://vm.example.org/api"
@@ -29,8 +33,12 @@ run "passes_every_lambda_setting" {
       ISLAND_BATTLES_LOBBY_PROXY_SECRET            = "not-a-secret"
       ISLAND_BATTLES_SETTING_TERRAFORM_DOESNT_KNOW = "a=b"
       ISLAND_BATTLES_DATABASE_MAX_OPEN_CONNECTIONS = "2"
+      ISLAND_BATTLES_CONCURRENCY                   = "5"
+      ISLAND_BATTLES_LOG_LINES_PER_MINUTE          = "5"
+      ISLAND_BATTLES_LOG_LINE_BYTES                = "1024"
+      ISLAND_BATTLES_TRACE_INTERVAL                = "180s"
     })
-    error_message = "The function must get every lambda.env setting, the last value of a repeated key, and the pool size."
+    error_message = "The function must get every lambda.env setting, the last value of a repeated key, the pool size, and the log and trace limits with C from the reserved concurrency."
   }
 
   assert {
@@ -39,8 +47,8 @@ run "passes_every_lambda_setting" {
   }
 
   assert {
-    condition     = aws_lambda_function.backend.reserved_concurrent_executions == 20
-    error_message = "The default reserved concurrency must be 20."
+    condition     = aws_lambda_function.backend.reserved_concurrent_executions == 5
+    error_message = "The default reserved concurrency must be 5."
   }
 
   assert {
@@ -49,8 +57,8 @@ run "passes_every_lambda_setting" {
   }
 
   assert {
-    condition     = aws_iam_role_policy_attachment.lambda_logs.policy_arn == "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-    error_message = "The role must have basic execution only."
+    condition     = aws_iam_role_policy_attachment.lambda_logs.policy_arn == "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole" && aws_iam_role_policy_attachment.lambda_traces.policy_arn == "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+    error_message = "The role must have basic execution and X-Ray writes only."
   }
 
   assert {
@@ -88,36 +96,46 @@ run "rejects_too_many_database_connections" {
   command = plan
 
   variables {
-    # 46 × 2 = 92 leaves 8 of 100 free, fewer than the 10 spare connections.
-    reserved_concurrency = 46
+    # 5 × 19 = 95 leaves 5 of 100 free, fewer than the 10 spare connections.
+    database_max_open_connections = 19
   }
 
   expect_failures = [aws_lambda_function.backend]
 }
 
-run "allows_the_largest_safe_concurrency" {
+run "allows_the_largest_safe_pool" {
   command = plan
 
   variables {
-    reserved_concurrency = 45
+    database_max_open_connections = 18
   }
 
   assert {
-    condition     = aws_lambda_function.backend.reserved_concurrent_executions == 45
-    error_message = "45 × 2 = 90 leaves exactly the 10 spare connections."
+    condition     = nonsensitive(aws_lambda_function.backend.environment[0].variables["ISLAND_BATTLES_DATABASE_MAX_OPEN_CONNECTIONS"]) == "18"
+    error_message = "5 × 18 = 90 leaves exactly the 10 spare connections."
   }
 }
 
+# A new account's limit of 10 can't be reserved. Unreserved, the limit is C,
+# and the default log and trace limits are over the budget for 10 instances,
+# so the documented ones for that case apply.
 run "leaves_concurrency_unreserved_when_asked" {
   command = plan
 
   variables {
-    reserved_concurrency = null
+    reserved_concurrency   = null
+    log_lines_per_minute   = 2
+    trace_interval_seconds = 360
   }
 
   assert {
     condition     = aws_lambda_function.backend.reserved_concurrent_executions == -1
     error_message = "A null reserved_concurrency must leave the function unreserved."
+  }
+
+  assert {
+    condition     = nonsensitive(aws_lambda_function.backend.environment[0].variables["ISLAND_BATTLES_CONCURRENCY"]) == "10"
+    error_message = "Unreserved, the backend's concurrency must be the account limit."
   }
 }
 
@@ -125,10 +143,11 @@ run "checks_the_account_limit_when_concurrency_is_unreserved" {
   command = plan
 
   variables {
-    # Unreserved, the account limit caps the function: 46 × 2 = 92 leaves 8
+    # Unreserved, the account limit caps the function: 5 × 19 = 95 leaves 5
     # of 100 free, fewer than the 10 spare connections.
-    reserved_concurrency      = null
-    account_concurrency_limit = 46
+    reserved_concurrency          = null
+    account_concurrency_limit     = 5
+    database_max_open_connections = 19
   }
 
   expect_failures = [aws_lambda_function.backend]
@@ -142,20 +161,23 @@ run "rejects_an_account_limit_of_1000_without_a_reservation" {
     account_concurrency_limit = 1000
   }
 
-  expect_failures = [aws_lambda_function.backend]
+  # 1,000 instances are over the free-tier budget too. The function depends
+  # on the log group, so the plan stops there.
+  expect_failures = [aws_cloudwatch_log_group.backend]
 }
 
 run "allows_the_largest_safe_account_limit_without_a_reservation" {
   command = plan
 
   variables {
-    reserved_concurrency      = null
-    account_concurrency_limit = 45
+    reserved_concurrency          = null
+    account_concurrency_limit     = 5
+    database_max_open_connections = 18
   }
 
   assert {
     condition     = aws_lambda_function.backend.reserved_concurrent_executions == -1
-    error_message = "An account limit of 45 × 2 = 90 leaves exactly the 10 spare connections."
+    error_message = "An account limit of 5 × 18 = 90 leaves exactly the 10 spare connections."
   }
 }
 
@@ -163,15 +185,167 @@ run "ignores_the_account_limit_when_concurrency_is_reserved" {
   command = plan
 
   variables {
-    reserved_concurrency      = 20
+    reserved_concurrency      = 5
     account_concurrency_limit = 1000
   }
 
   assert {
-    condition     = aws_lambda_function.backend.reserved_concurrent_executions == 20
+    condition     = aws_lambda_function.backend.reserved_concurrent_executions == 5 && nonsensitive(aws_lambda_function.backend.environment[0].variables["ISLAND_BATTLES_CONCURRENCY"]) == "5"
     error_message = "A reservation caps the function, whatever the account limit."
   }
 }
+
+# The free-tier budget (#46) ---------------------------------------------------
+
+run "keeps_logs_and_traces_inside_the_free_tier" {
+  command = plan
+
+  assert {
+    # 5 × 44,640 minutes × (5 × (1,024 + 128) + 256 + 128) bytes, and
+    # 5 × 2,678,400 seconds / 180, as backend/observability works them out.
+    condition     = local.monthly_log_bytes == 1371340800 && local.monthly_traces == 74400
+    error_message = "The defaults' worst case must match the backend's: 1,371,340,800 bytes of logs and 74,400 traces a month."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_log_group.backend.name == "/aws/lambda/island-battles" && aws_cloudwatch_log_group.backend.retention_in_days == 7 && aws_lambda_function.backend.logging_config[0].log_group == "/aws/lambda/island-battles"
+    error_message = "The function must log to its own log group, kept for 7 days."
+  }
+
+  assert {
+    condition     = aws_lambda_function.backend.logging_config[0].log_format == "JSON" && aws_lambda_function.backend.logging_config[0].application_log_level == "WARN" && aws_lambda_function.backend.logging_config[0].system_log_level == "WARN"
+    error_message = "Lambda must filter application and system logs at WARN."
+  }
+
+  assert {
+    condition     = aws_lambda_function.backend.tracing_config[0].mode == "PassThrough"
+    error_message = "Lambda's Active tracing must stay off."
+  }
+
+  assert {
+    condition     = aws_lambda_function.backend.layers == tolist(["arn:aws:lambda:eu-central-1:901920570463:layer:aws-otel-collector-arm64-ver-0-156-0:4"])
+    error_message = "The function must run the ADOT collector layer for arm64 in its region."
+  }
+
+  assert {
+    condition = (
+      nonsensitive(aws_lambda_function.backend.environment[0].variables["OTEL_EXPORTER_OTLP_ENDPOINT"]) == "http://localhost:4318" &&
+      nonsensitive(aws_lambda_function.backend.environment[0].variables["OPENTELEMETRY_EXTENSION_LOG_LEVEL"]) == "error" &&
+      nonsensitive(aws_lambda_function.backend.environment[0].variables["OPENTELEMETRY_COLLECTOR_CONFIG_URI"]) == "env:ISLAND_BATTLES_COLLECTOR_CONFIG" &&
+      jsondecode(nonsensitive(aws_lambda_function.backend.environment[0].variables["ISLAND_BATTLES_COLLECTOR_CONFIG"])).service.telemetry.logs.level == "error" &&
+      jsondecode(nonsensitive(aws_lambda_function.backend.environment[0].variables["ISLAND_BATTLES_COLLECTOR_CONFIG"])).service.pipelines.traces.exporters == ["awsxray"]
+    )
+    error_message = "The backend must send its spans to the collector on localhost, which sends them to X-Ray and logs only errors."
+  }
+
+  assert {
+    condition     = local.lambda_environment_bytes <= 4096
+    error_message = "The function's environment must fit Lambda's 4 KB."
+  }
+}
+
+run "alerts_on_errors_within_the_free_tier" {
+  command = plan
+
+  assert {
+    condition     = aws_cloudwatch_log_metric_filter.errors.pattern == "{ ($.level = \"ERROR\") || ($.level = \"error\") }" && try(length(aws_cloudwatch_log_metric_filter.errors.metric_transformation[0].dimensions), 0) == 0
+    error_message = "One metric, without dimensions, must count the error lines."
+  }
+
+  assert {
+    condition = alltrue([for alarm in [aws_cloudwatch_metric_alarm.lambda_errors, aws_cloudwatch_metric_alarm.error_lines] :
+      alarm.period == 3600 && alarm.evaluation_periods == 1 && alarm.threshold == 0 && alarm.treat_missing_data == "notBreaching" &&
+      length(alarm.alarm_actions) == 1 && try(length(alarm.ok_actions), 0) == 0 && try(length(alarm.insufficient_data_actions), 0) == 0
+    ])
+    error_message = "Each alarm must look at one hour and notify only on entering ALARM."
+  }
+
+  assert {
+    condition     = aws_cloudwatch_metric_alarm.lambda_errors.namespace == "AWS/Lambda" && aws_cloudwatch_metric_alarm.lambda_errors.metric_name == "Errors" && aws_cloudwatch_metric_alarm.error_lines.metric_name == "ErrorLines"
+    error_message = "One alarm must watch the function's Errors, the other the error lines."
+  }
+
+  assert {
+    condition     = aws_sns_topic_subscription.alert_email.protocol == "email" && aws_sns_topic_subscription.alert_email.endpoint == "alerts@example.org"
+    error_message = "The alarms must email alert_email."
+  }
+
+  assert {
+    condition = (
+      aws_budgets_budget.zero_spend.budget_type == "COST" && aws_budgets_budget.zero_spend.limit_amount == "0.01" && aws_budgets_budget.zero_spend.time_unit == "MONTHLY" &&
+      one(aws_budgets_budget.zero_spend.notification).subscriber_email_addresses == toset(["alerts@example.org"])
+    )
+    error_message = "A zero-spend budget must email alert_email."
+  }
+}
+
+run "rejects_logs_over_the_budget" {
+  command = plan
+
+  variables {
+    # 5 × 44,640 × (6 × 1,152 + 384) = 1.63 GB.
+    log_lines_per_minute = 6
+  }
+
+  expect_failures = [aws_cloudwatch_log_group.backend]
+}
+
+run "rejects_traces_over_the_budget" {
+  command = plan
+
+  variables {
+    # 5 × 2,678,400 / 160 = 83,700 traces.
+    trace_interval_seconds = 160
+  }
+
+  expect_failures = [aws_cloudwatch_log_group.backend]
+}
+
+run "rejects_a_concurrency_over_the_budget" {
+  command = plan
+
+  variables {
+    reserved_concurrency = 20
+  }
+
+  expect_failures = [aws_cloudwatch_log_group.backend]
+}
+
+run "rejects_the_limits_in_lambda_settings" {
+  command = plan
+
+  variables {
+    extra_lambda_environment = {
+      ISLAND_BATTLES_LOG_LINES_PER_MINUTE = "100"
+    }
+  }
+
+  expect_failures = [aws_lambda_function.backend]
+}
+
+run "turns_tracing_off_without_a_collector_layer" {
+  command = plan
+
+  variables {
+    collector_layer_arn = ""
+  }
+
+  assert {
+    condition     = length(aws_lambda_function.backend.layers) == 0 && !contains(keys(nonsensitive(aws_lambda_function.backend.environment[0].variables)), "OTEL_EXPORTER_OTLP_ENDPOINT")
+    error_message = "Without a collector layer, the function must run without it and without tracing."
+  }
+}
+
+run "requires_an_alert_email" {
+  command = plan
+
+  variables {
+    alert_email = "not an address"
+  }
+
+  expect_failures = [var.alert_email]
+}
+
 
 run "rejects_the_pool_size_in_lambda_settings" {
   command = plan
@@ -212,8 +386,8 @@ run "creates_the_function_without_settings_on_the_first_apply" {
   }
 
   assert {
-    condition     = nonsensitive(aws_lambda_function.backend.environment[0].variables) == tomap({ ISLAND_BATTLES_DATABASE_MAX_OPEN_CONNECTIONS = "2" })
-    error_message = "Without lambda.env, the function only gets the pool size."
+    condition     = keys(nonsensitive(aws_lambda_function.backend.environment[0].variables)) == sort(concat(keys(local.lambda_terraform_settings), keys(local.collector_environment)))
+    error_message = "Without lambda.env, the function only gets what Terraform sets."
   }
 }
 

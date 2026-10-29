@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"islandBattles/backend/observability"
 	"islandBattles/backend/services"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/go-chi/httplog/v3"
 	"gorm.io/gorm"
 )
 
@@ -25,9 +25,10 @@ func (env *Env) GetGameGraph(ctx context.Context, input *struct {
 	return &huma.StreamResponse{
 		Body: func(ctx huma.Context) {
 			ctx.SetHeader("Content-Type", "text/html")
-			// The status is already sent, so the request's log line carries the error.
+			// The status is already sent, so the error only reaches the request's
+			// error line if it fails for another reason.
 			if _, err := ctx.BodyWriter().Write([]byte(htmlContent)); err != nil {
-				_ = httplog.SetError(ctx.Context(), fmt.Errorf("write game graph: %w", err))
+				observability.RecordError(ctx.Context(), fmt.Errorf("write game graph: %w", err))
 			}
 		},
 	}, nil

@@ -196,7 +196,7 @@ The rows a pass deletes belong to games nobody can reach any more, and the index
 [`app.New`](app/app.go) builds the HTTP handler from the configuration and a database connection. Two hosts serve it:
 
 - **The HTTP server,** [`backend/main.go`](main.go), for local development. It listens on `ISLAND_BATTLES_HTTP_ADDR`, shuts down gracefully on SIGINT or SIGTERM and logs in colour through `tint`. It alone passes `app.WithGameGraph()`, so it alone serves `GET /game/{id}/graph`, which reads any game without authentication.
-- **The AWS Lambda function,** [`cmd/lambda`](cmd/lambda/main.go), behind a Function URL. It is public, so it serves no graph page, and every route it serves that reads game data requires a player on the game's frozen roster. It serves the handler through `lambdaurl`, so the Function URL must use the `RESPONSE_STREAM` invoke mode. Streaming also lets replay pages, which inline JSON that grows with the game, pass Lambda's 6 MB limit on buffered responses; streamed responses may reach 200 MB. It logs JSON lines through `slog`'s JSON handler, which keeps the default `level` key that Lambda's log-level filtering reads.
+- **The AWS Lambda function,** [`cmd/lambda`](cmd/lambda/main.go), behind a Function URL. It is public, so it serves no graph page, and every route it serves that reads game data requires a player on the game's frozen roster. It serves the handler through `lambdaurl`, so the Function URL must use the `RESPONSE_STREAM` invoke mode. Streaming also lets replay pages, which inline JSON that grows with the game, pass Lambda's 6 MB limit on buffered responses; streamed responses may reach 200 MB. It logs warnings and errors only, as JSON lines with the `level` and `timestamp` keys that Lambda's log-level filtering reads, within the limits in [Logs and traces](#logs-and-traces).
 
 Build the Lambda for the `provided.al2023` runtime on arm64. The runtime runs the executable named `bootstrap` at the root of the zip:
 
@@ -217,9 +217,29 @@ Every process has its own pool, and every Lambda instance is a separate process.
 | `ISLAND_BATTLES_DATABASE_MAX_IDLE_CONNECTIONS` | 2, or the open limit if lower | Most connections kept open while idle |
 | `ISLAND_BATTLES_DATABASE_CONNECTION_MAX_IDLE_TIME` | `1m` | How long an idle connection stays open, as a Go duration |
 
-A Lambda instance serves one request at a time, so the defaults suffice there. Cap the function's reserved concurrency so that **reserved concurrency × max open connections < PostgreSQL `max_connections`** (100 by default), leaving room for the migrate command and administration. For example, with the default of 2 connections, a reserved concurrency of 40 uses at most 80. A frozen Lambda instance keeps its idle connections until it thaws or ends, so count them as open.
+A Lambda instance serves one request at a time, so the defaults suffice there. Cap the function's reserved concurrency so that **reserved concurrency × max open connections < PostgreSQL `max_connections`** (100 by default), leaving room for the migrate command and administration. For example, with the default of 2 connections, the default reserved concurrency of 5 uses at most 10. The free-tier budget below also grows with the concurrency. A frozen Lambda instance keeps its idle connections until it thaws or ends, so count them as open.
 
 If PgBouncer is added later in transaction mode, it must be 1.21 or newer with `max_prepared_statements` set, because pgx uses named prepared statements by default.
+
+### Logs and traces
+
+[`observability`](observability/) gives both hosts the same request logging (#46):
+
+- **Every request** is logged once, after it is answered. A 5xx answer or a recovered panic is one ERROR line, `Request failed` or `Request panicked`, with the operation, route, status, the error chain and the IDs involved: `lobby_id`, `game_key`, `game_id`, `generation_id` and `player_id`, as far as the request got. A panic also carries its value and stack, and answers 500. Every other request, client errors included, is an INFO line.
+- **Recording causes:** a handler that turns an error into a response without its cause calls `observability.RecordError(ctx, err)` first, and `observability.Annotate` adds IDs. Huma's 5xx problems and the lobby's problems are recorded on their own, with what they wrap.
+- **Failed queries** are warnings, like slow ones: some fail as expected, such as a unique violation that answers 409.
+- **Traces** are off unless `OTEL_EXPORTER_OTLP_ENDPOINT` is set, as OpenTelemetry's standard variable. Then each request, each GORM query and each Centrifugo API call gets a span, exported over OTLP/HTTP. Locally every request is traced. Trace headers on incoming requests are ignored, so callers can't start traces. A line logged inside a sampled trace carries `trace_id` and `xray_trace_id`.
+
+The Lambda host also applies limits that keep CloudWatch Logs and X-Ray inside AWS's free tier, worst case included. Terraform sets them, and refuses them in `lambda.env` ([deploy/README.md](../deploy/README.md#logs-alerts-and-traces)):
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `ISLAND_BATTLES_CONCURRENCY` | 5 | C: the most instances that run at once, the function's reserved concurrency |
+| `ISLAND_BATTLES_LOG_LINES_PER_MINUTE` | 5 | N: the most warning and error lines an instance writes a minute. Warnings may use N−1. The rest become one line that counts them |
+| `ISLAND_BATTLES_LOG_LINE_BYTES` | 1024 | L: the most bytes of a line. Longer lines are cut and stay JSON |
+| `ISLAND_BATTLES_TRACE_INTERVAL` | `180s` | T: an instance starts at most one trace every T, the first one T after it starts |
+
+At startup the Lambda host works out the worst case for a 31-day month, C × 44,640 minutes × (N × (L + 128) + 384) bytes of logs and C × 2,678,400 s / T traces. Over 1.5 GB or 80,000, it refuses to serve: it answers 503 and logs why. A backend that fails to start for any other reason, such as an unreachable database, does the same and tries again at most every 10 seconds, rather than failing the cold start, which Lambda would retry on every request. The local server host applies none of these limits.
 
 ## Verification
 

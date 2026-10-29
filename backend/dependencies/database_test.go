@@ -14,6 +14,10 @@ import (
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/models"
 
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace/noop"
 	gormpostgres "gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -131,7 +135,9 @@ func TestInitDBRunsNoDDLAndBoundsThePool(t *testing.T) {
 }
 
 // GORM's own logger writes coloured text, which CloudWatch can't query, so
-// failed and slow queries must go through the host's slog logger.
+// failed and slow queries must go through the host's slog logger. Both are
+// warnings: a request that fails logs its own error line, and the error alarm
+// must not fire on queries that fail as expected, such as unique violations.
 func TestInitDBLogsFailedAndSlowQueriesThroughSlog(t *testing.T) {
 	empty := testutils.InitEmptyTestDB(t)
 	var output bytes.Buffer
@@ -147,7 +153,7 @@ func TestInitDBLogsFailedAndSlowQueriesThroughSlog(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("logged %d lines, want 2: %s", len(lines), output.String())
 	}
-	for index, want := range []struct{ level, query string }{{"ERROR", "missing_table"}, {"WARN", "pg_sleep"}} {
+	for index, want := range []struct{ level, query string }{{"WARN", "missing_table"}, {"WARN", "pg_sleep"}} {
 		var line map[string]any
 		if err := json.Unmarshal([]byte(lines[index]), &line); err != nil {
 			t.Fatalf("line %d is not JSON: %s", index, lines[index])
@@ -158,6 +164,35 @@ func TestInitDBLogsFailedAndSlowQueriesThroughSlog(t *testing.T) {
 	}
 	if strings.Contains(output.String(), "secret-value") {
 		t.Fatalf("query values were logged: %s", output.String())
+	}
+}
+
+// Each query inside a sampled trace gets a span, without the query's values.
+func TestInitDBTracesQueriesInsideSampledTraces(t *testing.T) {
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() { otel.SetTracerProvider(noop.NewTracerProvider()) })
+	empty := testutils.InitEmptyTestDB(t)
+	connected := connect(t, dependencies.DefaultDatabaseConfig(databaseURL(t, empty)), slog.New(slog.DiscardHandler))
+	ctx, request := provider.Tracer("test").Start(context.Background(), "request")
+	if err := connected.WithContext(ctx).Exec(`SELECT ?::text`, "secret-value").Error; err != nil {
+		t.Fatal(err)
+	}
+	request.End()
+	var query sdktrace.ReadOnlySpan
+	for _, span := range recorder.Ended() {
+		if span.Parent().SpanID() == request.SpanContext().SpanID() {
+			query = span
+		}
+	}
+	if query == nil {
+		t.Fatalf("no query span under the request among %d spans", len(recorder.Ended()))
+	}
+	for _, attribute := range query.Attributes() {
+		if strings.Contains(attribute.Value.String(), "secret-value") {
+			t.Fatalf("the query span holds its values: %s=%s", attribute.Key, attribute.Value.String())
+		}
 	}
 }
 

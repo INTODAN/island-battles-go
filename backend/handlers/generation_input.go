@@ -6,8 +6,10 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"gorm.io/gorm"
 	"islandBattles/backend/models"
+	"islandBattles/backend/observability"
 	"islandBattles/backend/services"
 	"islandBattles/lobby/domain"
+	"log/slog"
 	"net/http"
 )
 
@@ -29,7 +31,7 @@ func (handler *LobbyGame) CurrentGeneration(ctx context.Context, input *struct {
 	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher}
 	state, err := service.Current(ctx, verified.Principal, input.LobbyID)
 	if err != nil {
-		return nil, generationHTTPError(err)
+		return nil, generationHTTPError(ctx, err)
 	}
 	return &GenerationStateResponse{Body: state}, nil
 }
@@ -40,15 +42,18 @@ func (handler *LobbyGame) RegisterGenerationCommands(ctx context.Context, input 
 	if err != nil {
 		return nil, huma.Error401Unauthorized("authentication required")
 	}
+	observability.Annotate(ctx, slog.Uint64("game_id", uint64(input.Body.GameID)), slog.Uint64("generation_id", uint64(input.Body.GenerationID)))
 	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher}
 	state, err := service.Register(ctx, verified.Principal, input.Body)
 	if err != nil {
-		return nil, generationHTTPError(err)
+		return nil, generationHTTPError(ctx, err)
 	}
 	return &GenerationStateResponse{Body: state}, nil
 }
 
-func generationHTTPError(err error) error {
+// generationHTTPError answers a service error. An unexpected one answers 503
+// without its cause, which goes on the request's error line instead.
+func generationHTTPError(ctx context.Context, err error) error {
 	var rejection *services.GenerationError
 	if errors.As(err, &rejection) {
 		return &huma.ErrorModel{Type: rejection.Type, Title: http.StatusText(rejection.Status), Status: rejection.Status, Detail: rejection.Detail}
@@ -59,5 +64,6 @@ func generationHTTPError(err error) error {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return huma.Error409Conflict("game generation is not initialized")
 	}
+	observability.RecordError(ctx, err)
 	return huma.Error503ServiceUnavailable("game is temporarily unavailable")
 }

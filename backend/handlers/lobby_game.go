@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"context"
+	"fmt"
+	"islandBattles/backend/observability"
 	"islandBattles/backend/services"
 	"islandBattles/lobby/domain"
 
@@ -41,13 +43,14 @@ func (handler *LobbyGame) Replay(ctx context.Context, input *struct {
 	service := services.GenerationService{Database: handler.Database}
 	replay, err := service.Replay(ctx, verified.Principal, input.LobbyID)
 	if err != nil {
-		return nil, generationHTTPError(err)
+		return nil, generationHTTPError(ctx, err)
 	}
 	if len(replay.Frames) == 0 {
 		return nil, huma.Error404NotFound("game result is not ready")
 	}
 	html, err := services.RenderGameReplay(replay)
 	if err != nil {
+		observability.RecordError(ctx, fmt.Errorf("render replay: %w", err))
 		return nil, huma.Error500InternalServerError("game result could not be rendered")
 	}
 	return &huma.StreamResponse{Body: func(response huma.Context) {

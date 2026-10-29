@@ -16,6 +16,7 @@ import (
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/mapbuilder"
+	"islandBattles/backend/observability"
 	"islandBattles/backend/retention"
 	"islandBattles/backend/routes"
 	"islandBattles/lobby/application"
@@ -27,7 +28,6 @@ import (
 
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/httplog/v3"
 	"gorm.io/gorm"
 )
 
@@ -114,8 +114,11 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 		return nil, err
 	}
 
+	// The authenticated player goes on a failed request's error line.
+	authenticated := annotatingAuthentication{authentication}
+
 	router := chi.NewMux()
-	router.Use(httplog.RequestLogger(logger, &httplog.Options{Level: slog.LevelInfo, Schema: httplog.SchemaOTEL.Concise(true)}))
+	router.Use(observability.Requests(logger))
 	api := humachi.New(router, routes.NewAPIConfig("Island Battles Go Backend", "1.0.0"))
 	environment := handlers.Env{DB: database}
 	routes.SetupRoutes(api, &environment, config.AdminAPIKey)
@@ -125,13 +128,25 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	if selected.gameGraph {
 		routes.SetupGameGraphRoute(api, &environment)
 	}
-	routes.SetupLobbyRoutes(api, lobbyService, authentication, gameBinding, lobbyRetention, &handlers.LobbyGame{Database: database, Authenticator: authentication, Publisher: publisher, Retention: gameRetention})
+	routes.SetupLobbyRoutes(api, lobbyService, authenticated, gameBinding, lobbyRetention, &handlers.LobbyGame{Database: database, Authenticator: authenticated, Publisher: publisher, Retention: gameRetention})
 	proxy.Register(router)
 	if err := registerPages(router); err != nil {
 		return nil, err
 	}
 	router.Get("/healthz", func(response http.ResponseWriter, request *http.Request) { response.WriteHeader(http.StatusNoContent) })
 	return router, nil
+}
+
+// annotatingAuthentication adds the player of each verified session to the
+// request's error line.
+type annotatingAuthentication struct{ *auth.Service }
+
+func (authentication annotatingAuthentication) Authenticate(ctx context.Context, authorization string) (domain.SessionVerification, error) {
+	verified, err := authentication.Service.Authenticate(ctx, authorization)
+	if err == nil {
+		observability.Annotate(ctx, slog.String("player_id", verified.Principal.PlayerID))
+	}
+	return verified, err
 }
 
 // registerPages serves the embedded browser pages, which need no files beside
