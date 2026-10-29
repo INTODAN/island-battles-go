@@ -13,7 +13,7 @@ type CommandFields struct {
 type Command struct {
 	gorm.Model
 	CommandFields
-	GenerationID uint
+	GenerationID uint `gorm:"index"`
 }
 
 type CommandType string

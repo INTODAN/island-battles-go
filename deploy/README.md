@@ -212,6 +212,7 @@ It doesn't ask for confirmation, never connects to the VM and never changes a Li
 - Run `scripts/aws.sh deploy` again whenever the VM deploy rewrites `lambda.env`, for example after new secrets.
 - `ISLAND_BATTLES_DATABASE_MAX_OPEN_CONNECTIONS` comes from the `database_max_open_connections` variable instead, and Terraform refuses it in `lambda.env` ([The concurrency cap](#the-concurrency-cap)).
 - Non-secret settings of your own, such as the pool's idle time, go in `extra_lambda_environment` in `aws.tfvars`.
+- The Lambda needs no game retention setting: games are deleted 7 days after their last turn by default. To change the period, set `ISLAND_BATTLES_GAME_RETENTION_PERIOD` there as a Go duration, such as `336h` for 14 days ([Game retention](../backend/README.md#game-retention)).
 
 **Why Terraform publishes the code,** rather than the AWS CLI with Terraform only creating the function:
 

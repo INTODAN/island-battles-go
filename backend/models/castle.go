@@ -22,7 +22,7 @@ type Castle struct {
 	CastleFields
 	SoldierAmount uint
 
-	MapID uint
+	MapID uint `gorm:"index"`
 	Map   Map
 }
 

@@ -14,12 +14,26 @@ type LobbyGame struct {
 	Database      *gorm.DB
 	Authenticator domain.Authenticator
 	Publisher     services.Publisher
+	// Retention runs at the end of every game request: turns, which are what
+	// adds game data, and the state and replay reads that players poll. Nil
+	// deletes nothing. retention.Retention is the real one; it has the same
+	// shape as the lobby's runner but deletes only game data.
+	Retention domain.RetentionRunner
+}
+
+// runRetention runs after the handler has its response, and after a turn has
+// committed and pushed its events.
+func (handler *LobbyGame) runRetention(ctx context.Context) {
+	if handler.Retention != nil {
+		handler.Retention.RunIfDue(ctx)
+	}
 }
 
 func (handler *LobbyGame) Replay(ctx context.Context, input *struct {
 	LobbyID       string `path:"lobby_id" format:"uuid"`
 	Authorization string `header:"Authorization"`
 }) (*huma.StreamResponse, error) {
+	defer handler.runRetention(ctx)
 	verified, err := handler.Authenticator.Authenticate(ctx, input.Authorization)
 	if err != nil {
 		return nil, huma.Error401Unauthorized("authentication required")

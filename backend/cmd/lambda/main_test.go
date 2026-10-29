@@ -16,6 +16,7 @@ import (
 	"islandBattles/backend/dependencies"
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/models"
+	"islandBattles/backend/retention"
 	"islandBattles/backend/services"
 	"islandBattles/lobby/domain"
 
@@ -75,6 +76,7 @@ func testConfig(t *testing.T, database *gorm.DB) dependencies.Config {
 		CentrifugoAPIKey:          "test-centrifugo-api-key",
 		ConnectionTokenHMACSecret: "test-connection-token-secret-of-sufficient-length",
 		LobbyProxySecret:          "test-lobby-proxy-secret",
+		GameRetentionPeriod:       retention.DefaultPeriod,
 	}
 }
 
