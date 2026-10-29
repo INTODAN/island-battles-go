@@ -29,10 +29,27 @@ import (
 	"gorm.io/gorm"
 )
 
+// Option adds what only some hosts serve.
+type Option func(*options)
+
+type options struct {
+	gameGraph bool
+}
+
+// WithGameGraph serves GET /game/{id}/graph, which reads any game without
+// authentication. Only the local server host passes it.
+func WithGameGraph() Option {
+	return func(options *options) { options.gameGraph = true }
+}
+
 // New wires the stores and services to a router. It starts no goroutines and
 // holds nothing that outlives a request besides the database pool, which the
-// host owns and closes.
-func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger) (http.Handler, error) {
+// host owns and closes. Without options it serves only what is safe in public.
+func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opts ...Option) (http.Handler, error) {
+	var selected options
+	for _, option := range opts {
+		option(&selected)
+	}
 	clock := domain.SystemClock{}
 	identifiers := domain.CryptoIdentifiers{}
 	policy := domain.DefaultPolicy(
@@ -83,7 +100,13 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger) (ht
 	router.Use(httplog.RequestLogger(logger, &httplog.Options{Level: slog.LevelInfo, Schema: httplog.SchemaOTEL.Concise(true)}))
 	api := humachi.New(router, routes.NewAPIConfig("Island Battles Go Backend", "1.0.0"))
 	environment := handlers.Env{DB: database}
-	routes.SetupRoutes(api, &environment)
+	routes.SetupRoutes(api, &environment, config.AdminAPIKey)
+	if config.AdminAPIKey == "" {
+		logger.Warn("POST /map/create refuses every request because " + dependencies.AdminAPIKeyEnv + " is not set")
+	}
+	if selected.gameGraph {
+		routes.SetupGameGraphRoute(api, &environment)
+	}
 	routes.SetupLobbyRoutes(api, lobbyService, authentication, gameBinding, &handlers.LobbyGame{Database: database, Authenticator: authentication, Publisher: publisher})
 	proxy.Register(router)
 	if err := registerPages(router); err != nil {

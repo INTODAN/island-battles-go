@@ -4,7 +4,7 @@ The Go/Huma server hosts the reusable [`lobby/`](../lobby/README.md) package and
 
 ## Run locally
 
-Follow the [root setup](../README.md#development-setup). All seven backend settings in [`.env.example`](../.env.example) are required: database URL, HTTP address, public WebSocket URL, server-only Centrifugo API URL/key, connection-token signing secret and internal proxy secret. Startup rejects missing values. Only the HTTP server host reads the HTTP address; the [Lambda host](#hosts-and-deploys) has none. The database pool settings are optional; see [the connection pool](#the-connection-pool). Public clients receive only their guest credential and short-lived connection JWT.
+Follow the [root setup](../README.md#development-setup). Seven of the backend settings in [`.env.example`](../.env.example) are required: database URL, HTTP address, public WebSocket URL, server-only Centrifugo API URL/key, connection-token signing secret and internal proxy secret. Startup rejects missing values. Only the HTTP server host reads the HTTP address; the [Lambda host](#hosts-and-deploys) has none. The database pool settings are optional; see [the connection pool](#the-connection-pool). So is `ISLAND_BATTLES_ADMIN_API_KEY`, the [admin API key](#map-files) that `POST /map/create` requires; without it, that endpoint refuses every request. Public clients receive only their guest credential and short-lived connection JWT.
 
 Run `./scripts/dev.sh` from the repository root to load `.env`, start local dependencies with Docker Compose or Podman, migrate the schema and run the backend. If dependencies are already running and the environment is exported, run `go run ./backend/cmd/migrate` and then `go run ./backend`. The backend only connects to the database, so it fails on a database the migrate command hasn't brought up to date. `/docs` exposes Huma documentation, `/openapi.json` the combined schema, and `/healthz` HTTP readiness. The lobby-only generated contract is in [`lobby/api/`](../lobby/api/README.md).
 
@@ -134,6 +134,16 @@ A map file is the JSON that `POST /map/create` stores as a default map, publishe
 - A castle without `starting_soldier_amount` starts with `neutral_starting_soldier_amount`. Omitted upgrades start at level 1.
 - A castle's position in `castles` is its castle ID in every game built from the map.
 
+Only admins create default maps. Send the deployment's admin API key, `ISLAND_BATTLES_ADMIN_API_KEY`, in the `X-Admin-API-Key` header:
+
+```sh
+curl -X POST http://localhost:8888/map/create \
+  -H "X-Admin-API-Key: $ISLAND_BATTLES_ADMIN_API_KEY" -H 'Content-Type: application/json' \
+  --data @crossing.json
+```
+
+The key is compared in constant time, before the body is read. A missing or wrong key returns 401. When the backend has no key set, the endpoint is disabled: every request returns 403, and startup logs a warning. `scripts/dev.sh` reads the key from `.env`; an `.env` copied from an older `.env.example` lacks it, so add the line from `.env.example`.
+
 `models/map_template.go` holds the format and the functions every map source uses: `models.ValidateMapTemplate` checks a map without storing it and returns a `*models.MapTemplateError` that lists each invalid field, such as `castles[2].x`; `models.BuildMap` builds the game map. Read map files with `models.DecodeMapTemplate`, not plain `encoding/json`: it rejects unknown keys and missing required fields, which `encoding/json` ignores or reads as 0, then validates the map. `/map/create` answers an invalid map with 422 and one error per field, stores nothing, and answers a `map_name` that another map uses with 409. Stored templates keep working: games built from them are not validated again, and castles stored before `starting_soldier_amount` existed start with `neutral_starting_soldier_amount`.
 
 `POST /map/validate` checks a map file with `models.DecodeMapTemplate` and stores nothing, so it is safe to leave public. Any non-empty body answers 200 with `{"valid": ..., "errors": [...]}`, each error located relative to the file, such as `castles[2].x`. A `*models.MapTemplateError` lists at most 100 problems and counts the rest in a last detail, and it echoes only scalar values, never a whole object, so a large invalid file gets a small answer. A `map_name` that a default map already uses is not a problem here.
@@ -168,8 +178,8 @@ Lobby invalidations and generation events are pushed after their transaction com
 
 [`app.New`](app/app.go) builds the HTTP handler from the configuration and a database connection. Two hosts serve it:
 
-- **The HTTP server,** [`backend/main.go`](main.go), for local development. It listens on `ISLAND_BATTLES_HTTP_ADDR`, shuts down gracefully on SIGINT or SIGTERM and logs in colour through `tint`.
-- **The AWS Lambda function,** [`cmd/lambda`](cmd/lambda/main.go), behind a Function URL. It serves the handler through `lambdaurl`, so the Function URL must use the `RESPONSE_STREAM` invoke mode. Streaming also lets replay and graph pages, which inline JSON that grows with the game, pass Lambda's 6 MB limit on buffered responses; streamed responses may reach 200 MB. It logs JSON lines through `slog`'s JSON handler, which keeps the default `level` key that Lambda's log-level filtering reads.
+- **The HTTP server,** [`backend/main.go`](main.go), for local development. It listens on `ISLAND_BATTLES_HTTP_ADDR`, shuts down gracefully on SIGINT or SIGTERM and logs in colour through `tint`. It alone passes `app.WithGameGraph()`, so it alone serves `GET /game/{id}/graph`, which reads any game without authentication.
+- **The AWS Lambda function,** [`cmd/lambda`](cmd/lambda/main.go), behind a Function URL. It is public, so it serves no graph page, and every route it serves that reads game data requires a player on the game's frozen roster. It serves the handler through `lambdaurl`, so the Function URL must use the `RESPONSE_STREAM` invoke mode. Streaming also lets replay pages, which inline JSON that grows with the game, pass Lambda's 6 MB limit on buffered responses; streamed responses may reach 200 MB. It logs JSON lines through `slog`'s JSON handler, which keeps the default `level` key that Lambda's log-level filtering reads.
 
 Build the Lambda for the `provided.al2023` runtime on arm64. The runtime runs the executable named `bootstrap` at the root of the zip:
 
@@ -178,7 +188,7 @@ GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -tags lambda.norpc -trimpath -ldf
 zip -j bootstrap.zip bootstrap
 ```
 
-A deploy runs `go run ./backend/cmd/migrate` (or the same command built for the deploy machine) against the production database first, then publishes the new code. A cold start runs no DDL. The Lambda has no VPC and reaches PostgreSQL over the internet, which accepts only TLS connections. `sslmode=require` encrypts the connection but doesn't check the server's certificate. To check it, bundle the VM's certificate with the Lambda and use `sslmode=verify-full&sslrootcert=<path>`, as [the deploy guide](../deploy/README.md#the-lambdas-settings) describes. Every page the backend serves, including the lobby UI, the browser demo and `GET /game/{id}/graph`, is embedded in the binary.
+A deploy runs `go run ./backend/cmd/migrate` (or the same command built for the deploy machine) against the production database first, then publishes the new code. A cold start runs no DDL. The Lambda has no VPC and reaches PostgreSQL over the internet, which accepts only TLS connections. `sslmode=require` encrypts the connection but doesn't check the server's certificate. To check it, bundle the VM's certificate with the Lambda and use `sslmode=verify-full&sslrootcert=<path>`, as [the deploy guide](../deploy/README.md#the-lambdas-settings) describes. Every page the backend serves, including the lobby UI, the browser demo and the local host's `GET /game/{id}/graph`, is embedded in the binary.
 
 ### The connection pool
 

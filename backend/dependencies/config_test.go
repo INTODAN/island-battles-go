@@ -36,6 +36,14 @@ func TestLoadConfigAcceptsExplicitValidConfiguration(t *testing.T) {
 	if config.CentrifugoPublicURL != "ws://localhost:8000/connection/websocket" {
 		t.Fatalf("CentrifugoPublicURL = %q", config.CentrifugoPublicURL)
 	}
+	if config.AdminAPIKey != "" {
+		t.Fatalf("AdminAPIKey = %q without %s", config.AdminAPIKey, AdminAPIKeyEnv)
+	}
+	environment := validConfigurationEnvironment()
+	environment[AdminAPIKeyEnv] = " admin-key "
+	if config, err := LoadConfigFromLookup(mapLookup(environment)); err != nil || config.AdminAPIKey != "admin-key" {
+		t.Fatalf("AdminAPIKey = %q, error = %v", config.AdminAPIKey, err)
+	}
 }
 
 func TestLoadConfigRejectsInvalidPublicWebSocketURL(t *testing.T) {

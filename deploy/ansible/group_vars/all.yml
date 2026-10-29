@@ -48,3 +48,8 @@ connection_token_hmac_secret: >-
 lobby_proxy_secret: >-
   {{ lookup('ansible.builtin.password', deploy_secrets_dir ~ '/lobby_proxy_secret',
      length=48, chars=['ascii_letters', 'digits']) }}
+# The backend's admin API key, sent as X-Admin-API-Key to POST /map/create.
+# Only the Lambda reads it; nothing on the VM does.
+admin_api_key: >-
+  {{ lookup('ansible.builtin.password', deploy_secrets_dir ~ '/admin_api_key',
+     length=48, chars=['ascii_letters', 'digits']) }}

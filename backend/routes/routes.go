@@ -70,17 +70,24 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 	api.OpenAPI().Paths["/lobby/v1/lobbies"].Post.Description += " Island Battles reads game_settings as the LobbySettings schema."
 }
 
-func SetupRoutes(api huma.API, env *handlers.Env) {
+// SetupRoutes registers the game routes every host serves. adminAPIKey
+// authorizes POST /map/create; an empty key refuses every request.
+func SetupRoutes(api huma.API, env *handlers.Env, adminAPIKey string) {
 	// GORM JSON marshals as raw JSON, rather than the base64 string Huma infers
 	// from its underlying byte slice. Describe command parameters accordingly.
 	api.OpenAPI().Components.Schemas.RegisterTypeAlias(reflect.TypeOf(datatypes.JSON{}), reflect.TypeOf(json.RawMessage{}))
+	registerAdminAPIKeyScheme(api)
 	huma.Register(api, huma.Operation{Path: "/map/create", Method: http.MethodPost, DefaultStatus: http.StatusOK,
-		Summary: "Create a default map from a map file.",
+		Summary:  "Create a default map from a map file.",
+		Security: adminAPIKeySecurity, Middlewares: huma.Middlewares{requireAdminAPIKey(api, adminAPIKey)},
+		Errors: []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusConflict},
 		Description: "The body is the map file format, the MapTemplate schema. Positions are measured from the centre of the plane, so a castle's x lies from -plane_size_x/2 to plane_size_x/2 and its y from -plane_size_y/2 to plane_size_y/2. " +
 			"Castle team colours run from 1 to player_amount, and 0 is neutral. A castle without starting_soldier_amount starts with neutral_starting_soldier_amount. " +
 			"Castle upgrades are a map of upgrade type to level. Omitted upgrades default to level 1; speed supports levels 1 through 4, and clash_stop_generations supports levels 1 through 3. " +
-			"An invalid map returns 422 with an error for each invalid field and is not stored. A map_name that another map uses returns 409."}, env.CreateMapTemplate)
+			"An invalid map returns 422 with an error for each invalid field and is not stored. A map_name that another map uses returns 409. " +
+			"Admins only: send the deployment's admin API key in the " + AdminAPIKeyHeader + " header. A missing or wrong key returns 401, and when the deployment sets no key every request returns 403."}, env.CreateMapTemplate)
 	dropSchemaLink(api, reflect.TypeFor[models.MapTemplateView]())
+
 	huma.Register(api, huma.Operation{Path: "/map/validate", Method: http.MethodPost, DefaultStatus: http.StatusOK,
 		Summary: "Check a map file without storing it.",
 		Description: "The body is a map file, the MapTemplate schema, checked exactly as a map file is read: unknown keys, missing fields and wrong types are problems, then the same rules as /map/create apply. " +
@@ -95,8 +102,15 @@ func SetupRoutes(api huma.API, env *handlers.Env) {
 		Description: "Lists every default map whose castle team colours are exactly 1 to player_amount, ordered by name. " +
 			"Choose one when creating an Island Battles lobby by passing its map_template_id in game_settings, with exactly team_count teams. " +
 			"Maps that fit no lobby are left out: those whose team colours skip a colour, and those made for fewer than 2 or more than 16 teams."}, env.ListMapTemplates)
+}
+
+// SetupGameGraphRoute registers the game graph page, which reads any game
+// without authentication. Only the local server host serves it, never the
+// public Lambda host.
+func SetupGameGraphRoute(api huma.API, env *handlers.Env) {
 	huma.Register(api, huma.Operation{Path: "/game/{id}/graph", Method: http.MethodGet, DefaultStatus: http.StatusOK,
-		Summary: "Get a graph visualization of the game."}, env.GetGameGraph)
+		Summary:     "Get a graph visualization of the game.",
+		Description: "A development page that reads any game without authentication. Only the local server host serves it, never the public Lambda host."}, env.GetGameGraph)
 }
 
 // dropSchemaLink removes the read-only $schema property that Huma's schema

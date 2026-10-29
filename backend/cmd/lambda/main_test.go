@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -20,6 +21,7 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambdaurl"
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	gormpostgres "gorm.io/driver/postgres"
@@ -76,9 +78,9 @@ func testConfig(t *testing.T, database *gorm.DB) dependencies.Config {
 	}
 }
 
-func TestPagesOverSixMegabytesStreamThroughTheFunctionURL(t *testing.T) {
+func TestReplayOverSixMegabytesStreamsThroughTheFunctionURL(t *testing.T) {
 	database := testutils.InitTestDB(t)
-	handler, err := app.New(testConfig(t, database), database, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	handler, err := newHandler(testConfig(t, database), database, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,30 +105,105 @@ func TestPagesOverSixMegabytesStreamThroughTheFunctionURL(t *testing.T) {
 	}
 	enlargeGame(t, database, binding.GameID)
 
-	for name, page := range map[string]struct{ path, authorization string }{
-		"replay": {"/game/from-lobby/" + lobbyID + "/replay", "Bearer " + alice.AccessToken},
-		"graph":  {fmt.Sprintf("/game/%d/graph", binding.GameID), ""},
-	} {
-		response, content := call(t, invoke, http.MethodGet, page.path, "", page.authorization)
-		if response.StatusCode != http.StatusOK {
-			t.Fatalf("%s=%d %.500s", name, response.StatusCode, content)
-		}
-		if !strings.HasPrefix(response.Headers["Content-Type"], "text/html") {
-			t.Fatalf("%s content type=%q", name, response.Headers["Content-Type"])
-		}
-		if len(content) <= bufferedResponseLimit {
-			t.Fatalf("%s is %d bytes, so it doesn't test the 6 MB limit", name, len(content))
-		}
-		if !bytes.HasSuffix(bytes.TrimSpace(content), []byte("</html>")) {
-			t.Fatalf("%s was cut short: %q", name, content[max(0, len(content)-200):])
-		}
-		t.Logf("%s streamed %d bytes", name, len(content))
+	response, content = call(t, invoke, http.MethodGet, "/game/from-lobby/"+lobbyID+"/replay", "", "Bearer "+alice.AccessToken)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("replay=%d %.500s", response.StatusCode, content)
+	}
+	if !strings.HasPrefix(response.Headers["Content-Type"], "text/html") {
+		t.Fatalf("replay content type=%q", response.Headers["Content-Type"])
+	}
+	if len(content) <= bufferedResponseLimit {
+		t.Fatalf("replay is %d bytes, so it doesn't test the 6 MB limit", len(content))
+	}
+	if !bytes.HasSuffix(bytes.TrimSpace(content), []byte("</html>")) {
+		t.Fatalf("replay was cut short: %q", content[max(0, len(content)-200):])
+	}
+	t.Logf("replay streamed %d bytes", len(content))
+
+	// The graph page reads any game without authentication, so the public
+	// host doesn't serve it.
+	if response, content := call(t, invoke, http.MethodGet, fmt.Sprintf("/game/%d/graph", binding.GameID), "", ""); response.StatusCode != http.StatusNotFound {
+		t.Fatalf("graph on the Lambda host=%d %.500s", response.StatusCode, content)
 	}
 }
 
-// enlargeGame adds generations that share one map with many castles. Both
-// pages are derived from the stored generations and draw every castle once
-// per generation, so both pass the buffered response limit.
+// publicRoutes are the only routes the public Lambda host serves without
+// authentication. None reads game data. Add a route here only on purpose.
+// A route listed without a method allows every method, for static mounts.
+var publicRoutes = map[string]string{
+	"GET /healthz":            "readiness",
+	"POST /lobby/v1/sessions": "creates a guest credential",
+	"GET /map/templates":      "lists default map templates, which are not game data",
+	"POST /map/validate":      "checks a map file and stores nothing",
+	"GET /lobby/ui":           "redirect to the embedded lobby UI",
+	"/lobby/ui/*":             "embedded static lobby UI",
+	"/game/demo/*":            "embedded static browser demo",
+	"GET /map/builder":        "redirect to the embedded map builder",
+	"/map/builder/*":          "embedded static map builder",
+	"GET /docs":               "API documentation",
+	"GET /openapi.json":       "API document",
+	"GET /openapi.yaml":       "API document",
+	"GET /openapi-3.0.json":   "API document",
+	"GET /openapi-3.0.yaml":   "API document",
+	"GET /schemas/{schema}":   "API schemas",
+}
+
+// Every other route must refuse a request without credentials: no bearer
+// token, no admin key and no proxy secret.
+func TestTheLambdaHostServesOnlyListedRoutesWithoutAuthentication(t *testing.T) {
+	database := testutils.InitTestDB(t)
+	config := testConfig(t, database)
+	config.AdminAPIKey = "test-admin-api-key"
+	handler, err := newHandler(config, database, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	router, ok := handler.(chi.Routes)
+	if !ok {
+		t.Fatalf("handler %T is not a chi router", handler)
+	}
+	invoke := lambdaurl.Wrap(handler)
+	parameter := regexp.MustCompile(`\{[^}]+\}`)
+	guarded := 0
+	if err := chi.Walk(router, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		if _, public := publicRoutes[method+" "+route]; public {
+			return nil
+		}
+		if _, public := publicRoutes[route]; public {
+			return nil
+		}
+		path := parameter.ReplaceAllString(route, "00000000-0000-4000-8000-000000000001")
+		response, content := call(t, invoke, method, path, `{}`, "")
+		if response.StatusCode != http.StatusUnauthorized && response.StatusCode != http.StatusForbidden {
+			return fmt.Errorf("%s %s answered %d without credentials; protect it, or list it in publicRoutes if it is meant to be public: %.300s", method, route, response.StatusCode, content)
+		}
+		guarded++
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if guarded == 0 {
+		t.Fatal("found no authenticated routes")
+	}
+	if router.Match(chi.NewRouteContext(), http.MethodGet, "/game/1/graph") {
+		t.Fatal("the Lambda host serves the graph page")
+	}
+	if response, content := call(t, invoke, http.MethodPost, "/map/create", `{}`, ""); response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("map creation without the admin key=%d %s", response.StatusCode, content)
+	}
+
+	local, err := app.New(config, database, slog.New(slog.NewTextHandler(io.Discard, nil)), app.WithGameGraph())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !local.(chi.Routes).Match(chi.NewRouteContext(), http.MethodGet, "/game/1/graph") {
+		t.Fatal("the local server host's options don't serve the graph page")
+	}
+}
+
+// enlargeGame adds generations that share one map with many castles. The
+// replay is derived from the stored generations and draws every castle once
+// per generation, so it passes the buffered response limit.
 func enlargeGame(t *testing.T, database *gorm.DB, gameID uint) {
 	t.Helper()
 	const castleCount, generationCount = 1000, 140

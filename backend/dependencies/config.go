@@ -22,6 +22,7 @@ const (
 	CentrifugoAPIKeyEnv              = "ISLAND_BATTLES_CENTRIFUGO_API_KEY"
 	ConnectionTokenHMACSecretEnv     = "ISLAND_BATTLES_CONNECTION_TOKEN_HMAC_SECRET"
 	LobbyProxySecretEnv              = "ISLAND_BATTLES_LOBBY_PROXY_SECRET"
+	AdminAPIKeyEnv                   = "ISLAND_BATTLES_ADMIN_API_KEY"
 )
 
 // The pool defaults suit Lambda, where an instance serves one request at a
@@ -52,7 +53,8 @@ func DefaultDatabaseConfig(url string) DatabaseConfig {
 
 // Config contains the settings every host of the HTTP API needs. They must be
 // supplied explicitly by the deployment, except for the pool limits, which
-// have defaults. Values are loaded only by executables, never by package init.
+// have defaults, and the admin API key, without which admin operations refuse
+// every request. Values are loaded only by executables, never by package init.
 // The listen address belongs to the HTTP server host alone; see LoadHTTPAddr.
 type Config struct {
 	Database                  DatabaseConfig
@@ -61,6 +63,9 @@ type Config struct {
 	CentrifugoAPIKey          string
 	ConnectionTokenHMACSecret string
 	LobbyProxySecret          string
+	// AdminAPIKey authorizes admin operations such as POST /map/create. Empty
+	// disables them.
+	AdminAPIKey string
 }
 
 // LoadConfig reads and validates the HTTP API's environment values.
@@ -85,6 +90,7 @@ func LoadConfigFromLookup(lookup func(string) (string, bool)) (Config, error) {
 		CentrifugoAPIKey:          readEnvironment(lookup, CentrifugoAPIKeyEnv),
 		ConnectionTokenHMACSecret: readEnvironment(lookup, ConnectionTokenHMACSecretEnv),
 		LobbyProxySecret:          readEnvironment(lookup, LobbyProxySecretEnv),
+		AdminAPIKey:               readEnvironment(lookup, AdminAPIKeyEnv),
 	}
 	if err := validateURL(CentrifugoPublicURLEnv, config.CentrifugoPublicURL, "ws", "wss"); err != nil {
 		return Config{}, err

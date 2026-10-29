@@ -31,7 +31,7 @@ Requires Go 1.25+ and either Docker with Compose or Podman on Linux. Python 3.14
 
 The script creates `.env` from `.env.example` if needed, exports it, starts the dependencies, waits for PostgreSQL, runs the migrate command (`go run ./backend/cmd/migrate`), and runs the backend. The backend never changes the schema itself, locally or on [AWS Lambda](backend/README.md#hosts-and-deploys). Open **http://localhost:8888/lobby/ui/** in two fresh tabs to test the lobby with two players. No frontend build is required.
 
-PostgreSQL listens on port 5432, Centrifugo on 8000, and the backend on 8888. The native Podman path uses these local defaults, stores database data in the `island-battles-dev-postgres` volume, and disables the Centrifugo admin UI. `/healthz` reports HTTP readiness; Huma serves API documentation at `/docs`.
+PostgreSQL listens on port 5432, Centrifugo on 8000, and the backend on 8888. The native Podman path uses these local defaults, stores database data in the `island-battles-dev-postgres` volume, and disables the Centrifugo admin UI. `/healthz` reports HTTP readiness; Huma serves API documentation at `/docs`. Creating a default map with `POST /map/create` is for admins: send `ISLAND_BATTLES_ADMIN_API_KEY` from `.env` in the `X-Admin-API-Key` header (see [map files](backend/README.md#map-files)). The local backend also serves the development page `GET /game/{id}/graph`, which the public Lambda host leaves out.
 
 Ctrl+C stops the backend. Dependencies remain running for the next launch. Stop them with `docker compose stop` or, for native Podman, `podman stop island-battles-dev-db island-battles-dev-centrifugo`.
 

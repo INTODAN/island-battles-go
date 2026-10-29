@@ -29,5 +29,6 @@ app_secret_files:
   - "{{ deploy_secrets_dir }}/centrifugo_api_key"
   - "{{ deploy_secrets_dir }}/connection_token_hmac_secret"
   - "{{ deploy_secrets_dir }}/lobby_proxy_secret"
+  - "{{ deploy_secrets_dir }}/admin_api_key"
   - "{{ app_postgres_tls_dir }}/server.key"
   - "{{ app_postgres_tls_dir }}/server.crt"

@@ -1,4 +1,5 @@
 """Island Battles integration checks layered on the shared lobby acceptance suite."""
+import os
 import signal
 from uuid import uuid4
 
@@ -149,7 +150,10 @@ async def started_map(lobby_id):
 async def test_lobby_starts_on_a_chosen_default_map(guests):
     name = f"Strait {uuid4()}"
     async with httpx.AsyncClient(base_url=BASE) as client:
-        created = await client.post("/map/create", json=strait_map(name))
+        refused = await client.post("/map/create", json=strait_map(name))
+        assert refused.status_code == 401, refused.text
+        created = await client.post("/map/create", json=strait_map(name),
+                                    headers={"X-Admin-API-Key": os.environ["ISLAND_BATTLES_ADMIN_API_KEY"]})
         assert created.status_code == 200, created.text
         template_id = created.json()["map_template_id"]
         listed = (await client.get("/map/templates")).json()["maps"]
