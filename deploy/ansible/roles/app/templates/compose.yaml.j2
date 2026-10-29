@@ -22,6 +22,14 @@ services:
       - ssl_cert_file=/etc/island-battles/postgres/tls/server.crt
       - -c
       - ssl_key_file=/etc/island-battles/postgres/tls/server.key
+      # Close connections whose Lambda environment was frozen or killed
+      # within minutes, instead of the kernel's two hours.
+      - -c
+      - tcp_keepalives_idle={{ app_postgres_tcp_keepalives_idle }}
+      - -c
+      - tcp_keepalives_interval={{ app_postgres_tcp_keepalives_interval }}
+      - -c
+      - tcp_keepalives_count={{ app_postgres_tcp_keepalives_count }}
     env_file: db.env
     labels:
       # Recreates the container when a mounted file changes.
