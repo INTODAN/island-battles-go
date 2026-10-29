@@ -7,6 +7,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
@@ -102,7 +103,9 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	if err != nil {
 		return nil, err
 	}
-	proxy, err := realtime.NewProxy(authorizer, config.LobbyProxySecret)
+	// The proxy answers an outage with a bare 503, so its cause goes on the
+	// request's error line.
+	proxy, err := realtime.NewProxy(authorizer, config.LobbyProxySecret, realtime.WithErrorReporter(observability.RecordError))
 	if err != nil {
 		return nil, err
 	}
@@ -120,6 +123,8 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	router := chi.NewMux()
 	router.Use(observability.Requests(logger))
 	api := humachi.New(router, routes.NewAPIConfig("Island Battles Go Backend", "1.0.0"))
+	// Before any operation is registered, so every operation gets it.
+	api.UseMiddleware(observability.NameOperations)
 	environment := handlers.Env{DB: database}
 	routes.SetupRoutes(api, &environment, config.AdminAPIKey)
 	if config.AdminAPIKey == "" {
@@ -143,8 +148,13 @@ type annotatingAuthentication struct{ *auth.Service }
 
 func (authentication annotatingAuthentication) Authenticate(ctx context.Context, authorization string) (domain.SessionVerification, error) {
 	verified, err := authentication.Service.Authenticate(ctx, authorization)
-	if err == nil {
+	switch {
+	case err == nil:
 		observability.Annotate(ctx, slog.String("player_id", verified.Principal.PlayerID))
+	case !errors.Is(err, domain.ErrUnauthenticated):
+		// The lobby's authentication answers with its own problem, which
+		// leaves the cause out, such as an unreachable database.
+		observability.RecordError(ctx, err)
 	}
 	return verified, err
 }

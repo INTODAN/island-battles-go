@@ -313,15 +313,23 @@ func TestRequestsEndBeforeTheLambdaTimeout(t *testing.T) {
 
 // A request that fails writes one ERROR line, which the error alarm counts,
 // with its operation and the cause that its response leaves out.
+// That covers the answers that leave Huma's transformers out: the lobby's
+// authentication writes its own problem, and the Centrifugo proxy its own 503.
 func TestAFailedRequestLogsOneErrorLineWithItsCause(t *testing.T) {
 	database := testutils.InitTestDB(t)
 	var output bytes.Buffer
 	logger, _ := observability.NewLambdaLogger(&output, observability.DefaultSettings())
-	handler, err := newHandler(testConfig(t, database), database, logger)
+	config := testConfig(t, database)
+	handler, err := newHandler(config, database, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
-	output.Reset()
+	invoke := lambdaurl.Wrap(handler)
+	response, content := call(t, invoke, http.MethodPost, "/lobby/v1/sessions", `{"display_name":"Alice"}`, "")
+	var alice domain.GuestSession
+	if err := json.Unmarshal(content, &alice); response.StatusCode != http.StatusCreated || err != nil {
+		t.Fatalf("create session=%d %s", response.StatusCode, content)
+	}
 	sqlDatabase, err := database.DB()
 	if err != nil {
 		t.Fatal(err)
@@ -329,25 +337,59 @@ func TestAFailedRequestLogsOneErrorLineWithItsCause(t *testing.T) {
 	if err := sqlDatabase.Close(); err != nil {
 		t.Fatal(err)
 	}
-	response, content := call(t, lambdaurl.Wrap(handler), http.MethodPost, "/lobby/v1/sessions", `{"display_name":"Alice"}`, "")
-	if response.StatusCode < http.StatusInternalServerError || strings.Contains(string(content), "closed") {
-		t.Fatalf("create session=%d %s", response.StatusCode, content)
-	}
-	var errorLines []map[string]any
-	for _, text := range strings.Split(strings.TrimSpace(output.String()), "\n") {
-		var line map[string]any
-		if err := json.Unmarshal([]byte(text), &line); err != nil {
-			t.Fatalf("log line is not JSON: %q", text)
+	proxyRequest := func(t *testing.T) *events.LambdaFunctionURLStreamingResponse {
+		path := "/internal/lobby/centrifugo/subscribe"
+		response, err := invoke(context.Background(), &events.LambdaFunctionURLRequest{
+			RawPath: path,
+			Headers: map[string]string{"content-type": "application/json", "x-lobby-proxy-secret": config.LobbyProxySecret},
+			Body:    `{"client":"client","user":"` + alice.PlayerID + `","channel":"player:` + alice.PlayerID + `"}`,
+			RequestContext: events.LambdaFunctionURLRequestContext{
+				DomainName: "example.lambda-url.eu-west-1.on.aws",
+				HTTP:       events.LambdaFunctionURLRequestContextHTTPDescription{Method: http.MethodPost, Path: path},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
-		// The lobby retention pass that ends the request fails too, and logs
-		// its own line.
-		if line["level"] == "ERROR" && line["msg"] != "Lobby retention pass failed" {
-			errorLines = append(errorLines, line)
-		}
+		_, _ = io.ReadAll(response.Body)
+		return response
 	}
-	if len(errorLines) != 1 || errorLines[0]["operation"] == nil || errorLines[0]["route"] != "/lobby/v1/sessions" ||
-		!strings.Contains(fmt.Sprint(errorLines[0]["errors"]), "database is closed") {
-		t.Fatalf("error lines = %v\nall output: %s", errorLines, output.String())
+	for _, test := range []struct {
+		name, route, operation string
+		send                   func(*testing.T) *events.LambdaFunctionURLStreamingResponse
+	}{
+		{"a Huma operation", "/lobby/v1/sessions", "createLobbySession", func(t *testing.T) *events.LambdaFunctionURLStreamingResponse {
+			response, _ := call(t, invoke, http.MethodPost, "/lobby/v1/sessions", `{"display_name":"Bob"}`, "")
+			return response
+		}},
+		{"the lobby's authentication", "/lobby/v1/lobbies", "createLobby", func(t *testing.T) *events.LambdaFunctionURLStreamingResponse {
+			response, _ := call(t, invoke, http.MethodPost, "/lobby/v1/lobbies", `{}`, "Bearer "+alice.AccessToken)
+			return response
+		}},
+		{"the Centrifugo proxy", "/internal/lobby/centrifugo/subscribe", "", proxyRequest},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			output.Reset()
+			if response := test.send(t); response.StatusCode < http.StatusInternalServerError {
+				t.Fatalf("status=%d", response.StatusCode)
+			}
+			var errorLines []map[string]any
+			for _, text := range strings.Split(strings.TrimSpace(output.String()), "\n") {
+				var line map[string]any
+				if err := json.Unmarshal([]byte(text), &line); err != nil {
+					t.Fatalf("log line is not JSON: %q", text)
+				}
+				// The lobby retention pass that ends a lobby request fails too,
+				// and logs its own line.
+				if line["level"] == "ERROR" && line["msg"] != "Lobby retention pass failed" {
+					errorLines = append(errorLines, line)
+				}
+			}
+			if len(errorLines) != 1 || errorLines[0]["route"] != test.route || !strings.Contains(fmt.Sprint(errorLines[0]["errors"]), "database is closed") ||
+				test.operation != "" && errorLines[0]["operation"] != test.operation {
+				t.Fatalf("error lines = %v\nall output: %s", errorLines, output.String())
+			}
+		})
 	}
 }
 

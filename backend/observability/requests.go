@@ -88,16 +88,28 @@ func (current *request) addError(message string) {
 	current.errors = append(current.errors, message)
 }
 
-// RecordProblems is a Huma transformer. It names the request's operation, and
-// records each 5xx problem with its cause, which a response may leave out.
+// NameOperations is a Huma API middleware that names each request's
+// operation on its error line. Register it on the API before any operation,
+// so that it runs before group middlewares such as authentication, which may
+// answer without calling the handler.
+func NameOperations(ctx huma.Context, next func(huma.Context)) {
+	if current, ok := ctx.Context().Value(requestKey{}).(*request); ok {
+		current.mutex.Lock()
+		current.operation = ctx.Operation().OperationID
+		current.mutex.Unlock()
+	}
+	next(ctx)
+}
+
+// RecordProblems is a Huma transformer. It records each 5xx problem with its
+// cause, which a response may leave out. Middlewares that write their own
+// problems, such as the lobby's authentication, skip it; their callers record
+// the cause with RecordError.
 func RecordProblems(ctx huma.Context, status string, value any) (any, error) {
 	current, ok := ctx.Context().Value(requestKey{}).(*request)
 	if !ok {
 		return value, nil
 	}
-	current.mutex.Lock()
-	current.operation = ctx.Operation().OperationID
-	current.mutex.Unlock()
 	code, err := strconv.Atoi(status)
 	problem, isError := value.(error)
 	if err != nil || code < http.StatusInternalServerError || !isError {

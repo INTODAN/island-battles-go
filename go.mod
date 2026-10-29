@@ -107,6 +107,7 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.45.0
 	go.opentelemetry.io/otel/sdk v1.45.0
 	go.opentelemetry.io/otel/trace v1.45.0
+	go.uber.org/goleak v1.3.0
 	gorm.io/plugin/opentelemetry v0.1.16
 	islandBattles/lobby v0.0.0
 )

@@ -65,7 +65,8 @@ func main() {
 
 // build runs once per cold start. The pool stays open for the instance's
 // lifetime, so warm invocations reuse its connections.
-func build(ctx context.Context, settings observability.Settings, logger *slog.Logger) (http.Handler, error) {
+// A failed attempt closes its pool, so the retries don't pile up connections.
+func build(ctx context.Context, settings observability.Settings, logger *slog.Logger) (_ http.Handler, err error) {
 	config, err := dependencies.LoadConfig()
 	if err != nil {
 		return nil, err
@@ -74,6 +75,14 @@ func build(ctx context.Context, settings observability.Settings, logger *slog.Lo
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if err == nil {
+			return
+		}
+		if sqlDatabase, poolError := database.DB(); poolError == nil {
+			_ = sqlDatabase.Close()
+		}
+	}()
 	handler, err := newHandler(config, database, logger)
 	if err != nil {
 		return nil, err

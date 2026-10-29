@@ -336,6 +336,16 @@ run "turns_tracing_off_without_a_collector_layer" {
   }
 }
 
+run "requires_a_timeout_over_the_deadline_margin" {
+  command = plan
+
+  variables {
+    lambda_timeout_seconds = 2
+  }
+
+  expect_failures = [var.lambda_timeout_seconds]
+}
+
 run "requires_an_alert_email" {
   command = plan
 

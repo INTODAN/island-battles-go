@@ -75,7 +75,8 @@ resource "aws_cloudwatch_log_group" "backend" {
 }
 
 # Counts the error lines: the backend's, and the collector's, which log in
-# lower case. It is 1 of the 10 free custom metrics. It has no dimensions,
+# lower case if Lambda lets them through at all (deploy/README.md). It is 1
+# of the 10 free custom metrics. It has no dimensions,
 # because each dimension value would be another metric.
 resource "aws_cloudwatch_log_metric_filter" "errors" {
   name           = "${var.name}-errors"

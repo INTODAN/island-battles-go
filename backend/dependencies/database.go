@@ -18,6 +18,10 @@ import (
 // SlowQueryThreshold is how long a query may take before it is logged as slow.
 const SlowQueryThreshold = 200 * time.Millisecond
 
+// ConnectTimeout bounds InitDB's first connection, well under Lambda's
+// 10-second limit on a cold start's init.
+const ConnectTimeout = 5 * time.Second
+
 // InitDB connects to the database with a bounded pool. It runs no DDL, so a
 // Lambda cold start stays fast and concurrent starts don't race; the schema
 // comes from MigrateSchema, which runs once per deploy. It returns errors to
@@ -38,12 +42,11 @@ func InitDB(config DatabaseConfig, logger *slog.Logger) (*gorm.DB, error) {
 		IgnoreRecordNotFoundError: true,
 		ParameterizedQueries:      true,
 	})
-	db, err := gorm.Open(postgres.Open(config.URL), &gorm.Config{Logger: queryLogger})
+	// GORM's own ping has no timeout, which could hold a Lambda cold start
+	// past Lambda's 10-second limit on init.
+	db, err := gorm.Open(postgres.Open(config.URL), &gorm.Config{Logger: queryLogger, DisableAutomaticPing: true})
 	if err != nil {
 		return nil, fmt.Errorf("connect database: %w", err)
-	}
-	if err := db.Use(gormtracing.NewPlugin(gormtracing.WithoutMetrics(), gormtracing.WithoutQueryVariables())); err != nil {
-		return nil, fmt.Errorf("trace database queries: %w", err)
 	}
 	sqlDatabase, err := db.DB()
 	if err != nil {
@@ -52,6 +55,16 @@ func InitDB(config DatabaseConfig, logger *slog.Logger) (*gorm.DB, error) {
 	sqlDatabase.SetMaxOpenConns(config.MaxOpenConnections)
 	sqlDatabase.SetMaxIdleConns(config.MaxIdleConnections)
 	sqlDatabase.SetConnMaxIdleTime(config.ConnectionMaxIdleTime)
+	ctx, cancel := context.WithTimeout(context.Background(), ConnectTimeout)
+	defer cancel()
+	if err := sqlDatabase.PingContext(ctx); err != nil {
+		_ = sqlDatabase.Close()
+		return nil, fmt.Errorf("connect database: %w", err)
+	}
+	if err := db.Use(gormtracing.NewPlugin(gormtracing.WithoutMetrics(), gormtracing.WithoutQueryVariables())); err != nil {
+		_ = sqlDatabase.Close()
+		return nil, fmt.Errorf("trace database queries: %w", err)
+	}
 	return db, nil
 }
 

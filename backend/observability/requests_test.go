@@ -20,6 +20,7 @@ import (
 	"go.opentelemetry.io/otel"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace/noop"
+	"go.uber.org/goleak"
 )
 
 // causedProblem is a problem that keeps its cause out of the response, like
@@ -36,6 +37,7 @@ func newTestRouter(logger *slog.Logger) http.Handler {
 	config := huma.DefaultConfig("test", "1.0.0")
 	config.Transformers = append(config.Transformers, RecordProblems)
 	api := humachi.New(router, config)
+	api.UseMiddleware(NameOperations)
 	huma.Register(api, huma.Operation{OperationID: "startLobby", Method: http.MethodPost, Path: "/lobbies/{lobby_id}/start"}, func(ctx context.Context, input *struct {
 		LobbyID string `path:"lobby_id"`
 	}) (*struct{}, error) {
@@ -148,6 +150,46 @@ func (collector *otlpCollector) received() []byte {
 	collector.mutex.Lock()
 	defer collector.mutex.Unlock()
 	return bytes.Join(collector.payloads, nil)
+}
+
+// Nothing runs between requests (#28): a traced request exports its spans
+// itself and leaves no goroutine behind, no batch processor, timer or
+// kept-alive connection to the collector, which a frozen Lambda instance
+// would stop mid-export.
+func TestATracedRequestLeavesNoGoroutineBehind(t *testing.T) {
+	collector := &otlpCollector{}
+	collectorServer := httptest.NewServer(collector)
+	defer collectorServer.Close()
+	t.Setenv(EndpointEnv, collectorServer.URL)
+	t.Cleanup(func() { otel.SetTracerProvider(noop.NewTracerProvider()) })
+	// The test server's own goroutines were there before tracing started.
+	ignore := goleak.IgnoreCurrent()
+	lookup := func(name string) (string, bool) { return collectorServer.URL, name == EndpointEnv }
+	tracing, err := StartTracing(context.Background(), lookup, "test", sdktrace.AlwaysSample())
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := chi.NewMux()
+	router.Use(Requests(slog.New(slog.DiscardHandler)))
+	router.Get("/lobbies/{lobby_id}", func(response http.ResponseWriter, request *http.Request) {
+		_, query := otel.Tracer("test").Start(request.Context(), "query")
+		query.End()
+		response.WriteHeader(http.StatusNoContent)
+	})
+	for range 3 {
+		if response := serve(tracing.Handler(router), http.MethodGet, "/lobbies/lobby-1"); response.Code != http.StatusNoContent {
+			t.Fatalf("read=%d", response.Code)
+		}
+	}
+	if !bytes.Contains(collector.received(), []byte("GET /lobbies/{lobby_id}")) {
+		t.Fatal("the collector didn't receive the request's span")
+	}
+	if err := goleak.Find(ignore); err != nil {
+		t.Fatalf("goroutines outlived the requests: %v", err)
+	}
+	if err := tracing.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // A sampled request's spans, its own and its Centrifugo call's, reach the

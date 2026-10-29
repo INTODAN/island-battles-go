@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -164,6 +165,30 @@ func TestInitDBLogsFailedAndSlowQueriesThroughSlog(t *testing.T) {
 	}
 	if strings.Contains(output.String(), "secret-value") {
 		t.Fatalf("query values were logged: %s", output.String())
+	}
+}
+
+// A database that accepts the connection and never answers must not hold a
+// Lambda cold start past Lambda's 10 seconds for init.
+func TestInitDBGivesUpOnADatabaseThatNeverAnswers(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = listener.Close() }()
+	go func() {
+		for {
+			connection, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			t.Cleanup(func() { _ = connection.Close() })
+		}
+	}()
+	start := time.Now()
+	_, err = dependencies.InitDB(dependencies.DefaultDatabaseConfig("postgres://user:password@"+listener.Addr().String()+"/island_battles?sslmode=disable"), slog.New(slog.DiscardHandler))
+	if elapsed := time.Since(start); err == nil || elapsed > dependencies.ConnectTimeout+2*time.Second {
+		t.Fatalf("InitDB() = %v after %s", err, elapsed)
 	}
 }
 

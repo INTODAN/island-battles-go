@@ -2,10 +2,10 @@ package observability
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -31,35 +31,44 @@ const (
 	XRayTraceIDKey = "xray_trace_id"
 )
 
+// exportTimeout bounds one export to the collector.
+const exportTimeout = 2 * time.Second
+
 // Tracing sends spans to an OTLP endpoint. The zero value, or nil, is off.
 type Tracing struct {
 	provider *sdktrace.TracerProvider
-	pending  *pendingSpans
+	spans    *requestSpans
 }
 
 // StartTracing sets the global tracer provider when EndpointEnv is set. Spans
-// that the sampler keeps are batched and exported by Flush. Nothing reads
-// trace headers from requests or adds them to outgoing calls, so callers on
-// the internet can't make the backend record a trace.
+// that the sampler keeps wait in memory until Flush exports them, inline.
+// Nothing runs between requests: no batch processor goroutine, no timer, and
+// no kept-alive connection to the collector, because a Lambda instance may
+// freeze or end once a request returns. Nothing reads trace headers from
+// requests or adds them to outgoing calls, so callers on the internet can't
+// make the backend record a trace.
 func StartTracing(ctx context.Context, lookup func(string) (string, bool), service string, sampler sdktrace.Sampler) (*Tracing, error) {
 	if read(lookup, EndpointEnv) == "" {
 		return &Tracing{}, nil
 	}
-	exporter, err := otlptracehttp.New(ctx)
+	exporter, err := otlptracehttp.New(ctx,
+		otlptracehttp.WithHTTPClient(&http.Client{Transport: &http.Transport{DisableKeepAlives: true}, Timeout: exportTimeout}),
+		// One attempt: a retry would wait with backoff inside a request.
+		otlptracehttp.WithRetry(otlptracehttp.RetryConfig{Enabled: false}),
+	)
 	if err != nil {
 		return nil, err
 	}
-	pending := &pendingSpans{}
+	spans := &requestSpans{exporter: exporter}
 	provider := sdktrace.NewTracerProvider(
 		sdktrace.WithSampler(sampler),
-		sdktrace.WithSpanProcessor(pending),
-		sdktrace.WithBatcher(exporter),
+		sdktrace.WithSpanProcessor(spans),
 		sdktrace.WithResource(resource.NewSchemaless(semconv.ServiceName(service))),
 	)
 	otel.SetTracerProvider(provider)
 	// An empty composite reads and writes no headers.
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator())
-	return &Tracing{provider: provider, pending: pending}, nil
+	return &Tracing{provider: provider, spans: spans}, nil
 }
 
 // Enabled reports whether spans are exported.
@@ -80,14 +89,15 @@ func (tracing *Tracing) Handler(next http.Handler) http.Handler {
 	})
 }
 
-// Flush exports the spans recorded since the last flush, if there are any.
+// Flush exports the spans recorded since the last flush, if there are any,
+// before it returns.
 func (tracing *Tracing) Flush(ctx context.Context) {
-	if !tracing.Enabled() || !tracing.pending.take() {
+	if !tracing.Enabled() {
 		return
 	}
-	flushContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	flushContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), exportTimeout)
 	defer cancel()
-	if err := tracing.provider.ForceFlush(flushContext); err != nil {
+	if err := tracing.spans.ForceFlush(flushContext); err != nil {
 		slog.WarnContext(ctx, "Spans could not be exported", "error", err)
 	}
 }
@@ -108,15 +118,46 @@ func HTTPTransport(base http.RoundTripper, name string) http.RoundTripper {
 	}))
 }
 
-// pendingSpans remembers whether a sampled span ended since the last flush,
-// so that requests without one skip the flush.
-type pendingSpans struct{ ended atomic.Bool }
+// maxPendingSpans bounds the spans that wait for a flush. A trace with more,
+// such as a request with thousands of queries, loses the rest.
+const maxPendingSpans = 2048
 
-func (pending *pendingSpans) OnStart(context.Context, sdktrace.ReadWriteSpan) {}
-func (pending *pendingSpans) OnEnd(sdktrace.ReadOnlySpan)                     { pending.ended.Store(true) }
-func (pending *pendingSpans) Shutdown(context.Context) error                  { return nil }
-func (pending *pendingSpans) ForceFlush(context.Context) error                { return nil }
-func (pending *pendingSpans) take() bool                                      { return pending.ended.Swap(false) }
+// requestSpans keeps the sampled spans that ended and exports them, in the
+// caller's goroutine, when the request flushes. Requests without any skip the
+// export.
+type requestSpans struct {
+	exporter sdktrace.SpanExporter
+	mutex    sync.Mutex
+	ended    []sdktrace.ReadOnlySpan
+}
+
+func (spans *requestSpans) OnStart(context.Context, sdktrace.ReadWriteSpan) {}
+
+func (spans *requestSpans) OnEnd(span sdktrace.ReadOnlySpan) {
+	if !span.SpanContext().IsSampled() {
+		return
+	}
+	spans.mutex.Lock()
+	defer spans.mutex.Unlock()
+	if len(spans.ended) < maxPendingSpans {
+		spans.ended = append(spans.ended, span)
+	}
+}
+
+func (spans *requestSpans) ForceFlush(ctx context.Context) error {
+	spans.mutex.Lock()
+	ended := spans.ended
+	spans.ended = nil
+	spans.mutex.Unlock()
+	if len(ended) == 0 {
+		return nil
+	}
+	return spans.exporter.ExportSpans(ctx, ended)
+}
+
+func (spans *requestSpans) Shutdown(ctx context.Context) error {
+	return errors.Join(spans.ForceFlush(ctx), spans.exporter.Shutdown(ctx))
+}
 
 // IntervalSampler starts at most one new trace every interval, and the first
 // one an interval after it is made. Spans inside a trace follow their local

@@ -101,9 +101,14 @@ variable "lambda_memory_mb" {
 }
 
 variable "lambda_timeout_seconds" {
-  description = "How long one request may run."
+  description = "How long one request may run. The backend ends a request's work 2 seconds before it (backend/cmd/lambda), so a timeout doesn't reset the instance."
   type        = number
   default     = 30
+
+  validation {
+    condition     = var.lambda_timeout_seconds > 2
+    error_message = "lambda_timeout_seconds must be more than the backend's 2-second deadline margin."
+  }
 }
 
 variable "reserved_concurrency" {
