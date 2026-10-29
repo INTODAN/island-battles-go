@@ -1,6 +1,8 @@
 package dal
 
 import (
+	"errors"
+	"fmt"
 	"time"
 
 	"islandBattles/backend/models"
@@ -83,68 +85,97 @@ type GamePurge struct {
 	Games int
 }
 
-// PurgeRetiredGames deletes, in one transaction, up to limit generations of
-// retired games, children first for the foreign keys. Then it deletes the
-// retired games it found with no generations left. Rows are removed for real,
-// never soft-deleted. Map templates are never touched: a game's maps are
-// copies of them.
-func PurgeRetiredGames(database *gorm.DB, limit int) (GamePurge, error) {
+// PurgeRetiredGames deletes up to generationLimit generations of at most
+// gameLimit retired games, lowest game IDs first, children first for the
+// foreign keys, and then each retired game it empties. Every game is purged
+// in its own transaction of about 15 statements, which gameLimit bounds. A game whose
+// purge fails is rolled back and left for a later pass, and the others carry
+// on, so one broken game never stops the rest. The error joins every failure,
+// and the counts include only the games that committed. Rows are removed for
+// real, never soft-deleted. Map templates are never touched: a game's maps
+// are copies of them.
+func PurgeRetiredGames(database *gorm.DB, generationLimit, gameLimit int) (GamePurge, error) {
+	var games []models.Game
+	if err := database.Unscoped().Select("ID").Where(clause.Neq{Column: deletedAtColumn, Value: nil}).
+		Order(clause.OrderByColumn{Column: idColumn}).Limit(gameLimit).Find(&games).Error; err != nil {
+		return GamePurge{}, err
+	}
 	var purge GamePurge
-	err := database.Transaction(func(transaction *gorm.DB) error {
+	var failures []error
+	for _, game := range games {
+		budget := generationLimit - purge.Generations
+		if budget == 0 {
+			break
+		}
+		generations, deleted, err := purgeRetiredGame(database, game.ID, budget)
+		if err != nil {
+			failures = append(failures, fmt.Errorf("purge retired game %d: %w", game.ID, err))
+			continue
+		}
+		purge.Generations += generations
+		if deleted {
+			purge.Games++
+		}
+	}
+	return purge, errors.Join(failures...)
+}
+
+// purgeRetiredGame deletes up to limit generations of one retired game, and
+// the game itself once it has none left. It skips a game that another pass
+// has locked, so passes on several hosts take different games.
+func purgeRetiredGame(database *gorm.DB, gameID uint, limit int) (generations int, deleted bool, err error) {
+	err = database.Transaction(func(transaction *gorm.DB) error {
 		// The session keeps Unscoped for every statement without carrying
 		// one statement's conditions into the next.
 		unscoped := transaction.Unscoped().Session(&gorm.Session{})
-		// Locking the retired games lets passes on other hosts take other games.
 		var games []models.Game
-		if err := unscoped.Select("ID").Where(clause.Neq{Column: deletedAtColumn, Value: nil}).
-			Order(clause.OrderByColumn{Column: idColumn}).Limit(limit).Clauses(skipLockedGames).
-			Find(&games).Error; err != nil {
+		if err := unscoped.Select("ID").Where(clause.Eq{Column: idColumn, Value: gameID}, clause.Neq{Column: deletedAtColumn, Value: nil}).
+			Limit(1).Clauses(skipLockedGames).Find(&games).Error; err != nil {
 			return err
 		}
 		if len(games) == 0 {
 			return nil
 		}
-		inGames := clause.IN{Column: gameIDColumn, Values: gameIDs(games)}
-		var generations []models.Generation
-		if err := unscoped.Select("ID", "MapID").Where(inGames).
-			Order(clause.OrderByColumn{Column: idColumn}).Limit(limit).Find(&generations).Error; err != nil {
+		inGame := clause.Eq{Column: gameIDColumn, Value: gameID}
+		var batch []models.Generation
+		if err := unscoped.Select("ID", "MapID").Where(inGame).
+			Order(clause.OrderByColumn{Column: idColumn}).Limit(limit).Find(&batch).Error; err != nil {
 			return err
 		}
-		if err := deleteGenerations(unscoped, inGames, generations); err != nil {
+		if err := deleteGenerations(unscoped, inGame, batch); err != nil {
 			return err
 		}
-		purge.Generations = len(generations)
-		var remaining []uint
-		if err := unscoped.Model(&models.Generation{}).Distinct("game_id").Where(inGames).Pluck("game_id", &remaining).Error; err != nil {
-			return err
-		}
-		emptyGames := make([]any, 0, len(games))
-		for _, game := range games {
-			if !containsID(remaining, game.ID) {
-				emptyGames = append(emptyGames, game.ID)
+		generations = len(batch)
+		// A batch that isn't full took every generation that was left.
+		if len(batch) == limit {
+			var remaining []models.Generation
+			if err := unscoped.Select("ID").Where(inGame).Limit(1).Find(&remaining).Error; err != nil {
+				return err
+			}
+			if len(remaining) > 0 {
+				return nil
 			}
 		}
-		if len(emptyGames) == 0 {
-			return nil
-		}
-		inEmptyGames := clause.IN{Column: gameIDColumn, Values: emptyGames}
 		for _, child := range []any{&models.GenerationRequest{}, &models.FrozenGamePlayer{}, &models.TeamBindingRecord{}} {
-			if err := unscoped.Where(inEmptyGames).Delete(child).Error; err != nil {
+			if err := unscoped.Where(inGame).Delete(child).Error; err != nil {
 				return err
 			}
 		}
-		result := unscoped.Where(clause.IN{Column: idColumn, Values: emptyGames}).Delete(&models.Game{})
-		purge.Games = int(result.RowsAffected)
+		result := unscoped.Where(clause.Eq{Column: idColumn, Value: gameID}).Delete(&models.Game{})
+		deleted = result.RowsAffected == 1
 		return result.Error
 	})
-	return purge, err
+	if err != nil {
+		return 0, false, err
+	}
+	return generations, deleted, nil
 }
 
-// deleteGenerations deletes generations of the games inGames matches, with
+// deleteGenerations deletes generations of the game inGame matches, with
 // everything that references them, and then their maps and castles. A
 // generation's soldier groups reference only its own map's castles, and every
 // generation has a map of its own.
-func deleteGenerations(unscoped *gorm.DB, inGames clause.Expression, generations []models.Generation) error {
+func deleteGenerations(unscoped *gorm.DB, inGame clause.Expression, generations []models.Generation) error {
 	if len(generations) == 0 {
 		return nil
 	}
@@ -156,7 +187,7 @@ func deleteGenerations(unscoped *gorm.DB, inGames clause.Expression, generations
 	}
 	inGenerations := clause.IN{Column: clause.Column{Name: "generation_id"}, Values: generationIDs}
 	// Requests are keyed by game first, which their primary key indexes.
-	if err := unscoped.Where(inGames, inGenerations).Delete(&models.GenerationRequest{}).Error; err != nil {
+	if err := unscoped.Where(inGame, inGenerations).Delete(&models.GenerationRequest{}).Error; err != nil {
 		return err
 	}
 	for _, child := range []any{&models.GenerationInput{}, &models.Command{}, &models.SoldierGroup{}} {
@@ -179,13 +210,4 @@ func gameIDs(games []models.Game) []any {
 		ids[index] = game.ID
 	}
 	return ids
-}
-
-func containsID(ids []uint, id uint) bool {
-	for _, candidate := range ids {
-		if candidate == id {
-			return true
-		}
-	}
-	return false
 }

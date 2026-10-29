@@ -154,7 +154,12 @@ func BuildGraphForGeneration(generation *models.Generation, index int, totalGens
 func GetGameGraph(db *gorm.DB, gameID uint) (string, error) {
 	game, err := dal.GetGameByID(db, gameID)
 	if err != nil {
-		return "", fmt.Errorf("game not found: %w", err)
+		return "", fmt.Errorf("load game %d: %w", gameID, err)
+	}
+	// Retention retires a game before deleting it, so a retired game is
+	// missing too.
+	if game == nil {
+		return "", fmt.Errorf("game %d: %w", gameID, gorm.ErrRecordNotFound)
 	}
 
 	totalGens := len(game.Generations)

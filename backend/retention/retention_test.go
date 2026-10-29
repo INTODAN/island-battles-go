@@ -21,7 +21,10 @@ type recordingStore struct {
 	limits  []int
 	retired int
 	purge   dal.GamePurge
-	err     error
+	// err fails retiring, and purgeErr fails purging.
+	err      error
+	purgeErr error
+	purges   int
 	// block, when set, holds every pass until it is closed.
 	block   chan struct{}
 	entered chan struct{}
@@ -45,11 +48,12 @@ func (store *recordingStore) RetireExpiredGames(ctx context.Context, before time
 	return store.retired, store.err
 }
 
-func (store *recordingStore) PurgeRetiredGames(_ context.Context, limit int) (dal.GamePurge, error) {
+func (store *recordingStore) PurgeRetiredGames(_ context.Context, generationLimit, gameLimit int) (dal.GamePurge, error) {
 	store.mutex.Lock()
 	defer store.mutex.Unlock()
-	store.limits = append(store.limits, limit)
-	return store.purge, store.err
+	store.limits = append(store.limits, generationLimit, gameLimit)
+	store.purges++
+	return store.purge, store.purgeErr
 }
 
 func (store *recordingStore) passCount() int {
@@ -106,8 +110,8 @@ func TestPassesRunAtMostOncePerIntervalWithoutBacklog(t *testing.T) {
 	if store.passCount() != 1 || !store.befores[0].Equal(clock.now.Add(-retention.DefaultPeriod)) {
 		t.Fatalf("passes=%d befores=%v, want one pass with a cutoff 7 days ago", store.passCount(), store.befores)
 	}
-	if store.limits[0] != 10 || store.limits[1] != 10 {
-		t.Fatalf("limits = %v, want the batch size for both steps", store.limits)
+	if store.limits[0] != 10 || store.limits[1] != 10 || store.limits[2] != retention.MaxPurgedGames {
+		t.Fatalf("limits = %v, want the batch size for both steps, from at most %d games", store.limits, retention.MaxPurgedGames)
 	}
 	clock.now = clock.now.Add(59 * time.Second)
 	runner.RunIfDue(context.Background())
@@ -125,7 +129,7 @@ func TestAFullBatchMakesTheNextRequestRunAnotherPass(t *testing.T) {
 	for name, store := range map[string]*recordingStore{
 		"retired a full batch":            {retired: 10},
 		"deleted a full generation batch": {purge: dal.GamePurge{Generations: 10}},
-		"deleted a full game batch":       {purge: dal.GamePurge{Generations: 3, Games: 10}},
+		"deleted from the most games":     {purge: dal.GamePurge{Generations: 3, Games: retention.MaxPurgedGames}},
 	} {
 		clock := &fakeClock{now: time.Now()}
 		runner := newRetention(t, store, clock)
@@ -135,7 +139,7 @@ func TestAFullBatchMakesTheNextRequestRunAnotherPass(t *testing.T) {
 			t.Errorf("%s: passes=%d, want the second request to continue the backlog", name, store.passCount())
 		}
 	}
-	partial := &recordingStore{retired: 9, purge: dal.GamePurge{Generations: 9, Games: 2}}
+	partial := &recordingStore{retired: 9, purge: dal.GamePurge{Generations: 9, Games: retention.MaxPurgedGames - 1}}
 	runner := newRetention(t, partial, &fakeClock{now: time.Now()})
 	runner.RunIfDue(context.Background())
 	runner.RunIfDue(context.Background())
@@ -151,6 +155,21 @@ func TestAFailedPassWaitsForTheInterval(t *testing.T) {
 	runner.RunIfDue(context.Background())
 	if store.passCount() != 1 {
 		t.Fatalf("passes=%d, want a failed pass not to be retried at once", store.passCount())
+	}
+}
+
+func TestAFailingStepDoesNotStopTheOther(t *testing.T) {
+	retireFails := &recordingStore{err: errors.New("retire failed"), purge: dal.GamePurge{Generations: 4, Games: 1}}
+	runner := newRetention(t, retireFails, &fakeClock{now: time.Now()})
+	result, err := runner.Pass(context.Background(), time.Now())
+	if err == nil || retireFails.purges != 1 || result.Generations != 4 || result.Games != 1 {
+		t.Fatalf("result=%+v error=%v purges=%d, want retired games purged although retiring failed", result, err, retireFails.purges)
+	}
+	purgeFails := &recordingStore{retired: 3, purge: dal.GamePurge{Generations: 2}, purgeErr: errors.New("purge failed for one game")}
+	runner = newRetention(t, purgeFails, &fakeClock{now: time.Now()})
+	result, err = runner.Pass(context.Background(), time.Now())
+	if err == nil || result.RetiredGames != 3 || result.Generations != 2 {
+		t.Fatalf("result=%+v error=%v, want the retired games and the other games' purge counted", result, err)
 	}
 }
 

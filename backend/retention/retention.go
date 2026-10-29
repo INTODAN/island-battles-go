@@ -8,6 +8,7 @@ package retention
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -24,7 +25,8 @@ type Policy struct {
 	// treated alike, since an abandoned game never gets an outcome.
 	Period time.Duration
 	// BatchSize bounds both the games one pass retires and the generations
-	// it deletes. A generation is deleted with its map, castles, soldier
+	// it deletes, from at most MaxPurgedGames games. A generation is deleted
+	// with its map, castles, soldier
 	// groups, commands, player inputs and requests, so this bounds the rows
 	// one transaction deletes by BatchSize generations' worth.
 	BatchSize int
@@ -40,8 +42,9 @@ const DefaultPeriod = 7 * 24 * time.Hour
 const MaxBatchSize = 100
 
 // DefaultPolicy keeps games for DefaultPeriod. A pass retires at most 10
-// games and deletes at most 10 generations, at most once a minute per
-// process unless the previous pass found more to delete.
+// games and deletes at most 10 generations from at most MaxPurgedGames games,
+// at most once a minute per process unless the previous pass found more to
+// delete.
 func DefaultPolicy() Policy {
 	return Policy{Period: DefaultPeriod, BatchSize: 10, PassInterval: time.Minute}
 }
@@ -69,9 +72,9 @@ type Store interface {
 	// RetireExpiredGames hides up to limit games with no generation since
 	// before, skipping games that a request has locked.
 	RetireExpiredGames(ctx context.Context, before time.Time, limit int) (int, error)
-	// PurgeRetiredGames deletes up to limit generations of retired games,
-	// and the retired games left with none.
-	PurgeRetiredGames(ctx context.Context, limit int) (dal.GamePurge, error)
+	// PurgeRetiredGames deletes up to generationLimit generations of at most
+	// gameLimit retired games, and the retired games left with none.
+	PurgeRetiredGames(ctx context.Context, generationLimit, gameLimit int) (dal.GamePurge, error)
 }
 
 // DatabaseStore runs the game's retention queries in dal.
@@ -83,9 +86,14 @@ func (store DatabaseStore) RetireExpiredGames(ctx context.Context, before time.T
 	return dal.RetireExpiredGames(store.Database.WithContext(ctx), before, limit)
 }
 
-func (store DatabaseStore) PurgeRetiredGames(ctx context.Context, limit int) (dal.GamePurge, error) {
-	return dal.PurgeRetiredGames(store.Database.WithContext(ctx), limit)
+func (store DatabaseStore) PurgeRetiredGames(ctx context.Context, generationLimit, gameLimit int) (dal.GamePurge, error) {
+	return dal.PurgeRetiredGames(store.Database.WithContext(ctx), generationLimit, gameLimit)
 }
+
+// MaxPurgedGames bounds the retired games one pass deletes from. Each takes a
+// transaction of its own, of about 15 statements, and on Lambda every
+// statement is a round trip to the database.
+const MaxPurgedGames = 3
 
 // passTimeout bounds one pass, so a slow database delays the request that
 // runs it by at most this much.
@@ -137,10 +145,10 @@ func (retention *Retention) RunIfDue(ctx context.Context) {
 	defer cancel()
 	result, err := retention.Pass(ctx, now)
 	if err != nil {
+		// The work that succeeded still counts. A failing pass waits for the
+		// interval, so it isn't retried on every request.
 		retention.logger.ErrorContext(ctx, "Game retention pass failed", "error", err)
-		return
-	}
-	if result.backlog(retention.policy.BatchSize) {
+	} else if retention.backlog(result) {
 		retention.nextPass = now
 	}
 	if result != (Result{}) {
@@ -150,18 +158,34 @@ func (retention *Retention) RunIfDue(ctx context.Context) {
 }
 
 // Pass retires the games that expired by now and deletes one batch of
-// retired games' rows, whether or not a pass is due.
+// retired games' rows, whether or not a pass is due. Each step runs even when
+// the other fails, so games retired earlier are still deleted while retiring
+// fails, and the reverse. The result counts what succeeded, and the error
+// joins every failure.
 func (retention *Retention) Pass(ctx context.Context, now time.Time) (Result, error) {
 	var result Result
-	var err error
-	if result.RetiredGames, err = retention.store.RetireExpiredGames(ctx, now.Add(-retention.policy.Period), retention.policy.BatchSize); err != nil {
-		return result, err
+	retired, retireErr := retention.store.RetireExpiredGames(ctx, now.Add(-retention.policy.Period), retention.policy.BatchSize)
+	if retireErr != nil {
+		retireErr = fmt.Errorf("retire expired games: %w", retireErr)
+	} else {
+		result.RetiredGames = retired
 	}
-	result.GamePurge, err = retention.store.PurgeRetiredGames(ctx, retention.policy.BatchSize)
-	return result, err
+	purge, purgeErr := retention.store.PurgeRetiredGames(ctx, retention.policy.BatchSize, retention.purgedGames())
+	if purgeErr != nil {
+		purgeErr = fmt.Errorf("delete retired games: %w", purgeErr)
+	}
+	// A purge that fails for some games still reports the others.
+	result.GamePurge = purge
+	return result, errors.Join(retireErr, purgeErr)
+}
+
+// purgedGames is the number of retired games one pass deletes from.
+func (retention *Retention) purgedGames() int {
+	return min(MaxPurgedGames, retention.policy.BatchSize)
 }
 
 // backlog reports a pass that filled a batch, which may have left more.
-func (result Result) backlog(batchSize int) bool {
-	return result.RetiredGames >= batchSize || result.Generations >= batchSize || result.Games >= batchSize
+func (retention *Retention) backlog(result Result) bool {
+	batchSize := retention.policy.BatchSize
+	return result.RetiredGames >= batchSize || result.Generations >= batchSize || result.Games >= retention.purgedGames()
 }

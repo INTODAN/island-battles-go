@@ -2,17 +2,22 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"islandBattles/backend/services"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/go-chi/httplog/v3"
+	"gorm.io/gorm"
 )
 
 func (env *Env) GetGameGraph(ctx context.Context, input *struct {
 	GameID uint `path:"id" doc:"The ID of the game"`
 }) (*huma.StreamResponse, error) {
 	htmlContent, err := services.GetGameGraph(env.DB, input.GameID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, huma.Error404NotFound("game not found")
+	}
 	if err != nil {
 		return nil, huma.Error500InternalServerError("Get game graph failed", err)
 	}

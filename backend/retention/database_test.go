@@ -74,6 +74,12 @@ func (game playedGame) submit(ctx context.Context, player int) error {
 	if err != nil {
 		return err
 	}
+	return game.register(ctx, player, state)
+}
+
+// register completes one player's turn on state's generation, the first
+// player with one command.
+func (game playedGame) register(ctx context.Context, player int, state models.GenerationState) error {
 	commands := []models.PublicGenerationCommand{}
 	if player == 0 {
 		var origin, destination models.CastleView
@@ -90,7 +96,7 @@ func (game playedGame) submit(ctx context.Context, player int) error {
 		}
 	}
 	complete := true
-	_, err = game.service.Register(ctx, game.players[player], models.RegisterGenerationCommands{
+	_, err := game.service.Register(ctx, game.players[player], models.RegisterGenerationCommands{
 		GameID: state.GameID, GenerationID: state.GenerationID, RequestID: uuid.NewString(), Complete: &complete, Commands: commands,
 	})
 	return err
@@ -415,29 +421,52 @@ func countAllGames(t *testing.T, database *gorm.DB) int64 {
 	return count
 }
 
-// A turn holds its game's lock. A pass skips the game rather than waiting,
-// and the turn's new generation then keeps it.
+// holdOnce registers a callback that, the first time a statement matches,
+// signals held and waits for release, inside that statement's transaction.
+func holdOnce(t *testing.T, processor interface {
+	Register(string, func(*gorm.DB)) error
+}, remove func(string) error, name string, matches func(*gorm.DB) bool) (held, release chan struct{}) {
+	t.Helper()
+	held, release = make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	if err := processor.Register(name, func(statement *gorm.DB) {
+		if matches(statement) {
+			once.Do(func() {
+				close(held)
+				<-release
+			})
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = remove(name) })
+	return held, release
+}
+
+// A turn that is saving its new generation holds its game's lock. A pass
+// skips the game rather than waiting, and the turn's new generation then
+// keeps it.
 func TestAPassSkipsAGameWhoseTurnIsInProgress(t *testing.T) {
 	database := testutils.InitTestDB(t)
 	game := startGame(t, database)
 	game.playTurns(t, 1)
+	if err := game.submit(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
 	game.age(t, database, 8*24*time.Hour)
 	before := countGameRows(t, database, game.gameID)
+	state, err := game.service.Current(context.Background(), game.players[1], game.lobbyID)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	locked, release, turnDone := make(chan struct{}), make(chan struct{}), make(chan error, 1)
-	go func() {
-		turnDone <- dal.WithLockedGame(database, game.gameID, func(transaction *gorm.DB, _ *models.Game) error {
-			close(locked)
-			<-release
-			state, err := dal.LoadGameState(transaction, game.gameID)
-			if err != nil {
-				return err
-			}
-			_, err = dal.SaveGeneration(transaction, game.gameID, state, nil, nil)
-			return err
-		})
-	}()
-	<-locked
+	// The second player's completion stops right after inserting the new
+	// generation, inside the turn's transaction.
+	inTurn, release := holdOnce(t, database.Callback().Create().After("gorm:create"), database.Callback().Create().Remove,
+		"test:hold_turn", func(statement *gorm.DB) bool { return statement.Statement.Table == "generations" })
+	turnDone := make(chan error, 1)
+	go func() { turnDone <- game.register(context.Background(), 1, state) }()
+	<-inTurn
 	runner := newDatabaseRetention(t, database, 10)
 	started := time.Now()
 	result, err := runner.Pass(context.Background(), time.Now())
@@ -463,62 +492,200 @@ func TestAPassSkipsAGameWhoseTurnIsInProgress(t *testing.T) {
 	}
 }
 
-// Turns and passes race on games that are just past the period. Either the
-// turn commits first and keeps its game, or the pass retires the game and the
-// turn finds it gone. A turn never adds rows to a retired game.
-func TestPassesConcurrentWithTurnsAreSafe(t *testing.T) {
+// A turn that arrives while a pass is retiring its game waits for the game's
+// lock, then finds the game gone, and stores nothing.
+func TestATurnThatArrivesWhileAPassRetiresItsGameFindsItGone(t *testing.T) {
 	database := testutils.InitTestDB(t)
+	// The pass and the waiting turn each hold a connection, and the test
+	// needs one more to see the turn wait.
+	pool, err := database.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool.SetMaxOpenConns(4)
+	game := startGame(t, database)
+	game.playTurns(t, 1)
+	if err := game.submit(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
+	game.age(t, database, 8*24*time.Hour)
+	state, err := game.service.Current(context.Background(), game.players[1], game.lobbyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The pass stops right after soft-deleting the game, inside its
+	// transaction, so it still holds the game's lock.
+	retiring, release := holdOnce(t, database.Callback().Delete().After("gorm:delete"), database.Callback().Delete().Remove,
+		"test:hold_retirement", func(statement *gorm.DB) bool {
+			return statement.Statement.Table == "games" && !statement.Statement.Unscoped
+		})
 	runner := newDatabaseRetention(t, database, 10)
-	kept, removed := 0, 0
-	for iteration := range 16 {
-		game := startGame(t, database)
-		game.playTurns(t, 1)
-		// The first player has submitted; the second player's completion
-		// creates the next generation, racing the pass.
-		if err := game.submit(context.Background(), 0); err != nil {
+	passDone := make(chan error, 1)
+	go func() {
+		_, err := runner.Pass(context.Background(), time.Now())
+		passDone <- err
+	}()
+	<-retiring
+	turnDone := make(chan error, 1)
+	go func() { turnDone <- game.register(context.Background(), 1, state) }()
+	waitForALockWait(t, database)
+	close(release)
+	if err := <-passDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-turnDone; !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("turn error = %v, want not found", err)
+	}
+	drain(t, runner, 10)
+	if rows := countGameRows(t, database, game.gameID); rows.total() != 0 {
+		t.Fatalf("rows left after the turn found the game gone: %v", rows)
+	}
+}
+
+// waitForALockWait waits until a query is blocked on a row lock.
+func waitForALockWait(t *testing.T, database *gorm.DB) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var waiting int64
+		if err := database.Raw(`SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock'`).Scan(&waiting).Error; err != nil {
 			t.Fatal(err)
 		}
-		game.age(t, database, 8*24*time.Hour)
-		generationsBefore := countGameRows(t, database, game.gameID)["generations"]
-
-		var waitGroup sync.WaitGroup
-		var turnErr, passErr error
-		start := make(chan struct{})
-		waitGroup.Add(2)
-		go func() {
-			defer waitGroup.Done()
-			<-start
-			turnErr = game.submit(context.Background(), 1)
-		}()
-		go func() {
-			defer waitGroup.Done()
-			<-start
-			// Later passes start later, so both orders occur.
-			time.Sleep(time.Duration(iteration) * 150 * time.Microsecond)
-			_, passErr = runner.Pass(context.Background(), time.Now())
-		}()
-		close(start)
-		waitGroup.Wait()
-		if passErr != nil {
-			t.Fatal(passErr)
+		if waiting > 0 {
+			return
 		}
-		drain(t, runner, 10)
-		rows := countGameRows(t, database, game.gameID)
-		switch {
-		case turnErr == nil:
-			// The turn's generation is new, so no pass may retire its game.
-			if rows["games"] != 1 || rows["generations"] != generationsBefore+1 {
-				t.Fatalf("rows after a committed turn = %v, want the game kept with %d generations", rows, generationsBefore+1)
-			}
-			kept++
-		case errors.Is(turnErr, domain.ErrNotFound):
-			if rows.total() != 0 {
-				t.Fatalf("the turn found the game retired, but rows are left: %v", rows)
-			}
-			removed++
-		default:
-			t.Fatalf("turn error = %v", turnErr)
+		if time.Now().After(deadline) {
+			t.Fatal("the turn never waited for the game's lock")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// A game whose purge always fails is rolled back and retried by later
+// passes, while the other retired games are still deleted.
+func TestAGameThatFailsToPurgeDoesNotBlockTheOthers(t *testing.T) {
+	database := testutils.InitTestDB(t)
+	broken := startGame(t, database)
+	broken.playTurns(t, 1)
+	broken.age(t, database, 8*24*time.Hour)
+	healthy := startGame(t, database)
+	healthy.playTurns(t, 1)
+	healthy.age(t, database, 8*24*time.Hour)
+	brokenRows := countGameRows(t, database, broken.gameID)
+
+	// A row outside the game tables references one of the broken game's
+	// castles, so deleting that game's castles always fails.
+	var castleIDs []uint
+	if err := database.Model(&models.Castle{}).Joins("JOIN generations ON generations.map_id = castles.map_id").
+		Where(clause.Eq{Column: clause.Column{Table: "generations", Name: "game_id"}, Value: broken.gameID}).
+		Order(clause.OrderByColumn{Column: clause.Column{Table: "castles", Name: "id"}}).Limit(1).
+		Pluck("castles.id", &castleIDs).Error; err != nil || len(castleIDs) != 1 {
+		t.Fatalf("castle of the broken game: %v %v", castleIDs, err)
+	}
+	if err := database.Exec(`CREATE TABLE retention_test_blockers (castle_id bigint REFERENCES castles(id))`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Exec(`INSERT INTO retention_test_blockers VALUES (?)`, castleIDs[0]).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	runner := newDatabaseRetention(t, database, 10)
+	for pass := range 2 {
+		result, err := runner.Pass(context.Background(), time.Now())
+		if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("purge retired game %d", broken.gameID)) {
+			t.Fatalf("pass %d error = %v, want the broken game's purge to fail", pass, err)
+		}
+		if pass == 0 && (result.RetiredGames != 2 || result.Games != 1) {
+			t.Fatalf("first pass = %+v, want both games retired and the healthy one deleted", result)
+		}
+		if pass == 1 && result.Games != 0 {
+			t.Fatalf("second pass = %+v, want nothing more deleted", result)
 		}
 	}
-	t.Logf("kept %d games, removed %d", kept, removed)
+	if rows := countGameRows(t, database, healthy.gameID); rows.total() != 0 {
+		t.Fatalf("the healthy game was not deleted: %v", rows)
+	}
+	// The broken game's purge rolled back whole, and the game stays hidden.
+	if rows := countGameRows(t, database, broken.gameID); rows.total() != brokenRows.total() {
+		t.Fatalf("broken game rows = %v, want all of %v kept", rows, brokenRows)
+	}
+	if _, err := dal.FindGame(database, broken.gameID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("FindGame() on the broken game error = %v, want not found", err)
+	}
+
+	// Once the obstacle is gone, a later pass deletes it.
+	if err := database.Exec(`DROP TABLE retention_test_blockers`).Error; err != nil {
+		t.Fatal(err)
+	}
+	drain(t, runner, 10)
+	if rows := countGameRows(t, database, broken.gameID); rows.total() != 0 {
+		t.Fatalf("the broken game was not deleted once it could be: %v", rows)
+	}
+	assertNoGameData(t, database)
+}
+
+// countStatements counts every statement GORM sends from now on. On Lambda
+// each is a round trip to the database, as are the BEGIN and COMMIT of each
+// transaction.
+func countStatements(t *testing.T, database *gorm.DB) *int {
+	t.Helper()
+	count := new(int)
+	var mutex sync.Mutex
+	callbacks := database.Callback()
+	for _, processor := range []interface {
+		Register(string, func(*gorm.DB)) error
+		Remove(string) error
+	}{callbacks.Create(), callbacks.Query(), callbacks.Update(), callbacks.Delete(), callbacks.Row(), callbacks.Raw()} {
+		if err := processor.Register("test:count_statements", func(statement *gorm.DB) {
+			// Subqueries are built in dry runs, which send nothing.
+			if statement.DryRun {
+				return
+			}
+			mutex.Lock()
+			defer mutex.Unlock()
+			*count++
+		}); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = processor.Remove("test:count_statements") })
+	}
+	return count
+}
+
+func TestAPassMakesFewDatabaseRoundTrips(t *testing.T) {
+	database := testutils.InitTestDB(t)
+	for range 5 {
+		game := startGame(t, database)
+		game.playTurns(t, 1)
+		game.age(t, database, 30*24*time.Hour)
+	}
+	long := startGame(t, database)
+	long.playTurns(t, 14)
+	long.age(t, database, 30*24*time.Hour)
+	runner := newDatabaseRetention(t, database, 10)
+	statements := countStatements(t, database)
+
+	// Retiring all 6 games, and deleting the first 3 small games whole: one
+	// transaction to retire, and one per game.
+	result, err := runner.Pass(context.Background(), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RetiredGames != 6 || result.Games != retention.MaxPurgedGames || result.Generations != 2*retention.MaxPurgedGames {
+		t.Fatalf("first pass = %+v", result)
+	}
+	if *statements > 45 {
+		t.Fatalf("the pass sent %d statements, want at most 45", *statements)
+	}
+	t.Logf("a pass that deletes 3 small games sends %d statements in 4 transactions", *statements)
+	drain(t, runner, 10)
+
+	*statements = 0
+	if result, err := runner.Pass(context.Background(), time.Now()); err != nil || result != (retention.Result{}) {
+		t.Fatalf("idle pass = %+v, %v", result, err)
+	}
+	if *statements != 2 {
+		t.Fatalf("a pass with nothing to delete sent %d statements, want 2", *statements)
+	}
 }
