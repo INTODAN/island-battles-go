@@ -21,6 +21,10 @@ import (
 // the square of the count, so a regression stays far from the memory cap.
 const unknownKeys = 400
 
+// testAdminAPIKey lets /map/create requests through the admin check, so they
+// reach validation.
+const testAdminAPIKey = "admin-key"
+
 type problem struct {
 	Code   string             `json:"code"`
 	Status int                `json:"status"`
@@ -31,7 +35,7 @@ type problem struct {
 // backend's API config, so both its transformer and the lobby's run.
 func newBackendAPI(t *testing.T) http.Handler {
 	handler, api := humatest.New(t, routes.NewAPIConfig("test", "1.0.0"))
-	routes.SetupRoutes(api, &handlers.Env{})
+	routes.SetupRoutes(api, &handlers.Env{}, testAdminAPIKey)
 	// Validation rejects these requests before any service is called.
 	httpapi.Register(api, nil, nil, nil)
 	return handler
@@ -44,6 +48,7 @@ func serveProblem(t *testing.T, handler http.Handler, path, body string) (int, p
 	t.Helper()
 	request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set(routes.AdminAPIKeyHeader, testAdminAPIKey)
 	recorder := httptest.NewRecorder()
 	runtime.GC()
 	var before, after runtime.MemStats
