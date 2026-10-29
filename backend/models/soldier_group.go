@@ -6,8 +6,8 @@ import (
 )
 
 type SoldierGroupFields struct {
-	OriginCastleID      uint
-	DestinationCastleID uint
+	OriginCastleID      uint `gorm:"index"`
+	DestinationCastleID uint `gorm:"index"`
 	SoldierAmount       uint
 }
 
@@ -18,7 +18,7 @@ type SoldierGroup struct {
 	OriginCastle      Castle `json:"-"`
 	DestinationCastle Castle `json:"-"`
 
-	GenerationID             uint
+	GenerationID             uint `gorm:"index"`
 	PersistentSoldierGroupID uint
 	TeamColor                uint
 	MovementPauseGenerations uint         `json:"movement_pause_generations" gorm:"not null"`

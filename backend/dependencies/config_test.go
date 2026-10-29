@@ -115,6 +115,26 @@ func TestLoadDatabaseConfigRejectsInvalidPoolLimits(t *testing.T) {
 	}
 }
 
+func TestLoadConfigReadsTheGameRetentionPeriod(t *testing.T) {
+	t.Parallel()
+
+	values := validConfigurationEnvironment()
+	config, err := LoadConfigFromLookup(mapLookup(values))
+	if err != nil || config.GameRetentionPeriod != 7*24*time.Hour {
+		t.Fatalf("GameRetentionPeriod = %v, error = %v, want 7 days by default", config.GameRetentionPeriod, err)
+	}
+	values[GameRetentionPeriodEnv] = "36h"
+	if config, err = LoadConfigFromLookup(mapLookup(values)); err != nil || config.GameRetentionPeriod != 36*time.Hour {
+		t.Fatalf("GameRetentionPeriod = %v, error = %v, want 36h", config.GameRetentionPeriod, err)
+	}
+	for _, invalid := range []string{"7d", "0s", "-1h"} {
+		values[GameRetentionPeriodEnv] = invalid
+		if _, err := LoadConfigFromLookup(mapLookup(values)); err == nil || !strings.Contains(err.Error(), GameRetentionPeriodEnv) {
+			t.Errorf("%s=%q: error = %v, want a %s validation error", GameRetentionPeriodEnv, invalid, err, GameRetentionPeriodEnv)
+		}
+	}
+}
+
 // Only the HTTP server host listens on an address; Lambda has none.
 func TestHTTPAddrIsOnlyNeededByTheServerHost(t *testing.T) {
 	t.Parallel()

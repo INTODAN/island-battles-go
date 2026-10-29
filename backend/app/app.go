@@ -9,12 +9,14 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"islandBattles/backend/demo"
 	"islandBattles/backend/dependencies"
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/mapbuilder"
+	"islandBattles/backend/retention"
 	"islandBattles/backend/routes"
 	"islandBattles/lobby/application"
 	"islandBattles/lobby/auth"
@@ -92,7 +94,7 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 		return nil, err
 	}
 	// Lobby requests delete expired lobby data in small batches as they end.
-	retention, err := application.NewRetention(retentionStore, clock, policy, logger)
+	lobbyRetention, err := application.NewRetention(retentionStore, clock, policy, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -101,6 +103,13 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 		return nil, err
 	}
 	proxy, err := realtime.NewProxy(authorizer, config.LobbyProxySecret)
+	if err != nil {
+		return nil, err
+	}
+	// Game requests delete expired games in small batches as they end.
+	gameRetentionPolicy := retention.DefaultPolicy()
+	gameRetentionPolicy.Period = config.GameRetentionPeriod
+	gameRetention, err := retention.New(retention.DatabaseStore{Database: database}, gameRetentionPolicy, time.Now, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +125,7 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	if selected.gameGraph {
 		routes.SetupGameGraphRoute(api, &environment)
 	}
-	routes.SetupLobbyRoutes(api, lobbyService, authentication, gameBinding, retention, &handlers.LobbyGame{Database: database, Authenticator: authentication, Publisher: publisher})
+	routes.SetupLobbyRoutes(api, lobbyService, authentication, gameBinding, lobbyRetention, &handlers.LobbyGame{Database: database, Authenticator: authentication, Publisher: publisher, Retention: gameRetention})
 	proxy.Register(router)
 	if err := registerPages(router); err != nil {
 		return nil, err

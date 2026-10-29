@@ -21,6 +21,7 @@ func (handler *LobbyGame) CurrentGeneration(ctx context.Context, input *struct {
 	LobbyID       string `path:"lobby_id" format:"uuid"`
 	Authorization string `header:"Authorization"`
 }) (*GenerationStateResponse, error) {
+	defer handler.runRetention(ctx)
 	verified, err := handler.Authenticator.Authenticate(ctx, input.Authorization)
 	if err != nil {
 		return nil, huma.Error401Unauthorized("authentication required")
@@ -34,6 +35,7 @@ func (handler *LobbyGame) CurrentGeneration(ctx context.Context, input *struct {
 }
 
 func (handler *LobbyGame) RegisterGenerationCommands(ctx context.Context, input *RegisterGenerationCommandsRequest) (*GenerationStateResponse, error) {
+	defer handler.runRetention(ctx)
 	verified, err := handler.Authenticator.Authenticate(ctx, input.Authorization)
 	if err != nil {
 		return nil, huma.Error401Unauthorized("authentication required")

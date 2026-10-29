@@ -831,7 +831,7 @@
   "paths": {
     "/game/from-lobby/{lobby_id}/generation": {
       "get": {
-        "description": "Requires a place on the game's frozen roster. The game does not consult the lobby, so access continues after the lobby is deleted. Returns castle and soldier group IDs, which are never reassigned within a game, troop state, recorded clashes with per-participant before/after counts, your turn completion flag, and the outcome once the game has ended. A finished game stays readable.",
+        "description": "Requires a place on the game's frozen roster. The game does not consult the lobby, so access continues after the lobby is deleted. Returns castle and soldier group IDs, which are never reassigned within a game, troop state, recorded clashes with per-participant before/after counts, your turn completion flag, and the outcome once the game has ended. A finished game stays readable until the game is deleted, 7 days after its last generation by default; then this returns 404.",
         "operationId": "getIslandLobbyGeneration",
         "parameters": [
           {

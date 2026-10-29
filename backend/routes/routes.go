@@ -41,12 +41,12 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 	huma.Register(api, huma.Operation{
 		OperationID: "getIslandLobbyReplay", Path: "/game/from-lobby/{lobby_id}/replay", Method: http.MethodGet,
 		Summary:     "View the Island Battles replay history for a started lobby",
-		Description: "Players on the game's frozen roster can view every stored generation of the game, built from the generations on each request, including clash effects with survivor losses and defeated troop outlines, and the outcome once the game has ended. The game does not consult the lobby, so access continues after the lobby is deleted.",
+		Description: "Players on the game's frozen roster can view every stored generation of the game, built from the generations on each request, including clash effects with survivor losses and defeated troop outlines, and the outcome once the game has ended. The game does not consult the lobby, so access continues after the lobby is deleted. The game, and with it the replay, is deleted 7 days after its last generation by default, and then this returns 404.",
 		Tags:        []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
 	}, game.Replay)
 	huma.Register(api, huma.Operation{
 		OperationID: "getIslandLobbyGeneration", Path: "/game/from-lobby/{lobby_id}/generation", Method: http.MethodGet,
-		Summary: "Read the current generation for a roster player", Description: "Requires a place on the game's frozen roster. The game does not consult the lobby, so access continues after the lobby is deleted. Returns castle and soldier group IDs, which are never reassigned within a game, troop state, recorded clashes with per-participant before/after counts, your turn completion flag, and the outcome once the game has ended. A finished game stays readable.",
+		Summary: "Read the current generation for a roster player", Description: "Requires a place on the game's frozen roster. The game does not consult the lobby, so access continues after the lobby is deleted. Returns castle and soldier group IDs, which are never reassigned within a game, troop state, recorded clashes with per-participant before/after counts, your turn completion flag, and the outcome once the game has ended. A finished game stays readable until the game is deleted, 7 days after its last generation by default; then this returns 404.",
 		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
 	}, game.CurrentGeneration)
 	huma.Register(api, huma.Operation{
