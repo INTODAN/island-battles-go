@@ -33,8 +33,9 @@ func NewAPIConfig(title, version string) huma.Config {
 
 // SetupLobbyRoutes embeds reusable lobby commands and the explicit game binding.
 // Centrifugo's trusted proxy endpoints are registered separately from OpenAPI.
-func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authentication *auth.Service, gameBinding *application.GameBinding[models.BindingResult], game *handlers.LobbyGame) {
-	httpapi.Register(api, lobbyadapter.WithGameStart(lobbyApplication, gameBinding), authentication, authentication)
+// Lobby requests end with a lobby retention pass when one is due.
+func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authentication *auth.Service, gameBinding *application.GameBinding[models.BindingResult], retention domain.RetentionRunner, game *handlers.LobbyGame) {
+	httpapi.Register(api, lobbyadapter.WithGameStart(lobbyApplication, gameBinding), authentication, authentication, retention)
 	lobbyadapter.Register(api, gameBinding, authentication)
 	api.OpenAPI().Paths["/lobby/v1/games/{game_key}/lobbies/{lobby_id}/start"].Post.Description += " Island Battles initializes one playable generation and waits for every frozen roster player to complete their turn. Retrying resumes a failed initialization."
 	huma.Register(api, huma.Operation{
