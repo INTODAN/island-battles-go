@@ -16,9 +16,12 @@ Usage:
   scripts/aws.sh apply [terraform plan options]
       Build the backend, then create or update every AWS resource: the
       Lightsail VM, its static IP and firewall, and the Lambda. Shows the plan
-      and asks first. Runs the migrations before publishing new code, once the
-      VM deploy has written deploy/local/lambda.env. The very first apply
-      needs -var allow_missing_lambda_settings=true.
+      and asks first. A plan that deletes or replaces an instance, the static
+      IP or a disk also needs each one's name typed, or listed in
+      ISLAND_BATTLES_ALLOW_DESTROY, comma-separated. Runs the migrations before
+      publishing new code, once the VM deploy has written
+      deploy/local/lambda.env. The very first apply needs
+      -var allow_missing_lambda_settings=true.
   scripts/aws.sh deploy
       Build the backend, run the migrations against Postgres and publish the
       new code and deploy/local/lambda.env's settings to the Lambda. Doesn't
@@ -54,7 +57,8 @@ initialize_terraform() {
   # .terraform/terraform.tfstate records the backend; `init -backend=false`
   # (for validating) leaves it out.
   if [[ ! -f "$terraform_directory/.terraform/terraform.tfstate" ]]; then
-    run_terraform init -input=false
+    # To stderr, so "$(scripts/aws.sh output static_ip)" captures only the IP.
+    run_terraform init -input=false >&2
   fi
 }
 
@@ -74,9 +78,11 @@ build_backend() {
     go build -tags lambda.norpc -trimpath -ldflags='-s -w' -o "$build_directory/bootstrap" ./backend/cmd/lambda)
 }
 
-# Reads one KEY=value line from lambda.env without evaluating it as shell.
+# Reads one KEY=value line from lambda.env without evaluating it as shell. Like
+# Terraform (lambda.tf), it ignores spaces and a carriage return around the
+# line, and keeps the last value of a repeated key.
 lambda_setting() {
-  sed -n "s/^$1=//p" "$lambda_settings_file" | tail -n 1
+  sed -n -E "s/^[[:space:]]*$1=(.*[^[:space:]])?[[:space:]]*\$/\1/p" "$lambda_settings_file" | tail -n 1
 }
 
 # Migrations run from this machine, straight against Postgres over TLS, before
@@ -93,7 +99,33 @@ migrate_database() {
 }
 
 check_plan() {
-  run_terraform show -json "$plan_file" | python3 "$repository_root/deploy/check_deploy_plan.py" "$1"
+  run_terraform show -json "$plan_file" | python3 -I "$repository_root/deploy/check_deploy_plan.py" "$1"
+}
+
+# Deleting or replacing an instance deletes its disk and its automatic
+# snapshots, and releasing the static IP gives vm.<domain>'s address away. A
+# generic yes isn't enough for that: each one's name must be typed, or listed
+# in ISLAND_BATTLES_ALLOW_DESTROY.
+confirm_destruction() {
+  local destroyed name answer
+  local names=()
+  destroyed="$(check_plan apply)"
+  [[ -n "$destroyed" ]] || return 0
+  while IFS= read -r name; do
+    names+=("$name")
+  done <<<"$destroyed"
+  local allowed=",${ISLAND_BATTLES_ALLOW_DESTROY:-},"
+  for name in "${names[@]}"; do
+    if [[ "$allowed" == *",$name,"* ]]; then
+      echo "ISLAND_BATTLES_ALLOW_DESTROY allows destroying $name." >&2
+      continue
+    fi
+    read -r -p "Type $name to destroy it: " answer
+    if [[ "$answer" != "$name" ]]; then
+      echo "Nothing applied. Check deploy/local/aws.tfvars against the instances that run." >&2
+      exit 1
+    fi
+  done
 }
 
 # Plans, checks the plan, migrates and applies exactly the plan that was
@@ -112,6 +144,7 @@ plan_and_apply() {
   if [[ "$mode" == deploy ]]; then
     check_plan deploy
   else
+    confirm_destruction
     local answer
     read -r -p "Apply this plan? Only 'yes' applies it: " answer
     if [[ "$answer" != yes ]]; then

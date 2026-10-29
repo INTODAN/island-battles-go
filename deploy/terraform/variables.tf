@@ -24,7 +24,9 @@ variable "vm_instances" {
     The Lightsail instances, by name. Normally one. Moving to a new VM adds a
     second one next to it, moves the static IP and then removes the old one
     (deploy/README.md). Changing an existing instance's zone, image or plan
-    replaces it and deletes its disk, so add a new instance instead.
+    replaces it and deletes its disk, so add a new instance instead. There's
+    no default, so a lost or stale aws.tfvars can't plan to replace the live
+    instance with a default one.
   EOT
   type = map(object({
     # Defaults to the region's "a" zone.
@@ -34,9 +36,6 @@ variable "vm_instances" {
     # 1 GB of memory, 2 vCPUs, 40 GB of disk and a public IPv4 address.
     bundle_id = optional(string, "micro_3_0")
   }))
-  default = {
-    "island-battles-1" = {}
-  }
 
   validation {
     condition     = length(var.vm_instances) > 0
@@ -47,7 +46,6 @@ variable "vm_instances" {
 variable "static_ip_instance" {
   description = "The instance in vm_instances the static IP, and so vm.<domain>, points at."
   type        = string
-  default     = "island-battles-1"
 
   validation {
     condition     = contains(keys(var.vm_instances), var.static_ip_instance)
@@ -114,7 +112,8 @@ variable "reserved_concurrency" {
     pool of up to database_max_open_connections, so the product must leave
     postgres_spare_connections free under postgres_max_connections. Set it to
     null only on an account whose concurrency limit is too low to reserve any
-    (deploy/README.md); the account limit is then the cap.
+    (deploy/README.md). The account limit, account_concurrency_limit, is then
+    the cap.
   EOT
   type        = number
   default     = 20
@@ -123,6 +122,23 @@ variable "reserved_concurrency" {
   validation {
     condition     = var.reserved_concurrency == null || try(var.reserved_concurrency >= 1, false)
     error_message = "reserved_concurrency must be at least 1, or null. 0 would stop the function."
+  }
+}
+
+variable "account_concurrency_limit" {
+  description = <<-EOT
+    The account's Lambda concurrency limit in this region: "Concurrent
+    executions" in Service Quotas. It caps the function when
+    reserved_concurrency is null, so Terraform checks it against Postgres's
+    connections instead. AWS raises new accounts' limit of 10 on its own, so
+    look it up again before every apply while reserved_concurrency is null.
+  EOT
+  type        = number
+  default     = 10
+
+  validation {
+    condition     = var.account_concurrency_limit >= 1
+    error_message = "account_concurrency_limit must be at least 1."
   }
 }
 

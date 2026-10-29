@@ -32,7 +32,9 @@ locals {
     (local.lambda_pool_setting) = tostring(var.database_max_open_connections)
   })
 
-  lambda_database_connections = var.reserved_concurrency == null ? 0 : var.reserved_concurrency * var.database_max_open_connections
+  # Without a reservation, the account's own limit caps the function.
+  lambda_concurrency_cap      = var.reserved_concurrency == null ? var.account_concurrency_limit : var.reserved_concurrency
+  lambda_database_connections = local.lambda_concurrency_cap * var.database_max_open_connections
 }
 
 # The provided.al2023 runtime runs the executable named bootstrap at the root
@@ -109,7 +111,7 @@ resource "aws_lambda_function" "backend" {
     }
     precondition {
       condition     = local.lambda_database_connections <= var.postgres_max_connections - var.postgres_spare_connections
-      error_message = "reserved_concurrency × database_max_open_connections is ${local.lambda_database_connections}, which leaves fewer than postgres_spare_connections (${var.postgres_spare_connections}) of Postgres's ${var.postgres_max_connections} connections free. Lower one of them."
+      error_message = "${var.reserved_concurrency == null ? "account_concurrency_limit (reserved_concurrency is null)" : "reserved_concurrency"} × database_max_open_connections is ${local.lambda_database_connections}, which leaves fewer than postgres_spare_connections (${var.postgres_spare_connections}) of Postgres's ${var.postgres_max_connections} connections free. Lower one of them."
     }
   }
 }

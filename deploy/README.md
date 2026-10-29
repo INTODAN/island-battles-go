@@ -20,7 +20,7 @@ This document covers creating the AWS resources with Terraform, setting up the V
 | `deploy/aws.example.tfvars` | The template for the AWS settings. |
 | `deploy/vm.example.yml` | The template for the VM settings. |
 | `deploy/terraform/` | The AWS resources: the Lightsail VM in `vm.tf`, the Lambda in `lambda.tf`, and `observability.tf` for #46. `tests/` checks the configuration offline. |
-| `deploy/check_deploy_plan.py` | Reads the plan for `scripts/aws.sh`: stops a backend deploy that would change more than the backend, and tells an apply whether to run the migrations. |
+| `deploy/check_deploy_plan.py` | Reads the plan for `scripts/aws.sh`: stops a backend deploy that would change more than the backend, lists what an apply would destroy, and tells an apply whether to run the migrations. `deploy/test_check_deploy_plan.py` tests it. |
 | `deploy/ansible/` | The playbooks: `site.yml` deploys, `dump.yml` and `restore.yml` copy the database. The `base` role prepares Ubuntu, and the `app` role deploys the Compose project. |
 | `deploy/smoke.py` | The smoke test that `scripts/vm.sh smoke` runs. |
 | `deploy/local/` | Gitignored. Your settings, the generated secrets, the Lambda's settings, Terraform's state, the built Lambda, dumps and the smoke test's guest credential. |
@@ -70,7 +70,7 @@ The pieces depend on each other in a circle. Terraform creates the Lambda, whose
 
 1. **Check the account's Lambda concurrency limit.** In the Service Quotas console, look up AWS Lambda's "Concurrent executions" for your region. If it's below 1000, read [The concurrency cap](#the-concurrency-cap) first.
 2. **Write the settings.**
-   - Copy `deploy/aws.example.tfvars` to `deploy/local/aws.tfvars` and set the region and your SSH public key ([AWS settings](#aws-settings)).
+   - Copy `deploy/aws.example.tfvars` to `deploy/local/aws.tfvars` and set the region, your SSH public key and the instance ([AWS settings](#aws-settings)).
    - Copy `deploy/vm.example.yml` to `deploy/local/vm.yml` and set `deploy_domain` ([Settings](#settings)). The Function URL comes in step 4.
 3. **Create the AWS resources:**
 
@@ -110,7 +110,7 @@ There's no CloudFront, ACM certificate, VPC, peering or EventBridge. #46 adds lo
 
 ### AWS settings
 
-Copy `deploy/aws.example.tfvars` to `deploy/local/aws.tfvars` and fill in `region` and `ssh_public_key`. `deploy/terraform/variables.tf` describes every other variable, all of which have defaults. If Lightsail rejects your key, use an RSA key: `ssh-keygen -t rsa -b 4096`.
+Copy `deploy/aws.example.tfvars` to `deploy/local/aws.tfvars` and fill in `region`, `ssh_public_key`, `vm_instances` and `static_ip_instance`. `deploy/terraform/variables.tf` describes every other variable, all of which have defaults. The instances have no default, so a lost `aws.tfvars` can't plan to replace the instance that runs with a default one. Keep it in step with the instances, for example after a move. If Lightsail rejects your key, use an RSA key: `ssh-keygen -t rsa -b 4096`.
 
 ### State
 
@@ -125,7 +125,11 @@ Terraform's state is a local file, `deploy/local/terraform/terraform.tfstate`, g
 Every Lambda instance has its own database pool, so the reserved concurrency caps the backend's Postgres connections ([backend/README.md](../backend/README.md#the-connection-pool)). Terraform checks that **`reserved_concurrency` × `database_max_open_connections` ≤ `postgres_max_connections` − `postgres_spare_connections`**. It also sets `ISLAND_BATTLES_DATABASE_MAX_OPEN_CONNECTIONS` itself, so the two can't drift apart.
 
 - The defaults use at most 20 × 2 = 40 of Postgres's 100 connections. They leave at least 10 free: 3 that Postgres reserves for superusers, 2 for the migrate command, and the rest for administration. A bigger cap still fits under `max_connections`, but every connection costs memory on the 1 GB VM.
-- **Accounts with a low concurrency limit:** Lambda always keeps part of the account's concurrency unreserved, 100 on a normal account. On an account limited to 10, that's all of it, and any reserved concurrency fails with `decreases account's UnreservedConcurrentExecution below its minimum value`. Either request an increase of "Concurrent executions" in Service Quotas, which is free, or set `reserved_concurrency = null`. The account limit is then the cap: 10 × 2 = 20 connections.
+- **Accounts with a low concurrency limit:** Lambda always keeps part of the account's concurrency unreserved, 100 on a normal account. On an account limited to 10, that's all of it, and any reserved concurrency fails with `decreases account's UnreservedConcurrentExecution below its minimum value`. Either request an increase of "Concurrent executions" in Service Quotas, which is free, or set `reserved_concurrency = null`.
+- **Without a reservation,** the account limit is the cap, so Terraform checks **`account_concurrency_limit` × `database_max_open_connections`** instead. Set `account_concurrency_limit` in `aws.tfvars` to the limit Service Quotas shows. It defaults to 10, which gives 10 × 2 = 20 connections.
+  - **Recheck the limit before every apply.** AWS raises a new account's limit to 1000 on its own after some use, and a limit of 1000 lets 2,000 connections at Postgres.
+  - Once it's raised, set `account_concurrency_limit` to the new value. The check then fails, which tells you to reserve concurrency: set `reserved_concurrency` again, for example back to 20.
+- **Lingering connections:** a frozen or killed Lambda environment never closes its connections. Postgres's TCP keepalives on the VM close them about two minutes after the environment stops answering, so they don't pile up against `max_connections`.
 
 ## First VM deploy
 
@@ -140,7 +144,7 @@ The deploy logs in as `ubuntu`, which Lightsail's Ubuntu images use, and:
 1. **Checks** the settings, that the secrets exist, the Ubuntu version and the DNS record. It also refuses a VM that a move left behind (see [Moving to a new VM](#moving-to-a-new-vm)).
 2. **Base role:** installs Docker and the Compose plugin from Ubuntu's archive, enables unattended security upgrades, keeps containers running while the Docker daemon restarts, adds a 1 GB swap file, and creates the `deploy` user that owns the Compose project. Your SSH keys log in as `deploy` too.
 3. **App role:** writes the Compose project to `/opt/island-battles` and starts it with `docker compose up --wait`:
-   - `db` is `postgres:18-alpine` with a named volume. It publishes 5432 with TLS, using a self-signed certificate, and its `pg_hba.conf` allows only `hostssl` scram logins by the backend's role to its own database. The `postgres` superuser only connects through the container's local socket.
+   - `db` is `postgres:18-alpine` with a named volume. It publishes 5432 with TLS, using a self-signed certificate, and its `pg_hba.conf` allows only `hostssl` scram logins by the backend's role to its own database. The `postgres` superuser only connects through the container's local socket. TCP keepalives close a connection about two minutes after its client stops answering, such as a frozen Lambda environment ([The concurrency cap](#the-concurrency-cap)).
    - `centrifugo` is `centrifugo/centrifugo:v6.9.6`. Host port 443 maps to its public port, which serves TLS with an autocert certificate for `vm.<domain>`, the client endpoints and the HTTP API (`http_api.external`). Its health endpoint listens only inside the container, for the healthcheck. The admin UI is off. The `lobby` and `player` namespaces keep history and force recovery, so reconnecting clients receive what they missed. The proxy timeout is 10 seconds, to allow for a Lambda cold start on top of the backend's push retry. The certificate cache is a named volume.
    - Both services rotate their Docker logs at 10 MB, keeping five files.
 4. **Creates** the backend's role and its database. The role owns the database but isn't a superuser.
@@ -239,6 +243,7 @@ Run `scripts/aws.sh deploy` from the commit you want to publish. See [Deploying 
 Change `deploy/local/aws.tfvars` or `deploy/terraform/`, then run `scripts/aws.sh apply`. It shows the plan and applies it only when you type `yes`.
 
 - **Read the plan.** Changing an instance's zone, image or plan replaces it, and replacing an instance deletes its disk and its automatic snapshots. Add a new instance and [move to it](#moving-to-a-new-vm) instead.
+- **Destroying needs the name.** When the plan deletes or replaces an instance, the static IP or a disk, the apply lists them and asks you to type each one's name before the usual `yes`. A wrong answer applies nothing. If you didn't mean to destroy it, `aws.tfvars` probably doesn't match the instances that run. Without a terminal, list the names in `ISLAND_BATTLES_ALLOW_DESTROY`, separated by commas.
 - **It may publish the backend too.** When the plan changes the function, the apply first runs the migrations and then publishes the backend built from your checkout, so run it from the commit you last deployed or a newer one. A plan that leaves the function alone, such as moving the static IP, runs no migrations: in the middle of a move, the old VM refuses the backend.
 
 ## Smoke test
@@ -320,7 +325,7 @@ Moving copies the database with `pg_dump` and restores it on the new VM (#31). I
    ```
 
    The deploy changes nothing, but it now runs the TLS check, which also gets the new VM's certificate. The smoke test should report that the saved credential still works. The restored schema is the old VM's. If the backend deploy brings newer migrations, its migrate step updates it.
-7. **Delete the old instance** once you're satisfied. First keep its latest automatic snapshot as a manual one, because deleting the instance deletes its automatic snapshots ([Backups](#backups)). Then remove it from `vm_instances` and run `scripts/aws.sh apply`. The plan deletes the instance and its firewall rules. To go back to the old instance instead, set `static_ip_instance` back, run `scripts/aws.sh apply`, and run `scripts/vm.sh deploy <static IP> -e app_unlock_after_move=true`. That lets the backend's role log in again and removes the marker. Anything written to the new VM in the meantime isn't copied back.
+7. **Delete the old instance** once you're satisfied. First keep its latest automatic snapshot as a manual one, because deleting the instance deletes its automatic snapshots ([Backups](#backups)). Then remove it from `vm_instances` and run `scripts/aws.sh apply`. The plan deletes the instance and its firewall rules, and the apply asks you to type the instance's name. To go back to the old instance instead, set `static_ip_instance` back, run `scripts/aws.sh apply`, and run `scripts/vm.sh deploy <static IP> -e app_unlock_after_move=true`. That lets the backend's role log in again and removes the marker. Anything written to the new VM in the meantime isn't copied back.
 
 If the old VM is gone, there's nothing to dump. [Restore the latest snapshot](#restoring-from-a-snapshot) instead, then run steps 5 and 6.
 
@@ -344,6 +349,7 @@ Dumps use `pg_dump`'s custom format, without owners or grants. The restore makes
   - After repeated failures, Let's Encrypt blocks new attempts for about an hour.
 - **`REMOTE HOST IDENTIFICATION HAS CHANGED`:** the static IP now points at a different instance. Run `ssh-keygen -R <static IP>`.
 - **`This plan changes more than the backend`:** `scripts/aws.sh deploy` found changes to Lightsail resources, or a deletion, in the plan, and stopped before migrating. Run `scripts/aws.sh apply`, read the plan, and deploy again once it's applied.
+- **The migrations or the apply fail during `scripts/aws.sh deploy`:** fix the cause, for example the database being unreachable, and run `scripts/aws.sh deploy` again. Migrations that already ran are skipped. If the apply failed after the migrations, the old code keeps serving against the migrated schema until a deploy succeeds.
 - **`lambda.env is missing`** from Terraform or `scripts/aws.sh`: copy `deploy/local/` from your backup, or run the VM deploy, which writes it. Only the very first apply passes `-var allow_missing_lambda_settings=true`.
 - **`decreases account's UnreservedConcurrentExecution below its minimum value`:** the account's concurrency limit is too low. See [The concurrency cap](#the-concurrency-cap).
 - **The Function URL answers `Internal Server Error`:** read the function's log, the CloudWatch log group `/aws/lambda/<name>`, `/aws/lambda/island-battles` by default. Right after the first apply, the function has no settings yet: run `scripts/aws.sh deploy`. A `Forbidden` means the Function URL's public permissions are missing.
@@ -365,4 +371,5 @@ terraform -chdir=deploy/terraform init -backend=false
 terraform -chdir=deploy/terraform fmt -check -recursive
 terraform -chdir=deploy/terraform validate
 terraform -chdir=deploy/terraform test
+python3 -I -m unittest discover -s deploy -p 'test_*.py'   # the plan checks, on synthetic plans
 ```

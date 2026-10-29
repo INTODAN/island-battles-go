@@ -19,6 +19,18 @@ app_centrifugo_proxy_timeout: 10s
 # Optional contact address for the Let's Encrypt account.
 app_letsencrypt_email: ""
 
+# TCP keepalives for Postgres's connections. A frozen or killed Lambda
+# environment never closes its connections, and Linux's defaults only notice
+# a dead peer after about two hours, so such connections would pile up against
+# max_connections. With these, Postgres probes a connection after 60 idle
+# seconds and closes it after 6 unanswered probes 10 seconds apart: 2 minutes
+# in all. A live idle connection answers the probes and stays open, so the
+# backend's pooled connections aren't affected, unlike with
+# idle_session_timeout.
+app_postgres_tcp_keepalives_idle: 60
+app_postgres_tcp_keepalives_interval: 10
+app_postgres_tcp_keepalives_count: 6
+
 # The Postgres certificate is self-signed and generated once on the developer
 # machine, so a replacement VM presents the same certificate.
 app_postgres_tls_dir: "{{ deploy_secrets_dir }}/postgres-tls"

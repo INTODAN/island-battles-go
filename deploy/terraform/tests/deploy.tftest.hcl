@@ -10,6 +10,10 @@ variables {
   region                = "eu-central-1"
   lambda_settings_file  = "tests/fixtures/lambda.env"
   lambda_bootstrap_file = "tests/fixtures/bootstrap"
+  vm_instances = {
+    "island-battles-1" = {}
+  }
+  static_ip_instance = "island-battles-1"
 }
 
 run "passes_every_lambda_setting" {
@@ -114,6 +118,58 @@ run "leaves_concurrency_unreserved_when_asked" {
   assert {
     condition     = aws_lambda_function.backend.reserved_concurrent_executions == -1
     error_message = "A null reserved_concurrency must leave the function unreserved."
+  }
+}
+
+run "checks_the_account_limit_when_concurrency_is_unreserved" {
+  command = plan
+
+  variables {
+    # Unreserved, the account limit caps the function: 46 × 2 = 92 leaves 8
+    # of 100 free, fewer than the 10 spare connections.
+    reserved_concurrency      = null
+    account_concurrency_limit = 46
+  }
+
+  expect_failures = [aws_lambda_function.backend]
+}
+
+run "rejects_an_account_limit_of_1000_without_a_reservation" {
+  command = plan
+
+  variables {
+    reserved_concurrency      = null
+    account_concurrency_limit = 1000
+  }
+
+  expect_failures = [aws_lambda_function.backend]
+}
+
+run "allows_the_largest_safe_account_limit_without_a_reservation" {
+  command = plan
+
+  variables {
+    reserved_concurrency      = null
+    account_concurrency_limit = 45
+  }
+
+  assert {
+    condition     = aws_lambda_function.backend.reserved_concurrent_executions == -1
+    error_message = "An account limit of 45 × 2 = 90 leaves exactly the 10 spare connections."
+  }
+}
+
+run "ignores_the_account_limit_when_concurrency_is_reserved" {
+  command = plan
+
+  variables {
+    reserved_concurrency      = 20
+    account_concurrency_limit = 1000
+  }
+
+  assert {
+    condition     = aws_lambda_function.backend.reserved_concurrent_executions == 20
+    error_message = "A reservation caps the function, whatever the account limit."
   }
 }
 
