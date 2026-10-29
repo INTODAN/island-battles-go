@@ -30,6 +30,7 @@ func (SessionRecord) TableName() string { return "lobby_sessions" }
 
 // RoomRecord.GameSettings is written once at creation into the json column
 // that migration 0003 adds; rooms created before it hold an empty object.
+// LastConnectedAt is migration 0004's; it decides when an idle room is deleted.
 type RoomRecord struct {
 	ID               string    `gorm:"column:id;type:uuid;primaryKey"`
 	GameKey          string    `gorm:"column:game_key;not null"`
@@ -42,6 +43,7 @@ type RoomRecord struct {
 	CreatedAt        time.Time `gorm:"column:created_at;not null"`
 	NextJoinSequence int64     `gorm:"column:next_join_sequence;not null"`
 	GameSettings     []byte    `gorm:"column:game_settings;type:json"`
+	LastConnectedAt  time.Time `gorm:"column:last_connected_at;not null"`
 }
 
 func (RoomRecord) TableName() string { return "lobby_rooms" }
@@ -99,10 +101,13 @@ type StartRosterRecord struct {
 func (StartRosterRecord) TableName() string { return "lobby_start_roster" }
 
 // CreateRequestRecord retains the original representation used to answer an
-// idempotent create retry.
+// idempotent create retry. LobbyID, from migration 0004, names the lobby it
+// created, so the request is deleted with that lobby; it is null only for
+// requests that an older build stored.
 type CreateRequestRecord struct {
 	PlayerID     string         `gorm:"column:player_id;type:uuid;primaryKey"`
 	RequestID    string         `gorm:"column:request_id;type:uuid;primaryKey"`
+	LobbyID      *string        `gorm:"column:lobby_id;type:uuid"`
 	PayloadHash  []byte         `gorm:"column:payload_hash;type:bytea;not null"`
 	ResponseJSON datatypes.JSON `gorm:"column:response_json;type:jsonb;not null"`
 	CreatedAt    time.Time      `gorm:"column:created_at;not null"`

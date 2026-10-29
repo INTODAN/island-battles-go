@@ -87,6 +87,15 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	if err != nil {
 		return nil, err
 	}
+	retentionStore, err := lobbypostgres.NewRetentionStore(database)
+	if err != nil {
+		return nil, err
+	}
+	// Lobby requests delete expired lobby data in small batches as they end.
+	retention, err := application.NewRetention(retentionStore, clock, policy, logger)
+	if err != nil {
+		return nil, err
+	}
 	authorizer, err := realtime.NewAuthorizer(identities, store, clock, policy)
 	if err != nil {
 		return nil, err
@@ -107,7 +116,7 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	if selected.gameGraph {
 		routes.SetupGameGraphRoute(api, &environment)
 	}
-	routes.SetupLobbyRoutes(api, lobbyService, authentication, gameBinding, &handlers.LobbyGame{Database: database, Authenticator: authentication, Publisher: publisher})
+	routes.SetupLobbyRoutes(api, lobbyService, authentication, gameBinding, retention, &handlers.LobbyGame{Database: database, Authenticator: authentication, Publisher: publisher})
 	proxy.Register(router)
 	if err := registerPages(router); err != nil {
 		return nil, err
