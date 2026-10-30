@@ -103,7 +103,7 @@ def main(arguments):
     if mode == "apply":
         destroyed = destroyed_resources(plan)
         if destroyed:
-            print("This plan destroys Lightsail resources:", file=sys.stderr)
+            print("This plan destroys resources that are hard to get back:", file=sys.stderr)
             for name, description in destroyed:
                 print(f"  {description}", file=sys.stderr)
                 print(name)

@@ -21,10 +21,10 @@ Usage:
       the distribution also needs each one's name typed, or listed in
       ISLAND_BATTLES_ALLOW_DESTROY, comma-separated. Runs the migrations before
       publishing new code, once the VM deploy has written
-      deploy/local/lambda.env. A new game_hostname first needs its certificate
-      alone, -target=aws_acm_certificate.game, so its validation record can be
-      added before the full apply waits for it. The very first full apply
-      needs -var allow_missing_lambda_settings=true.
+      deploy/local/lambda.env. The first apply with game_hostname set needs
+      its certificate alone, -target=aws_acm_certificate.game, so its
+      validation record can be added before the full apply waits for it. The
+      very first full apply needs -var allow_missing_lambda_settings=true.
   scripts/aws.sh deploy
       Build the backend, run the migrations against Postgres and publish the
       new code and deploy/local/lambda.env's settings to the Lambda. Doesn't
@@ -107,9 +107,10 @@ check_plan() {
 }
 
 # Deleting or replacing an instance deletes its disk and its automatic
-# snapshots, and releasing the static IP gives vm.<domain>'s address away. A
-# generic yes isn't enough for that: each one's name must be typed, or listed
-# in ISLAND_BATTLES_ALLOW_DESTROY.
+# snapshots, releasing the static IP gives vm.<domain>'s address away, and a
+# new distribution has a new domain for the game's CNAME. A generic yes isn't
+# enough for that: each one's name must be typed, or listed in
+# ISLAND_BATTLES_ALLOW_DESTROY.
 confirm_destruction() {
   local destroyed name answer
   local names=()
@@ -126,7 +127,7 @@ confirm_destruction() {
     fi
     read -r -p "Type $name to destroy it: " answer
     if [[ "$answer" != "$name" ]]; then
-      echo "Nothing applied. Check deploy/local/aws.tfvars against the instances that run." >&2
+      echo "Nothing applied. Check deploy/local/aws.tfvars against the resources that run." >&2
       exit 1
     fi
   done
@@ -168,10 +169,13 @@ plan_and_apply() {
     fi
   fi
   run_terraform apply -input=false "$plan_file"
-  # The certificate's apply on its own leaves the function for later.
+  # The certificate's apply on its own leaves the rest for later.
   local function_url
   if function_url="$(run_terraform output -raw function_url 2>/dev/null)"; then
     echo "The backend is at $function_url"
+  fi
+  if run_terraform output -raw distribution_domain >/dev/null 2>&1; then
+    echo "Players open the game at $(run_terraform output -raw game_url)"
   fi
 }
 

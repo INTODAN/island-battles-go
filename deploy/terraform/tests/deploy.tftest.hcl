@@ -427,6 +427,16 @@ run "requires_a_timeout_over_the_deadline_margin" {
   expect_failures = [var.lambda_timeout_seconds]
 }
 
+run "keeps_the_timeout_under_cloudfronts" {
+  command = plan
+
+  variables {
+    lambda_timeout_seconds = 51
+  }
+
+  expect_failures = [var.lambda_timeout_seconds]
+}
+
 run "requires_an_alert_email" {
   command = plan
 

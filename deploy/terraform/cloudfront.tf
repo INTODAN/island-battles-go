@@ -68,9 +68,9 @@ resource "aws_cloudfront_distribution" "game" {
       origin_protocol_policy = "https-only"
       origin_ssl_protocols   = ["TLSv1.2"]
       # How long CloudFront waits for the first byte, and between the parts of
-      # a streamed answer. The most it allows without a quota increase, so it
-      # doesn't cut short a request that runs for the whole Lambda timeout
-      # after a cold start.
+      # a streamed answer. The most it allows without a quota increase. A GET
+      # that runs out of it would be retried, so lambda_timeout_seconds stays
+      # under it with room for a cold start.
       origin_read_timeout = 60
     }
   }
