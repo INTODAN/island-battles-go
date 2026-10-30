@@ -14,7 +14,7 @@ Island Battles runs in one AWS region:
 
 This document covers creating the AWS resources with Terraform, setting up the VM with Ansible, deploying the backend to Lambda, backups, redeploys and moving to a new VM. [First deployment, step by step](#first-deployment-step-by-step) puts it all in order. #26 describes the architecture.
 
-The live deployment (#45, 2026-10-30) runs in `eu-central-1`, and its VM is `vm.elidan.org`. Its DNS records are managed in the Squarespace domains dashboard: `elidan.org` → DNS → Custom records.
+The live deployment (#45, 2026-10-30) runs in `eu-central-1`, and its VM is `vm.elidan.org`. Players open it at `https://island-battles.elidan.org` (#75, 2026-10-30), which replaced a 2021 WebGL build of the game on Firebase Hosting. Its DNS records are managed in the Squarespace domains dashboard: `elidan.org` → DNS → Custom records.
 
 ## Files
 
@@ -95,6 +95,8 @@ The pieces depend on each other in a circle. Terraform creates the Lambda, whose
    ```
 
    The plan creates only the certificate, in `us-east-1`. Terraform warns that a targeted plan may be incomplete, which is expected here. Then `scripts/aws.sh output certificate_validation_record` prints its validation record: add it ([DNS](#dns)).
+
+   A new account may also need AWS Support to verify it before it can create a CloudFront distribution. If step 4 fails with `Your account must be verified before you can add new CloudFront resources`, see [Troubleshooting](#troubleshooting).
 4. **Create the AWS resources:**
 
    ```sh
@@ -136,7 +138,7 @@ A deployment from before #75 serves players at the Function URL. To move them to
 |---|---|
 | Lightsail instance | Ubuntu 24.04 LTS on the 1 GB plan (`micro_3_0`), IPv4 only, with daily [automatic snapshots](#backups). |
 | Static IP | Attached to the instance named by `static_ip_instance`. Terraform refuses to destroy it, because `vm.<domain>` points at it. |
-| Firewall | 22 from `ssh_allowed_cidrs`, and 443 and 5432 from anywhere. Nothing else, not even 80. |
+| Firewall | 22 from `ssh_allowed_cidrs`, and 443 and 5432 from anywhere. Nothing else, not even 80. Changing a rule replaces all of them, which closes every port for a few seconds. |
 | Key pair | Imported from `ssh_public_key`. Without it, Lightsail uses the region's default key, which you download from the Lightsail console. |
 | Lambda | The `provided.al2023` runtime on arm64, 512 MB, a 30-second timeout, a reserved concurrency of 5, JSON logs filtered at WARN, Active tracing off, and the OpenTelemetry collector layer. |
 | IAM role | Basic execution and X-Ray writes: the function writes its logs, its collector layer sends traces to X-Ray, and it calls nothing else in AWS. |
@@ -513,6 +515,9 @@ These checks first ran on 2026-10-30, with `reserved_concurrency = null`, `accou
 - **The migrations or the apply fail during `scripts/aws.sh deploy`:** fix the cause, for example the database being unreachable, and run `scripts/aws.sh deploy` again. Migrations that already ran are skipped. If the apply failed after the migrations, the old code keeps serving against the migrated schema until a deploy succeeds.
 - **`lambda.env is missing`** from Terraform or `scripts/aws.sh`: copy `deploy/local/` from your backup, or run the VM deploy, which writes it. Only the very first apply passes `-var allow_missing_lambda_settings=true`.
 - **`decreases account's UnreservedConcurrentExecution below its minimum value`:** the account's concurrency limit is too low. See [The concurrency cap](#the-concurrency-cap).
+- **`AccessDenied: Your account must be verified before you can add new CloudFront resources`:** the account can't create distributions yet, whether through Terraform or the console. Open a free case in the Support Center: **Account and billing** → service **Account**, with the error message and its request ID. Then run `scripts/aws.sh apply` again. The rest of the apply has already finished. Until the distribution exists, `scripts/aws.sh deploy` refuses its plan, which creates it; publish the backend with `scripts/aws.sh apply` instead.
+  - 2026-10-30, the live account: the first two full applies failed this way. A third, later the same day, created the distribution in 3 minutes.
+- **The VM deploy times out connecting to port 22:** your public IP is no longer in `ssh_allowed_cidrs`. A home connection's address can change after a router restart. Check it with `curl https://checkip.amazonaws.com`, put the new address in `aws.tfvars`, and run `scripts/aws.sh apply` ([Firewall](#aws-resources)).
 - **The Function URL answers `Internal Server Error`:** read the function's log, the CloudWatch log group `/aws/lambda/<name>`, `/aws/lambda/island-battles` by default, as [Reading the logs](#reading-the-logs) describes. Right after the first apply, the function has no settings yet: run `scripts/aws.sh deploy`. A `Forbidden` means the Function URL's public permissions are missing.
 - **The Function URL answers `the backend failed to start` (503):** the log's `Backend failed to start` line says why, such as missing settings, an unreachable database or limits over the budget. The instance tries again every 10 seconds.
 - **`... over the free-tier budget`** from Terraform: the concurrency cap and the log or trace limits together could leave the free tier. Lower one of them ([The budget](#the-budget)).
