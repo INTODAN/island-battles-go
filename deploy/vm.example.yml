@@ -5,9 +5,13 @@
 # The domain whose vm.<domain> A record points at the VM's static IP.
 deploy_domain: <your-domain>
 
-# The backend Lambda's Function URL. Centrifugo calls its proxy endpoints, and
-# browsers load the lobby UI from its origin.
+# The backend Lambda's Function URL. Centrifugo calls its proxy endpoints.
+# `scripts/aws.sh output function_url` prints it.
 lambda_function_url: https://<url-id>.lambda-url.<region>.on.aws/
+
+# Where players open the game, through CloudFront. Centrifugo accepts browser
+# connections only from its origin. `scripts/aws.sh output game_url` prints it.
+game_url: https://island-battles.<your-domain>
 
 # Optional: the SSH key for the instance, unless ssh-agent or ~/.ssh/config
 # already provides it.

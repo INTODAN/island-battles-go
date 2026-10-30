@@ -21,8 +21,8 @@ Usage:
       Stop the backend from writing to the old VM, dump its database and
       restore it into the new VM.
   scripts/vm.sh smoke
-      Check the Lambda, Postgres and Centrifugo together, reusing the saved
-      guest credential in deploy/local/smoke-session.json.
+      Check CloudFront, the Lambda, Postgres and Centrifugo together, reusing
+      the saved guest credential in deploy/local/smoke-session.json.
 EOF
   exit 2
 }
@@ -102,15 +102,15 @@ EOF
     ;;
   smoke)
     [[ $# -eq 0 ]] || usage
-    function_url="$(sed -n -E "s/^lambda_function_url:[[:space:]]*[\"']?([^\"' #]+).*/\1/p" "$settings_file")"
-    if [[ -z "$function_url" ]]; then
-      echo "Set lambda_function_url in $settings_file." >&2
+    game_url="$(sed -n -E "s/^game_url:[[:space:]]*[\"']?([^\"' #]+).*/\1/p" "$settings_file")"
+    if [[ -z "$game_url" ]]; then
+      echo "Set game_url in $settings_file. scripts/aws.sh output game_url prints it." >&2
       exit 1
     fi
     # The smoke test uses the lobby client's locked dependencies.
     uv run --project "$repository_root/lobby/clients/lobby-python" --locked \
       python "$repository_root/deploy/smoke.py" \
-      --function-url "$function_url" --session-file "$local_directory/smoke-session.json"
+      --game-url "$game_url" --session-file "$local_directory/smoke-session.json"
     ;;
   *)
     usage

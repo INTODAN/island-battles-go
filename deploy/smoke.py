@@ -1,17 +1,22 @@
 """Smoke test for a deployment: the backend Lambda and the VM together.
 
-Run it with `scripts/vm.sh smoke`. It checks, in order:
+Run it with `scripts/vm.sh smoke`. It goes through the game's URL, which
+CloudFront serves from the Lambda Function URL (#75), and checks, in order:
 
-1. `/healthz` on the Lambda Function URL returns 204.
-2. A guest credential works. The credential is kept in a session file, so a
+1. `/healthz` returns 204.
+2. `/` opens the lobby UI.
+3. A guest credential works. The credential is kept in a session file, so a
    later run reuses it. After moving to a new VM, that shows the database was
    carried over (#31). A missing or expired credential is replaced by a new
    guest session.
-3. The backend issues a connection token, so it reaches Postgres.
-4. Centrifugo accepts the token on its public WebSocket URL, with a valid
-   certificate and the Function URL as the browser origin.
-5. Centrifugo subscribes the guest to its personal channel, so Centrifugo
-   reaches the backend's subscribe proxy.
+4. The backend issues a connection token, so it reaches Postgres.
+5. An authenticated GET reaches the backend with its `Authorization` header.
+   CloudFront strips the header from GET requests unless its origin request
+   policy forwards it.
+6. Centrifugo accepts the token on its public WebSocket URL, with a valid
+   certificate and the game's URL as the browser origin.
+7. Centrifugo subscribes the guest to its personal channel, so Centrifugo
+   reaches the backend's subscribe proxy on the Function URL.
 """
 from __future__ import annotations
 
@@ -22,6 +27,7 @@ import json
 import os
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -77,6 +83,12 @@ async def check_backend(http: httpx.AsyncClient, session_file: Path) -> tuple[di
         raise SmokeTestFailure(f"/healthz returned {health.status_code}, expected 204")
     report("the backend answers /healthz")
 
+    lobby_ui = await http.get("/", follow_redirects=True)
+    if lobby_ui.status_code != 200 or lobby_ui.url.path != "/lobby/ui/":
+        raise SmokeTestFailure(f"/ led to {lobby_ui.url.path} with {lobby_ui.status_code}, expected the lobby UI at "
+                               "/lobby/ui/ with 200")
+    report("/ opens the lobby UI")
+
     session = load_session(session_file)
     reused_session = session is not None
     if session is None:
@@ -98,17 +110,29 @@ async def check_backend(http: httpx.AsyncClient, session_file: Path) -> tuple[di
     if reused_session:
         report(f"the saved credential of guest {session['player_id']} still works")
     report("the backend issued a connection token, so it reaches Postgres")
-    return session, response.json()
+    connection_token = response.json()
+
+    # A lobby that doesn't exist: the backend answers 404 once it has
+    # authenticated the guest, and 401 without the header.
+    response = await http.get(f"/lobby/v1/games/island-battles/lobbies/{uuid.uuid4()}",
+                              headers={"Authorization": f"Bearer {session['access_token']}"})
+    if response.status_code == 401:
+        raise SmokeTestFailure("an authenticated GET answered 401, so its Authorization header didn't reach the "
+                               "backend. Check the distribution's origin request policy.")
+    if response.status_code != 404:
+        raise SmokeTestFailure(f"getting a missing lobby returned {response.status_code}, expected 404: {response.text}")
+    report("an authenticated GET reaches the backend with its Authorization header")
+    return session, connection_token
 
 
-async def check_centrifugo(function_origin: str, session: dict[str, str], connection_token: dict[str, str]) -> None:
+async def check_centrifugo(game_origin: str, session: dict[str, str], connection_token: dict[str, str]) -> None:
     websocket_url = connection_token["websocket_url"]
-    if function_origin.startswith("https://") and not websocket_url.startswith("wss://"):
-        raise SmokeTestFailure(f"browsers on {function_origin} can't open {websocket_url}; it must use wss://")
+    if game_origin.startswith("https://") and not websocket_url.startswith("wss://"):
+        raise SmokeTestFailure(f"browsers on {game_origin} can't open {websocket_url}; it must use wss://")
     channel = f"player:{session['player_id']}"
     # Centrifugo's JSON protocol: one command per message, and each reply
     # carries its command's id. An empty message is a ping, answered with one.
-    async with connect(websocket_url, origin=function_origin, open_timeout=WEBSOCKET_TIMEOUT_SECONDS) as websocket:
+    async with connect(websocket_url, origin=game_origin, open_timeout=WEBSOCKET_TIMEOUT_SECONDS) as websocket:
         async def call(command_id: int, command: dict[str, object]) -> dict[str, object]:
             await websocket.send(json.dumps({"id": command_id, **command}))
             while True:
@@ -125,7 +149,7 @@ async def check_centrifugo(function_origin: str, session: dict[str, str], connec
         if "error" in reply:
             raise SmokeTestFailure(f"Centrifugo refused the connection token: {reply['error']}. Check that the Lambda "
                                    "and the VM use the same connection token secret.")
-        report(f"connected to {websocket_url} from origin {function_origin}")
+        report(f"connected to {websocket_url} from origin {game_origin}")
 
         reply = await asyncio.wait_for(call(2, {"subscribe": {"channel": channel}}), WEBSOCKET_TIMEOUT_SECONDS)
         if "error" in reply:
@@ -134,21 +158,21 @@ async def check_centrifugo(function_origin: str, session: dict[str, str], connec
         report(f"subscribed to {channel} through the backend's subscribe proxy")
 
 
-async def run(function_url: str, session_file: Path) -> None:
-    function_origin = origin_of(function_url)
-    async with httpx.AsyncClient(base_url=function_origin, timeout=HTTP_TIMEOUT_SECONDS) as http:
+async def run(game_url: str, session_file: Path) -> None:
+    game_origin = origin_of(game_url)
+    async with httpx.AsyncClient(base_url=game_origin, timeout=HTTP_TIMEOUT_SECONDS) as http:
         session, connection_token = await check_backend(http, session_file)
-    await check_centrifugo(function_origin, session, connection_token)
+    await check_centrifugo(game_origin, session, connection_token)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--function-url", required=True, help="the backend Lambda's Function URL")
+    parser.add_argument("--game-url", required=True, help="where players open the game, through CloudFront")
     parser.add_argument("--session-file", type=Path, required=True,
                         help="where the guest credential is kept between runs")
     arguments = parser.parse_args()
     try:
-        asyncio.run(run(arguments.function_url, arguments.session_file))
+        asyncio.run(run(arguments.game_url, arguments.session_file))
     except SmokeTestFailure as failure:
         print(f"FAILED: {failure}", file=sys.stderr)
         return 1

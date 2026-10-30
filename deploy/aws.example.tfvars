@@ -17,6 +17,10 @@ vm_instances = {
 }
 static_ip_instance = "island-battles-1"
 
+# Where players open the game. CloudFront serves it with an ACM certificate,
+# and its DNS records are added by hand (deploy/README.md).
+game_hostname = "island-battles.<your-domain>"
+
 # Where the error alarms and the zero-spend budget send their emails.
 alert_email = "<your email address>"
 

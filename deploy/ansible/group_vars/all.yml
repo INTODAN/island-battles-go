@@ -1,7 +1,7 @@
 ---
 # Shared by every VM playbook. The developer's own settings (the domain, the
-# Lambda Function URL) come from deploy/local/vm.yml, which scripts/vm.sh passes
-# with -e. See deploy/vm.example.yml.
+# Lambda Function URL, the game's URL) come from deploy/local/vm.yml, which
+# scripts/vm.sh passes with -e. See deploy/vm.example.yml.
 
 # Lightsail's Ubuntu images log in as `ubuntu`, with passwordless sudo.
 ansible_user: ubuntu

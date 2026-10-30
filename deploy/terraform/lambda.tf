@@ -157,8 +157,8 @@ resource "aws_lambda_function" "backend" {
   }
 }
 
-# Players open the lobby UI here, and Centrifugo calls the subscribe proxy
-# here. For auth type NONE, the provider adds the public lambda:InvokeFunctionUrl
+# CloudFront serves the game from here (cloudfront.tf), and Centrifugo calls
+# the subscribe proxy here. For auth type NONE, the provider adds the public lambda:InvokeFunctionUrl
 # and lambda:InvokeFunction permissions on creation. The backend serves through
 # lambdaurl, which needs RESPONSE_STREAM.
 resource "aws_lambda_function_url" "backend" {

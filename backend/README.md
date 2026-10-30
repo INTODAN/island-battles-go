@@ -8,7 +8,7 @@ Follow the [root setup](../README.md#development-setup). Seven of the backend se
 
 Run `./scripts/dev.sh` from the repository root to load `.env`, start local dependencies with Docker Compose or Podman, migrate the schema and run the backend. If dependencies are already running and the environment is exported, run `go run ./backend/cmd/migrate` and then `go run ./backend`. The backend only connects to the database, so it fails on a database the migrate command hasn't brought up to date. `/docs` exposes Huma documentation, `/openapi.json` the combined schema, and `/healthz` HTTP readiness. The lobby-only generated contract is in [`lobby/api/`](../lobby/api/README.md).
 
-Open `/lobby/ui/` for the [temporary two-player lobby frontend](../lobby/frontend/README.md). It is embedded in the backend and needs no separate frontend build.
+Open `/lobby/ui/` for the [temporary two-player lobby frontend](../lobby/frontend/README.md); `/` redirects there. It is embedded in the backend and needs no separate frontend build.
 
 Compose mounts PostgreSQL 18's parent data directory at `/var/lib/postgresql`.
 
@@ -196,7 +196,7 @@ The rows a pass deletes belong to games nobody can reach any more, and the index
 [`app.New`](app/app.go) builds the HTTP handler from the configuration and a database connection. Two hosts serve it:
 
 - **The HTTP server,** [`backend/main.go`](main.go), for local development. It listens on `ISLAND_BATTLES_HTTP_ADDR`, shuts down gracefully on SIGINT or SIGTERM and logs in colour through `tint`. It alone passes `app.WithGameGraph()`, so it alone serves `GET /game/{id}/graph`, which reads any game without authentication.
-- **The AWS Lambda function,** [`cmd/lambda`](cmd/lambda/main.go), behind a Function URL. It is public, so it serves no graph page, and every route it serves that reads game data requires a player on the game's frozen roster. It serves the handler through `lambdaurl`, so the Function URL must use the `RESPONSE_STREAM` invoke mode. Streaming also lets replay pages, which inline JSON that grows with the game, pass Lambda's 6 MB limit on buffered responses; streamed responses may reach 200 MB. It logs warnings and errors only, as JSON lines with the `level` and `timestamp` keys that Lambda's log-level filtering reads, within the limits in [Logs and traces](#logs-and-traces).
+- **The AWS Lambda function,** [`cmd/lambda`](cmd/lambda/main.go), behind a Function URL, which players reach through CloudFront at the game's name ([deploy/README.md](../deploy/README.md)). It is public, so it serves no graph page, and every route it serves that reads game data requires a player on the game's frozen roster. It serves the handler through `lambdaurl`, so the Function URL must use the `RESPONSE_STREAM` invoke mode. Streaming also lets replay pages, which inline JSON that grows with the game, pass Lambda's 6 MB limit on buffered responses; streamed responses may reach 200 MB. It logs warnings and errors only, as JSON lines with the `level` and `timestamp` keys that Lambda's log-level filtering reads, within the limits in [Logs and traces](#logs-and-traces).
 
 Build the Lambda for the `provided.al2023` runtime on arm64. The runtime runs the executable named `bootstrap` at the root of the zip:
 
