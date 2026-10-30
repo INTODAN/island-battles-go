@@ -2,7 +2,7 @@
 
 Island Battles runs in one AWS region:
 
-- **Backend:** the Go backend runs on AWS Lambda behind its Function URL. Players open the lobby UI at the Function URL itself. There is no custom domain, CloudFront or ACM certificate.
+- **Backend:** the Go backend runs on AWS Lambda behind its Function URL. Players open the lobby UI at `/lobby/ui/` on the Function URL itself; the bare Function URL answers 404. There is no custom domain, CloudFront or ACM certificate.
 - **VM:** a Lightsail instance runs Postgres and Centrifugo in Docker Compose. Nothing else runs on it.
 - **Network:** there is no VPC or peering. The Lambda reaches Postgres and Centrifugo's HTTP API over the internet:
   - Postgres accepts only TLS (`hostssl`) logins, with scram and a generated password.
@@ -10,6 +10,8 @@ Island Battles runs in one AWS region:
 - **DNS:** one record, `vm.<domain>`, points at the VM's static IP. Centrifugo gets a Let's Encrypt certificate for it, and browsers connect to `wss://vm.<domain>/connection/websocket`.
 
 This document covers creating the AWS resources with Terraform, setting up the VM with Ansible, deploying the backend to Lambda, backups, redeploys and moving to a new VM. [First deployment, step by step](#first-deployment-step-by-step) puts it all in order. #26 describes the architecture.
+
+The live deployment (#45, 2026-10-30) runs in `eu-central-1`, and its VM is `vm.elidan.org`. Its A record is managed in the Squarespace domains dashboard: `elidan.org` → DNS → Custom records.
 
 ## Files
 
@@ -30,6 +32,7 @@ This document covers creating the AWS resources with Terraform, setting up the V
 - **On your machine:**
   - Terraform 1.9 or newer, Go, which builds the backend and runs its migrations, and Python 3, for the backend deploy's plan check.
   - AWS credentials for Terraform, which reads the standard AWS credential chain, e.g. `AWS_PROFILE=<profile>`. They need to manage Lightsail, Lambda, IAM roles, CloudWatch Logs and alarms, SNS and Budgets. Nothing in the repo stores them.
+    - `aws login --profile <profile>` (AWS CLI 2.32 or newer) signs in through the console and gives short-lived credentials, which Terraform's AWS provider reads directly. They last up to 12 hours; run it again when Terraform reports expired credentials.
   - Ansible: `uv tool install ansible-core`. `scripts/vm.sh` installs the collections it needs into `deploy/ansible/.collections/` (gitignored) on first use.
   - [uv](https://docs.astral.sh/uv/), for the smoke test.
   - The instance's SSH key, through `ssh-agent`, `~/.ssh/config` or `ansible_ssh_private_key_file` in the settings.
@@ -47,7 +50,7 @@ The VM needs a single DNS record. Squarespace has no DNS API, so you add it by h
 
 1. In the Squarespace domains dashboard, open the domain's DNS settings and add a custom record: type `A`, host `vm`, value the static IP. If the domain uses DNS Connect with another provider's nameservers, add it there instead.
 2. Run `dig CAA <domain> +short`. If it prints records, one of them must allow `letsencrypt.org`, or the certificate request fails. You can also add a CAA record on `vm.<domain>` itself.
-3. Wait until `dig +short vm.<domain>` prints the static IP.
+3. Wait until `dig +short vm.<domain>` prints the static IP. A resolver that looked the name up before the record existed keeps the empty answer for the zone's negative TTL, 5 minutes for `elidan.org`. The playbook's check resolves the name on the VM, which hasn't looked it up before.
 
 Let's Encrypt allows only a few failed validations per hostname per hour. The playbook therefore stops before touching the VM if `vm.<domain>` doesn't resolve to the static IP yet.
 
@@ -329,12 +332,13 @@ Moving copies the database with `pg_dump` and restores it on the new VM (#31). I
 
    ```sh
    ssh-keygen -R <static IP>    # the new VM has a new host key
+   ssh-keygen -R vm.<domain>    # if you also log in by name
    scripts/vm.sh deploy <static IP>
    scripts/vm.sh smoke
    ```
 
    The deploy changes nothing, but it now runs the TLS check, which also gets the new VM's certificate. The smoke test should report that the saved credential still works. The restored schema is the old VM's. If the backend deploy brings newer migrations, its migrate step updates it.
-7. **Delete the old instance** once you're satisfied. First keep its latest automatic snapshot as a manual one, because deleting the instance deletes its automatic snapshots ([Backups](#backups)). Then remove it from `vm_instances` and run `scripts/aws.sh apply`. The plan deletes the instance and its firewall rules, and the apply asks you to type the instance's name. To go back to the old instance instead, set `static_ip_instance` back, run `scripts/aws.sh apply`, and run `scripts/vm.sh deploy <static IP> -e app_unlock_after_move=true`. That lets the backend's role log in again and removes the marker. Anything written to the new VM in the meantime isn't copied back.
+7. **Delete the old instance** once you're satisfied. First keep its latest automatic snapshot as a manual one, because deleting the instance deletes its automatic snapshots ([Backups](#backups)). A new instance has no automatic snapshot until Lightsail takes its first one, at or after its first `snapshot_time`. Then remove it from `vm_instances` and run `scripts/aws.sh apply`. The plan deletes the instance and its firewall rules, and the apply asks you to type the instance's name. To go back to the old instance instead, set `static_ip_instance` back, run `scripts/aws.sh apply`, and run `scripts/vm.sh deploy <static IP> -e app_unlock_after_move=true`. That lets the backend's role log in again and removes the marker. Anything written to the new VM in the meantime isn't copied back.
 
 If the old VM is gone, there's nothing to dump. [Restore the latest snapshot](#restoring-from-a-snapshot) instead, then run steps 5 and 6.
 
@@ -355,7 +359,7 @@ The backend Lambda's logs, error alarms and traces stay inside AWS's free monthl
 - **Errors:** every 5xx answer and every recovered panic is one ERROR line with the operation, the error chain and the IDs. One metric filter counts ERROR lines. Two alarms, on that metric and on the function's `Errors`, email `alert_email` through an SNS topic when they enter ALARM.
 - **Traces:** the backend traces each request, database query and Centrifugo API call with the OpenTelemetry Go SDK. Each instance starts at most one trace every T seconds. It hands the spans over localhost to the collector layer, which sends them to X-Ray. Lambda's own Active tracing stays off.
 - **Tripwire:** a zero-spend AWS Budgets cost budget of $0.01 emails `alert_email` once anything costs money. Budgets refreshes its data about three times a day, so a charge is reported within a day. It stops nothing; the limits do.
-- **The VM's logs:** Docker rotates the `db` and `centrifugo` logs at 10 MB, five files each (#27). Read them over SSH with `sudo docker compose logs` in `/opt/island-battles`. They never leave the VM and cost nothing.
+- **The VM's logs:** Docker rotates the `db` and `centrifugo` logs at 10 MB, five files each (#27). Read them over SSH as `deploy`, which owns the Compose project: `ssh deploy@vm.<domain>`, then `cd /opt/island-battles && docker compose logs`. `ubuntu` can't open `/opt/island-battles`. They never leave the VM and cost nothing.
 
 ### Never turn these on
 
@@ -395,7 +399,7 @@ The worst case is a 31-day month, 44,640 minutes, with the function at its concu
 | Text that isn't JSON: a Go crash's stack trace, the Lambda runtime library's own messages | Lambda counts a line without a JSON `level` as INFO, so the WARN filter drops it | 0 |
 | Lambda's platform lines: `start` and `report` for every invocation, and the init lines | INFO or DEBUG when they succeed, so the WARN filter drops them | 0 |
 | Lambda's platform lines for a failure: `initRuntimeDone`, `initReport`, `runtimeDone` and `report` with a status other than success, a failed extension, `logsDropped` | The backend never fails its start (it answers 503 instead), recovers every panic, and ends a request's work 2 seconds before the Lambda timeout. What's left takes a bug: a fatal runtime error, running out of memory, or a loop that ignores its deadline. Counted at 1 KB per failed invocation. | Not bounded by code; see below |
-| The collector layer's own lines | It logs errors only (`service.telemetry.logs.level: error` and `OPENTELEMETRY_EXTENSION_LOG_LEVEL=error`), and only exports when a sampled trace ends. Its lines are zap JSON with a lower-case `level` and an epoch `ts` instead of an RFC 3339 `timestamp`, so Lambda probably counts them as INFO and drops them; #45 checks which. Counted as if they arrive, at 2 lines of 1 KB per trace. | 74,400 × 2 KB = 0.15 GB |
+| The collector layer's own lines | It logs errors only (`service.telemetry.logs.level: error` and `OPENTELEMETRY_EXTENSION_LOG_LEVEL=error`), and only exports when a sampled trace ends. Its lines are zap JSON with a lower-case `level` and an epoch `ts` instead of an RFC 3339 `timestamp`, so Lambda probably counts them as INFO and drops them. In #45, a failed export logged nothing within a minute, even with the application log level at DEBUG. Counted as if they arrive anyway, at 2 lines of 1 KB per trace. | 74,400 × 2 KB = 0.15 GB |
 | Storage | 7 days' retention keeps at most 7/31 of a month's ingestion | 0.35 GB |
 | **Total of the bounded sources** | | **1.87 GB of 5 GB** |
 | Logs Insights scans and failed invocations | The other 3.1 GB. A query over the whole log group scans at most its 7 days, about 0.35 GB. A crash loop of one failed invocation a second all month comes to 2.7 GB. The `Errors` alarm emails within the hour of the first. | 3.1 GB left |
@@ -417,8 +421,8 @@ The function runs the [AWS Distro for OpenTelemetry (ADOT)](https://aws-otel.git
 - **Why ADOT:** its build has the `awsxray` exporter, which sends spans to X-Ray's `PutTraceSegments` API, billed per trace recorded. The upstream [opentelemetry-lambda](https://github.com/open-telemetry/opentelemetry-lambda) collector layer (0.24.0 of 2026-10-22, `arn:aws:lambda:<region>:184161586896:layer:opentelemetry-collector-arm64-0_24_0:1`) has no `awsxray` exporter. It could only reach X-Ray through X-Ray's OTLP endpoint, which needs Transaction Search on. AWS's docs now call collector layers the legacy approach and recommend Application Signals layers, which have no Go version and need Application Signals.
 - **ARN pattern:** `arn:aws:lambda:<region>:901920570463:layer:aws-otel-collector-arm64-ver-<collector version, dashed>:<layer version>`. Terraform uses `aws-otel-collector-arm64-ver-0-156-0:4`: ADOT Collector for Lambda v0.49.0, built on OpenTelemetry Collector v0.156.0 ([CHANGELOG](https://github.com/aws-observability/aws-otel-lambda/blob/main/CHANGELOG.md), 2026-08-25). Override it with `collector_layer_arn`.
 - **Configuration:** Terraform passes it in the environment, `OPENTELEMETRY_COLLECTOR_CONFIG_URI=env:ISLAND_BATTLES_COLLECTOR_CONFIG`, so the zip holds only `bootstrap`: an OTLP/HTTP receiver on `localhost:4318`, the `awsxray` exporter in the function's region, and error-only logs.
-  - **Untested:** the ADOT build includes the `env:` config provider, but this configuration hasn't run on a real function yet. A configuration the collector rejects stops its extension, and then every invocation fails: Lambda doesn't start a function whose extension failed. Step 1 of [Checking it live](#checking-it-live-45) checks it first. If it fails, set `collector_layer_arn = ""` in `aws.tfvars` and apply: the function then runs without the layer and without tracing until the configuration is fixed.
-- **Its errors may not reach CloudWatch.** The collector logs zap JSON: a lower-case `level` and an epoch `ts`, with no RFC 3339 `timestamp`. Lambda counts a line without a valid timestamp as INFO, so the WARN filter probably drops the collector's errors, and the error metric never sees them. A failing export then shows only as traces missing from X-Ray. Step 5 of [Checking it live](#checking-it-live-45) finds out.
+  - **Checked live on 2026-10-30 (#45):** the ADOT build reads the `env:` configuration, the extension starts, and sampled traces reach X-Ray. If a later change makes the collector reject its configuration, its extension stops, and every invocation fails: Lambda doesn't start a function whose extension failed. Set `collector_layer_arn = ""` in `aws.tfvars` and apply: the function then runs without the layer and without tracing until the configuration is fixed.
+- **A failing export doesn't show in CloudWatch.** The collector logs zap JSON: a lower-case `level` and an epoch `ts`, with no RFC 3339 `timestamp`, so Lambda probably counts its lines as INFO. Step 5 of [Checking it live](#checking-it-live-45) went further on 2026-10-30. With the exporter pointed at an invalid region, a sampled request produced no collector line within a minute, even with the application log level at DEBUG. The backend logged no `Spans could not be exported` warning either, presumably because the collector accepts the spans before it exports them. A failing export therefore shows only as traces missing from X-Ray, and the error metric never sees it.
 - **Cold-start cost:** neither the ADOT docs nor AWS's publish a number. They say each extension must finish starting before Lambda invokes the function, and call the collector "an added overhead". An [upstream issue's logs](https://github.com/open-telemetry/opentelemetry-lambda/issues/2101) show about 410 ms from launch to ready. To measure it, set the system log level to INFO in the Lambda console for a few cold starts and compare the `report` lines' `initDurationMs` with and without the layer. The next `scripts/aws.sh deploy` sets the level back.
 - **Export time:** the ADOT build has no `batch` or `decouple` processor, so the collector sends spans to X-Ray while the backend flushes them. A sampled request finishes later by that round trip, once every T per instance at most. The backend flushes only after requests that recorded spans.
 
@@ -435,12 +439,21 @@ An alarm email names the alarm. `<name>-error-lines` means the backend logged an
 
 ### Checking it live (#45)
 
+These checks first ran on 2026-10-30, with `reserved_concurrency = null`, `account_concurrency_limit = 10`, `log_lines_per_minute = 2` and `trace_interval_seconds = 360`. The results are noted under each step. Run the commands on the VM as `deploy`: `ssh deploy@vm.<domain>`, then `cd /opt/island-battles`.
+
 1. **The collector starts.** Right after the first `scripts/aws.sh deploy`, call `/healthz` on the Function URL. A 204 means the collector extension accepted its configuration. If the call fails and the log group shows a failed `extension` or `initReport` line, the configuration is wrong: set `collector_layer_arn = ""`, deploy again, and fix it before turning tracing back on ([The collector layer](#the-collector-layer)).
+   - 2026-10-30: 204 on the first cold start.
 2. Follow the SNS confirmation link from the first apply.
-3. **An email from a failing request:** on the VM, stop Postgres for a minute: `cd /opt/island-battles && sudo docker compose stop db`. Call `POST /lobby/v1/sessions` on the Function URL, which then answers 5xx, and start Postgres again with `sudo docker compose start db`. The `<name>-error-lines` alarm emails within about an hour.
-4. **A trace:** stop Centrifugo instead, `sudo docker compose stop centrifugo`. Create a guest session with `POST /lobby/v1/sessions`, wait 3 minutes (T) without other requests, and then create a lobby with `POST /lobby/v1/lobbies` (see `/docs`). The instance samples it, its push to Centrifugo fails, and its `Centrifugo push failed` error line carries `xray_trace_id`. The trace in X-Ray holds the request's span, its database spans and its Centrifugo API spans. If the line has no trace ID, the request reached an instance younger than T: wait 3 minutes and create another lobby. Start Centrifugo again.
-5. **Whether the collector's errors arrive.** Make one export fail: in the Lambda console, set `ISLAND_BATTLES_COLLECTOR_CONFIG`'s `awsxray` exporter to `{"region":"xx-invalid-1"}` (the next `scripts/aws.sh deploy` restores it), wait T on a warm instance, and send a request. Then look in the log stream for the collector's error line. If it isn't there, Lambda dropped it as INFO: X-Ray failures then show only as missing traces. Note the result here, and in the budget's collector row.
-6. Check in the CloudWatch console that Transaction Search is off (Settings → X-Ray traces), and in the Billing console that the zero-spend budget exists.
+3. **An email from a failing request:** stop Postgres for a minute: `docker compose stop db`. Call `POST /lobby/v1/sessions` on the Function URL, which then answers 5xx, and start Postgres again with `docker compose start db`. The `<name>-error-lines` alarm emails within about an hour.
+   - 2026-10-30: the request answered 503 and wrote one ERROR line. The alarm entered ALARM 39 seconds later, and the email arrived.
+4. **A trace:** close every browser tab with the lobby UI first, because their heartbeats use up each instance's one trace per T. Then stop Centrifugo, `docker compose stop centrifugo`. Create a guest session with `POST /lobby/v1/sessions`, wait T (3 minutes with the defaults) without other requests, and then create a lobby with `POST /lobby/v1/lobbies` (see `/docs`). The instance samples it, its push to Centrifugo fails, and its `Centrifugo push failed` error line carries `xray_trace_id`. The trace in X-Ray holds the request's span, its database spans and its Centrifugo API spans. If the line has no trace ID, another request used up the instance's trace, or the request reached an instance younger than T: wait T and create another lobby. Start Centrifugo again.
+   - 2026-10-30: the first try had no trace ID, because open lobby tabs' heartbeats were sampled instead. The second try, with no tabs open, logged a trace ID. Its trace held the request, its database spans, and spans for the three failed Centrifugo API attempts.
+5. **Whether the collector's errors arrive.** Make one export fail: in the Lambda console, set `ISLAND_BATTLES_COLLECTOR_CONFIG`'s `awsxray` exporter to `{"region":"xx-invalid-1"}` (the next `scripts/aws.sh deploy` restores it), wait T on a warm instance, and send a request. Then look in the log stream for the collector's error line. If it isn't there, X-Ray failures show only as missing traces. To see everything the collector writes, also set the application log level to DEBUG for the test; the next deploy sets it back.
+   - 2026-10-30: no collector line arrived within a minute, at WARN or at DEBUG, and no trace reached X-Ray. X-Ray failures show only as missing traces ([The collector layer](#the-collector-layer)).
+6. Check in the CloudWatch console that Transaction Search is off (Settings → X-Ray traces), and in the Billing console that the zero-spend budget exists. With the AWS CLI: `aws xray get-trace-segment-destination` prints `XRay` while Transaction Search is off, and `aws budgets describe-budgets --account-id <account>` lists the budget.
+   - 2026-10-30: Transaction Search off, and the budget exists. Application Signals lists the function as `UNINSTRUMENTED`: it sends Application Signals no data.
+7. **After a day of use,** check the Billing console: CloudWatch, X-Ray, SNS and Budgets show no charges. The zero-spend budget emails as soon as anything costs money, the Lightsail instance included, so its email alone doesn't mean these services cost anything.
+   - Pending: the deployment went live on 2026-10-30.
 
 ## Troubleshooting
 
@@ -449,7 +462,7 @@ An alarm email names the alarm. `<name>-error-lines` means the backend logged an
 - **`vm.<domain> resolves to [...], not <IP>`:** fix the A record and wait for it to resolve, or pass `-e vm_static_ip=<static IP>` when preparing a new VM.
 - **The TLS check fails:**
   - Check that the Lightsail firewall opens 443 and that CAA records allow `letsencrypt.org`.
-  - Read Centrifugo's log on the VM: `cd /opt/island-battles && sudo docker compose logs centrifugo`.
+  - Read Centrifugo's log on the VM: `ssh deploy@vm.<domain>`, then `cd /opt/island-battles && docker compose logs centrifugo`.
   - After repeated failures, Let's Encrypt blocks new attempts for about an hour.
 - **`REMOTE HOST IDENTIFICATION HAS CHANGED`:** the static IP now points at a different instance. Run `ssh-keygen -R <static IP>`.
 - **`This plan changes more than the backend`:** `scripts/aws.sh deploy` found changes to Lightsail resources, or a deletion, in the plan, and stopped before migrating. Run `scripts/aws.sh apply`, read the plan, and deploy again once it's applied.
