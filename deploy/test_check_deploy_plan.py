@@ -13,9 +13,10 @@ import unittest
 import check_deploy_plan
 
 
-def change(address, actions, before_name=None):
+def change(address, actions, before_name=None, before=None):
     resource_type = address.split(".")[0]
-    before = None if before_name is None else {"name": before_name}
+    if before is None and before_name is not None:
+        before = {"name": before_name}
     return {
         "address": address,
         "mode": "managed",
@@ -48,6 +49,10 @@ ATTACHMENT_REPLACE = change("aws_lightsail_static_ip_attachment.vm", ["delete", 
 STATIC_IP_DELETE = change("aws_lightsail_static_ip.vm", ["delete"], "island-battles-vm")
 URL_REPLACE = change("aws_lambda_function_url.backend", ["create", "delete"])
 LOG_GROUP_CREATE = change("aws_cloudwatch_log_group.backend", ["create"])
+CERTIFICATE_CREATE = change("aws_acm_certificate.game", ["create"])
+DISTRIBUTION_UPDATE = change("aws_cloudfront_distribution.game", ["update"])
+DISTRIBUTION_REPLACE = change("aws_cloudfront_distribution.game", ["delete", "create"],
+                              before={"domain_name": "d111111abcdef8.cloudfront.net"})
 
 
 class DeployModeTest(unittest.TestCase):
@@ -59,6 +64,12 @@ class DeployModeTest(unittest.TestCase):
         code, _, stderr = run("deploy", FUNCTION_UPDATE, PORTS_UPDATE)
         self.assertEqual(code, 1)
         self.assertIn("aws_lightsail_instance_public_ports", stderr)
+
+    def test_refuses_creating_the_certificate_and_changing_the_distribution(self):
+        code, _, stderr = run("deploy", FUNCTION_UPDATE, CERTIFICATE_CREATE, DISTRIBUTION_UPDATE)
+        self.assertEqual(code, 1)
+        self.assertIn("aws_acm_certificate.game: create (the game's certificate)", stderr)
+        self.assertIn("aws_cloudfront_distribution.game: update (the game's distribution)", stderr)
 
     def test_refuses_replacing_the_function_url(self):
         code, _, stderr = run("deploy", URL_REPLACE)
@@ -82,6 +93,11 @@ class ApplyModeTest(unittest.TestCase):
         _, stdout, stderr = run("apply", STATIC_IP_DELETE)
         self.assertEqual(stdout.splitlines(), ["island-battles-vm"])
         self.assertIn("static IP", stderr)
+
+    def test_lists_a_replaced_distribution_by_its_domain(self):
+        _, stdout, stderr = run("apply", DISTRIBUTION_REPLACE, CERTIFICATE_CREATE)
+        self.assertEqual(stdout.splitlines(), ["d111111abcdef8.cloudfront.net"])
+        self.assertIn("replaces the distribution", stderr)
 
     def test_falls_back_to_the_address_without_a_name(self):
         _, stdout, _ = run("apply", change('aws_lightsail_disk.data["x"]', ["delete"]))

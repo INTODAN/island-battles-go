@@ -34,8 +34,9 @@ enabled = false
 enabled = true
 
 [client]
-# The lobby UI and the demo player are served from the Lambda Function URL.
-allowed_origins = ["{{ app_lambda_origin }}"]
+# The lobby UI and the demo player are served from the game's URL, through
+# CloudFront. The proxy endpoints below call the Function URL directly.
+allowed_origins = ["{{ app_game_origin }}"]
 
 [client.subscribe_to_user_personal_channel]
 enabled = false

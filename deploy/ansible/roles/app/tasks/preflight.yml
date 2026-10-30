@@ -7,9 +7,12 @@
       - deploy_domain is ansible.builtin.match('^[a-z0-9.-]+\.[a-z]+$')
       - lambda_function_url is defined
       - lambda_function_url is ansible.builtin.match('^https://[^/<>]+/?$')
+      - game_url is defined
+      - game_url is ansible.builtin.match('^https://[^/<>]+/?$')
     fail_msg: >-
       Copy deploy/vm.example.yml to deploy/local/vm.yml and set deploy_domain
-      (lowercase, e.g. example.org) and lambda_function_url (https://<id>.lambda-url.<region>.on.aws/).
+      (lowercase, e.g. example.org), lambda_function_url (https://<id>.lambda-url.<region>.on.aws/)
+      and game_url (https://island-battles.<domain>). scripts/aws.sh output prints both URLs.
     quiet: true
 
 # The password lookups would silently generate any missing secret. On a live VM

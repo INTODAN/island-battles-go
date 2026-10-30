@@ -160,11 +160,13 @@ func (authentication annotatingAuthentication) Authenticate(ctx context.Context,
 }
 
 // registerPages serves the embedded browser pages, which need no files beside
-// the binary.
+// the binary. The bare name opens the lobby.
 func registerPages(router chi.Router) error {
-	router.Get("/lobby/ui", func(response http.ResponseWriter, request *http.Request) {
+	toLobby := func(response http.ResponseWriter, request *http.Request) {
 		http.Redirect(response, request, "/lobby/ui/", http.StatusTemporaryRedirect)
-	})
+	}
+	router.Get("/", toLobby)
+	router.Get("/lobby/ui", toLobby)
 	lobbyFrontend, err := frontend.Handler([]frontend.Game{lobbyadapter.FrontendGame()})
 	if err != nil {
 		return err

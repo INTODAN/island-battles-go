@@ -138,6 +138,7 @@ func TestReplayOverSixMegabytesStreamsThroughTheFunctionURL(t *testing.T) {
 // A route listed without a method allows every method, for static mounts.
 var publicRoutes = map[string]string{
 	"GET /healthz":            "readiness",
+	"GET /":                   "redirect to the embedded lobby UI",
 	"POST /lobby/v1/sessions": "creates a guest credential",
 	"GET /map/templates":      "lists default map templates, which are not game data",
 	"POST /map/validate":      "checks a map file and stores nothing",
@@ -196,6 +197,10 @@ func TestTheLambdaHostServesOnlyListedRoutesWithoutAuthentication(t *testing.T) 
 	}
 	if response, content := call(t, invoke, http.MethodPost, "/map/create", `{}`, ""); response.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("map creation without the admin key=%d %s", response.StatusCode, content)
+	}
+	// The game's bare name opens the lobby (#75).
+	if response, content := call(t, invoke, http.MethodGet, "/", "", ""); response.StatusCode != http.StatusTemporaryRedirect || response.Headers["Location"] != "/lobby/ui/" {
+		t.Fatalf("/=%d to %q %s", response.StatusCode, response.Headers["Location"], content)
 	}
 
 	local, err := app.New(config, database, slog.New(slog.NewTextHandler(io.Discard, nil)), app.WithGameGraph())

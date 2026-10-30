@@ -1,6 +1,7 @@
 terraform {
-  # 1.9 for variable validations that refer to other variables.
-  required_version = ">= 1.9"
+  # 1.9 for variable validations that refer to other variables, and 1.11 for
+  # override_during in the tests.
+  required_version = ">= 1.11"
 
   required_providers {
     aws = {

@@ -15,21 +15,25 @@ usage() {
 Usage:
   scripts/aws.sh apply [terraform plan options]
       Build the backend, then create or update every AWS resource: the
-      Lightsail VM, its static IP and firewall, and the Lambda. Shows the plan
-      and asks first. A plan that deletes or replaces an instance, the static
-      IP or a disk also needs each one's name typed, or listed in
+      Lightsail VM, its static IP and firewall, the Lambda, and the game's
+      certificate and CloudFront distribution. Shows the plan and asks first.
+      A plan that deletes or replaces an instance, the static IP, a disk or
+      the distribution also needs each one's name typed, or listed in
       ISLAND_BATTLES_ALLOW_DESTROY, comma-separated. Runs the migrations before
       publishing new code, once the VM deploy has written
-      deploy/local/lambda.env. The very first apply needs
-      -var allow_missing_lambda_settings=true.
+      deploy/local/lambda.env. A new game_hostname first needs its certificate
+      alone, -target=aws_acm_certificate.game, so its validation record can be
+      added before the full apply waits for it. The very first full apply
+      needs -var allow_missing_lambda_settings=true.
   scripts/aws.sh deploy
       Build the backend, run the migrations against Postgres and publish the
       new code and deploy/local/lambda.env's settings to the Lambda. Doesn't
-      ask, and refuses a plan that changes Lightsail resources or deletes
-      anything. Never touches the VM.
+      ask, and refuses a plan that changes Lightsail resources or the game's
+      certificate or distribution, or deletes anything. Never touches the VM.
   scripts/aws.sh output [name]
-      Print Terraform's outputs, or one of them, e.g. static_ip or
-      function_url.
+      Print Terraform's outputs, or one of them, e.g. static_ip,
+      function_url, game_url, certificate_validation_record or
+      distribution_domain.
 EOF
   exit 2
 }
@@ -164,7 +168,11 @@ plan_and_apply() {
     fi
   fi
   run_terraform apply -input=false "$plan_file"
-  echo "The backend is at $(run_terraform output -raw function_url)"
+  # The certificate's apply on its own leaves the function for later.
+  local function_url
+  if function_url="$(run_terraform output -raw function_url 2>/dev/null)"; then
+    echo "The backend is at $function_url"
+  fi
 }
 
 case "$command" in

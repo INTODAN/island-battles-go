@@ -15,6 +15,7 @@ variables {
   }
   static_ip_instance = "island-battles-1"
   alert_email        = "alerts@example.org"
+  game_hostname      = "island-battles.example.org"
 }
 
 run "passes_every_lambda_setting" {
@@ -193,6 +194,86 @@ run "ignores_the_account_limit_when_concurrency_is_reserved" {
     condition     = aws_lambda_function.backend.reserved_concurrent_executions == 5 && nonsensitive(aws_lambda_function.backend.environment[0].variables["ISLAND_BATTLES_CONCURRENCY"]) == "5"
     error_message = "A reservation caps the function, whatever the account limit."
   }
+}
+
+# The game's name (#75) --------------------------------------------------------
+
+run "serves_the_game_through_cloudfront" {
+  command = plan
+
+  # AWS assigns these on creation. Known during the plan, the distribution's
+  # origin and certificate can be checked.
+  override_resource {
+    target          = aws_lambda_function_url.backend
+    override_during = plan
+    values = {
+      function_url = "https://abcdefghijklmnopqrstuvwxyz012345.lambda-url.eu-central-1.on.aws/"
+    }
+  }
+
+  override_resource {
+    target          = aws_acm_certificate.game
+    override_during = plan
+    values = {
+      arn = "arn:aws:acm:us-east-1:123456789012:certificate/00000000-0000-4000-8000-000000000001"
+    }
+  }
+
+  assert {
+    condition     = aws_acm_certificate.game.region == "us-east-1" && aws_acm_certificate.game.domain_name == "island-battles.example.org" && aws_acm_certificate.game.validation_method == "DNS" && aws_acm_certificate_validation.game.region == "us-east-1"
+    error_message = "The certificate must be for game_hostname, validated by DNS, in us-east-1 where CloudFront takes it from."
+  }
+
+  assert {
+    condition = (
+      aws_cloudfront_distribution.game.aliases == toset(["island-battles.example.org"]) &&
+      aws_cloudfront_distribution.game.viewer_certificate[0].acm_certificate_arn == "arn:aws:acm:us-east-1:123456789012:certificate/00000000-0000-4000-8000-000000000001" &&
+      aws_cloudfront_distribution.game.viewer_certificate[0].ssl_support_method == "sni-only"
+    )
+    error_message = "The distribution must serve game_hostname with the validated certificate."
+  }
+
+  assert {
+    condition = (
+      one(aws_cloudfront_distribution.game.origin).domain_name == "abcdefghijklmnopqrstuvwxyz012345.lambda-url.eu-central-1.on.aws" &&
+      one(aws_cloudfront_distribution.game.origin).custom_origin_config[0].origin_protocol_policy == "https-only" &&
+      try(length(one(aws_cloudfront_distribution.game.origin).origin_access_control_id), 0) == 0
+    )
+    error_message = "The distribution must call the Function URL's host over HTTPS, without origin access control."
+  }
+
+  assert {
+    condition = (
+      toset(aws_cloudfront_distribution.game.default_cache_behavior[0].allowed_methods) == toset(["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]) &&
+      aws_cloudfront_distribution.game.default_cache_behavior[0].viewer_protocol_policy == "redirect-to-https" &&
+      data.aws_cloudfront_cache_policy.caching_disabled.name == "Managed-CachingDisabled" &&
+      aws_cloudfront_distribution.game.default_cache_behavior[0].cache_policy_id == data.aws_cloudfront_cache_policy.caching_disabled.id &&
+      data.aws_cloudfront_origin_request_policy.all_viewer_except_host_header.name == "Managed-AllViewerExceptHostHeader" &&
+      aws_cloudfront_distribution.game.default_cache_behavior[0].origin_request_policy_id == data.aws_cloudfront_origin_request_policy.all_viewer_except_host_header.id &&
+      length(aws_cloudfront_distribution.game.ordered_cache_behavior) == 0
+    )
+    error_message = "Every request must reach the Lambda uncached over HTTPS, with every method and every viewer header but Host."
+  }
+
+  assert {
+    condition     = length(aws_cloudfront_distribution.game.logging_config) == 0 && try(length(aws_cloudfront_distribution.game.default_cache_behavior[0].realtime_log_config_arn), 0) == 0
+    error_message = "Standard and real-time logs must stay off."
+  }
+
+  assert {
+    condition     = output.game_url == "https://island-battles.example.org"
+    error_message = "The game's URL is game_hostname over HTTPS."
+  }
+}
+
+run "requires_a_game_hostname" {
+  command = plan
+
+  variables {
+    game_hostname = "https://island-battles.example.org/"
+  }
+
+  expect_failures = [var.game_hostname]
 }
 
 # The free-tier budget (#46) ---------------------------------------------------

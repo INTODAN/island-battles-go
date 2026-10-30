@@ -17,6 +17,21 @@ variable "name" {
   default     = "island-battles"
 }
 
+variable "game_hostname" {
+  description = <<-EOT
+    The name players open the game at, such as island-battles.example.org.
+    CloudFront serves it from the Function URL, with an ACM certificate. Its
+    CNAME and the certificate's validation record are added to the domain's
+    DNS by hand (deploy/README.md).
+  EOT
+  type        = string
+
+  validation {
+    condition     = can(regex("^([a-z0-9]([a-z0-9-]*[a-z0-9])?\\.)+[a-z]{2,}$", var.game_hostname))
+    error_message = "game_hostname must be a lowercase hostname, such as island-battles.example.org."
+  }
+}
+
 # The VM (#26, #32) ------------------------------------------------------------
 
 variable "vm_instances" {

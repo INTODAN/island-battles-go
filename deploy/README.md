@@ -2,16 +2,19 @@
 
 Island Battles runs in one AWS region:
 
-- **Backend:** the Go backend runs on AWS Lambda behind its Function URL. Players open the lobby UI at `/lobby/ui/` on the Function URL itself; the bare Function URL answers 404. There is no custom domain, CloudFront or ACM certificate.
+- **Backend:** the Go backend runs on AWS Lambda behind its Function URL. Players open the game at `https://island-battles.<domain>`, which a CloudFront distribution serves from the Function URL with an ACM certificate (#75). `/` redirects to the lobby UI at `/lobby/ui/`.
 - **VM:** a Lightsail instance runs Postgres and Centrifugo in Docker Compose. Nothing else runs on it.
 - **Network:** there is no VPC or peering. The Lambda reaches Postgres and Centrifugo's HTTP API over the internet:
   - Postgres accepts only TLS (`hostssl`) logins, with scram and a generated password.
   - Centrifugo's API needs TLS and its API key.
-- **DNS:** one record, `vm.<domain>`, points at the VM's static IP. Centrifugo gets a Let's Encrypt certificate for it, and browsers connect to `wss://vm.<domain>/connection/websocket`.
+- **DNS:** three records, added by hand:
+  - `vm.<domain>` points at the VM's static IP. Centrifugo gets a Let's Encrypt certificate for it, and browsers connect to `wss://vm.<domain>/connection/websocket`.
+  - `island-battles.<domain>` points at the CloudFront distribution.
+  - ACM's validation record lets it issue and renew the game's certificate.
 
 This document covers creating the AWS resources with Terraform, setting up the VM with Ansible, deploying the backend to Lambda, backups, redeploys and moving to a new VM. [First deployment, step by step](#first-deployment-step-by-step) puts it all in order. #26 describes the architecture.
 
-The live deployment (#45, 2026-10-30) runs in `eu-central-1`, and its VM is `vm.elidan.org`. Its A record is managed in the Squarespace domains dashboard: `elidan.org` → DNS → Custom records.
+The live deployment (#45, 2026-10-30) runs in `eu-central-1`, and its VM is `vm.elidan.org`. Its DNS records are managed in the Squarespace domains dashboard: `elidan.org` → DNS → Custom records.
 
 ## Files
 
@@ -21,7 +24,7 @@ The live deployment (#45, 2026-10-30) runs in `eu-central-1`, and its VM is `vm.
 | `scripts/vm.sh` | Deploys the VM, moves its database and runs the smoke test. |
 | `deploy/aws.example.tfvars` | The template for the AWS settings. |
 | `deploy/vm.example.yml` | The template for the VM settings. |
-| `deploy/terraform/` | The AWS resources: the Lightsail VM in `vm.tf`, the Lambda in `lambda.tf`, and its log group, alarms, collector settings and budget in `observability.tf`. `tests/` checks the configuration offline. |
+| `deploy/terraform/` | The AWS resources: the Lightsail VM in `vm.tf`, the Lambda in `lambda.tf`, the game's certificate and CloudFront distribution in `cloudfront.tf`, and the Lambda's log group, alarms, collector settings and budget in `observability.tf`. `tests/` checks the configuration offline. |
 | `deploy/check_deploy_plan.py` | Reads the plan for `scripts/aws.sh`: stops a backend deploy that would change more than the backend, lists what an apply would destroy, and tells an apply whether to run the migrations. `deploy/test_check_deploy_plan.py` tests it. |
 | `deploy/ansible/` | The playbooks: `site.yml` deploys, `dump.yml` and `restore.yml` copy the database. The `base` role prepares Ubuntu, and the `app` role deploys the Compose project. |
 | `deploy/smoke.py` | The smoke test that `scripts/vm.sh smoke` runs. |
@@ -30,8 +33,8 @@ The live deployment (#45, 2026-10-30) runs in `eu-central-1`, and its VM is `vm.
 ## Prerequisites
 
 - **On your machine:**
-  - Terraform 1.9 or newer, Go, which builds the backend and runs its migrations, and Python 3, for the backend deploy's plan check.
-  - AWS credentials for Terraform, which reads the standard AWS credential chain, e.g. `AWS_PROFILE=<profile>`. They need to manage Lightsail, Lambda, IAM roles, CloudWatch Logs and alarms, SNS and Budgets. Nothing in the repo stores them.
+  - Terraform 1.11 or newer, Go, which builds the backend and runs its migrations, and Python 3, for the backend deploy's plan check.
+  - AWS credentials for Terraform, which reads the standard AWS credential chain, e.g. `AWS_PROFILE=<profile>`. They need to manage Lightsail, Lambda, IAM roles, CloudWatch Logs and alarms, SNS, Budgets, ACM and CloudFront. Nothing in the repo stores them.
     - `aws login --profile <profile>` (AWS CLI 2.32 or newer) signs in through the console and gives short-lived credentials, which Terraform's AWS provider reads directly. They last up to 12 hours; run it again when Terraform reports expired credentials.
   - Ansible: `uv tool install ansible-core`. `scripts/vm.sh` installs the collections it needs into `deploy/ansible/.collections/` (gitignored) on first use.
   - [uv](https://docs.astral.sh/uv/), for the smoke test.
@@ -41,16 +44,25 @@ The live deployment (#45, 2026-10-30) runs in `eu-central-1`, and its VM is `vm.
   - A static IP attached to it.
   - Firewall rules for 22, 443 and 5432. Limit 22 to your own IP if you can. Port 80 stays closed, because Centrifugo answers Let's Encrypt's challenge on 443.
   - Ansible doesn't set up a host firewall: ports that Docker publishes bypass ufw, so the Lightsail firewall is the one that counts.
-- **The Lambda's Function URL:** `scripts/aws.sh output function_url`. Centrifugo calls the backend's subscribe proxy through it, and accepts browser connections only from its origin.
+- **The Lambda's Function URL:** `scripts/aws.sh output function_url`. Centrifugo calls the backend's subscribe proxy through it.
+- **The game's URL:** `scripts/aws.sh output game_url`. Centrifugo accepts browser connections only from its origin.
 - **DNS** (#30): see below.
 
 ### DNS
 
-The VM needs a single DNS record. Squarespace has no DNS API, so you add it by hand, once. It doesn't change on a redeploy or when you move to a new VM, because the static IP moves with the deployment.
+The deployment needs three DNS records. Squarespace has no DNS API, so you add them by hand, once. They don't change on a redeploy or when you move to a new VM: the static IP moves with the deployment, and the distribution and its certificate stay.
 
-1. In the Squarespace domains dashboard, open the domain's DNS settings and add a custom record: type `A`, host `vm`, value the static IP. If the domain uses DNS Connect with another provider's nameservers, add it there instead.
-2. Run `dig CAA <domain> +short`. If it prints records, one of them must allow `letsencrypt.org`, or the certificate request fails. You can also add a CAA record on `vm.<domain>` itself.
-3. Wait until `dig +short vm.<domain>` prints the static IP. A resolver that looked the name up before the record existed keeps the empty answer for the zone's negative TTL, 5 minutes for `elidan.org`. The playbook's check resolves the name on the VM, which hasn't looked it up before.
+In the Squarespace domains dashboard, open the domain's DNS settings and add each one as a custom record. If the domain uses DNS Connect with another provider's nameservers, add them there instead. Squarespace's host field takes the name without the domain: for `_1a2b.island-battles.elidan.org.`, enter `_1a2b.island-battles`.
+
+| Record | Type | Host | Value | When |
+|---|---|---|---|---|
+| The certificate's validation | `CNAME` | The name that `scripts/aws.sh output certificate_validation_record` prints, without the domain | The value it prints after `CNAME`, ending in `.acm-validations.aws.` | Once the certificate exists, before the apply that waits for it |
+| The VM | `A` | `vm` | `scripts/aws.sh output static_ip` | Before the VM deploy |
+| The game | `CNAME` | `island-battles`: `game_hostname` without the domain | `scripts/aws.sh output distribution_domain`, `<id>.cloudfront.net` | Once the distribution exists |
+
+- **Keep the validation record.** ACM renews the certificate only while it can still see the record.
+- **CAA records:** run `dig CAA <domain> +short`. If it prints records, they must allow `letsencrypt.org`, for `vm`, and `amazon.com`, for ACM, or the certificate requests fail. You can also add CAA records on `vm.<domain>` and `island-battles.<domain>` themselves. `elidan.org` had none on 2026-10-30.
+- **Wait until `dig +short vm.<domain>` prints the static IP** before the VM deploy. A resolver that looked the name up before the record existed keeps the empty answer for the zone's negative TTL, 5 minutes for `elidan.org`. The playbook's check resolves the name on the VM, which hasn't looked it up before.
 
 Let's Encrypt allows only a few failed validations per hostname per hour. The playbook therefore stops before touching the VM if `vm.<domain>` doesn't resolve to the static IP yet.
 
@@ -62,44 +74,63 @@ Copy `deploy/vm.example.yml` to `deploy/local/vm.yml` and fill it in:
 |---|---|
 | `deploy_domain` | The domain. The VM's hostname is `vm.<deploy_domain>`. |
 | `lambda_function_url` | The backend Lambda's Function URL, e.g. `https://<id>.lambda-url.<region>.on.aws/`. `scripts/aws.sh output function_url` prints it. |
+| `game_url` | Where players open the game, e.g. `https://island-battles.<domain>`. `scripts/aws.sh output game_url` prints it. |
 | `ansible_ssh_private_key_file` | Optional. The instance's SSH key. |
 | `app_letsencrypt_email` | Optional. The contact address for the Let's Encrypt account. |
 
-Everything else derives from these two: the autocert host whitelist, `ISLAND_BATTLES_CENTRIFUGO_PUBLIC_URL`, the API URL, and Centrifugo's allowed origin and proxy endpoints. Other variables are in `deploy/ansible/group_vars/all.yml` and the roles' `defaults/main.yml`, and any of them can be overridden with `-e name=value`.
+Everything else derives from these three: the autocert host whitelist, `ISLAND_BATTLES_CENTRIFUGO_PUBLIC_URL` and the API URL from the domain, Centrifugo's proxy endpoints from the Function URL, and its allowed origin from the game's URL. Other variables are in `deploy/ansible/group_vars/all.yml` and the roles' `defaults/main.yml`, and any of them can be overridden with `-e name=value`.
 
 ## First deployment, step by step
 
-The pieces depend on each other in a circle. Terraform creates the Lambda, whose Function URL the VM deploy needs for Centrifugo. The VM deploy writes `deploy/local/lambda.env`, which the Lambda needs. The first apply therefore creates the function without its settings, and the backend deploy publishes them once the VM is up:
+The pieces depend on each other in a circle. Terraform creates the Lambda, whose Function URL the VM deploy needs for Centrifugo. The VM deploy writes `deploy/local/lambda.env`, which the Lambda needs. The first apply therefore creates the function without its settings, and the backend deploy publishes them once the VM is up. The game's certificate comes first of all, because the distribution needs it issued, and ACM issues it only once you've added its DNS record:
 
 1. **Check the account's Lambda concurrency limit.** In the Service Quotas console, look up AWS Lambda's "Concurrent executions" for your region. If it's below 1000, read [The concurrency cap](#the-concurrency-cap) first.
 2. **Write the settings.**
-   - Copy `deploy/aws.example.tfvars` to `deploy/local/aws.tfvars` and set the region, your SSH public key, the instance and `alert_email` ([AWS settings](#aws-settings)).
-   - Copy `deploy/vm.example.yml` to `deploy/local/vm.yml` and set `deploy_domain` ([Settings](#settings)). The Function URL comes in step 4.
-3. **Create the AWS resources:**
+   - Copy `deploy/aws.example.tfvars` to `deploy/local/aws.tfvars` and set the region, your SSH public key, the instance, `game_hostname` and `alert_email` ([AWS settings](#aws-settings)).
+   - Copy `deploy/vm.example.yml` to `deploy/local/vm.yml` and set `deploy_domain` ([Settings](#settings)). The URLs come in step 5.
+3. **Request the game's certificate:**
+
+   ```sh
+   scripts/aws.sh apply -target=aws_acm_certificate.game
+   ```
+
+   The plan creates only the certificate, in `us-east-1`. Terraform warns that a targeted plan may be incomplete, which is expected here. Then `scripts/aws.sh output certificate_validation_record` prints its validation record: add it ([DNS](#dns)).
+4. **Create the AWS resources:**
 
    ```sh
    scripts/aws.sh apply -var allow_missing_lambda_settings=true
    ```
 
-   It builds the backend and shows the plan: the instance, its firewall, the static IP and its attachment, the key pair, the Lambda's role, the function and its Function URL, and its log group, metric filter, alarms, alert topic and zero-spend budget ([Logs, alerts and traces](#logs-alerts-and-traces)). Type `yes`. There's no `lambda.env` yet, so it skips the migrations, and the function fails every request until step 7.
+   It builds the backend and shows the plan: the instance, its firewall, the static IP and its attachment, the key pair, the Lambda's role, the function and its Function URL, the certificate's validation and the CloudFront distribution, and the function's log group, metric filter, alarms, alert topic and zero-spend budget ([Logs, alerts and traces](#logs-alerts-and-traces)). Type `yes`. There's no `lambda.env` yet, so it skips the migrations, and the function fails every request until step 8.
 
-   SNS then emails `alert_email` a confirmation link. Follow it, or the alarms send nothing.
-4. **Feed the outputs to the VM deploy.** `scripts/aws.sh output` prints the static IP and the Function URL. Put `function_url` into `deploy/local/vm.yml` as `lambda_function_url`.
-5. **Add the DNS record** `vm.<domain>` for the static IP, and wait until it resolves ([DNS](#dns)).
-6. **Deploy the VM.** Give the new instance a minute to boot first.
+   - It waits until ACM has issued the certificate, usually within minutes of the record resolving, and then until CloudFront has deployed the distribution, which takes a few minutes more.
+   - SNS then emails `alert_email` a confirmation link. Follow it, or the alarms send nothing.
+5. **Feed the outputs to the VM deploy.** `scripts/aws.sh output` prints the static IP, the Function URL and the game's URL. Put `function_url` into `deploy/local/vm.yml` as `lambda_function_url`, and `game_url` as `game_url`.
+6. **Add the DNS records** `vm.<domain>` for the static IP and `island-battles.<domain>` for the distribution, and wait until `vm.<domain>` resolves ([DNS](#dns)).
+7. **Deploy the VM.** Give the new instance a minute to boot first.
 
    ```sh
    scripts/vm.sh deploy "$(scripts/aws.sh output static_ip)" -e app_generate_secrets=true
    ```
 
    It generates the [secrets](#secrets) and writes `deploy/local/lambda.env` ([First VM deploy](#first-vm-deploy)).
-7. **Deploy the backend:** `scripts/aws.sh deploy`. Its plan only updates the function's settings. The migrations create the schema, then the function gets its settings ([Deploying the backend](#deploying-the-backend)).
-8. **Run the smoke test:** `scripts/vm.sh smoke` ([Smoke test](#smoke-test)).
-9. **Back up `deploy/local/`:** the secrets, Terraform's state, `aws.tfvars`, `vm.yml` and `lambda.env`.
+8. **Deploy the backend:** `scripts/aws.sh deploy`. Its plan only updates the function's settings. The migrations create the schema, then the function gets its settings ([Deploying the backend](#deploying-the-backend)).
+9. **Run the smoke test:** `scripts/vm.sh smoke` ([Smoke test](#smoke-test)). Players can now open `https://island-battles.<domain>`.
+10. **Back up `deploy/local/`:** the secrets, Terraform's state, `aws.tfvars`, `vm.yml` and `lambda.env`.
+
+### Adding the game's name to a running deployment
+
+A deployment from before #75 serves players at the Function URL. To move them to `https://island-battles.<domain>`:
+
+1. Set `game_hostname` in `deploy/local/aws.tfvars`, request the certificate with `scripts/aws.sh apply -target=aws_acm_certificate.game`, and add its validation record ([DNS](#dns)).
+2. Run `scripts/aws.sh apply`. Its plan creates the certificate's validation and the distribution, and waits for both. Built from a checkout with #75, it also publishes the backend, whose `/` redirects to the lobby UI, as [any apply that changes the function](#the-aws-resources) does.
+3. Add the `island-battles` CNAME for `scripts/aws.sh output distribution_domain`, and wait until `https://island-battles.<domain>/healthz` answers.
+4. Set `game_url` in `deploy/local/vm.yml` and run `scripts/vm.sh deploy <static IP>`. It recreates the Centrifugo container with the new allowed origin, which drops every WebSocket connection. From here, live updates work only on pages opened at the game's URL, not at the Function URL.
+5. Run `scripts/vm.sh smoke`.
 
 ## AWS resources
 
-`deploy/terraform/` creates everything in AWS (#32). The DNS record is the only manual step.
+`deploy/terraform/` creates everything in AWS (#32). The DNS records are the only manual step.
 
 | Resource | Details |
 |---|---|
@@ -110,15 +141,17 @@ The pieces depend on each other in a circle. Terraform creates the Lambda, whose
 | Lambda | The `provided.al2023` runtime on arm64, 512 MB, a 30-second timeout, a reserved concurrency of 5, JSON logs filtered at WARN, Active tracing off, and the OpenTelemetry collector layer. |
 | IAM role | Basic execution and X-Ray writes: the function writes its logs, its collector layer sends traces to X-Ray, and it calls nothing else in AWS. |
 | Function URL | Auth type `NONE` and the `RESPONSE_STREAM` invoke mode, which the backend's `lambdaurl` host needs. The provider adds the public invoke permissions. |
+| Certificate | An ACM certificate for `game_hostname` in `us-east-1`, where CloudFront takes certificates from, validated by DNS. ACM renews it on its own while its validation record stays. |
+| CloudFront distribution | Serves `game_hostname` with the certificate, over HTTPS only: plain HTTP is redirected. Its one origin is the Function URL, over HTTPS. Every method reaches the Lambda uncached (`Managed-CachingDisabled`), with every viewer header, cookie and query string but `Host` (`Managed-AllViewerExceptHostHeader`), so the Function URL sees its own `Host` and the backend gets `Authorization`. Streamed answers stream through. No origin access control: for a Function URL it would need clients to send a SHA-256 of every POST body, and the Function URL is public anyway. Price class 100, no logs and no WAF. |
 | Log group | `/aws/lambda/<name>`, kept for 7 days. |
 | Metric filter and alarms | One metric that counts error lines, and two alarms, on it and on the function's `Errors`, that email `alert_email` through an SNS topic. |
 | Budget | A zero-spend cost budget that emails `alert_email`. |
 
-There's no CloudFront, ACM certificate, VPC, peering or EventBridge. [Logs, alerts and traces](#logs-alerts-and-traces) explains the last three rows, and why they stay inside AWS's free tier.
+There's no VPC, peering or EventBridge. [Logs, alerts and traces](#logs-alerts-and-traces) explains the last three rows, and why they stay inside AWS's free tier, and [Free allowances](#free-allowances) covers CloudFront's.
 
 ### AWS settings
 
-Copy `deploy/aws.example.tfvars` to `deploy/local/aws.tfvars` and fill in `region`, `ssh_public_key`, `vm_instances`, `static_ip_instance` and `alert_email`. `alert_email` stays in that gitignored file: never commit it. `deploy/terraform/variables.tf` describes every other variable, all of which have defaults. The instances have no default, so a lost `aws.tfvars` can't plan to replace the instance that runs with a default one. Keep it in step with the instances, for example after a move. If Lightsail rejects your key, use an RSA key: `ssh-keygen -t rsa -b 4096`.
+Copy `deploy/aws.example.tfvars` to `deploy/local/aws.tfvars` and fill in `region`, `ssh_public_key`, `vm_instances`, `static_ip_instance`, `game_hostname` and `alert_email`. `alert_email` stays in that gitignored file: never commit it. `deploy/terraform/variables.tf` describes every other variable, all of which have defaults. The instances have no default, so a lost `aws.tfvars` can't plan to replace the instance that runs with a default one. Keep it in step with the instances, for example after a move. If Lightsail rejects your key, use an RSA key: `ssh-keygen -t rsa -b 4096`.
 
 ### State
 
@@ -212,11 +245,11 @@ scripts/aws.sh deploy
 
 1. **Builds** `deploy/local/lambda/bootstrap` with the build command from [backend/README.md](../backend/README.md#hosts-and-deploys). Terraform zips it with `archive_file`.
 2. **Plans** the Terraform configuration with `deploy/local/aws.tfvars` and `deploy/local/lambda.env`.
-3. **Checks the plan** with `deploy/check_deploy_plan.py`, which allows only creating or updating resources outside Lightsail. A plan that changes the VM, its firewall or its static IP, or that deletes or replaces anything, such as the Function URL, stops the deploy before the migrations. Review those changes with `scripts/aws.sh apply` instead.
+3. **Checks the plan** with `deploy/check_deploy_plan.py`, which allows only creating or updating resources outside Lightsail, ACM and CloudFront. A plan that changes the VM, its firewall or its static IP, or the game's certificate or distribution, or that deletes or replaces anything, such as the Function URL, stops the deploy before the migrations. Review those changes with `scripts/aws.sh apply` instead. A deploy that created the certificate would wait for a DNS record nobody has added yet.
 4. **Migrates the database** from your machine: `go run ./backend/cmd/migrate`, with `ISLAND_BATTLES_DATABASE_URL` from `lambda.env`, straight to Postgres over TLS. The old code serves requests against the new schema until the next step finishes.
 5. **Applies the checked plan:** the new code and settings. Then it prints the Function URL.
 
-It doesn't ask for confirmation, never connects to the VM and never changes a Lightsail resource. The plan file holds the settings, so the script deletes it afterwards.
+It doesn't ask for confirmation, never connects to the VM and never changes a Lightsail resource or the game's name. The plan file holds the settings, so the script deletes it afterwards.
 
 **Settings:** every `KEY=value` line of `lambda.env` becomes one of the function's environment variables, so a new setting that the VM deploy writes needs no Terraform change. Values are taken literally, without quotes. Plans show the environment only as `(sensitive value)`.
 
@@ -255,7 +288,7 @@ Run `scripts/aws.sh deploy` from the commit you want to publish. See [Deploying 
 Change `deploy/local/aws.tfvars` or `deploy/terraform/`, then run `scripts/aws.sh apply`. It shows the plan and applies it only when you type `yes`.
 
 - **Read the plan.** Changing an instance's zone, image or plan replaces it, and replacing an instance deletes its disk and its automatic snapshots. Add a new instance and [move to it](#moving-to-a-new-vm) instead.
-- **Destroying needs the name.** When the plan deletes or replaces an instance, the static IP or a disk, the apply lists them and asks you to type each one's name before the usual `yes`. A wrong answer applies nothing. If you didn't mean to destroy it, `aws.tfvars` probably doesn't match the instances that run. Without a terminal, list the names in `ISLAND_BATTLES_ALLOW_DESTROY`, separated by commas.
+- **Destroying needs the name.** When the plan deletes or replaces an instance, the static IP, a disk or the distribution, the apply lists them and asks you to type each one's name before the usual `yes`. For the distribution, that's its domain, `<id>.cloudfront.net`: a new distribution gets a new one, and the `island-battles` CNAME must follow it. A wrong answer applies nothing. If you didn't mean to destroy it, `aws.tfvars` probably doesn't match the instances that run. Without a terminal, list the names in `ISLAND_BATTLES_ALLOW_DESTROY`, separated by commas.
 - **It may publish the backend too.** When the plan changes the function, the apply first runs the migrations and then publishes the backend built from your checkout, so run it from the commit you last deployed or a newer one. A plan that leaves the function alone, such as moving the static IP, runs no migrations: in the middle of a move, the old VM refuses the backend.
 
 ## Smoke test
@@ -264,12 +297,14 @@ Change `deploy/local/aws.tfvars` or `deploy/terraform/`, then run `scripts/aws.s
 scripts/vm.sh smoke
 ```
 
-It reads the Function URL from your settings and checks the whole path:
+It reads `game_url` from your settings and checks the whole path, through CloudFront:
 
-1. `/healthz` on the Function URL returns 204.
-2. A guest credential works, and the backend issues a connection token for it, which needs Postgres.
-3. Centrifugo accepts the token at `wss://vm.<domain>/connection/websocket`, with a valid certificate and the Function URL's origin.
-4. Centrifugo subscribes the guest to its personal channel through the backend's subscribe proxy, which needs the proxy secret and the Function URL.
+1. `/healthz` returns 204, with a valid certificate for the game's name.
+2. `/` leads to the lobby UI.
+3. A guest credential works, and the backend issues a connection token for it, which needs Postgres.
+4. An authenticated GET reaches the backend with its `Authorization` header. CloudFront strips the header from GET requests unless the origin request policy forwards it.
+5. Centrifugo accepts the token at `wss://vm.<domain>/connection/websocket`, with a valid certificate and the game's origin.
+6. Centrifugo subscribes the guest to its personal channel through the backend's subscribe proxy, which needs the proxy secret and the Function URL.
 
 The guest's credential is kept in `deploy/local/smoke-session.json`, and later runs reuse it. After a move to a new VM, that confirms the data came along. Guest credentials expire after 24 hours, and the test replaces one that expires within two hours. If the saved credential is rejected for another reason, delete the file and run the test again.
 
@@ -372,6 +407,7 @@ Each is billed outside the limits below, and nothing in `deploy/terraform/` turn
 - CloudWatch RUM and Synthetics
 - Contributor Insights
 - Detailed monitoring
+- On the CloudFront distribution: standard logs, real-time logs, additional metrics, Origin Shield and Lambda@Edge. The Terraform tests check that it has no logs.
 
 ### Free allowances
 
@@ -385,6 +421,8 @@ Checked on 2026-10-29. Accounts created after 15 July 2025 get credits instead o
 | X-Ray | 100,000 traces recorded, and 1,000,000 traces retrieved or scanned. | [CloudWatch pricing](https://aws.amazon.com/cloudwatch/pricing/), which [X-Ray pricing](https://aws.amazon.com/xray/pricing/) now points to |
 | SNS | 1,000 email notifications, 1 million requests. | [SNS FAQ](https://aws.amazon.com/sns/faqs/) |
 | AWS Budgets | Budgets and their notifications are free. Only action-enabled budgets past the first two, and emailed reports, cost money. | [Budgets pricing](https://aws.amazon.com/aws-cost-management/aws-budgets/pricing/) |
+| CloudFront | 1 TB of data transfer out and 10,000,000 HTTP or HTTPS requests, on the always-free tier of the pay-as-you-go pricing. Transfer from AWS origins, such as the Function URL, to CloudFront is free. Checked on 2026-10-30. | [CloudFront pricing](https://aws.amazon.com/cloudfront/pricing/pay-as-you-go/), [CloudFront FAQ](https://aws.amazon.com/cloudfront/faqs/) |
+| ACM | Public certificates are free. | [CloudFront pricing](https://aws.amazon.com/cloudfront/pricing/pay-as-you-go/) ("Free SSL certificates") |
 
 ### The budget
 
@@ -409,10 +447,12 @@ The worst case is a 31-day month, 44,640 minutes, with the function at its concu
 | Budget emails | Sent by Budgets, not SNS | free |
 | Traces recorded | Each instance starts at most one every T, and its first T after it starts: **C × 2,678,400 / T ≤ 80,000**, checked by Terraform and at startup | 74,400 of 100,000 |
 | Traces retrieved or scanned | Opening traces in the console, by hand | far under 1,000,000 |
+| CloudFront's standard and real-time logs | Off: the distribution has no logging configuration, which the Terraform tests check | 0 |
+| CloudFront's requests and transfer out | Not bounded by code: anyone can call the public name. Nothing is cached, so every request is also a Lambda request. | of 10,000,000 requests and 1 TB; see below |
 
 Two assumptions sit under the per-instance limits. Each Lambda instance is one process with its own limits, and the concurrency cap bounds how many run at once. An instance that replaces another, such as after a crash, starts with a fresh minute of N lines but no trace until it has run for T. The 3.1 GB of headroom also covers that.
 
-Lambda's requests and compute are outside this budget. The developer accepted the cost risk of the public Function URL (#26).
+Lambda's requests and compute, and CloudFront's requests and transfer, are outside this budget. Players stay far under CloudFront's free 10 million requests a month: a lobby tab left open for a whole month sends a heartbeat every 15 seconds, about 180,000 requests. The developer accepted the cost risk of the public Function URL and the public name (#26, #75).
 
 ### The collector layer
 
@@ -465,7 +505,11 @@ These checks first ran on 2026-10-30, with `reserved_concurrency = null`, `accou
   - Read Centrifugo's log on the VM: `ssh deploy@vm.<domain>`, then `cd /opt/island-battles && docker compose logs centrifugo`.
   - After repeated failures, Let's Encrypt blocks new attempts for about an hour.
 - **`REMOTE HOST IDENTIFICATION HAS CHANGED`:** the static IP now points at a different instance. Run `ssh-keygen -R <static IP>`.
-- **`This plan changes more than the backend`:** `scripts/aws.sh deploy` found changes to Lightsail resources, or a deletion, in the plan, and stopped before migrating. Run `scripts/aws.sh apply`, read the plan, and deploy again once it's applied.
+- **`This plan changes more than the backend`:** `scripts/aws.sh deploy` found changes to Lightsail resources or the game's certificate or distribution, or a deletion, in the plan, and stopped before migrating. Run `scripts/aws.sh apply`, read the plan, and deploy again once it's applied. Right after `game_hostname` is first set, request the certificate first ([Adding the game's name](#adding-the-games-name-to-a-running-deployment)).
+- **The apply waits at `aws_acm_certificate_validation.game: Still creating...`:** ACM hasn't seen the validation record. `dig CNAME <the record's name> +short` must print the value that `scripts/aws.sh output certificate_validation_record` shows. Terraform gives up after 75 minutes; run the apply again once the record resolves.
+- **`https://island-battles.<domain>` doesn't resolve, or shows a certificate for another name:** `dig +short island-battles.<domain>` must lead to `scripts/aws.sh output distribution_domain`. A new CNAME may take the zone's negative TTL, 5 minutes for `elidan.org`, to reach a resolver that looked the name up before.
+- **The lobby loads, but live updates never arrive:** Centrifugo accepts browsers only from `game_url`'s origin. Open the game at `game_url`, not at the Function URL, and check that `game_url` in `deploy/local/vm.yml` matches it, then redeploy the VM.
+- **Authenticated requests answer 401 through CloudFront, but not on the Function URL:** the distribution doesn't forward `Authorization`. Check its origin request policy, `Managed-AllViewerExceptHostHeader`.
 - **The migrations or the apply fail during `scripts/aws.sh deploy`:** fix the cause, for example the database being unreachable, and run `scripts/aws.sh deploy` again. Migrations that already ran are skipped. If the apply failed after the migrations, the old code keeps serving against the migrated schema until a deploy succeeds.
 - **`lambda.env is missing`** from Terraform or `scripts/aws.sh`: copy `deploy/local/` from your backup, or run the VM deploy, which writes it. Only the very first apply passes `-var allow_missing_lambda_settings=true`.
 - **`decreases account's UnreservedConcurrentExecution below its minimum value`:** the account's concurrency limit is too low. See [The concurrency cap](#the-concurrency-cap).
