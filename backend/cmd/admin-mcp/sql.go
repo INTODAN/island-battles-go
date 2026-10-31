@@ -186,6 +186,9 @@ const cursorName = "admin_query"
 // cap, so it learns whether rows were left out without reading them all.
 // DECLARE takes only a query, so the statement can't be a command such as
 // SET or COPY; the read-only transaction refuses anything in it that writes.
+// The read-only transaction alone wouldn't do: SET TRANSACTION READ WRITE
+// as its first statement makes it read-write, and it still lets a
+// superuser, such as the local development role, run COPY ... TO PROGRAM.
 //
 // Both statements use the extended protocol without caching, so PostgreSQL
 // rejects a statement that holds several, and each FETCH is described anew.
