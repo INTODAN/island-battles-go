@@ -2,6 +2,7 @@ package routes
 
 import (
 	"encoding/json"
+	"fmt"
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/models"
@@ -54,7 +55,7 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 	}, game.Replay)
 	huma.Register(api, huma.Operation{
 		OperationID: "getIslandLobbyGeneration", Path: "/game/from-lobby/{lobby_id}/generation", Method: http.MethodGet,
-		Summary: "Read the current generation for a roster player", Description: "Requires a place on the game's frozen roster. The game does not consult the lobby, so access continues after the lobby is deleted. Returns castle and soldier group IDs, which are never reassigned within a game, troop state, recorded clashes with per-participant before/after counts, your turn completion flag, and the outcome once the game has ended. A finished game stays readable until the game is deleted, 7 days after its last generation by default; then this returns 404.",
+		Summary: "Read the current generation for a roster player", Description: "Requires a place on the game's frozen roster. The game does not consult the lobby, so access continues after the lobby is deleted. Returns castle and soldier group IDs, which are never reassigned within a game, troop state, every castle's and soldier group's upgrade levels, recorded clashes with per-participant before/after counts, your turn completion flag, and the outcome once the game has ended. A finished game stays readable until the game is deleted, 7 days after its last generation by default; then this returns 404.",
 		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
 	}, game.CurrentGeneration)
 	huma.Register(api, huma.Operation{
@@ -104,7 +105,7 @@ func SetupRoutes(api huma.API, env *handlers.Env, adminAPIKey string) {
 		Errors: []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusConflict},
 		Description: "The body is the map file format, the MapTemplate schema. Positions are measured from the centre of the plane, so a castle's x lies from -plane_size_x/2 to plane_size_x/2 and its y from -plane_size_y/2 to plane_size_y/2. " +
 			"Castle team colours run from 1 to player_amount, and 0 is neutral. A castle without starting_soldier_amount starts with neutral_starting_soldier_amount. " +
-			"Castle upgrades are a map of upgrade type to level. Omitted upgrades default to level 1; speed supports levels 1 through 4, and clash_stop_generations supports levels 1 through 3. " +
+			"Castle upgrades are a map of upgrade type to level. Omitted upgrades default to level 1; " + upgradeLevelRanges() + ". " +
 			"An invalid map returns 422 with an error for each invalid field and is not stored. A map_name that another map uses returns 409. " +
 			"Admins only: send the deployment's admin API key in the " + AdminAPIKeyHeader + " header. A missing or wrong key returns 401, and when the deployment sets no key every request returns 403."}, env.CreateMapTemplate)
 	dropSchemaLink(api, reflect.TypeFor[models.MapTemplateView]())
@@ -136,6 +137,19 @@ func SetupGameGraphRoute(api huma.API, env *handlers.Env) {
 	huma.Register(api, huma.Operation{Path: "/game/{id}/graph", Method: http.MethodGet, DefaultStatus: http.StatusOK,
 		Summary:     "Get a graph visualization of the game.",
 		Description: "A development page that reads any game without authentication. Only the local server host serves it, never the public Lambda host."}, env.GetGameGraph)
+}
+
+// upgradeLevelRanges says which levels each upgrade type supports, from the
+// upgrade table, such as "speed supports levels 1 through 4".
+func upgradeLevelRanges() string {
+	ranges := []string{}
+	for _, upgrade := range models.UpgradeTable() {
+		ranges = append(ranges, fmt.Sprintf("%s supports levels 1 through %d", upgrade.Type, upgrade.MaxLevel))
+	}
+	if len(ranges) < 2 {
+		return strings.Join(ranges, "")
+	}
+	return strings.Join(ranges[:len(ranges)-1], ", ") + ", and " + ranges[len(ranges)-1]
 }
 
 // dropSchemaLink removes the read-only $schema property that Huma's schema

@@ -2,6 +2,7 @@ package routes_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"github.com/danielgtaylor/huma/v2/humatest"
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/models"
@@ -25,6 +26,13 @@ func TestUpgradesAreListedWithoutAuthentication(t *testing.T) {
 	}
 	if !reflect.DeepEqual(body.Upgrades, models.UpgradeTable()) {
 		t.Fatalf("upgrades=%+v, want %+v", body.Upgrades, models.UpgradeTable())
+	}
+	// The map file docs take each type's levels from the same table.
+	description := api.OpenAPI().Paths["/map/create"].Post.Description
+	for _, upgrade := range models.UpgradeTable() {
+		if want := fmt.Sprintf("%s supports levels 1 through %d", upgrade.Type, upgrade.MaxLevel); !strings.Contains(description, want) {
+			t.Fatalf("/map/create description lacks %q: %s", want, description)
+		}
 	}
 }
 
