@@ -66,6 +66,14 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 			"A generation of another game returns 404. The lines are deleted with the game, 7 days after its last generation by default; then this returns 404.",
 		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
 	}, game.GenerationLogs)
+	for _, parameter := range api.OpenAPI().Paths["/game/from-lobby/{lobby_id}/logs"].Get.Parameters {
+		if parameter.Name == "generation_id" {
+			// The handler requires it after authentication; see GenerationLogs.
+			parameter.Required = true
+			minimum := 1.0
+			parameter.Schema.Minimum = &minimum
+		}
+	}
 	huma.Register(api, huma.Operation{
 		OperationID: "registerGenerationCommand", Path: "/generation/commands", Method: http.MethodPost,
 		Summary: "Register an atomic player command batch and optionally complete the turn", Description: "Requires a place on the game's frozen roster; the lobby is not consulted. Players send send_soldier_group and upgrade_castle commands for castles their team owns; other command types are forbidden (403). " +
