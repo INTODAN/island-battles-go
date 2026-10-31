@@ -31,6 +31,10 @@ let checkTimer;
 // stays set once the page that opened the builder is gone.
 let sentText = null;
 let lobbyPageClosed = false;
+// lobbyPage is the same-origin window that opened this page, if one did. The
+// page keeps it, because browsers clear window.opener once that window closes.
+const lobbyPage = openerState(window.opener, location.origin) === "ready" ? window.opener : null;
+const lobbyPageState = () => (!lobbyPage ? "none" : lobbyPage.closed ? "closed" : "ready");
 let drag = null;
 
 const isPositive = (value) => typeof value === "number" && value > 0 && Number.isFinite(value);
@@ -120,7 +124,7 @@ function renderCheck() {
 // renderLobby shows Use in lobby only on a page that a same-origin window
 // opened, such as the lobby's create form, and says why it is disabled.
 function renderLobby() {
-  const opener = openerState(window.opener, location.origin);
+  const opener = lobbyPageState();
   if (opener === "closed") lobbyPageClosed = true;
   const text = serialize(map);
   const gate = lobbyGate(map, text, check);
@@ -136,8 +140,8 @@ function renderLobby() {
 lobbyButton.addEventListener("click", () => {
   const text = serialize(map);
   if (!lobbyGate(map, text, check).ready) return;
-  if (openerState(window.opener, location.origin) === "ready") {
-    window.opener.postMessage(lobbyMessage(text), location.origin);
+  if (lobbyPageState() === "ready") {
+    lobbyPage.postMessage(lobbyMessage(text), location.origin);
     sentText = text;
   }
   renderLobby();
