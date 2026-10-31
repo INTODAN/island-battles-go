@@ -4,13 +4,13 @@ This suite verifies an Island Battles player client in any language. The client 
 
 ## Writing a client
 
-Generate the data models and request types from [`backend/api/openapi.json`](../../backend/api/openapi.json). It contains the three player operations, the `GenerationEvent` and `GameEndedEvent` pushed over Centrifugo, and every constraint the server applies. Do not hand-write wire types. Treat unknown response fields as allowed so newer servers stay compatible.
+Generate the data models and request types from [`backend/api/openapi.json`](../../backend/api/openapi.json). It contains the four player operations, including the upgrade cost table, the `GenerationEvent` and `GameEndedEvent` pushed over Centrifugo, and every constraint the server applies. Do not hand-write wire types. Treat unknown response fields as allowed so newer servers stay compatible.
 
-Hand-write only the behavior below. Each rule has live tests in [`tests/live/test_turns.py`](tests/live/test_turns.py).
+Hand-write only the behavior below. Each rule has live tests in [`tests/live/test_turns.py`](tests/live/test_turns.py), and rule 11 in [`tests/live/test_upgrades.py`](tests/live/test_upgrades.py).
 
 1. **Start.** Request a connection token, connect to Centrifugo, read `GET /game/from-lobby/{lobby_id}/generation` to learn your `player:{player_id}` channel and team color, subscribe, wait for the subscription acknowledgment, then read the generation again.
 2. **Callbacks.** Invoke the strategy once per generation, serially, with a command receiver scoped to that callback. Never invoke it for a generation that is already submitted, including after a restart.
-3. **Commands.** Validate arguments against the generated `SendSoldierGroupParameters` before sending. Post each call as its own batch, with `complete: false` and a new request UUID.
+3. **Commands.** The receiver offers `send_soldier_group` and `upgrade_castle`. Validate arguments against the generated `SendSoldierGroupParameters` or `UpgradeCastleParameters` before sending. Post each call as its own batch, with `complete: false` and a new request UUID. Map the server's problem types `urn:island-battles:problem:castle-not-found`, `castle-not-owned`, `upgrade-max-level` and `insufficient-soldiers` to their own errors, for both commands.
 4. **Completion.** When the callback returns, post an empty batch with `complete: true`. When it raises, or the client closes during the callback, leave the turn open. The receiver rejects calls after its callback ends.
 5. **Retries.** When a request fails without a response, retry the identical body, including its request UUID; the server applies it once. Report HTTP error responses to the strategy instead of retrying them.
 6. **Events.** Accept a publication only if it validates as `GenerationEvent` (`schema_version` 1, type `game.next_generation`) or `GameEndedEvent` (type `game.ended`, with an `outcome` in its state) and its game, lobby, player, channel and team match the client. Ignore everything else.
@@ -18,6 +18,7 @@ Hand-write only the behavior below. Each rule has live tests in [`tests/live/tes
 8. **Recovery.** Read the generation again after every connect, reconnect or resubscribe, and retry failed reads with backoff. The player channel keeps no history, so this read is the only way to recover a missed push. Do not poll while idle.
 9. **End.** A state with an `outcome`, from `game.ended` or from HTTP, is the final generation of a finished game. Do not invoke the strategy for it or send any command; report the outcome and the final board to the strategy once, then stop. A client that starts on a finished game reports the end the same way. The server rejects commands for a finished game with 409 and problem type `urn:island-battles:problem:game-ended`.
 10. **Utilities.** Implement `distance(other)`, `compare_team(other)` and `distance_left()` as methods on the generated models. Their rules are defined by [`island_conformance/reference.py`](island_conformance/reference.py), not by any client. A generation whose group's destination castle is missing is invalid.
+11. **Upgrades.** Read `GET /game/upgrades` once during start, before the first callback, and keep it; a failed read fails start. The receiver's `upgrade_cost(castle_id, upgrade_type)` sends no request and returns the cost of the castle's next level of that type, counting the levels this callback bought. Before any request, `upgrade_castle` rejects, in this order: invalid arguments, a castle that is not on the callback's board, a castle the player's team doesn't own, a level that is already the maximum counting this callback's upgrades, and a cost beyond the castle's soldiers minus what this callback already sent or paid from it. `upgrade_cost` rejects the same arguments, missing castles and maximum levels. These local checks reject only what the server would also reject; a teammate's reservations can still make the server refuse.
 
 ## Adapter protocol
 
@@ -30,6 +31,8 @@ Messages from the runner:
 | `evaluate` | `id`, `generation` (wire `Generation`) | Parse it with the client's public model and reply `evaluation`. Needs no server. |
 | `start` | `base_url`, `credential`, `lobby_id` | Start the client. The strategy reports each callback and waits for `finish` or `fail`. |
 | `send_soldier_group` | `origin_castle_id`, `destination_castle_id`, `soldier_amount` | Call the current receiver, or the most recent expired one, with the values as given, which may be invalid or missing. Reply `sent` or `send_failed`. |
+| `upgrade_castle` | `castle_id`, `upgrade_type` | Call `upgrade_castle` like `send_soldier_group`. Reply `sent` or `send_failed`. |
+| `upgrade_cost` | `castle_id`, `upgrade_type` | Call `upgrade_cost` on the same receiver. Reply `cost` or `cost_failed`. |
 | `finish` | | Return from the current callback. |
 | `fail` | | Raise from the current callback. |
 | `close` | | Close the client without completing an open turn, reply `closed`, and exit. |
@@ -43,17 +46,18 @@ Messages from the adapter:
 | `generation` | `generation`, serialized like `evaluation.generation` |
 | `ended` | `outcome` (wire `GameOutcome`) and the final `generation`, serialized like `evaluation.generation` |
 | `sent` | |
-| `send_failed`, `stopped` | `error`: `kind`, `status` (HTTP status or null) and `detail` |
+| `cost` | `cost`, the soldiers the next level costs |
+| `send_failed`, `cost_failed`, `stopped` | `error`: `kind`, `status` (HTTP status, or null when no request answered) and `detail` |
 | `closed` | |
 
-Error kinds are `invalid_argument` (rejected before any request), `rejected` (a 4xx other than 401), `authentication`, `transport`, `protocol`, `receiver_closed`, `closed`, and `player` (the strategy raised). `stopped` reports a client that ended on its own, for example after a failed callback or a rejected credential.
+Error kinds are `invalid_argument` (rejected before any request), `castle_not_found`, `not_owned`, `max_level` and `insufficient_soldiers` (from a local check, with status null, or from the server's problem type), `rejected` (any other 4xx but 401), `authentication`, `transport`, `protocol`, `receiver_closed`, `closed`, and `player` (the strategy raised). `stopped` reports a client that ended on its own, for example after a failed callback or a rejected credential.
 
 ## Running
 
 The offline tier needs only the adapter. It checks parsing and the utilities in two ways, both against the reference implementation:
 
 - [`fixtures/models.json`](fixtures/models.json) holds hand-picked valid and invalid boards. It is generated by `island_conformance/fixtures.py`, and a test fails when it no longer matches the reference. After changing a board or a rule, run `uv run --project clients/conformance python -m island_conformance.fixtures`.
-- 300 random boards from a fixed seed cover shared positions, groups at their destination, neutral castles, whole-number coordinates, unknown fields, and missing destinations. A failure prints the seed, board number and board. Set `ISLAND_BATTLES_CONFORMANCE_SEED` or `ISLAND_BATTLES_CONFORMANCE_BOARDS` to explore further.
+- 300 random boards from a fixed seed cover shared positions, groups at their destination, neutral castles, whole-number coordinates, upgrade levels, unknown fields, and missing destinations. A failure prints the seed, board number and board. Set `ISLAND_BATTLES_CONFORMANCE_SEED` or `ISLAND_BATTLES_CONFORMANCE_BOARDS` to explore further.
 
 Run it with:
 
