@@ -23,6 +23,21 @@ input { flex: 1; min-width: 100px; accent-color: #3464e0; }
 /* Keep a line for the summary even with no clashes. The host resizes the frame only after a size message, so growing
    the page here shows a scrollbar for a frame. A fixed line height stops fallback glyphs such as → from adding height. */
 #clashes { margin-top: 10px; min-height: 1lh; line-height: 1.4; color: #824309; overflow-wrap: anywhere; }
+/* The log panel scrolls inside a fixed height, so loading lines never changes the size the frame reports. */
+#logs { margin-top: 16px; }
+#logs h2 { font-size: .95rem; margin: 0 0 6px; }
+#logs-box { height: 240px; overflow-y: auto; padding: 10px 12px; border-radius: 10px; background: #f5f7fb; font: .78rem/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+#logs-box h3 { font: 700 .82rem system-ui, sans-serif; margin: 10px 0 4px; padding-left: 6px; border-left: 4px solid; }
+#logs-box h3:first-child { margin-top: 0; }
+#logs-box h4 { font: 600 .78rem system-ui, sans-serif; margin: 6px 0 2px; color: #52667b; }
+#logs-box .log-note { font-family: system-ui, sans-serif; margin: 4px 0; }
+#logs-box button { margin-top: 6px; }
+.log-line { white-space: pre-wrap; overflow-wrap: anywhere; color: #202d40; }
+.log-level { font-weight: 700; }
+.log-logger { color: #687386; }
+.log-debug { color: #7a8699; }
+.log-warning { color: #8a5a00; }
+.log-error { color: #b42335; }
 @media (max-width: 450px) { body { padding: 12px; } .controls input { flex-basis: 100%; order: 1; } }
 </style>
 </head>
@@ -40,6 +55,10 @@ input { flex: 1; min-width: 100px; accent-color: #3464e0; }
 </div>
 <p id="outcome" role="status"></p>
 <p id="clashes" role="status"></p>
+<section id="logs" aria-labelledby="logs-title">
+<h2 id="logs-title">Logs</h2>
+<div id="logs-box" tabindex="0"></div>
+</section>
 <script>
 "use strict";
 const replay = {{.}};
@@ -170,6 +189,7 @@ function render(animateClashes = false) {
   live.textContent = followingLive ? "● Live" : "Follow live";
   live.setAttribute("aria-pressed", String(followingLive));
   live.hidden = replay.ended;
+  showLogs();
 }
 play.addEventListener("click", () => { followingLive = false; if (turn === lastTurn) turn = 0; playing = !playing; render(); });
 slider.addEventListener("input", () => { turn = Number(slider.value); playing = false; followingLive = false; render(); });
@@ -182,6 +202,7 @@ window.addEventListener("message", (event) => {
   const newer = state.generation.id > latestGeneration;
   if (!newer && !state.outcome) return;
   const animate = followingLive;
+  const previousLatest = latestGeneration;
   if (newer) {
     // Saved frames have the same shape as live generations.
     latestGeneration = state.generation.id;
@@ -195,8 +216,157 @@ window.addEventListener("message", (event) => {
     replay.ended = true;
     replay.outcome = state.outcome.summary;
     followingLive = false;
+    // Every team's logs are visible now.
+    resetLogs();
   }
   render(animate);
+  // The previous turn is over; a panel still showing it loads its final lines.
+  if (newer && shownLogs === previousLatest) requestLogs(previousLatest);
+});
+// The bots' game logs. The frame has no credential, so the lobby page fetches
+// them for it: a game.request message names the path, and a lobby.response
+// message answers it. Lines of the open turn can still grow, so only
+// generations whose turn is over are cached, and the open turn is read again
+// every few seconds while it is shown.
+const logsBox = document.getElementById("logs-box");
+const logCache = new Map();
+const logRequests = new Map();
+let logRequestCount = 0;
+let shownLogs = null;
+// The generation whose lines the panel shows, rather than a note.
+let renderedLogs = null;
+const openTurnRefreshMilliseconds = 3000;
+const isOpenTurn = (generation) => !replay.ended && generation === latestGeneration;
+function logNote(text) {
+  const note = document.createElement("p");
+  note.className = "log-note";
+  note.textContent = text;
+  return note;
+}
+function showLogs() {
+  const generation = replay.frames[turn].id;
+  if (shownLogs === generation) return;
+  shownLogs = generation;
+  document.getElementById("logs-title").textContent = `Logs · Generation ${turn + 1}`;
+  if (logCache.has(generation)) {
+    renderLogs(logCache.get(generation));
+    return;
+  }
+  if (window.parent === window) {
+    logsBox.replaceChildren(logNote("Open the replay from the lobby to see the bots’ logs."));
+    return;
+  }
+  logsBox.replaceChildren(logNote("Loading logs…"));
+  requestLogs(generation);
+}
+function requestLogs(generation) {
+  const cacheable = !isOpenTurn(generation);
+  if ([...logRequests.values()].some((request) => request.generation === generation && request.cacheable === cacheable)) return;
+  const id = `logs-${++logRequestCount}`;
+  logRequests.set(id, { generation, cacheable });
+  const path = `/game/from-lobby/${encodeURIComponent(replay.lobby_id)}/logs?generation_id=${generation}`;
+  window.parent.postMessage({ type: "game.request", id, path }, "*");
+  // The page answers every request it accepts; stop waiting for a lost one.
+  setTimeout(() => {
+    if (logRequests.delete(id) && shownLogs === generation && renderedLogs !== generation) showLogFailure();
+  }, 15000);
+}
+// While the open turn is shown, in a visible tab of a running game, its lines
+// are read again on a timer. Each read is a request to the server, so there is
+// at most one at a time, and none while the tab is hidden.
+setInterval(() => {
+  if (window.parent === window || document.visibilityState !== "visible" || shownLogs === null || !isOpenTurn(shownLogs)) return;
+  requestLogs(shownLogs);
+}, openTurnRefreshMilliseconds);
+// Called when the outcome arrives, which reveals every team's logs.
+function resetLogs() {
+  logCache.clear();
+  logRequests.clear();
+  shownLogs = null;
+  renderedLogs = null;
+}
+function showLogFailure() {
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.textContent = "Retry";
+  retry.addEventListener("click", () => {
+    shownLogs = null;
+    showLogs();
+  });
+  logsBox.replaceChildren(logNote("The logs could not be loaded."), retry);
+  renderedLogs = null;
+}
+function teamName(teamColor) {
+  return replay.teams.find((team) => team.color === teamColor)?.name || `Team ${teamColor}`;
+}
+// Lines are grouped by team, then by player, in the order they were written.
+function renderLogs(logs) {
+  const nodes = [];
+  let lines = 0;
+  for (const team of replay.teams) {
+    const players = logs.players.filter((player) => player.team_color === team.color);
+    if (!players.length) continue;
+    const heading = document.createElement("h3");
+    heading.textContent = team.name;
+    heading.style.borderColor = color(team.color);
+    nodes.push(heading);
+    for (const player of players) {
+      const name = document.createElement("h4");
+      name.textContent = player.display_name;
+      nodes.push(name);
+      if (!player.lines.length) nodes.push(logNote("No lines."));
+      for (const line of player.lines) {
+        const row = document.createElement("div");
+        row.className = `log-line log-${line.level}`;
+        row.dataset.level = line.level;
+        const level = document.createElement("span");
+        level.className = "log-level";
+        level.textContent = line.level.toUpperCase().padEnd(8);
+        const logger = document.createElement("span");
+        logger.className = "log-logger";
+        logger.textContent = `${line.logger}: `;
+        row.append(level, logger, line.message);
+        nodes.push(row);
+        lines++;
+      }
+    }
+  }
+  // Without any line, a list of players with no lines says less than one note.
+  // While some teams are hidden, the caller sees only their own team. Lines of
+  // the open turn may still arrive.
+  const open = isOpenTurn(logs.generation_id);
+  if (!lines) {
+    nodes.splice(0, nodes.length, logNote(open ? "This turn is still open. Lines appear here as the bots log them."
+      : logs.hidden_team_colors.length ? "Your team logged nothing in this generation." : "No bot logged anything in this generation."));
+  } else if (open) {
+    nodes.unshift(logNote("This turn is still open; more lines may arrive."));
+  }
+  if (logs.hidden_team_colors.length) {
+    const names = logs.hidden_team_colors.map((teamColor) => `${teamName(teamColor)}’s`);
+    const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0];
+    nodes.push(logNote(`${list} logs appear when the game ends.`));
+  }
+  // A refresh of the shown generation keeps the reader's place.
+  const scrollTop = renderedLogs === logs.generation_id ? logsBox.scrollTop : 0;
+  logsBox.replaceChildren(...nodes);
+  logsBox.scrollTop = scrollTop;
+  renderedLogs = logs.generation_id;
+}
+window.addEventListener("message", (event) => {
+  if (event.source !== window.parent || event.data?.type !== "lobby.response") return;
+  const request = logRequests.get(event.data.id);
+  if (!request) return;
+  logRequests.delete(event.data.id);
+  const logs = event.data.body;
+  if (event.data.status !== 200 || !Array.isArray(logs?.players) || !Array.isArray(logs.hidden_team_colors) || logs.generation_id !== request.generation) {
+    // A failed refresh keeps the lines already shown.
+    if (shownLogs === request.generation && renderedLogs !== request.generation) showLogFailure();
+    return;
+  }
+  // A read from while the turn was open may answer after its final lines.
+  if (!request.cacheable && logCache.has(request.generation)) return;
+  if (request.cacheable) logCache.set(request.generation, logs);
+  if (shownLogs === request.generation) renderLogs(logs);
 });
 setInterval(() => {
   if (!playing) return;

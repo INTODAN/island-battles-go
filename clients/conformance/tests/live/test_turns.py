@@ -151,7 +151,10 @@ async def test_failed_callback_keeps_sent_commands_but_does_not_complete(
     await alice.send({"type": "fail"})
     stopped = await alice.expect("stopped")
     assert stopped["error"]["kind"] == "player"
-    assert [batch["complete"] for batch in posts(proxy)] == [False]
+    # The last batch carries only the callback's game log, with its traceback.
+    batches = posts(proxy)
+    assert [batch["complete"] for batch in batches] == [False, False]
+    assert batches[1]["commands"] == []
     assert not (await match.read(match.alice))["submitted"]
 
 

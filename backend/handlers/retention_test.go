@@ -54,6 +54,7 @@ func TestGameRequestsEndWithARetentionPass(t *testing.T) {
 	huma.Register(api, huma.Operation{OperationID: "current", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/generation"}, handler.CurrentGeneration)
 	huma.Register(api, huma.Operation{OperationID: "commands", Method: http.MethodPost, Path: "/generation/commands"}, handler.RegisterGenerationCommands)
 	huma.Register(api, huma.Operation{OperationID: "replay", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/replay"}, handler.Replay)
+	huma.Register(api, huma.Operation{OperationID: "logs", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/logs"}, handler.GenerationLogs)
 	statePath, replayPath := "/game/from-lobby/"+lobbyID+"/generation", "/game/from-lobby/"+lobbyID+"/replay"
 	expectPasses := func(step string, want int) {
 		t.Helper()
@@ -100,4 +101,9 @@ func TestGameRequestsEndWithARetentionPass(t *testing.T) {
 		t.Fatalf("unknown replay=%d", response.Code)
 	}
 	expectPasses("unknown replay", 6)
+	logsPath := fmt.Sprintf("/game/from-lobby/%s/logs?generation_id=%d", lobbyID, state.GenerationID)
+	if response := api.Get(logsPath, "Authorization: Bearer valid"); response.Code != http.StatusOK {
+		t.Fatalf("logs=%d %s", response.Code, response.Body.String())
+	}
+	expectPasses("logs", 7)
 }

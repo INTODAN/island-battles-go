@@ -78,7 +78,7 @@ func expiredGame(database *gorm.DB, before time.Time) clause.Expression {
 // GamePurge counts the rows that one PurgeRetiredGames call deleted.
 type GamePurge struct {
 	// Generations counts generations deleted with their maps, castles,
-	// soldier groups, commands, player inputs and requests.
+	// soldier groups, commands, player inputs, game log lines and requests.
 	Generations int
 	// Games counts games deleted with their frozen players and team bindings,
 	// once they had no generations left.
@@ -88,7 +88,7 @@ type GamePurge struct {
 // PurgeRetiredGames deletes up to generationLimit generations of at most
 // gameLimit retired games, lowest game IDs first, children first for the
 // foreign keys, and then each retired game it empties. Every game is purged
-// in its own transaction of about 15 statements, which gameLimit bounds. A game whose
+// in its own transaction of about 16 statements, which gameLimit bounds. A game whose
 // purge fails is rolled back and left for a later pass, and the others carry
 // on, so one broken game never stops the rest. The error joins every failure,
 // and the counts include only the games that committed. Rows are removed for
@@ -190,7 +190,7 @@ func deleteGenerations(unscoped *gorm.DB, inGame clause.Expression, generations 
 	if err := unscoped.Where(inGame, inGenerations).Delete(&models.GenerationRequest{}).Error; err != nil {
 		return err
 	}
-	for _, child := range []any{&models.GenerationInput{}, &models.Command{}, &models.SoldierGroup{}} {
+	for _, child := range []any{&models.GenerationInput{}, &models.GenerationLog{}, &models.Command{}, &models.SoldierGroup{}} {
 		if err := unscoped.Where(inGenerations).Delete(child).Error; err != nil {
 			return err
 		}

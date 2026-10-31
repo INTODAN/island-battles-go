@@ -201,7 +201,7 @@ async def test_island_schema_survives_restart():
     assert set(tables.splitlines()) == lobby_tables | {
         "games", "maps", "castles", "castle_templates", "map_templates", "map_template_schema_migrations",
         "generations", "soldier_groups", "commands", "island_game_team_bindings",
-        "frozen_game_players", "generation_inputs", "generation_requests",
+        "frozen_game_players", "generation_inputs", "generation_requests", "generation_logs",
     }
     columns = await sql("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='games' ORDER BY ordinal_position")
     assert set(columns.splitlines()) == {"id", "created_at", "updated_at", "deleted_at", "lobby_id", "teams", "outcome", "next_soldier_group_id"}

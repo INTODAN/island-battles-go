@@ -254,6 +254,43 @@ class GenerationEvent(GameModel):
     type: Literal["game.next_generation"]
 
 
+class GenerationLogLine(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    level: Literal["debug", "info", "warning", "error"]
+    logger: Annotated[StrictStr, Field(max_length=100)]
+    """
+    The name of the logger that wrote the line, such as island_battles.player.
+    """
+    message: Annotated[StrictStr, Field(max_length=500, min_length=1)]
+    """
+    The line, of 1 to 500 Unicode code points. A client cuts a longer line to fit and says so at its end.
+    """
+
+
+class GenerationLogs(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    field_schema: Annotated[
+        AnyUrl | None,
+        Field(alias="$schema", examples=["https://example.com/GenerationLogs.json"]),
+    ] = None
+    """
+    A URL to the JSON Schema for this object.
+    """
+    generation_id: Annotated[StrictInt, Field(ge=1)]
+    hidden_team_colors: Sequence[HiddenTeamColor]
+    """
+    Teams whose logs you can't see yet. While the game runs you see only your own team's logs; once it has an outcome you see every team's.
+    """
+    players: Sequence[PlayerGenerationLogs]
+    """
+    Every player of the teams you can see, ordered by team colour and then display name, with their lines in the order they were written.
+    """
+
+
 class GenerationState(GameModel):
     model_config = ConfigDict(
         extra="ignore",
@@ -273,6 +310,10 @@ class GenerationState(GameModel):
     generation: Generation
     generation_id: Annotated[StrictInt, Field(ge=1)]
     lobby_id: UUID
+    log_lines_stored: Annotated[StrictInt, Field(ge=0)]
+    """
+    How many game log lines you have stored for this generation, out of the 100 a player may store per generation. 0 when there are none. A client that restarts during a turn continues counting from it.
+    """
     outcome: GameOutcome | None = None
     """
     How the game ended. Absent while the game runs. A finished game keeps its final generation and rejects every command.
@@ -283,6 +324,10 @@ class GenerationState(GameModel):
     Whether you completed this generation's turn.
     """
     team_color: Annotated[StrictInt, Field(ge=1)]
+
+
+class HiddenTeamColor(RootModel[StrictInt]):
+    root: Annotated[StrictInt, Field(ge=0)]
 
 
 class ListMapTemplatesResponseBody(GameModel):
@@ -384,6 +429,15 @@ class MapTemplateSummary(GameModel):
     """
 
 
+class PlayerGenerationLogs(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    display_name: StrictStr
+    lines: Sequence[GenerationLogLine]
+    team_color: Annotated[StrictInt, Field(ge=1)]
+
+
 class Problem(GameModel):
     model_config = ConfigDict(
         extra="ignore",
@@ -434,6 +488,10 @@ class RegisterGenerationCommands(GameModel):
     """
     game_id: Annotated[StrictInt, Field(ge=1)]
     generation_id: Annotated[StrictInt, Field(ge=1)]
+    logs: Annotated[Sequence[GenerationLogLine] | None, Field(max_length=100)] = None
+    """
+    Game log lines written since your previous batch for this generation, appended in order after the lines already stored. At most 100 lines per player per generation, each of at most 500 characters; a batch that would break either limit is rejected whole with 422 and problem type urn:island-battles:problem:game-log-limit.
+    """
     request_id: UUID
     """
     Identifies this batch. Retry a lost request with the same UUID and body; use a new UUID for every new batch.

@@ -197,10 +197,10 @@ func TestAdminRoleReadsAllButBearerHashes(t *testing.T) {
 		}
 	}
 	// A table that a later migration creates.
-	if err := owner.Exec("CREATE TABLE generation_logs (id bigserial PRIMARY KEY, message text NOT NULL)").Error; err != nil {
+	if err := owner.Exec("CREATE TABLE later_game_notes (id bigserial PRIMARY KEY, message text NOT NULL)").Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := owner.Exec("INSERT INTO generation_logs (message) VALUES ('hello')").Error; err != nil {
+	if err := owner.Exec("INSERT INTO later_game_notes (message) VALUES ('hello')").Error; err != nil {
 		t.Fatal(err)
 	}
 	adminURL := *ownerURL
@@ -224,7 +224,7 @@ func TestAdminRoleReadsAllButBearerHashes(t *testing.T) {
 		{"describe_schema", nil}, {"describe_schema", map[string]any{"table": "lobby_sessions"}},
 		{"query", map[string]any{"sql": "SELECT id, player_id, created_at, expires_at FROM lobby_sessions"}},
 		{"query", map[string]any{"sql": "SELECT count(*) FROM lobby_sessions"}},
-		{"query", map[string]any{"sql": "SELECT message FROM generation_logs"}},
+		{"query", map[string]any{"sql": "SELECT message FROM later_game_notes"}},
 	} {
 		if text, isError := client.callText(t, tool.name, tool.arguments); isError {
 			t.Errorf("%s(%v) failed: %s", tool.name, tool.arguments, text)
