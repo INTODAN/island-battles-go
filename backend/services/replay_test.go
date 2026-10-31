@@ -113,7 +113,7 @@ func TestReplayFramesMatchLivePlayerStates(t *testing.T) {
 	if err := json.Unmarshal(raw, &page); err != nil {
 		t.Fatal(err)
 	}
-	if len(page) != 6 || string(page["ended"]) != "false" || page["game_id"] == nil || string(page["lobby_id"]) != `"`+fixture.state.LobbyID+`"` || page["teams"] == nil || page["frames"] == nil || string(page["outcome"]) != `"Waiting for player turns"` {
+	if len(page) != 5 || page["game_id"] == nil || string(page["lobby_id"]) != `"`+fixture.state.LobbyID+`"` || page["teams"] == nil || page["frames"] == nil || string(page["outcome"]) != "null" {
 		t.Fatalf("replay page data = %s", raw)
 	}
 	if len(replay.Teams) != 2 || replay.GameID != fixture.state.GameID {
@@ -147,8 +147,9 @@ func TestReplayShowsTheRecordedOutcome(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if replay.Outcome != test.text {
-			t.Fatalf("outcome %+v shows %q, want %q", test.outcome, replay.Outcome, test.text)
+		want := &models.GameOutcomeView{Reason: test.outcome.Reason, WinnerTeamColor: test.outcome.WinnerTeamColor, Summary: test.text}
+		if !reflect.DeepEqual(replay.Outcome, want) {
+			t.Fatalf("outcome %+v shows %+v, want %+v", test.outcome, replay.Outcome, want)
 		}
 	}
 	saved, err := dal.FindLobbyGame(fixture.database, fixture.state.LobbyID)

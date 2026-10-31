@@ -142,7 +142,7 @@ func TestGameEndsWithTheLastTeamStanding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !replay.Ended || replay.Outcome != want.Summary || replay.Frames[len(replay.Frames)-1].ID != current.GenerationID {
-		t.Fatalf("replay ended=%v outcome=%q", replay.Ended, replay.Outcome)
+	if !reflect.DeepEqual(replay.Outcome, &want) || replay.Frames[len(replay.Frames)-1].ID != current.GenerationID {
+		t.Fatalf("replay outcome=%+v", replay.Outcome)
 	}
 }

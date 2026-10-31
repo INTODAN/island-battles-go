@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"islandBattles/backend/demo"
+	"islandBattles/backend/demoviewer"
 	"islandBattles/backend/dependencies"
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/lobbyadapter"
@@ -181,5 +182,13 @@ func registerPages(router chi.Router) error {
 		http.Redirect(response, request, "/map/builder/", http.StatusTemporaryRedirect)
 	})
 	router.Handle("/map/builder/*", http.StripPrefix("/map/builder/", mapBuilder))
+	demoViewer, err := demoviewer.Handler()
+	if err != nil {
+		return err
+	}
+	router.Get("/game/demo-viewer", func(response http.ResponseWriter, request *http.Request) {
+		http.Redirect(response, request, "/game/demo-viewer/", http.StatusTemporaryRedirect)
+	})
+	router.Handle("/game/demo-viewer/*", http.StripPrefix("/game/demo-viewer/", demoViewer))
 	return nil
 }

@@ -3,9 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Island Battles replay</title>
+<title>{{if .Viewer}}Island Battles demo viewer{{else}}Island Battles replay{{end}}</title>
 <style>
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body { margin: 0; padding: 20px; font-family: system-ui, sans-serif; color: #202d40; background: #fff; }
 h1 { font-size: 1.2rem; margin: 0 0 6px; }
 p { margin: 0; color: #687386; font-size: .85rem; }
@@ -16,6 +17,7 @@ p { margin: 0; color: #687386; font-size: .85rem; }
 svg { display: block; width: 100%; max-height: 330px; border-radius: 14px; background: #edf5fb; }
 .controls { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
 button { padding: 9px 14px; border: 0; border-radius: 8px; background: #edf2fb; color: #305dc7; font: inherit; cursor: pointer; }
+button:disabled { cursor: progress; opacity: .75; }
 button:focus-visible, input:focus-visible { outline: 3px solid #aac4ff; outline-offset: 3px; }
 input { flex: 1; min-width: 100px; accent-color: #3464e0; }
 #turn { white-space: nowrap; font-size: .82rem; }
@@ -38,18 +40,40 @@ input { flex: 1; min-width: 100px; accent-color: #3464e0; }
 .log-debug { color: #7a8699; }
 .log-warning { color: #8a5a00; }
 .log-error { color: #b42335; }
+/* The status keeps its line, so a message doesn't change the frame's size. */
+.save { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+#save-status { min-height: 1lh; line-height: 1.4; overflow-wrap: anywhere; }
+.problem { color: #b42335; }
+.demo-file { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 16px 0; }
+#demo-error { margin-bottom: 16px; padding: 10px 12px; border-radius: 10px; background: #fff4ef; overflow-wrap: anywhere; }
+#demo-summary { margin: 6px 0 10px; color: #202d40; overflow-wrap: anywhere; }
 @media (max-width: 450px) { body { padding: 12px; } .controls input { flex-basis: 100%; order: 1; } }
 </style>
 </head>
 <body>
+{{if .Viewer}}
+<h1>Island Battles demo viewer</h1>
+<p>Open a demo file that you saved from a game’s replay, and step through the game one generation at a time. The file is read in this browser and never uploaded.</p>
+<div class="demo-file" data-format="{{.DemoFormat}}" data-schema-version="{{.DemoSchemaVersion}}">
+<button id="open-demo" type="button">Open demo file</button>
+<input id="demo-input" type="file" accept=".json,application/json" hidden>
+<p id="demo-status" role="status">No demo is open.</p>
+</div>
+<p id="demo-error" class="problem" role="alert" hidden></p>
+{{else}}
 <h1>Island Battles</h1>
+{{end}}
+<div id="view"{{if .Viewer}} hidden{{end}}>
+{{if .Viewer}}<p id="demo-summary"></p>{{end}}
 <p>Circles are castles; moving dots are troops. Numbers show soldiers.</p>
 <div id="teams"></div>
 <svg id="battlefield" viewBox="0 0 800 600" role="img" aria-label="Battlefield showing castles and moving troops"></svg>
 <div class="controls">
+<button id="previous" type="button" aria-label="Previous generation">◀</button>
 <button id="play" type="button">Play</button>
-<button id="result" type="button">Latest generation</button>
-<button id="live" type="button">● Live</button>
+<button id="next" type="button" aria-label="Next generation">▶</button>
+<button id="result" type="button">{{if .Viewer}}Last generation{{else}}Latest generation{{end}}</button>
+<button id="live" type="button"{{if .Viewer}} hidden{{end}}>● Live</button>
 <label id="turn" for="timeline"></label>
 <input id="timeline" type="range" min="0" value="0" aria-label="Replay turn">
 </div>
@@ -59,31 +83,36 @@ input { flex: 1; min-width: 100px; accent-color: #3464e0; }
 <h2 id="logs-title">Logs</h2>
 <div id="logs-box" tabindex="0"></div>
 </section>
+{{if not .Viewer}}
+<div class="save" hidden>
+<button id="save-demo" type="button">Save demo</button>
+<p id="save-status" role="status"></p>
+</div>
+{{end}}
+</div>
 <script>
 "use strict";
-const replay = {{.}};
-document.body.dataset.gameId = replay.game_id;
+// The replay that the server embedded. The demo viewer has none until it opens
+// a demo file, which has the same teams, frames and outcome.
+let replay = {{.Replay}};
 const colors = ["#3464e0", "#d94d5b", "#288562", "#9560cb", "#b37914", "#24828f"];
 const field = document.getElementById("battlefield");
 const slider = document.getElementById("timeline");
 const play = document.getElementById("play");
-let lastTurn = replay.frames.length - 1;
-let latestGeneration = replay.frames[lastTurn].id;
-// A finished game has no live generations left to follow.
-let followingLive = !replay.ended;
-let turn = lastTurn;
-let playing = false;
 const live = document.getElementById("live");
-slider.max = lastTurn;
+// A demo's logs by generation ID. A replay has none and reads its logs through
+// the lobby page.
+let demoLogs = null;
+let lastTurn = 0;
+let latestGeneration = 0;
+let followingLive = false;
+let turn = 0;
+let playing = false;
 const color = (team) => colors[(team - 1) % colors.length] || "#8290a4";
 const worldScale = 100;
 const castleRadius = 0.5; // Visual only; castle arrival still uses its center.
-// Castles never move, so the first frame's castles bound every frame. The
-// field keeps at least the generated map's 8 by 6 units, with room around
-// each castle for its circle and label.
-const fieldX = Math.max(4, ...replay.frames[0].castles.map((castle) => Math.abs(castle.x) + 1));
-const fieldY = Math.max(3, ...replay.frames[0].castles.map((castle) => Math.abs(castle.y) + 1));
-field.setAttribute("viewBox", `0 0 ${2 * fieldX * worldScale} ${2 * fieldY * worldScale}`);
+let fieldX = 4;
+let fieldY = 3;
 const point = (node) => [(fieldX + node.x) * worldScale, (fieldY + node.y) * worldScale];
 // Each castle's upgrade levels, written under its label, such as "Speed 2 · Stop 1".
 // Known types come first under short names; any other type follows under its own.
@@ -95,16 +124,42 @@ const upgradeLevels = (castle) => Object.keys(castle.upgrades)
 const scoreLabels = new Map();
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 let renderedTurn = null;
-for (const team of replay.teams) {
-  const card = document.createElement("div");
-  card.className = "team";
-  card.style.borderColor = color(team.color);
-  const title = document.createElement("strong");
-  title.textContent = `${team.name} · ${team.players.join(", ")}`;
-  const score = document.createElement("span");
-  card.append(title, score);
-  document.getElementById("teams").append(card);
-  scoreLabels.set(team.color, score);
+// show starts the view over with a replay, or with a demo and its logs by
+// generation ID.
+function show(next, logs = null) {
+  replay = next;
+  demoLogs = logs;
+  lastTurn = replay.frames.length - 1;
+  latestGeneration = replay.frames[lastTurn].id;
+  // A finished game has no live generations left to follow, and a demo has none.
+  followingLive = !demoLogs && !replay.outcome;
+  // A demo starts at its first generation, ready to play.
+  turn = demoLogs ? 0 : lastTurn;
+  playing = false;
+  renderedTurn = null;
+  slider.max = lastTurn;
+  document.body.dataset.gameId = replay.game_id;
+  // Castles never move, so the first frame's castles bound every frame. The
+  // field keeps at least the generated map's 8 by 6 units, with room around
+  // each castle for its circle and label.
+  fieldX = replay.frames[0].castles.reduce((largest, castle) => Math.max(largest, Math.abs(castle.x) + 1), 4);
+  fieldY = replay.frames[0].castles.reduce((largest, castle) => Math.max(largest, Math.abs(castle.y) + 1), 3);
+  field.setAttribute("viewBox", `0 0 ${2 * fieldX * worldScale} ${2 * fieldY * worldScale}`);
+  scoreLabels.clear();
+  const cards = replay.teams.map((team) => {
+    const card = document.createElement("div");
+    card.className = "team";
+    card.style.borderColor = color(team.color);
+    const title = document.createElement("strong");
+    title.textContent = `${team.name} · ${team.players.join(", ")}`;
+    const score = document.createElement("span");
+    card.append(title, score);
+    scoreLabels.set(team.color, score);
+    return card;
+  });
+  document.getElementById("teams").replaceChildren(...cards);
+  resetLogs();
+  render();
 }
 function svg(tag, attributes, text) {
   const element = document.createElementNS("http://www.w3.org/2000/svg", tag);
@@ -120,7 +175,7 @@ function renderClashes(frame, animate) {
     if (!clash.participants.length) continue;
     const positions = clash.participants.map(point);
     const center = positions.reduce(([x, y], [nextX, nextY]) => [x + nextX / positions.length, y + nextY / positions.length], [0, 0]);
-    const radius = Math.max(...positions.map(([x, y], index) => Math.hypot(x - center[0], y - center[1]) + clash.participants[index].clash_radius * worldScale)) + 12;
+    const radius = positions.reduce((largest, [x, y], index) => Math.max(largest, Math.hypot(x - center[0], y - center[1]) + clash.participants[index].clash_radius * worldScale), 0) + 12;
     const ring = svg("circle", { cx: center[0], cy: center[1], r: radius, fill: "none", stroke: "#b37914", "stroke-width": 2, opacity: .35, "data-kind": "clash-ring", "pointer-events": "none" });
     if (animate && !reducedMotion.matches) {
       ring.style.transformBox = "fill-box";
@@ -129,8 +184,7 @@ function renderClashes(frame, animate) {
     }
     const participants = [];
     for (const participant of clash.participants) {
-      const team = replay.teams.find((team) => team.color === participant.team_color);
-      participants.push(`${team?.name || `Team ${participant.team_color}`} ${participant.soldiers_before} → ${participant.soldiers_after}`);
+      participants.push(`${teamName(participant.team_color)} ${participant.soldiers_before} → ${participant.soldiers_after}`);
       if (participant.soldiers_after > 0) {
         losses.set(participant.group_id, (losses.get(participant.group_id) || 0) + participant.soldiers_before - participant.soldiers_after);
         continue;
@@ -153,6 +207,11 @@ function renderClashes(frame, animate) {
     if (animate && !reducedMotion.matches) label.animate([{ opacity: 0, transform: "translateY(8px)" }, { opacity: 1, transform: "translateY(0)" }], { duration: 350 });
   }
   document.getElementById("clashes").textContent = summaries.join(". ");
+}
+// The outcome shown at the last generation.
+function outcomeText() {
+  if (replay.outcome) return replay.outcome.summary;
+  return demoLogs ? "The demo was saved before the game ended." : "Waiting for player turns";
 }
 function render(animateClashes = false) {
   const frame = replay.frames[turn];
@@ -184,21 +243,32 @@ function render(animateClashes = false) {
   }
   slider.value = turn;
   document.getElementById("turn").textContent = `Generation ${turn + 1} / ${lastTurn + 1}`;
-  document.getElementById("outcome").textContent = followingLive ? "Live · Waiting for both players’ next turn" : turn === lastTurn ? replay.outcome : "Watching recorded generations…";
+  document.getElementById("outcome").textContent = followingLive ? "Live · Waiting for both players’ next turn" : turn === lastTurn ? outcomeText() : "Watching recorded generations…";
   play.textContent = playing ? "Pause" : turn === lastTurn ? "Replay" : "Play";
+  document.getElementById("previous").disabled = turn === 0;
+  document.getElementById("next").disabled = turn === lastTurn;
   live.textContent = followingLive ? "● Live" : "Follow live";
   live.setAttribute("aria-pressed", String(followingLive));
-  live.hidden = replay.ended;
+  live.hidden = Boolean(replay.outcome) || demoLogs !== null;
   showLogs();
 }
+// step shows the generation by steps after the shown one, or before it.
+function step(steps) {
+  turn = Math.min(lastTurn, Math.max(0, turn + steps));
+  playing = false;
+  followingLive = false;
+  render();
+}
 play.addEventListener("click", () => { followingLive = false; if (turn === lastTurn) turn = 0; playing = !playing; render(); });
+document.getElementById("previous").addEventListener("click", () => step(-1));
+document.getElementById("next").addEventListener("click", () => step(1));
 slider.addEventListener("input", () => { turn = Number(slider.value); playing = false; followingLive = false; render(); });
 document.getElementById("result").addEventListener("click", () => { turn = lastTurn; playing = false; followingLive = false; render(); });
 live.addEventListener("click", () => { followingLive = true; playing = false; turn = lastTurn; render(); });
 window.addEventListener("message", (event) => {
-  if (event.source !== window.parent || event.data?.type !== "lobby.game-state" || event.data.game_key !== "island-battles") return;
+  if (!replay || demoLogs || event.source !== window.parent || event.data?.type !== "lobby.game-state" || event.data.game_key !== "island-battles") return;
   const state = event.data.state;
-  if (replay.ended || state?.game_id !== replay.game_id || !state.generation) return;
+  if (replay.outcome || state?.game_id !== replay.game_id || !state.generation) return;
   const newer = state.generation.id > latestGeneration;
   if (!newer && !state.outcome) return;
   const animate = followingLive;
@@ -213,8 +283,7 @@ window.addEventListener("message", (event) => {
   }
   // The generation that ends the game is its last; show how it ended.
   if (state.outcome) {
-    replay.ended = true;
-    replay.outcome = state.outcome.summary;
+    replay.outcome = state.outcome;
     followingLive = false;
     // Every team's logs are visible now.
     resetLogs();
@@ -223,20 +292,22 @@ window.addEventListener("message", (event) => {
   // The previous turn is over; a panel still showing it loads its final lines.
   if (newer && shownLogs === previousLatest) requestLogs(previousLatest);
 });
-// The bots' game logs. The frame has no credential, so the lobby page fetches
-// them for it: a game.request message names the path, and a lobby.response
-// message answers it. Lines of the open turn can still grow, so only
-// generations whose turn is over are cached, and the open turn is read again
-// every few seconds while it is shown.
+// The bots' game logs. A demo holds them. A replay's frame has no credential,
+// so the lobby page fetches them for it: a game.request message names the
+// path, and a lobby.response message answers it. Lines of the open turn can
+// still grow, so only generations whose turn is over are cached, and the open
+// turn is read again every few seconds while it is shown.
 const logsBox = document.getElementById("logs-box");
 const logCache = new Map();
 const logRequests = new Map();
-let logRequestCount = 0;
+let requestCount = 0;
 let shownLogs = null;
 // The generation whose lines the panel shows, rather than a note.
 let renderedLogs = null;
 const openTurnRefreshMilliseconds = 3000;
-const isOpenTurn = (generation) => !replay.ended && generation === latestGeneration;
+const isOpenTurn = (generation) => !demoLogs && !replay.outcome && generation === latestGeneration;
+// A demo saved during the game ends with the turn that was open then.
+const isSavedOpenTurn = (generation) => demoLogs !== null && !replay.outcome && generation === latestGeneration;
 function logNote(text) {
   const note = document.createElement("p");
   note.className = "log-note";
@@ -248,6 +319,10 @@ function showLogs() {
   if (shownLogs === generation) return;
   shownLogs = generation;
   document.getElementById("logs-title").textContent = `Logs · Generation ${turn + 1}`;
+  if (demoLogs) {
+    renderLogs(demoLogs.get(generation));
+    return;
+  }
   if (logCache.has(generation)) {
     renderLogs(logCache.get(generation));
     return;
@@ -262,7 +337,7 @@ function showLogs() {
 function requestLogs(generation) {
   const cacheable = !isOpenTurn(generation);
   if ([...logRequests.values()].some((request) => request.generation === generation && request.cacheable === cacheable)) return;
-  const id = `logs-${++logRequestCount}`;
+  const id = `logs-${++requestCount}`;
   logRequests.set(id, { generation, cacheable });
   const path = `/game/from-lobby/${encodeURIComponent(replay.lobby_id)}/logs?generation_id=${generation}`;
   window.parent.postMessage({ type: "game.request", id, path }, "*");
@@ -278,7 +353,8 @@ setInterval(() => {
   if (window.parent === window || document.visibilityState !== "visible" || shownLogs === null || !isOpenTurn(shownLogs)) return;
   requestLogs(shownLogs);
 }, openTurnRefreshMilliseconds);
-// Called when the outcome arrives, which reveals every team's logs.
+// Called when a replay or a demo is shown, and when the outcome arrives, which
+// reveals every team's logs.
 function resetLogs() {
   logCache.clear();
   logRequests.clear();
@@ -335,16 +411,22 @@ function renderLogs(logs) {
   // While some teams are hidden, the caller sees only their own team. Lines of
   // the open turn may still arrive.
   const open = isOpenTurn(logs.generation_id);
+  const savedOpen = isSavedOpenTurn(logs.generation_id);
   if (!lines) {
-    nodes.splice(0, nodes.length, logNote(open ? "This turn is still open. Lines appear here as the bots log them."
-      : logs.hidden_team_colors.length ? "Your team logged nothing in this generation." : "No bot logged anything in this generation."));
+    let note = "No bot logged anything in this generation.";
+    if (open) note = "This turn is still open. Lines appear here as the bots log them.";
+    else if (savedOpen) note = "This turn was still open when the demo was saved, and no bot in it had logged anything yet.";
+    else if (logs.hidden_team_colors.length) note = demoLogs ? "The saver’s team logged nothing in this generation." : "Your team logged nothing in this generation.";
+    nodes.splice(0, nodes.length, logNote(note));
   } else if (open) {
     nodes.unshift(logNote("This turn is still open; more lines may arrive."));
+  } else if (savedOpen) {
+    nodes.unshift(logNote("This turn was still open when the demo was saved; lines logged after that are not in it."));
   }
   if (logs.hidden_team_colors.length) {
     const names = logs.hidden_team_colors.map((teamColor) => `${teamName(teamColor)}’s`);
     const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0];
-    nodes.push(logNote(`${list} logs appear when the game ends.`));
+    nodes.push(logNote(demoLogs ? `${list} logs are not in this demo, because it was saved before the game ended.` : `${list} logs appear when the game ends.`));
   }
   // A refresh of the shown generation keeps the reader's place.
   const scrollTop = renderedLogs === logs.generation_id ? logsBox.scrollTop : 0;
@@ -353,7 +435,11 @@ function renderLogs(logs) {
   renderedLogs = logs.generation_id;
 }
 window.addEventListener("message", (event) => {
-  if (event.source !== window.parent || event.data?.type !== "lobby.response") return;
+  if (!replay || demoLogs || event.source !== window.parent || event.data?.type !== "lobby.response") return;
+  if (saving && event.data.id === saving.id) {
+    receiveDemo(event.data);
+    return;
+  }
   const request = logRequests.get(event.data.id);
   if (!request) return;
   logRequests.delete(event.data.id);
@@ -368,13 +454,79 @@ window.addEventListener("message", (event) => {
   if (request.cacheable) logCache.set(request.generation, logs);
   if (shownLogs === request.generation) renderLogs(logs);
 });
+// Save demo asks the lobby page for the game's demo file, which can take
+// tens of megabytes, so it allows the page its longest wait. The browser
+// then saves the answer as a file; the frame's sandbox allows downloads.
+const saveButton = document.getElementById("save-demo");
+const saveStatus = document.getElementById("save-status");
+const saveTimeoutSeconds = 120;
+let saving = null;
+// Only the lobby page can fetch the demo.
+if (saveButton && window.parent !== window) saveButton.parentElement.hidden = false;
+saveButton?.addEventListener("click", () => {
+  if (saving) return;
+  const id = `demo-${++requestCount}`;
+  const started = Date.now();
+  const progress = () => { saveButton.textContent = `Saving… ${Math.floor((Date.now() - started) / 1000)} s`; };
+  // The page answers every request; this only covers an answer that is lost.
+  saving = { id, progress: setInterval(progress, 1000), deadline: setTimeout(() => finishSave("the lobby page did not answer."), (saveTimeoutSeconds + 10) * 1000) };
+  progress();
+  saveButton.disabled = true;
+  saveStatus.classList.remove("problem");
+  saveStatus.textContent = "Collecting every generation and its logs…";
+  window.parent.postMessage({ type: "game.request", id, path: `/game/from-lobby/${encodeURIComponent(replay.lobby_id)}/demo`, timeout_seconds: saveTimeoutSeconds }, "*");
+});
+// finishSave reports a saved file, or the reason the demo wasn't saved.
+function finishSave(error, fileName) {
+  clearInterval(saving.progress);
+  clearTimeout(saving.deadline);
+  saving = null;
+  saveButton.disabled = false;
+  saveButton.textContent = "Save demo";
+  saveStatus.classList.toggle("problem", Boolean(error));
+  saveStatus.textContent = error ? `The demo could not be saved: ${error}` : `Saved ${fileName}.`;
+}
+function receiveDemo(answer) {
+  const demo = answer.body;
+  if (answer.status !== 200) {
+    const reason = answer.status === 0 ? answer.error || "the request failed" : typeof demo?.detail === "string" ? demo.detail : `the server answered ${answer.status}`;
+    finishSave(`${reason}.`);
+    return;
+  }
+  if (demo?.format !== "island-battles-demo" || !Number.isSafeInteger(demo.game_id) || !Array.isArray(demo.frames)) {
+    finishSave("the server’s answer is not a demo.");
+    return;
+  }
+  // The server names the file the same way for a direct download.
+  const fileName = `island-battles-game-${demo.game_id}-generation-${demo.frames.length}.json`;
+  const url = URL.createObjectURL(new Blob([JSON.stringify(demo)], { type: "application/json" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.hidden = true;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  // The download has read the file long before this.
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  finishSave(null, fileName);
+}
 setInterval(() => {
   if (!playing) return;
   if (turn < lastTurn) turn++;
   if (turn === lastTurn) playing = false;
   render(true);
 }, 500);
-render();
+{{if .Viewer -}}
+// The viewer's module opens a demo file, checks it and shows it with this.
+window.showDemo = (demo) => {
+  show({ game_id: demo.game_id, lobby_id: "", teams: demo.teams, frames: demo.frames, outcome: demo.outcome },
+    new Map(demo.logs.map((logs) => [logs.generation_id, logs])));
+  document.getElementById("view").hidden = false;
+};
+{{- else -}}
+show(replay);
+{{- end}}
 // Let the host fit the embedded view as summaries wrap or team cards resize.
 // Body height is intrinsic, so resizing the frame does not impose a minimum.
 if (window.parent !== window) {
@@ -389,5 +541,6 @@ if (window.parent !== window) {
   reportSize();
 }
 </script>
+{{if .Viewer}}<script type="module" src="./viewer.mjs"></script>{{end}}
 </body>
 </html>

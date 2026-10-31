@@ -20,9 +20,9 @@ type Game struct {
 // GameTeam is a team that took part in the battle, with its lobby name and
 // the display names its players had at the start.
 type GameTeam struct {
-	Color   uint     `json:"color"`
+	Color   uint     `json:"color" minimum:"1" doc:"The team colour that castles and soldier groups carry as team_color."`
 	Name    string   `json:"name"`
-	Players []string `json:"players"`
+	Players []string `json:"players" nullable:"false" doc:"The display names the team's players had at the start."`
 }
 
 // GameOutcomeReason says why a game ended.

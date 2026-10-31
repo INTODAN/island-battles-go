@@ -66,6 +66,33 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 			"A generation of another game returns 404. The lines are deleted with the game, 7 days after its last generation by default; then this returns 404.",
 		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
 	}, game.GenerationLogs)
+	// The demo is streamed, so Huma can't derive its response from the
+	// handler; the published file format is the Demo schema.
+	demo := api.OpenAPI().Components.Schemas.Schema(reflect.TypeOf(models.Demo{}), true, "")
+	// Huma can't mark a reference nullable, and a demo of a running game has
+	// a null outcome.
+	demoSchema := api.OpenAPI().Components.Schemas.SchemaFromRef(demo.Ref)
+	outcome := demoSchema.Properties["outcome"]
+	demoSchema.Properties["outcome"] = &huma.Schema{Description: outcome.Description, AnyOf: []*huma.Schema{{Ref: outcome.Ref}, {Type: "null"}}}
+	demoSchema.PrecomputeMessages()
+	huma.Register(api, huma.Operation{
+		OperationID: "getIslandLobbyDemo", Path: "/game/from-lobby/{lobby_id}/demo", Method: http.MethodGet,
+		Summary: "Save a lobby's game as a demo file for a roster player",
+		Description: "Requires a place on the game's frozen roster; the lobby is not consulted. Returns the game as a demo file, the Demo schema, as an attachment named island-battles-game-<game_id>-generation-<n>.json, where n is the number of generations played. " +
+			"Any roster player can save a demo at any time: one saved during the game holds the generations played so far and a null outcome. Each frame's game log lines follow the rule of GET /game/from-lobby/{lobby_id}/logs when the demo is saved: while the game runs only your own team's lines, once it has ended every team's. " +
+			"The demo viewer at /game/demo-viewer/ opens the file without the lobby, a session or the game. The body is streamed, and a long game with full logs takes tens of megabytes, so it is packed with gzip (Content-Encoding: gzip) when Accept-Encoding allows it. The game is deleted 7 days after its last generation by default; then this returns 404.",
+		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
+		Responses: map[string]*huma.Response{"200": {
+			Description: "The demo file.",
+			Headers: map[string]*huma.Param{
+				"Content-Disposition": {Description: "attachment, with the demo's file name.", Schema: &huma.Schema{Type: huma.TypeString}},
+				"Content-Encoding":    {Description: "gzip when the request's Accept-Encoding allows it; absent otherwise.", Schema: &huma.Schema{Type: huma.TypeString}},
+			},
+			Content: map[string]*huma.MediaType{"application/json": {Schema: demo}},
+		}},
+	}, game.Demo)
+	// A demo is a file format, like a map file.
+	dropSchemaLink(api, reflect.TypeFor[models.Demo]())
 	for _, parameter := range api.OpenAPI().Paths["/game/from-lobby/{lobby_id}/logs"].Get.Parameters {
 		if parameter.Name == "generation_id" {
 			// The service requires it after authorizing the caller; see

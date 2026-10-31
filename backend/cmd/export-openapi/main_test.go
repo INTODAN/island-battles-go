@@ -62,7 +62,7 @@ func TestPlayerOpenAPIPublishesGeneratableModels(t *testing.T) {
 		t.Fatalf("unexpected operations: %v", operations)
 	}
 	schemas := document.Components.Schemas
-	for _, name := range []string{"Generation", "Castle", "SoldierGroup", "Clash", "ClashParticipant", "GenerationState", "GenerationEvent", "GameEndedEvent", "GameOutcome", "SendSoldierGroupParameters", "UpgradeCastleParameters", "UpgradeType", "Upgrade", "UpgradeLevel", "MapTemplate", "CastleTemplate"} {
+	for _, name := range []string{"Generation", "Castle", "SoldierGroup", "Clash", "ClashParticipant", "GenerationState", "GenerationEvent", "GameEndedEvent", "GameOutcome", "SendSoldierGroupParameters", "UpgradeCastleParameters", "UpgradeType", "Upgrade", "UpgradeLevel", "MapTemplate", "CastleTemplate", "Demo", "GameTeam", "GenerationLogs"} {
 		if _, exists := schemas[name]; !exists {
 			t.Fatalf("schema %s is missing", name)
 		}
@@ -92,6 +92,48 @@ func TestPlayerOpenAPIPublishesGeneratableModels(t *testing.T) {
 			if types, isList := schema.Type.([]any); isList {
 				t.Fatalf("%s.%s is nullable: %v", name, property, types)
 			}
+		}
+	}
+}
+
+// A demo is a file of its own keys, and a demo of a running game has a null
+// outcome.
+func TestPlayerOpenAPIPublishesTheDemoFileFormat(t *testing.T) {
+	raw, err := BuildPlayerOpenAPI()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		Components struct {
+			Schemas map[string]struct {
+				Properties map[string]struct {
+					Ref   string `json:"$ref"`
+					AnyOf []struct {
+						Ref  string `json:"$ref"`
+						Type string `json:"type"`
+					} `json:"anyOf"`
+					Items struct {
+						Ref string `json:"$ref"`
+					} `json:"items"`
+				} `json:"properties"`
+				Required []string `json:"required"`
+			} `json:"schemas"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	demo := document.Components.Schemas["Demo"]
+	if len(demo.Properties) != 8 || len(demo.Required) != 8 {
+		t.Fatalf("Demo has properties %v and requires %v", demo.Properties, demo.Required)
+	}
+	outcome := demo.Properties["outcome"].AnyOf
+	if len(outcome) != 2 || outcome[0].Ref != schemaRefPrefix+"GameOutcome" || outcome[1].Type != "null" {
+		t.Fatalf("Demo.outcome = %+v", outcome)
+	}
+	for property, item := range map[string]string{"frames": "Generation", "logs": "GenerationLogs", "teams": "GameTeam"} {
+		if demo.Properties[property].Items.Ref != schemaRefPrefix+item {
+			t.Fatalf("Demo.%s holds %q", property, demo.Properties[property].Items.Ref)
 		}
 	}
 }

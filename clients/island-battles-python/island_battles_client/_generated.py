@@ -141,6 +141,41 @@ class ConnectionTokenInputBody(GameModel):
     """
 
 
+class Demo(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    format: Literal["island-battles-demo"]
+    """
+    Marks the file as an Island Battles demo.
+    """
+    frames: Annotated[Sequence[Generation], Field(min_length=1)]
+    """
+    Every generation played when the demo was saved, in order. Each is the board view that players received.
+    """
+    game_id: Annotated[StrictInt, Field(ge=1)]
+    logs: Sequence[GenerationLogs]
+    """
+    One entry per frame, in the same order, with the game log lines its saver could see when saving: while the game runs only the saver's team's, once it has ended every team's. hidden_team_colors names the teams left out.
+    """
+    outcome: GameOutcome | None
+    """
+    How the game ended, or null when the demo was saved while the game was still running.
+    """
+    saved_at: AwareDatetime
+    """
+    When the demo was saved.
+    """
+    schema_version: Literal[1]
+    """
+    The demo format's version. The demo viewer opens only the current version and rejects a demo saved by another version of the game.
+    """
+    teams: Sequence[GameTeam]
+    """
+    The teams that played, with their lobby names and the display names their players had at the start.
+    """
+
+
 class ErrorDetail(GameModel):
     model_config = ConfigDict(
         extra="ignore",
@@ -229,6 +264,21 @@ class GameOutcome(GameModel):
     winner_team_color: Annotated[StrictInt | None, Field(ge=1)]
     """
     The winning team, or null for a draw.
+    """
+
+
+class GameTeam(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    color: Annotated[StrictInt, Field(ge=1)]
+    """
+    The team colour that castles and soldier groups carry as team_color.
+    """
+    name: StrictStr
+    players: Sequence[StrictStr]
+    """
+    The display names the team's players had at the start.
     """
 
 

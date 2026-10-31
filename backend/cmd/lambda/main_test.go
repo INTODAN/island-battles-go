@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -43,6 +44,13 @@ type functionURL func(context.Context, *events.LambdaFunctionURLRequest) (*event
 // in RESPONSE_STREAM mode, and reads the whole streamed body.
 func call(t *testing.T, invoke functionURL, method, path, body, authorization string) (*events.LambdaFunctionURLStreamingResponse, []byte) {
 	t.Helper()
+	return callWithHeaders(t, invoke, method, path, body, authorization, nil)
+}
+
+// callWithHeaders is call with more request headers, in lower case as the
+// Function URL passes them.
+func callWithHeaders(t *testing.T, invoke functionURL, method, path, body, authorization string, headers map[string]string) (*events.LambdaFunctionURLStreamingResponse, []byte) {
+	t.Helper()
 	request := &events.LambdaFunctionURLRequest{
 		RawPath: path,
 		Headers: map[string]string{"content-type": "application/json"},
@@ -54,6 +62,9 @@ func call(t *testing.T, invoke functionURL, method, path, body, authorization st
 	}
 	if authorization != "" {
 		request.Headers["authorization"] = authorization
+	}
+	for name, value := range headers {
+		request.Headers[name] = value
 	}
 	response, err := invoke(context.Background(), request)
 	if err != nil {
@@ -126,6 +137,30 @@ func TestReplayOverSixMegabytesStreamsThroughTheFunctionURL(t *testing.T) {
 	}
 	t.Logf("replay streamed %d bytes", len(content))
 
+	// The demo of the same game streams packed with gzip to a browser, which
+	// asks for it, and unpacks to the whole file.
+	response, content = callWithHeaders(t, invoke, http.MethodGet, "/game/from-lobby/"+lobbyID+"/demo", "", "Bearer "+alice.AccessToken,
+		map[string]string{"accept-encoding": "gzip, deflate, br, zstd"})
+	if response.StatusCode != http.StatusOK || response.Headers["Content-Encoding"] != "gzip" || response.Headers["Vary"] != "Accept-Encoding" {
+		t.Fatalf("demo=%d %v", response.StatusCode, response.Headers)
+	}
+	unpacker, err := gzip.NewReader(bytes.NewReader(content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	unpacked, err := io.ReadAll(unpacker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var demo models.Demo
+	if err := json.Unmarshal(unpacked, &demo); err != nil {
+		t.Fatalf("unpacked demo: %v", err)
+	}
+	if demo.GameID != binding.GameID || len(demo.Frames) != 141 || len(demo.Logs) != 141 {
+		t.Fatalf("demo of game %d has %d frames and %d log entries", demo.GameID, len(demo.Frames), len(demo.Logs))
+	}
+	t.Logf("demo streamed %d bytes packed, %d unpacked", len(content), len(unpacked))
+
 	// The graph page reads any game without authentication, so the public
 	// host doesn't serve it.
 	if response, content := call(t, invoke, http.MethodGet, fmt.Sprintf("/game/%d/graph", binding.GameID), "", ""); response.StatusCode != http.StatusNotFound {
@@ -148,6 +183,8 @@ var publicRoutes = map[string]string{
 	"/game/demo/*":            "embedded static browser demo",
 	"GET /map/builder":        "redirect to the embedded map builder",
 	"/map/builder/*":          "embedded static map builder",
+	"GET /game/demo-viewer":   "redirect to the embedded demo viewer",
+	"/game/demo-viewer/*":     "embedded static demo viewer, which reads demo files in the browser",
 	"GET /docs":               "API documentation",
 	"GET /openapi.json":       "API document",
 	"GET /openapi.yaml":       "API document",

@@ -32,21 +32,22 @@ const (
 		"generation read after subscribing or reconnecting; HTTP state is authoritative, and its `outcome` is set once the " +
 		"game has ended. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the " +
 		"`game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose. " +
-		"`GET /game/upgrades` lists what each castle upgrade level costs."
+		"`GET /game/upgrades` lists what each castle upgrade level costs. `Demo` is the demo file format, which " +
+		"`GET /game/from-lobby/{lobby_id}/demo` returns and the demo viewer at `/game/demo-viewer/` opens."
 )
 
 // PlayerOperations are the endpoints a gameplay client uses, including the
-// upgrade cost table and the game log read that the replay also shows, and
-// the default map list for choosing a lobby's map. Lobby setup has its own
+// upgrade cost table, the game log read that the replay also shows, the demo
+// download, and the default map list for choosing a lobby's map. Lobby setup has its own
 // generated SDK in lobby/api/openapi.json.
-var PlayerOperations = []string{"createLobbyConnectionToken", "getIslandLobbyGeneration", "registerGenerationCommand", "getIslandLobbyGenerationLogs", "listUpgrades", "listMapTemplates"}
+var PlayerOperations = []string{"createLobbyConnectionToken", "getIslandLobbyGeneration", "registerGenerationCommand", "getIslandLobbyGenerationLogs", "getIslandLobbyDemo", "listUpgrades", "listMapTemplates"}
 
 // PlayerEventSchemas are delivered by Centrifugo rather than HTTP responses.
 var PlayerEventSchemas = []string{"GenerationEvent", "GameEndedEvent"}
 
-// MapFileSchemas describe the map file format, the body of POST /map/create,
-// and the lobby game_settings that choose a map.
-var MapFileSchemas = []string{"MapTemplate", "LobbySettings"}
+// FileSchemas describe the map file format, the body of POST /map/create,
+// the lobby game_settings that choose a map, and the demo file format.
+var FileSchemas = []string{"MapTemplate", "LobbySettings", "Demo"}
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
@@ -103,7 +104,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 }
 
 // BuildPlayerOpenAPI registers the production routes, keeps the player
-// operations and the map file format, and drops schemas they do not
+// operations and the file formats, and drops schemas they do not
 // reference. No handler is called while registering, so nil dependencies are
 // sufficient.
 func BuildPlayerOpenAPI() ([]byte, error) {
@@ -127,7 +128,7 @@ func BuildPlayerOpenAPI() ([]byte, error) {
 	if err := keepOperations(document, PlayerOperations); err != nil {
 		return nil, err
 	}
-	if err := keepReferencedSchemas(document, slices.Concat(PlayerEventSchemas, MapFileSchemas)); err != nil {
+	if err := keepReferencedSchemas(document, slices.Concat(PlayerEventSchemas, FileSchemas)); err != nil {
 		return nil, err
 	}
 	keepUsedSecuritySchemes(document)

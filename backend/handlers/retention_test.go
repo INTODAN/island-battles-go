@@ -55,6 +55,7 @@ func TestGameRequestsEndWithARetentionPass(t *testing.T) {
 	huma.Register(api, huma.Operation{OperationID: "commands", Method: http.MethodPost, Path: "/generation/commands"}, handler.RegisterGenerationCommands)
 	huma.Register(api, huma.Operation{OperationID: "replay", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/replay"}, handler.Replay)
 	huma.Register(api, huma.Operation{OperationID: "logs", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/logs"}, handler.GenerationLogs)
+	huma.Register(api, huma.Operation{OperationID: "demo", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/demo"}, handler.Demo)
 	statePath, replayPath := "/game/from-lobby/"+lobbyID+"/generation", "/game/from-lobby/"+lobbyID+"/replay"
 	expectPasses := func(step string, want int) {
 		t.Helper()
@@ -106,4 +107,12 @@ func TestGameRequestsEndWithARetentionPass(t *testing.T) {
 		t.Fatalf("logs=%d %s", response.Code, response.Body.String())
 	}
 	expectPasses("logs", 7)
+	if response := api.Get("/game/from-lobby/"+lobbyID+"/demo", "Authorization: Bearer valid"); response.Code != http.StatusOK || !json.Valid(response.Body.Bytes()) {
+		t.Fatalf("demo=%d %s", response.Code, response.Body.String())
+	}
+	expectPasses("demo", 8)
+	if response := api.Get("/game/from-lobby/"+uuid.NewString()+"/demo", "Authorization: Bearer valid"); response.Code != http.StatusNotFound {
+		t.Fatalf("unknown demo=%d", response.Code)
+	}
+	expectPasses("unknown demo", 9)
 }

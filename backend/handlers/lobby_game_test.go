@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -88,7 +89,8 @@ func TestStartedGameServesItsRosterWithoutTheLobby(t *testing.T) {
 	// The service validates the body itself, as routes.SetupLobbyRoutes registers it.
 	huma.Register(api, huma.Operation{OperationID: "commands", Method: http.MethodPost, Path: "/generation/commands", SkipValidateBody: true}, handler.RegisterGenerationCommands)
 	huma.Register(api, huma.Operation{OperationID: "logs", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/logs"}, handler.GenerationLogs)
-	statePath, replayPath := "/game/from-lobby/"+lobbyID+"/generation", "/game/from-lobby/"+lobbyID+"/replay"
+	huma.Register(api, huma.Operation{OperationID: "demo", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/demo"}, handler.Demo)
+	statePath, replayPath, demoPath := "/game/from-lobby/"+lobbyID+"/generation", "/game/from-lobby/"+lobbyID+"/replay", "/game/from-lobby/"+lobbyID+"/demo"
 
 	response := api.Get(statePath, "Authorization: Bearer alice")
 	if response.Code != http.StatusOK {
@@ -128,6 +130,12 @@ func TestStartedGameServesItsRosterWithoutTheLobby(t *testing.T) {
 		if response := api.Get(fmt.Sprintf("/game/from-lobby/%s/logs?generation_id=%d", lobbyID, initial.GenerationID), "Authorization: "+credential); response.Code != want {
 			t.Fatalf("%s logs=%d", credential, response.Code)
 		}
+		if response := api.Get(demoPath, "Authorization: "+credential); response.Code != want || response.Header().Get("Content-Disposition") != "" {
+			t.Fatalf("%s demo=%d %s", credential, response.Code, response.Body.String())
+		}
+	}
+	if response := api.Get("/game/from-lobby/"+uuid.NewString()+"/demo", "Authorization: Bearer alice"); response.Code != http.StatusNotFound {
+		t.Fatalf("unknown lobby demo=%d", response.Code)
 	}
 	if response := api.Get("/game/from-lobby/"+uuid.NewString()+"/replay", "Authorization: Bearer alice"); response.Code != http.StatusNotFound {
 		t.Fatalf("unknown lobby replay=%d", response.Code)
@@ -193,7 +201,7 @@ func TestStartedGameServesItsRosterWithoutTheLobby(t *testing.T) {
 	}
 	// The page embeds one frame per stored generation, the last one being the
 	// generation the turn just produced.
-	_, embedded, found := strings.Cut(replay.Body.String(), "const replay = ")
+	_, embedded, found := strings.Cut(replay.Body.String(), "let replay = ")
 	embedded, _, _ = strings.Cut(embedded, ";\n")
 	var page services.GameReplay
 	if err := json.Unmarshal([]byte(embedded), &page); !found || err != nil {
@@ -201,5 +209,33 @@ func TestStartedGameServesItsRosterWithoutTheLobby(t *testing.T) {
 	}
 	if len(page.Frames) != 2 || page.Frames[1].ID != next.GenerationID || page.GameID != initial.GameID {
 		t.Fatalf("replay page = %+v", page)
+	}
+
+	// A demo is a download of the same frames, with the logs its saver may
+	// see: during the game, Bob sees no line of Alice's.
+	saveDemo := func(credential string) models.Demo {
+		t.Helper()
+		response := api.Get(demoPath, "Authorization: "+credential)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s demo=%d %s", credential, response.Code, response.Body.String())
+		}
+		wantName := fmt.Sprintf(`attachment; filename="island-battles-game-%d-generation-2.json"`, initial.GameID)
+		if response.Header().Get("Content-Disposition") != wantName || response.Header().Get("Content-Type") != "application/json" || response.Header().Get("Cache-Control") != "no-store" {
+			t.Fatalf("demo headers = %v", response.Header())
+		}
+		var demo models.Demo
+		if err := json.Unmarshal(response.Body.Bytes(), &demo); err != nil {
+			t.Fatal(err)
+		}
+		if demo.Format != models.DemoFormat || demo.SchemaVersion != models.DemoSchemaVersion || demo.GameID != initial.GameID || !reflect.DeepEqual(demo.Frames, page.Frames) || len(demo.Logs) != 2 {
+			t.Fatalf("demo = %+v", demo)
+		}
+		return demo
+	}
+	if demo := saveDemo("Bearer bob"); demo.Outcome != nil || len(demo.Logs[0].Players) != 1 || demo.Logs[0].Players[0].DisplayName != "Bob" || !reflect.DeepEqual(demo.Logs[0].HiddenTeamColors, []uint{initial.TeamColor}) {
+		t.Fatalf("Bob's demo logs = %+v", demo.Logs)
+	}
+	if demo := saveDemo("Bearer alice"); len(demo.Logs[0].Players) != 1 || len(demo.Logs[0].Players[0].Lines) != 1 || demo.Logs[0].Players[0].Lines[0].Message != "attacking with 5" {
+		t.Fatalf("Alice's demo logs = %+v", demo.Logs)
 	}
 }

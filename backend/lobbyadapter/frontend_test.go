@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"islandBattles/backend/demo"
+	"islandBattles/backend/demoviewer"
 	"islandBattles/backend/lobbyadapter"
 	"islandBattles/lobby/frontend"
 )
@@ -27,5 +28,22 @@ func TestFrontendGameModulesAreServed(t *testing.T) {
 		if recorder.Code != http.StatusOK || !strings.Contains(recorder.Header().Get("Content-Type"), "javascript") {
 			t.Errorf("GET %s: status %d, content type %q", module, recorder.Code, recorder.Header().Get("Content-Type"))
 		}
+	}
+}
+
+// The catalog links the demo viewer where app.go mounts it.
+func TestFrontendGameLinksTheDemoViewer(t *testing.T) {
+	links := lobbyadapter.FrontendGame().Links
+	if len(links) != 1 || links[0].Label != "Watch a saved demo" {
+		t.Fatalf("links = %+v", links)
+	}
+	viewer, err := demoviewer.Handler()
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder := httptest.NewRecorder()
+	http.StripPrefix("/game/demo-viewer/", viewer).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, links[0].URL, nil))
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "Open demo file") {
+		t.Fatalf("GET %s: status %d", links[0].URL, recorder.Code)
 	}
 }
