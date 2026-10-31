@@ -9,6 +9,8 @@ from typing import Any
 from pydantic import ValidationError
 
 from island_battles_client import (
+    CastleNotFoundError,
+    CastleNotOwnedError,
     CommandReceiver,
     GameAuthenticationError,
     GameClientClosedError,
@@ -18,8 +20,10 @@ from island_battles_client import (
     GameReceiverClosedError,
     GameTransportError,
     Generation,
+    InsufficientSoldiersError,
     IslandBattlesClient,
     Player,
+    UpgradeMaxLevelError,
 )
 
 
@@ -33,6 +37,10 @@ def describe(error: BaseException) -> dict[str, Any]:
         (GameAuthenticationError, "authentication"),
         (GameTransportError, "transport"),
         (GameProtocolError, "protocol"),
+        (CastleNotFoundError, "castle_not_found"),
+        (CastleNotOwnedError, "not_owned"),
+        (UpgradeMaxLevelError, "max_level"),
+        (InsufficientSoldiersError, "insufficient_soldiers"),
         (GameError, "rejected"),
     )
     kind = next((kind for type_, kind in kinds if isinstance(error, type_)), "player")
@@ -151,6 +159,37 @@ class Adapter:
         else:
             self.emit({"type": "sent"})
 
+    async def upgrade(self, message: dict[str, Any]) -> None:
+        """Upgrade one castle with the current or most recent receiver."""
+        if self.receiver is None:
+            self.emit(
+                {"type": "send_failed", "error": describe(GameReceiverClosedError())}
+            )
+            return
+        try:
+            await self.receiver.upgrade_castle(
+                message.get("castle_id"),  # ty: ignore[invalid-argument-type]
+                message.get("upgrade_type"),  # ty: ignore[invalid-argument-type]
+            )
+        except Exception as error:  # noqa: BLE001 - every failure is reported
+            self.emit({"type": "send_failed", "error": describe(error)})
+        else:
+            self.emit({"type": "sent"})
+
+    def cost(self, message: dict[str, Any]) -> None:
+        """Report what the next upgrade of a castle costs."""
+        try:
+            if self.receiver is None:
+                raise GameReceiverClosedError()
+            cost = self.receiver.upgrade_cost(
+                message.get("castle_id"),  # ty: ignore[invalid-argument-type]
+                message.get("upgrade_type"),  # ty: ignore[invalid-argument-type]
+            )
+        except Exception as error:  # noqa: BLE001 - every failure is reported
+            self.emit({"type": "cost_failed", "error": describe(error)})
+        else:
+            self.emit({"type": "cost", "cost": cost})
+
     async def close(self) -> None:
         """Close without completing an open turn."""
         self.closing = True
@@ -174,6 +213,10 @@ class Adapter:
                     self.spawn(self.run(message))
                 case "send_soldier_group":
                     self.spawn(self.send(message))
+                case "upgrade_castle":
+                    self.spawn(self.upgrade(message))
+                case "upgrade_cost":
+                    self.cost(message)
                 case "finish" | "fail":
                     self.decisions.put_nowait(message["type"])
                 case "close":

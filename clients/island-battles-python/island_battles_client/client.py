@@ -19,11 +19,13 @@ from ._generated import (
     GameOutcome,
     GenerationEvent,
     GenerationState,
+    ListUpgradesResponseBody,
     PublicGenerationCommand,
     RegisterGenerationCommands,
 )
 from .commands import CommandReceiver
 from .errors import (
+    PROBLEM_TYPE_ERRORS,
     GameAuthenticationError,
     GameClientClosedError,
     GameError,
@@ -32,6 +34,7 @@ from .errors import (
 )
 from .models import Generation
 from .player import Player
+from .upgrades import UpgradeTable
 
 
 def _parse_state(data: object) -> GenerationState:
@@ -135,6 +138,7 @@ class IslandBattlesClient:
         self._sdk = None
         self._subscription = None
         self._state: GenerationState | None = None
+        self._upgrades: UpgradeTable | None = None
         self._expected_identity: tuple[int, UUID, str, int] | None = None
         self._last_queued_generation = 0
         self._start_lock = asyncio.Lock()
@@ -160,6 +164,11 @@ class IslandBattlesClient:
     def player(self) -> Player | None:
         """The strategy created after the first authorized state read."""
         return self._player
+
+    @property
+    def upgrades(self) -> UpgradeTable | None:
+        """The upgrade cost table, read once by ``start()``; None before it."""
+        return self._upgrades
 
     @property
     def outcome(self) -> GameOutcome | None:
@@ -227,14 +236,19 @@ class IslandBattlesClient:
                     problem = response.json()
                 except ValueError, TypeError:
                     problem = {}
-                detail = problem.get("detail") if isinstance(problem, dict) else None
+                if not isinstance(problem, dict):
+                    problem = {}
+                detail = problem.get("detail")
                 if not isinstance(detail, str) or not detail:
                     detail = f"request failed ({response.status_code})"
+                problem_type = problem.get("type")
                 error_class = (
                     GameAuthenticationError
                     if response.status_code == 401
                     else GameTransportError
                     if response.status_code == 429 or response.status_code >= 500
+                    else PROBLEM_TYPE_ERRORS.get(problem_type, GameError)
+                    if isinstance(problem_type, str)
                     else GameError
                 )
                 error = error_class(detail, response.status_code)
@@ -305,6 +319,13 @@ class IslandBattlesClient:
             self._callbacks.put_nowait(state)
         return state
 
+    async def _fetch_upgrades(self) -> UpgradeTable:
+        data = await self._request("GET", "/game/upgrades")
+        try:
+            return UpgradeTable(ListUpgradesResponseBody.model_validate(data).upgrades)
+        except ValidationError as exc:
+            raise GameProtocolError("invalid upgrade table") from exc
+
     async def _fetch_state(self) -> GenerationState:
         data = await self._request(
             "GET", f"/game/from-lobby/{self.lobby_id}/generation"
@@ -351,6 +372,7 @@ class IslandBattlesClient:
                     initial.channel,
                     initial.team_color,
                 )
+                self._upgrades = await self._fetch_upgrades()
                 self._player = self._player_factory(initial.team_color)
                 if self._player.team_color != initial.team_color:
                     raise GameProtocolError(
@@ -421,7 +443,7 @@ class IslandBattlesClient:
                     self._callbacks.task_done()
                 self._stopped.set()
                 return
-            receiver = self._receiver(state.generation_id)
+            receiver = self._receiver(state)
             try:
                 if self._state is not None and (
                     self._state.generation_id != state.generation_id
@@ -438,11 +460,17 @@ class IslandBattlesClient:
                 receiver._close()
                 self._callbacks.task_done()
 
-    def _receiver(self, generation_id: int) -> CommandReceiver:
+    def _receiver(self, state: GenerationState) -> CommandReceiver:
         async def submit(command: PublicGenerationCommand) -> None:
-            await self._register([command], False, generation_id=generation_id)
+            await self._register([command], False, generation_id=state.generation_id)
 
-        return CommandReceiver(submit)
+        assert self._upgrades is not None
+        return CommandReceiver(
+            submit,
+            generation=state.generation,
+            team_color=state.team_color,
+            upgrades=self._upgrades,
+        )
 
     async def _register(
         self,

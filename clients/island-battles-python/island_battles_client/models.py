@@ -12,6 +12,9 @@ from ._generated import (
     GameOutcome,
     Generation,
     SoldierGroup,
+    Upgrade,
+    UpgradeLevel,
+    UpgradeType,
 )
 
 __all__ = [
@@ -24,4 +27,7 @@ __all__ = [
     "Generation",
     "SoldierGroup",
     "TeamType",
+    "Upgrade",
+    "UpgradeLevel",
+    "UpgradeType",
 ]
