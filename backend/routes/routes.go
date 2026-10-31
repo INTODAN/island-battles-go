@@ -68,10 +68,15 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 	}, game.GenerationLogs)
 	for _, parameter := range api.OpenAPI().Paths["/game/from-lobby/{lobby_id}/logs"].Get.Parameters {
 		if parameter.Name == "generation_id" {
-			// The service requires it after authorizing the caller; see GenerationLogs.
+			// The service requires it after authorizing the caller; see
+			// GenerationLogs. Huma validates requests against the schema it
+			// registered, so the documented minimum goes on a copy: on the
+			// original, generation_id=0 would be refused before authentication.
 			parameter.Required = true
 			minimum := 1.0
-			parameter.Schema.Minimum = &minimum
+			documented := *parameter.Schema
+			documented.Minimum = &minimum
+			parameter.Schema = &documented
 		}
 	}
 	huma.Register(api, huma.Operation{

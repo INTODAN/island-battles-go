@@ -1,12 +1,14 @@
 package routes_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/danielgtaylor/huma/v2/humatest"
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/models"
 	"islandBattles/backend/routes"
+	"islandBattles/lobby/domain"
 	"net/http"
 	"reflect"
 	"strings"
@@ -118,6 +120,35 @@ func TestRawGenerationMutationRoutesAreRemoved(t *testing.T) {
 		}
 		if response := api.Post(path, `{}`); response.Code != 404 {
 			t.Fatalf("%s status=%d", path, response.Code)
+		}
+	}
+}
+
+// rejectEveryone authenticates nobody.
+type rejectEveryone struct{}
+
+func (rejectEveryone) CreateGuest(context.Context, domain.CreateGuestRequest) (domain.GuestSession, error) {
+	return domain.GuestSession{}, domain.ErrUnauthenticated
+}
+func (rejectEveryone) Authenticate(context.Context, string) (domain.SessionVerification, error) {
+	return domain.SessionVerification{}, domain.ErrUnauthenticated
+}
+
+// The logs read documents generation_id as required and positive, but checks
+// it only after authenticating and authorizing the caller, so a caller off
+// the roster learns nothing from a 422. From the review of PR #86.
+func TestTheLogsReadAuthenticatesBeforeCheckingTheGeneration(t *testing.T) {
+	_, api := humatest.New(t, routes.NewAPIConfig("test", "1.0.0"))
+	routes.SetupLobbyRoutes(api, nil, nil, nil, nil, &handlers.LobbyGame{Authenticator: rejectEveryone{}})
+	path := "/game/from-lobby/4a0f1a52-7f4e-4d5c-9a8e-2f3b6c1d0e9a/logs"
+	for _, query := range []string{"?generation_id=0", ""} {
+		if response := api.Get(path+query, "Authorization: Bearer stranger"); response.Code != http.StatusUnauthorized {
+			t.Fatalf("%s: status=%d %s", query, response.Code, response.Body.String())
+		}
+	}
+	for _, parameter := range api.OpenAPI().Paths["/game/from-lobby/{lobby_id}/logs"].Get.Parameters {
+		if parameter.Name == "generation_id" && (!parameter.Required || parameter.Schema.Minimum == nil || *parameter.Schema.Minimum != 1) {
+			t.Fatalf("generation_id is documented as %+v", parameter)
 		}
 	}
 }
