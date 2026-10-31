@@ -36,10 +36,20 @@ class Match:
         assert response.status_code == 200, response.text
         return response.json()
 
-    async def complete(self, seat: Seat, commands=()) -> dict:
-        return await self.submit(seat, await self.read(seat), commands)
+    async def read_logs(self, seat: Seat, generation_id: int) -> dict:
+        """Read a generation's game log as the seat may see it."""
+        response = await self.http.get(
+            f"/game/from-lobby/{self.lobby_id}/logs",
+            params={"generation_id": generation_id},
+            headers={"Authorization": f"Bearer {seat.credential}"},
+        )
+        assert response.status_code == 200, response.text
+        return response.json()
 
-    async def submit(self, seat: Seat, state: dict, commands=()) -> dict:
+    async def complete(self, seat: Seat, commands=(), logs=()) -> dict:
+        return await self.submit(seat, await self.read(seat), commands, logs)
+
+    async def submit(self, seat: Seat, state: dict, commands=(), logs=()) -> dict:
         """Complete the seat's turn for the generation of state."""
         response = await self.post(seat, state, commands, complete=True)
         assert response.status_code == 200, response.text
@@ -58,6 +68,7 @@ class Match:
                 "request_id": str(uuid4()),
                 "complete": complete,
                 "commands": list(commands),
+                "logs": list(logs),
             },
         )
 

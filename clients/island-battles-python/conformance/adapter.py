@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import json
+import logging
 import sys
 from typing import Any
 
@@ -25,6 +26,13 @@ from island_battles_client import (
     Player,
     UpgradeMaxLevelError,
 )
+
+LOG_LEVELS = {
+    "debug": logging.DEBUG,
+    "info": logging.INFO,
+    "warning": logging.WARNING,
+    "error": logging.ERROR,
+}
 
 
 def describe(error: BaseException) -> dict[str, Any]:
@@ -63,7 +71,11 @@ class ScriptedPlayer(Player):
         self.adapter.emit(
             {"type": "generation", "generation": generation.model_dump(mode="json")}
         )
-        if await self.adapter.decisions.get() == "fail":
+        while (decision := await self.adapter.decisions.get())["type"] == "log":
+            # Logged inside the callback, so the line goes to the game log.
+            self.logger.log(LOG_LEVELS[decision["level"]], decision["message"])
+            self.adapter.emit({"type": "logged"})
+        if decision["type"] == "fail":
             raise RuntimeError("scripted callback failure")
 
     async def on_game_ended(self, outcome: GameOutcome, generation: Generation) -> None:
@@ -82,7 +94,7 @@ class Adapter:
 
     def __init__(self) -> None:
         """Start with no client; the runner sends start or evaluate."""
-        self.decisions: asyncio.Queue[str] = asyncio.Queue()
+        self.decisions: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self.receiver: CommandReceiver | None = None
         self.client: IslandBattlesClient | None = None
         self.closing = False
@@ -130,6 +142,10 @@ class Adapter:
             message["credential"],
             message["lobby_id"],
             player_factory=lambda team_color: ScriptedPlayer(team_color, self),
+            # Stdout carries the protocol; the adapter logs to stderr instead.
+            log_level=logging.DEBUG,
+            log_to_stdout=False,
+            log_file=message.get("log_file"),
         )
         try:
             await self.client.start()
@@ -217,8 +233,8 @@ class Adapter:
                     self.spawn(self.upgrade(message))
                 case "upgrade_cost":
                     self.cost(message)
-                case "finish" | "fail":
-                    self.decisions.put_nowait(message["type"])
+                case "finish" | "fail" | "log":
+                    self.decisions.put_nowait(message)
                 case "close":
                     break
         await self.close()
@@ -229,4 +245,6 @@ class Adapter:
 
 
 if __name__ == "__main__":
+    # The runner shows stderr when a test fails.
+    logging.getLogger("island_battles").addHandler(logging.StreamHandler(sys.stderr))
     asyncio.run(Adapter().main())

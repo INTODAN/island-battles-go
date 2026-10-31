@@ -45,18 +45,21 @@ async def launch(match, proxy):
     """Start an adapter playing Alice, or another credential, through the proxy."""
     processes = []
 
-    async def start(credential: str | None = None) -> AdapterProcess:
+    async def start(
+        credential: str | None = None, log_file: str | None = None
+    ) -> AdapterProcess:
         process = AdapterProcess()
         await process.__aenter__()
         processes.append(process)
-        await process.send(
-            {
-                "type": "start",
-                "base_url": proxy.url,
-                "credential": credential or match.alice.credential,
-                "lobby_id": match.lobby_id,
-            }
-        )
+        message = {
+            "type": "start",
+            "base_url": proxy.url,
+            "credential": credential or match.alice.credential,
+            "lobby_id": match.lobby_id,
+        }
+        if log_file is not None:
+            message["log_file"] = log_file
+        await process.send(message)
         return process
 
     yield start

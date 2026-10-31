@@ -93,6 +93,47 @@ Each call is pinned to its callback's generation. The SDK creates the request UU
 
 The full HTTP contract, authorization rules, reservation checks, retry behavior and status codes are documented in the [backend README](../../backend/README.md). The browser's **New demo lobby** uses its own JavaScript player strategy. See the [demo walkthrough](../../backend/README.md#browser-demo).
 
+## Logging
+
+`Player.logger` is a standard `logging.Logger` named `island_battles.player`. Log with it as with any logger:
+
+```python
+class MyPlayer(Player):
+    async def on_generation(self, generation, commands_receiver):
+        self.logger.info("generation %d: %d castles", generation.id, len(generation.castles))
+```
+
+Helper modules can use child loggers, such as `logging.getLogger("island_battles.player.planner")`, whose records propagate to it. From `start()` to `close()` the client attaches three handlers to the `island_battles` logger, the parent of the player's logger and of the SDK's own `island_battles.sdk`:
+
+- **stdout**, unless `log_to_stdout=False`;
+- **a file**, when `log_file` is set; lines are appended;
+- **the game log**, always. The client has no option to turn it off.
+
+```python
+client = IslandBattlesClient(
+    base_url, credential, lobby_id,
+    player_factory=MyPlayer,
+    log_level=logging.DEBUG,  # the default is logging.INFO
+    log_file="bot.log",
+)
+```
+
+`log_level` applies to all three handlers. The `island_battles` logger propagates to the root logger as usual, so turn `log_to_stdout` off if your program already prints the root logger's records.
+
+The **game log** stores the lines that the strategy logs during `on_generation` on the server, with the generation whose callback logged them. The replay in the lobby page shows each generation's lines: your own team's while the game runs, and every team's once it has ended. A record is filed under the callback that is running, through a `contextvars.ContextVar`, so tasks that the callback starts log into it too, and two clients in one process never mix their lines. Records logged outside a callback go to stdout and the file only: in the strategy's `__init__`, in `on_game_ended`, or by the SDK itself.
+
+Each request the client sends for a generation carries the lines logged since its previous request for that generation, and the request that completes the turn carries the rest. A retried request resends the identical lines. A line logged with an exception, such as `self.logger.exception(...)`, keeps its traceback, which the game log stores with the exception first and the innermost frames next. When `on_generation` raises, the client logs the exception with its traceback at `error` as `island_battles.sdk`, and sends the generation's remaining lines in a last batch with no commands that leaves the turn open, before it stops.
+
+The server stores at most **100 lines per player per generation**, each of at most **500 characters**. The client applies these limits before it sends anything, and a logging call never raises, so the bot keeps playing:
+
+- A longer line is cut so that, ending in `… (cut at 500 characters)`, it is 500 characters.
+- Past 100 lines, the client drops the rest. It writes `game log limit reached for generation 41: 100 lines per generation; the rest of this generation's lines are not stored` to stdout and the file once, when the first line is dropped. The game log stores, as the generation's last line, `game log limit reached for generation 41: 100 lines per generation; 7 lines were not stored`, at level `error` from `island_battles.sdk`, in place of the 100th line, so a generation never has more than 100. Anyone reading the replay can see why the lines stop.
+- Empty lines are not stored in the game log. A NUL character is stored as `�`.
+
+The handler reports its own failures, such as a message whose arguments don't match its format, through `logging`'s `handleError`, as standard handlers do.
+
+The game log needs a server that accepts `logs` with each batch; an older server ignores them. Older clients keep working against the new server, without a game log.
+
 ## Regenerating the models
 
 Change the Go API types in `backend/models`, then export the document and regenerate:
