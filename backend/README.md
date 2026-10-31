@@ -14,7 +14,7 @@ Compose mounts PostgreSQL 18's parent data directory at `/var/lib/postgresql`.
 
 ## Browser demo
 
-The backend lists Island Battles in the lobby frontend's game catalog with [`lobbyadapter.FrontendGame`](lobbyadapter/frontend.go), and serves the browser [example player](demo/example-player.mjs) and the create form's [map choice](demo/lobby-settings.mjs) under `/game/demo/`. Once a lobby starts, the frontend shows the lobby replay from `/game/from-lobby/{lobby_id}/replay`, which takes new generations from the page's `lobby.game-state` messages.
+The backend lists Island Battles in the lobby frontend's game catalog with [`lobbyadapter.FrontendGame`](lobbyadapter/frontend.go), and serves the browser [example player](demo/example-player.mjs) and the create form's [map choice](demo/lobby-settings.mjs) under `/game/demo/`. Once a lobby starts, the frontend shows the lobby replay from `/game/from-lobby/{lobby_id}/replay`, which takes new generations from the page's `lobby.game-state` messages and reads each generation's [game logs](#game-logs) through the page's `game.request` messages.
 
 For the quickest test, open `/lobby/ui/` and click **New demo lobby**. It creates Alex on Blue in the current tab, opens Sam on Red in a second tab, marks both ready, and starts automatically. Both tabs run the example player: send one soldier from the first available owned castle to the first enemy castle, then finish the turn. Players submit immediately when a generation arrives, without an artificial client delay. Replay playback has its own viewing pace. Failed requests still use retry backoff.
 
@@ -71,6 +71,7 @@ Each request UUID identifies one immutable batch for one player and generation. 
 | The castle belongs to another team or is neutral | 403 | `urn:island-battles:problem:castle-not-owned` |
 | The type's pending level is already its maximum | 409 | `urn:island-battles:problem:upgrade-max-level` |
 | Soldiers or an upgrade cost beyond the castle's unreserved soldiers | 409 | `urn:island-battles:problem:insufficient-soldiers` |
+| The batch's [game log](#game-logs) lines would pass 100 for the player's generation, or one has more than 500 characters | 422 | `urn:island-battles:problem:game-log-limit` |
 
 Each `detail` names the castle and the numbers, such as `castle 3 has 12 unreserved soldiers; speed level 3 costs 20`. Read it before retrying with a new request UUID.
 
@@ -91,6 +92,43 @@ Groups leave field combat when they reach their destination, including arrivals 
 The replay draws troop circles using their stored radius and castle circles with a visual-only radius of **0.5 units**, with the same world scale on both axes.
 
 The Island Battles adapter wraps the generic start operation. Generic lobby start freezes the roster first; game initialization uses that roster and persists generation one and its player/team bindings. Concurrent or repeated starts reuse the initialized game. Other game keys are unaffected.
+
+### Game logs
+
+A bot can send the lines it logs while playing a generation, its **game log**, with that generation's batches. `POST /generation/commands` takes an optional `logs` array:
+
+```json
+"logs": [{"level": "info", "logger": "island_battles.player", "message": "attacking castle 3 with 12 soldiers"}]
+```
+
+- `level` is `debug`, `info`, `warning` or `error`. `logger` names the logger that wrote the line, in at most 100 characters. `message` has 1 to 500 characters, counted as Unicode code points, and no NUL.
+- A batch may carry logs, commands, both, or neither. The server appends a batch's lines, in order, after the player's earlier lines for the generation, under the game lock. The payload hash includes them, so retrying a request stores nothing twice.
+- A player has at most **100 lines per generation**. A batch that would take the player past 100 lines, or that has a line longer than 500 characters, is rejected whole with 422 and problem type `urn:island-battles:problem:game-log-limit`; the detail names the limit. Nothing of a rejected batch is stored: not its lines, its commands, or its completion. Other invalid lines, such as an unknown level, are a plain 422. The [Python client](../clients/island-battles-python/README.md#logging) cuts and counts its lines, so it never sends such a batch.
+- Lines are accepted only while the turn is open, as commands are: a new batch after completion, or for a generation that is no longer current, conflicts with 409.
+
+The lines live in the `generation_logs` table, one row per line, with the game, the generation, the player, the line's `sequence` within the player's generation (from 1), its level, logger and message. The unique index on the generation, player and sequence serves the line count under the lock and the reads. The table is game data: AutoMigrate creates it, and [retention](#game-retention) deletes the lines with their generation. Players are named in the logs by `FrozenGamePlayer.DisplayName`, the lobby display name copied at start, as the replay's team players are; a player that the start snapshot doesn't list is named `Player <n>` after their roster position.
+
+`GET /game/from-lobby/{lobby_id}/logs?generation_id=N` reads one generation's game log, with the same authorization as `/generation`: a place on the game's frozen roster. Its response is the `GenerationLogs` schema:
+
+```json
+{
+  "generation_id": 41,
+  "players": [
+    {"display_name": "Alex", "team_color": 1, "lines": [{"level": "info", "logger": "island_battles.player", "message": "attacking castle 3 with 12 soldiers"}]}
+  ],
+  "hidden_team_colors": [2]
+}
+```
+
+- While the game runs, the caller sees only their own team's lines. Once the game has an outcome, every roster player sees every player's lines.
+- `players` lists every player of the visible teams, also those without lines, ordered by team colour and then display name. Each player's `lines` keep the order they were stored in.
+- `hidden_team_colors` lists, in ascending order, the teams whose lines the caller can't see yet, so a page can explain why. It doesn't reveal whether those teams logged anything. It is empty once the game has ended.
+- The response contains no player IDs.
+- `generation_id` must be a generation of this game; any other is 404, as are callers off the roster. Like the other game reads, the request ends with a game [retention](#game-retention) pass.
+
+A future reader that shows several generations, such as a saved demo, can reuse `GenerationLogs` per generation; the visibility it shows is the rule that applied when it was read.
+
+The replay shows the game log in a **Logs** panel below the board, for the generation on the board. The replay runs in the lobby page's sandboxed frame without the credential, so it reads the logs through the page: Island Battles' catalog entry sets the lobby frontend's `DataURLPrefix` to `/game/from-lobby/{lobby_id}/`, and the replay posts `game.request` messages for `/game/from-lobby/{lobby_id}/logs?generation_id=N`, which the page fetches for it (see the [lobby frontend README](../lobby/frontend/README.md#what-a-game-provides)). The replay page data carries the `lobby_id` for that path. The panel groups the lines by team and then by player, in monospace, coloured by level, and scrolls inside a fixed height, so the frame's reported size doesn't change as lines load. It caches the lines of generations whose turn is over, explains hidden teams ("Red’s logs appear when the game ends") and generations without lines, and loads every generation again when the game's outcome arrives. Opened outside the lobby page, it says the logs need the lobby.
 
 ### Retry or explicitly bind a started lobby
 
@@ -200,12 +238,12 @@ A game is deleted with all its rows 7 days after its latest generation was creat
 | --- | --- | --- |
 | `ISLAND_BATTLES_GAME_RETENTION_PERIOD` | `168h` | How long a game is kept after its latest generation, as a positive Go duration. Go durations have no days unit, so 7 days is `168h`. |
 
-There is no timer. The game's own requests run the passes as they end: turns (`POST /generation/commands`), which are what adds game data, and the state and replay reads that players poll (`GET /game/from-lobby/{lobby_id}/generation` and `/replay`). When nobody plays, no game data is added, so none needs deleting. The pass runs before the response is sent, so the request waits for it. Each process runs at most one pass at a time, and at most one a minute while passes find no backlog. A pass that fills a batch lets the next request run another, so a backlog drains one batch per request. A turn adds one generation and a pass deletes up to 10, so deleting keeps ahead of playing. A pass has a 5-second timeout, and a failed pass is logged without failing the request. Against a local database a pass takes under a millisecond when there's nothing to delete and 5 to 7 ms for a full batch. On Lambda every statement, and every BEGIN and COMMIT, is a round trip over TLS to the VM: 4 for a pass with nothing to delete, about 20 for a batch from one long game, and about 50 for a pass that finishes 3 small games, the most a pass purges. That is a few to about a hundred milliseconds at a few milliseconds a round trip, at most once a minute per instance while there's no backlog, and on every game request while there is one.
+There is no timer. The game's own requests run the passes as they end: turns (`POST /generation/commands`), which are what adds game data, and the state, replay and game log reads that players poll (`GET /game/from-lobby/{lobby_id}/generation`, `/replay` and `/logs`). When nobody plays, no game data is added, so none needs deleting. The pass runs before the response is sent, so the request waits for it. Each process runs at most one pass at a time, and at most one a minute while passes find no backlog. A pass that fills a batch lets the next request run another, so a backlog drains one batch per request. A turn adds one generation and a pass deletes up to 10, so deleting keeps ahead of playing. A pass has a 5-second timeout, and a failed pass is logged without failing the request. Against a local database a pass takes under a millisecond when there's nothing to delete and 5 to 7 ms for a full batch. On Lambda every statement, and every BEGIN and COMMIT, is a round trip over TLS to the VM: 4 for a pass with nothing to delete, about 20 for a batch from one long game, and about 50 for a pass that finishes 3 small games, the most a pass purges. That is a few to about a hundred milliseconds at a few milliseconds a round trip, at most once a minute per instance while there's no backlog, and on every game request while there is one.
 
 A pass has two steps. Each runs even when the other fails, and the pass logs every failure:
 
 1. **Retire** up to 10 expired games by soft-deleting the game row. Every request finds and locks its game through GORM's default scope, so a retired game disappears from every endpoint at once, and its turns and reads return 404. The step skips games that a request holds locked (`FOR UPDATE SKIP LOCKED`), so it never waits for a turn and never retires a game while a turn on it is in progress. It checks each locked candidate again in a new statement, so a turn that commits just before the lock keeps its game.
-2. **Purge** up to 10 generations of at most 3 retired games, lowest game IDs first, with `Unscoped`, so rows are removed for real. Each generation goes with its requests, player inputs, commands and soldier groups, then the generation, then its map's castles and the map. A retired game with no generations left then goes with its remaining requests, frozen players and team bindings. Every game is purged in its own transaction, so a game whose purge fails is rolled back and retried by later passes while the other games are still deleted. A long game takes several passes, and no transaction deletes more than 10 generations' rows.
+2. **Purge** up to 10 generations of at most 3 retired games, lowest game IDs first, with `Unscoped`, so rows are removed for real. Each generation goes with its requests, player inputs, game log lines, commands and soldier groups, then the generation, then its map's castles and the map. A retired game with no generations left then goes with its remaining requests, frozen players and team bindings. Every game is purged in its own transaction, so a game whose purge fails is rolled back and retried by later passes while the other games are still deleted. A long game takes several passes, and no transaction deletes more than 10 generations' rows.
 
 The rows a pass deletes belong to games nobody can reach any more, and the indexes on the foreign key columns (`generations.game_id` and `map_id`, `castles.map_id`, `commands.generation_id`, and `soldier_groups.generation_id`, `origin_castle_id` and `destination_castle_id`) keep the deletes and their foreign key checks from scanning other games' rows. Passes on several hosts at once lock different games, so they never wait for each other either.
 
