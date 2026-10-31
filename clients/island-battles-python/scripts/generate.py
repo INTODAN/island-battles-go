@@ -104,6 +104,11 @@ def generate(output: Path) -> None:
             "--field-constraints",
             "--enum-field-as-literal",
             "all",
+            # UpgradeType keys the upgrades maps, so it is a StrEnum that
+            # bots can import, iterate and compare with plain strings.
+            "--enum-field-as-literal-map",
+            json.dumps({"UpgradeType": "enum"}),
+            "--use-specialized-enum",
             "--use-generic-container-types",
             "--use-union-operator",
             # Tolerate fields added by newer servers.

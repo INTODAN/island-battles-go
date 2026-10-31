@@ -1,13 +1,32 @@
 package routes_test
 
 import (
+	"encoding/json"
 	"github.com/danielgtaylor/huma/v2/humatest"
 	"islandBattles/backend/handlers"
+	"islandBattles/backend/models"
 	"islandBattles/backend/routes"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestUpgradesAreListedWithoutAuthentication(t *testing.T) {
+	_, api := humatest.New(t, routes.NewAPIConfig("test", "1.0.0"))
+	routes.SetupRoutes(api, &handlers.Env{}, "")
+	if security := api.OpenAPI().Paths["/game/upgrades"].Get.Security; len(security) != 0 {
+		t.Fatalf("GET /game/upgrades requires %v", security)
+	}
+	response := api.Get("/game/upgrades")
+	var body struct{ Upgrades []models.UpgradeView }
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s err=%v", response.Code, response.Body.String(), err)
+	}
+	if !reflect.DeepEqual(body.Upgrades, models.UpgradeTable()) {
+		t.Fatalf("upgrades=%+v, want %+v", body.Upgrades, models.UpgradeTable())
+	}
+}
 
 func TestMapCreateAcceptsTheMapFileFormat(t *testing.T) {
 	_, api := humatest.New(t, routes.NewAPIConfig("test", "1.0.0"))

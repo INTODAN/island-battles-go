@@ -97,3 +97,28 @@ func TestClashStopUpgradeLevelsAndCosts(t *testing.T) {
 		t.Fatalf("invalid stop level accepted: %v", err)
 	}
 }
+
+// The published table is built from upgradeLevels, so every level reports the
+// same effect and cost that Upgrades applies.
+func TestUpgradeTableMatchesTheLevels(t *testing.T) {
+	table := UpgradeTable()
+	if len(table) != len(upgradeLevels) || table[0].Type != ClashStopGenerationsUpgrade || table[1].Type != SpeedUpgrade {
+		t.Fatalf("table is not every type sorted by type: %+v", table)
+	}
+	for _, upgrade := range table {
+		if upgrade.Description == "" || upgrade.MaxLevel != len(upgrade.Levels) || upgrade.MaxLevel != len(upgradeLevels[upgrade.Type]) {
+			t.Fatalf("incomplete %s: %+v", upgrade.Type, upgrade)
+		}
+		for index, level := range upgrade.Levels {
+			upgrades := Upgrades{upgrade.Type: index + 1}
+			value, valueErr := upgrades.Value(upgrade.Type)
+			cost, costErr := upgrades.Cost(upgrade.Type)
+			if level.Level != index+1 || valueErr != nil || costErr != nil || level.Value != value || level.SoldierCost != cost {
+				t.Fatalf("%s level %d = %+v, want value %v and cost %d", upgrade.Type, index+1, level, value, cost)
+			}
+		}
+	}
+	if speed := table[1].Levels; speed[1].SoldierCost != 10 || speed[3].SoldierCost != 30 || speed[3].Value != 2 {
+		t.Fatalf("speed levels = %+v", speed)
+	}
+}

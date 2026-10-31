@@ -59,7 +59,12 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 	}, game.CurrentGeneration)
 	huma.Register(api, huma.Operation{
 		OperationID: "registerGenerationCommand", Path: "/generation/commands", Method: http.MethodPost,
-		Summary: "Register an atomic player command batch and optionally complete the turn", Description: "Requires a place on the game's frozen roster; the lobby is not consulted. Only owned send_soldier_group commands are accepted; other command types are forbidden (403). Complete defaults to true; an empty batch can complete a turn. The last frozen roster completion advances exactly once. " +
+		Summary: "Register an atomic player command batch and optionally complete the turn", Description: "Requires a place on the game's frozen roster; the lobby is not consulted. Players send send_soldier_group and upgrade_castle commands for castles their team owns; other command types are forbidden (403). " +
+			"upgrade_castle buys the next level of one upgrade type and pays that level's soldier_cost, listed by GET /game/upgrades, from the castle's soldiers. A castle may be upgraded several times in one turn, and each upgrade buys the next level. " +
+			"Every command is checked against the generation and every command already accepted this turn, yours and your teammates', so an accepted command cannot fail when the turn runs. An invalid command rejects the whole batch, and nothing of it is stored. " +
+			"Malformed parameters are 422. Rejections that clients tell apart carry a problem type: a castle that is not in the generation is 422 " + services.CastleNotFoundProblemType + ", an unknown upgrade_type is 422 " + services.UnknownUpgradeTypeProblemType + ", a castle your team does not own is 403 " + services.CastleNotOwnedProblemType + ", " +
+			"an upgrade past its type's max_level, counting this turn's upgrades, is 409 " + services.UpgradeMaxLevelProblemType + ", and soldiers or an upgrade cost beyond what the castle has left after this turn's reservations is 409 " + services.InsufficientSoldiersProblemType + ". A castle may spend all its soldiers. " +
+			"Complete defaults to true; an empty batch can complete a turn. The last frozen roster completion advances exactly once. " +
 			"The game ends after the turn that leaves one team with castles or soldier groups, a draw when the last teams are eliminated in the same turn, or after the turn that creates generation 300, where the team with the most castles wins. " +
 			"That turn's generation is the last, its state carries the outcome, and every later command conflicts (409) with problem type " + services.GameEndedProblemType + ". " +
 			"Retry the same request UUID and payload safely, also after the game ended; changed payloads and stale new requests conflict.",
@@ -69,9 +74,14 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 		SkipValidateBody: true,
 	}, game.RegisterGenerationCommands)
 	registry := api.OpenAPI().Components.Schemas
-	command := registry.Map()["PublicGenerationCommand"]
-	command.Properties["command_type"].Enum = []any{string(models.SendSoldierGroup)}
-	command.Properties["parameters"] = registry.Schema(reflect.TypeOf(models.SendSoldierGroupParameters{}), true, "")
+	// The service decodes parameters by command_type, so the published command
+	// is one of the two player command shapes.
+	send := registry.Schema(reflect.TypeOf(models.SendSoldierGroupCommand{}), true, "")
+	upgrade := registry.Schema(reflect.TypeOf(models.UpgradeCastleCommand{}), true, "")
+	*registry.Map()["PublicGenerationCommand"] = huma.Schema{
+		OneOf:         []*huma.Schema{send, upgrade},
+		Discriminator: &huma.Discriminator{PropertyName: "command_type", Mapping: map[string]string{string(models.SendSoldierGroup): send.Ref, string(models.UpgradeCastle): upgrade.Ref}},
+	}
 	// Published on each roster player's personal channel rather than over HTTP.
 	registry.Schema(reflect.TypeOf(models.GenerationEvent{}), true, "")
 	registry.Schema(reflect.TypeOf(models.GameEndedEvent{}), true, "")
@@ -108,6 +118,10 @@ func SetupRoutes(api huma.API, env *handlers.Env, adminAPIKey string) {
 		// rejects it and every problem comes back in the response.
 		SkipValidateBody: true, MaxBodyBytes: 1 << 20, BodyReadTimeout: 5 * time.Second}, handlers.ValidateMapTemplate)
 	api.OpenAPI().Paths["/map/validate"].Post.RequestBody.Content["application/json"].Schema = &huma.Schema{Ref: "#/components/schemas/MapTemplate"}
+	huma.Register(api, huma.Operation{OperationID: "listUpgrades", Path: "/game/upgrades", Method: http.MethodGet,
+		Summary: "List the castle upgrades, their levels and their costs.",
+		Description: "Lists every upgrade type, sorted by type, with what its levels measure and, for each level from 1 to max_level, its effect and the soldiers a castle pays to reach it from the level below. Every castle starts at level 1. " +
+			"The table is static and needs no authentication. Castles and soldier groups carry their current levels, and upgrade_castle in POST /generation/commands buys the next one."}, handlers.ListUpgrades)
 	huma.Register(api, huma.Operation{OperationID: "listMapTemplates", Path: "/map/templates", Method: http.MethodGet,
 		Summary: "List the default maps a lobby can start on.",
 		Description: "Lists every default map whose castle team colours are exactly 1 to player_amount, ordered by name. " +

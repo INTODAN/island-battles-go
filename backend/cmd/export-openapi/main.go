@@ -31,13 +31,14 @@ const (
 		"which pushes a `GameEndedEvent` with the final generation and its outcome instead. Clients reconcile with the " +
 		"generation read after subscribing or reconnecting; HTTP state is authoritative, and its `outcome` is set once the " +
 		"game has ended. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the " +
-		"`game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose."
+		"`game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose. " +
+		"`GET /game/upgrades` lists what each castle upgrade level costs."
 )
 
-// PlayerOperations are the endpoints a gameplay client uses, and the default
-// map list for choosing a lobby's map. Lobby setup has its own generated SDK
-// in lobby/api/openapi.json.
-var PlayerOperations = []string{"createLobbyConnectionToken", "getIslandLobbyGeneration", "registerGenerationCommand", "listMapTemplates"}
+// PlayerOperations are the endpoints a gameplay client uses, including the
+// upgrade cost table, and the default map list for choosing a lobby's map.
+// Lobby setup has its own generated SDK in lobby/api/openapi.json.
+var PlayerOperations = []string{"createLobbyConnectionToken", "getIslandLobbyGeneration", "registerGenerationCommand", "listUpgrades", "listMapTemplates"}
 
 // PlayerEventSchemas are delivered by Centrifugo rather than HTTP responses.
 var PlayerEventSchemas = []string{"GenerationEvent", "GameEndedEvent"}

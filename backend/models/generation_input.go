@@ -34,10 +34,23 @@ type GenerationRequest struct {
 
 // PublicGenerationCommand keeps raw parameters so the service can decode them
 // strictly and reject other command types with 403. The published schema
-// describes them as SendSoldierGroupParameters.
+// describes it as one of SendSoldierGroupCommand and UpgradeCastleCommand,
+// chosen by command_type.
 type PublicGenerationCommand struct {
 	CommandType CommandType     `json:"command_type"`
 	Parameters  json.RawMessage `json:"parameters"`
+}
+
+// SendSoldierGroupCommand and UpgradeCastleCommand only describe the two
+// shapes of PublicGenerationCommand in the published schema.
+type SendSoldierGroupCommand struct {
+	CommandType CommandType                `json:"command_type" enum:"send_soldier_group"`
+	Parameters  SendSoldierGroupParameters `json:"parameters"`
+}
+
+type UpgradeCastleCommand struct {
+	CommandType CommandType             `json:"command_type" enum:"upgrade_castle"`
+	Parameters  UpgradeCastleParameters `json:"parameters"`
 }
 
 // SendSoldierGroupParameters orders soldiers from an owned castle. Pointers let
@@ -46,6 +59,13 @@ type SendSoldierGroupParameters struct {
 	OriginCastleID      *uint `json:"origin_castle_id" nullable:"false" doc:"Castle your team owns."`
 	DestinationCastleID *uint `json:"destination_castle_id" nullable:"false" doc:"Any other castle."`
 	SoldierAmount       *uint `json:"soldier_amount" minimum:"1" nullable:"false" doc:"Soldiers to send; counts against soldiers already reserved by your team this turn."`
+}
+
+// UpgradeCastleParameters buys the next level of one upgrade type for an owned
+// castle. A pointer lets validation distinguish a missing ID from castle 0.
+type UpgradeCastleParameters struct {
+	CastleID    *uint        `json:"castle_id" nullable:"false" doc:"Castle your team owns. It pays the level's soldier_cost from GET /game/upgrades."`
+	UpgradeType *UpgradeType `json:"upgrade_type" nullable:"false" doc:"The type to raise by one level. Several upgrades of a castle in one turn each buy the next level."`
 }
 
 type RegisterGenerationCommands struct {
@@ -107,20 +127,22 @@ type GenerationView struct {
 }
 
 type CastleView struct {
-	ID        uint    `json:"id" doc:"Castle ID, stable for the whole game."`
-	TeamColor uint    `json:"team_color" doc:"Owning team; 0 is neutral."`
-	Soldiers  uint    `json:"soldiers"`
-	X         float64 `json:"x"`
-	Y         float64 `json:"y"`
+	ID        uint     `json:"id" doc:"Castle ID, stable for the whole game."`
+	TeamColor uint     `json:"team_color" doc:"Owning team; 0 is neutral."`
+	Soldiers  uint     `json:"soldiers"`
+	X         float64  `json:"x"`
+	Y         float64  `json:"y"`
+	Upgrades  Upgrades `json:"upgrades" doc:"Every upgrade type's level. GET /game/upgrades lists the levels and what the next one costs."`
 }
 
 type SoldierGroupView struct {
-	ID                  uint    `json:"id" doc:"Soldier group ID, never reassigned within a game."`
-	TeamColor           uint    `json:"team_color" doc:"Owning team; 0 is neutral."`
-	Soldiers            uint    `json:"soldiers"`
-	X                   float64 `json:"x"`
-	Y                   float64 `json:"y"`
-	OriginCastleID      uint    `json:"origin_castle_id"`
-	DestinationCastleID uint    `json:"destination_castle_id"`
-	ClashRadius         float64 `json:"clash_radius" exclusiveMinimum:"0" doc:"Enemies clash when their centers are within the larger of their radii."`
+	ID                  uint     `json:"id" doc:"Soldier group ID, never reassigned within a game."`
+	TeamColor           uint     `json:"team_color" doc:"Owning team; 0 is neutral."`
+	Soldiers            uint     `json:"soldiers"`
+	X                   float64  `json:"x"`
+	Y                   float64  `json:"y"`
+	OriginCastleID      uint     `json:"origin_castle_id"`
+	DestinationCastleID uint     `json:"destination_castle_id"`
+	ClashRadius         float64  `json:"clash_radius" exclusiveMinimum:"0" doc:"Enemies clash when their centers are within the larger of their radii."`
+	Upgrades            Upgrades `json:"upgrades" doc:"Every upgrade type's level, copied from the origin castle when the group left."`
 }

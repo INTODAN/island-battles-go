@@ -21,6 +21,17 @@
             "minimum": 0,
             "type": "integer"
           },
+          "upgrades": {
+            "additionalProperties": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "description": "Every upgrade type's level. GET /game/upgrades lists the levels and what the next one costs.",
+            "propertyNames": {
+              "$ref": "#/components/schemas/UpgradeType"
+            },
+            "type": "object"
+          },
           "x": {
             "format": "double",
             "type": "number"
@@ -35,7 +46,8 @@
           "team_color",
           "soldiers",
           "x",
-          "y"
+          "y",
+          "upgrades"
         ],
         "type": "object"
       },
@@ -60,6 +72,9 @@
               "type": "integer"
             },
             "description": "Starting level of each upgrade type. Omitted types start at level 1.",
+            "propertyNames": {
+              "$ref": "#/components/schemas/UpgradeType"
+            },
             "type": "object"
           },
           "x": {
@@ -499,6 +514,30 @@
         ],
         "type": "object"
       },
+      "ListUpgradesResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/ListUpgradesResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "upgrades": {
+            "items": {
+              "$ref": "#/components/schemas/Upgrade"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "upgrades"
+        ],
+        "type": "object"
+      },
       "LobbySettings": {
         "additionalProperties": false,
         "description": "Island Battles game_settings for a lobby create request. Choose at most one map: map_template_id or map. The map must be made for exactly the lobby's teams: player_amount equal to the team count, and castle team colours exactly 1 to that count, in team order, with 0 for neutral castles. Without a map the game starts on a generated map. An invalid choice fails lobby creation with invalid_game_settings, and its detail names each invalid field, such as game_settings.map.castles[0].x.",
@@ -662,23 +701,21 @@
         "type": "object"
       },
       "PublicGenerationCommand": {
-        "additionalProperties": false,
-        "properties": {
-          "command_type": {
-            "enum": [
-              "send_soldier_group"
-            ],
-            "type": "string"
+        "discriminator": {
+          "mapping": {
+            "send_soldier_group": "#/components/schemas/SendSoldierGroupCommand",
+            "upgrade_castle": "#/components/schemas/UpgradeCastleCommand"
           },
-          "parameters": {
-            "$ref": "#/components/schemas/SendSoldierGroupParameters"
-          }
+          "propertyName": "command_type"
         },
-        "required": [
-          "command_type",
-          "parameters"
-        ],
-        "type": "object"
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/SendSoldierGroupCommand"
+          },
+          {
+            "$ref": "#/components/schemas/UpgradeCastleCommand"
+          }
+        ]
       },
       "RegisterGenerationCommands": {
         "additionalProperties": false,
@@ -724,6 +761,25 @@
           "generation_id",
           "request_id",
           "commands"
+        ],
+        "type": "object"
+      },
+      "SendSoldierGroupCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "command_type": {
+            "enum": [
+              "send_soldier_group"
+            ],
+            "type": "string"
+          },
+          "parameters": {
+            "$ref": "#/components/schemas/SendSoldierGroupParameters"
+          }
+        },
+        "required": [
+          "command_type",
+          "parameters"
         ],
         "type": "object"
       },
@@ -792,6 +848,17 @@
             "minimum": 0,
             "type": "integer"
           },
+          "upgrades": {
+            "additionalProperties": {
+              "format": "int64",
+              "type": "integer"
+            },
+            "description": "Every upgrade type's level, copied from the origin castle when the group left.",
+            "propertyNames": {
+              "$ref": "#/components/schemas/UpgradeType"
+            },
+            "type": "object"
+          },
           "x": {
             "format": "double",
             "type": "number"
@@ -809,9 +876,116 @@
           "y",
           "origin_castle_id",
           "destination_castle_id",
-          "clash_radius"
+          "clash_radius",
+          "upgrades"
         ],
         "type": "object"
+      },
+      "Upgrade": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "description": "What the levels' values measure.",
+            "type": "string"
+          },
+          "levels": {
+            "description": "Every level from 1 to max_level, in order.",
+            "items": {
+              "$ref": "#/components/schemas/UpgradeLevel"
+            },
+            "type": "array"
+          },
+          "max_level": {
+            "description": "The highest level. Every castle starts at level 1.",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "type": {
+            "$ref": "#/components/schemas/UpgradeType"
+          }
+        },
+        "required": [
+          "type",
+          "description",
+          "max_level",
+          "levels"
+        ],
+        "type": "object"
+      },
+      "UpgradeCastleCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "command_type": {
+            "enum": [
+              "upgrade_castle"
+            ],
+            "type": "string"
+          },
+          "parameters": {
+            "$ref": "#/components/schemas/UpgradeCastleParameters"
+          }
+        },
+        "required": [
+          "command_type",
+          "parameters"
+        ],
+        "type": "object"
+      },
+      "UpgradeCastleParameters": {
+        "additionalProperties": false,
+        "properties": {
+          "castle_id": {
+            "description": "Castle your team owns. It pays the level's soldier_cost from GET /game/upgrades.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "upgrade_type": {
+            "$ref": "#/components/schemas/UpgradeType",
+            "description": "The type to raise by one level. Several upgrades of a castle in one turn each buy the next level."
+          }
+        },
+        "required": [
+          "castle_id",
+          "upgrade_type"
+        ],
+        "type": "object"
+      },
+      "UpgradeLevel": {
+        "additionalProperties": false,
+        "properties": {
+          "level": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "soldier_cost": {
+            "description": "Soldiers the castle pays to reach this level from the level below. Level 1 is free.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "value": {
+            "description": "The level's effect, in the unit its type's description names.",
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "level",
+          "value",
+          "soldier_cost"
+        ],
+        "type": "object"
+      },
+      "UpgradeType": {
+        "description": "A castle upgrade. GET /game/upgrades lists each type's levels and costs.",
+        "enum": [
+          "clash_stop_generations",
+          "speed"
+        ],
+        "type": "string"
       }
     },
     "securitySchemes": {
@@ -823,7 +997,7 @@
     }
   },
   "info": {
-    "description": "Operations a player client calls during a started game. After every turn, each roster player's Centrifugo channel `player:{player_id}` receives a `GenerationEvent`, except after the turn that ends the game, which pushes a `GameEndedEvent` with the final generation and its outcome instead. Clients reconcile with the generation read after subscribing or reconnecting; HTTP state is authoritative, and its `outcome` is set once the game has ended. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the `game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose.",
+    "description": "Operations a player client calls during a started game. After every turn, each roster player's Centrifugo channel `player:{player_id}` receives a `GenerationEvent`, except after the turn that ends the game, which pushes a `GameEndedEvent` with the final generation and its outcome instead. Clients reconcile with the generation read after subscribing or reconnecting; HTTP state is authoritative, and its `outcome` is set once the game has ended. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the `game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose. `GET /game/upgrades` lists what each castle upgrade level costs.",
     "title": "Island Battles Player API",
     "version": "1.0.0"
   },
@@ -884,9 +1058,38 @@
         ]
       }
     },
+    "/game/upgrades": {
+      "get": {
+        "description": "Lists every upgrade type, sorted by type, with what its levels measure and, for each level from 1 to max_level, its effect and the soldiers a castle pays to reach it from the level below. Every castle starts at level 1. The table is static and needs no authentication. Castles and soldier groups carry their current levels, and upgrade_castle in POST /generation/commands buys the next one.",
+        "operationId": "listUpgrades",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListUpgradesResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List the castle upgrades, their levels and their costs."
+      }
+    },
     "/generation/commands": {
       "post": {
-        "description": "Requires a place on the game's frozen roster; the lobby is not consulted. Only owned send_soldier_group commands are accepted; other command types are forbidden (403). Complete defaults to true; an empty batch can complete a turn. The last frozen roster completion advances exactly once. The game ends after the turn that leaves one team with castles or soldier groups, a draw when the last teams are eliminated in the same turn, or after the turn that creates generation 300, where the team with the most castles wins. That turn's generation is the last, its state carries the outcome, and every later command conflicts (409) with problem type urn:island-battles:problem:game-ended. Retry the same request UUID and payload safely, also after the game ended; changed payloads and stale new requests conflict.",
+        "description": "Requires a place on the game's frozen roster; the lobby is not consulted. Players send send_soldier_group and upgrade_castle commands for castles their team owns; other command types are forbidden (403). upgrade_castle buys the next level of one upgrade type and pays that level's soldier_cost, listed by GET /game/upgrades, from the castle's soldiers. A castle may be upgraded several times in one turn, and each upgrade buys the next level. Every command is checked against the generation and every command already accepted this turn, yours and your teammates', so an accepted command cannot fail when the turn runs. An invalid command rejects the whole batch, and nothing of it is stored. Malformed parameters are 422. Rejections that clients tell apart carry a problem type: a castle that is not in the generation is 422 urn:island-battles:problem:castle-not-found, an unknown upgrade_type is 422 urn:island-battles:problem:unknown-upgrade-type, a castle your team does not own is 403 urn:island-battles:problem:castle-not-owned, an upgrade past its type's max_level, counting this turn's upgrades, is 409 urn:island-battles:problem:upgrade-max-level, and soldiers or an upgrade cost beyond what the castle has left after this turn's reservations is 409 urn:island-battles:problem:insufficient-soldiers. A castle may spend all its soldiers. Complete defaults to true; an empty batch can complete a turn. The last frozen roster completion advances exactly once. The game ends after the turn that leaves one team with castles or soldier groups, a draw when the last teams are eliminated in the same turn, or after the turn that creates generation 300, where the team with the most castles wins. That turn's generation is the last, its state carries the outcome, and every later command conflicts (409) with problem type urn:island-battles:problem:game-ended. Retry the same request UUID and payload safely, also after the game ended; changed payloads and stale new requests conflict.",
         "operationId": "registerGenerationCommand",
         "parameters": [
           {

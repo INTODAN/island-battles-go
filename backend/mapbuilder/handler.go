@@ -6,9 +6,7 @@ import (
 	"bytes"
 	"embed"
 	"encoding/json"
-	"maps"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
@@ -20,29 +18,14 @@ var assets embed.FS
 
 // upgradesPath is the file, relative to the page, that lists the upgrade
 // types a castle can start with, so the page offers exactly the levels the
-// game accepts.
+// game accepts. It holds models.UpgradeTable, which GET /game/upgrades also
+// serves; the page reads each type and max_level.
 const upgradesPath = "upgrades.json"
-
-// Upgrade is one upgrade type the page offers, from level 1 to MaxLevel.
-type Upgrade struct {
-	Type     models.UpgradeType `json:"type"`
-	MaxLevel int                `json:"max_level"`
-}
-
-// Upgrades lists every upgrade type in a stable order.
-func Upgrades() []Upgrade {
-	maxLevels := models.UpgradeMaxLevels()
-	upgrades := make([]Upgrade, 0, len(maxLevels))
-	for _, upgradeType := range slices.Sorted(maps.Keys(maxLevels)) {
-		upgrades = append(upgrades, Upgrade{Type: upgradeType, MaxLevel: maxLevels[upgradeType]})
-	}
-	return upgrades
-}
 
 // Handler serves the page. Mount it with its prefix stripped, on the same
 // origin as POST /map/validate.
 func Handler() (http.Handler, error) {
-	upgrades, err := json.Marshal(Upgrades())
+	upgrades, err := json.Marshal(models.UpgradeTable())
 	if err != nil {
 		return nil, err
 	}

@@ -2,6 +2,7 @@
 # change the Go API types, export the document, and regenerate instead.
 
 from collections.abc import Mapping, Sequence
+from enum import StrEnum
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
@@ -16,6 +17,7 @@ from pydantic import (
     AwareDatetime,
     ConfigDict,
     Field,
+    RootModel,
     StrictBool,
     StrictFloat,
     StrictInt,
@@ -36,6 +38,10 @@ class Castle(BoardEntity):
     """
     Owning team; 0 is neutral.
     """
+    upgrades: Mapping[UpgradeType, StrictInt]
+    """
+    Every upgrade type's level. GET /game/upgrades lists the levels and what the next one costs.
+    """
     x: StrictFloat
     y: StrictFloat
 
@@ -52,7 +58,7 @@ class CastleTemplate(GameModel):
     """
     Owning team colour, from 1 to player_amount; 0 is neutral.
     """
-    upgrades: Mapping[str, StrictInt] | None = None
+    upgrades: Mapping[UpgradeType, StrictInt] | None = None
     """
     Starting level of each upgrade type. Omitted types start at level 1.
     """
@@ -296,6 +302,23 @@ class ListMapTemplatesResponseBody(GameModel):
     maps: Sequence[MapTemplateSummary]
 
 
+class ListUpgradesResponseBody(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    field_schema: Annotated[
+        AnyUrl | None,
+        Field(
+            alias="$schema",
+            examples=["https://example.com/ListUpgradesResponseBody.json"],
+        ),
+    ] = None
+    """
+    A URL to the JSON Schema for this object.
+    """
+    upgrades: Sequence[Upgrade]
+
+
 class LobbySettings(GameModel):
     model_config = ConfigDict(
         extra="ignore",
@@ -390,14 +413,6 @@ class Problem(GameModel):
     title: StrictStr
 
 
-class PublicGenerationCommand(GameModel):
-    model_config = ConfigDict(
-        extra="ignore",
-    )
-    command_type: Literal["send_soldier_group"]
-    parameters: SendSoldierGroupParameters
-
-
 class RegisterGenerationCommands(GameModel):
     model_config = ConfigDict(
         extra="ignore",
@@ -423,6 +438,14 @@ class RegisterGenerationCommands(GameModel):
     """
     Identifies this batch. Retry a lost request with the same UUID and body; use a new UUID for every new batch.
     """
+
+
+class SendSoldierGroupCommand(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    command_type: Literal["send_soldier_group"]
+    parameters: SendSoldierGroupParameters
 
 
 class SendSoldierGroupParameters(GameModel):
@@ -462,5 +485,79 @@ class SoldierGroup(SoldierGroupBase):
     """
     Owning team; 0 is neutral.
     """
+    upgrades: Mapping[UpgradeType, StrictInt]
+    """
+    Every upgrade type's level, copied from the origin castle when the group left.
+    """
     x: StrictFloat
     y: StrictFloat
+
+
+class Upgrade(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    description: StrictStr
+    """
+    What the levels' values measure.
+    """
+    levels: Sequence[UpgradeLevel]
+    """
+    Every level from 1 to max_level, in order.
+    """
+    max_level: Annotated[StrictInt, Field(ge=1)]
+    """
+    The highest level. Every castle starts at level 1.
+    """
+    type: UpgradeType
+
+
+class UpgradeCastleCommand(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    command_type: Literal["upgrade_castle"]
+    parameters: UpgradeCastleParameters
+
+
+class PublicGenerationCommand(
+    RootModel[SendSoldierGroupCommand | UpgradeCastleCommand]
+):
+    root: Annotated[
+        SendSoldierGroupCommand | UpgradeCastleCommand,
+        Field(discriminator="command_type"),
+    ]
+
+
+class UpgradeCastleParameters(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    castle_id: Annotated[StrictInt, Field(ge=0)]
+    """
+    Castle your team owns. It pays the level's soldier_cost from GET /game/upgrades.
+    """
+    upgrade_type: UpgradeType
+    """
+    The type to raise by one level. Several upgrades of a castle in one turn each buy the next level.
+    """
+
+
+class UpgradeLevel(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    level: Annotated[StrictInt, Field(ge=1)]
+    soldier_cost: Annotated[StrictInt, Field(ge=0)]
+    """
+    Soldiers the castle pays to reach this level from the level below. Level 1 is free.
+    """
+    value: StrictFloat
+    """
+    The level's effect, in the unit its type's description names.
+    """
+
+
+class UpgradeType(StrEnum):
+    clash_stop_generations = "clash_stop_generations"
+    speed = "speed"

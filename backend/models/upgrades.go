@@ -3,6 +3,10 @@ package models
 import (
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
+
+	"github.com/danielgtaylor/huma/v2"
 )
 
 type UpgradeType string
@@ -30,16 +34,67 @@ var upgradeLevels = map[UpgradeType][]upgradeLevel{
 	ClashStopGenerationsUpgrade: {{Value: 3}, {Value: 2, SoldierCost: 10}, {Value: 1, SoldierCost: 20}},
 }
 
+// upgradeDescriptions says what each type's level values measure.
+var upgradeDescriptions = map[UpgradeType]string{
+	SpeedUpgrade:                "World units a troop moves per turn",
+	ClashStopGenerationsUpgrade: "Generations a troop stays stopped after a clash",
+}
+
+// UpgradeTypes lists every upgrade type in a stable order.
+func UpgradeTypes() []UpgradeType {
+	return slices.Sorted(maps.Keys(upgradeLevels))
+}
+
+// Schema publishes UpgradeType as one named string enum, so generated clients
+// share a single type for upgrade_type fields and upgrade map keys.
+func (UpgradeType) Schema(registry huma.Registry) *huma.Schema {
+	const name = "UpgradeType"
+	if _, exists := registry.Map()[name]; !exists {
+		values := make([]any, 0, len(upgradeLevels))
+		for _, upgradeType := range UpgradeTypes() {
+			values = append(values, string(upgradeType))
+		}
+		registry.Map()[name] = &huma.Schema{Type: huma.TypeString, Enum: values, Description: "A castle upgrade. GET /game/upgrades lists each type's levels and costs."}
+	}
+	return &huma.Schema{Ref: "#/components/schemas/" + name}
+}
+
+// UpgradeLevelView is one level of an upgrade type.
+type UpgradeLevelView struct {
+	Level       int     `json:"level" minimum:"1"`
+	Value       float64 `json:"value" doc:"The level's effect, in the unit its type's description names."`
+	SoldierCost uint    `json:"soldier_cost" doc:"Soldiers the castle pays to reach this level from the level below. Level 1 is free."`
+}
+
+// UpgradeView is one upgrade type with every level a castle can reach.
+type UpgradeView struct {
+	Type        UpgradeType        `json:"type"`
+	Description string             `json:"description" doc:"What the levels' values measure."`
+	MaxLevel    int                `json:"max_level" minimum:"1" doc:"The highest level. Every castle starts at level 1."`
+	Levels      []UpgradeLevelView `json:"levels" nullable:"false" doc:"Every level from 1 to max_level, in order."`
+}
+
+// UpgradeTable lists every upgrade type, sorted by type, with each level's
+// effect and cost.
+func UpgradeTable() []UpgradeView {
+	table := make([]UpgradeView, 0, len(upgradeLevels))
+	for _, upgradeType := range UpgradeTypes() {
+		levels := make([]UpgradeLevelView, 0, len(upgradeLevels[upgradeType]))
+		for index, level := range upgradeLevels[upgradeType] {
+			levels = append(levels, UpgradeLevelView{Level: index + 1, Value: level.Value, SoldierCost: level.SoldierCost})
+		}
+		table = append(table, UpgradeView{Type: upgradeType, Description: upgradeDescriptions[upgradeType], MaxLevel: len(levels), Levels: levels})
+	}
+	return table
+}
+
+// Upgrades maps upgrade types to levels.
 type Upgrades map[UpgradeType]int
 
-// UpgradeMaxLevels returns each upgrade type's highest level. Every type
-// starts at level 1.
-func UpgradeMaxLevels() map[UpgradeType]int {
-	maxLevels := make(map[UpgradeType]int, len(upgradeLevels))
-	for upgradeType, levels := range upgradeLevels {
-		maxLevels[upgradeType] = len(levels)
-	}
-	return maxLevels
+// Schema publishes the map's keys as UpgradeType.
+func (Upgrades) Schema(registry huma.Registry) *huma.Schema {
+	return &huma.Schema{Type: huma.TypeObject, AdditionalProperties: &huma.Schema{Type: huma.TypeInteger, Format: "int64"},
+		Extensions: map[string]any{"propertyNames": UpgradeType("").Schema(registry)}}
 }
 
 func (upgrades Upgrades) Level(upgradeType UpgradeType) (int, error) {
