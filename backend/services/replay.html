@@ -66,6 +66,9 @@ const fieldX = Math.max(4, ...replay.frames[0].castles.map((castle) => Math.abs(
 const fieldY = Math.max(3, ...replay.frames[0].castles.map((castle) => Math.abs(castle.y) + 1));
 field.setAttribute("viewBox", `0 0 ${2 * fieldX * worldScale} ${2 * fieldY * worldScale}`);
 const point = (node) => [(fieldX + node.x) * worldScale, (fieldY + node.y) * worldScale];
+// Each castle's upgrade levels, written under its label, such as "Speed 2 · Stop 1".
+const upgradeNames = [["speed", "Speed"], ["clash_stop_generations", "Stop"]];
+const upgradeLevels = (castle) => upgradeNames.map(([type, name]) => `${name} ${castle.upgrades[type]}`).join(" · ");
 const scoreLabels = new Map();
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 let renderedTurn = null;
@@ -143,6 +146,7 @@ function render(animateClashes = false) {
     svg("circle", { cx: x, cy: y, r: castleRadius * worldScale, fill: "#fff", stroke: color(castle.team_color), "stroke-width": 3, "data-kind": "castle" });
     svg("text", { x, y: y + 8, "text-anchor": "middle", "font-size": 26, "font-weight": 700, fill: color(castle.team_color) }, castle.soldiers);
     svg("text", { x, y: y + 72, "text-anchor": "middle", "font-size": 17, fill: "#52667b" }, `Castle ${castle.id + 1}`);
+    svg("text", { x, y: y + 92, "text-anchor": "middle", "font-size": 14, fill: "#52667b", "data-kind": "castle-upgrades" }, upgradeLevels(castle));
   }
   for (const group of frame.soldier_groups) {
     const [x, y] = point(group);
