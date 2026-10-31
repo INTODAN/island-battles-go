@@ -101,7 +101,7 @@ func TestQueryReadsOneStatement(t *testing.T) {
 		if message := callFailing(t, client, "query", map[string]any{"sql": "SELECT 1; SELECT 2"}); !strings.Contains(message, "exactly one statement") {
 			t.Errorf("several statements: %s", message)
 		}
-		if message := callFailing(t, client, "query", map[string]any{"sql": "SELECT pg_sleep(10)"}); !strings.Contains(message, "longer than 5s") {
+		if message := callFailing(t, client, "query", map[string]any{"sql": "SELECT pg_sleep(10)"}); !strings.Contains(message, "5s statement timeout") {
 			t.Errorf("a long statement: %s", message)
 		}
 		if message := callFailing(t, client, "query", map[string]any{"sql": "SELECT lo_create(0)"}); !strings.Contains(message, "read-only") {

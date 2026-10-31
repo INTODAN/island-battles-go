@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"islandBattles/backend/dependencies"
 	"islandBattles/backend/internal/testutils"
@@ -138,6 +139,52 @@ func TestLongValuesAreCut(t *testing.T) {
 	}
 	if text := result.Rows[0][0].(string); len(text) != maxValueBytes || strings.Trim(text, "é") != "" || result.Rows[0][1] != "short" {
 		t.Errorf("row = %d bytes, %v", len(text), result.Rows[0][1])
+	}
+
+	// pgx returns json, jsonb and xml as bytes. A cut inside a character
+	// leaves them text, not hex.
+	documents := call[QueryResult](t, client, "query", map[string]any{"sql": `SELECT jsonb_build_object('k', repeat('é', 20000)) AS document,
+		json_build_object('k', repeat('é', 20000)) AS json_document, xmlelement(name k, repeat('é', 20000)) AS markup`})
+	for index, value := range documents.Rows[0] {
+		text, ok := value.(string)
+		if !ok || strings.HasPrefix(text, `\x`) || !utf8.ValidString(text) || len(text) > maxValueBytes || len(text) < maxValueBytes-3 || !strings.Contains(text, "éé") {
+			t.Errorf("%s = %.40q (%d bytes), want text cut to 16 KiB", documents.Columns[index].Name, value, len(text))
+		}
+	}
+
+	// One 16 KiB value of characters that HTML escaping would grow fits.
+	markup := call[QueryResult](t, client, "query", map[string]any{"sql": "SELECT repeat('<', 16000) AS markup"})
+	if len(markup.Rows) != 1 || markup.Truncated {
+		t.Errorf("a value of < : %d rows, truncated %t, notes %v", len(markup.Rows), markup.Truncated, markup.Notes)
+	}
+}
+
+// The production role can't write WAL through pg_logical_emit_message,
+// which a rollback doesn't undo.
+func TestAdminRoleCantEmitLogicalMessages(t *testing.T) {
+	owner := testutils.InitTestDB(t)
+	client := connect(t, openAs(t, grantAdminRole(t, owner)))
+	for _, statement := range []string{
+		"SELECT pg_logical_emit_message(false, 'mallory', 'x')",
+		"SELECT pg_logical_emit_message(false, 'mallory', 'x'::bytea)",
+		"SELECT pg_logical_emit_message(false, 'mallory', 'x', true)",
+	} {
+		if message := callFailing(t, client, "query", map[string]any{"sql": statement}); !strings.Contains(message, "permission denied") {
+			t.Errorf("%q: %s", statement, message)
+		}
+	}
+}
+
+// Without bearer_hash, the column grants may no longer match the table, so
+// query is refused, also for a role that may read everything.
+func TestQueryIsRefusedWhenBearerHashIsRenamed(t *testing.T) {
+	owner := testutils.InitTestDB(t)
+	if err := owner.Exec("ALTER TABLE lobby_sessions RENAME COLUMN bearer_hash TO credential_digest").Error; err != nil {
+		t.Fatal(err)
+	}
+	client := connect(t, openAs(t, dsnOf(t, owner)))
+	if message := callFailing(t, client, "query", map[string]any{"sql": "SELECT 1"}); !strings.Contains(message, "admin-role.sql.j2") {
+		t.Errorf("query without bearer_hash: %s", message)
 	}
 }
 

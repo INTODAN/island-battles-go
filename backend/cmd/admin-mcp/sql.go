@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/hex"
@@ -107,7 +108,7 @@ type QueryColumn struct {
 type QueryResult struct {
 	Columns   []QueryColumn `json:"columns"`
 	Rows      [][]any       `json:"rows" jsonschema:"One array of values per row, in the order of columns."`
-	Truncated bool          `json:"truncated" jsonschema:"Whether rows were cut to fit the caps."`
+	Truncated bool          `json:"truncated" jsonschema:"Whether rows or values were cut to fit the caps."`
 	Notes     []string      `json:"notes,omitempty"`
 }
 
@@ -191,8 +192,11 @@ func describeSchema(transaction *gorm.DB, table string) (Schema, error) {
 
 // credentialsError says how to fix a role that can read bearer hashes.
 func credentialsError(err error) error {
-	if errors.Is(err, adminmcp.ErrCredentialsReadable) {
+	switch {
+	case errors.Is(err, adminmcp.ErrCredentialsReadable):
 		return fmt.Errorf("%w. Run the VM deploy, which grants them again: see \"The admin MCP server\" in deploy/README.md", err)
+	case errors.Is(err, adminmcp.ErrCredentialsColumnChanged):
+		return fmt.Errorf("%w. Update the lobby_sessions column grants in deploy/ansible/roles/app/templates/admin-role.sql.j2 and run the VM deploy", err)
 	}
 	return err
 }
@@ -276,13 +280,13 @@ func readRows(rows *sql.Rows) (QueryResult, error) {
 		}
 		row := make([]any, 0, len(kept))
 		for _, index := range kept {
-			value, cut := cutValue(values[index])
+			value, cut := cutValue(values[index], columnTypes[index].DatabaseTypeName())
 			if cut {
 				cutValues++
 			}
 			row = append(row, jsonValue(value, columnTypes[index].DatabaseTypeName()))
 		}
-		encoded, err := json.Marshal(row)
+		encoded, err := encodeRow(row)
 		if err != nil {
 			return QueryResult{}, err
 		}
@@ -301,19 +305,41 @@ func readRows(rows *sql.Rows) (QueryResult, error) {
 	return result, rows.Err()
 }
 
+// encodeRow encodes a row as the size caps count it. HTML escaping is off,
+// so a value full of <, > or & isn't counted six times its length.
+func encodeRow(row []any) ([]byte, error) {
+	var encoded bytes.Buffer
+	encoder := json.NewEncoder(&encoded)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(row); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(encoded.Bytes(), []byte("\n")), nil
+}
+
 // cutValue cuts text and bytes longer than maxValueBytes, before they are
 // converted or encoded, and reports whether it cut. Cut text stays valid
-// UTF-8, and cut JSON is returned as text.
-func cutValue(value any) (any, bool) {
+// UTF-8, also the json, jsonb and xml values that pgx returns as bytes, and
+// cut JSON is returned as text.
+func cutValue(value any, databaseType string) (any, bool) {
 	switch typed := value.(type) {
 	case string:
 		if len(typed) > maxValueBytes {
 			return strings.ToValidUTF8(typed[:maxValueBytes], ""), true
 		}
 	case []byte:
-		if len(typed) > maxValueBytes {
-			return typed[:maxValueBytes], true
+		if len(typed) <= maxValueBytes {
+			return value, false
 		}
+		cut := typed[:maxValueBytes]
+		if databaseType != "BYTEA" {
+			// A character is at most 4 bytes, so a cut inside one leaves at
+			// most 3 of its bytes to drop.
+			for dropped := 0; dropped < utf8.UTFMax-1 && !utf8.Valid(cut); dropped++ {
+				cut = cut[:len(cut)-1]
+			}
+		}
+		return cut, true
 	}
 	return value, false
 }
@@ -369,7 +395,7 @@ func explainQueryError(err error) error {
 	case postgresError.Code == readOnlySQLTransaction:
 		return fmt.Errorf("the admin server is read-only: %w", err)
 	case postgresError.Code == queryCanceled:
-		return fmt.Errorf("the statement ran longer than %s and was canceled: %w", adminmcp.StatementTimeout, err)
+		return fmt.Errorf("the statement was canceled, probably by the %s statement timeout: %w", adminmcp.StatementTimeout, err)
 	case postgresError.Code == insufficientPrivilege && strings.Contains(postgresError.Message, "lobby_sessions"):
 		return fmt.Errorf("the database role may read only some columns of lobby_sessions, so name the columns: %w", err)
 	case postgresError.Code == insufficientPrivilege:
