@@ -44,6 +44,40 @@ export function readMapFile(text) {
   return map;
 }
 
+// The map builder's Use in lobby button posts this message type to the page
+// that opened it. mapbuilder/builder.mjs holds the sending side.
+const mapMessageType = "island-battles.map-file";
+const builderURL = "/map/builder/";
+const builderWindowName = "island-battles-map-builder";
+
+// mapFromBuilderMessage reads a message event for the map it carries. It
+// returns null for a message that isn't the builder's: from another origin or
+// window, or of another type. A message that is the builder's but holds no
+// usable map throws, like a bad file does. builder is the window the form
+// opened.
+export function mapFromBuilderMessage(event, { origin, builder }) {
+  if (!builder || event.origin !== origin || event.source !== builder) return null;
+  if (event.data?.type !== mapMessageType) return null;
+  if (typeof event.data.text !== "string") throw new Error("The map builder sent no map file.");
+  return readMapFile(event.data.text);
+}
+
+// The page tells a builder window that it is the page to send maps to. A
+// builder that outlived a reload of the form still holds the old, closed
+// page as its opener.
+const lobbyPageMessageType = "island-battles.lobby-page";
+
+// builderWindowAction decides what to do with the window that
+// window.open("", name) returned. A window already on the builder is kept,
+// because navigating it would reload the builder and lose its unsaved map.
+// Anything else, such as a fresh blank window, is sent to the builder.
+export function builderWindowAction(opened, origin) {
+  try {
+    if (opened.location.origin === origin && opened.location.pathname.startsWith(builderURL)) return "keep";
+  } catch { /* A window of another origin can't be read; take it over. */ }
+  return "navigate";
+}
+
 function describeMap(name, teamCount, width, height) {
   return `${name} · ${teamCount} teams · ${width}×${height}`;
 }
@@ -76,6 +110,8 @@ export class SettingsForm {
     this.maps = [];
     this.file = null;
     this.fileError = "";
+    this.fileFromBuilder = false;
+    this.builder = null;
     this.mapsError = "";
     this.select = node("select", { id: "map-choice" },
       new Option(`Generated map · ${generatedTeams} teams`, ""), new Option("Load a map file…", "file"));
@@ -83,7 +119,10 @@ export class SettingsForm {
     this.fileInput.setAttribute("aria-label", "Map file");
     this.status = node("p", { className: "hint" });
     this.status.setAttribute("role", "status");
-    container.append(node("label", {}, "Map", this.select), this.fileInput, this.status);
+    this.builderButton = node("button", { type: "button", className: "secondary" }, "Build a map…");
+    container.append(node("label", {}, "Map", this.select), this.fileInput, this.builderButton, this.status);
+    this.builderButton.addEventListener("click", () => this.openBuilder());
+    window.addEventListener("message", (event) => this.receive(event));
     this.select.addEventListener("change", () => this.update());
     this.fileInput.addEventListener("change", () => this.readFile());
     this.update();
@@ -103,10 +142,57 @@ export class SettingsForm {
     this.update();
   }
 
+  // The builder opens in its own window. Opening it again focuses that window
+  // instead of reloading it, which would lose the map being built. It must
+  // not open with noopener, because the builder reaches this page through
+  // window.opener.
+  //
+  // After this page reloads, it has forgotten the window but the browser has
+  // not, so it asks for the window by name without a URL and then decides.
+  openBuilder() {
+    if (this.builder && !this.builder.closed) {
+      this.builder.focus();
+      return;
+    }
+    const opened = window.open("", builderWindowName);
+    if (!opened) return;
+    this.builder = opened;
+    if (builderWindowAction(opened, location.origin) === "keep") {
+      // Its opener is the page before the reload, so name this page instead.
+      opened.postMessage({ type: lobbyPageMessageType }, location.origin);
+      opened.focus();
+    } else {
+      opened.location.href = builderURL;
+    }
+  }
+
+  // receive takes the map that the builder sends. The latest map or file the
+  // host picks wins.
+  receive(event) {
+    let map;
+    try {
+      map = mapFromBuilderMessage(event, { origin: location.origin, builder: this.builder });
+    } catch (error) {
+      this.chooseFile(null, error.message, false);
+      return;
+    }
+    if (map) this.chooseFile(map, "", true);
+  }
+
+  chooseFile(map, error, fromBuilder) {
+    this.file = map;
+    this.fileError = error;
+    this.fileFromBuilder = fromBuilder;
+    this.fileInput.value = "";
+    this.select.value = "file";
+    this.update();
+  }
+
   async readFile() {
     const [file] = this.fileInput.files;
     this.file = null;
     this.fileError = "";
+    this.fileFromBuilder = false;
     if (file) {
       try { this.file = readMapFile(await file.text()); } catch (error) { this.fileError = error.message; }
     }
@@ -118,7 +204,7 @@ export class SettingsForm {
     this.fileInput.hidden = !loading;
     if (loading) {
       this.status.textContent = this.fileError || (this.file
-        ? `${describeMap(this.file.map_name, this.file.player_amount, this.file.plane_size_x, this.file.plane_size_y)}. Teams: ${teamNames(this.file.player_amount).join(", ")}.`
+        ? `${this.fileFromBuilder ? "From the map builder: " : ""}${describeMap(this.file.map_name, this.file.player_amount, this.file.plane_size_x, this.file.plane_size_y)}. Teams: ${teamNames(this.file.player_amount).join(", ")}.`
         : "Choose a map file made with the map builder.");
     } else {
       const map = this.select.value && this.chosenDefaultMap();
