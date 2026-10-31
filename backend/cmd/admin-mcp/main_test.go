@@ -369,6 +369,14 @@ func TestServerAnswersAboutLobbiesAndGames(t *testing.T) {
 		if second.Board == nil || second.Board.ID != ids.secondGeneration || len(second.Board.Castles) != 2 || len(second.Board.SoldierGroups) != 1 ||
 			second.Board.SoldierGroups[0].OriginCastleID == second.Board.SoldierGroups[0].DestinationCastleID {
 			t.Errorf("board = %+v", second.Board)
+		} else {
+			// The board carries every upgrade level, as players receive it.
+			if levels := second.Board.Castles[0].Upgrades; len(levels) == 0 || !equalJSON(levels, models.Upgrades{}.Clone()) {
+				t.Errorf("castle upgrades = %v", levels)
+			}
+			if levels := second.Board.SoldierGroups[0].Upgrades; len(levels) == 0 || !equalJSON(levels, models.Upgrades{}.Clone()) {
+				t.Errorf("soldier group upgrades = %v", levels)
+			}
 		}
 		for _, arguments := range []map[string]any{
 			{"game_id": ids.runningGameID}, {"game_id": ids.runningGameID, "turn": 3}, {"game_id": ids.finishedGameID, "generation_id": ids.firstGeneration},
