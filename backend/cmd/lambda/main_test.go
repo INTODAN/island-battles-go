@@ -148,6 +148,8 @@ var publicRoutes = map[string]string{
 	"/game/demo/*":            "embedded static browser demo",
 	"GET /map/builder":        "redirect to the embedded map builder",
 	"/map/builder/*":          "embedded static map builder",
+	"GET /game/demo-viewer":   "redirect to the embedded demo viewer",
+	"/game/demo-viewer/*":     "embedded static demo viewer, which reads demo files in the browser",
 	"GET /docs":               "API documentation",
 	"GET /openapi.json":       "API document",
 	"GET /openapi.yaml":       "API document",
