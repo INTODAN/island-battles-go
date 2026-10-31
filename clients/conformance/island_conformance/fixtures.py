@@ -14,10 +14,23 @@ from island_conformance import reference
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "models.json"
 
+
+def levels(speed: int = 1, clash_stop_generations: int = 1) -> dict:
+    """Every upgrade type's level, as the server lists them."""
+    return {"clash_stop_generations": clash_stop_generations, "speed": speed}
+
+
 CASTLES = [
-    {"id": 0, "team_color": 1, "soldiers": 30, "x": -2, "y": 0},
-    {"id": 1, "team_color": 2, "soldiers": 30, "x": 2, "y": 0},
-    {"id": 2, "team_color": 0, "soldiers": 15, "x": 0, "y": 3},
+    {"id": 0, "team_color": 1, "soldiers": 30, "x": -2, "y": 0, "upgrades": levels()},
+    {
+        "id": 1,
+        "team_color": 2,
+        "soldiers": 30,
+        "x": 2,
+        "y": 0,
+        "upgrades": levels(speed=3, clash_stop_generations=2),
+    },
+    {"id": 2, "team_color": 0, "soldiers": 15, "x": 0, "y": 3, "upgrades": levels()},
 ]
 GROUPS = [
     {
@@ -29,6 +42,7 @@ GROUPS = [
         "origin_castle_id": 0,
         "destination_castle_id": 1,
         "clash_radius": 0.25,
+        "upgrades": levels(),
     },
     # Already at its destination.
     {
@@ -40,6 +54,7 @@ GROUPS = [
         "origin_castle_id": 1,
         "destination_castle_id": 2,
         "clash_radius": 0.5,
+        "upgrades": levels(speed=3, clash_stop_generations=2),
     },
 ]
 CLASHES = [
@@ -74,9 +89,30 @@ BOARD = {"id": 3, "castles": CASTLES, "soldier_groups": GROUPS, "clashes": CLASH
 COINCIDENT = {
     "id": 8,
     "castles": [
-        {"id": 3, "team_color": 0, "soldiers": 0, "x": -1.5, "y": -2.25},
-        {"id": 5, "team_color": 0, "soldiers": 12, "x": -1.5, "y": -2.25},
-        {"id": 6, "team_color": 3, "soldiers": 7, "x": 4.75, "y": -0.5},
+        {
+            "id": 3,
+            "team_color": 0,
+            "soldiers": 0,
+            "x": -1.5,
+            "y": -2.25,
+            "upgrades": levels(),
+        },
+        {
+            "id": 5,
+            "team_color": 0,
+            "soldiers": 12,
+            "x": -1.5,
+            "y": -2.25,
+            "upgrades": levels(),
+        },
+        {
+            "id": 6,
+            "team_color": 3,
+            "soldiers": 7,
+            "x": 4.75,
+            "y": -0.5,
+            "upgrades": levels(speed=4, clash_stop_generations=3),
+        },
     ],
     "soldier_groups": [
         {
@@ -88,6 +124,7 @@ COINCIDENT = {
             "origin_castle_id": 6,
             "destination_castle_id": 6,
             "clash_radius": 1.5,
+            "upgrades": levels(speed=4, clash_stop_generations=3),
         },
     ],
     "clashes": [],
@@ -190,6 +227,22 @@ def build_model_fixtures() -> dict:
                 "generation": mutated(
                     ["soldier_groups", 0, "origin_castle_id"], delete=True
                 ),
+            },
+            {
+                "name": "castle misses its upgrades",
+                "generation": mutated(["castles", 0, "upgrades"], delete=True),
+            },
+            {
+                "name": "soldier group misses its upgrades",
+                "generation": mutated(["soldier_groups", 0, "upgrades"], delete=True),
+            },
+            {
+                "name": "unknown upgrade type",
+                "generation": mutated(["castles", 0, "upgrades", "armor"], 1),
+            },
+            {
+                "name": "fractional upgrade level",
+                "generation": mutated(["castles", 0, "upgrades", "speed"], 1.5),
             },
         ],
     }

@@ -98,14 +98,20 @@ async def test_rejected_commands_reach_the_callback_and_leave_the_turn_open(
     forbidden = await sent(alice, send(enemy_castle(state), own_castle(state), 1))
     assert (
         forbidden["type"] == "send_failed"
-        and forbidden["error"]["kind"] == "rejected"
+        and forbidden["error"]["kind"] == "not_owned"
         and forbidden["error"]["status"] == 403
     )
     excessive = await sent(alice, send(own_castle(state), enemy_castle(state), 1000))
     assert (
         excessive["type"] == "send_failed"
-        and excessive["error"]["kind"] == "rejected"
+        and excessive["error"]["kind"] == "insufficient_soldiers"
         and excessive["error"]["status"] == 409
+    )
+    missing = await sent(alice, send(own_castle(state), 999, 1))
+    assert (
+        missing["type"] == "send_failed"
+        and missing["error"]["kind"] == "castle_not_found"
+        and missing["error"]["status"] == 422
     )
     assert not (await match.read(match.alice))["submitted"]
     await alice.send({"type": "finish"})
