@@ -12,6 +12,7 @@ their lines. Records logged outside a callback go to stdout and the file only.
 from __future__ import annotations
 
 import logging
+import re
 import sys
 import threading
 import traceback
@@ -34,6 +35,8 @@ MAX_LINES = 100
 MAX_MESSAGE_LENGTH = 500
 MAX_LOGGER_LENGTH = 100
 CUT_NOTE = f"… (cut at {MAX_MESSAGE_LENGTH} characters)"
+# NUL and the surrogate code points, which stored text can't hold.
+_UNSTORABLE = re.compile("[\x00\ud800-\udfff]")
 
 # Marks the SDK's own reports about the game log, which go to stdout and the
 # file but never into the game log itself.
@@ -65,6 +68,16 @@ def cut(message: str) -> str:
     return message[: MAX_MESSAGE_LENGTH - len(CUT_NOTE)] + CUT_NOTE
 
 
+def _clean(text: str) -> str:
+    """Make text storable, replacing what UTF-8 text can't hold with U+FFFD.
+
+    PostgreSQL text holds no NUL, and a surrogate code point, which Python
+    strings may carry alone (for example from ``errors="surrogateescape"``),
+    has no UTF-8 encoding.
+    """
+    return _UNSTORABLE.sub("\ufffd", text)
+
+
 def _level(record: logging.LogRecord) -> LogLevel:
     if record.levelno >= logging.ERROR:
         return "error"
@@ -78,18 +91,21 @@ def _level(record: logging.LogRecord) -> LogLevel:
 class GameLog:
     """One generation's game log lines that the client has not sent yet.
 
-    The first 99 lines are sent as they come. The 100th is held back until
-    the turn's last request: it is sent if no more lines came, and otherwise
-    replaced by an error that counts every dropped line, so the player never
-    passes the server's limit. The handler adds lines from any thread, and
+    Lines are sent as they come until the player has 99 stored or pending,
+    counting the ``stored`` lines an earlier run already stored. The next line
+    is held back until the turn's last request: it is sent if no more lines
+    came, and otherwise replaced by an error that counts every dropped line,
+    so the player never passes the server's limit. With 100 lines already
+    stored, nothing more is sent. The handler adds lines from any thread, and
     the client takes them under its command lock.
     """
 
-    def __init__(self, generation_id: int) -> None:
+    def __init__(self, generation_id: int, stored: int = 0) -> None:
         self.generation_id = generation_id
-        self._lock = threading.Lock()
+        # Reentrant, so commit can seal under it.
+        self._lock = threading.RLock()
         self._pending: list[GenerationLogLine] = []
-        self._accepted = 0
+        self._accepted = stored
         self._held: GenerationLogLine | None = None
         self._dropped = 0
         self._sealed = False
@@ -103,12 +119,16 @@ class GameLog:
                 self._pending.append(line)
                 self._accepted += 1
                 return False
-            if self._held is None and self._dropped == 0:
+            if (
+                self._accepted == MAX_LINES - 1
+                and self._held is None
+                and not self._dropped
+            ):
                 self._held = line
                 return False
-            first = self._held is not None
+            first = not self._dropped
             # The held line is dropped with the first line past the limit.
-            self._dropped += 2 if first else 1
+            self._dropped += 2 if self._held is not None else 1
             self._held = None
             return first
 
@@ -116,15 +136,17 @@ class GameLog:
         """The lines for the next request, and how many pending lines they include.
 
         The turn's last request also carries the held line, or the limit error
-        in its place. Nothing is removed until ``commit``, so a rejected
-        request leaves the lines for the next one.
+        in its place when there is room for it. Nothing is removed until
+        ``commit``, so a rejected request leaves the lines for the next one.
         """
         with self._lock:
+            if self._sealed:
+                return [], 0
             lines = list(self._pending)
             count = len(lines)
             if last and self._held is not None:
                 lines.append(self._held)
-            elif last and self._dropped:
+            elif last and self._dropped and self._accepted < MAX_LINES:
                 lines.append(
                     GenerationLogLine(
                         level="error",
@@ -139,9 +161,15 @@ class GameLog:
         with self._lock:
             del self._pending[:count]
             if last:
-                self._sealed = True
-                self._held = None
-                self._dropped = 0
+                self.seal()
+
+    def seal(self) -> None:
+        """Send nothing more for this generation."""
+        with self._lock:
+            self._sealed = True
+            self._pending.clear()
+            self._held = None
+            self._dropped = 0
 
 
 def limit_error(generation_id: int, dropped: int | None = None) -> str:
@@ -154,6 +182,16 @@ def limit_error(generation_id: int, dropped: int | None = None) -> str:
     return (
         f"game log limit reached for generation {generation_id}: "
         f"{MAX_LINES} lines per generation; {rest}"
+    )
+
+
+def report_server_limit(generation_id: int, detail: str) -> None:
+    """Write to stdout and the file that the server refused a batch's lines."""
+    _sdk_logger.error(
+        "%s; the server refused the lines: %s",
+        limit_error(generation_id),
+        detail,
+        extra={_NOT_FOR_GAME_LOG: True},
     )
 
 
@@ -214,12 +252,12 @@ class _GameLogHandler(logging.Handler):
         ):
             return
         try:
-            message = cut(self.format(record).replace("\x00", "�"))
+            message = cut(_clean(self.format(record)))
             if not message:
                 return
             line = GenerationLogLine(
                 level=_level(record),
-                logger=record.name[:MAX_LOGGER_LENGTH].replace("\x00", "�"),
+                logger=_clean(record.name[:MAX_LOGGER_LENGTH]),
                 message=message,
             )
             if scope.game_log.add(line):
@@ -231,6 +269,13 @@ class _GameLogHandler(logging.Handler):
                 )
         except Exception:  # noqa: BLE001 - a logging call never raises into the bot
             self.handleError(record)
+
+
+# The clients attached to the island_battles logger, and its level before the
+# first of them lowered it.
+_attached: set[ClientLogging] = set()
+_level_before_clients = logging.NOTSET
+_attach_lock = threading.Lock()
 
 
 class ClientLogging:
@@ -264,21 +309,31 @@ class ClientLogging:
         handlers.append(_GameLogHandler(self.owner, self.level))
         owner_filter = _OwnerFilter(self.owner)
         root = logging.getLogger(ROOT_LOGGER)
-        for handler in handlers:
-            handler.addFilter(owner_filter)
-            root.addHandler(handler)
-        # Each handler applies its client's level; the logger passes the
-        # lowest level any client asked for.
-        if root.level == logging.NOTSET or root.level > self.level:
-            root.setLevel(self.level)
+        global _level_before_clients
+        with _attach_lock:
+            if not _attached:
+                _level_before_clients = root.level
+            _attached.add(self)
+            for handler in handlers:
+                handler.addFilter(owner_filter)
+                root.addHandler(handler)
+            # Each handler applies its client's level; the logger passes the
+            # lowest level any client asked for.
+            if root.level == logging.NOTSET or root.level > self.level:
+                root.setLevel(self.level)
         self._handlers = handlers
 
     def detach(self) -> None:
         """Remove and close this client's handlers."""
         root = logging.getLogger(ROOT_LOGGER)
-        for handler in self._handlers:
-            root.removeHandler(handler)
-            handler.close()
+        with _attach_lock:
+            for handler in self._handlers:
+                root.removeHandler(handler)
+                handler.close()
+            if self in _attached:
+                _attached.discard(self)
+                if not _attached:
+                    root.setLevel(_level_before_clients)
         self._handlers = []
 
     @contextmanager

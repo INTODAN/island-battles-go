@@ -118,7 +118,7 @@ client = IslandBattlesClient(
 )
 ```
 
-`log_level` applies to all three handlers. The `island_battles` logger propagates to the root logger as usual, so turn `log_to_stdout` off if your program already prints the root logger's records.
+`log_level` applies to all three handlers. The client lowers the `island_battles` logger's level to `log_level` when it is higher, and the last client to close restores it. The `island_battles` logger propagates to the root logger as usual, so turn `log_to_stdout` off if your program already prints the root logger's records.
 
 The **game log** stores the lines that the strategy logs during `on_generation` on the server, with the generation whose callback logged them. The replay in the lobby page shows each generation's lines: your own team's while the game runs, and every team's once it has ended. A record is filed under the callback that is running, through a `contextvars.ContextVar`, so tasks that the callback starts log into it too, and two clients in one process never mix their lines. Records logged outside a callback go to stdout and the file only: in the strategy's `__init__`, in `on_game_ended`, or by the SDK itself.
 
@@ -128,7 +128,9 @@ The server stores at most **100 lines per player per generation**, each of at mo
 
 - A longer line is cut so that, ending in `… (cut at 500 characters)`, it is 500 characters.
 - Past 100 lines, the client drops the rest. It writes `game log limit reached for generation 41: 100 lines per generation; the rest of this generation's lines are not stored` to stdout and the file once, when the first line is dropped. The game log stores, as the generation's last line, `game log limit reached for generation 41: 100 lines per generation; 7 lines were not stored`, at level `error` from `island_battles.sdk`, in place of the 100th line, so a generation never has more than 100. Anyone reading the replay can see why the lines stop.
-- Empty lines are not stored in the game log. A NUL character is stored as `�`.
+- A client that starts again during a turn, for example after `on_generation` raised, counts on from the lines its earlier run stored for the generation, which the generation state's `log_lines_stored` reports.
+- If the server still refuses a batch's lines with `urn:island-battles:problem:game-log-limit`, for example because another client of the same player logged meanwhile, the client drops them, writes the limit error to stdout and the file, sends no more lines for the generation, and sends the batch's commands and completion again without lines. The strategy never sees this error.
+- Empty lines are not stored in the game log. A NUL character or an unpaired surrogate is stored as `�`.
 
 The handler reports its own failures, such as a message whose arguments don't match its format, through `logging`'s `handleError`, as standard handlers do.
 

@@ -20,6 +20,7 @@ from ._generated import (
     GameEndedEvent,
     GameOutcome,
     GenerationEvent,
+    GenerationLogLine,
     GenerationState,
     ListUpgradesResponseBody,
     PublicGenerationCommand,
@@ -31,10 +32,11 @@ from .errors import (
     GameAuthenticationError,
     GameClientClosedError,
     GameError,
+    GameLogLimitError,
     GameProtocolError,
     GameTransportError,
 )
-from .game_log import SDK_LOGGER, ClientLogging, GameLog
+from .game_log import SDK_LOGGER, ClientLogging, GameLog, report_server_limit
 from .models import Generation
 from .player import Player
 from .upgrades import UpgradeTable
@@ -330,6 +332,16 @@ class IslandBattlesClient:
             # A GET begun before a successful command can finish afterward.
             # Completion is monotone within one generation.
             return current
+        if (
+            current is not None
+            and state.generation_id == current.generation_id
+            and state.log_lines_stored < current.log_lines_stored
+        ):
+            # So is the stored line count. A pushed event says 0 for its
+            # generation, which a restarted client may receive after its read.
+            state = state.model_copy(
+                update={"log_lines_stored": current.log_lines_stored}
+            )
         self._state = state
         if state.generation_id > self._last_queued_generation:
             self._last_queued_generation = state.generation_id
@@ -473,7 +485,10 @@ class IslandBattlesClient:
                     or self._state.submitted
                 ):
                     continue
-                self._game_log = GameLog(state.generation_id)
+                # Count on from the lines an earlier run stored for this turn,
+                # as the latest state of this generation says.
+                latest = self._state or state
+                self._game_log = GameLog(state.generation_id, latest.log_lines_stored)
                 try:
                     with self._logging.scope(self._game_log):
                         try:
@@ -548,22 +563,36 @@ class IslandBattlesClient:
             if game_log is not None and game_log.generation_id != generation_id:
                 game_log = None
             logs, sent = game_log.batch(last) if game_log is not None else ([], 0)
-            payload = RegisterGenerationCommands(
-                game_id=self._state.game_id,
-                generation_id=generation_id,
-                request_id=uuid4(),
-                complete=complete,
-                commands=commands,
-                logs=logs or None,
-            ).model_dump(mode="json", by_alias=True, exclude_none=True)
-            # The transport retries this exact payload, including its generated UUID.
-            try:
-                result = await self._request(
+            game_id = self._state.game_id
+
+            async def post(lines: list[GenerationLogLine]) -> Any:
+                payload = RegisterGenerationCommands(
+                    game_id=game_id,
+                    generation_id=generation_id,
+                    request_id=uuid4(),
+                    complete=complete,
+                    commands=commands,
+                    logs=lines or None,
+                ).model_dump(mode="json", by_alias=True, exclude_none=True)
+                # The transport retries this exact payload, including its UUID.
+                return await self._request(
                     "POST",
                     "/generation/commands",
                     payload=payload,
                     retry_transport=True,
                 )
+
+            try:
+                result = await post(logs)
+            except GameLogLimitError as error:
+                if game_log is None or not logs:
+                    raise
+                # The server holds more lines than this client counted, for
+                # example from another client of the same player. Drop the
+                # lines, and send the commands and completion without them.
+                game_log.seal()
+                report_server_limit(generation_id, error.detail)
+                result = await post([])
             except GameTransportError:
                 # The server may have stored the lines; sending them again could
                 # pass the line limit, so they are not resent.

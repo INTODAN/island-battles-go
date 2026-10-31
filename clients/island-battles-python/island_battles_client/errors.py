@@ -55,10 +55,20 @@ class InsufficientSoldiersError(GameCommandError):
     """The castle has too few soldiers left after this turn's reservations."""
 
 
-# The server's problem types for command rejections, shared by every command.
-PROBLEM_TYPE_ERRORS: dict[str, type[GameCommandError]] = {
+class GameLogLimitError(GameError):
+    """The server refused a batch's game log lines, which would pass its limit.
+
+    The client handles it itself: it sends the batch's commands again without
+    the lines, so a strategy never sees it.
+    """
+
+
+# The server's problem types that clients tell apart: the command rejections,
+# shared by every command, and the game log limit.
+PROBLEM_TYPE_ERRORS: dict[str, type[GameError]] = {
     "urn:island-battles:problem:castle-not-found": CastleNotFoundError,
     "urn:island-battles:problem:castle-not-owned": CastleNotOwnedError,
     "urn:island-battles:problem:upgrade-max-level": UpgradeMaxLevelError,
     "urn:island-battles:problem:insufficient-soldiers": InsufficientSoldiersError,
+    "urn:island-battles:problem:game-log-limit": GameLogLimitError,
 }
