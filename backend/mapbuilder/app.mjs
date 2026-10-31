@@ -1,7 +1,7 @@
 // The map builder page. builder.mjs holds the logic; this module only draws
 // the map and turns the page's events into edits.
 import {
-  castleRadius, checkMap, describeProblems, downloadGate, dragPosition, fieldLabel, fileName, freeSpot, lobbyGate, lobbyMessage, missingTeams,
+  castleRadius, checkMap, describeProblems, downloadGate, dragPosition, fieldLabel, fileName, freeSpot, lobbyGate, lobbyMessage, lobbyPageFromMessage, missingTeams,
   newMap, openMapFile, openerState, placeProblems, problemCastle, problemsFor, serialize, teamColor, upgradeLabel, withoutCastle,
 } from "./builder.mjs";
 
@@ -33,7 +33,7 @@ let sentText = null;
 let lobbyPageClosed = false;
 // lobbyPage is the same-origin window that opened this page, if one did. The
 // page keeps it, because browsers clear window.opener once that window closes.
-const lobbyPage = openerState(window.opener, location.origin) === "ready" ? window.opener : null;
+let lobbyPage = openerState(window.opener, location.origin) === "ready" ? window.opener : null;
 const lobbyPageState = () => (!lobbyPage ? "none" : lobbyPage.closed ? "closed" : "ready");
 let drag = null;
 
@@ -144,6 +144,15 @@ lobbyButton.addEventListener("click", () => {
     lobbyPage.postMessage(lobbyMessage(text), location.origin);
     sentText = text;
   }
+  renderLobby();
+});
+
+// A lobby form that reloaded names itself as the page to send maps to.
+window.addEventListener("message", (event) => {
+  const page = lobbyPageFromMessage(event, location.origin, window);
+  if (!page) return;
+  lobbyPage = page;
+  lobbyPageClosed = false;
   renderLobby();
 });
 

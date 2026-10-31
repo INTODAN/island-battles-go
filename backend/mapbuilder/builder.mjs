@@ -246,6 +246,8 @@ export function downloadGate(text, check) {
 // text the server accepted. demo/lobby-settings.mjs holds the receiving side.
 export const lobbyMessageType = "island-battles.map-file";
 
+const lobbyPageMessageType = "island-battles.lobby-page";
+
 // lobbyMessage is what Use in lobby posts to the form that opened the builder.
 export function lobbyMessage(text) {
   return { type: lobbyMessageType, text };
@@ -262,6 +264,15 @@ export function openerState(opener, origin) {
   } catch {
     return "none";
   }
+}
+
+// lobbyPageFromMessage returns the window that a message names as the lobby
+// page, or null. A lobby form that reloaded sends it to a builder that outlived
+// the reload, because the builder's opener is then the form's old page. Only
+// a window of the builder's own origin, other than the builder itself, counts.
+export function lobbyPageFromMessage(event, origin, self) {
+  if (event.origin !== origin || !event.source || event.source === self) return null;
+  return event.data?.type === lobbyPageMessageType ? event.source : null;
 }
 
 // lobbyGate decides whether text can be sent to the lobby. It needs what

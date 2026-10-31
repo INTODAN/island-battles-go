@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { describeSettings, loadDefaultMaps, mapFromBuilderMessage, readMapFile, teamNames } from "./lobby-settings.mjs";
+import { builderWindowAction, describeSettings, loadDefaultMaps, mapFromBuilderMessage, readMapFile, teamNames } from "./lobby-settings.mjs";
 
 test("a map's teams are named after the board's team colours", () => {
   assert.deepEqual(teamNames(2), ["Blue", "Red"]);
@@ -52,4 +52,16 @@ test("the form takes a map only from the builder window it opened, on its own or
   // A message that is the builder's but unusable is an error, as a bad file is.
   assert.throws(() => mapFromBuilderMessage(message({ data: { type: "island-battles.map-file" } }), { origin, builder }), /no map file/);
   assert.throws(() => mapFromBuilderMessage(message({ data: { type: "island-battles.map-file", text: "{" } }), { origin, builder }), /not valid JSON/);
+});
+
+test("a builder window that is already open is kept, and anything else is sent to the builder", () => {
+  const origin = "https://lobby.example";
+  const at = (windowOrigin, pathname) => ({ location: { origin: windowOrigin, pathname } });
+  assert.equal(builderWindowAction(at(origin, "/map/builder/"), origin), "keep");
+  assert.equal(builderWindowAction(at(origin, "/map/builder/index.html"), origin), "keep");
+  assert.equal(builderWindowAction(at("null", "blank"), origin), "navigate");
+  assert.equal(builderWindowAction(at(origin, "/lobby/ui/"), origin), "navigate");
+  assert.equal(builderWindowAction(at("https://other.example", "/map/builder/"), origin), "navigate");
+  const crossOrigin = { get location() { throw new DOMException("blocked", "SecurityError"); } };
+  assert.equal(builderWindowAction(crossOrigin, origin), "navigate");
 });

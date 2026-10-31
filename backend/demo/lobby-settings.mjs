@@ -62,6 +62,22 @@ export function mapFromBuilderMessage(event, { origin, builder }) {
   return readMapFile(event.data.text);
 }
 
+// The page tells a builder window that it is the page to send maps to. A
+// builder that outlived a reload of the form still holds the old, closed
+// page as its opener.
+const lobbyPageMessageType = "island-battles.lobby-page";
+
+// builderWindowAction decides what to do with the window that
+// window.open("", name) returned. A window already on the builder is kept,
+// because navigating it would reload the builder and lose its unsaved map.
+// Anything else, such as a fresh blank window, is sent to the builder.
+export function builderWindowAction(opened, origin) {
+  try {
+    if (opened.location.origin === origin && opened.location.pathname.startsWith(builderURL)) return "keep";
+  } catch { /* A window of another origin can't be read; take it over. */ }
+  return "navigate";
+}
+
 function describeMap(name, teamCount, width, height) {
   return `${name} · ${teamCount} teams · ${width}×${height}`;
 }
@@ -130,9 +146,24 @@ export class SettingsForm {
   // instead of reloading it, which would lose the map being built. It must
   // not open with noopener, because the builder reaches this page through
   // window.opener.
+  //
+  // After this page reloads, it has forgotten the window but the browser has
+  // not, so it asks for the window by name without a URL and then decides.
   openBuilder() {
-    if (this.builder && !this.builder.closed) this.builder.focus();
-    else this.builder = window.open(builderURL, builderWindowName);
+    if (this.builder && !this.builder.closed) {
+      this.builder.focus();
+      return;
+    }
+    const opened = window.open("", builderWindowName);
+    if (!opened) return;
+    this.builder = opened;
+    if (builderWindowAction(opened, location.origin) === "keep") {
+      // Its opener is the page before the reload, so name this page instead.
+      opened.postMessage({ type: lobbyPageMessageType }, location.origin);
+      opened.focus();
+    } else {
+      opened.location.href = builderURL;
+    }
   }
 
   // receive takes the map that the builder sends. The latest map or file the

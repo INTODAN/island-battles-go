@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  checkMap, describeProblems, downloadGate, dragPosition, fileName, freeSpot, lobbyGate, lobbyMessage, mapFile, missingTeams, newMap,
+  checkMap, describeProblems, downloadGate, dragPosition, fileName, freeSpot, lobbyGate, lobbyMessage, lobbyPageFromMessage, mapFile, missingTeams, newMap,
   openerState, openMapFile, placeProblems, problemsFor, serialize, withoutCastle,
 } from "./builder.mjs";
 
@@ -185,4 +185,17 @@ test("the builder hands its map only to an open window on its own origin", () =>
   assert.equal(openerState({ closed: false, location: { origin: "https://evil.example" } }, origin), "none");
   const crossOrigin = { get location() { throw new DOMException("blocked", "SecurityError"); } };
   assert.equal(openerState(crossOrigin, origin), "none");
+});
+
+test("a reloaded lobby form names itself to the builder, from the builder's own origin only", () => {
+  const origin = "https://lobby.example";
+  const form = {};
+  const self = {};
+  const message = (overrides = {}) => ({ origin, source: form, data: { type: "island-battles.lobby-page" }, ...overrides });
+  assert.equal(lobbyPageFromMessage(message(), origin, self), form);
+  assert.equal(lobbyPageFromMessage(message({ origin: "https://evil.example" }), origin, self), null);
+  assert.equal(lobbyPageFromMessage(message({ source: self }), origin, self), null);
+  assert.equal(lobbyPageFromMessage(message({ source: null }), origin, self), null);
+  assert.equal(lobbyPageFromMessage(message({ data: { type: "island-battles.map-file" } }), origin, self), null);
+  assert.equal(lobbyPageFromMessage(message({ data: null }), origin, self), null);
 });
