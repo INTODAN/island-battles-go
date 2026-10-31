@@ -259,6 +259,47 @@ The Lambda host also applies limits that keep CloudWatch Logs and X-Ray inside A
 
 At startup the Lambda host works out the worst case for a 31-day month, C × 44,640 minutes × (N × (L + 128) + 384) bytes of logs and C × 2,678,400 s / T traces. Over 1.5 GB or 80,000, it refuses to serve: it answers 503 and logs why. A backend that fails to start for any other reason, such as an unreachable database, does the same and tries again at most every 10 seconds, rather than failing the cold start, which Lambda would retry on every request. The local server host applies none of these limits.
 
+## Admin MCP server
+
+[`cmd/admin-mcp`](cmd/admin-mcp/main.go) is a [Model Context Protocol](https://modelcontextprotocol.io) server (#79) that answers questions about lobbies, players and games, such as "How many lobbies are currently active?" or "How many players are in lobby X?". It runs on your own machine, serves one client over stdio, and connects straight to PostgreSQL, the local database or production. It adds no endpoint to the backend and is never deployed. It's built on the official Go SDK, `github.com/modelcontextprotocol/go-sdk`.
+
+| Tool | What it answers |
+| --- | --- |
+| `overview` | Lobby counts by game key and phase; active lobbies, which have a connected member; members connected now; live guest sessions; games running and finished; generations created in the last hour |
+| `list_lobbies` | Lobbies, newest first, by game key, phase or only active ones, with their member and connected counts, host, times and game |
+| `get_lobby` | One lobby by ID or join code: also its settings, teams, members with their leases and grace deadlines, start roster and retention deadline |
+| `find_players` | Players by ID or by part of a display name, with their live sessions (times only), lobbies and start roster places |
+| `list_games` | Games, newest first, running or finished, with teams, roster, generation count, outcome and retention deadline |
+| `get_game` | One game by ID or lobby ID: also its current turn, who has completed it, and each team's castles and soldiers |
+| `get_generation` | One generation by ID or turn: each player's commands and completion, the commands that produced it, its clashes, and optionally the board that players receive |
+| `describe_schema` | The tables, or one table's columns, from `information_schema` |
+| `query` | One SQL query, for everything else |
+
+A member is connected while one of the leases of its current membership has neither expired nor been released. The tools work this out from the timestamps, as the lobby does, but never apply expiry themselves, so a lobby that nobody has touched since its members left may still be waiting. Answers are JSON with stable field names and times in UTC as RFC 3339. No answer contains `lobby_sessions.bearer_hash`, a connection token or any other secret.
+
+The lobby tools are the lobby's own, [`lobby/adminmcp`](../lobby/README.md#admin-mcp-tools), which reads only the `lobby_*` tables, so another game can reuse them. The binary adds the Island Battles game tools and the SQL tools.
+
+**It never writes.** Its one connection's sessions start with `default_transaction_read_only=on` and a 5-second `statement_timeout`, and every tool runs in a read-only transaction that is rolled back, so even the local development role, which owns every table, can't write through it. `query` runs the statement through a cursor (`DECLARE ... CURSOR FOR <sql>`), which takes only a `SELECT`, `VALUES`, `TABLE` or `WITH` query and fetches at most one row more than its cap. Commands such as `SET`, `COPY` or `COMMIT` are therefore syntax errors, and the read-only transaction refuses anything in a query that writes, such as `nextval()` or `FOR UPDATE`. Statements go over PostgreSQL's extended protocol, which refuses a string of several statements. Results are cut to 200 rows and 64 KiB, and `truncated` says when. Locally, `query` leaves out any result column named `bearer_hash`; in production the read-only role can't read that column at all.
+
+It reads one setting, `ISLAND_BATTLES_ADMIN_DATABASE_URL`, and logs to stderr only, because stdout carries the MCP stream. Locally, use the development database's URL from `.env`. For production, use the read-only role described in [the deploy guide](../deploy/README.md#the-admin-mcp-server).
+
+Register it with Claude Code from the repository root, which `go run` needs as its working directory:
+
+```sh
+claude mcp add island-battles-admin \
+  --env ISLAND_BATTLES_ADMIN_DATABASE_URL='postgres://islandBattles:islandBattles@localhost:5432/islandBattles?sslmode=disable' \
+  -- go run ./backend/cmd/admin-mcp
+```
+
+`go run` compiles it on every start. A built binary starts at once and runs from any directory:
+
+```sh
+go build -o ~/.local/bin/island-battles-admin-mcp ./backend/cmd/admin-mcp
+claude mcp add island-battles-admin --env ISLAND_BATTLES_ADMIN_DATABASE_URL=... -- ~/.local/bin/island-battles-admin-mcp
+```
+
+Rebuild it after pulling changes to the tools. `claude mcp list` shows whether the server connects, and `/mcp` inside Claude Code shows its tools. Other MCP clients start the same command with the same environment variable. To use the local database and production side by side, register the server twice under different names.
+
 ## Verification
 
 ```sh
