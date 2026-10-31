@@ -190,14 +190,15 @@ The deploy logs in as `ubuntu`, which Lightsail's Ubuntu images use, and:
 1. **Checks** the settings, that the secrets exist, the Ubuntu version and the DNS record. It also refuses a VM that a move left behind (see [Moving to a new VM](#moving-to-a-new-vm)).
 2. **Base role:** installs Docker and the Compose plugin from Ubuntu's archive, enables unattended security upgrades, keeps containers running while the Docker daemon restarts, adds a 1 GB swap file, and creates the `deploy` user that owns the Compose project. Your SSH keys log in as `deploy` too.
 3. **App role:** writes the Compose project to `/opt/island-battles` and starts it with `docker compose up --wait`:
-   - `db` is `postgres:18-alpine` with a named volume. It publishes 5432 with TLS, using a self-signed certificate, and its `pg_hba.conf` allows only `hostssl` scram logins by the backend's role to its own database. The `postgres` superuser only connects through the container's local socket. TCP keepalives close a connection about two minutes after its client stops answering, such as a frozen Lambda environment ([The concurrency cap](#the-concurrency-cap)).
+   - `db` is `postgres:18-alpine` with a named volume. It publishes 5432 with TLS, using a self-signed certificate, and its `pg_hba.conf` allows only `hostssl` scram logins to the backend's database, by the backend's role and by the [admin MCP server's](#the-admin-mcp-server) read-only role. The `postgres` superuser only connects through the container's local socket. TCP keepalives close a connection about two minutes after its client stops answering, such as a frozen Lambda environment ([The concurrency cap](#the-concurrency-cap)).
    - `centrifugo` is `centrifugo/centrifugo:v6.9.6`. Host port 443 maps to its public port, which serves TLS with an autocert certificate for `vm.<domain>`, the client endpoints and the HTTP API (`http_api.external`). Its health endpoint listens only inside the container, for the healthcheck. The admin UI is off. The `lobby` and `player` namespaces keep history and force recovery, so reconnecting clients receive what they missed. The proxy timeout is 10 seconds, to allow for a Lambda cold start on top of the backend's push retry. The certificate cache is a named volume.
    - Both services rotate their Docker logs at 10 MB, keeping five files.
 4. **Creates** the backend's role and its database. The role owns the database but isn't a superuser.
    - Owning the database gives the role `CREATE` on it. The migration runner (#23) needs that: on a database without migration history, it creates a scratch schema in a transaction to check migration 1, then rolls it back.
    - The deploy creates the database with the role as its owner, and a restore recreates it the same way.
    - The VM doesn't create the schema. The migrate step in the Lambda deploy does (#29, #38), connecting as this role.
-5. **Checks** that the role logs in over TLS and is refused without it. It also checks that `https://vm.<domain>/api/info` answers with a valid certificate when called with the API key, and refuses calls without it. That first TLS connection also makes Centrifugo request its certificate.
+   - It also creates `island_battles_admin`, the read-only role of the [admin MCP server](#the-admin-mcp-server), and grants it read access. Every deploy and restore grants it again.
+5. **Checks** that the role logs in over TLS and is refused without it, and that the admin role logs in over TLS and can't read `lobby_sessions.bearer_hash`. It also checks that `https://vm.<domain>/api/info` answers with a valid certificate when called with the API key, and refuses calls without it. That first TLS connection also makes Centrifugo request its certificate.
 6. **Writes** `deploy/local/lambda.env`: the settings the backend Lambda needs to reach the VM.
 
 Then [deploy the backend](#deploying-the-backend) and run the [smoke test](#smoke-test).
@@ -206,7 +207,7 @@ Then [deploy the backend](#deploying-the-backend) and run the [smoke test](#smok
 
 The first deploy generates these into `deploy/local/secrets/`. Every later deploy and every new VM reuses them:
 
-- The two Postgres passwords.
+- The Postgres passwords: the superuser's, the backend's role's, and the admin MCP server's read-only role's, `postgres_admin_password`.
 - Centrifugo's API key, the connection token secret and the lobby proxy secret. Reusing them keeps issued tokens valid when you move to a new VM.
 - The backend's admin API key, `admin_api_key`. Only the Lambda reads it, from `lambda.env`. Send it in the `X-Admin-API-Key` header to create default maps with `POST /map/create` (see [map files](../backend/README.md#map-files)). Without it, the Lambda refuses every map creation.
 - Postgres's TLS key and its self-signed certificate.
@@ -215,7 +216,7 @@ Back up `deploy/local/secrets/` somewhere safe, such as a password manager, and 
 
 A deploy stops if any of these files is missing, because new secrets would replace the live VM's password and keys. Pass `-e app_generate_secrets=true` only for a first deploy, or if the secrets are lost for good. In that case the deploy resets the backend's password and Centrifugo's keys, and you redeploy the backend with the new `lambda.env`: `scripts/aws.sh deploy`. Players then need new connection tokens, which clients fetch on their own.
 
-`admin_api_key` was added after the first secrets (#37), so an existing `deploy/local/secrets/` without it fails this check. Run one deploy with `-e app_generate_secrets=true`: it generates only the missing files and reads the others unchanged, so no password or key on the VM changes. Then redeploy the Lambda with the new `lambda.env`.
+`admin_api_key` (#37) and `postgres_admin_password` (#79) were added after the first secrets, so an existing `deploy/local/secrets/` without them fails this check. Run one deploy with `-e app_generate_secrets=true`: it generates only the missing files and reads the others unchanged, so no password or key on the VM changes. A new `admin_api_key` also needs the Lambda redeployed with the new `lambda.env`.
 
 Nothing secret is committed. Never copy anything from `deploy/local/` into the repo.
 
@@ -310,6 +311,35 @@ It reads `game_url` from your settings and checks the whole path, through CloudF
 
 The guest's credential is kept in `deploy/local/smoke-session.json`, and later runs reuse it. After a move to a new VM, that confirms the data came along. Guest credentials expire after 24 hours, and the test replaces one that expires within two hours. If the saved credential is rejected for another reason, delete the file and run the test again.
 
+## The admin MCP server
+
+The [admin MCP server](../backend/README.md#admin-mcp-server) (#79) answers questions about lobbies, players and games, such as "How many lobbies are currently active?", from Claude Code or another MCP client on your machine. Nothing of it is deployed: it runs on your machine and connects straight to Postgres on the VM, as the read-only role `island_battles_admin`.
+
+**The role.** The VM deploy creates it, with the password in `deploy/local/secrets/postgres_admin_password`, and grants it, in one transaction:
+
+- `SELECT` on every table, and default privileges, so that it can read the tables that later migrations create;
+- on `lobby_sessions`, `SELECT` on `id`, `player_id`, `created_at` and `expires_at` only. `bearer_hash`, the digest of each guest's credential, stays unreadable, also through the server's SQL tool.
+
+The role logs in only over TLS with its password, like the backend's. Its sessions are read-only with a 5-second statement timeout, and it has no privilege to write. The default privileges are only set once `lobby_sessions` exists, because set before, they would let the role read all of it. So on a new VM, run the VM deploy again after the backend deploy's first migration, or the role can read nothing. A restore leaves no grants, so the restore grants them again. A deployment from before #79 has neither the role nor its password: run one VM deploy with `-e app_generate_secrets=true`, as [Secrets](#secrets) describes.
+
+**The connection string.** The certificate is self-signed for `vm.<domain>`, and you have it, so check it with `verify-full`:
+
+```text
+postgres://island_battles_admin:<password>@vm.<domain>:5432/island_battles?sslmode=verify-full&sslrootcert=<repository>/deploy/local/secrets/postgres-tls/server.crt
+```
+
+Use an absolute path for `sslrootcert`. The password has only letters and digits, so it needs no escaping.
+
+**Registering it** with Claude Code, from the repository root:
+
+```sh
+claude mcp add island-battles-admin-production \
+  --env ISLAND_BATTLES_ADMIN_DATABASE_URL="postgres://island_battles_admin:$(cat deploy/local/secrets/postgres_admin_password)@vm.<domain>:5432/island_battles?sslmode=verify-full&sslrootcert=$PWD/deploy/local/secrets/postgres-tls/server.crt" \
+  -- go run ./backend/cmd/admin-mcp
+```
+
+Claude Code keeps the URL, password included, in `~/.claude.json`, which only you can read. To run a built binary instead, and other clients, see the [backend README](../backend/README.md#admin-mcp-server).
+
 ## Backups
 
 Backups are Lightsail's automatic snapshots (#33). Nothing is uploaded anywhere else.
@@ -386,7 +416,7 @@ scripts/vm.sh dump <IP>                  # writes deploy/local/dumps/island_batt
 scripts/vm.sh restore <IP> <dump file>   # into an empty database
 ```
 
-Dumps use `pg_dump`'s custom format, without owners or grants. The restore makes the backend's role the owner of everything. Dumps hold player data, so keep them in `deploy/local/`.
+Dumps use `pg_dump`'s custom format, without owners or grants. The restore makes the backend's role the owner of everything, and grants the admin MCP server's role read access again. Dumps hold player data, so keep them in `deploy/local/`.
 
 ## Logs, alerts and traces
 
@@ -523,7 +553,8 @@ These checks first ran on 2026-10-30, with `reserved_concurrency = null`, `accou
 - **`... over the free-tier budget`** from Terraform: the concurrency cap and the log or trace limits together could leave the free tier. Lower one of them ([The budget](#the-budget)).
 - **`Terraform sets ... itself`:** `lambda.env` or `extra_lambda_environment` sets the pool size, a log or trace limit, or a collector setting. Use the Terraform variables instead.
 - **No alarm emails:** follow the link in SNS's confirmation email, or resend it from the SNS console's subscription page.
-- **Postgres from your machine:** `psql "host=vm.<domain> dbname=island_battles user=island_battles sslmode=require"`, with the password from `deploy/local/secrets/postgres_app_password`.
+- **Postgres from your machine:** `psql "host=vm.<domain> dbname=island_battles user=island_battles sslmode=require"`, with the password from `deploy/local/secrets/postgres_app_password`. To only read, use `user=island_battles_admin` and `deploy/local/secrets/postgres_admin_password`.
+- **The admin MCP server answers `permission denied`:** the role has no grants yet, for example on a new VM before its first migration, or after a restore that failed before granting them. Run `scripts/vm.sh deploy <static IP>` ([The admin MCP server](#the-admin-mcp-server)). A query that names `bearer_hash`, or `SELECT *` from `lobby_sessions`, is denied on purpose.
 
 ## Validating changes
 

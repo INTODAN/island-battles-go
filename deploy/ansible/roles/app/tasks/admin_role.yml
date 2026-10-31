@@ -1,0 +1,23 @@
+---
+# The read-only role that the admin MCP server connects as (#79). Deploys and
+# restores run this after the backend's role and database exist. It runs on
+# every run, so the grants cover the tables that migrations added since.
+# The SQL goes through stdin, so the password never appears in a command line.
+- name: Create the read-only admin role and grant it read access
+  ansible.builtin.command:
+    argv: "{{ app_superuser_psql + ['--dbname', postgres_database, '--set', 'ON_ERROR_STOP=1', '--quiet', '--single-transaction'] }}"
+    chdir: "{{ vm_app_dir }}"
+    stdin: "{{ lookup('ansible.builtin.template', 'admin-role.sql.j2') }}"
+  # The same grants on every run.
+  changed_when: false
+  no_log: true
+
+- name: Check that the admin role logs in over TLS and can't read bearer hashes
+  ansible.builtin.command:
+    argv: "{{ app_backend_psql + ['--tuples-only', '--no-align', app_admin_conninfo ~ ' sslmode=require', '--command', app_admin_check_query] }}"
+    chdir: "{{ vm_app_dir }}"
+    stdin: "{{ postgres_admin_password }}"
+  no_log: true
+  register: app_admin_login
+  changed_when: false
+  failed_when: app_admin_login.rc != 0 or app_admin_login.stdout != 't'

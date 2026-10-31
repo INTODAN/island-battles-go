@@ -18,6 +18,13 @@ app_backend_psql:
   - psql
 app_backend_conninfo: host=127.0.0.1 port=5432 dbname={{ postgres_database }} user={{ postgres_app_role }}
 app_backend_ssl_query: SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()
+# The admin MCP server's read-only role (#79) connects the same way, and must
+# not be able to read lobby_sessions.bearer_hash once the table exists.
+app_admin_conninfo: host=127.0.0.1 port=5432 dbname={{ postgres_database }} user={{ postgres_admin_role }}
+app_admin_check_query: >-
+  SELECT ssl AND (to_regclass('public.lobby_sessions') IS NULL
+  OR NOT has_column_privilege('public.lobby_sessions', 'bearer_hash', 'SELECT'))
+  FROM pg_stat_ssl WHERE pid = pg_backend_pid()
 # Written when a move locks the backend out of this VM's database (dump.yml).
 # Deploys and restores refuse a VM that has it.
 app_moved_away_marker: "{{ vm_app_dir }}/moved-away"
@@ -26,6 +33,7 @@ app_moved_away_marker: "{{ vm_app_dir }}/moved-away"
 app_secret_files:
   - "{{ deploy_secrets_dir }}/postgres_superuser_password"
   - "{{ deploy_secrets_dir }}/postgres_app_password"
+  - "{{ deploy_secrets_dir }}/postgres_admin_password"
   - "{{ deploy_secrets_dir }}/centrifugo_api_key"
   - "{{ deploy_secrets_dir }}/connection_token_hmac_secret"
   - "{{ deploy_secrets_dir }}/lobby_proxy_secret"

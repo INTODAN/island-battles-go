@@ -149,6 +149,11 @@
         argv: "{{ app_db_exec + ['vacuumdb', '--username', 'postgres', '--dbname', postgres_database, '--analyze-only', '--quiet'] }}"
         chdir: "{{ vm_app_dir }}"
       changed_when: false
+
+    # The dump holds no grants, so the admin role reads nothing until it gets
+    # them again.
+    - name: Grant the admin MCP server's read-only role read access again
+      ansible.builtin.include_tasks: admin_role.yml
   always:
     - name: Remove the dump from the VM
       ansible.builtin.file:
