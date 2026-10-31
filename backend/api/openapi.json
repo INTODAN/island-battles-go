@@ -532,6 +532,12 @@
             "format": "uuid",
             "type": "string"
           },
+          "log_lines_stored": {
+            "description": "How many game log lines you have stored for this generation, out of the 100 a player may store per generation. 0 when there are none. A client that restarts during a turn continues counting from it.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "outcome": {
             "$ref": "#/components/schemas/GameOutcome",
             "description": "How the game ended. Absent while the game runs. A finished game keeps its final generation and rejects every command."
@@ -558,7 +564,8 @@
           "team_color",
           "channel",
           "submitted",
-          "generation"
+          "generation",
+          "log_lines_stored"
         ],
         "type": "object"
       },

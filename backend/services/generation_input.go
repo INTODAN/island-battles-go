@@ -93,8 +93,10 @@ func (service *GenerationService) Current(ctx context.Context, principal domain.
 		if err != nil {
 			return err
 		}
-		state, err = generationState(locked, generation, player, inputs)
-		return err
+		if state, err = generationState(locked, generation, player, inputs); err != nil {
+			return err
+		}
+		return countStoredLogLines(transaction, &state)
 	})
 	return state, err
 }
@@ -164,8 +166,10 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 			if previous.PayloadHash != payloadHash {
 				return reject(409, "request_id was already used for a different payload")
 			}
-			state, err = generationState(locked, generation, player, inputs)
-			return err
+			if state, err = generationState(locked, generation, player, inputs); err != nil {
+				return err
+			}
+			return countStoredLogLines(transaction, &state)
 		}
 		if locked.Outcome != nil {
 			return &GenerationError{Status: 409, Detail: "the game has ended: " + describeOutcome(locked), Type: GameEndedProblemType}
@@ -251,8 +255,10 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 				return err
 			}
 		}
-		state, err = generationState(locked, generation, player, inputs)
-		return err
+		if state, err = generationState(locked, generation, player, inputs); err != nil {
+			return err
+		}
+		return countStoredLogLines(transaction, &state)
 	})
 	if err != nil {
 		return models.GenerationState{}, err

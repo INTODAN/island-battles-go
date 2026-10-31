@@ -91,6 +91,10 @@ type GenerationState struct {
 	Generation   GenerationView `json:"generation"`
 	// Outcome is nil, and left out, while the game runs.
 	Outcome *GameOutcomeView `json:"outcome,omitempty" doc:"How the game ended. Absent while the game runs. A finished game keeps its final generation and rejects every command."`
+
+	// LogLinesStored lets a restarted client continue counting toward the
+	// game log limit. Pushed events carry 0: a new generation has no lines.
+	LogLinesStored uint `json:"log_lines_stored" doc:"How many game log lines you have stored for this generation, out of the 100 a player may store per generation. 0 when there are none. A client that restarts during a turn continues counting from it."`
 }
 
 // GameOutcomeView is how a finished game ended.

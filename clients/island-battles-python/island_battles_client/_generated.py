@@ -310,6 +310,10 @@ class GenerationState(GameModel):
     generation: Generation
     generation_id: Annotated[StrictInt, Field(ge=1)]
     lobby_id: UUID
+    log_lines_stored: Annotated[StrictInt, Field(ge=0)]
+    """
+    How many game log lines you have stored for this generation, out of the 100 a player may store per generation. 0 when there are none. A client that restarts during a turn continues counting from it.
+    """
     outcome: GameOutcome | None = None
     """
     How the game ended. Absent while the game runs. A finished game keeps its final generation and rejects every command.

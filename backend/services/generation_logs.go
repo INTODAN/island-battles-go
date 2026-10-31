@@ -77,6 +77,14 @@ func appendGenerationLogs(transaction *gorm.DB, gameID, generationID uint, playe
 	return dal.StoreGenerationLogs(transaction, records)
 }
 
+// countStoredLogLines fills in how many game log lines the state's player has
+// stored for its generation.
+func countStoredLogLines(transaction *gorm.DB, state *models.GenerationState) error {
+	stored, err := dal.CountGenerationLogs(transaction, state.GenerationID, state.PlayerID)
+	state.LogLinesStored = uint(stored)
+	return err
+}
+
 // Logs returns a generation's game log for a roster player. While the game
 // runs, the caller sees only their own team's lines; once it has an outcome,
 // every team's. It takes no game lock, like Replay: the game is read first,
@@ -90,6 +98,10 @@ func (service *GenerationService) Logs(ctx context.Context, principal domain.Pri
 	observability.Annotate(ctx, slog.Uint64("game_id", uint64(game.ID)), slog.Uint64("generation_id", uint64(generationID)))
 	if err := service.authorize(ctx, principal, game); err != nil {
 		return models.GenerationLogs{}, err
+	}
+	// Checked after authorization, so only roster players learn of it.
+	if generationID == 0 {
+		return models.GenerationLogs{}, reject(422, "generation_id must be a positive generation ID")
 	}
 	found, err := dal.GameHasGeneration(database, game.ID, generationID)
 	if err != nil {

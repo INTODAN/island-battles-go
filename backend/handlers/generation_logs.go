@@ -12,8 +12,8 @@ type GenerationLogsResponse struct{ Body models.GenerationLogs }
 
 func (handler *LobbyGame) GenerationLogs(ctx context.Context, input *struct {
 	LobbyID string `path:"lobby_id" format:"uuid"`
-	// The handler checks the generation after authentication, so a caller
-	// without credentials learns nothing from a 422. SetupLobbyRoutes
+	// The service checks the generation after authorizing the caller, so a
+	// caller off the roster learns nothing from a 422. SetupLobbyRoutes
 	// documents the parameter as required.
 	GenerationID  uint   `query:"generation_id" doc:"The generation whose lines to read, from Generation.id."`
 	Authorization string `header:"Authorization"`
@@ -22,9 +22,6 @@ func (handler *LobbyGame) GenerationLogs(ctx context.Context, input *struct {
 	verified, err := handler.Authenticator.Authenticate(ctx, input.Authorization)
 	if err != nil {
 		return nil, huma.Error401Unauthorized("authentication required")
-	}
-	if input.GenerationID == 0 {
-		return nil, huma.Error422UnprocessableEntity("generation_id must be a positive generation ID")
 	}
 	service := services.GenerationService{Database: handler.Database}
 	logs, err := service.Logs(ctx, verified.Principal, input.LobbyID, input.GenerationID)

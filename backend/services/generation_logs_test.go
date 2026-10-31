@@ -6,6 +6,7 @@ import (
 	"errors"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -296,5 +297,112 @@ func TestGameLogsNeedTheRosterAndAGenerationOfTheGame(t *testing.T) {
 	}
 	if len(logs.Players) != 1 || logs.Players[0].DisplayName != "Player 1" || len(logs.HiddenTeamColors) != 0 {
 		t.Fatalf("unnamed player's logs = %+v", logs)
+	}
+	// The generation is checked only for roster players.
+	if _, err := fixture.service.Logs(ctx, otherPlayer, fixture.state.LobbyID, 0); err == nil {
+		t.Fatal("an outsider read generation 0")
+	} else {
+		assertTurnStatus(t, err, 404)
+	}
+	if _, err := fixture.service.Logs(ctx, alice, fixture.state.LobbyID, 0); err == nil {
+		t.Fatal("Alice read generation 0")
+	} else {
+		assertTurnStatus(t, err, 422)
+	}
+}
+
+func TestStatesCountTheCallersStoredLogLines(t *testing.T) {
+	fixture := newLogFixture(t)
+	ctx := context.Background()
+	alice, bob, ada := fixture.players[0], fixture.players[1], fixture.players[2]
+	state := fixture.state
+	if state.LogLinesStored != 0 {
+		t.Fatalf("a fresh generation has %d stored lines", state.LogLinesStored)
+	}
+	first := withLogs(batch(state, false), logLines(3, "first")...)
+	registered, err := fixture.service.Register(ctx, alice, first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if registered.LogLinesStored != 3 {
+		t.Fatalf("after a batch: %d stored lines, want 3", registered.LogLinesStored)
+	}
+	// A retry answers the same count, and so does a read, which is what a
+	// restarted client counts from.
+	if retried, err := fixture.service.Register(ctx, alice, first); err != nil || retried.LogLinesStored != 3 {
+		t.Fatalf("retry: %d stored lines, %v", retried.LogLinesStored, err)
+	}
+	if read, err := fixture.service.Current(ctx, alice, state.LobbyID); err != nil || read.LogLinesStored != 3 {
+		t.Fatalf("read: %d stored lines, %v", read.LogLinesStored, err)
+	}
+	// Each player counts only their own lines.
+	if read, err := fixture.service.Current(ctx, ada, state.LobbyID); err != nil || read.LogLinesStored != 0 {
+		t.Fatalf("Ada's read: %d stored lines, %v", read.LogLinesStored, err)
+	}
+	for _, player := range []domain.Principal{alice, ada, bob} {
+		if _, err := fixture.service.Register(ctx, player, batch(state, true)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The next generation starts from zero, in reads and in pushed events.
+	if read, err := fixture.service.Current(ctx, alice, state.LobbyID); err != nil || read.GenerationID == state.GenerationID || read.LogLinesStored != 0 {
+		t.Fatalf("next generation: %+v, %v", read, err)
+	}
+	for _, publication := range fixture.publisher.Publications() {
+		var event models.GenerationEvent
+		if err := json.Unmarshal(publication.Data, &event); err != nil || event.State.LogLinesStored != 0 {
+			t.Fatalf("event %s: %v", publication.Data, err)
+		}
+	}
+}
+
+// Concurrent batches of one player can't pass the 100-line limit together,
+// and a request sent several times at once stores its lines once. From the
+// review of PR #86.
+func TestConcurrentGameLogBatchesKeepTheLimit(t *testing.T) {
+	fixture := newLogFixture(t)
+	ctx := context.Background()
+	alice := fixture.players[0]
+	state := fixture.state
+	const workers = 6
+	var group sync.WaitGroup
+	errs := make([]error, workers)
+	for index := range workers {
+		group.Go(func() {
+			_, errs[index] = fixture.service.Register(ctx, alice, withLogs(batch(state, false), logLines(30, "concurrent")...))
+		})
+	}
+	group.Wait()
+	accepted := 0
+	for _, err := range errs {
+		if err == nil {
+			accepted++
+		} else {
+			assertGameLogLimit(t, err)
+		}
+	}
+	if rows := countLogRows(t, fixture); accepted != 3 || rows != 90 {
+		t.Fatalf("accepted %d batches, stored %d rows; errors %v", accepted, rows, errs)
+	}
+	retried := withLogs(batch(state, false), logLines(10, "retried")...)
+	for index := range workers {
+		group.Go(func() { _, errs[index] = fixture.service.Register(ctx, alice, retried) })
+	}
+	group.Wait()
+	for _, err := range errs {
+		if err != nil {
+			t.Fatalf("retry error %v", err)
+		}
+	}
+	if rows := countLogRows(t, fixture); rows != 100 {
+		t.Fatalf("stored %d rows after a retried request, want 100", rows)
+	}
+	// One more line is refused whole, with the completion it carries.
+	assertGameLogLimit(t, func() error {
+		_, err := fixture.service.Register(ctx, alice, withLogs(batch(state, true), logLine(models.GenerationLogInfo, "restarted")))
+		return err
+	}())
+	if read, err := fixture.service.Current(ctx, alice, state.LobbyID); err != nil || read.Submitted || read.LogLinesStored != 100 {
+		t.Fatalf("after the refused completion: %+v, %v", read, err)
 	}
 }

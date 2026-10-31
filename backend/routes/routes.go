@@ -68,7 +68,7 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 	}, game.GenerationLogs)
 	for _, parameter := range api.OpenAPI().Paths["/game/from-lobby/{lobby_id}/logs"].Get.Parameters {
 		if parameter.Name == "generation_id" {
-			// The handler requires it after authentication; see GenerationLogs.
+			// The service requires it after authorizing the caller; see GenerationLogs.
 			parameter.Required = true
 			minimum := 1.0
 			parameter.Schema.Minimum = &minimum
