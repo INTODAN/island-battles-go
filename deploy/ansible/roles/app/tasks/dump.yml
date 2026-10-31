@@ -39,9 +39,20 @@
       ansible.builtin.command:
         argv: "{{ app_superuser_psql + ['--dbname', 'postgres', '--set', 'ON_ERROR_STOP=1', '--quiet', '--tuples-only'] }}"
         chdir: "{{ vm_app_dir }}"
+        # The admin MCP server's read-only role is locked out too, so nobody
+        # reads the old VM's data by mistake. A deploy that unlocks the VM
+        # lets both log in again.
         stdin: |
           ALTER ROLE "{{ postgres_app_role }}" NOLOGIN;
-          SELECT count(pg_terminate_backend(pid, 5000)) FROM pg_stat_activity WHERE usename = '{{ postgres_app_role }}';
+          DO $$
+          BEGIN
+            IF EXISTS (SELECT FROM pg_roles WHERE rolname = '{{ postgres_admin_role }}') THEN
+              ALTER ROLE "{{ postgres_admin_role }}" NOLOGIN;
+            END IF;
+          END
+          $$;
+          SELECT count(pg_terminate_backend(pid, 5000)) FROM pg_stat_activity
+            WHERE usename IN ('{{ postgres_app_role }}', '{{ postgres_admin_role }}');
       changed_when: true
 
 # Custom format is compressed and lets pg_restore run in one transaction.

@@ -320,7 +320,9 @@ The [admin MCP server](../backend/README.md#admin-mcp-server) (#79) answers ques
 - `SELECT` on every table, and default privileges, so that it can read the tables that later migrations create;
 - on `lobby_sessions`, `SELECT` on `id`, `player_id`, `created_at` and `expires_at` only. `bearer_hash`, the digest of each guest's credential, stays unreadable, also through the server's SQL tool.
 
-The role logs in only over TLS with its password, like the backend's. Its sessions are read-only with a 5-second statement timeout, and it has no privilege to write. The default privileges are only set once `lobby_sessions` exists, because set before, they would let the role read all of it. So on a new VM, run the VM deploy again after the backend deploy's first migration, or the role can read nothing. A restore leaves no grants, so the restore grants them again. A deployment from before #79 has neither the role nor its password: run one VM deploy with `-e app_generate_secrets=true`, as [Secrets](#secrets) describes.
+The role logs in only over TLS with its password, like the backend's. Its sessions are read-only with a 5-second statement timeout, and it has no privilege to write. The default privileges are only set once `lobby_sessions` exists, because set before, they would let the role read all of it. So on a new VM, run the VM deploy again after the backend deploy's first migration, or the role can read nothing. A restore leaves no grants, so the restore grants them again.
+
+The default privileges also make whatever a later migration creates readable, until the next VM deploy runs the grants again: a migration that recreates `lobby_sessions` would let the role read `bearer_hash`, and so would a new table that holds credentials. The server guards the first case: at startup and before every `query`, it checks whether its role can read `bearer_hash` without being a superuser or the table's owner. If so, `query` refuses to run and the server logs why, until you run `scripts/vm.sh deploy <static IP>`. The typed tools never read the column. A new table that holds credentials needs its own column grants in `admin-role.sql.j2`. A deployment from before #79 has neither the role nor its password: run one VM deploy with `-e app_generate_secrets=true`, as [Secrets](#secrets) describes.
 
 **The connection string.** The certificate is self-signed for `vm.<domain>`, and you have it, so check it with `verify-full`:
 
@@ -389,7 +391,7 @@ Moving copies the database with `pg_dump` and restores it on the new VM (#31). I
    scripts/vm.sh move-data <static IP> <new IP>
    ```
 
-   - On the old VM, it locks the backend's role out (`NOLOGIN`) and ends its connections, so nothing is written after the dump. The Lambda's requests fail from here until step 5 is done.
+   - On the old VM, it locks the backend's role out (`NOLOGIN`) and ends its connections, so nothing is written after the dump. It locks the admin MCP server's read-only role out too, so nobody reads the old data by mistake. The Lambda's requests fail from here until step 5 is done.
    - The lock is sticky. It leaves the marker file `/opt/island-battles/moved-away` on the old VM, and a deploy or restore there stops while the marker exists. A redeploy can't let the backend write to the old VM again, which would lose those writes.
    - It dumps the old database to `deploy/local/dumps/` and restores the dump into the new VM's empty database, in one transaction.
    - The restore refuses a dump without tables, and a database that already has tables. To overwrite one, pass `-e app_restore_replace_existing=true`: the restore first saves the database it replaces to `deploy/local/dumps/`.
