@@ -161,6 +161,9 @@
       -e app_unlock_after_move=true. Otherwise read `docker compose logs db` in {{ vm_app_dir }}.
     quiet: true
 
+- name: Set up the admin MCP server's read-only role
+  ansible.builtin.include_tasks: admin_role.yml
+
 # The role logs in again, so this VM serves the backend.
 - name: Remove the moved-away marker
   ansible.builtin.file:

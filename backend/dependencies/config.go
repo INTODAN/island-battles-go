@@ -90,6 +90,10 @@ func LoadConfigFromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	gameRetentionPeriod, err := LoadGameRetentionPeriodFromLookup(lookup)
+	if err != nil {
+		return Config{}, err
+	}
 	config := Config{
 		Database:                  database,
 		CentrifugoPublicURL:       readEnvironment(lookup, CentrifugoPublicURLEnv),
@@ -98,13 +102,7 @@ func LoadConfigFromLookup(lookup func(string) (string, bool)) (Config, error) {
 		ConnectionTokenHMACSecret: readEnvironment(lookup, ConnectionTokenHMACSecretEnv),
 		LobbyProxySecret:          readEnvironment(lookup, LobbyProxySecretEnv),
 		AdminAPIKey:               readEnvironment(lookup, AdminAPIKeyEnv),
-		GameRetentionPeriod:       retention.DefaultPeriod,
-	}
-	if value := readEnvironment(lookup, GameRetentionPeriodEnv); value != "" {
-		config.GameRetentionPeriod, err = time.ParseDuration(value)
-		if err != nil || config.GameRetentionPeriod <= 0 {
-			return Config{}, fmt.Errorf("%s must be a positive duration such as 168h", GameRetentionPeriodEnv)
-		}
+		GameRetentionPeriod:       gameRetentionPeriod,
 	}
 	if err := validateURL(CentrifugoPublicURLEnv, config.CentrifugoPublicURL, "ws", "wss"); err != nil {
 		return Config{}, err
@@ -113,6 +111,21 @@ func LoadConfigFromLookup(lookup func(string) (string, bool)) (Config, error) {
 		return Config{}, err
 	}
 	return config, nil
+}
+
+// LoadGameRetentionPeriodFromLookup reads ISLAND_BATTLES_GAME_RETENTION_PERIOD,
+// or returns retention.DefaultPeriod when it isn't set. The admin MCP server
+// reads it too, to say when retention deletes a game.
+func LoadGameRetentionPeriodFromLookup(lookup func(string) (string, bool)) (time.Duration, error) {
+	value := readEnvironment(lookup, GameRetentionPeriodEnv)
+	if value == "" {
+		return retention.DefaultPeriod, nil
+	}
+	period, err := time.ParseDuration(value)
+	if err != nil || period <= 0 {
+		return 0, fmt.Errorf("%s must be a positive duration such as 168h", GameRetentionPeriodEnv)
+	}
+	return period, nil
 }
 
 // LoadDatabaseConfig reads the database settings, which are all the migrate

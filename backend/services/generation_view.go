@@ -6,16 +6,17 @@ import (
 	"islandBattles/backend/models"
 )
 
-// generationView is the one public board projection of a generation. Player
-// states, their notifications and replay frames all use it, so they share one
-// JSON shape. Castles and soldier groups are sorted by persistent ID, and every
-// list is empty rather than null.
+// GenerationView is the one public board projection of a generation. Player
+// states, their notifications, replay frames and the admin MCP server's
+// get_generation all use it, so they share one JSON shape. Castles and
+// soldier groups are sorted by persistent ID, and every list is empty rather
+// than null.
 //
 // It expects a generation loaded with dal.WithFullGeneration or
 // dal.LoadGameGenerations, meaning
 // Map.Castles, SoldierGroups.OriginCastle and SoldierGroups.DestinationCastle.
 // Without that preload the origin and destination castle IDs silently become 0.
-func generationView(generation *models.Generation) models.GenerationView {
+func GenerationView(generation *models.Generation) models.GenerationView {
 	view := models.GenerationView{
 		ID:            generation.ID,
 		Castles:       make([]models.CastleView, 0, len(generation.Map.Castles)),

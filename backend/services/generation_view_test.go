@@ -23,7 +23,7 @@ func TestGenerationViewSortsByPersistentID(t *testing.T) {
 		Clashes:       []models.Clash{{ID: 1}},
 	}
 	generation.ID = 7
-	view := generationView(generation)
+	view := GenerationView(generation)
 	if view.ID != 7 || len(view.Clashes) != 1 {
 		t.Fatalf("view = %+v", view)
 	}
@@ -39,7 +39,7 @@ func TestGenerationViewSortsByPersistentID(t *testing.T) {
 }
 
 func TestGenerationViewListsAreNeverNull(t *testing.T) {
-	raw, err := json.Marshal(generationView(&models.Generation{}))
+	raw, err := json.Marshal(GenerationView(&models.Generation{}))
 	if err != nil {
 		t.Fatal(err)
 	}

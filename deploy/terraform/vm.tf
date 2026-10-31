@@ -61,8 +61,9 @@ resource "aws_lightsail_instance_public_ports" "vm" {
   }
 
   # Postgres, TLS only. Lambda's outbound addresses aren't fixed, so it's open
-  # to everyone, and pg_hba.conf admits only the backend's role over TLS with
-  # its password.
+  # to everyone, and pg_hba.conf admits only two roles over TLS, each with its
+  # password: the backend's, and the read-only role of the admin MCP server
+  # that the operator runs on their own machine (#79).
   port_info {
     protocol  = "tcp"
     from_port = var.postgres_port
