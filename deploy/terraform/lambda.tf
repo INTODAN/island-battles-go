@@ -136,7 +136,7 @@ resource "aws_lambda_function" "backend" {
   lifecycle {
     precondition {
       condition     = local.lambda_settings_found || var.allow_missing_lambda_settings
-      error_message = "${local.lambda_settings_file} is missing. Copy deploy/local/ from where you keep it, or run the VM deploy, which writes it. Only for the very first apply, pass -var allow_missing_lambda_settings=true."
+      error_message = "${local.lambda_settings_file} is missing. Push deploy/local/ to the deploy bucket from the machine that has it, or run the VM deploy, which writes it. Only for the very first apply, pass -var allow_missing_lambda_settings=true."
     }
     precondition {
       condition     = length(local.lambda_settings_malformed) == 0

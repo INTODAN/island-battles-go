@@ -9,9 +9,13 @@ variables_file="$local_directory/aws.tfvars"
 lambda_settings_file="$local_directory/lambda.env"
 build_directory="$local_directory/lambda"
 plan_file="$local_directory/terraform/scripts-aws.tfplan"
+local_state_file="$local_directory/terraform/terraform.tfstate"
 
 usage() {
   cat >&2 <<'EOF'
+Terraform's state is in the deploy bucket. apply and deploy pull deploy/local/
+from the bucket first and push it back at the end.
+
 Usage:
   scripts/aws.sh apply [terraform plan options]
       Build the backend, then create or update every AWS resource: the
@@ -34,6 +38,9 @@ Usage:
       Print Terraform's outputs, or one of them, e.g. static_ip,
       function_url, game_url, certificate_validation_record or
       distribution_domain.
+  scripts/aws.sh migrate-state
+      Move Terraform's old local state, deploy/local/terraform/terraform.tfstate,
+      into the deploy bucket. Once, on the machine that has it.
 EOF
   exit 2
 }
@@ -55,15 +62,59 @@ run_terraform() {
   terraform -chdir="$terraform_directory" "$@"
 }
 
+deploy_files() {
+  python3 -I "$repository_root/deploy/deploy_files.py" "$@"
+}
+
+# The bucket and its region come from the AWS credentials, so a new machine
+# needs nothing else. Terraform's GitHub deploy role is scoped to the bucket.
 initialize_terraform() {
   require_command terraform
+  require_command aws
+  require_command python3
   mkdir -p "$local_directory/terraform"
-  # .terraform/terraform.tfstate records the backend; `init -backend=false`
-  # (for validating) leaves it out.
-  if [[ ! -f "$terraform_directory/.terraform/terraform.tfstate" ]]; then
+  local bucket_and_region bucket region
+  bucket_and_region="$(deploy_files bucket)"
+  read -r bucket region <<<"$bucket_and_region"
+  export TF_VAR_deploy_bucket="$bucket"
+  # .terraform/terraform.tfstate records the backend and its bucket; `init
+  # -backend=false` (for validating) leaves it out.
+  if ! python3 -I -c 'import json, sys
+backend = json.load(open(sys.argv[1])).get("backend") or {}
+sys.exit(0 if backend.get("type") == "s3" and backend["config"].get("bucket") == sys.argv[2] else 1)' \
+    "$terraform_directory/.terraform/terraform.tfstate" "$bucket" 2>/dev/null; then
     # To stderr, so "$(scripts/aws.sh output static_ip)" captures only the IP.
-    run_terraform init -input=false >&2
+    run_terraform init -input=false -reconfigure \
+      -backend-config="bucket=$bucket" -backend-config="region=$region" >&2
   fi
+}
+
+# A machine that still has the old local state must move it first, or it would
+# plan against the bucket's state while its own copy goes stale.
+require_migrated_state() {
+  if [[ -s "$local_state_file" ]]; then
+    echo "$local_state_file is Terraform's old local state. Run scripts/aws.sh migrate-state to move it into the deploy bucket." >&2
+    exit 1
+  fi
+}
+
+# Removes the plan, which holds the Lambda's settings, and pushes what changed
+# in deploy/local/, keeping the run's own exit status.
+finish() {
+  local status=$?
+  rm -f "$plan_file"
+  if ! deploy_files push; then
+    echo "deploy/local/ isn't in the deploy bucket yet. Run scripts/deploy-files.sh push." >&2
+    [[ $status -ne 0 ]] || status=1
+  fi
+  exit "$status"
+}
+
+sync_deploy_files() {
+  require_command aws
+  require_command python3
+  deploy_files pull
+  trap finish EXIT
 }
 
 require_variables() {
@@ -134,15 +185,14 @@ confirm_destruction() {
 }
 
 # Plans, checks the plan, migrates and applies exactly the plan that was
-# checked. The plan file holds the Lambda's settings, so it's removed after.
+# checked. The plan file holds the Lambda's settings, so finish removes it.
 plan_and_apply() {
   local mode="$1"
   shift
+  require_migrated_state
   initialize_terraform
   require_variables
   build_backend
-  require_command python3
-  trap 'rm -f "$plan_file"' EXIT
   run_terraform plan -input=false -var-file="$variables_file" -out="$plan_file" "$@"
 
   local migrate=yes
@@ -181,24 +231,42 @@ plan_and_apply() {
 
 case "$command" in
   apply)
+    sync_deploy_files
     plan_and_apply apply "$@"
     ;;
   deploy)
     [[ $# -eq 0 ]] || usage
+    sync_deploy_files
     if [[ ! -f "$lambda_settings_file" ]]; then
-      echo "$lambda_settings_file is missing. Copy deploy/local/ from where you keep it, or run scripts/vm.sh deploy, which writes it." >&2
+      echo "$lambda_settings_file is missing. Push deploy/local/ from the machine that has it, or run scripts/vm.sh deploy, which writes it." >&2
       exit 1
     fi
     plan_and_apply deploy
     ;;
   output)
     [[ $# -le 1 ]] || usage
+    require_migrated_state
     initialize_terraform
     if [[ $# -eq 1 ]]; then
       run_terraform output -raw "$1"
     else
       run_terraform output
     fi
+    ;;
+  migrate-state)
+    [[ $# -eq 0 ]] || usage
+    if [[ ! -s "$local_state_file" ]]; then
+      echo "There's no local state at $local_state_file to move." >&2
+      exit 1
+    fi
+    initialize_terraform
+    if [[ "$(deploy_files has-state)" == yes ]]; then
+      echo "The deploy bucket already has Terraform's state. Compare it with $local_state_file before replacing anything." >&2
+      exit 1
+    fi
+    run_terraform state push "$local_state_file"
+    mv "$local_state_file" "$local_state_file.migrated"
+    echo "Moved the state into the deploy bucket, and kept the old file as $local_state_file.migrated."
     ;;
   *)
     usage

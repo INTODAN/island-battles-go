@@ -518,3 +518,100 @@ run "rejects_a_static_ip_instance_that_doesnt_exist" {
 
   expect_failures = [var.static_ip_instance]
 }
+
+# The GitHub deploy role ------------------------------------------------------
+
+run "creates_no_github_role_by_default" {
+  command = plan
+
+  assert {
+    condition     = length(aws_iam_role.github_deploy) == 0 && length(aws_iam_openid_connect_provider.github) == 0 && output.github_deploy_role_arn == null
+    error_message = "Without github_repository, there must be no OIDC provider or deploy role."
+  }
+}
+
+run "lets_only_the_repositorys_production_jobs_deploy" {
+  command = plan
+
+  variables {
+    github_repository = "INTODAN/island-battles-go"
+    deploy_bucket     = "island-battles-deploy-123456789012"
+  }
+
+  override_resource {
+    target          = aws_iam_openid_connect_provider.github
+    override_during = plan
+    values = {
+      arn = "arn:aws:iam::123456789012:oidc-provider/token.actions.githubusercontent.com"
+    }
+  }
+
+  override_resource {
+    target          = aws_iam_role.lambda
+    override_during = plan
+    values = {
+      arn = "arn:aws:iam::123456789012:role/island-battles-lambda"
+    }
+  }
+
+  override_data {
+    target          = data.aws_caller_identity.current
+    override_during = plan
+    values = {
+      account_id = "123456789012"
+    }
+  }
+
+  assert {
+    condition = jsondecode(aws_iam_role.github_deploy[0].assume_role_policy).Statement[0].Condition.StringEquals == {
+      "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+      "token.actions.githubusercontent.com:sub" = "repo:INTODAN/island-battles-go:environment:production"
+    }
+    error_message = "Only the repository's jobs in the production environment may assume the role."
+  }
+
+  assert {
+    condition     = aws_iam_role_policy_attachment.github_deploy_read[0].policy_arn == "arn:aws:iam::aws:policy/ReadOnlyAccess"
+    error_message = "The role must read the account, as every plan does."
+  }
+
+  assert {
+    condition = toset(flatten([for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : statement.Action])) == toset([
+      "lambda:UpdateFunctionCode", "lambda:UpdateFunctionConfiguration", "lambda:TagResource", "lambda:UntagResource",
+      "iam:PassRole", "s3:ListBucket", "s3:GetObject", "s3:PutObject", "s3:DeleteObject",
+      "lightsail:GetInstanceAccessDetails",
+    ])
+    error_message = "The role may write only the function, the deploy bucket and a temporary VM key."
+  }
+
+  assert {
+    condition     = one([for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : statement.Resource if statement.Sid == "PublishTheBackend"]) == "arn:aws:lambda:eu-central-1:123456789012:function:island-battles"
+    error_message = "The role may only publish the backend function."
+  }
+
+  assert {
+    condition     = one([for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : statement.Resource if statement.Sid == "ReleaseTheStateLock"]) == "arn:aws:s3:::island-battles-deploy-123456789012/terraform/terraform.tfstate.tflock"
+    error_message = "The role may delete nothing but the state's lock."
+  }
+}
+
+run "needs_the_deploy_bucket_for_the_github_role" {
+  command = plan
+
+  variables {
+    github_repository = "INTODAN/island-battles-go"
+  }
+
+  expect_failures = [var.github_repository]
+}
+
+run "rejects_a_github_repository_that_isnt_owner_and_name" {
+  command = plan
+
+  variables {
+    github_repository = "https://github.com/INTODAN/island-battles-go"
+    deploy_bucket     = "island-battles-deploy-123456789012"
+  }
+
+  expect_failures = [var.github_repository]
+}

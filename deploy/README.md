@@ -12,7 +12,7 @@ Island Battles runs in one AWS region:
   - `island-battles.<domain>` points at the CloudFront distribution.
   - ACM's validation record lets it issue and renew the game's certificate.
 
-This document covers creating the AWS resources with Terraform, setting up the VM with Ansible, deploying the backend to Lambda, backups, redeploys and moving to a new VM. [First deployment, step by step](#first-deployment-step-by-step) puts it all in order. #26 describes the architecture.
+This document covers creating the AWS resources with Terraform, setting up the VM with Ansible, deploying the backend to Lambda, backups, redeploys and moving to a new VM. Any machine with the AWS credentials can deploy, and so can GitHub Actions: Terraform's state and the deploy's files live in a [deploy bucket](#the-deploy-bucket), and the VM deploy logs in with [temporary keys from Lightsail](#logging-in-to-the-vm). [First deployment, step by step](#first-deployment-step-by-step) puts it all in order. #26 describes the architecture.
 
 The live deployment (#45, 2026-10-30) runs in `eu-central-1`, and its VM is `vm.elidan.org`. Players open it at `https://island-battles.elidan.org` (#75, 2026-10-30), which replaced a 2021 WebGL build of the game on Firebase Hosting. Its DNS records are managed in the Squarespace domains dashboard: `elidan.org` → DNS → Custom records.
 
@@ -22,27 +22,29 @@ The live deployment (#45, 2026-10-30) runs in `eu-central-1`, and its VM is `vm.
 |---|---|
 | `scripts/aws.sh` | Creates the AWS resources and deploys the backend to Lambda. |
 | `scripts/vm.sh` | Deploys the VM, moves its database and runs the smoke test. |
+| `scripts/deploy-files.sh` | Creates the [deploy bucket](#the-deploy-bucket), and syncs `deploy/local/` with it by hand. `deploy/deploy_files.py` does the work, and `deploy/test_deploy_files.py` tests it. |
+| `.github/workflows/deploy.yml` | [Deploys from GitHub Actions](#deploying-from-github-actions), on demand. |
 | `deploy/aws.example.tfvars` | The template for the AWS settings. |
 | `deploy/vm.example.yml` | The template for the VM settings. |
-| `deploy/terraform/` | The AWS resources: the Lightsail VM in `vm.tf`, the Lambda in `lambda.tf`, the game's certificate and CloudFront distribution in `cloudfront.tf`, and the Lambda's log group, alarms, collector settings and budget in `observability.tf`. `tests/` checks the configuration offline. |
+| `deploy/terraform/` | The AWS resources: the Lightsail VM in `vm.tf`, the Lambda in `lambda.tf`, the game's certificate and CloudFront distribution in `cloudfront.tf`, the Lambda's log group, alarms, collector settings and budget in `observability.tf`, and GitHub Actions' deploy role in `github.tf`. `tests/` checks the configuration offline. |
 | `deploy/check_deploy_plan.py` | Reads the plan for `scripts/aws.sh`: stops a backend deploy that would change more than the backend, lists what an apply would destroy, and tells an apply whether to run the migrations. `deploy/test_check_deploy_plan.py` tests it. |
 | `deploy/ansible/` | The playbooks: `site.yml` deploys, `dump.yml` and `restore.yml` copy the database. The `base` role prepares Ubuntu, and the `app` role deploys the Compose project. |
 | `deploy/smoke.py` | The smoke test that `scripts/vm.sh smoke` runs. |
-| `deploy/local/` | Gitignored. Your settings, the generated secrets, the Lambda's settings, Terraform's state, the built Lambda, dumps and the smoke test's guest credential. |
+| `deploy/local/` | Gitignored. The settings, the generated secrets, the Lambda's settings and the smoke test's guest credential, which the scripts sync with the [deploy bucket](#the-deploy-bucket), and this machine's built Lambda, plans and dumps, which they don't. |
 
 ## Prerequisites
 
 - **On your machine:**
-  - Terraform 1.11 or newer, Go, which builds the backend and runs its migrations, and Python 3, for the backend deploy's plan check.
-  - AWS credentials for Terraform, which reads the standard AWS credential chain, e.g. `AWS_PROFILE=<profile>`. They need to manage Lightsail, Lambda, IAM roles, CloudWatch Logs and alarms, SNS, Budgets, ACM and CloudFront. Nothing in the repo stores them.
-    - `aws login --profile <profile>` (AWS CLI 2.32 or newer) signs in through the console and gives short-lived credentials, which Terraform's AWS provider reads directly. They last up to 12 hours; run it again when Terraform reports expired credentials.
+  - Terraform 1.11 or newer, Go, which builds the backend and runs its migrations, and Python 3, for the backend deploy's plan check and the deploy bucket's sync.
+  - The AWS CLI 2.32 or newer. The scripts use it for the [deploy bucket](#the-deploy-bucket) and the VM's [temporary SSH keys](#logging-in-to-the-vm).
+  - AWS credentials, which Terraform and the AWS CLI read from the standard AWS credential chain, e.g. `AWS_PROFILE=<profile>`. They need to manage Lightsail, Lambda, IAM roles and OIDC providers, CloudWatch Logs and alarms, SNS, Budgets, ACM and CloudFront, and the deploy bucket in S3. Nothing in the repo stores them, and nothing else is needed: no SSH key, and no copy of `deploy/local/`.
+    - `aws login --profile <profile>` signs in through the console and gives short-lived credentials, which Terraform's AWS provider reads directly. They last up to 12 hours; run it again when Terraform reports expired credentials.
   - Ansible: `uv tool install ansible-core`. `scripts/vm.sh` installs the collections it needs into `deploy/ansible/.collections/` (gitignored) on first use.
   - [uv](https://docs.astral.sh/uv/), for the smoke test.
-  - The instance's SSH key, through `ssh-agent`, `~/.ssh/config` or `ansible_ssh_private_key_file` in the settings.
 - **Lightsail** (Terraform creates these, see [AWS resources](#aws-resources)):
   - An Ubuntu 24.04 LTS instance. The 1 GB plan is enough. Both images publish amd64 and arm64 builds.
   - A static IP attached to it.
-  - Firewall rules for 22, 443 and 5432. Limit 22 to your own IP if you can. Port 80 stays closed, because Centrifugo answers Let's Encrypt's challenge on 443.
+  - Firewall rules for 22, 443 and 5432. Port 22 stays open to all, so that any machine or GitHub runner can deploy: logins need a key, and password logins are off. Port 80 stays closed, because Centrifugo answers Let's Encrypt's challenge on 443.
   - Ansible doesn't set up a host firewall: ports that Docker publishes bypass ufw, so the Lightsail firewall is the one that counts.
 - **The Lambda's Function URL:** `scripts/aws.sh output function_url`. Centrifugo calls the backend's subscribe proxy through it.
 - **The game's URL:** `scripts/aws.sh output game_url`. Centrifugo accepts browser connections only from its origin.
@@ -75,7 +77,6 @@ Copy `deploy/vm.example.yml` to `deploy/local/vm.yml` and fill it in:
 | `deploy_domain` | The domain. The VM's hostname is `vm.<deploy_domain>`. |
 | `lambda_function_url` | The backend Lambda's Function URL, e.g. `https://<id>.lambda-url.<region>.on.aws/`. `scripts/aws.sh output function_url` prints it. |
 | `game_url` | Where players open the game, e.g. `https://island-battles.<domain>`. `scripts/aws.sh output game_url` prints it. |
-| `ansible_ssh_private_key_file` | Optional. The instance's SSH key. |
 | `app_letsencrypt_email` | Optional. The contact address for the Let's Encrypt account. |
 
 Everything else derives from these three: the autocert host whitelist, `ISLAND_BATTLES_CENTRIFUGO_PUBLIC_URL` and the API URL from the domain, Centrifugo's proxy endpoints from the Function URL, and its allowed origin from the game's URL. Other variables are in `deploy/ansible/group_vars/all.yml` and the roles' `defaults/main.yml`, and any of them can be overridden with `-e name=value`.
@@ -84,7 +85,7 @@ Everything else derives from these three: the autocert host whitelist, `ISLAND_B
 
 The pieces depend on each other in a circle. Terraform creates the Lambda, whose Function URL the VM deploy needs for Centrifugo. The VM deploy writes `deploy/local/lambda.env`, which the Lambda needs. The first apply therefore creates the function without its settings, and the backend deploy publishes them once the VM is up. The game's certificate comes first of all, because the distribution needs it issued, and ACM issues it only once you've added its DNS record:
 
-1. **Check the account's Lambda concurrency limit.** In the Service Quotas console, look up AWS Lambda's "Concurrent executions" for your region. If it's below 1000, read [The concurrency cap](#the-concurrency-cap) first.
+1. **Check the account's Lambda concurrency limit.** In the Service Quotas console, look up AWS Lambda's "Concurrent executions" for your region. If it's below 1000, read [The concurrency cap](#the-concurrency-cap) first. Then create the [deploy bucket](#the-deploy-bucket): `scripts/deploy-files.sh bootstrap --region <region>`.
 2. **Write the settings.**
    - Copy `deploy/aws.example.tfvars` to `deploy/local/aws.tfvars` and set the region, your SSH public key, the instance, `game_hostname` and `alert_email` ([AWS settings](#aws-settings)).
    - Copy `deploy/vm.example.yml` to `deploy/local/vm.yml` and set `deploy_domain` ([Settings](#settings)). The URLs come in step 5.
@@ -118,7 +119,7 @@ The pieces depend on each other in a circle. Terraform creates the Lambda, whose
    It generates the [secrets](#secrets) and writes `deploy/local/lambda.env` ([First VM deploy](#first-vm-deploy)).
 8. **Deploy the backend:** `scripts/aws.sh deploy`. Its plan only updates the function's settings. The migrations create the schema, then the function gets its settings ([Deploying the backend](#deploying-the-backend)).
 9. **Run the smoke test:** `scripts/vm.sh smoke` ([Smoke test](#smoke-test)). Players can now open `https://island-battles.<domain>`.
-10. **Back up `deploy/local/`:** the secrets, Terraform's state, `aws.tfvars`, `vm.yml` and `lambda.env`.
+10. **Nothing to back up by hand:** every script pushed the settings, the secrets and `lambda.env` to the deploy bucket, and Terraform keeps its state there. Any machine with the AWS credentials can deploy from here on.
 
 ### Adding the game's name to a running deployment
 
@@ -157,11 +158,49 @@ Copy `deploy/aws.example.tfvars` to `deploy/local/aws.tfvars` and fill in `regio
 
 ### State
 
-Terraform's state is a local file, `deploy/local/terraform/terraform.tfstate`, gitignored like the rest of `deploy/local/`. `.gitignore` also covers `.terraform/` and `*.tfstate*` anywhere else.
+Terraform's state is `terraform/terraform.tfstate` in the [deploy bucket](#the-deploy-bucket), through Terraform's S3 backend. `scripts/aws.sh` finds the bucket and its region from the AWS credentials and passes them to `terraform init`. `.gitignore` covers `.terraform/` and `*.tfstate*`, in case a copy ends up in the checkout.
 
-- **The state holds the Lambda's secrets:** its environment, with the database password, Centrifugo's API key, the connection token secret and the proxy secret. Treat it like `deploy/local/secrets/`: back it up with them, and never commit it.
-- **Apply from one machine at a time.** A local state has no locking. Copy the state along with `deploy/local/` when you switch machines or worktrees.
+- **The state holds the Lambda's secrets:** its environment, with the database password, Centrifugo's API key, the connection token secret and the proxy secret. Never commit a copy.
+- **One apply at a time.** Terraform locks the state with `terraform/terraform.tfstate.tflock` in the bucket while it plans and applies. A plan on another machine meanwhile fails with `Error acquiring the state lock`. If a run was killed and left the lock behind, `terraform -chdir=deploy/terraform force-unlock <lock ID>` removes it, once you're sure nothing else is applying.
+- **Every earlier state is kept:** the bucket is versioned. To go back to one, find it in the S3 console's versions of the object.
 - **If the state is lost,** the resources keep running, but Terraform no longer knows them. Bring each back with `terraform import` before applying again, or Terraform tries to create them a second time.
+
+### The deploy bucket
+
+`island-battles-deploy-<account ID>` is a private S3 bucket in the deployment's own account, which `scripts/deploy-files.sh bootstrap --region <region>` creates once. Set `ISLAND_BATTLES_DEPLOY_BUCKET` to use another name. The bootstrap blocks public access, turns on versioning and SSE-S3 encryption, refuses plain HTTP, and expires copies that were replaced more than 90 days ago, keeping the last 10 of each file. Run it again to bring an existing bucket's settings up to date. The bucket isn't part of the Terraform configuration, which keeps its state in it.
+
+It holds:
+
+- `terraform/`: Terraform's state and its lock.
+- `files/`: a copy of `deploy/local/`: `aws.tfvars`, `vm.yml`, `secrets/`, `lambda.env` and `smoke-session.json`, and any other file there, except `terraform/` (plans and an old local state), `lambda/` (the build) and `dumps/`.
+
+`scripts/aws.sh apply` and `deploy`, and every `scripts/vm.sh` command, **pull** the files first and **push** them back when they end, even after a failure, so new secrets and a new `lambda.env` never stay on one machine. A new machine or worktree needs nothing but the AWS credentials. To change a setting, edit it in `deploy/local/` and run a script, or `scripts/deploy-files.sh push`.
+
+Each machine remembers what it last pulled or pushed, in `deploy/local/.sync-base.json`, so a sync can tell which side changed a file:
+
+- **Changed only in the bucket**, or missing here: a pull takes the bucket's copy.
+- **Changed only here:** a push sends it. The upload only succeeds while the bucket still has the copy it compared against, so two machines can't overwrite each other.
+- **Changed on both sides:** a conflict, and the script stops before deploying. `scripts/deploy-files.sh status` lists the differences. Keep one: `scripts/deploy-files.sh pull --force` takes the bucket's copies, `push --force` sends this machine's.
+- **Deleted:** nothing is ever deleted from the bucket, and a pull brings back a file deleted here. Delete a file in the S3 console to remove it everywhere; versioning keeps its earlier copies.
+
+The VM deploy refuses to run while the bucket has the deployment's Terraform state but no secrets: with `-e app_generate_secrets=true`, it would otherwise replace every password and key of the deployment that runs.
+
+#### Moving an existing deployment to the bucket
+
+A deployment from before the deploy bucket keeps its state and secrets in one machine's `deploy/local/`. On that machine, with a checkout of this change:
+
+1. `scripts/deploy-files.sh bootstrap --region <region>`, with the deployment's region.
+2. `scripts/deploy-files.sh push`, which sends `deploy/local/`'s settings and secrets.
+3. `scripts/aws.sh migrate-state`, which moves `deploy/local/terraform/terraform.tfstate` into the bucket and renames the local file to `terraform.tfstate.migrated`. Until then, `scripts/aws.sh` refuses to plan on that machine.
+4. Remove `ssh_allowed_cidrs` from `deploy/local/aws.tfvars`, so the firewall opens 22 to all, and set `github_repository` for [GitHub Actions](#deploying-from-github-actions). Run `scripts/aws.sh apply`: changing the rules closes every port for a few seconds ([AWS resources](#aws-resources)).
+
+Every other machine and worktree then pulls from the bucket on its own. Keep the old `deploy/local/` until another machine has deployed.
+
+### Logging in to the VM
+
+The VM deploy logs in as `ubuntu` with a temporary SSH key from Lightsail, as the console's browser-based SSH does. For each IP it deploys to, `scripts/vm.sh` finds the instance with that public IP in the region from `aws.tfvars`, asks Lightsail for a key and its certificate with `aws lightsail get-instance-access-details`, and hands them to Ansible. The instance trusts certificates from Lightsail's own CA, so no key of yours needs to be on it, and the key is deleted when the script ends.
+
+This needs only the AWS credentials, with `lightsail:GetInstanceAccessDetails`, and port 22 open to the machine that deploys, which is why `ssh_allowed_cidrs` stays open to all. `ssh_public_key` still installs your own key for `ubuntu`, and the VM deploy lets it log in as `deploy` too, for logging in by hand.
 
 ### The concurrency cap
 
@@ -212,7 +251,7 @@ The first deploy generates these into `deploy/local/secrets/`. Every later deplo
 - The backend's admin API key, `admin_api_key`. Only the Lambda reads it, from `lambda.env`. Send it in the `X-Admin-API-Key` header to create default maps with `POST /map/create` (see [map files](../backend/README.md#map-files)). Without it, the Lambda refuses every map creation.
 - Postgres's TLS key and its self-signed certificate.
 
-Back up `deploy/local/secrets/` somewhere safe, such as a password manager, and copy it into every checkout or worktree you deploy from.
+The scripts keep them in the [deploy bucket](#the-deploy-bucket), so every machine and worktree gets them with its first pull.
 
 A deploy stops if any of these files is missing, because new secrets would replace the live VM's password and keys. Pass `-e app_generate_secrets=true` only for a first deploy, or if the secrets are lost for good. In that case the deploy resets the backend's password and Centrifugo's keys, and you redeploy the backend with the new `lambda.env`: `scripts/aws.sh deploy`. Players then need new connection tokens, which clients fetch on their own.
 
@@ -264,7 +303,7 @@ It doesn't ask for confirmation, never connects to the VM and never changes a Li
 **Why Terraform publishes the code,** rather than the AWS CLI with Terraform only creating the function:
 
 - **One owner.** If the CLI published the code and settings, Terraform would have to ignore both. The pool size that Terraform checks against the reserved concurrency would then be set by another tool, and nothing would check the two together.
-- **One tool.** A deploy needs Terraform, Go and Python, which the rest of the deployment already uses, and no AWS CLI.
+- **One tool.** A deploy needs Terraform, Go and Python, which the rest of the deployment already uses. The AWS CLI only syncs the deploy bucket.
 - **Checked offline.** `terraform test` covers the settings pass-through and the concurrency check with mocked providers.
 - **The cost:** every deploy plans the whole configuration. That takes a few seconds longer and could pick up unrelated changes, which the plan check stops.
 - Either way the state holds the secrets, because Terraform reads the function's environment into its state even when it ignores changes to it.
@@ -293,6 +332,37 @@ Change `deploy/local/aws.tfvars` or `deploy/terraform/`, then run `scripts/aws.s
 - **Read the plan.** Changing an instance's zone, image or plan replaces it, and replacing an instance deletes its disk and its automatic snapshots. Add a new instance and [move to it](#moving-to-a-new-vm) instead.
 - **Destroying needs the name.** When the plan deletes or replaces an instance, the static IP, a disk or the distribution, the apply lists them and asks you to type each one's name before the usual `yes`. For the distribution, that's its domain, `<id>.cloudfront.net`: a new distribution gets a new one, and the `island-battles` CNAME must follow it. A wrong answer applies nothing. If you didn't mean to destroy it, `aws.tfvars` probably doesn't match the instances that run. Without a terminal, list the names in `ISLAND_BATTLES_ALLOW_DESTROY`, separated by commas.
 - **It may publish the backend too.** When the plan changes the function, the apply first runs the migrations and then publishes the backend built from your checkout, so run it from the commit you last deployed or a newer one. A plan that leaves the function alone, such as moving the static IP, runs no migrations: in the middle of a move, the old VM refuses the backend.
+
+## Deploying from GitHub Actions
+
+The Deploy workflow, `.github/workflows/deploy.yml`, runs the same scripts on a GitHub runner. Start it by hand from the repository's **Actions** tab, or with `gh workflow run deploy.yml -f target=<target>`:
+
+| Target | Runs |
+|---|---|
+| `backend` | `scripts/aws.sh deploy` |
+| `vm` | `scripts/vm.sh deploy "$(scripts/aws.sh output static_ip)"` |
+| `smoke` | `scripts/vm.sh smoke` |
+
+It deploys the commit of the branch you start it on. Runs wait for each other, and Terraform's lock keeps them apart from a machine's.
+
+**Setting it up**, once:
+
+1. Set `github_repository = "<owner>/<name>"` in `deploy/local/aws.tfvars` and run `scripts/aws.sh apply`. It creates GitHub's OIDC provider in IAM and the role `island-battles-github-deploy` (`deploy/terraform/github.tf`). `scripts/aws.sh output github_deploy_role_arn` prints the role.
+2. In the repository's **Settings → Environments**, create `production` and limit its deployment branches to `main`. Only jobs in that environment can assume the role. Add required reviewers there if a deploy should wait for an approval.
+3. Add two repository variables, which aren't secret: `AWS_DEPLOY_ROLE_ARN`, the role, and `AWS_REGION`, the deployment's region.
+
+   ```sh
+   gh variable set AWS_DEPLOY_ROLE_ARN --body "$(scripts/aws.sh output github_deploy_role_arn)"
+   gh variable set AWS_REGION --body <region>
+   ```
+
+**What the role can do:** read the account, which every plan needs (`ReadOnlyAccess`), and write only what a deploy writes: the backend function's code and settings, the deploy bucket's state and files, and a temporary SSH key for the VM. It deletes nothing but the state's lock. GitHub stores no AWS keys: each run gets credentials for an hour.
+
+**What stays on a person's machine:**
+
+- `scripts/aws.sh apply`, which asks before applying and may destroy resources.
+- A backend deploy whose plan also creates something new, such as an alarm: the plan check allows it, but the role can't create it. Run `scripts/aws.sh apply` once, then deploy again.
+- `-e app_generate_secrets=true`, dumps, restores and moves.
 
 ## Smoke test
 
@@ -533,12 +603,16 @@ These checks first ran on 2026-10-30, with `reserved_concurrency = null`, `accou
 
 ## Troubleshooting
 
-- **`Missing secrets: ...`:** copy `deploy/local/secrets/` from your backup. See [Secrets](#secrets).
+- **`Missing secrets: ...`:** the deploy bucket doesn't have them. Push `deploy/local/` from the machine that has them ([The deploy bucket](#the-deploy-bucket)). See [Secrets](#secrets).
+- **`has the deployment's Terraform state but no secrets`:** the same, caught before the playbook runs.
+- **`These files changed both here and in the bucket`:** see [The deploy bucket](#the-deploy-bucket) for keeping one copy.
+- **`is Terraform's old local state`:** this machine still has the state from before the deploy bucket. Run `scripts/aws.sh migrate-state` ([Moving an existing deployment to the bucket](#moving-an-existing-deployment-to-the-bucket)).
+- **`No Lightsail instance in <region> has the public IP <IP>`:** check the IP against `scripts/aws.sh output instance_ips`, and `region` in `aws.tfvars`.
 - **`<IP> was moved away from`:** you're deploying the VM a move left behind. Check the IP. See step 7 of [Moving to a new VM](#moving-to-a-new-vm) to really go back to it.
 - **`vm.<domain> resolves to [...], not <IP>`:** fix the A record and wait for it to resolve, or pass `-e vm_static_ip=<static IP>` when preparing a new VM.
 - **The TLS check fails:**
   - Check that the Lightsail firewall opens 443 and that CAA records allow `letsencrypt.org`.
-  - Read Centrifugo's log on the VM: `ssh deploy@vm.<domain>`, then `cd /opt/island-battles && docker compose logs centrifugo`.
+  - Read Centrifugo's log on the VM: `ssh deploy@vm.<domain>` with the key from `ssh_public_key`, or the Lightsail console's browser-based SSH and then `sudo -iu deploy`, then `cd /opt/island-battles && docker compose logs centrifugo`.
   - After repeated failures, Let's Encrypt blocks new attempts for about an hour.
 - **`REMOTE HOST IDENTIFICATION HAS CHANGED`:** the static IP now points at a different instance. Run `ssh-keygen -R <static IP>`.
 - **`This plan changes more than the backend`:** `scripts/aws.sh deploy` found changes to Lightsail resources or the game's certificate or distribution, or a deletion, in the plan, and stopped before migrating. Run `scripts/aws.sh apply`, read the plan, and deploy again once it's applied. Right after `game_hostname` is first set, request the certificate first ([Adding the game's name](#adding-the-games-name-to-a-running-deployment)).
@@ -547,11 +621,12 @@ These checks first ran on 2026-10-30, with `reserved_concurrency = null`, `accou
 - **The lobby loads, but live updates never arrive:** Centrifugo accepts browsers only from `game_url`'s origin. Open the game at `game_url`, not at the Function URL, and check that `game_url` in `deploy/local/vm.yml` matches it, then redeploy the VM.
 - **Authenticated requests answer 401 through CloudFront, but not on the Function URL:** the distribution doesn't forward `Authorization`. Check its origin request policy, `Managed-AllViewerExceptHostHeader`.
 - **The migrations or the apply fail during `scripts/aws.sh deploy`:** fix the cause, for example the database being unreachable, and run `scripts/aws.sh deploy` again. Migrations that already ran are skipped. If the apply failed after the migrations, the old code keeps serving against the migrated schema until a deploy succeeds.
-- **`lambda.env is missing`** from Terraform or `scripts/aws.sh`: copy `deploy/local/` from your backup, or run the VM deploy, which writes it. Only the very first apply passes `-var allow_missing_lambda_settings=true`.
+- **`lambda.env is missing`** from Terraform or `scripts/aws.sh`: push `deploy/local/` from the machine that has it, or run the VM deploy, which writes it. Only the very first apply passes `-var allow_missing_lambda_settings=true`.
 - **`decreases account's UnreservedConcurrentExecution below its minimum value`:** the account's concurrency limit is too low. See [The concurrency cap](#the-concurrency-cap).
 - **`AccessDenied: Your account must be verified before you can add new CloudFront resources`:** the account can't create distributions yet. The error asks you to contact AWS Support: open a case in the Support Center with the error message and its request ID, then run `scripts/aws.sh apply` again. Until the distribution exists, `scripts/aws.sh deploy` refuses its plan, which creates it; publish the backend with `scripts/aws.sh apply` instead.
   - 2026-10-30, the live account: the first two full applies failed this way. The first had already created the certificate's validation and updated the function. A third, later the same day, created the distribution in 3 minutes.
-- **The VM deploy times out connecting to port 22:** usually your public IP is no longer in `ssh_allowed_cidrs`, as on 2026-10-30. Check it with `curl https://checkip.amazonaws.com`, put the new address in `aws.tfvars`, and run `scripts/aws.sh apply` ([Firewall](#aws-resources)).
+- **The VM deploy times out connecting to port 22:** the firewall doesn't let this machine in, as on 2026-10-30, when `ssh_allowed_cidrs` held one address. Remove `ssh_allowed_cidrs` from `aws.tfvars` and run `scripts/aws.sh apply` from a machine that can deploy ([Logging in to the VM](#logging-in-to-the-vm)).
+- **`Permission denied (publickey)` from the VM deploy:** Lightsail's temporary certificate was refused, for example because it expired. Run the deploy again for a new one.
 - **The Function URL answers `Internal Server Error`:** read the function's log, the CloudWatch log group `/aws/lambda/<name>`, `/aws/lambda/island-battles` by default, as [Reading the logs](#reading-the-logs) describes. Right after the first apply, the function has no settings yet: run `scripts/aws.sh deploy`. A `Forbidden` means the Function URL's public permissions are missing.
 - **The Function URL answers `the backend failed to start` (503):** the log's `Backend failed to start` line says why, such as missing settings, an unreachable database or limits over the budget. The instance tries again every 10 seconds.
 - **`... over the free-tier budget`** from Terraform: the concurrency cap and the log or trace limits together could leave the free tier. Lower one of them ([The budget](#the-budget)).

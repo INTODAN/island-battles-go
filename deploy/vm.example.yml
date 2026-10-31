@@ -13,9 +13,5 @@ lambda_function_url: https://<url-id>.lambda-url.<region>.on.aws/
 # connections only from its origin. `scripts/aws.sh output game_url` prints it.
 game_url: https://island-battles.<your-domain>
 
-# Optional: the SSH key for the instance, unless ssh-agent or ~/.ssh/config
-# already provides it.
-# ansible_ssh_private_key_file: ~/.ssh/<lightsail-key>.pem
-
 # Optional: a contact address for the Let's Encrypt account.
 # app_letsencrypt_email: <you@your-domain>

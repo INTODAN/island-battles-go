@@ -24,8 +24,9 @@ game_hostname = "island-battles.<your-domain>"
 # Where the error alarms and the zero-spend budget send their emails.
 alert_email = "<your email address>"
 
-# Optional: limit SSH to your own address.
-# ssh_allowed_cidrs = ["<your IP>/32"]
+# Optional: let the repository's Deploy workflow deploy through an IAM role
+# that GitHub Actions assumes with OIDC (deploy/README.md).
+# github_repository = "<owner>/<name>"
 
 # Optional: how many Lambda instances may run at once. Every one keeps up to
 # database_max_open_connections (2) connections to Postgres, and together they

@@ -36,7 +36,7 @@
       - app_missing_secret_files | length == 0 or app_generate_secrets | bool
     fail_msg: >-
       Missing secrets: {{ app_missing_secret_files | join(', ') }}. Deploying without them would replace
-      the live VM's passwords and keys. Copy deploy/local/secrets/ from where you keep it. Only for a
+      the live VM's passwords and keys. Push deploy/local/ to the deploy bucket from the machine that has them. Only for a
       first deploy, or after losing the secrets for good, pass -e app_generate_secrets=true.
     quiet: true
   run_once: true
