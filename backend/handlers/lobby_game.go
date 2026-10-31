@@ -59,3 +59,33 @@ func (handler *LobbyGame) Replay(ctx context.Context, input *struct {
 		_, _ = response.BodyWriter().Write([]byte(html))
 	}}, nil
 }
+
+func (handler *LobbyGame) Demo(ctx context.Context, input *struct {
+	LobbyID       string `path:"lobby_id" format:"uuid"`
+	Authorization string `header:"Authorization"`
+}) (*huma.StreamResponse, error) {
+	defer handler.runRetention(ctx)
+	verified, err := handler.Authenticator.Authenticate(ctx, input.Authorization)
+	if err != nil {
+		return nil, huma.Error401Unauthorized("authentication required")
+	}
+	service := services.GenerationService{Database: handler.Database}
+	demo, err := service.Demo(ctx, verified.Principal, input.LobbyID)
+	if err != nil {
+		return nil, generationHTTPError(ctx, err)
+	}
+	if len(demo.Frames) == 0 {
+		return nil, huma.Error404NotFound("game is not ready")
+	}
+	return &huma.StreamResponse{Body: func(response huma.Context) {
+		response.SetHeader("Content-Type", "application/json")
+		response.SetHeader("Content-Disposition", fmt.Sprintf("attachment; filename=%q", services.DemoFileName(demo)))
+		response.SetHeader("Cache-Control", "no-store")
+		// The status went out with the first bytes, so a failed write can
+		// only cut the body short. A player who leaves cancels the request,
+		// which is not an error.
+		if err := services.WriteDemo(response.BodyWriter(), demo); err != nil && ctx.Err() == nil {
+			observability.RecordError(ctx, fmt.Errorf("write demo: %w", err))
+		}
+	}}, nil
+}

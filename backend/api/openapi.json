@@ -222,6 +222,80 @@
         },
         "type": "object"
       },
+      "Demo": {
+        "additionalProperties": false,
+        "properties": {
+          "format": {
+            "description": "Marks the file as an Island Battles demo.",
+            "enum": [
+              "island-battles-demo"
+            ],
+            "type": "string"
+          },
+          "frames": {
+            "description": "Every generation played when the demo was saved, in order. Each is the board view that players received.",
+            "items": {
+              "$ref": "#/components/schemas/Generation"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "game_id": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "logs": {
+            "description": "One entry per frame, in the same order, with the game log lines its saver could see when saving: while the game runs only the saver's team's, once it has ended every team's. hidden_team_colors names the teams left out.",
+            "items": {
+              "$ref": "#/components/schemas/GenerationLogs"
+            },
+            "type": "array"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GameOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How the game ended, or null when the demo was saved while the game was still running."
+          },
+          "saved_at": {
+            "description": "When the demo was saved.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "schema_version": {
+            "description": "The demo format's version. The demo viewer opens only the current version and rejects a demo saved by another version of the game.",
+            "enum": [
+              1
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "teams": {
+            "description": "The teams that played, with their lobby names and the display names their players had at the start.",
+            "items": {
+              "$ref": "#/components/schemas/GameTeam"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "format",
+          "schema_version",
+          "saved_at",
+          "game_id",
+          "teams",
+          "outcome",
+          "frames",
+          "logs"
+        ],
+        "type": "object"
+      },
       "ErrorDetail": {
         "additionalProperties": false,
         "properties": {
@@ -361,6 +435,33 @@
           "reason",
           "winner_team_color",
           "summary"
+        ],
+        "type": "object"
+      },
+      "GameTeam": {
+        "additionalProperties": false,
+        "properties": {
+          "color": {
+            "description": "The team colour that castles and soldier groups carry as team_color.",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "players": {
+            "description": "The display names the team's players had at the start.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "color",
+          "name",
+          "players"
         ],
         "type": "object"
       },
@@ -1112,12 +1213,75 @@
     }
   },
   "info": {
-    "description": "Operations a player client calls during a started game. After every turn, each roster player's Centrifugo channel `player:{player_id}` receives a `GenerationEvent`, except after the turn that ends the game, which pushes a `GameEndedEvent` with the final generation and its outcome instead. Clients reconcile with the generation read after subscribing or reconnecting; HTTP state is authoritative, and its `outcome` is set once the game has ended. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the `game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose. `GET /game/upgrades` lists what each castle upgrade level costs.",
+    "description": "Operations a player client calls during a started game. After every turn, each roster player's Centrifugo channel `player:{player_id}` receives a `GenerationEvent`, except after the turn that ends the game, which pushes a `GameEndedEvent` with the final generation and its outcome instead. Clients reconcile with the generation read after subscribing or reconnecting; HTTP state is authoritative, and its `outcome` is set once the game has ended. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the `game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose. `GET /game/upgrades` lists what each castle upgrade level costs. `Demo` is the demo file format, which `GET /game/from-lobby/{lobby_id}/demo` returns and the demo viewer at `/game/demo-viewer/` opens.",
     "title": "Island Battles Player API",
     "version": "1.0.0"
   },
   "openapi": "3.1.0",
   "paths": {
+    "/game/from-lobby/{lobby_id}/demo": {
+      "get": {
+        "description": "Requires a place on the game's frozen roster; the lobby is not consulted. Returns the game as a demo file, the Demo schema, as an attachment named island-battles-game-\u003cgame_id\u003e-generation-\u003cn\u003e.json, where n is the number of generations played. Any roster player can save a demo at any time: one saved during the game holds the generations played so far and a null outcome. Each frame's game log lines follow the rule of GET /game/from-lobby/{lobby_id}/logs when the demo is saved: while the game runs only your own team's lines, once it has ended every team's. The demo viewer at /game/demo-viewer/ opens the file without the lobby, a session or the game. The body is streamed, and a long game with full logs takes tens of megabytes. The game is deleted 7 days after its last generation by default; then this returns 404.",
+        "operationId": "getIslandLobbyDemo",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lobby_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Demo"
+                }
+              }
+            },
+            "description": "The demo file.",
+            "headers": {
+              "Content-Disposition": {
+                "description": "attachment, with the demo's file name.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "LobbyBearer": []
+          }
+        ],
+        "summary": "Save a lobby's game as a demo file for a roster player",
+        "tags": [
+          "Island Battles"
+        ]
+      }
+    },
     "/game/from-lobby/{lobby_id}/generation": {
       "get": {
         "description": "Requires a place on the game's frozen roster. The game does not consult the lobby, so access continues after the lobby is deleted. Returns castle and soldier group IDs, which are never reassigned within a game, troop state, every castle's and soldier group's upgrade levels, recorded clashes with per-participant before/after counts, your turn completion flag, and the outcome once the game has ended. A finished game stays readable until the game is deleted, 7 days after its last generation by default; then this returns 404.",
