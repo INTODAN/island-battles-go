@@ -19,7 +19,10 @@ var replayTemplate = template.Must(template.New("replay").Parse(replayHTML))
 // every read, in the board view that players receive, so the page appends live
 // generations unchanged.
 type GameReplay struct {
-	GameID  uint                    `json:"game_id"`
+	GameID uint `json:"game_id"`
+	// LobbyID names the game in the paths that the page asks the lobby page
+	// to fetch for it, such as the game log's.
+	LobbyID string                  `json:"lobby_id"`
 	Teams   []models.GameTeam       `json:"teams"`
 	Frames  []models.GenerationView `json:"frames"`
 	Outcome string                  `json:"outcome"`
@@ -30,7 +33,7 @@ type GameReplay struct {
 // gameReplay builds the replay of a game from its generations in ID order,
 // as dal.LoadGameGenerations returns them.
 func gameReplay(game *models.Game, generations []models.Generation) GameReplay {
-	replay := GameReplay{GameID: game.ID, Teams: game.Teams, Frames: make([]models.GenerationView, 0, len(generations)), Outcome: describeOutcome(game), Ended: game.Outcome != nil}
+	replay := GameReplay{GameID: game.ID, LobbyID: lobbyID(game), Teams: game.Teams, Frames: make([]models.GenerationView, 0, len(generations)), Outcome: describeOutcome(game), Ended: game.Outcome != nil}
 	if replay.Teams == nil {
 		replay.Teams = []models.GameTeam{}
 	}
@@ -38,6 +41,15 @@ func gameReplay(game *models.Game, generations []models.Generation) GameReplay {
 		replay.Frames = append(replay.Frames, GenerationView(&generations[index]))
 	}
 	return replay
+}
+
+// lobbyID is the ID of the lobby that started the game, or empty for a game
+// that no lobby started.
+func lobbyID(game *models.Game) string {
+	if game.LobbyID == nil {
+		return ""
+	}
+	return *game.LobbyID
 }
 
 func describeOutcome(game *models.Game) string {
