@@ -95,14 +95,7 @@ async def test_lines_past_the_limit_are_replaced_by_one_stored_error(
     assert all(len(batch.get("logs", [])) <= 100 for batch in posts(proxy))
     lines = own_lines(await match.read_logs(match.alice, generation["id"]))
     assert lines[:99] == [line("info", f"line {index + 1}") for index in range(99)]
-    assert lines[99:] == [
-        line(
-            "error",
-            f"game log limit reached for generation {generation['id']}: "
-            "100 lines per generation; 6 lines were not stored",
-            SDK_LOGGER,
-        )
-    ]
+    assert lines[99:] == [limit_error(generation["id"], 6)]
     # The file gets every line and the error once, when the first line is dropped.
     written = log_file.read_text(encoding="utf-8")
     assert "line 105" in written
@@ -137,6 +130,88 @@ async def test_a_failed_callback_keeps_its_lines_and_traceback(launch, match, pr
     assert "scripted callback failure" in failure["message"]
     assert len(failure["message"]) <= 500
     assert not (await match.read(match.alice))["submitted"]
+
+
+def limit_error(generation_id: int, dropped: int) -> dict:
+    return line(
+        "error",
+        f"game log limit reached for generation {generation_id}: "
+        f"100 lines per generation; {dropped} lines were not stored",
+        SDK_LOGGER,
+    )
+
+
+async def test_text_that_cannot_be_stored_is_replaced(launch, match):
+    alice, generation = await playing(launch, match)
+    await log(alice, "info", "a NUL \x00 and a lone surrogate \udcff")
+    await alice.send({"type": "finish"})
+    await match.wait_submitted(match.alice)
+    assert own_lines(await match.read_logs(match.alice, generation["id"])) == [
+        line("info", "a NUL \ufffd and a lone surrogate \ufffd")
+    ]
+
+
+async def test_a_restarted_bot_counts_on_from_its_stored_lines(launch, match, proxy):
+    first, generation = await playing(launch, match)
+    for index in range(60):
+        await log(first, "info", f"first run {index + 1}")
+    await first.send({"type": "fail"})
+    assert (await first.expect("stopped"))["error"]["kind"] == "player"
+    await first.close()
+    # The failed callback stored its 60 lines and its traceback.
+    state = await match.read(match.alice)
+    assert not state["submitted"] and state["log_lines_stored"] == 61
+
+    # The developer fixes the bug and starts the bot again for the same turn.
+    second = await launch()
+    await second.expect("started")
+    assert (await second.expect("generation"))["generation"]["id"] == generation["id"]
+    sent_before = len(posts(proxy))
+    for index in range(50):
+        await log(second, "info", f"second run {index + 1}")
+    await second.send({"type": "finish"})
+    await match.wait_submitted(match.alice)
+    # Counting from the stored lines, the client sent only what the server
+    # takes: 38 lines and the error in place of the 39th, with the completion.
+    [completion] = posts(proxy)[sent_before:]
+    assert completion["complete"] is True and len(completion["logs"]) == 39
+    lines = own_lines(await match.read_logs(match.alice, generation["id"]))
+    assert len(lines) == 100
+    assert lines[:60] == [line("info", f"first run {index + 1}") for index in range(60)]
+    assert lines[60]["logger"] == SDK_LOGGER and "Traceback" in lines[60]["message"]
+    assert lines[61:99] == [
+        line("info", f"second run {index + 1}") for index in range(38)
+    ]
+    assert lines[99] == limit_error(generation["id"], 12)
+
+
+async def test_lines_the_server_refuses_are_dropped_and_the_turn_completes(
+    launch, match, proxy, tmp_path
+):
+    log_file = tmp_path / "bot.log"
+    alice, generation = await playing(launch, match, log_file=str(log_file))
+    # Another client of the same player fills the generation's game log.
+    other = [line("info", f"other client {index + 1}") for index in range(100)]
+    response = await match.post(
+        match.alice, match.alice.state, logs=other, complete=False
+    )
+    assert response.status_code == 200, response.text
+    await log(alice, "info", "one line too many")
+    await alice.send({"type": "finish"})
+    await match.wait_submitted(match.alice)
+    # The refused batch is sent again without its lines, as a new request.
+    refused, resent = posts(proxy)[-2:]
+    assert refused["logs"] == [line("info", "one line too many")]
+    assert refused["complete"] is True and resent["complete"] is True
+    assert not resent.get("logs") and resent["commands"] == refused["commands"]
+    assert resent["request_id"] != refused["request_id"]
+    assert own_lines(await match.read_logs(match.alice, generation["id"])) == other
+    # The bot's outputs say why the line is missing.
+    written = log_file.read_text(encoding="utf-8")
+    assert "one line too many" in written
+    assert (
+        written.count(f"game log limit reached for generation {generation['id']}") == 1
+    )
 
 
 async def test_the_opponents_lines_are_hidden_until_the_game_ends(launch, match):

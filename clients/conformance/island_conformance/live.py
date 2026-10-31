@@ -51,12 +51,12 @@ class Match:
 
     async def submit(self, seat: Seat, state: dict, commands=(), logs=()) -> dict:
         """Complete the seat's turn for the generation of state."""
-        response = await self.post(seat, state, commands, complete=True)
+        response = await self.post(seat, state, commands, logs, complete=True)
         assert response.status_code == 200, response.text
         return response.json()
 
     async def post(
-        self, seat: Seat, state: dict, commands=(), *, complete: bool
+        self, seat: Seat, state: dict, commands=(), logs=(), *, complete: bool
     ) -> httpx.Response:
         """Post one batch for the generation of state and return the raw answer."""
         return await self.http.post(
