@@ -21,6 +21,21 @@ ALTER ROLE "{{ postgres_admin_role }}" SET default_transaction_read_only = on;
 ALTER ROLE "{{ postgres_admin_role }}" SET statement_timeout = '5s';
 
 GRANT CONNECT ON DATABASE "{{ postgres_database }}" TO "{{ postgres_admin_role }}";
+
+-- pg_logical_emit_message writes WAL that a rollback doesn't undo, so a loop
+-- of them could fill the VM's disk even from a read-only transaction.
+-- Everyone may call it by default, and nothing in the backend does, so it is
+-- revoked from PUBLIC, in every signature this PostgreSQL version has. The
+-- superuser keeps it.
+DO $$
+DECLARE
+  emit_message regprocedure;
+BEGIN
+  FOR emit_message IN SELECT oid::regprocedure FROM pg_proc WHERE proname = 'pg_logical_emit_message' LOOP
+    EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM PUBLIC', emit_message);
+  END LOOP;
+END
+$$;
 GRANT USAGE ON SCHEMA public TO "{{ postgres_admin_role }}";
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO "{{ postgres_admin_role }}";
 
