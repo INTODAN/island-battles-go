@@ -28,3 +28,37 @@ class GameClientClosedError(GameError):
 class GameReceiverClosedError(GameError):
     def __init__(self):
         super().__init__("command receiver is closed; use it only during on_generation")
+
+
+class GameCommandError(GameError):
+    """A command that the game rules reject, for a reason a strategy can act on.
+
+    The receiver raises it before any request, with ``status`` None, when the
+    callback's board already shows the problem. Otherwise the server rejects the
+    command, and ``status`` is the HTTP status.
+    """
+
+
+class CastleNotFoundError(GameCommandError):
+    """The castle is not in the generation."""
+
+
+class CastleNotOwnedError(GameCommandError):
+    """The castle belongs to another team or to none."""
+
+
+class UpgradeMaxLevelError(GameCommandError):
+    """The upgrade type is at its maximum level, counting this turn's upgrades."""
+
+
+class InsufficientSoldiersError(GameCommandError):
+    """The castle has too few soldiers left after this turn's reservations."""
+
+
+# The server's problem types for command rejections, shared by every command.
+PROBLEM_TYPE_ERRORS: dict[str, type[GameCommandError]] = {
+    "urn:island-battles:problem:castle-not-found": CastleNotFoundError,
+    "urn:island-battles:problem:castle-not-owned": CastleNotOwnedError,
+    "urn:island-battles:problem:upgrade-max-level": UpgradeMaxLevelError,
+    "urn:island-battles:problem:insufficient-soldiers": InsufficientSoldiersError,
+}

@@ -6,8 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
-	"io"
+	"fmt"
 	"log/slog"
 
 	"islandBattles/backend/dal"
@@ -37,6 +36,16 @@ func reject(status int, detail string) error { return &GenerationError{Status: s
 // GameEndedProblemType is the problem type of the 409 that rejects commands
 // for a finished game.
 const GameEndedProblemType = "urn:island-battles:problem:game-ended"
+
+// Problem types of command rejections that clients map to their own errors.
+// send_soldier_group and upgrade_castle share them.
+const (
+	CastleNotFoundProblemType       = "urn:island-battles:problem:castle-not-found"
+	CastleNotOwnedProblemType       = "urn:island-battles:problem:castle-not-owned"
+	UnknownUpgradeTypeProblemType   = "urn:island-battles:problem:unknown-upgrade-type"
+	UpgradeMaxLevelProblemType      = "urn:island-battles:problem:upgrade-max-level"
+	InsufficientSoldiersProblemType = "urn:island-battles:problem:insufficient-soldiers"
+)
 
 // MaxGenerations caps a game. Turns are not paced, so bots play as fast as round
 // trips allow. The turn that creates the last generation ends the game, so no
@@ -268,69 +277,40 @@ func commandPayloadHash(request models.RegisterGenerationCommands) (string, erro
 	return hex.EncodeToString(hash[:]), nil
 }
 
+// validateCommands checks a batch against the generation and every command
+// already accepted this turn, by any player, and translates it into internal
+// commands. A batch it accepts cannot make simulation.Simulate fail.
 func validateCommands(generation *models.Generation, teamColor uint, inputs []models.GenerationInput, public []models.PublicGenerationCommand) ([]models.CommandFields, error) {
-	available := map[uint]uint{}
-	castles := map[uint]models.Castle{}
-	for _, castle := range generation.Map.Castles {
-		castles[castle.PersistentCastleID] = castle
-		available[castle.PersistentCastleID] = castle.SoldierAmount
-	}
+	reservations := newTurnReservations(generation)
 	for _, input := range inputs {
 		var commands []models.CommandFields
 		if err := json.Unmarshal(input.Commands, &commands); err != nil {
 			return nil, err
 		}
 		for _, command := range commands {
-			var parameters simulation.SendSoldierGroupParams
-			if err := json.Unmarshal(command.Parameters, &parameters); err != nil {
-				return nil, err
+			// %v rather than %w: a stored command that no longer fits is a
+			// server fault, not a rejection of this batch.
+			if err := reservations.reserveStored(command); err != nil {
+				return nil, fmt.Errorf("persisted reservations do not fit the generation: %v", err)
 			}
-			if parameters.SoldierAmount > available[parameters.OriginPersistentCastleID] {
-				return nil, errors.New("persisted reservations exceed available soldiers")
-			}
-			available[parameters.OriginPersistentCastleID] -= parameters.SoldierAmount
 		}
 	}
 	commands := make([]models.CommandFields, 0, len(public))
 	for _, command := range public {
-		if command.CommandType != models.SendSoldierGroup {
-			return nil, reject(403, "only send_soldier_group is a player command")
+		var internal models.CommandFields
+		var err error
+		switch command.CommandType {
+		case models.SendSoldierGroup:
+			internal, err = reservations.acceptSend(teamColor, command.Parameters)
+		case models.UpgradeCastle:
+			internal, err = reservations.acceptUpgrade(teamColor, command.Parameters)
+		default:
+			return nil, reject(403, "only send_soldier_group and upgrade_castle are player commands")
 		}
-		var parameters models.SendSoldierGroupParameters
-		decoder := json.NewDecoder(bytes.NewReader(command.Parameters))
-		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&parameters); err != nil {
-			return nil, reject(422, "send_soldier_group parameters must contain integer castle IDs and soldier_amount")
-		}
-		var trailing any
-		if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-			return nil, reject(422, "invalid parameters")
-		}
-		if parameters.OriginCastleID == nil || parameters.DestinationCastleID == nil || parameters.SoldierAmount == nil || *parameters.SoldierAmount == 0 {
-			return nil, reject(422, "origin_castle_id, destination_castle_id and positive soldier_amount are required")
-		}
-		if *parameters.OriginCastleID == *parameters.DestinationCastleID {
-			return nil, reject(422, "origin and destination must differ")
-		}
-		origin, exists := castles[*parameters.OriginCastleID]
-		if !exists {
-			return nil, reject(422, "origin castle does not exist in this generation")
-		}
-		if _, exists := castles[*parameters.DestinationCastleID]; !exists {
-			return nil, reject(422, "destination castle does not exist in this generation")
-		}
-		if origin.TeamColor != teamColor {
-			return nil, reject(403, "origin castle is not owned by your team")
-		}
-		if *parameters.SoldierAmount > available[*parameters.OriginCastleID] {
-			return nil, reject(409, "insufficient soldiers after accepted team reservations")
-		}
-		available[*parameters.OriginCastleID] -= *parameters.SoldierAmount
-		raw, err := json.Marshal(simulation.SendSoldierGroupParams{OriginPersistentCastleID: *parameters.OriginCastleID, DestinationPersistentCastleID: *parameters.DestinationCastleID, SoldierAmount: *parameters.SoldierAmount})
 		if err != nil {
 			return nil, err
 		}
-		commands = append(commands, models.CommandFields{CommandType: models.SendSoldierGroup, Parameters: raw})
+		commands = append(commands, internal)
 	}
 	return commands, nil
 }

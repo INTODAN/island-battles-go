@@ -54,7 +54,7 @@ func TestHandlerListsTheGamesUpgrades(t *testing.T) {
 	if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "application/json" {
 		t.Fatalf("status=%d content type=%q", response.StatusCode, response.Header.Get("Content-Type"))
 	}
-	var upgrades []mapbuilder.Upgrade
+	var upgrades []models.UpgradeView
 	if err := json.NewDecoder(response.Body).Decode(&upgrades); err != nil {
 		t.Fatal(err)
 	}

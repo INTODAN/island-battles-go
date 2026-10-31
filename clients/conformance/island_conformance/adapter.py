@@ -56,6 +56,14 @@ class AdapterProcess:
         self._process.stdin.write((json.dumps(message) + "\n").encode())
         await self._process.stdin.drain()
 
+    async def send_together(self, messages: list[dict[str, Any]]) -> None:
+        """Write several messages at once, so the adapter acts on them concurrently."""
+        assert self._process is not None and self._process.stdin is not None
+        self._process.stdin.write(
+            "".join(json.dumps(message) + "\n" for message in messages).encode()
+        )
+        await self._process.stdin.drain()
+
     async def request(
         self, message: dict[str, Any], reply: str | tuple[str, ...], timeout: float = 20
     ) -> dict[str, Any]:

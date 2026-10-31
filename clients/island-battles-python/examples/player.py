@@ -6,25 +6,47 @@ import asyncio
 from island_battles_client import (
     NEUTRAL_TEAM_COLOR,
     CommandReceiver,
+    GameCommandError,
     Generation,
     IslandBattlesClient,
     Player,
+    UpgradeMaxLevelError,
+    UpgradeType,
 )
 
 
 class ExamplePlayer(Player):
-    """Send one soldier from the first available castle to the first enemy."""
+    """Buy speed where a castle can afford it, then send one soldier to an enemy."""
 
     async def on_generation(
         self, generation: Generation, commands_receiver: CommandReceiver
     ) -> None:
-        """Choose one legal order; returning completes the turn."""
+        """Choose legal orders; returning completes the turn."""
         castles = sorted(generation.castles, key=lambda castle: castle.id)
+        spent: dict[int, int] = {}
+        for castle in castles:
+            if castle.team_color != self.team_color:
+                continue
+            try:
+                cost = commands_receiver.upgrade_cost(castle.id, UpgradeType.speed)
+            except UpgradeMaxLevelError:
+                continue
+            # Keep one soldier to send.
+            if cost >= castle.soldiers:
+                continue
+            try:
+                await commands_receiver.upgrade_castle(castle.id, UpgradeType.speed)
+            except GameCommandError:
+                # A teammate's orders this turn may already have spent the
+                # castle's soldiers or bought the level; skip the upgrade.
+                continue
+            spent[castle.id] = cost
         own = next(
             (
                 castle
                 for castle in castles
-                if castle.team_color == self.team_color and castle.soldiers > 0
+                if castle.team_color == self.team_color
+                and castle.soldiers > spent.get(castle.id, 0)
             ),
             None,
         )

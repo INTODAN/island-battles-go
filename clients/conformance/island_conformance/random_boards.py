@@ -32,6 +32,10 @@ def _identifiers(rng: random.Random, count: int) -> list[int]:
     return rng.sample(range(10_000), count)
 
 
+def _upgrades(rng: random.Random) -> dict:
+    return {"clash_stop_generations": rng.randint(1, 3), "speed": rng.randint(1, 4)}
+
+
 def random_board(rng: random.Random) -> tuple[dict, dict]:
     """Return a valid wire generation and its public form without unknown fields."""
     taken: list[tuple] = []
@@ -45,6 +49,7 @@ def random_board(rng: random.Random) -> tuple[dict, dict]:
                 "soldiers": rng.randint(0, 500),
                 "x": x,
                 "y": y,
+                "upgrades": _upgrades(rng),
             }
         )
     groups = []
@@ -64,6 +69,7 @@ def random_board(rng: random.Random) -> tuple[dict, dict]:
                 "origin_castle_id": origin["id"],
                 "destination_castle_id": destination["id"],
                 "clash_radius": rng.choice([0.25, 0.5, rng.uniform(0.01, 3)]),
+                "upgrades": _upgrades(rng),
             }
         )
     clashes = []

@@ -23,10 +23,10 @@ func generationView(generation *models.Generation) models.GenerationView {
 		Clashes:       append([]models.Clash{}, generation.Clashes...),
 	}
 	for _, castle := range generation.Map.Castles {
-		view.Castles = append(view.Castles, models.CastleView{ID: castle.PersistentCastleID, TeamColor: castle.TeamColor, Soldiers: castle.SoldierAmount, X: castle.Position.P.X, Y: castle.Position.P.Y})
+		view.Castles = append(view.Castles, models.CastleView{ID: castle.PersistentCastleID, TeamColor: castle.TeamColor, Soldiers: castle.SoldierAmount, X: castle.Position.P.X, Y: castle.Position.P.Y, Upgrades: castle.Upgrades.Clone()})
 	}
 	for _, group := range generation.SoldierGroups {
-		view.SoldierGroups = append(view.SoldierGroups, models.SoldierGroupView{ID: group.PersistentSoldierGroupID, TeamColor: group.TeamColor, Soldiers: group.SoldierAmount, X: group.Position.P.X, Y: group.Position.P.Y, OriginCastleID: group.OriginCastle.PersistentCastleID, DestinationCastleID: group.DestinationCastle.PersistentCastleID, ClashRadius: group.EffectiveClashRadius()})
+		view.SoldierGroups = append(view.SoldierGroups, models.SoldierGroupView{ID: group.PersistentSoldierGroupID, TeamColor: group.TeamColor, Soldiers: group.SoldierAmount, X: group.Position.P.X, Y: group.Position.P.Y, OriginCastleID: group.OriginCastle.PersistentCastleID, DestinationCastleID: group.DestinationCastle.PersistentCastleID, ClashRadius: group.EffectiveClashRadius(), Upgrades: group.Upgrades.Clone()})
 	}
 	sort.Slice(view.Castles, func(left, right int) bool { return view.Castles[left].ID < view.Castles[right].ID })
 	sort.Slice(view.SoldierGroups, func(left, right int) bool { return view.SoldierGroups[left].ID < view.SoldierGroups[right].ID })

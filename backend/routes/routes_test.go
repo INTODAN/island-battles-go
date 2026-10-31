@@ -1,13 +1,40 @@
 package routes_test
 
 import (
+	"encoding/json"
+	"fmt"
 	"github.com/danielgtaylor/huma/v2/humatest"
 	"islandBattles/backend/handlers"
+	"islandBattles/backend/models"
 	"islandBattles/backend/routes"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestUpgradesAreListedWithoutAuthentication(t *testing.T) {
+	_, api := humatest.New(t, routes.NewAPIConfig("test", "1.0.0"))
+	routes.SetupRoutes(api, &handlers.Env{}, "")
+	if security := api.OpenAPI().Paths["/game/upgrades"].Get.Security; len(security) != 0 {
+		t.Fatalf("GET /game/upgrades requires %v", security)
+	}
+	response := api.Get("/game/upgrades")
+	var body struct{ Upgrades []models.UpgradeView }
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s err=%v", response.Code, response.Body.String(), err)
+	}
+	if !reflect.DeepEqual(body.Upgrades, models.UpgradeTable()) {
+		t.Fatalf("upgrades=%+v, want %+v", body.Upgrades, models.UpgradeTable())
+	}
+	// The map file docs take each type's levels from the same table.
+	description := api.OpenAPI().Paths["/map/create"].Post.Description
+	for _, upgrade := range models.UpgradeTable() {
+		if want := fmt.Sprintf("%s supports levels 1 through %d", upgrade.Type, upgrade.MaxLevel); !strings.Contains(description, want) {
+			t.Fatalf("/map/create description lacks %q: %s", want, description)
+		}
+	}
+}
 
 func TestMapCreateAcceptsTheMapFileFormat(t *testing.T) {
 	_, api := humatest.New(t, routes.NewAPIConfig("test", "1.0.0"))

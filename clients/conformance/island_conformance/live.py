@@ -41,19 +41,25 @@ class Match:
 
     async def submit(self, seat: Seat, state: dict, commands=()) -> dict:
         """Complete the seat's turn for the generation of state."""
-        response = await self.http.post(
+        response = await self.post(seat, state, commands, complete=True)
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    async def post(
+        self, seat: Seat, state: dict, commands=(), *, complete: bool
+    ) -> httpx.Response:
+        """Post one batch for the generation of state and return the raw answer."""
+        return await self.http.post(
             COMMANDS,
             headers={"Authorization": f"Bearer {seat.credential}"},
             json={
                 "game_id": state["game_id"],
                 "generation_id": state["generation_id"],
                 "request_id": str(uuid4()),
-                "complete": True,
+                "complete": complete,
                 "commands": list(commands),
             },
         )
-        assert response.status_code == 200, response.text
-        return response.json()
 
     async def play_turns(self, turns: int) -> dict:
         """Play whole turns for both seats over HTTP; return the latest state."""
@@ -92,6 +98,22 @@ def send(origin, destination, amount) -> dict:
         "origin_castle_id": origin,
         "destination_castle_id": destination,
         "soldier_amount": amount,
+    }
+
+
+def upgrade(castle_id, upgrade_type) -> dict:
+    return {
+        "type": "upgrade_castle",
+        "castle_id": castle_id,
+        "upgrade_type": upgrade_type,
+    }
+
+
+def cost(castle_id, upgrade_type) -> dict:
+    return {
+        "type": "upgrade_cost",
+        "castle_id": castle_id,
+        "upgrade_type": upgrade_type,
     }
 
 
