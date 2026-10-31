@@ -67,8 +67,12 @@ const fieldY = Math.max(3, ...replay.frames[0].castles.map((castle) => Math.abs(
 field.setAttribute("viewBox", `0 0 ${2 * fieldX * worldScale} ${2 * fieldY * worldScale}`);
 const point = (node) => [(fieldX + node.x) * worldScale, (fieldY + node.y) * worldScale];
 // Each castle's upgrade levels, written under its label, such as "Speed 2 · Stop 1".
-const upgradeNames = [["speed", "Speed"], ["clash_stop_generations", "Stop"]];
-const upgradeLevels = (castle) => upgradeNames.map(([type, name]) => `${name} ${castle.upgrades[type]}`).join(" · ");
+// Known types come first under short names; any other type follows under its own.
+const upgradeNames = new Map([["speed", "Speed"], ["clash_stop_generations", "Stop"]]);
+const upgradeRank = (type) => [...upgradeNames.keys()].indexOf(type) >>> 0;
+const upgradeLevels = (castle) => Object.keys(castle.upgrades)
+  .sort((left, right) => upgradeRank(left) - upgradeRank(right) || left.localeCompare(right))
+  .map((type) => `${upgradeNames.get(type) ?? type} ${castle.upgrades[type]}`).join(" · ");
 const scoreLabels = new Map();
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 let renderedTurn = null;
