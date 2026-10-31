@@ -10,6 +10,12 @@ export const maxDemoBytes = 128 * 1024 * 1024;
 
 const logLevels = new Set(["debug", "info", "warning", "error"]);
 
+// The farthest a position may be from the origin, and the largest radius, in
+// world units. A map has no fixed limit, but its plane is drawn to scale, so a
+// board this large is already far too large to show; a larger number, such as
+// 1e308, would make the board's size infinite and draw nothing.
+export const maxCoordinate = 1e6;
+
 // DemoFileError says why a file can't be opened.
 export class DemoFileError extends Error {}
 
@@ -76,6 +82,18 @@ function number(value, path) {
   return value;
 }
 
+// coordinate checks a position that the board can draw.
+function coordinate(value, path) {
+  if (Math.abs(number(value, path)) > maxCoordinate) throw new Problem(`${path} must be from -${maxCoordinate} to ${maxCoordinate}`);
+  return value;
+}
+
+// radius checks a soldier group's clash radius.
+function radius(value, path) {
+  if (!(number(value, path) > 0 && value <= maxCoordinate)) throw new Problem(`${path} must be more than 0 and at most ${maxCoordinate}`);
+  return value;
+}
+
 // count checks a whole number from minimum up.
 function count(value, path, minimum = 0) {
   if (!Number.isSafeInteger(value) || value < minimum) throw new Problem(`${path} must be a whole number of at least ${minimum}`);
@@ -120,8 +138,8 @@ function checkDemo(demo) {
       count(castle.id, `${castlePath}.id`);
       count(castle.team_color, `${castlePath}.team_color`);
       count(castle.soldiers, `${castlePath}.soldiers`);
-      number(castle.x, `${castlePath}.x`);
-      number(castle.y, `${castlePath}.y`);
+      coordinate(castle.x, `${castlePath}.x`);
+      coordinate(castle.y, `${castlePath}.y`);
       upgrades(castle.upgrades, `${castlePath}.upgrades`);
     });
     array(frame.soldier_groups, `${path}.soldier_groups`).forEach((group, groupIndex) => {
@@ -130,9 +148,9 @@ function checkDemo(demo) {
       count(group.id, `${groupPath}.id`);
       count(group.team_color, `${groupPath}.team_color`);
       count(group.soldiers, `${groupPath}.soldiers`);
-      number(group.x, `${groupPath}.x`);
-      number(group.y, `${groupPath}.y`);
-      if (!(number(group.clash_radius, `${groupPath}.clash_radius`) > 0)) throw new Problem(`${groupPath}.clash_radius must be more than 0`);
+      coordinate(group.x, `${groupPath}.x`);
+      coordinate(group.y, `${groupPath}.y`);
+      radius(group.clash_radius, `${groupPath}.clash_radius`);
     });
     array(frame.clashes, `${path}.clashes`).forEach((clash, clashIndex) => {
       const clashPath = `${path}.clashes[${clashIndex}]`;
@@ -142,9 +160,9 @@ function checkDemo(demo) {
         object(participant, participantPath);
         count(participant.group_id, `${participantPath}.group_id`);
         count(participant.team_color, `${participantPath}.team_color`);
-        number(participant.x, `${participantPath}.x`);
-        number(participant.y, `${participantPath}.y`);
-        if (!(number(participant.clash_radius, `${participantPath}.clash_radius`) >= 0)) throw new Problem(`${participantPath}.clash_radius must not be negative`);
+        coordinate(participant.x, `${participantPath}.x`);
+        coordinate(participant.y, `${participantPath}.y`);
+        radius(participant.clash_radius, `${participantPath}.clash_radius`);
         count(participant.soldiers_before, `${participantPath}.soldiers_before`);
         count(participant.soldiers_after, `${participantPath}.soldiers_after`);
       });
@@ -161,7 +179,8 @@ function checkDemo(demo) {
       const playerPath = `${path}.players[${playerIndex}]`;
       object(player, playerPath);
       string(player.display_name, `${playerPath}.display_name`);
-      count(player.team_color, `${playerPath}.team_color`, 1);
+      // The panel lists lines under their team.
+      if (!teamColors.has(count(player.team_color, `${playerPath}.team_color`, 1))) throw new Problem(`${playerPath}.team_color must be one of the teams' colours`);
       array(player.lines, `${playerPath}.lines`).forEach((line, lineIndex) => {
         const linePath = `${playerPath}.lines[${lineIndex}]`;
         object(line, linePath);
