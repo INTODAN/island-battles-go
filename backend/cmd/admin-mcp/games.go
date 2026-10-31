@@ -10,7 +10,6 @@ import (
 
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
-	"islandBattles/backend/retention"
 	"islandBattles/backend/services"
 	"islandBattles/lobby/adminmcp"
 	lobbypostgres "islandBattles/lobby/postgres"
@@ -124,7 +123,7 @@ type GameSummary struct {
 	GenerationCount    int64          `json:"generation_count" jsonschema:"Generations so far; the current one is turn generation_count."`
 	LastGenerationAt   *time.Time     `json:"last_generation_at"`
 	Outcome            *Outcome       `json:"outcome"`
-	RetentionDeletesAt time.Time      `json:"retention_deletes_at" jsonschema:"When retention deletes the game, 7 days after its latest generation, unless another turn is played first."`
+	RetentionDeletesAt time.Time      `json:"retention_deletes_at" jsonschema:"When retention deletes the game: ISLAND_BATTLES_GAME_RETENTION_PERIOD, 7 days by default, after its latest generation, unless another turn is played first."`
 }
 
 // GameList is list_games' answer.
@@ -208,8 +207,8 @@ type GenerationDetail struct {
 }
 
 // addGameTools registers list_games, get_game and get_generation.
-func addGameTools(server *mcp.Server, database *gorm.DB) {
-	reader := gameReader{}
+func addGameTools(server *mcp.Server, database *gorm.DB, gameRetentionPeriod time.Duration) {
+	reader := gameReader{retentionPeriod: gameRetentionPeriod}
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "list_games",
 		Description: "Lists Island Battles games, newest first, optionally only running or finished ones. For each: ID, lobby ID, teams with their players, " +
@@ -257,7 +256,11 @@ func addGameTools(server *mcp.Server, database *gorm.DB) {
 }
 
 // gameReader answers the game tools from the game tables.
-type gameReader struct{}
+type gameReader struct {
+	// retentionPeriod is how long the backend keeps a game after its latest
+	// generation, ISLAND_BATTLES_GAME_RETENTION_PERIOD.
+	retentionPeriod time.Duration
+}
 
 // summaryFields are the game columns a summary reads.
 var summaryFields = []string{"ID", "CreatedAt", "LobbyID", "Teams", "Outcome"}
@@ -286,7 +289,7 @@ func (reader gameReader) listGames(transaction *gorm.DB, input ListGamesInput) (
 		return GameList{}, fmt.Errorf("read games: %w", err)
 	}
 	list := GameList{Truncated: len(games) > limit}
-	summaries, err := summarizeGames(transaction, games[:min(limit, len(games))])
+	summaries, err := reader.summarizeGames(transaction, games[:min(limit, len(games))])
 	if err != nil {
 		return GameList{}, err
 	}
@@ -303,7 +306,7 @@ type generationStats struct {
 
 // summarizeGames summarizes games, in their order, with a fixed number of
 // queries.
-func summarizeGames(transaction *gorm.DB, games []models.Game) ([]GameSummary, error) {
+func (reader gameReader) summarizeGames(transaction *gorm.DB, games []models.Game) ([]GameSummary, error) {
 	gameIDs := make([]any, len(games))
 	for index, game := range games {
 		gameIDs[index] = game.ID
@@ -341,7 +344,7 @@ func summarizeGames(transaction *gorm.DB, games []models.Game) ([]GameSummary, e
 			summary.LastGenerationAt = &lastGenerationAt
 			lastActivity = stat.LastGenerationAt
 		}
-		summary.RetentionDeletesAt = lastActivity.Add(retention.DefaultPeriod).UTC()
+		summary.RetentionDeletesAt = lastActivity.Add(reader.retentionPeriod).UTC()
 		if game.Outcome != nil {
 			summary.Status = "finished"
 			summary.Outcome = &Outcome{Reason: string(game.Outcome.Reason), WinnerTeamColor: game.Outcome.WinnerTeamColor}
@@ -426,7 +429,7 @@ func (reader gameReader) getGame(transaction *gorm.DB, input GetGameInput) (Game
 	if err != nil {
 		return GameDetail{}, err
 	}
-	summaries, err := summarizeGames(transaction, []models.Game{game})
+	summaries, err := reader.summarizeGames(transaction, []models.Game{game})
 	if err != nil {
 		return GameDetail{}, err
 	}

@@ -16,6 +16,7 @@ import (
 	"islandBattles/backend/dal"
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/models"
+	"islandBattles/backend/retention"
 	"islandBattles/lobby/adminmcp"
 	lobbypostgres "islandBattles/lobby/postgres"
 
@@ -161,9 +162,16 @@ type client struct {
 
 func connect(t *testing.T, database *gorm.DB) *client {
 	t.Helper()
+	return connectWithRetention(t, database, retention.DefaultPeriod)
+}
+
+// connectWithRetention serves newServer with a game retention period of its
+// own.
+func connectWithRetention(t *testing.T, database *gorm.DB, gameRetentionPeriod time.Duration) *client {
+	t.Helper()
 	ctx := context.Background()
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
-	serverSession, err := newServer(database).Connect(ctx, serverTransport, nil)
+	serverSession, err := newServer(database, slog.New(slog.NewTextHandler(io.Discard, nil)), gameRetentionPeriod).Connect(ctx, serverTransport, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

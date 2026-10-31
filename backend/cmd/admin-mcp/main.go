@@ -19,7 +19,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"islandBattles/backend/dependencies"
 	"islandBattles/lobby/adminmcp"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -43,9 +45,14 @@ func main() {
 		logger.Error(DatabaseURLEnv + " is required: the URL of the database to answer from")
 		os.Exit(1)
 	}
+	gameRetentionPeriod, err := dependencies.LoadGameRetentionPeriodFromLookup(os.LookupEnv)
+	if err != nil {
+		logger.Error("Invalid configuration", "error", err)
+		os.Exit(1)
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	if err := run(ctx, url, &mcp.StdioTransport{}, logger); err != nil {
+	if err := run(ctx, url, gameRetentionPeriod, &mcp.StdioTransport{}, logger); err != nil {
 		logger.Error("The admin MCP server stopped", "error", err)
 		os.Exit(1)
 	}
@@ -53,7 +60,7 @@ func main() {
 
 // run serves the tools over transport until the client disconnects or ctx
 // ends.
-func run(ctx context.Context, url string, transport mcp.Transport, logger *slog.Logger) error {
+func run(ctx context.Context, url string, gameRetentionPeriod time.Duration, transport mcp.Transport, logger *slog.Logger) error {
 	database, err := adminmcp.OpenDatabase(ctx, url, logger)
 	if err != nil {
 		return err
@@ -63,23 +70,29 @@ func run(ctx context.Context, url string, transport mcp.Transport, logger *slog.
 		return err
 	}
 	defer func() { _ = sqlDatabase.Close() }()
+	// query refuses to run while this fails; the other tools never read the
+	// hashes.
+	if err := adminmcp.ReadOnly(ctx, database, adminmcp.CheckCredentialsHidden); err != nil {
+		logger.Error("query is refused", "error", credentialsError(err))
+	}
 	logger.Info("Serving the admin MCP server over stdio")
-	if err := newServer(database).Run(ctx, transport); err != nil && !errors.Is(err, context.Canceled) {
+	if err := newServer(database, logger, gameRetentionPeriod).Run(ctx, transport); err != nil && !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("serve MCP: %w", err)
 	}
 	return nil
 }
 
 // newServer registers the lobby tools, the Island Battles game tools and the
-// SQL tools.
-func newServer(database *gorm.DB) *mcp.Server {
+// SQL tools. gameRetentionPeriod is how long the backend keeps a game after
+// its latest generation.
+func newServer(database *gorm.DB, logger *slog.Logger, gameRetentionPeriod time.Duration) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "island-battles-admin", Title: "Island Battles admin", Version: "1.0.0"},
 		&mcp.ServerOptions{Instructions: instructions})
 	adminmcp.AddTools(server, database, adminmcp.Options{
 		Games:         islandBattlesGames{},
 		GamesOverview: "Island Battles games running and finished, and the generations created in the last hour, one per turn played",
 	})
-	addGameTools(server, database)
-	addSQLTools(server, database)
+	addGameTools(server, database, gameRetentionPeriod)
+	addSQLTools(server, database, logger)
 	return server
 }

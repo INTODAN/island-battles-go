@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"slices"
 	"strings"
@@ -22,10 +23,14 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// The query tool's caps on its result.
+// The query tool's caps on its result. A longer value is cut to
+// maxValueBytes before it is converted and encoded, but the driver still
+// reads each whole row into memory first, up to PostgreSQL's 1 GB limit on a
+// value, within the statement timeout.
 const (
 	maxQueryRows  = 200
 	maxQueryBytes = 64 << 10
+	maxValueBytes = 16 << 10
 )
 
 // secretColumns are left out of query results by name. The production
@@ -107,7 +112,7 @@ type QueryResult struct {
 }
 
 // addSQLTools registers describe_schema and query.
-func addSQLTools(server *mcp.Server, database *gorm.DB) {
+func addSQLTools(server *mcp.Server, database *gorm.DB, logger *slog.Logger) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "describe_schema",
 		Description: "Lists the database's tables, or one table's columns with their types, nullability and defaults, from information_schema, " +
@@ -132,6 +137,11 @@ func addSQLTools(server *mcp.Server, database *gorm.DB) {
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, input QueryInput) (*mcp.CallToolResult, QueryResult, error) {
 		var result QueryResult
 		err := adminmcp.ReadOnly(ctx, database, func(transaction *gorm.DB) error {
+			if err := adminmcp.CheckCredentialsHidden(transaction); err != nil {
+				err = credentialsError(err)
+				logger.Error("query is refused", "error", err)
+				return err
+			}
 			var err error
 			result, err = runQuery(transaction, input.SQL)
 			return err
@@ -177,6 +187,14 @@ func describeSchema(transaction *gorm.DB, table string) (Schema, error) {
 		})
 	}
 	return schema, nil
+}
+
+// credentialsError says how to fix a role that can read bearer hashes.
+func credentialsError(err error) error {
+	if errors.Is(err, adminmcp.ErrCredentialsReadable) {
+		return fmt.Errorf("%w. Run the VM deploy, which grants them again: see \"The admin MCP server\" in deploy/README.md", err)
+	}
+	return err
 }
 
 // cursorName names the cursor that runQuery reads a statement through.
@@ -246,6 +264,7 @@ func readRows(rows *sql.Rows) (QueryResult, error) {
 		pointers[index] = &values[index]
 	}
 	size := 0
+	cutValues := 0
 	for rows.Next() {
 		if len(result.Rows) == maxQueryRows {
 			result.Truncated = true
@@ -257,7 +276,11 @@ func readRows(rows *sql.Rows) (QueryResult, error) {
 		}
 		row := make([]any, 0, len(kept))
 		for _, index := range kept {
-			row = append(row, jsonValue(values[index], columnTypes[index].DatabaseTypeName()))
+			value, cut := cutValue(values[index])
+			if cut {
+				cutValues++
+			}
+			row = append(row, jsonValue(value, columnTypes[index].DatabaseTypeName()))
 		}
 		encoded, err := json.Marshal(row)
 		if err != nil {
@@ -271,7 +294,28 @@ func readRows(rows *sql.Rows) (QueryResult, error) {
 		size += len(encoded) + 1
 		result.Rows = append(result.Rows, row)
 	}
+	if cutValues > 0 {
+		result.Truncated = true
+		result.Notes = append(result.Notes, fmt.Sprintf("Cut values longer than %d KiB to their first %d KiB (%d of them). Select a part of them, such as with left(), to see the rest.", maxValueBytes>>10, maxValueBytes>>10, cutValues))
+	}
 	return result, rows.Err()
+}
+
+// cutValue cuts text and bytes longer than maxValueBytes, before they are
+// converted or encoded, and reports whether it cut. Cut text stays valid
+// UTF-8, and cut JSON is returned as text.
+func cutValue(value any) (any, bool) {
+	switch typed := value.(type) {
+	case string:
+		if len(typed) > maxValueBytes {
+			return strings.ToValidUTF8(typed[:maxValueBytes], ""), true
+		}
+	case []byte:
+		if len(typed) > maxValueBytes {
+			return typed[:maxValueBytes], true
+		}
+	}
+	return value, false
 }
 
 // jsonValue turns a value that pgx scanned into one that JSON represents
@@ -326,8 +370,10 @@ func explainQueryError(err error) error {
 		return fmt.Errorf("the admin server is read-only: %w", err)
 	case postgresError.Code == queryCanceled:
 		return fmt.Errorf("the statement ran longer than %s and was canceled: %w", adminmcp.StatementTimeout, err)
+	case postgresError.Code == insufficientPrivilege && strings.Contains(postgresError.Message, "lobby_sessions"):
+		return fmt.Errorf("the database role may read only some columns of lobby_sessions, so name the columns: %w", err)
 	case postgresError.Code == insufficientPrivilege:
-		return fmt.Errorf("the database role may not read this; the production read-only role reads only some columns of lobby_sessions, so name the columns: %w", err)
+		return fmt.Errorf("the database role is not permitted to do this: %w", err)
 	}
 	return err
 }
