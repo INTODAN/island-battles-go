@@ -1,0 +1,65 @@
+# Deploys from a GitHub runner, with the same scripts as a person's machine
+# (deploy/README.md, "Deploying from GitHub Actions"). The job assumes the
+# deploy role that Terraform creates (deploy/terraform/github.tf) through
+# GitHub's OIDC provider, so no AWS keys are stored here, and the scripts pull
+# deploy/local/ from the deploy bucket and push it back.
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "backend: scripts/aws.sh deploy. vm: scripts/vm.sh deploy to the static IP. smoke: scripts/vm.sh smoke."
+        type: choice
+        options: [backend, vm, smoke]
+        default: backend
+
+permissions:
+  contents: read
+  id-token: write
+
+# One deploy at a time. A second one waits instead of cancelling the first.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    # The role trusts only this environment's jobs. Limit it to main in the
+    # repository's settings.
+    environment: production
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - if: inputs.target == 'backend'
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      # The wrapper would add its own lines to `scripts/aws.sh output static_ip`.
+      - if: inputs.target != 'smoke'
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - if: inputs.target != 'backend'
+        uses: astral-sh/setup-uv@v6
+
+      - if: inputs.target == 'vm'
+        run: uv tool install ansible-core
+
+      - if: inputs.target == 'backend'
+        run: scripts/aws.sh deploy
+
+      - if: inputs.target == 'vm'
+        run: scripts/vm.sh deploy "$(scripts/aws.sh output static_ip)"
+
+      - if: inputs.target == 'smoke'
+        run: scripts/vm.sh smoke

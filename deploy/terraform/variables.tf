@@ -85,7 +85,7 @@ variable "ssh_public_key" {
 }
 
 variable "ssh_allowed_cidrs" {
-  description = "IPv4 ranges that may reach SSH (22). Limit it to your own address if you can, e.g. [\"198.51.100.7/32\"]."
+  description = "IPv4 ranges that may reach SSH (22). Deploys log in with Lightsail's temporary keys from wherever they run, a GitHub runner included, so keep it open to all. Password logins are off."
   type        = list(string)
   default     = ["0.0.0.0/0"]
 }
@@ -295,4 +295,35 @@ variable "collector_layer_arn" {
   EOT
   type        = string
   default     = null
+}
+
+variable "deploy_bucket" {
+  description = "The deploy bucket, which holds the state and deploy/local/'s files. scripts/aws.sh sets it from the account (deploy/deploy_files.py)."
+  type        = string
+  default     = null
+}
+
+variable "github_repository" {
+  description = <<-EOT
+    The GitHub repository, as owner/name, whose Deploy workflow may deploy
+    through an IAM role it assumes with OIDC (github.tf). Null creates no role.
+  EOT
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.github_repository == null || can(regex("^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$", var.github_repository))
+    error_message = "github_repository must be owner/name, such as INTODAN/island-battles-go."
+  }
+
+  validation {
+    condition     = var.github_repository == null || var.deploy_bucket != null
+    error_message = "The GitHub deploy role needs deploy_bucket, which scripts/aws.sh sets."
+  }
+}
+
+variable "github_environment" {
+  description = "The GitHub environment whose jobs may assume the deploy role. Limit it to the main branch in the repository's settings."
+  type        = string
+  default     = "production"
 }

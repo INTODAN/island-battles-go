@@ -14,12 +14,14 @@ terraform {
     }
   }
 
-  # The state lives with the other deploy-local files, which are gitignored and
-  # backed up together. It holds the Lambda's environment, secrets included.
-  # The path is relative to this directory, which scripts/aws.sh runs
-  # Terraform in.
-  backend "local" {
-    path = "../local/terraform/terraform.tfstate"
+  # The state lives in the deploy bucket, so any machine with the AWS
+  # credentials can apply. It holds the Lambda's environment, secrets included.
+  # scripts/aws.sh passes the bucket and its region, which come from the
+  # account (deploy/deploy_files.py). The lock file stops two applies at once.
+  backend "s3" {
+    key          = "terraform/terraform.tfstate"
+    encrypt      = true
+    use_lockfile = true
   }
 }
 

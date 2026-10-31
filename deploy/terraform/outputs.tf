@@ -37,3 +37,8 @@ output "distribution_domain" {
   description = "The CloudFront distribution's own name, which the game_hostname CNAME points at."
   value       = aws_cloudfront_distribution.game.domain_name
 }
+
+output "github_deploy_role_arn" {
+  description = "The role the Deploy workflow assumes: the repository's AWS_DEPLOY_ROLE_ARN variable. Null without github_repository."
+  value       = try(aws_iam_role.github_deploy[0].arn, null)
+}
