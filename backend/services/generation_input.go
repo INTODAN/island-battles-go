@@ -321,7 +321,7 @@ func generationState(game *models.Game, generation *models.Generation, player mo
 		return models.GenerationState{}, err
 	}
 	state := models.GenerationState{GameID: game.ID, LobbyID: *game.LobbyID, GenerationID: generation.ID, PlayerID: player.PlayerID, TeamColor: player.TeamColor, Channel: channel,
-		Generation: generationView(generation)}
+		Generation: GenerationView(generation)}
 	if game.Outcome != nil {
 		state.Outcome = &models.GameOutcomeView{Reason: game.Outcome.Reason, WinnerTeamColor: game.Outcome.WinnerTeamColor, Summary: describeOutcome(game)}
 	}

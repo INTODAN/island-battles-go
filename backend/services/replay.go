@@ -35,7 +35,7 @@ func gameReplay(game *models.Game, generations []models.Generation) GameReplay {
 		replay.Teams = []models.GameTeam{}
 	}
 	for index := range generations {
-		replay.Frames = append(replay.Frames, generationView(&generations[index]))
+		replay.Frames = append(replay.Frames, GenerationView(&generations[index]))
 	}
 	return replay
 }
