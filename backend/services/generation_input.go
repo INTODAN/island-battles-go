@@ -120,6 +120,9 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 	if request.Commands == nil || len(request.Commands) > 1000 {
 		return models.GenerationState{}, reject(422, "commands must be an array of at most 1000 commands")
 	}
+	if err := validateLogLines(request.Logs); err != nil {
+		return models.GenerationState{}, err
+	}
 	complete := request.Complete == nil || *request.Complete
 	request.Complete = &complete
 	payloadHash, err := commandPayloadHash(request)
@@ -182,6 +185,9 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 		}
 		commands, err := validateCommands(generation, player.TeamColor, inputs, request.Commands)
 		if err != nil {
+			return err
+		}
+		if err := appendGenerationLogs(transaction, locked.ID, generation.ID, principal.PlayerID, request.Logs); err != nil {
 			return err
 		}
 		var accumulated []models.CommandFields

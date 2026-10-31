@@ -10,7 +10,10 @@ type FrozenGamePlayer struct {
 	GameID    uint   `gorm:"primaryKey;autoIncrement:false"`
 	PlayerID  string `gorm:"type:uuid;primaryKey"`
 	TeamColor uint   `gorm:"not null"`
-	CreatedAt time.Time
+	// DisplayName is the player's lobby name at the start. The game log names
+	// players by it, because the lobby is deleted later.
+	DisplayName string `gorm:"not null;default:''"`
+	CreatedAt   time.Time
 }
 
 type GenerationInput struct {
@@ -74,6 +77,7 @@ type RegisterGenerationCommands struct {
 	RequestID    string                    `json:"request_id" format:"uuid" doc:"Identifies this batch. Retry a lost request with the same UUID and body; use a new UUID for every new batch."`
 	Complete     *bool                     `json:"complete,omitempty" doc:"Seals your turn after this batch. Defaults to true."`
 	Commands     []PublicGenerationCommand `json:"commands" maxItems:"1000" nullable:"false"`
+	Logs         []GenerationLogLine       `json:"logs,omitempty" maxItems:"100" doc:"Game log lines written since your previous batch for this generation, appended in order after the lines already stored. At most 100 lines per player per generation, each of at most 500 characters; a batch that would break either limit is rejected whole with 422 and problem type urn:island-battles:problem:game-log-limit."`
 }
 
 type GenerationState struct {

@@ -36,9 +36,10 @@ const (
 )
 
 // PlayerOperations are the endpoints a gameplay client uses, including the
-// upgrade cost table, and the default map list for choosing a lobby's map.
-// Lobby setup has its own generated SDK in lobby/api/openapi.json.
-var PlayerOperations = []string{"createLobbyConnectionToken", "getIslandLobbyGeneration", "registerGenerationCommand", "listUpgrades", "listMapTemplates"}
+// upgrade cost table and the game log read that the replay also shows, and
+// the default map list for choosing a lobby's map. Lobby setup has its own
+// generated SDK in lobby/api/openapi.json.
+var PlayerOperations = []string{"createLobbyConnectionToken", "getIslandLobbyGeneration", "registerGenerationCommand", "getIslandLobbyGenerationLogs", "listUpgrades", "listMapTemplates"}
 
 // PlayerEventSchemas are delivered by Centrifugo rather than HTTP responses.
 var PlayerEventSchemas = []string{"GenerationEvent", "GameEndedEvent"}

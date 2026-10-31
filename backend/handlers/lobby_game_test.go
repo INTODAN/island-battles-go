@@ -85,7 +85,9 @@ func TestStartedGameServesItsRosterWithoutTheLobby(t *testing.T) {
 	_, api := humatest.New(t)
 	huma.Register(api, huma.Operation{OperationID: "replay", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/replay"}, handler.Replay)
 	huma.Register(api, huma.Operation{OperationID: "current", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/generation"}, handler.CurrentGeneration)
-	huma.Register(api, huma.Operation{OperationID: "commands", Method: http.MethodPost, Path: "/generation/commands"}, handler.RegisterGenerationCommands)
+	// The service validates the body itself, as routes.SetupLobbyRoutes registers it.
+	huma.Register(api, huma.Operation{OperationID: "commands", Method: http.MethodPost, Path: "/generation/commands", SkipValidateBody: true}, handler.RegisterGenerationCommands)
+	huma.Register(api, huma.Operation{OperationID: "logs", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/logs"}, handler.GenerationLogs)
 	statePath, replayPath := "/game/from-lobby/"+lobbyID+"/generation", "/game/from-lobby/"+lobbyID+"/replay"
 
 	response := api.Get(statePath, "Authorization: Bearer alice")
@@ -123,12 +125,51 @@ func TestStartedGameServesItsRosterWithoutTheLobby(t *testing.T) {
 		if response := api.Get(replayPath, "Authorization: "+credential); response.Code != want {
 			t.Fatalf("%s replay=%d", credential, response.Code)
 		}
+		if response := api.Get(fmt.Sprintf("/game/from-lobby/%s/logs?generation_id=%d", lobbyID, initial.GenerationID), "Authorization: "+credential); response.Code != want {
+			t.Fatalf("%s logs=%d", credential, response.Code)
+		}
 	}
 	if response := api.Get("/game/from-lobby/"+uuid.NewString()+"/replay", "Authorization: Bearer alice"); response.Code != http.StatusNotFound {
 		t.Fatalf("unknown lobby replay=%d", response.Code)
 	}
 	if response := api.Get("/game/from-lobby/"+otherLobby+"/generation", "Authorization: Bearer carol"); response.Code != http.StatusOK {
 		t.Fatalf("carol's own game read=%d %s", response.Code, response.Body.String())
+	}
+
+	// Game log lines travel in the same batches, and their limits answer a
+	// problem type of their own.
+	logBatch := func(message string) *httptest.ResponseRecorder {
+		request := fmt.Sprintf(`{"game_id":%d,"generation_id":%d,"request_id":%q,"complete":false,"commands":[],"logs":[{"level":"info","logger":"island_battles.player","message":%q}]}`,
+			initial.GameID, initial.GenerationID, uuid.NewString(), message)
+		return api.Post("/generation/commands", "Authorization: Bearer alice", strings.NewReader(request))
+	}
+	if response := logBatch("attacking with 5"); response.Code != http.StatusOK {
+		t.Fatalf("log batch=%d %s", response.Code, response.Body.String())
+	}
+	if response := logBatch(strings.Repeat("x", 501)); response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), services.GameLogLimitProblemType) {
+		t.Fatalf("long line=%d %s", response.Code, response.Body.String())
+	}
+	logsPath := fmt.Sprintf("/game/from-lobby/%s/logs?generation_id=%d", lobbyID, initial.GenerationID)
+	readLogs := func(credential string) models.GenerationLogs {
+		t.Helper()
+		response := api.Get(logsPath, "Authorization: "+credential)
+		if response.Code != http.StatusOK {
+			t.Fatalf("logs=%d %s", response.Code, response.Body.String())
+		}
+		var logs models.GenerationLogs
+		if err := json.Unmarshal(response.Body.Bytes(), &logs); err != nil {
+			t.Fatal(err)
+		}
+		return logs
+	}
+	if logs := readLogs("Bearer alice"); len(logs.Players) != 1 || logs.Players[0].DisplayName != "Alice" || len(logs.Players[0].Lines) != 1 || logs.Players[0].Lines[0].Message != "attacking with 5" {
+		t.Fatalf("Alice's logs = %+v", logs)
+	}
+	if logs := readLogs("Bearer bob"); len(logs.Players) != 1 || logs.Players[0].DisplayName != "Bob" || len(logs.Players[0].Lines) != 0 || len(logs.HiddenTeamColors) != 1 {
+		t.Fatalf("Bob's logs = %+v", logs)
+	}
+	if response := api.Get("/game/from-lobby/"+lobbyID+"/logs", "Authorization: Bearer alice"); response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("logs without a generation=%d", response.Code)
 	}
 
 	order := fmt.Sprintf(`{"command_type":"send_soldier_group","parameters":{"origin_castle_id":%d,"destination_castle_id":%d,"soldier_amount":5}}`, origin, target)

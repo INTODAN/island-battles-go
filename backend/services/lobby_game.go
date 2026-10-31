@@ -44,7 +44,7 @@ func RunLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 			gameMap = models.BuildMap(*chosenMap)
 		}
 		players := make([]models.FrozenGamePlayer, 0, len(snapshot.StartRoster))
-		for _, entry := range snapshot.StartRoster {
+		for index, entry := range snapshot.StartRoster {
 			color := models.NeutralTeamColor
 			for _, team := range binding.Teams {
 				if team.TeamID == entry.TeamID {
@@ -55,7 +55,7 @@ func RunLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 			if color == models.NeutralTeamColor {
 				return fmt.Errorf("frozen player has no team binding")
 			}
-			players = append(players, models.FrozenGamePlayer{GameID: binding.GameID, PlayerID: entry.PlayerID, TeamColor: color})
+			players = append(players, models.FrozenGamePlayer{GameID: binding.GameID, PlayerID: entry.PlayerID, TeamColor: color, DisplayName: startDisplayName(snapshot, index)})
 		}
 		if err := dal.StoreFrozenPlayers(transaction, players); err != nil {
 			return err
@@ -92,18 +92,10 @@ func prepareLobbyGame(binding models.BindingResult, snapshot domain.Snapshot) ([
 	gameMap := models.Map{MapFields: models.MapFields{MapName: "Lobby battle", PlayerAmount: uint(len(snapshot.StartRoster)), PlaneSizeX: 8, PlaneSizeY: 6}}
 	for _, team := range binding.Teams {
 		players := []string{}
-		for _, entry := range snapshot.StartRoster {
-			if entry.TeamID != team.TeamID {
-				continue
+		for index, entry := range snapshot.StartRoster {
+			if entry.TeamID == team.TeamID {
+				players = append(players, startDisplayName(snapshot, index))
 			}
-			name := entry.PlayerID
-			for _, member := range snapshot.Members {
-				if member.PlayerID == entry.PlayerID {
-					name = member.DisplayName
-					break
-				}
-			}
-			players = append(players, name)
 		}
 		name := fmt.Sprintf("Team %d", team.TeamOrder)
 		for _, lobbyTeam := range snapshot.Teams {
@@ -122,4 +114,18 @@ func prepareLobbyGame(binding models.BindingResult, snapshot domain.Snapshot) ([
 		})
 	}
 	return teams, gameMap
+}
+
+// startDisplayName is the lobby display name of the roster's player at index
+// when the game started. The game copies it, because it never reads the lobby
+// again. A player missing from the members is named by roster position, so
+// a name never reveals a player ID.
+func startDisplayName(snapshot domain.Snapshot, index int) string {
+	playerID := snapshot.StartRoster[index].PlayerID
+	for _, member := range snapshot.Members {
+		if member.PlayerID == playerID {
+			return member.DisplayName
+		}
+	}
+	return fmt.Sprintf("Player %d", index+1)
 }
