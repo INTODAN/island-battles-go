@@ -6,6 +6,7 @@ import asyncio
 from island_battles_client import (
     NEUTRAL_TEAM_COLOR,
     CommandReceiver,
+    GameCommandError,
     Generation,
     IslandBattlesClient,
     Player,
@@ -31,9 +32,15 @@ class ExamplePlayer(Player):
             except UpgradeMaxLevelError:
                 continue
             # Keep one soldier to send.
-            if cost < castle.soldiers:
+            if cost >= castle.soldiers:
+                continue
+            try:
                 await commands_receiver.upgrade_castle(castle.id, UpgradeType.speed)
-                spent[castle.id] = cost
+            except GameCommandError:
+                # A teammate's orders this turn may already have spent the
+                # castle's soldiers or bought the level; skip the upgrade.
+                continue
+            spent[castle.id] = cost
         own = next(
             (
                 castle
