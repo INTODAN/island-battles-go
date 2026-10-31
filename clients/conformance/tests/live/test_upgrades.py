@@ -165,6 +165,29 @@ async def test_two_upgrades_of_one_type_pay_for_both_levels_down_to_the_last_sol
     assert upgraded["soldiers"] == 1
 
 
+async def test_a_failed_concurrent_upgrade_frees_only_what_the_bought_levels_cost(
+    launch, match, proxy
+):
+    alice, _ = await playing(launch)
+    own = own_castle(match.alice.state)
+    # Two concurrent upgrades: each expects its own level, but the first request
+    # fails, so the server sells level 2 to the second and charges it 10.
+    proxy.fail_requests("POST", COMMANDS, 503)
+    await alice.send_together([upgrade(own, "speed"), upgrade(own, "speed")])
+    replies = [await alice.expect(("sent", "send_failed")) for _ in range(2)]
+    assert sorted(reply["type"] for reply in replies) == ["send_failed", "sent"]
+    assert failure(next(r for r in replies if r["type"] == "send_failed")) == (
+        "transport",
+        503,
+    )
+    # 20 soldiers are left, exactly what speed level 3 costs.
+    assert await priced(alice, cost(own, "speed")) == {"type": "cost", "cost": 20}
+    assert (await ordered(alice, upgrade(own, "speed")))["type"] == "sent"
+    upgraded = castle(await next_generation(alice, match), own)
+    assert upgraded["upgrades"]["speed"] == 3
+    assert upgraded["soldiers"] == 1
+
+
 async def test_an_upgrade_past_the_maximum_level_is_rejected(launch, match, proxy):
     alice, _ = await playing(launch)
     own = own_castle(match.alice.state)

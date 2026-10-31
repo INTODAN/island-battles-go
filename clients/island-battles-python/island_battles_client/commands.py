@@ -28,7 +28,7 @@ class CommandReceiver:
     """Submit commands for the current callback; the SDK completes the turn.
 
     The receiver remembers what this callback's commands reserved: the soldiers
-    each castle sends or pays, and the upgrade levels it buys.
+    each castle sends, and the upgrade levels it buys, which pay their costs.
     """
 
     def __init__(
@@ -43,7 +43,7 @@ class CommandReceiver:
         self._castles = {castle.id: castle for castle in generation.castles}
         self._team_color = team_color
         self._upgrades = upgrades
-        self._reserved_soldiers: Counter[int] = Counter()
+        self._sent_soldiers: Counter[int] = Counter()
         self._bought_levels: Counter[tuple[int, UpgradeType]] = Counter()
         self._closed = False
 
@@ -59,6 +59,21 @@ class CommandReceiver:
         if castle is None:
             raise CastleNotFoundError(f"castle {castle_id} is not in this generation")
         return castle
+
+    def _reserved(self, castle: Castle) -> int:
+        """Soldiers this callback's sends and upgrades take from the castle.
+
+        Upgrade costs follow from the number of levels bought, not from what
+        each call expected to pay, so they stay right when concurrent calls
+        reach the server in another order or one of them fails.
+        """
+        reserved = self._sent_soldiers[castle.id]
+        for upgrade_type in UpgradeType:
+            level = castle.upgrades.get(upgrade_type, 1)
+            bought = self._bought_levels[(castle.id, upgrade_type)]
+            for bought_level in range(level + 1, level + bought + 1):
+                reserved += self._upgrades.cost(upgrade_type, bought_level)
+        return reserved
 
     def _next_level(self, castle: Castle, upgrade_type: UpgradeType) -> int:
         level = castle.upgrades.get(upgrade_type, 1)
@@ -90,9 +105,7 @@ class CommandReceiver:
             soldier_amount=soldier_amount,
         )
         # Reserved before the request, so a concurrent call counts it too.
-        self._reserved_soldiers[parameters.origin_castle_id] += (
-            parameters.soldier_amount
-        )
+        self._sent_soldiers[parameters.origin_castle_id] += parameters.soldier_amount
         try:
             await self._submit(
                 PublicGenerationCommand(
@@ -102,7 +115,7 @@ class CommandReceiver:
                 )
             )
         except BaseException:
-            self._reserved_soldiers[parameters.origin_castle_id] -= (
+            self._sent_soldiers[parameters.origin_castle_id] -= (
                 parameters.soldier_amount
             )
             raise
@@ -154,14 +167,13 @@ class CommandReceiver:
             )
         level = self._next_level(castle, parameters.upgrade_type)
         cost = self._upgrades.cost(parameters.upgrade_type, level)
-        unreserved = castle.soldiers - self._reserved_soldiers[castle.id]
+        unreserved = castle.soldiers - self._reserved(castle)
         if cost > unreserved:
             raise InsufficientSoldiersError(
                 f"castle {castle.id} has {unreserved} unreserved soldiers; "
                 f"{parameters.upgrade_type} level {level} costs {cost}"
             )
         bought = (castle.id, parameters.upgrade_type)
-        self._reserved_soldiers[castle.id] += cost
         self._bought_levels[bought] += 1
         try:
             await self._submit(
@@ -172,6 +184,5 @@ class CommandReceiver:
                 )
             )
         except BaseException:
-            self._reserved_soldiers[castle.id] -= cost
             self._bought_levels[bought] -= 1
             raise
