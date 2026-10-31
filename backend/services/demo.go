@@ -2,6 +2,7 @@ package services
 
 import (
 	"bufio"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -78,6 +79,22 @@ func (service *GenerationService) Demo(ctx context.Context, principal domain.Pri
 // number in the game.
 func DemoFileName(demo models.Demo) string {
 	return fmt.Sprintf("island-battles-game-%d-generation-%d.json", demo.GameID, len(demo.Frames))
+}
+
+// WriteCompressedDemo writes a demo as WriteDemo does, compressed with gzip
+// as it is encoded, so the whole file is never held in memory, packed or
+// not. Bots' log lines repeat their wording, so a demo packs to a fraction of
+// its size: a two-player game at the generation cap with full logs of
+// varying bot-like lines packs from 33 to under 5 MiB.
+func WriteCompressedDemo(writer io.Writer, demo models.Demo) error {
+	compressor, err := gzip.NewWriterLevel(writer, gzip.DefaultCompression)
+	if err != nil {
+		return err
+	}
+	if err := WriteDemo(compressor, demo); err != nil {
+		return err
+	}
+	return compressor.Close()
 }
 
 // WriteDemo writes a demo as JSON, one frame and one generation's logs at a

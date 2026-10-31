@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"reflect"
 	"strings"
 	"testing"
@@ -243,14 +244,25 @@ func (writer *countingWriter) Write(data []byte) (int, error) {
 
 // The lobby page reads at most 64 MiB of a response (lobby/frontend/relay.mjs).
 // A two-player game that runs to the generation cap, with both bots logging
-// the most and the longest lines they may every turn, still fits.
+// the most and the longest lines they may every turn, still fits. Packed
+// with gzip, as browsers receive it, its varying bot-like lines take a
+// fraction of that, which Lambda streams in seconds.
 func TestAFullLengthTwoPlayerDemoWithFullLogsFitsTheLobbyPage(t *testing.T) {
 	const relayLimit = 64 * 1024 * 1024
 	upgrades := models.Upgrades{models.SpeedUpgrade: 3, models.ClashStopGenerationsUpgrade: 2}
-	message := strings.Repeat("m", models.MaxGenerationLogMessageLength)
-	lines := make([]models.GenerationLogLine, models.MaxGenerationLogLines)
-	for index := range lines {
-		lines[index] = models.GenerationLogLine{Level: models.GenerationLogWarning, Logger: "island_battles.player.strategy", Message: message}
+	// Lines in a bot's wording, with numbers that change from line to line.
+	random := rand.New(rand.NewPCG(80, 1))
+	botLines := func() []models.GenerationLogLine {
+		lines := make([]models.GenerationLogLine, models.MaxGenerationLogLines)
+		for index := range lines {
+			var message strings.Builder
+			for message.Len() < models.MaxGenerationLogMessageLength {
+				fmt.Fprintf(&message, "castle %d has %d soldiers; sending %d to castle %d at distance %.3f. ",
+					random.IntN(20), random.IntN(500), random.IntN(100), random.IntN(20), random.Float64()*10)
+			}
+			lines[index] = models.GenerationLogLine{Level: models.GenerationLogWarning, Logger: "island_battles.player.strategy", Message: message.String()[:models.MaxGenerationLogMessageLength]}
+		}
+		return lines
 	}
 	demo := models.Demo{Format: models.DemoFormat, SchemaVersion: models.DemoSchemaVersion, SavedAt: time.Now().UTC(), GameID: 123456,
 		Teams: []models.GameTeam{{Color: 1, Name: "Blue", Players: []string{"Alex"}}, {Color: 2, Name: "Red", Players: []string{"Sam"}}}}
@@ -271,15 +283,23 @@ func TestAFullLengthTwoPlayerDemoWithFullLogsFitsTheLobbyPage(t *testing.T) {
 		}
 		demo.Frames = append(demo.Frames, frame)
 		demo.Logs = append(demo.Logs, models.GenerationLogs{GenerationID: frame.ID, HiddenTeamColors: []uint{}, Players: []models.PlayerGenerationLogs{
-			{DisplayName: "Alex", TeamColor: 1, Lines: lines}, {DisplayName: "Sam", TeamColor: 2, Lines: lines},
+			{DisplayName: "Alex", TeamColor: 1, Lines: botLines()}, {DisplayName: "Sam", TeamColor: 2, Lines: botLines()},
 		}})
 	}
 	var size countingWriter
 	if err := services.WriteDemo(&size, demo); err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("a %d-generation two-player demo with full logs has %.1f MiB", services.MaxGenerations, float64(size.bytes)/1024/1024)
+	var packed countingWriter
+	if err := services.WriteCompressedDemo(&packed, demo); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("a %d-generation two-player demo with full logs has %.1f MiB, and %.1f MiB packed", services.MaxGenerations,
+		float64(size.bytes)/1024/1024, float64(packed.bytes)/1024/1024)
 	if size.bytes > relayLimit {
 		t.Fatalf("the demo has %d bytes, more than the lobby page's %d", size.bytes, relayLimit)
+	}
+	if packed.bytes > size.bytes/4 {
+		t.Fatalf("the demo packs only from %d to %d bytes", size.bytes, packed.bytes)
 	}
 }

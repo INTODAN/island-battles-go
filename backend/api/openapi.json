@@ -1221,7 +1221,7 @@
   "paths": {
     "/game/from-lobby/{lobby_id}/demo": {
       "get": {
-        "description": "Requires a place on the game's frozen roster; the lobby is not consulted. Returns the game as a demo file, the Demo schema, as an attachment named island-battles-game-\u003cgame_id\u003e-generation-\u003cn\u003e.json, where n is the number of generations played. Any roster player can save a demo at any time: one saved during the game holds the generations played so far and a null outcome. Each frame's game log lines follow the rule of GET /game/from-lobby/{lobby_id}/logs when the demo is saved: while the game runs only your own team's lines, once it has ended every team's. The demo viewer at /game/demo-viewer/ opens the file without the lobby, a session or the game. The body is streamed, and a long game with full logs takes tens of megabytes. The game is deleted 7 days after its last generation by default; then this returns 404.",
+        "description": "Requires a place on the game's frozen roster; the lobby is not consulted. Returns the game as a demo file, the Demo schema, as an attachment named island-battles-game-\u003cgame_id\u003e-generation-\u003cn\u003e.json, where n is the number of generations played. Any roster player can save a demo at any time: one saved during the game holds the generations played so far and a null outcome. Each frame's game log lines follow the rule of GET /game/from-lobby/{lobby_id}/logs when the demo is saved: while the game runs only your own team's lines, once it has ended every team's. The demo viewer at /game/demo-viewer/ opens the file without the lobby, a session or the game. The body is streamed, and a long game with full logs takes tens of megabytes, so it is packed with gzip (Content-Encoding: gzip) when Accept-Encoding allows it. The game is deleted 7 days after its last generation by default; then this returns 404.",
         "operationId": "getIslandLobbyDemo",
         "parameters": [
           {
@@ -1254,6 +1254,12 @@
             "headers": {
               "Content-Disposition": {
                 "description": "attachment, with the demo's file name.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Encoding": {
+                "description": "gzip when the request's Accept-Encoding allows it; absent otherwise.",
                 "schema": {
                   "type": "string"
                 }
