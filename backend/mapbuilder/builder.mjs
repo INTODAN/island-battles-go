@@ -241,3 +241,40 @@ export function downloadGate(text, check) {
   if (check.state === "invalid") return { ready: false, reason: `Fix ${plural(check.errors.length, "problem")} before downloading.` };
   return { ready: true, reason: "" };
 }
+
+// The lobby's create form waits for this message, and its text is the file
+// text the server accepted. demo/lobby-settings.mjs holds the receiving side.
+export const lobbyMessageType = "island-battles.map-file";
+
+// lobbyMessage is what Use in lobby posts to the form that opened the builder.
+export function lobbyMessage(text) {
+  return { type: lobbyMessageType, text };
+}
+
+// openerState says whether the builder can hand its map to a lobby page: "none"
+// when a same-origin window didn't open it, "closed" when that window is gone,
+// and "ready" otherwise. Reading anything of a cross-origin window throws,
+// which counts as having no lobby page.
+export function openerState(opener, origin) {
+  try {
+    if (!opener || opener.location.origin !== origin) return "none";
+    return opener.closed ? "closed" : "ready";
+  } catch {
+    return "none";
+  }
+}
+
+// lobbyGate decides whether text can be sent to the lobby. It needs what
+// downloadGate needs, and a castle for every team, because the lobby rejects
+// any other map. Download stays allowed when a team owns no castle.
+export function lobbyGate(map, text, check) {
+  if (!check || check.text !== text || check.state === "pending") return { ready: false, reason: "Checking the map…" };
+  if (check.state === "failed") return { ready: false, reason: `The map can't be sent to the lobby until the server has checked it. ${check.message}` };
+  if (check.state === "invalid") return { ready: false, reason: `Fix ${plural(check.errors.length, "problem")} before sending the map to the lobby.` };
+  const missing = missingTeams(map);
+  if (missing.length) {
+    const one = missing.length === 1;
+    return { ready: false, reason: `A lobby needs a castle for every team. ${one ? "Team" : "Teams"} ${missing.join(", ")} ${one ? "owns" : "own"} none.` };
+  }
+  return { ready: true, reason: "" };
+}

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  checkMap, describeProblems, downloadGate, dragPosition, fileName, freeSpot, mapFile, missingTeams, newMap,
-  openMapFile, placeProblems, problemsFor, serialize, withoutCastle,
+  checkMap, describeProblems, downloadGate, dragPosition, fileName, freeSpot, lobbyGate, lobbyMessage, mapFile, missingTeams, newMap,
+  openerState, openMapFile, placeProblems, problemsFor, serialize, withoutCastle,
 } from "./builder.mjs";
 
 const crossing = () => ({
@@ -149,4 +149,40 @@ test("the download is named after the map", () => {
   assert.equal(fileName({ map_name: "Big Crossing #2" }), "big-crossing-2.json");
   assert.equal(fileName({ map_name: "" }), "map.json");
   assert.equal(fileName({}), "map.json");
+});
+
+test("a map reaches the lobby only when it can be downloaded and every team owns a castle", () => {
+  const map = crossing();
+  const text = serialize(map);
+  const valid = { text, state: "valid", errors: [] };
+  assert.deepEqual(lobbyGate(map, text, valid), { ready: true, reason: "" });
+  assert.deepEqual(lobbyGate(map, text, null), { ready: false, reason: "Checking the map…" });
+  assert.equal(lobbyGate(map, text, { text, state: "pending" }).ready, false);
+  assert.equal(lobbyGate(map, text, { text: `${text} `, state: "valid", errors: [] }).ready, false);
+  assert.match(lobbyGate(map, text, { text, state: "invalid", errors: serverErrors.slice(0, 1) }).reason, /Fix 1 problem before sending/);
+  assert.match(lobbyGate(map, text, { text, state: "failed", message: "Couldn't reach the server: offline." }).reason, /offline/);
+
+  // Download is allowed without a castle for every team; the lobby is not.
+  map.castles = map.castles.filter((castle) => castle.team_color !== 2);
+  const unevenText = serialize(map);
+  const uneven = { text: unevenText, state: "valid", errors: [] };
+  assert.equal(downloadGate(unevenText, uneven).ready, true);
+  assert.deepEqual(lobbyGate(map, unevenText, uneven), { ready: false, reason: "A lobby needs a castle for every team. Team 2 owns none." });
+  map.castles = [];
+  assert.match(lobbyGate(map, serialize(map), { text: serialize(map), state: "valid", errors: [] }).reason, /Teams 1, 2 own none/);
+});
+
+test("the lobby message holds exactly the accepted text", () => {
+  assert.deepEqual(lobbyMessage("{}"), { type: "island-battles.map-file", text: "{}" });
+});
+
+test("the builder hands its map only to an open window on its own origin", () => {
+  const origin = "https://lobby.example";
+  assert.equal(openerState(null, origin), "none");
+  assert.equal(openerState(undefined, origin), "none");
+  assert.equal(openerState({ closed: false, location: { origin } }, origin), "ready");
+  assert.equal(openerState({ closed: true, location: { origin } }, origin), "closed");
+  assert.equal(openerState({ closed: false, location: { origin: "https://evil.example" } }, origin), "none");
+  const crossOrigin = { get location() { throw new DOMException("blocked", "SecurityError"); } };
+  assert.equal(openerState(crossOrigin, origin), "none");
 });

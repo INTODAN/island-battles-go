@@ -17,6 +17,7 @@
       <button id="open-button" class="secondary" type="button">Open map file</button>
       <input id="open-input" type="file" accept=".json,application/json" hidden>
       <button id="download-button" class="primary" type="button" aria-describedby="download-reason" disabled>Download map</button>
+      <button id="lobby-button" class="primary" type="button" aria-describedby="download-reason lobby-reason" hidden disabled>Use in lobby</button>
     </div>
   </header>
 
@@ -25,6 +26,8 @@
   <section id="check" class="check" aria-live="polite">
     <p id="check-status" class="check-status">Checking the map…</p>
     <p id="download-reason" class="download-reason"></p>
+    <p id="lobby-reason" class="download-reason"></p>
+    <p id="lobby-status" class="download-reason" role="status"></p>
     <ul id="problem-list" class="problem-list"></ul>
     <button id="check-again" class="text-button" type="button" hidden>Check again</button>
   </section>

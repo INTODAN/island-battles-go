@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { describeSettings, loadDefaultMaps, readMapFile, teamNames } from "./lobby-settings.mjs";
+import { describeSettings, loadDefaultMaps, mapFromBuilderMessage, readMapFile, teamNames } from "./lobby-settings.mjs";
 
 test("a map's teams are named after the board's team colours", () => {
   assert.deepEqual(teamNames(2), ["Blue", "Red"]);
@@ -35,4 +35,21 @@ test("the room names the chosen map", async (context) => {
   assert.equal(await describeSettings({ map_template_id: 9 }), "Map: default map #9");
   assert.equal((await loadDefaultMaps()).length, 1);
   assert.equal(requests, 2);
+});
+
+test("the form takes a map only from the builder window it opened, on its own origin", () => {
+  const builder = {};
+  const origin = "https://lobby.example";
+  const text = '{"map_name":"Strait","player_amount":2,"castles":[]}';
+  const message = (overrides = {}) => ({ origin, source: builder, data: { type: "island-battles.map-file", text }, ...overrides });
+  assert.equal(mapFromBuilderMessage(message(), { origin, builder }).map_name, "Strait");
+  assert.equal(mapFromBuilderMessage(message({ origin: "https://evil.example" }), { origin, builder }), null);
+  assert.equal(mapFromBuilderMessage(message({ source: {} }), { origin, builder }), null);
+  assert.equal(mapFromBuilderMessage(message(), { origin, builder: null }), null);
+  assert.equal(mapFromBuilderMessage(message({ data: { type: "other", text } }), { origin, builder }), null);
+  assert.equal(mapFromBuilderMessage(message({ data: null }), { origin, builder }), null);
+  assert.equal(mapFromBuilderMessage(message({ data: "island-battles.map-file" }), { origin, builder }), null);
+  // A message that is the builder's but unusable is an error, as a bad file is.
+  assert.throws(() => mapFromBuilderMessage(message({ data: { type: "island-battles.map-file" } }), { origin, builder }), /no map file/);
+  assert.throws(() => mapFromBuilderMessage(message({ data: { type: "island-battles.map-file", text: "{" } }), { origin, builder }), /not valid JSON/);
 });
