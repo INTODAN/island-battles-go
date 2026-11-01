@@ -34,6 +34,9 @@ Usage:
       new code and deploy/local/lambda.env's settings to the Lambda. Doesn't
       ask, and refuses a plan that changes Lightsail resources or the game's
       certificate or distribution, or deletes anything. Never touches the VM.
+      Both first read the account's Lambda concurrency limit, and refuse to
+      plan when reserved_concurrency is null and account_concurrency_limit in
+      aws.tfvars is below it (deploy/README.md, "The concurrency cap").
   scripts/aws.sh output [name]
       Print Terraform's outputs, or one of them, e.g. static_ip,
       function_url, game_url, certificate_validation_record or
@@ -124,6 +127,32 @@ require_variables() {
   fi
 }
 
+check_concurrency() {
+  python3 -I "$repository_root/deploy/check_concurrency.py" "$1" "$variables_file" "${@:2}"
+}
+
+# With reserved_concurrency = null, the account's limit is the Lambda's cap, and
+# Terraform checks the Postgres connections and the free-tier budget against
+# account_concurrency_limit. AWS raises that limit on its own, so a stale value
+# would check the wrong cap: refuse to plan until aws.tfvars matches. Reading
+# the limit needs only lambda:GetAccountSettings, which the GitHub deploy role
+# has (ReadOnlyAccess).
+require_current_concurrency_limit() {
+  local unreserved region account_limit
+  local region_options=()
+  # A failing check_concurrency stops the script here (set -e), not later.
+  unreserved="$(check_concurrency unreserved)"
+  [[ "$unreserved" == yes ]] || return 0
+  region="$(check_concurrency region)"
+  [[ -z "$region" ]] || region_options=(--region "$region")
+  if ! account_limit="$(aws lambda get-account-settings ${region_options[@]+"${region_options[@]}"} \
+    --query AccountLimit.ConcurrentExecutions --output text)"; then
+    echo "Couldn't read the account's Lambda concurrency limit, which reserved_concurrency = null needs. See \"The concurrency cap\" in deploy/README.md." >&2
+    exit 1
+  fi
+  check_concurrency check "$account_limit"
+}
+
 # The build command from backend/README.md. Terraform zips the result.
 build_backend() {
   require_command go
@@ -192,6 +221,7 @@ plan_and_apply() {
   require_migrated_state
   initialize_terraform
   require_variables
+  require_current_concurrency_limit
   build_backend
   run_terraform plan -input=false -var-file="$variables_file" -out="$plan_file" "$@"
 
