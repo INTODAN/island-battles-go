@@ -33,7 +33,9 @@ const (
 		"game has ended. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the " +
 		"`game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose. " +
 		"`GET /game/upgrades` lists what each castle upgrade level costs. `Demo` is the demo file format, which " +
-		"`GET /game/from-lobby/{lobby_id}/demo` returns and the demo viewer at `/game/demo-viewer/` opens."
+		"`GET /game/from-lobby/{lobby_id}/demo` returns and the demo viewer at `/game/demo-viewer/` opens. " +
+		"`BotTurn` and `BotTurnResult` are the stateless bot contract: a bot gets a `BotTurn` each turn and answers with a " +
+		"`BotTurnResult`, which a client sends as one completing batch."
 )
 
 // PlayerOperations are the endpoints a gameplay client uses, including the
@@ -48,6 +50,10 @@ var PlayerEventSchemas = []string{"GenerationEvent", "GameEndedEvent"}
 // FileSchemas describe the map file format, the body of POST /map/create,
 // the lobby game_settings that choose a map, and the demo file format.
 var FileSchemas = []string{"MapTemplate", "LobbySettings", "Demo"}
+
+// BotSchemas are the stateless bot turn contract, which a client relays
+// between the game and a bot rather than sending over HTTP itself.
+var BotSchemas = []string{"BotTurn", "BotTurnResult"}
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
@@ -128,7 +134,7 @@ func BuildPlayerOpenAPI() ([]byte, error) {
 	if err := keepOperations(document, PlayerOperations); err != nil {
 		return nil, err
 	}
-	if err := keepReferencedSchemas(document, slices.Concat(PlayerEventSchemas, FileSchemas)); err != nil {
+	if err := keepReferencedSchemas(document, slices.Concat(PlayerEventSchemas, FileSchemas, BotSchemas)); err != nil {
 		return nil, err
 	}
 	keepUsedSecuritySchemes(document)

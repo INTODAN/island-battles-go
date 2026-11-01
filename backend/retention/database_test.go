@@ -21,8 +21,9 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// playedGame is a started two-team game whose first player sends soldiers
-// and logs a line every turn, so it has rows in every game table.
+// playedGame is a started two-team game whose first player sends soldiers,
+// logs a line and keeps bot memory every turn, so it has rows in every game
+// table.
 type playedGame struct {
 	gameID  uint
 	lobbyID string
@@ -78,12 +79,14 @@ func (game playedGame) submit(ctx context.Context, player int) error {
 }
 
 // register completes one player's turn on state's generation, the first
-// player with one command and one game log line.
+// player with one command, one game log line and its bot memory.
 func (game playedGame) register(ctx context.Context, player int, state models.GenerationState) error {
 	commands := []models.PublicGenerationCommand{}
 	var logs []models.GenerationLogLine
+	var memory models.BotMemory
 	if player == 0 {
 		logs = []models.GenerationLogLine{{Level: models.GenerationLogInfo, Logger: "island_battles.player", Message: "attacking"}}
+		memory = fmt.Appendf(nil, `{"generation_id":%d}`, state.GenerationID)
 		var origin, destination models.CastleView
 		for _, castle := range state.Generation.Castles {
 			if castle.TeamColor == state.TeamColor {
@@ -99,7 +102,7 @@ func (game playedGame) register(ctx context.Context, player int, state models.Ge
 	}
 	complete := true
 	_, err := game.service.Register(ctx, game.players[player], models.RegisterGenerationCommands{
-		GameID: state.GameID, GenerationID: state.GenerationID, RequestID: uuid.NewString(), Complete: &complete, Commands: commands, Logs: logs,
+		GameID: state.GameID, GenerationID: state.GenerationID, RequestID: uuid.NewString(), Complete: &complete, Commands: commands, Logs: logs, Memory: memory,
 	})
 	return err
 }
@@ -145,6 +148,7 @@ func countGameRows(t *testing.T, database *gorm.DB, gameID uint) gameRows {
 		"generation_inputs":         unscoped.Model(&models.GenerationInput{}).Where(inGenerations),
 		"generation_logs":           unscoped.Model(&models.GenerationLog{}).Where(inGenerations),
 		"generation_requests":       unscoped.Model(&models.GenerationRequest{}).Where(inGame),
+		"game_player_bot_memory":    unscoped.Model(&models.GamePlayerBotMemory{}).Where(inGame),
 		"frozen_game_players":       unscoped.Model(&models.FrozenGamePlayer{}).Where(inGame),
 		"island_game_team_bindings": unscoped.Model(&models.TeamBindingRecord{}).Where(inGame),
 	} {
@@ -188,8 +192,8 @@ func assertNoGameData(t *testing.T, database *gorm.DB) {
 			t.Errorf("game table %s still has %d rows", table, count)
 		}
 	}
-	if checked != 11 {
-		t.Errorf("checked %d game tables, want the 11 that MigrateSchema creates; update countGameRows for a new one", checked)
+	if checked != 12 {
+		t.Errorf("checked %d game tables, want the 12 that MigrateSchema creates; update countGameRows for a new one", checked)
 	}
 }
 

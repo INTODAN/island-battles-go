@@ -25,6 +25,38 @@ from pydantic import (
 )
 
 
+class BotTurn(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    game_id: Annotated[StrictInt, Field(ge=1)]
+    generation: Generation
+    memory: Mapping[str, Any] | None
+    """
+    The memory the bot returned with its previous turn in this game, or null on its first turn and after a turn that returned null.
+    """
+    team_color: Annotated[StrictInt, Field(ge=1)]
+    turn_deadline_at: AwareDatetime | None
+    """
+    When the turn times out, or null when turns have no time limit.
+    """
+
+
+class BotTurnResult(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    commands: Annotated[Sequence[PublicGenerationCommand], Field(max_length=1000)]
+    logs: Annotated[Sequence[GenerationLogLine], Field(max_length=100)]
+    """
+    Game log lines for this turn, of at most 500 characters each.
+    """
+    memory: Mapping[str, Any] | None
+    """
+    Any JSON object of at most 64 KiB as compact JSON, given back as BotTurn.memory next turn, or null for none.
+    """
+
+
 class Castle(BoardEntity):
     model_config = ConfigDict(
         extra="ignore",
@@ -364,6 +396,10 @@ class GenerationState(GameModel):
     """
     How many game log lines you have stored for this generation, out of the 100 a player may store per generation. 0 when there are none. A client that restarts during a turn continues counting from it.
     """
+    memory: Mapping[str, Any] | None
+    """
+    The memory sent with your latest completed turn of this game, for your bot's next BotTurn.memory. Null before your first completed turn, and after a completed turn without memory.
+    """
     outcome: GameOutcome | None = None
     """
     How the game ended. Absent while the game runs. A finished game keeps its final generation and rejects every command.
@@ -541,6 +577,10 @@ class RegisterGenerationCommands(GameModel):
     logs: Annotated[Sequence[GenerationLogLine] | None, Field(max_length=100)] = None
     """
     Game log lines written since your previous batch for this generation, appended in order after the lines already stored. At most 100 lines per player per generation, each of at most 500 characters; a batch that would break either limit is rejected whole with 422 and problem type urn:island-battles:problem:game-log-limit.
+    """
+    memory: Mapping[str, Any] | None = None
+    """
+    Your bot's memory, the BotTurnResult.memory it returned: any JSON object of at most 64 KiB as compact JSON. Only the batch with complete true saves it, replacing your previous memory, and an absent or null memory clears it; other batches ignore it. GenerationState.memory returns it. Larger memory is rejected whole with 422 and problem type urn:island-battles:problem:bot-memory-too-large.
     """
     request_id: UUID
     """

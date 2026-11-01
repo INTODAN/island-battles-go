@@ -72,6 +72,7 @@ Each request UUID identifies one immutable batch for one player and generation. 
 | The type's pending level is already its maximum | 409 | `urn:island-battles:problem:upgrade-max-level` |
 | Soldiers or an upgrade cost beyond the castle's unreserved soldiers | 409 | `urn:island-battles:problem:insufficient-soldiers` |
 | The batch's [game log](#game-logs) lines would pass 100 for the player's generation, or one has more than 500 characters | 422 | `urn:island-battles:problem:game-log-limit` |
+| The batch's [bot memory](#bot-turns) is larger than 64 KiB as compact JSON | 422 | `urn:island-battles:problem:bot-memory-too-large` |
 
 Each `detail` names the castle and the numbers, such as `castle 3 has 12 unreserved soldiers; speed level 3 costs 20`. Read it before retrying with a new request UUID.
 
@@ -130,6 +131,38 @@ The lines live in the `generation_logs` table, one row per line, with the game, 
 A [demo](#demos) holds one `GenerationLogs` per generation, with the visibility rule that applied when it was saved.
 
 The replay shows the game log in a **Logs** panel below the board, for the generation on the board. The replay runs in the lobby page's sandboxed frame without the credential, so it reads the logs through the page: Island Battles' catalog entry sets the lobby frontend's `DataURLPrefix` to `/game/from-lobby/{lobby_id}/`, and the replay posts `game.request` messages for `/game/from-lobby/{lobby_id}/logs?generation_id=N`, which the page fetches for it (see the [lobby frontend README](../lobby/frontend/README.md#what-a-game-provides)). The replay page data carries the `lobby_id` for that path. The panel groups the lines by team and then by player, in monospace, coloured by level, and scrolls inside a fixed height, so the frame's reported size doesn't change as lines load. It caches the lines of generations whose turn is over. For the open turn, the latest generation of a running game, it says that lines may still arrive and, while that generation is shown in a visible tab, reads its lines again every 3 seconds, at most one read at a time; a generation that was open when shown is read once more when the next one arrives, for its final lines. It explains hidden teams ("Red’s logs appear when the game ends") and generations without lines, and loads every generation again when the game's outcome arrives. Opened outside the lobby page, it says the logs need the lobby.
+
+### Bot turns
+
+A bot is a **stateless function**. Each turn it gets a `BotTurn` and answers with a `BotTurnResult`; both are schemas in the [player API document](#player-api-document), so every client generates them:
+
+```json
+{"game_id": 7, "generation": {"id": 41, "castles": [], "soldier_groups": [], "clashes": []}, "team_color": 1,
+ "memory": {"target": 3}, "turn_deadline_at": null}
+```
+
+```json
+{"commands": [{"command_type": "send_soldier_group", "parameters": {"origin_castle_id": 0, "destination_castle_id": 3, "soldier_amount": 12}}],
+ "logs": [{"level": "info", "logger": "island_battles.player", "message": "attacking castle 3 with 12 soldiers"}],
+ "memory": {"target": 3, "sent": 12}}
+```
+
+- `generation` is the generation of `GenerationState`, and `team_color` is the bot's team. There are no previous generations: a generation is 10 to 25 KB of JSON, so a whole game would be megabytes per turn. A bot that needs history keeps what it needs in its memory.
+- `memory` is the memory the bot returned last turn: any JSON object, or `null` on its first turn. The bot returns its new memory, or `null` for none.
+- `turn_deadline_at` is always `null` for now: turns have no time limit yet.
+- `commands` and `logs` have the shapes of `POST /generation/commands`, and the same rules apply.
+
+Whoever runs the bot, a client relaying it or the backend itself, sends the result as the turn's completing batch: `POST /generation/commands` with its `commands`, `logs` and `memory`, and `complete: true`. The **server stores the memory**, so every way of running a bot behaves the same, and a bot keeps nothing between turns itself:
+
+- Only the batch with `complete: true` saves `memory`, under the game lock, replacing the player's previous memory. An absent or `null` memory clears it. Batches with `complete: false` may carry memory, but it isn't saved. A client that sends a turn in several batches puts the memory in the last one.
+- Memory is at most **64 KiB** (65,536 bytes) as compact JSON; whitespace around values doesn't count. Larger memory is rejected whole with 422 and problem type `urn:island-battles:problem:bot-memory-too-large`, and nothing of the batch is stored: not its commands, its lines, its memory or its completion. A memory that isn't a JSON object or `null` is a plain 422.
+- The payload hash includes the memory, so a retry stores it once, and a late retry of an earlier turn doesn't bring that turn's memory back. Absent and `null` memory hash alike.
+- Every `GenerationState` has `memory`: the memory sent with the caller's latest completed turn of the game, or `null`. It's the next `BotTurn.memory`. Events pushed after a turn carry each player's own memory, on their personal channel only.
+- Memory is kept as sent: numbers keep every digit. PostgreSQL may reorder an object's keys.
+
+The memory lives in the `game_player_bot_memory` table, one row per player who has memory, keyed by the game and the player, with the generation whose turn saved it. A turn that clears the memory deletes the row. The table is game data: AutoMigrate creates it, and [retention](#game-retention) deletes it with the game.
+
+Bots that the backend plays itself implement the Go interface `bots.Bot` in [`bots/`](bots/bots.go), `Play(ctx, BotTurn) (BotTurnResult, error)`, on the Go types `models.BotTurn` and `models.BotTurnResult` that the schemas are exported from.
 
 ### Demos
 
@@ -285,7 +318,7 @@ There is no timer. The game's own requests run the passes as they end: turns (`P
 A pass has two steps. Each runs even when the other fails, and the pass logs every failure:
 
 1. **Retire** up to 10 expired games by soft-deleting the game row. Every request finds and locks its game through GORM's default scope, so a retired game disappears from every endpoint at once, and its turns and reads return 404. The step skips games that a request holds locked (`FOR UPDATE SKIP LOCKED`), so it never waits for a turn and never retires a game while a turn on it is in progress. It checks each locked candidate again in a new statement, so a turn that commits just before the lock keeps its game.
-2. **Purge** up to 10 generations of at most 3 retired games, lowest game IDs first, with `Unscoped`, so rows are removed for real. Each generation goes with its requests, player inputs, game log lines, commands and soldier groups, then the generation, then its map's castles and the map. A retired game with no generations left then goes with its remaining requests, frozen players and team bindings. Every game is purged in its own transaction, so a game whose purge fails is rolled back and retried by later passes while the other games are still deleted. A long game takes several passes, and no transaction deletes more than 10 generations' rows.
+2. **Purge** up to 10 generations of at most 3 retired games, lowest game IDs first, with `Unscoped`, so rows are removed for real. Each generation goes with its requests, player inputs, game log lines, commands and soldier groups, then the generation, then its map's castles and the map. A retired game with no generations left then goes with its remaining requests, bot memory, frozen players and team bindings. Every game is purged in its own transaction, so a game whose purge fails is rolled back and retried by later passes while the other games are still deleted. A long game takes several passes, and no transaction deletes more than 10 generations' rows.
 
 The rows a pass deletes belong to games nobody can reach any more, and the indexes on the foreign key columns (`generations.game_id` and `map_id`, `castles.map_id`, `commands.generation_id`, and `soldier_groups.generation_id`, `origin_castle_id` and `destination_castle_id`) keep the deletes and their foreign key checks from scanning other games' rows. Passes on several hosts at once lock different games, so they never wait for each other either.
 
@@ -421,7 +454,7 @@ With Ryuk off, normal runs still remove their containers through `t.Cleanup`. An
 
 ## Player API document
 
-[`api/openapi.json`](api/openapi.json) describes the operations a player client calls, including `GET /game/upgrades`, the `GenerationEvent` and `GameEndedEvent` pushed on its channel, the `MapTemplate` [map file format](#map-files) and the `Demo` [demo file format](#demos). Player clients are generated from it; see the [conformance suite](../clients/conformance/README.md) for the behavior they implement by hand. API view types are published without their `View` suffix (`CastleView` becomes `Castle`). After changing them, update the document; a test fails while it is stale:
+[`api/openapi.json`](api/openapi.json) describes the operations a player client calls, including `GET /game/upgrades`, the `GenerationEvent` and `GameEndedEvent` pushed on its channel, the `MapTemplate` [map file format](#map-files), the `Demo` [demo file format](#demos), and `BotTurn` and `BotTurnResult`, the [bot turn contract](#bot-turns). Player clients are generated from it; see the [conformance suite](../clients/conformance/README.md) for the behavior they implement by hand. API view types are published without their `View` suffix (`CastleView` becomes `Castle`). After changing them, update the document; a test fails while it is stale:
 
 ```sh
 go run ./backend/cmd/export-openapi --output backend/api/openapi.json

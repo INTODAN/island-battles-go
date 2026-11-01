@@ -72,7 +72,7 @@ func RunLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 		if err := dal.SaveGameTeams(transaction, game, teams); err != nil {
 			return err
 		}
-		events, err = generationEvents(game, current, players)
+		events, err = generationEvents(game, current, players, nil)
 		return err
 	})
 	if err != nil {

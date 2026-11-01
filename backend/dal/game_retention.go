@@ -80,7 +80,7 @@ type GamePurge struct {
 	// Generations counts generations deleted with their maps, castles,
 	// soldier groups, commands, player inputs, game log lines and requests.
 	Generations int
-	// Games counts games deleted with their frozen players and team bindings,
+	// Games counts games deleted with their frozen players, bot memories and team bindings,
 	// once they had no generations left.
 	Games int
 }
@@ -156,7 +156,7 @@ func purgeRetiredGame(database *gorm.DB, gameID uint, limit int) (generations in
 				return nil
 			}
 		}
-		for _, child := range []any{&models.GenerationRequest{}, &models.FrozenGamePlayer{}, &models.TeamBindingRecord{}} {
+		for _, child := range []any{&models.GenerationRequest{}, &models.GamePlayerBotMemory{}, &models.FrozenGamePlayer{}, &models.TeamBindingRecord{}} {
 			if err := unscoped.Where(inGame).Delete(child).Error; err != nil {
 				return err
 			}

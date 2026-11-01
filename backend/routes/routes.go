@@ -117,7 +117,9 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 			"The game ends after the turn that leaves one team with castles or soldier groups, a draw when the last teams are eliminated in the same turn, or after the turn that creates generation 300, where the team with the most castles wins. " +
 			"That turn's generation is the last, its state carries the outcome, and every later command conflicts (409) with problem type " + services.GameEndedProblemType + ". " +
 			"Retry the same request UUID and payload safely, also after the game ended; changed payloads and stale new requests conflict. " +
-			"A batch may also carry game log lines, which are stored in order with the generation and read with GET /game/from-lobby/{lobby_id}/logs. A player has at most 100 lines per generation, each of at most 500 characters; a batch over either limit is rejected whole (422) with problem type " + services.GameLogLimitProblemType + ".",
+			"A batch may also carry game log lines, which are stored in order with the generation and read with GET /game/from-lobby/{lobby_id}/logs. A player has at most 100 lines per generation, each of at most 500 characters; a batch over either limit is rejected whole (422) with problem type " + services.GameLogLimitProblemType + ". " +
+			"A batch may also carry the memory of the player's bot, any JSON object of at most 64 KiB as compact JSON. The batch with complete true saves it, replacing the player's previous memory, and an absent or null memory clears it; other batches ignore it. " +
+			"GenerationState.memory returns the memory sent with the player's latest completed turn, and the retry hash covers it. Larger memory is rejected whole (422) with problem type " + services.BotMemoryTooLargeProblemType + ".",
 		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
 		// The service validates the body itself so forbidden command types and
 		// unowned castles keep their 403 status instead of a schema 422.
@@ -135,6 +137,12 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 	// Published on each roster player's personal channel rather than over HTTP.
 	registry.Schema(reflect.TypeOf(models.GenerationEvent{}), true, "")
 	registry.Schema(reflect.TypeOf(models.GameEndedEvent{}), true, "")
+	// The stateless bot contract: what a bot is given each turn and what it
+	// answers, whoever runs it.
+	botTurn := registry.SchemaFromRef(registry.Schema(reflect.TypeOf(models.BotTurn{}), true, "").Ref)
+	botTurn.Description = "What a bot is given to play one turn. A bot is a stateless function: whatever it needs to keep between turns goes in the memory it returns, which the server stores per player and game."
+	botTurnResult := registry.SchemaFromRef(registry.Schema(reflect.TypeOf(models.BotTurnResult{}), true, "").Ref)
+	botTurnResult.Description = "A bot's answer to a BotTurn. Its commands, logs and memory are sent as one completing batch of POST /generation/commands."
 	// Sent inside the generic lobby create request as its game_settings.
 	settings := registry.SchemaFromRef(registry.Schema(reflect.TypeOf(models.LobbySettings{}), true, "").Ref)
 	settings.Description = "Island Battles game_settings for a lobby create request. Choose at most one map: map_template_id or map. The map must be made for exactly the lobby's teams: player_amount equal to the team count, and castle team colours exactly 1 to that count, in team order, with 0 for neutral castles. Without a map the game starts on a generated map. An invalid choice fails lobby creation with invalid_game_settings, and its detail names each invalid field, such as game_settings.map.castles[0].x."

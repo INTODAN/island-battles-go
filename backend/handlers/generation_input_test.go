@@ -100,3 +100,49 @@ func TestGenerationHTTPAuthenticationValidationAndStatus(t *testing.T) {
 		t.Fatalf("finished read=%d %s", response.Code, response.Body.String())
 	}
 }
+
+func TestGenerationHTTPCarriesBotMemory(t *testing.T) {
+	database := testutils.InitTestDB(t)
+	players := []string{uuid.NewString(), uuid.NewString()}
+	lobbyID, blue, red := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted}, Teams: []domain.Team{{ID: blue, Order: 1}, {ID: red, Order: 2}},
+		StartRoster: domain.StartRoster{{PlayerID: players[0], TeamID: blue}, {PlayerID: players[1], TeamID: red}}}
+	publisher := &testutils.RecordedPublisher{}
+	if _, err := services.RunLobbyGame(context.Background(), database, publisher, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	handler := handlers.LobbyGame{Database: database, Authenticator: commandAuthentication{domain.Principal{PlayerID: players[0]}}, Publisher: publisher}
+	_, api := humatest.New(t)
+	huma.Register(api, huma.Operation{OperationID: "testCurrent", Method: "GET", Path: "/game/from-lobby/{lobby_id}/generation"}, handler.CurrentGeneration)
+	huma.Register(api, huma.Operation{OperationID: "registerGenerationCommand", Method: "POST", Path: "/generation/commands", SkipValidateBody: true}, handler.RegisterGenerationCommands)
+	path := "/game/from-lobby/" + lobbyID + "/generation"
+	response := api.Get(path, "Authorization: Bearer valid")
+	if response.Code != 200 || !strings.Contains(response.Body.String(), `"memory":null`) {
+		t.Fatalf("first read=%d %s", response.Code, response.Body.String())
+	}
+	var state models.GenerationState
+	if err := json.Unmarshal(response.Body.Bytes(), &state); err != nil {
+		t.Fatal(err)
+	}
+
+	tooLarge := fmt.Sprintf(`{"game_id":%d,"generation_id":%d,"request_id":%q,"commands":[],"memory":{"x":%q}}`, state.GameID, state.GenerationID, uuid.NewString(), strings.Repeat("a", models.MaxBotMemoryBytes))
+	response = api.Post("/generation/commands", "Authorization: Bearer valid", strings.NewReader(tooLarge))
+	var problem huma.ErrorModel
+	if err := json.Unmarshal(response.Body.Bytes(), &problem); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != 422 || problem.Type != services.BotMemoryTooLargeProblemType {
+		t.Fatalf("too large=%d %s", response.Code, response.Body.String())
+	}
+
+	// The memory's digits come back as they were sent.
+	request := fmt.Sprintf(`{"game_id":%d,"generation_id":%d,"request_id":%q,"commands":[],"memory":{"big":12345678901234567890,"plan":[1,2]}}`, state.GameID, state.GenerationID, uuid.NewString())
+	response = api.Post("/generation/commands", "Authorization: Bearer valid", strings.NewReader(request))
+	if response.Code != 200 || !strings.Contains(response.Body.String(), `"memory":{"big":12345678901234567890,"plan":[1,2]}`) {
+		t.Fatalf("complete=%d %s", response.Code, response.Body.String())
+	}
+	response = api.Get(path, "Authorization: Bearer valid")
+	if response.Code != 200 || !strings.Contains(response.Body.String(), `"big":12345678901234567890`) || !strings.Contains(response.Body.String(), `"plan":[1,2]`) {
+		t.Fatalf("read=%d %s", response.Code, response.Body.String())
+	}
+}
