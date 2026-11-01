@@ -50,3 +50,7 @@ deploy/ansible/.collections/
 .terraform/
 *.tfstate*
 *.tfplan
+
+# Web client dependencies and build output
+node_modules/
+dist/

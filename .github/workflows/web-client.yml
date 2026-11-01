@@ -1,0 +1,37 @@
+# Checks the 3D web client (clients/island-battles-web). It deploys nothing;
+# publishing the build to /play/ belongs to the release workflow.
+name: Web client
+
+on:
+  pull_request:
+    paths:
+      - "clients/island-battles-web/**"
+      - ".github/workflows/web-client.yml"
+  push:
+    paths:
+      - "clients/island-battles-web/**"
+      - ".github/workflows/web-client.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: clients/island-battles-web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the pinned Bun version
+        id: bun
+        run: echo "version=$(jq -r '.packageManager | sub("^bun@"; "")' package.json)" >> "$GITHUB_OUTPUT"
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ steps.bun.outputs.version }}
+
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun run build
