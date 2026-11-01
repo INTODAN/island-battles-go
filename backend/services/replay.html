@@ -218,11 +218,6 @@ function render(animateClashes = false) {
   const animate = animateClashes && renderedTurn !== turn;
   renderedTurn = turn;
   field.replaceChildren();
-  for (let index = 1; index < frame.castles.length; index++) {
-    const [x1, y1] = point(frame.castles[index - 1]);
-    const [x2, y2] = point(frame.castles[index]);
-    svg("line", { x1, y1, x2, y2, stroke: "#c6d8e7", "stroke-width": 2, "stroke-dasharray": "7 8" });
-  }
   for (const castle of frame.castles) {
     const [x, y] = point(castle);
     svg("circle", { cx: x, cy: y, r: castleRadius * worldScale, fill: "#fff", stroke: color(castle.team_color), "stroke-width": 3, "data-kind": "castle" });
