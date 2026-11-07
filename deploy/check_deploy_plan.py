@@ -15,8 +15,8 @@ else goes through `scripts/aws.sh apply`, which shows the plan and asks.
 `apply` prints, one per line, the name of every Lightsail instance, static IP
 or disk, and every CloudFront distribution, the plan deletes or replaces, and
 describes them on stderr. `scripts/aws.sh apply` then asks for each name to be
-typed, because deleting an instance deletes its disk and its automatic
-snapshots, and a new distribution has a new domain for the game's CNAME.
+typed, because deleting an instance deletes its disk and its database,
+and a new distribution has a new domain for the game's CNAME.
 
 `publishes-backend` prints `yes` when the plan creates or updates the backend
 function, so `scripts/aws.sh apply` runs the migrations first, and `no`
@@ -38,7 +38,7 @@ REFUSED_TYPE_PREFIXES = {
 }
 # Deleting one of these loses data, or an address that DNS points at.
 DESTRUCTIVE_TYPES = {
-    "aws_lightsail_instance": "instance, with its disk and automatic snapshots",
+    "aws_lightsail_instance": "instance, with its disk and its database",
     "aws_lightsail_static_ip": "static IP, which vm.<domain> points at",
     "aws_lightsail_disk": "disk",
     "aws_cloudfront_distribution": "distribution, whose domain the game's CNAME points at",

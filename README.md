@@ -57,6 +57,20 @@ Teams and readiness belong to the generic lobby. Starting freezes a roster. The 
 *   **Live acceptance (Linux Docker or Podman):** `./scripts/test-lobby-acceptance.sh`
 *   **Web client** (in `clients/island-battles-web/`, needs [Bun](https://bun.sh/)): `bun install`, then `bun run dev` (dev server on `:3000`, proxying the backend from `./scripts/dev.sh`), `bun run check` (Biome, `tsc`, `bun test`) and `bun run build`
 
+### Checks on every pull request
+
+[`.github/workflows/checks.yml`](.github/workflows/checks.yml) runs these checks on every pull request to `main`, as five parallel jobs. Each shows as its own check on the pull request:
+
+| Job | Runs |
+|---|---|
+| Go | `go vet`, `golangci-lint` (pinned to the version in the workflow), a `gofmt -l` check of both modules, and `go test` with Testcontainers on the runner's Docker |
+| API contract | both OpenAPI `--check` commands and the generated gameplay models' `--check` |
+| Python | the lobby client's unit tests and the offline gameplay client conformance tests, with `uv --locked` |
+| JS | `node --test` for the tests in `backend/demo`, `backend/demoviewer`, `backend/mapbuilder` and `lobby/frontend` |
+| Deploy | `python3 -I -m unittest discover -s deploy -p 'test_*.py'` |
+
+The workflow leaves out the live acceptance and live client conformance scripts, which start the whole stack. It also has a `workflow_call` trigger, so the release workflow can run the same checks with `uses: ./.github/workflows/checks.yml` before it deploys. Go comes from `go.mod`; when you change the golangci-lint version in the workflow, change the one you run locally to match.
+
 ## Testing & Visualization
 
 The project uses a specialized methodology for testing complex game state transitions and verifying them visually.
