@@ -18,7 +18,9 @@ from island_battles_client import (
     upgrade_castle,
 )
 
-# What reaching speed level 2, 3 and 4 costs; GET /game/upgrades serves the table.
+# What reaching speed level 2, 3 and 4 costs. BotTurn doesn't carry the cost
+# table yet, so it is hard-coded here; the authoritative table is the server's
+# GET /game/upgrades, and a follow-up issue will put it in BotTurn.
 SPEED_COSTS = {2: 10, 3: 20, 4: 30}
 
 

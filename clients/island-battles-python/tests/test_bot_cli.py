@@ -2,9 +2,11 @@
 
 import http.client
 import json
+import socket
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -114,7 +116,10 @@ def request(
     headers: dict[str, str] | None = None,
 ) -> tuple[int, http.client.HTTPMessage, bytes]:
     connection = http.client.HTTPConnection("127.0.0.1", bot_server.server_address[1])
-    connection.request(method, path, body, headers or {})
+    sent = dict(headers or {})
+    if method == "POST":
+        sent.setdefault("Content-Type", "application/json")
+    connection.request(method, path, body, sent)
     response = connection.getresponse()
     data = response.read()
     connection.close()
@@ -232,3 +237,114 @@ def test_preflight_and_requests_from_another_origin_are_refused(
 def test_an_allowed_origin_can_read_the_answer(server: tuple[BotServer, Path]) -> None:
     _, headers, _ = post_turn(server[0], {"Origin": GAME_ORIGIN})
     assert headers["Access-Control-Allow-Origin"] == GAME_ORIGIN
+
+
+def raw_exchange(bot_server: BotServer, payload: bytes) -> bytes:
+    """Send bytes over one socket and read until the server closes it."""
+    with socket.create_connection(
+        ("127.0.0.1", bot_server.server_address[1]), timeout=5
+    ) as connection:
+        connection.sendall(payload)
+        answer = b""
+        while chunk := connection.recv(65536):
+            answer += chunk
+    return answer
+
+
+def test_a_foreign_origin_cannot_smuggle_a_second_request_in_its_body(
+    server: tuple[BotServer, Path], tmp_path: Path
+) -> None:
+    bot_server, file = server
+    marker = tmp_path / "ran"
+    file.write_text(
+        f"from pathlib import Path\ndef play(turn):\n    Path({str(marker)!r}).touch()\n"
+    )
+    port = bot_server.server_address[1]
+    turn = json.dumps(fixture_turn_data()).encode()
+    inner = (
+        f"POST /turn HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
+        f"Content-Type: application/json\r\nContent-Length: {len(turn)}\r\n\r\n"
+    ).encode() + turn
+    outer = (
+        f"POST /turn HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
+        f"Origin: https://evil.example.com\r\nContent-Type: text/plain\r\n"
+        f"Content-Length: {len(inner)}\r\n\r\n"
+    ).encode() + inner
+    answer = raw_exchange(bot_server, outer)  # returns only when the server closes
+    time.sleep(0.3)
+    assert answer.count(b"HTTP/1.") == 1
+    assert b" 403 " in answer.split(b"\r\n", 1)[0]
+    assert b"Connection: close" in answer
+    assert not marker.exists()
+
+
+def test_a_post_that_is_not_json_is_a_415_and_the_connection_closes(
+    server: tuple[BotServer, Path],
+) -> None:
+    bot_server, _ = server
+    status, headers, _ = post_turn(bot_server, {"Content-Type": "text/plain"})
+    assert status == 415
+    assert headers["Connection"] == "close"
+    status, _, _ = post_turn(
+        bot_server, {"Content-Type": "application/json; charset=utf-8"}
+    )
+    assert status == 200
+
+
+def test_another_host_header_is_a_403_against_dns_rebinding(
+    server: tuple[BotServer, Path],
+) -> None:
+    bot_server, _ = server
+    port = bot_server.server_address[1]
+    for host in ("evil.example.com", f"evil.example.com:{port}", "127.0.0.1"):
+        assert post_turn(bot_server, {"Host": host})[0] == 403
+        assert request(bot_server, "GET", "/health", headers={"Host": host})[0] == 403
+    assert (
+        request(bot_server, "GET", "/health", headers={"Host": f"localhost:{port}"})[0]
+        == 200
+    )
+
+
+def test_a_body_over_the_limit_is_a_413(server: tuple[BotServer, Path]) -> None:
+    bot_server, _ = server
+    answer = raw_exchange(
+        bot_server,
+        f"POST /turn HTTP/1.1\r\nHost: 127.0.0.1:{bot_server.server_address[1]}\r\n"
+        "Content-Type: application/json\r\nContent-Length: 99999999\r\n\r\n".encode(),
+    )
+    assert b" 413 " in answer.split(b"\r\n", 1)[0]
+
+
+def test_a_looping_bot_is_a_504_and_the_server_keeps_serving(
+    server: tuple[BotServer, Path],
+) -> None:
+    bot_server, file = server
+    bot_server.turn_timeout = 0.5
+    file.write_text("def play(turn):\n    while True:\n        pass\n")
+    status, _, body = post_turn(bot_server)
+    assert status == 504
+    assert b"took longer than 0.5 s" in body
+    file.write_text(GOOD_BOT.format(answer=7))
+    assert BotTurnResult.model_validate_json(post_turn(bot_server)[2]).memory == {
+        "answer": 7
+    }
+
+
+def test_check_exits_at_once_for_a_bot_that_never_returns(tmp_path: Path) -> None:
+    for source in (
+        "def play(turn):\n    while True:\n        pass\n",
+        "async def play(turn):\n    while True:\n        pass\n",
+    ):
+        (tmp_path / "mybot.py").write_text(source)
+        started = time.monotonic()
+        result = subprocess.run(
+            [sys.executable, "-m", "island_battles_client.cli", "check", "mybot:play"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        assert result.returncode == 1
+        assert "took longer than 2 s" in result.stderr
+        assert time.monotonic() - started < 5

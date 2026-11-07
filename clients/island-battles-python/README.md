@@ -39,7 +39,7 @@ def play(turn: BotTurn) -> BotTurnResult:
 - `turn.generation` is the board (`castles`, `soldier_groups`, `clashes`), `turn.team_color` your team, `turn.game_id` the game, `turn.memory` what you returned last turn (`None` on the first turn and after a turn that returned none), and `turn.turn_deadline_at` when the turn times out, or `None`. A bot that doesn't answer by then makes its whole team lose.
 - `turn_result(commands=(), logs=(), memory=None)` builds the result. The helpers `send_soldier_group(origin_castle_id, destination_castle_id, soldier_amount)` and `upgrade_castle(castle_id, upgrade_type)` build commands, and `log_line(message, level="info")` builds a game log line. They validate their arguments against the generated models and raise `pydantic.ValidationError` for invalid ones, before any request.
 - **Memory** is any JSON object of at most 64 KiB as compact JSON (`MEMORY_LIMIT_BYTES` is 65,536 bytes). The completing batch saves it on the server, and the next turn's `turn.memory` is that memory. `check`, `serve` and the client raise `BotMemoryTooLargeError` for more, before any request.
-- **Commands** run in order. The server checks them against the board and everything already reserved this turn, including your teammates' orders, and rejects the **whole result** if any command is invalid, such as sending soldiers a castle doesn't have. Count what your commands spend: the cost of upgrades is in `GET /game/upgrades` (speed levels 2, 3 and 4 cost 10, 20 and 30 soldiers).
+- **Commands** run in order. The server checks them against the board and everything already reserved this turn, including your teammates' orders, and rejects the **whole result** if any command is invalid, such as sending soldiers a castle doesn't have. Count what your commands spend. A bot turn doesn't carry the upgrade costs yet, so [examples/bot.py](examples/bot.py) hard-codes them (speed levels 2, 3 and 4 cost 10, 20 and 30 soldiers); the authoritative table is `GET /game/upgrades` on the server, and a follow-up issue will put it in `BotTurn`.
 - **Logs:** lines the bot logs with `island_battles_client.logger` (a standard `logging.Logger` named `island_battles.player`) while it plays, and the lines in `turn_result(logs=...)`, are stored in the game log; see [Logging](#logging).
 
 ### Serve it on your machine
@@ -50,16 +50,16 @@ uv run island-battles-bot serve mybot:play
 
 serves the bot on `http://127.0.0.1:41414`, the Island Battles bot port (`--port` changes it). A game client relays each turn to it and submits the result:
 
-- `POST /turn` takes a `BotTurn` as JSON and answers a `BotTurnResult`. An exception in the bot answers `500` with the traceback in the body, so the relaying client can show it in the game log.
+- `POST /turn` takes a `BotTurn` as JSON (`Content-Type: application/json`, at most 2 MiB) and answers a `BotTurnResult`. An exception in the bot answers `500` with the traceback in the body, so the relaying client can show it in the game log. A turn that takes longer than `--turn-timeout` seconds (default 8, under the lobby's shortest turn timeout of 10) answers `504` and the server keeps serving; a bot stuck in a loop keeps its thread until you stop the server.
 - `GET /health` answers `{"name": "mybot:play", "ok": true}`, so a client can show "bot connected".
-- **The server reloads the module when a `.py` file in its directory changes**: edit, save, and the next turn uses the new code. A file that doesn't load answers `500` with the error until it is fixed.
-- **Browsers:** the server answers CORS preflights, with `Access-Control-Allow-Private-Network: true` for Chrome's Private Network Access, only for the game's origins: `http://localhost:8888` (the local backend) and `http://localhost:3000` (the web client's dev server) always, and any other with `--allow-origin https://game.example.org` (repeatable). Requests from other origins get `403`, and the bot doesn't run. Chrome, Edge and Firefox can reach `http://127.0.0.1` from an HTTPS page; Safari can't.
+- **The server reloads the module when a `.py` file in its directory changes**: edit, save, and the next turn uses the new code. It re-imports the bot module and the other modules in the same directory (never the standard library or site-packages), so keep a bot in its own directory rather than a shared one. A file that doesn't load answers `500` with the error until it is fixed.
+- **Browsers:** the server answers CORS preflights, with `Access-Control-Allow-Private-Network: true` for Chrome's Private Network Access, only for the game's origins: `http://localhost:8888` (the local backend), `http://localhost:3000` (the web client's dev server) and `https://island-battles.elidan.org` (the deployed game) always, and any other with `--allow-origin https://game.example.org` (repeatable). Requests from other origins, a `Host` other than `127.0.0.1:<port>` or `localhost:<port>` (DNS rebinding) get `403`, and a POST that isn't `application/json` gets `415`; the bot doesn't run, and the connection is closed after every refusal. Chrome, Edge and Firefox can reach `http://127.0.0.1` from an HTTPS page; Safari can't.
 
 Try it with curl:
 
 ```sh
 uv run island-battles-bot fixture > turn.json
-curl -X POST localhost:41414/turn -d @turn.json
+curl -X POST localhost:41414/turn -H 'Content-Type: application/json' -d @turn.json
 curl localhost:41414/health
 ```
 
