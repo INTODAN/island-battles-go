@@ -10,6 +10,7 @@ lambda_settings_file="$local_directory/lambda.env"
 build_directory="$local_directory/lambda"
 plan_file="$local_directory/terraform/scripts-aws.tfplan"
 local_state_file="$local_directory/terraform/terraform.tfstate"
+backup_settings_file="$local_directory/secrets/database_backups.json"
 
 usage() {
   cat >&2 <<'EOF'
@@ -19,8 +20,10 @@ from the bucket first and push it back at the end.
 Usage:
   scripts/aws.sh apply [terraform plan options]
       Build the backend, then create or update every AWS resource: the
-      Lightsail VM, its static IP and firewall, the Lambda, and the game's
-      certificate and CloudFront distribution. Shows the plan and asks first.
+      Lightsail VM, its static IP and firewall, the Lambda, the game's
+      certificate and CloudFront distribution, and the database backups'
+      bucket and key. Shows the plan and asks first. Writes the backups' key
+      to deploy/local/secrets/database_backups.json for the VM deploy.
       A plan that deletes or replaces an instance, the static IP, a disk or
       the distribution also needs each one's name typed, or listed in
       ISLAND_BATTLES_ALLOW_DESTROY, comma-separated. Runs the migrations before
@@ -34,9 +37,20 @@ Usage:
       new code and deploy/local/lambda.env's settings to the Lambda. Doesn't
       ask, and refuses a plan that changes Lightsail resources or the game's
       certificate or distribution, or deletes anything. Never touches the VM.
-      Both first read the account's Lambda concurrency limit, and refuse to
-      plan when reserved_concurrency is null and account_concurrency_limit in
-      aws.tfvars is below it (deploy/README.md, "The concurrency cap").
+  scripts/aws.sh plan <directory>
+      Build the backend and plan, like apply, without asking or applying.
+      Saves the plan, the build it packages and the plan as text in the
+      directory, which then holds the Lambda's settings. The Deploy workflow's
+      plan target runs it.
+  scripts/aws.sh apply-plan <directory>
+      Apply a plan that plan saved, without asking: the Deploy workflow's
+      apply target runs it on main, once someone has read the plan. Refuses a plan that destroys an instance, the static IP, a
+      disk or the distribution unless ISLAND_BATTLES_ALLOW_DESTROY lists it.
+      Runs the migrations first when the plan publishes the backend.
+      The apply, deploy and plan targets first read the account's Lambda
+      concurrency limit, and refuse to plan when reserved_concurrency is null
+      and account_concurrency_limit in aws.tfvars is below it
+      (deploy/README.md, "The concurrency cap").
   scripts/aws.sh output [name]
       Print Terraform's outputs, or one of them, e.g. static_ip,
       function_url, game_url, certificate_validation_record or
@@ -186,8 +200,8 @@ check_plan() {
   run_terraform show -json "$plan_file" | python3 -I "$repository_root/deploy/check_deploy_plan.py" "$1"
 }
 
-# Deleting or replacing an instance deletes its disk and its automatic
-# snapshots, releasing the static IP gives vm.<domain>'s address away, and a
+# Deleting or replacing an instance deletes its disk and everything written
+# since the last backup, releasing the static IP gives vm.<domain>'s address away, and a
 # new distribution has a new domain for the game's CNAME. A generic yes isn't
 # enough for that: each one's name must be typed, or listed in
 # ISLAND_BATTLES_ALLOW_DESTROY.
@@ -211,6 +225,71 @@ confirm_destruction() {
       exit 1
     fi
   done
+}
+
+# The VM deploy installs the daily backup's bucket and upload-only key on the
+# VM (deploy/README.md, "Backups"). Only Terraform's state has the key, so
+# every apply copies it to deploy/local/secrets/, which the deploy bucket
+# shares. An apply of the certificate alone has no such output yet.
+save_backup_settings() {
+  local settings
+  if ! settings="$(run_terraform output -json database_backups 2>/dev/null)" || [[ -z "$settings" ]] || [[ "$settings" == null ]]; then
+    return 0
+  fi
+  mkdir -p "$(dirname -- "$backup_settings_file")"
+  (umask 077 && printf '%s\n' "$settings" >"$backup_settings_file")
+}
+
+# The Deploy workflow's plan target saves a plan, and its apply target applies
+# it in a later run, once someone has read it. The plan packages deploy/local/lambda/bootstrap.zip by
+# its hash, so the apply needs that same file, not a new build.
+save_plan() {
+  local directory="$1"
+  require_migrated_state
+  initialize_terraform
+  require_variables
+  require_current_concurrency_limit
+  build_backend
+  run_terraform plan -input=false -var-file="$variables_file" -out="$plan_file"
+  mkdir -p "$directory"
+  cp "$plan_file" "$directory/tfplan"
+  cp "$build_directory/bootstrap" "$build_directory/bootstrap.zip" "$directory/"
+  run_terraform show -no-color "$plan_file" >"$directory/plan.txt"
+  # One name per line; the descriptions go to stderr, into the log.
+  check_plan apply >"$directory/destroys"
+  check_plan publishes-backend >"$directory/publishes-backend"
+}
+
+apply_saved_plan() {
+  local directory="$1" name
+  require_migrated_state
+  initialize_terraform
+  mkdir -p "$build_directory" "$(dirname -- "$plan_file")"
+  cp "$directory/bootstrap" "$directory/bootstrap.zip" "$build_directory/"
+  cp "$directory/tfplan" "$plan_file"
+  # Assigned first, so a failing check stops the script.
+  local destroyed allowed=",${ISLAND_BATTLES_ALLOW_DESTROY:-},"
+  local refused=()
+  destroyed="$(check_plan apply)"
+  while IFS= read -r name; do
+    [[ -n "$name" ]] || continue
+    if [[ "$allowed" != *",$name,"* ]]; then
+      refused+=("$name")
+    fi
+  done <<<"$destroyed"
+  if [[ ${#refused[@]} -gt 0 ]]; then
+    echo "The plan destroys ${refused[*]}. Nothing applied. If that's intended, start the run again with allow_destroy listing each name." >&2
+    exit 1
+  fi
+  if [[ "$(check_plan publishes-backend)" == yes ]]; then
+    if [[ -f "$lambda_settings_file" ]]; then
+      migrate_database
+    else
+      echo "No $lambda_settings_file yet, so no migrations."
+    fi
+  fi
+  run_terraform apply -input=false "$plan_file"
+  save_backup_settings
 }
 
 # Plans, checks the plan, migrates and applies exactly the plan that was
@@ -249,6 +328,7 @@ plan_and_apply() {
     fi
   fi
   run_terraform apply -input=false "$plan_file"
+  save_backup_settings
   # The certificate's apply on its own leaves the rest for later.
   local function_url
   if function_url="$(run_terraform output -raw function_url 2>/dev/null)"; then
@@ -272,6 +352,17 @@ case "$command" in
       exit 1
     fi
     plan_and_apply deploy
+    ;;
+  plan)
+    [[ $# -eq 1 ]] || usage
+    sync_deploy_files
+    save_plan "$1"
+    ;;
+  apply-plan)
+    [[ $# -eq 1 ]] || usage
+    [[ -f "$1/tfplan" ]] || { echo "$1 has no saved plan. Run scripts/aws.sh plan $1 first." >&2; exit 1; }
+    sync_deploy_files
+    apply_saved_plan "$1"
     ;;
   output)
     [[ $# -le 1 ]] || usage

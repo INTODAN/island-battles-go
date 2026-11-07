@@ -122,7 +122,7 @@ def stale_limit_message(configured, real):
         f"reserved_concurrency is null, so the account's concurrency limit is the Lambda's cap, but "
         f"account_concurrency_limit is {configured} in aws.tfvars and the account's limit is {real}.\n"
         f"Terraform would check the Postgres connections and the free-tier budget against {configured} "
-        f"instead of {real}. Either set reserved_concurrency again, for example back to 5, or set "
+        f"instead of {real}. Either set reserved_concurrency again, for example to 10, or set "
         f"account_concurrency_limit = {real} and check the budget it implies.\n"
         'See "The concurrency cap" in deploy/README.md.'
     )

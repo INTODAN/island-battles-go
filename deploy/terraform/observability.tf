@@ -102,7 +102,7 @@ resource "aws_sns_topic_subscription" "alert_email" {
   endpoint  = var.alert_email
 }
 
-# Two standard alarms of the 10 free. Each looks at one hour and notifies only
+# Two standard alarms of the 10 free (backups.tf has a third). Each looks at one hour and notifies only
 # on entering ALARM. It must pass an hour in OK first, so each sends at most
 # 360 emails in a 30-day month and 372 in a 31-day one.
 resource "aws_cloudwatch_metric_alarm" "lambda_errors" {

@@ -30,3 +30,12 @@ Each issue is written to be implemented on its own: read the whole issue, plus t
   - `game-state-testing`: generation, command and game-state tests
 - Keep `lobby/` game-neutral. Island Battles specifics belong in `backend/`.
 - After changing an API, re-export the OpenAPI documents and regenerate the clients in the same change. On a rebase conflict in generated files, regenerate them instead of merging by hand.
+
+## Deploying
+
+You have no AWS credentials, and only merged code deploys. When the user asks you to deploy or apply a change, use the Deploy workflow (`.github/workflows/deploy.yml`) on `main`, as [deploy/README.md](deploy/README.md#deploying-from-github-actions) describes, and only when asked:
+
+1. The change must be merged first. Open the pull request, and wait for the owner to merge it.
+2. For AWS resources, start a `plan` run on `main`. Read the plan from its log or summary, and tell the user what it creates, changes and destroys.
+3. Only when the user says to, start an `apply` run with `plan_run_id` set to that plan run's ID. Never pass `allow_destroy` unless the user named each resource.
+4. Then start the `vm`, `backend` or `smoke` runs the change needs, and check the result: the job's log, and the AWS resources it should have changed.

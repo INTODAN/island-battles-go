@@ -5,7 +5,9 @@
 # It can read the account, as a plan must, and write only what a backend or VM
 # deploy writes: the function's code and settings, the deploy bucket, and a
 # temporary SSH key for the VM. Anything else, such as new alarms or a change
-# to the VM, goes through `scripts/aws.sh apply` on a person's machine.
+# to the VM, goes through `scripts/aws.sh apply`: on a person's machine, or in
+# the Deploy workflow's apply target, which applies a saved plan from main
+# with the apply role from deploy/github_apply_role.py.
 
 data "aws_caller_identity" "current" {}
 
@@ -39,7 +41,8 @@ resource "aws_iam_role" "github_deploy" {
 }
 
 # Every plan refreshes every resource, across Lightsail, Lambda, IAM, logs,
-# alarms, SNS, budgets, ACM and CloudFront.
+# alarms, SNS, budgets, ACM, CloudFront and the backups bucket. The bucket's
+# policy keeps the backups themselves from this role (backups.tf).
 resource "aws_iam_role_policy_attachment" "github_deploy_read" {
   count      = local.github_deploy ? 1 : 0
   role       = aws_iam_role.github_deploy[0].name
