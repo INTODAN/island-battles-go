@@ -1,5 +1,15 @@
 # Island Battles Python bot client
 
+## Installing from PyPI
+
+Each release publishes this client to PyPI as `island-battles-python`, at the release's version (the import name is `island_battles_client`):
+
+```sh
+pip install island-battles-python==X.Y.Z   # or: uv add island-battles-python==X.Y.Z
+```
+
+It needs Python 3.14 or newer. To obtain the guest credential and the lobby ID, install the lobby client too, `mpl-lobby-client`, with the same version. The rest of this README describes the repository checkout.
+
 A bot is a **function**: it gets a `BotTurn` (the board, your team and the `memory` it returned last turn) and returns a `BotTurnResult` (commands, game log lines and its new memory). The function keeps nothing between turns; whatever it needs next turn goes into its memory, which the server stores. This package runs your function three ways:
 
 - `island-battles-bot serve` serves it on your machine, and a game client in your browser relays each turn to it,

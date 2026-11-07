@@ -9,15 +9,15 @@ dependencies = [
     "pytest>=8.0,<9",
     "pytest-asyncio>=0.24,<1",
     # Live tests reuse the lobby acceptance fixtures to start games.
-    "lobby-python",
+    "mpl-lobby-client",
 ]
 
 [dependency-groups]
 dev = ["ruff>=0.16.9"]
 
 [tool.uv.sources]
-lobby-python = { path = "../../lobby/clients/lobby-python", editable = true }
-lobby-api-client = { path = "../../lobby/clients/lobby-python/generated", editable = true }
+mpl-lobby-client = { path = "../../lobby/clients/lobby-python", editable = true }
+mpl-lobby-api-client = { path = "../../lobby/clients/lobby-python/generated", editable = true }
 
 [tool.uv.build-backend]
 module-name = "island_conformance"
