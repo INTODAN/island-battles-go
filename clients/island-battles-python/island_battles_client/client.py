@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 from datetime import UTC, datetime
 from os import PathLike
@@ -17,17 +18,17 @@ import httpx
 from pydantic import ValidationError
 
 from ._generated import (
+    BotTurn,
     ConnectionToken,
     GameEndedEvent,
     GameOutcome,
     GenerationEvent,
     GenerationLogLine,
     GenerationState,
-    ListUpgradesResponseBody,
     PublicGenerationCommand,
     RegisterGenerationCommands,
 )
-from .commands import CommandReceiver
+from .bot import Play, add_result_lines, call_play
 from .errors import (
     PROBLEM_TYPE_ERRORS,
     GameAuthenticationError,
@@ -40,8 +41,6 @@ from .errors import (
 )
 from .game_log import SDK_LOGGER, ClientLogging, GameLog, report_server_limit
 from .models import Generation
-from .player import Player
-from .upgrades import UpgradeTable
 
 _sdk_logger = logging.getLogger(SDK_LOGGER)
 
@@ -111,18 +110,21 @@ class _SubscriptionEvents(centrifuge.SubscriptionEventHandler):
 class IslandBattlesClient:
     """One authenticated player's generation-turn client.
 
-    The client owns an injected ``http_client`` and closes it. ``player_factory``
-    receives the authenticated team color once at startup. The resulting player's
-    callbacks run serially; successful return automatically completes the turn.
-    When the game ends, the player's ``on_game_ended`` runs once and ``wait()``
-    and ``run()`` return. While the player waits for others to complete a turn
+    The client owns an injected ``http_client`` and closes it. ``play`` is the
+    bot, a function (sync or async) from ``BotTurn`` to ``BotTurnResult``. The
+    client calls it once per generation, serially, and sends its result as the
+    turn's one completing batch: the commands, the game log lines and the
+    memory, which the server stores for the next ``BotTurn.memory``. When the
+    game ends, the optional ``on_game_ended(outcome, generation)`` runs once and
+    ``wait()`` and ``run()`` return. While the player waits for others to complete a turn
     that has a deadline, the client asks the server to apply the deadline a
     second after it, which ends the game when someone didn't answer.
 
     From ``start()`` to ``close()`` the client attaches its log handlers to the
-    player's logger: stdout unless ``log_to_stdout`` is false, ``log_file``
+    ``island_battles`` logger, which the bot's ``island_battles.player`` logger
+    propagates to: stdout unless ``log_to_stdout`` is false, ``log_file``
     when it is set, and always the game log, which sends the lines logged
-    during ``on_generation`` with that generation's requests. ``log_level``
+    while ``play`` runs with that generation's completing request. ``log_level``
     applies to all three.
     """
 
@@ -132,7 +134,9 @@ class IslandBattlesClient:
         credential: str,
         lobby_id: str,
         *,
-        player_factory: Callable[[int], Player],
+        play: Play,
+        on_game_ended: Callable[[GameOutcome, Generation], Awaitable[None] | None]
+        | None = None,
         http_client: httpx.AsyncClient | None = None,
         sdk_factory=centrifuge.Client,
         refresh_interval: float | None = None,
@@ -147,8 +151,8 @@ class IslandBattlesClient:
         self.base_url = base_url.rstrip("/")
         self.credential = credential
         self.lobby_id = str(UUID(str(lobby_id)))
-        self._player_factory = player_factory
-        self._player: Player | None = None
+        self._play = play
+        self._on_game_ended = on_game_ended
         if (
             (refresh_interval is not None and refresh_interval <= 0)
             or retry_attempts < 1
@@ -169,7 +173,6 @@ class IslandBattlesClient:
         self._sdk = None
         self._subscription = None
         self._state: GenerationState | None = None
-        self._upgrades: UpgradeTable | None = None
         self._expected_identity: tuple[int, UUID, str, int] | None = None
         self._last_queued_generation = 0
         # Whether the state with the outcome was queued for on_game_ended. A
@@ -199,14 +202,9 @@ class IslandBattlesClient:
         return self._state.generation if self._state is not None else None
 
     @property
-    def player(self) -> Player | None:
-        """The strategy created after the first authorized state read."""
-        return self._player
-
-    @property
-    def upgrades(self) -> UpgradeTable | None:
-        """The upgrade cost table, read once by ``start()``; None before it."""
-        return self._upgrades
+    def team_color(self) -> int | None:
+        """The player's frozen team color, known after the first state read."""
+        return self._expected_identity[3] if self._expected_identity else None
 
     @property
     def outcome(self) -> GameOutcome | None:
@@ -370,13 +368,6 @@ class IslandBattlesClient:
             self._callbacks.put_nowait(state)
         return state
 
-    async def _fetch_upgrades(self) -> UpgradeTable:
-        data = await self._request("GET", "/game/upgrades")
-        try:
-            return UpgradeTable(ListUpgradesResponseBody.model_validate(data).upgrades)
-        except ValidationError as exc:
-            raise GameProtocolError("invalid upgrade table") from exc
-
     async def _fetch_state(self) -> GenerationState:
         data = await self._request(
             "GET", f"/game/from-lobby/{self.lobby_id}/generation"
@@ -424,14 +415,6 @@ class IslandBattlesClient:
                     initial.channel,
                     initial.team_color,
                 )
-                self._upgrades = await self._fetch_upgrades()
-                # A strategy's __init__ logs to stdout and the file only.
-                with self._logging.scope():
-                    self._player = self._player_factory(initial.team_color)
-                if self._player.team_color != initial.team_color:
-                    raise GameProtocolError(
-                        "player factory returned a different team color"
-                    )
                 self._subscription = self._sdk.new_subscription(
                     initial.channel,
                     events=_SubscriptionEvents(self),
@@ -487,21 +470,20 @@ class IslandBattlesClient:
             self._wakeup.set()
 
     async def _callback_worker(self) -> None:
-        assert self._player is not None
         while not self._closed:
             state = await self._callbacks.get()
             if state.outcome is not None:
                 # The final generation has no turn: report the end, then stop.
                 try:
-                    with self._logging.scope():
-                        await self._player.on_game_ended(
-                            state.outcome, state.generation
-                        )
+                    if self._on_game_ended is not None:
+                        with self._logging.scope():
+                            ended = self._on_game_ended(state.outcome, state.generation)
+                            if inspect.isawaitable(ended):
+                                await ended
                 finally:
                     self._callbacks.task_done()
                 self._stopped.set()
                 return
-            receiver = self._receiver(state)
             try:
                 if self._state is not None and (
                     self._state.generation_id != state.generation_id
@@ -513,27 +495,46 @@ class IslandBattlesClient:
                 # as the latest state of this generation says.
                 latest = self._state or state
                 self._game_log = GameLog(state.generation_id, latest.log_lines_stored)
-                try:
-                    with self._logging.scope(self._game_log):
-                        try:
-                            await self._player.on_generation(state.generation, receiver)
-                        except GameEndedError:
-                            raise
-                        except Exception as error:
-                            receiver._close()
-                            await self._send_failure_logs(state.generation_id, error)
-                            raise
-                finally:
-                    receiver._close()
-                if not self._closed:
-                    await self._register([], True, generation_id=state.generation_id)
+                turn = BotTurn(
+                    game_id=state.game_id,
+                    generation=state.generation,
+                    memory=state.memory,
+                    team_color=state.team_color,
+                    turn_deadline_at=state.turn_deadline_at,
+                )
+                with self._logging.scope(self._game_log):
+                    try:
+                        result = await call_play(self._play, turn)
+                        add_result_lines(self._game_log, result)
+                        if not self._closed:
+                            # The one completing batch: the commands, the lines
+                            # and the memory, which the server stores.
+                            await self._register(
+                                list(result.commands),
+                                True,
+                                generation_id=state.generation_id,
+                                memory=result.memory,
+                            )
+                    except (
+                        GameEndedError,
+                        GameTransportError,
+                        GameAuthenticationError,
+                        GameClientClosedError,
+                    ):
+                        raise
+                    except Exception as error:
+                        # The bot raised, returned an invalid result, or the
+                        # server rejected the result's commands or memory. The
+                        # turn stays open and the client stops after the
+                        # error and the remaining lines are stored.
+                        await self._send_failure_logs(state.generation_id, error)
+                        raise
             except GameEndedError:
                 # The turn's deadline passed during the callback, and the game
                 # ended. Reconciling reads the final state, which queues
                 # on_game_ended, instead of failing the client.
                 self._wakeup.set()
             finally:
-                receiver._close()
                 self._game_log = None
                 self._callbacks.task_done()
 
@@ -603,14 +604,14 @@ class IslandBattlesClient:
         return changed in done
 
     async def _send_failure_logs(self, generation_id: int, error: Exception) -> None:
-        """Log the callback's exception and send the generation's remaining lines.
+        """Log the failure and send the generation's remaining lines.
 
         The batch leaves the turn open, and the client stops after it, so a
         crashing bot's last lines and traceback are kept.
         """
-        # Logged inside the callback's scope, so the game log stores it too.
+        # Logged inside the turn's scope, so the game log stores it too.
         _sdk_logger.error(
-            "on_generation raised for generation %d", generation_id, exc_info=error
+            "the bot failed on generation %d", generation_id, exc_info=error
         )
         try:
             await self._register([], False, generation_id=generation_id, last=True)
@@ -619,18 +620,6 @@ class IslandBattlesClient:
                 "could not send the failed generation's logs: %s", send_error
             )
 
-    def _receiver(self, state: GenerationState) -> CommandReceiver:
-        async def submit(command: PublicGenerationCommand) -> None:
-            await self._register([command], False, generation_id=state.generation_id)
-
-        assert self._upgrades is not None
-        return CommandReceiver(
-            submit,
-            generation=state.generation,
-            team_color=state.team_color,
-            upgrades=self._upgrades,
-        )
-
     async def _register(
         self,
         commands: list[PublicGenerationCommand],
@@ -638,6 +627,7 @@ class IslandBattlesClient:
         *,
         generation_id: int,
         last: bool | None = None,
+        memory: Mapping[str, Any] | None = None,
     ) -> GenerationState:
         """Send one batch; ``last`` (default: ``complete``) marks the turn's last request."""
         self._check_open()
@@ -668,6 +658,7 @@ class IslandBattlesClient:
                     request_id=uuid4(),
                     complete=complete,
                     commands=commands,
+                    memory=memory,
                     logs=lines or None,
                 ).model_dump(mode="json", by_alias=True, exclude_none=True)
                 # The transport retries this exact payload, including its UUID.

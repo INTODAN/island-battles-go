@@ -10,21 +10,26 @@ from typing import Any
 from pydantic import ValidationError
 
 from island_battles_client import (
+    BotMemoryTooLargeError,
+    BotTurn,
+    BotTurnResult,
     CastleNotFoundError,
     CastleNotOwnedError,
-    CommandReceiver,
     GameAuthenticationError,
     GameClientClosedError,
     GameError,
     GameOutcome,
     GameProtocolError,
-    GameReceiverClosedError,
     GameTransportError,
     Generation,
     InsufficientSoldiersError,
     IslandBattlesClient,
-    Player,
     UpgradeMaxLevelError,
+    log_line,
+    logger,
+    send_soldier_group,
+    turn_result,
+    upgrade_castle,
 )
 
 LOG_LEVELS = {
@@ -40,7 +45,7 @@ def describe(error: BaseException) -> dict[str, Any]:
     status = getattr(error, "status", None)
     kinds = (
         (ValidationError, "invalid_argument"),
-        (GameReceiverClosedError, "receiver_closed"),
+        (BotMemoryTooLargeError, "memory_too_large"),
         (GameClientClosedError, "closed"),
         (GameAuthenticationError, "authentication"),
         (GameTransportError, "transport"),
@@ -55,50 +60,67 @@ def describe(error: BaseException) -> dict[str, Any]:
     return {"kind": kind, "status": status, "detail": str(error)}
 
 
-class ScriptedPlayer(Player):
-    """Report each generation, then act on the runner's orders."""
-
-    def __init__(self, team_color: int, adapter: Adapter) -> None:
-        """Remember the adapter that relays orders."""
-        super().__init__(team_color)
-        self.adapter = adapter
-
-    async def on_generation(
-        self, generation: Generation, commands_receiver: CommandReceiver
-    ) -> None:
-        """Wait for finish (return) or fail (raise)."""
-        self.adapter.receiver = commands_receiver
-        self.adapter.emit(
-            {"type": "generation", "generation": generation.model_dump(mode="json")}
-        )
-        while (decision := await self.adapter.decisions.get())["type"] == "log":
-            # Logged inside the callback, so the line goes to the game log.
-            self.logger.log(LOG_LEVELS[decision["level"]], decision["message"])
-            self.adapter.emit({"type": "logged"})
-        if decision["type"] == "fail":
-            raise RuntimeError("scripted callback failure")
-
-    async def on_game_ended(self, outcome: GameOutcome, generation: Generation) -> None:
-        """Report the outcome and the final board."""
-        self.adapter.emit(
-            {
-                "type": "ended",
-                "outcome": outcome.model_dump(mode="json"),
-                "generation": generation.model_dump(mode="json"),
-            }
-        )
-
-
 class Adapter:
     """Translate protocol messages into SDK calls."""
 
     def __init__(self) -> None:
         """Start with no client; the runner sends start or evaluate."""
         self.decisions: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
-        self.receiver: CommandReceiver | None = None
         self.client: IslandBattlesClient | None = None
         self.closing = False
         self.tasks: set[asyncio.Task[None]] = set()
+
+    def order(self, order: dict[str, Any]) -> Any:
+        """Build a command from the runner's order, with the values as given."""
+        if order["type"] == "send_soldier_group":
+            return send_soldier_group(
+                order.get("origin_castle_id"),  # ty: ignore[invalid-argument-type]
+                order.get("destination_castle_id"),  # ty: ignore[invalid-argument-type]
+                order.get("soldier_amount"),  # ty: ignore[invalid-argument-type]
+            )
+        return upgrade_castle(
+            order.get("castle_id"),  # ty: ignore[invalid-argument-type]
+            order.get("upgrade_type"),  # ty: ignore[invalid-argument-type]
+        )
+
+    async def play(self, turn: BotTurn) -> BotTurnResult:
+        """Report the turn, then act on the runner's orders: finish or fail."""
+        self.emit(
+            {
+                "type": "generation",
+                "generation": turn.generation.model_dump(mode="json"),
+                "memory": turn.memory,
+                "team_color": turn.team_color,
+                "game_id": turn.game_id,
+                "turn_deadline_at": turn.turn_deadline_at.isoformat()
+                if turn.turn_deadline_at
+                else None,
+            }
+        )
+        while (decision := await self.decisions.get())["type"] == "log":
+            # Logged inside the turn, so the line goes to the game log.
+            logger.log(LOG_LEVELS[decision["level"]], decision["message"])
+            self.emit({"type": "logged"})
+        if decision["type"] == "fail":
+            raise RuntimeError("scripted callback failure")
+        return turn_result(
+            [self.order(order) for order in decision.get("commands", [])],
+            [
+                log_line(entry["message"], entry["level"])
+                for entry in decision.get("logs", [])
+            ],
+            memory=decision.get("memory"),
+        )
+
+    async def on_game_ended(self, outcome: GameOutcome, generation: Generation) -> None:
+        """Report the outcome and the final board."""
+        self.emit(
+            {
+                "type": "ended",
+                "outcome": outcome.model_dump(mode="json"),
+                "generation": generation.model_dump(mode="json"),
+            }
+        )
 
     def emit(self, message: dict[str, Any]) -> None:
         """Write one protocol message."""
@@ -141,7 +163,8 @@ class Adapter:
             message["base_url"],
             message["credential"],
             message["lobby_id"],
-            player_factory=lambda team_color: ScriptedPlayer(team_color, self),
+            play=self.play,
+            on_game_ended=self.on_game_ended,
             # Stdout carries the protocol; the adapter logs to stderr instead.
             log_level=logging.DEBUG,
             log_to_stdout=False,
@@ -149,62 +172,12 @@ class Adapter:
         )
         try:
             await self.client.start()
-            assert self.client.player is not None
-            self.emit({"type": "started", "team_color": self.client.player.team_color})
+            self.emit({"type": "started", "team_color": self.client.team_color})
             await self.client.wait()
         except Exception as error:  # noqa: BLE001 - every failure is reported
             if not self.closing:
                 self.emit({"type": "stopped", "error": describe(error)})
             await self.client.close()
-
-    async def send(self, message: dict[str, Any]) -> None:
-        """Send one group with the current or most recent receiver."""
-        if self.receiver is None:
-            self.emit(
-                {"type": "send_failed", "error": describe(GameReceiverClosedError())}
-            )
-            return
-        try:
-            await self.receiver.send_soldier_group(
-                message.get("origin_castle_id"),  # ty: ignore[invalid-argument-type]
-                message.get("destination_castle_id"),  # ty: ignore[invalid-argument-type]
-                message.get("soldier_amount"),  # ty: ignore[invalid-argument-type]
-            )
-        except Exception as error:  # noqa: BLE001 - every failure is reported
-            self.emit({"type": "send_failed", "error": describe(error)})
-        else:
-            self.emit({"type": "sent"})
-
-    async def upgrade(self, message: dict[str, Any]) -> None:
-        """Upgrade one castle with the current or most recent receiver."""
-        if self.receiver is None:
-            self.emit(
-                {"type": "send_failed", "error": describe(GameReceiverClosedError())}
-            )
-            return
-        try:
-            await self.receiver.upgrade_castle(
-                message.get("castle_id"),  # ty: ignore[invalid-argument-type]
-                message.get("upgrade_type"),  # ty: ignore[invalid-argument-type]
-            )
-        except Exception as error:  # noqa: BLE001 - every failure is reported
-            self.emit({"type": "send_failed", "error": describe(error)})
-        else:
-            self.emit({"type": "sent"})
-
-    def cost(self, message: dict[str, Any]) -> None:
-        """Report what the next upgrade of a castle costs."""
-        try:
-            if self.receiver is None:
-                raise GameReceiverClosedError()
-            cost = self.receiver.upgrade_cost(
-                message.get("castle_id"),  # ty: ignore[invalid-argument-type]
-                message.get("upgrade_type"),  # ty: ignore[invalid-argument-type]
-            )
-        except Exception as error:  # noqa: BLE001 - every failure is reported
-            self.emit({"type": "cost_failed", "error": describe(error)})
-        else:
-            self.emit({"type": "cost", "cost": cost})
 
     async def close(self) -> None:
         """Close without completing an open turn."""
@@ -227,12 +200,6 @@ class Adapter:
                     self.evaluate(message)
                 case "start":
                     self.spawn(self.run(message))
-                case "send_soldier_group":
-                    self.spawn(self.send(message))
-                case "upgrade_castle":
-                    self.spawn(self.upgrade(message))
-                case "upgrade_cost":
-                    self.cost(message)
                 case "finish" | "fail" | "log":
                     self.decisions.put_nowait(message)
                 case "close":

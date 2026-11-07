@@ -8,28 +8,36 @@ import httpx
 import pytest
 from integration.test_live import BASE, control_backend, sql
 from integration.test_live import guests as guests_fixture
-from island_battles_client import IslandBattlesClient, Player
+from island_battles_client import IslandBattlesClient, send_soldier_group, turn_result
 from test_lobby_binding import started_lobby
 
 guests = guests_fixture
 pytestmark = pytest.mark.asyncio
 
 
-class ObservingPlayer(Player):
-    def __init__(self, team_color):
-        super().__init__(team_color)
+class ObservingBot:
+    """A bot that reports each turn's generation and waits to be told its orders."""
+
+    def __init__(self):
         self.generations = asyncio.Queue()
         self.orders = asyncio.Queue()
 
-    async def on_generation(self, generation, commands):
-        await self.generations.put(generation)
+    async def play(self, turn):
+        await self.generations.put(turn.generation)
         order = await self.orders.get()
-        if order is not None:
-            await commands.send_soldier_group(*order)
+        return turn_result([] if order is None else [send_soldier_group(*order)])
 
 
-async def observed(player):
-    return await asyncio.wait_for(player.player.generations.get(), 15)
+def observing_client(credential, lobby_id):
+    """A client playing an ObservingBot, which it keeps as ``client.bot``."""
+    bot = ObservingBot()
+    client = IslandBattlesClient(BASE, credential, lobby_id, play=bot.play)
+    client.bot = bot
+    return client
+
+
+async def observed(client):
+    return await asyncio.wait_for(client.bot.generations.get(), 15)
 
 
 async def submitted(player):
@@ -43,12 +51,8 @@ async def submitted(player):
 async def test_commands_wait_for_every_player_and_push_next_generation(guests):
     alice, bob, scope = await started_lobby(guests, "island-battles")
     # Default clients rely on push notifications without periodic polling.
-    first = IslandBattlesClient(
-        BASE, alice.credential, scope.lobby_id, player_factory=ObservingPlayer
-    )
-    second = IslandBattlesClient(
-        BASE, bob.credential, scope.lobby_id, player_factory=ObservingPlayer
-    )
+    first = observing_client(alice.credential, scope.lobby_id)
+    second = observing_client(bob.credential, scope.lobby_id)
     try:
         await asyncio.gather(first.start(), second.start())
         initial, other = await asyncio.gather(observed(first), observed(second))
@@ -56,14 +60,14 @@ async def test_commands_wait_for_every_player_and_push_next_generation(guests):
         origin = next(
             castle
             for castle in initial.castles
-            if castle.team_color == first.player.team_color
+            if castle.team_color == first.team_color
         )
         target = next(
             castle
             for castle in initial.castles
-            if castle.team_color != first.player.team_color
+            if castle.team_color != first.team_color
         )
-        await first.player.orders.put((origin.id, target.id, 5))
+        await first.bot.orders.put((origin.id, target.id, 5))
         await submitted(first)
         assert (
             await sql(
@@ -71,8 +75,8 @@ async def test_commands_wait_for_every_player_and_push_next_generation(guests):
             )
             == "1"
         )
-        assert first.player.generations.empty() and second.player.generations.empty()
-        await second.player.orders.put(None)  # Returning without orders passes.
+        assert first.bot.generations.empty() and second.bot.generations.empty()
+        await second.bot.orders.put(None)  # Returning without orders passes.
         advanced, other_advanced = await asyncio.gather(
             observed(first), observed(second)
         )
@@ -85,7 +89,7 @@ async def test_commands_wait_for_every_player_and_push_next_generation(guests):
         )
         assert not first._state.submitted and not second._state.submitted
         assert any(
-            group.team_color == first.player.team_color and group.soldiers == 5
+            group.team_color == first.team_color and group.soldiers == 5
             for group in advanced.soldier_groups
         )
     finally:
@@ -218,17 +222,16 @@ async def test_rejection_retry_restart_and_public_migration_bypass(guests):
         )
 
 
-class EndingPlayer(Player):
+class EndingBot:
     """Passes every turn and keeps how the game ended."""
 
-    def __init__(self, team_color):
-        super().__init__(team_color)
+    def __init__(self):
         self.ended = None
 
-    async def on_generation(self, generation, commands):
-        pass
+    def play(self, turn):
+        return turn_result()
 
-    async def on_game_ended(self, outcome, generation):
+    def on_game_ended(self, outcome, generation):
         self.ended = (outcome, generation)
 
 
@@ -239,17 +242,22 @@ async def test_a_player_who_never_plays_loses_at_the_turn_deadline(guests):
     # Alice's client plays her turn and then waits for Bob, who never plays.
     # The server runs no timers: her client applies the deadline a second
     # after it, and the game ends with Bob's team, Blue, losing.
+    bot = EndingBot()
     client = IslandBattlesClient(
-        BASE, alice.credential, scope.lobby_id, player_factory=EndingPlayer
+        BASE,
+        alice.credential,
+        scope.lobby_id,
+        play=bot.play,
+        on_game_ended=bot.on_game_ended,
     )
     try:
         await client.start()
         first = client._state
         assert first.turn_deadline_at is not None
         await asyncio.wait_for(client.wait(), 20)
-        outcome, final = client.player.ended
+        outcome, final = bot.ended
         assert outcome.reason == "turn_timeout"
-        assert outcome.winner_team_color == client.player.team_color
+        assert outcome.winner_team_color == client.team_color
         assert outcome.summary == (
             "Blue lost: Bob's bot didn't answer within 5 s; Red wins"
         )

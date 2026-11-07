@@ -1,4 +1,4 @@
-"""Live tier: castle upgrades, their costs and the client's local checks.
+"""Live tier: castle upgrades in a bot's result.
 
 These games have three seats: the client under test plays Alice, and the runner
 plays her teammate Carol and their opponent Bob over plain HTTP. Every castle
@@ -18,7 +18,6 @@ from island_conformance.live import (
     COMMANDS,
     Match,
     Seat,
-    cost,
     enemy_castle,
     own_castle,
     send,
@@ -70,19 +69,6 @@ async def playing(launch) -> tuple[AdapterProcess, dict]:
     return alice, (await alice.expect("generation"))["generation"]
 
 
-async def ordered(alice: AdapterProcess, order: dict) -> dict:
-    return await alice.request(order, ("sent", "send_failed"))
-
-
-async def priced(alice: AdapterProcess, order: dict) -> dict:
-    return await alice.request(order, ("cost", "cost_failed"))
-
-
-def failure(reply: dict) -> tuple[str, int | None]:
-    assert reply["type"] in ("send_failed", "cost_failed"), reply
-    return reply["error"]["kind"], reply["error"]["status"]
-
-
 def castle(generation: dict, castle_id: int) -> dict:
     return next(castle for castle in generation["castles"] if castle["id"] == castle_id)
 
@@ -91,32 +77,32 @@ def posts(proxy) -> list[dict]:
     return [exchange.body for exchange in proxy.requests("POST", COMMANDS)]
 
 
-async def next_generation(alice: AdapterProcess, match: TeamMatch) -> dict:
-    """Finish Alice's callback, complete the runner's seats, and return the
-    generation of Alice's next callback."""
-    await alice.send({"type": "finish"})
+async def next_generation(
+    alice: AdapterProcess, match: TeamMatch, *orders: dict
+) -> dict:
+    """Finish Alice's turn with the orders, complete the runner's seats, and
+    return the generation of Alice's next turn."""
+    await alice.send({"type": "finish", "commands": list(orders)})
     await match.wait_submitted(match.alice)
     await match.complete(match.carol)
     await match.complete(match.bob)
     return (await alice.expect("generation"))["generation"]
 
 
-async def test_upgrade_costs_are_read_at_start_and_an_upgrade_pays_its_level(
+async def test_an_upgrade_pays_its_level_and_a_group_carries_the_levels(
     launch, match, proxy
 ):
     alice, generation = await playing(launch)
-    assert len(proxy.requests("GET", "/game/upgrades")) == 1
-    own = own_castle(match.alice.state)
+    own, enemy = own_castle(match.alice.state), enemy_castle(match.alice.state)
     assert all(
         set(entity["upgrades"]) == {"speed", "clash_stop_generations"}
         for entity in generation["castles"]
     )
     assert castle(generation, own)["upgrades"]["speed"] == 1
-    assert await priced(alice, cost(own, "speed")) == {"type": "cost", "cost": 10}
-    assert (await ordered(alice, upgrade(own, "speed")))["type"] == "sent"
+    advanced = await next_generation(alice, match, upgrade(own, "speed"))
     assert [(batch["complete"], batch["commands"]) for batch in posts(proxy)] == [
         (
-            False,
+            True,
             [
                 {
                     "command_type": "upgrade_castle",
@@ -125,19 +111,12 @@ async def test_upgrade_costs_are_read_at_start_and_an_upgrade_pays_its_level(
             ],
         )
     ]
-    # The next level counts the one this callback bought.
-    assert await priced(alice, cost(own, "speed")) == {"type": "cost", "cost": 20}
-    advanced = await next_generation(alice, match)
     upgraded = castle(advanced, own)
     # 30 soldiers pay 10, then the castle grows by one.
     assert upgraded["upgrades"] == {"speed": 2, "clash_stop_generations": 1}
     assert upgraded["soldiers"] == 21
-    assert await priced(alice, cost(own, "speed")) == {"type": "cost", "cost": 20}
     # A group leaving the castle carries its levels.
-    assert (await ordered(alice, send(own, enemy_castle(match.alice.state), 1)))[
-        "type"
-    ] == "sent"
-    advanced = await next_generation(alice, match)
+    advanced = await next_generation(alice, match, send(own, enemy, 1))
     group = next(
         group
         for group in advanced["soldier_groups"]
@@ -147,76 +126,45 @@ async def test_upgrade_costs_are_read_at_start_and_an_upgrade_pays_its_level(
 
 
 async def test_two_upgrades_of_one_type_pay_for_both_levels_down_to_the_last_soldier(
-    launch, match, proxy
+    launch, match
 ):
     alice, _ = await playing(launch)
     own = own_castle(match.alice.state)
-    for _ in range(2):
-        assert (await ordered(alice, upgrade(own, "speed")))["type"] == "sent"
-    # 10 + 20 spent all 30 soldiers, so no further soldier is free.
-    assert await priced(alice, cost(own, "speed")) == {"type": "cost", "cost": 30}
-    assert failure(await ordered(alice, upgrade(own, "speed"))) == (
-        "insufficient_soldiers",
-        None,
+    # 10 + 20 spend all 30 soldiers.
+    upgraded = castle(
+        await next_generation(
+            alice, match, upgrade(own, "speed"), upgrade(own, "speed")
+        ),
+        own,
     )
-    assert len(posts(proxy)) == 2
-    upgraded = castle(await next_generation(alice, match), own)
     assert upgraded["upgrades"]["speed"] == 3
     assert upgraded["soldiers"] == 1
 
 
-async def test_a_failed_concurrent_upgrade_frees_only_what_the_bought_levels_cost(
-    launch, match, proxy
-):
-    alice, _ = await playing(launch)
-    own = own_castle(match.alice.state)
-    # Two concurrent upgrades: each expects its own level, but the first request
-    # fails, so the server sells level 2 to the second and charges it 10.
-    proxy.fail_requests("POST", COMMANDS, 503)
-    await alice.send_together([upgrade(own, "speed"), upgrade(own, "speed")])
-    replies = [await alice.expect(("sent", "send_failed")) for _ in range(2)]
-    assert sorted(reply["type"] for reply in replies) == ["send_failed", "sent"]
-    assert failure(next(r for r in replies if r["type"] == "send_failed")) == (
-        "transport",
-        503,
-    )
-    # 20 soldiers are left, exactly what speed level 3 costs.
-    assert await priced(alice, cost(own, "speed")) == {"type": "cost", "cost": 20}
-    assert (await ordered(alice, upgrade(own, "speed")))["type"] == "sent"
-    upgraded = castle(await next_generation(alice, match), own)
-    assert upgraded["upgrades"]["speed"] == 3
-    assert upgraded["soldiers"] == 1
-
-
-async def test_an_upgrade_past_the_maximum_level_is_rejected(launch, match, proxy):
-    alice, _ = await playing(launch)
-    own = own_castle(match.alice.state)
-    for _ in range(2):
-        assert (await ordered(alice, upgrade(own, "clash_stop_generations")))[
-            "type"
-        ] == "sent"
-    assert failure(await ordered(alice, upgrade(own, "clash_stop_generations"))) == (
-        "max_level",
-        None,
-    )
-    assert failure(await priced(alice, cost(own, "clash_stop_generations"))) == (
-        "max_level",
-        None,
-    )
-    assert len(posts(proxy)) == 2
-    advanced = await next_generation(alice, match)
-    assert castle(advanced, own)["upgrades"]["clash_stop_generations"] == 3
-    # The maximum holds in later generations too.
-    assert failure(await ordered(alice, upgrade(own, "clash_stop_generations"))) == (
-        "max_level",
-        None,
-    )
-    assert len(posts(proxy)) == 3
-
-
-async def test_local_checks_reject_upgrades_before_any_request(launch, match, proxy):
-    alice, _ = await playing(launch)
+async def test_a_result_the_server_rejects_is_dropped_whole(launch, match, proxy):
     own, enemy = own_castle(match.alice.state), enemy_castle(match.alice.state)
+    # Each result stays within the castle's soldiers until its last command.
+    for orders, rejected in (
+        (
+            [upgrade(own, "clash_stop_generations")] * 3,
+            ("max_level", 409),
+        ),
+        (
+            [upgrade(own, "speed"), upgrade(own, "speed"), upgrade(own, "speed")],
+            ("insufficient_soldiers", 409),
+        ),
+        ([send(own, enemy, 25), upgrade(own, "speed")], ("insufficient_soldiers", 409)),
+    ):
+        alice, _ = await playing(launch)
+        await alice.send({"type": "finish", "commands": orders})
+        stopped = await alice.expect("stopped")
+        assert (stopped["error"]["kind"], stopped["error"]["status"]) == rejected
+        assert not (await match.read(match.alice))["submitted"]
+        await alice.close()
+
+
+async def test_invalid_upgrades_are_rejected_before_any_request(launch, match, proxy):
+    own = own_castle(match.alice.state)
     for order in (
         upgrade(own, "armor"),
         upgrade(own, 1),
@@ -226,42 +174,21 @@ async def test_local_checks_reject_upgrades_before_any_request(launch, match, pr
         {"type": "upgrade_castle", "castle_id": own},
         {"type": "upgrade_castle", "upgrade_type": "speed"},
     ):
-        assert failure(await ordered(alice, order)) == ("invalid_argument", None), order
-    assert failure(await priced(alice, cost(own, "armor"))) == (
-        "invalid_argument",
-        None,
+        alice, _ = await playing(launch)
+        await alice.send({"type": "finish", "commands": [order]})
+        assert (await alice.expect("stopped"))["error"]["kind"] == "invalid_argument"
+        await alice.close()
+    assert all(
+        not batch["complete"] and not batch["commands"] for batch in posts(proxy)
     )
-    assert failure(await ordered(alice, upgrade(999, "speed"))) == (
-        "castle_not_found",
-        None,
-    )
-    assert failure(await priced(alice, cost(999, "speed"))) == (
-        "castle_not_found",
-        None,
-    )
-    assert failure(await ordered(alice, upgrade(enemy, "speed"))) == (
-        "not_owned",
-        None,
-    )
-    assert posts(proxy) == []
-    # A send reserves its soldiers: 5 are left, and speed level 2 costs 10.
-    assert (await ordered(alice, send(own, enemy, 25)))["type"] == "sent"
-    assert failure(await ordered(alice, upgrade(own, "speed"))) == (
-        "insufficient_soldiers",
-        None,
-    )
-    assert len(posts(proxy)) == 1
-    await alice.send({"type": "finish"})
-    await match.wait_submitted(match.alice)
 
 
 async def test_server_rejects_what_only_a_teammate_reservation_shows(
     launch, match, proxy
 ):
-    alice, _ = await playing(launch)
     own, enemy = own_castle(match.alice.state), enemy_castle(match.alice.state)
     # Carol buys both clash_stop_generations levels from the shared castle,
-    # paying all 30 soldiers, after Alice's callback has its board.
+    # paying all 30 soldiers, before Alice's bot answers.
     bought = await match.post(
         match.carol,
         match.carol.state,
@@ -280,9 +207,13 @@ async def test_server_rejects_what_only_a_teammate_reservation_shows(
         (upgrade(own, "speed"), ("insufficient_soldiers", 409)),
         (send(own, enemy, 1), ("insufficient_soldiers", 409)),
     ):
-        assert failure(await ordered(alice, order)) == rejected, order
-    assert len(posts(proxy)) == 3
+        alice, _ = await playing(launch)
+        await alice.send({"type": "finish", "commands": [order]})
+        stopped = await alice.expect("stopped")
+        assert (stopped["error"]["kind"], stopped["error"]["status"]) == rejected
+        await alice.close()
     assert not (await match.read(match.alice))["submitted"]
+    alice, _ = await playing(launch)
     advanced = castle(await next_generation(alice, match), own)
     assert advanced["upgrades"]["clash_stop_generations"] == 3
     assert advanced["soldiers"] == 1

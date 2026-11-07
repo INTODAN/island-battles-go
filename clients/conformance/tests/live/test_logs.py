@@ -1,4 +1,4 @@
-"""Live tier: the bot's game log, sent with each generation's requests."""
+"""Live tier: the bot's game log, sent with the turn's batch."""
 
 from island_conformance.adapter import AdapterProcess
 from island_conformance.live import (
@@ -46,21 +46,22 @@ async def test_lines_are_stored_in_order_with_the_generation_that_logged_them(
     state = match.alice.state
     await log(alice, "debug", "reading the board")
     await log(alice, "info", "attacking castle")
-    sent = await alice.request(
-        send(own_castle(state), enemy_castle(state), 2), ("sent", "send_failed")
-    )
-    assert sent["type"] == "sent"
     await log(alice, "warning", "low on soldiers")
     await log(alice, "error", "giving up")
-    await alice.send({"type": "finish"})
+    await alice.send(
+        {
+            "type": "finish",
+            "commands": [send(own_castle(state), enemy_castle(state), 2)],
+        }
+    )
     await match.wait_submitted(match.alice)
-    # Each request carries the lines logged since the previous one.
-    batches = posts(proxy)
-    assert [
-        [entry["message"] for entry in batch.get("logs", [])] for batch in batches
-    ] == [
-        ["reading the board", "attacking castle"],
-        ["low on soldiers", "giving up"],
+    # The turn's one batch carries every line the bot logged, in order.
+    [batch] = posts(proxy)
+    assert [entry["message"] for entry in batch["logs"]] == [
+        "reading the board",
+        "attacking castle",
+        "low on soldiers",
+        "giving up",
     ]
     logs = await match.read_logs(match.alice, generation["id"])
     assert own_lines(logs) == [
@@ -80,6 +81,19 @@ async def test_lines_are_stored_in_order_with_the_generation_that_logged_them(
         line("info", "second turn")
     ]
     assert len(own_lines(await match.read_logs(match.alice, generation["id"]))) == 4
+
+
+async def test_lines_in_the_result_follow_the_lines_the_bot_logged(launch, match):
+    alice, generation = await playing(launch, match)
+    await log(alice, "info", "logged while playing")
+    await alice.send(
+        {"type": "finish", "logs": [{"level": "warning", "message": "returned"}]}
+    )
+    await match.wait_submitted(match.alice)
+    assert own_lines(await match.read_logs(match.alice, generation["id"])) == [
+        line("info", "logged while playing"),
+        line("warning", "returned"),
+    ]
 
 
 async def test_lines_past_the_limit_are_replaced_by_one_stored_error(
