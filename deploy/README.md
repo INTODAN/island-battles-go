@@ -460,7 +460,7 @@ It reads the bucket and the distribution from Terraform's outputs (`web_client_b
 3. uploads `index.html` last, with `Cache-Control: no-cache`, so a page never names a file that isn't there yet;
 4. invalidates `/play/` and `/play/index.html`, so the new build shows as soon as the script ends.
 
-It never deletes files, so the hashed files of earlier builds stay and tabs that are open keep working. They are small; remove old ones from the bucket by hand if they ever matter. It needs `bun`, the AWS CLI and Terraform, and the credentials that `scripts/aws.sh` uses. It is not part of a release yet (#90).
+It never deletes files, so the hashed files of earlier builds stay and tabs that are open keep working. They are small; remove old ones from the bucket by hand if they ever matter. It needs `bun`, the AWS CLI and Terraform, and the credentials that `scripts/aws.sh` uses. Releases don't upload it yet; that is #114.
 
 **Rolling back:** check out the commit of the earlier build and run `scripts/deploy-web-client.sh` again. Its `index.html` names the earlier hashed files, which are still in the bucket, and the invalidation makes it live.
 
