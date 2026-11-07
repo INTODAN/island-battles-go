@@ -316,18 +316,28 @@ def test_a_body_over_the_limit_is_a_413(server: tuple[BotServer, Path]) -> None:
 
 
 def test_a_looping_bot_is_a_504_and_the_server_keeps_serving(
-    server: tuple[BotServer, Path],
+    server: tuple[BotServer, Path], tmp_path: Path
 ) -> None:
     bot_server, file = server
     bot_server.turn_timeout = 0.5
-    file.write_text("def play(turn):\n    while True:\n        pass\n")
-    status, _, body = post_turn(bot_server)
-    assert status == 504
-    assert b"took longer than 0.5 s" in body
-    file.write_text(GOOD_BOT.format(answer=7))
-    assert BotTurnResult.model_validate_json(post_turn(bot_server)[2]).memory == {
-        "answer": 7
-    }
+    stop = tmp_path / "stop"
+    # Loops until the test ends, so no spinning thread outlives the test run.
+    file.write_text(
+        "import os\n"
+        "def play(turn):\n"
+        f"    while not os.path.exists({str(stop)!r}):\n"
+        "        pass\n"
+    )
+    try:
+        status, _, body = post_turn(bot_server)
+        assert status == 504
+        assert b"took longer than 0.5 s" in body
+        file.write_text(GOOD_BOT.format(answer=7))
+        assert BotTurnResult.model_validate_json(post_turn(bot_server)[2]).memory == {
+            "answer": 7
+        }
+    finally:
+        stop.touch()
 
 
 def test_check_exits_at_once_for_a_bot_that_never_returns(tmp_path: Path) -> None:
