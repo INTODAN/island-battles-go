@@ -41,10 +41,10 @@ Usage:
       Build the backend and plan, like apply, without asking or applying.
       Saves the plan, the build it packages and the plan as text in the
       directory, which then holds the Lambda's settings. The Deploy workflow's
-      apply target runs it before it waits for an approval.
+      plan target runs it.
   scripts/aws.sh apply-plan <directory>
-      Apply a plan that plan saved, without asking: the approval in GitHub
-      is the yes. Refuses a plan that destroys an instance, the static IP, a
+      Apply a plan that plan saved, without asking: the Deploy workflow's
+      apply target runs it on main, once someone has read the plan. Refuses a plan that destroys an instance, the static IP, a
       disk or the distribution unless ISLAND_BATTLES_ALLOW_DESTROY lists it.
       Runs the migrations first when the plan publishes the backend.
   scripts/aws.sh output [name]
@@ -210,8 +210,8 @@ save_backup_settings() {
   (umask 077 && printf '%s\n' "$settings" >"$backup_settings_file")
 }
 
-# The Deploy workflow's apply target plans in one job and applies in the next,
-# after an approval. The plan packages deploy/local/lambda/bootstrap.zip by
+# The Deploy workflow's plan target saves a plan, and its apply target applies
+# it in a later run, once someone has read it. The plan packages deploy/local/lambda/bootstrap.zip by
 # its hash, so the apply needs that same file, not a new build.
 save_plan() {
   local directory="$1"

@@ -1,18 +1,18 @@
-"""Create the role that lets GitHub Actions apply Terraform, after your approval.
+"""Create the role that lets GitHub Actions apply Terraform from main.
 
-The Deploy workflow's `apply` target, and every run started from a branch other
-than main, runs in the `production-approval` environment, whose required
-reviewer must approve each job. This role trusts only that environment's jobs,
-through GitHub's OIDC provider, so AWS credentials never exist before the
-approval. That is what lets an agent in the cloud deploy: it starts the run,
-and you approve it (deploy/README.md, "Deploying from GitHub Actions").
+The Deploy workflow's `apply` target applies a plan that its `plan` target
+saved. Its jobs run in the `production` environment, which the repository's
+settings limit to main, and this role trusts only that environment's jobs,
+through GitHub's OIDC provider. So only merged code ever gets it: merging the
+pull request is the approval. That is what lets an agent in the cloud deploy
+(deploy/README.md, "Deploying from GitHub Actions").
 
 The role reads the whole account (ReadOnlyAccess), as a plan must, and changes
 only what deploy/terraform/ manages: Lightsail, Lambda, CloudWatch logs and
 alarms, SNS, Budgets, ACM and CloudFront, buckets named island-battles-*, and
 IAM roles and users named island-battles-*. It can't change itself. Because it
 can write IAM policies for island-battles-* roles, treat it as close to
-administrator of the account: the approval is the control.
+administrator of the account: reviewing what merges to main is the control.
 
 It lives outside Terraform, like the deploy bucket, so a Terraform run can't
 widen the role that applies it. Run this again after changing it here.
@@ -35,7 +35,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from deploy_files import AwsError, aws, aws_json  # noqa: E402
 
 ROLE_NAME = "island-battles-github-apply"
-ENVIRONMENT = "production-approval"
+# The deploy role (deploy/terraform/github.tf) trusts the same environment.
+ENVIRONMENT = "production"
 NAME_PREFIX = "island-battles-"
 OIDC_HOST = "token.actions.githubusercontent.com"
 READ_POLICY_ARN = "arn:aws:iam::aws:policy/ReadOnlyAccess"
@@ -154,9 +155,8 @@ def main(arguments):
         print(error, file=sys.stderr)
         return 1
     print(arn)
-    print(f"Only jobs in the {ENVIRONMENT} environment can assume it. Give that environment a required "
-          "reviewer before anything runs in it (deploy/README.md, \"Deploying from GitHub Actions\").",
-          file=sys.stderr)
+    print(f"Only jobs in the {ENVIRONMENT} environment can assume it. Keep that environment limited to main "
+          "(deploy/README.md, \"Deploying from GitHub Actions\").", file=sys.stderr)
     return 0
 
 

@@ -56,14 +56,14 @@ def run(fake, arguments):
 
 
 class PolicyTest(unittest.TestCase):
-    def test_trusts_only_the_approval_environment(self):
+    def test_trusts_only_the_main_only_production_environment(self):
         trust = github_apply_role.trust_policy(ACCOUNT, REPOSITORY)["Statement"]
         self.assertEqual(len(trust), 1)
         self.assertEqual(trust[0]["Principal"], {
             "Federated": f"arn:aws:iam::{ACCOUNT}:oidc-provider/token.actions.githubusercontent.com"})
         self.assertEqual(trust[0]["Condition"], {"StringEquals": {
             "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-            "token.actions.githubusercontent.com:sub": f"repo:{REPOSITORY}:environment:production-approval",
+            "token.actions.githubusercontent.com:sub": f"repo:{REPOSITORY}:environment:production",
         }})
 
     def test_changes_only_the_deployments_resources_and_never_itself(self):

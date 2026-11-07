@@ -33,9 +33,9 @@ Each issue is written to be implemented on its own: read the whole issue, plus t
 
 ## Deploying
 
-You have no AWS credentials. When the user asks you to deploy or apply a change, use the Deploy workflow (`.github/workflows/deploy.yml`) on your branch, as [deploy/README.md](deploy/README.md#deploying-from-github-actions) describes, and only when asked:
+You have no AWS credentials, and only merged code deploys. When the user asks you to deploy or apply a change, use the Deploy workflow (`.github/workflows/deploy.yml`) on `main`, as [deploy/README.md](deploy/README.md#deploying-from-github-actions) describes, and only when asked:
 
-1. Push your branch, and start the workflow on it with the target: `apply` for Terraform changes, then `vm`, `backend` or `smoke`.
-2. Each job waits for the owner's approval. Tell the user which run to approve and what it will do.
-3. For `apply`, read the first job's log or summary once it has planned, and tell the user what the plan creates, changes and destroys before they approve the second job. Never pass `allow_destroy` unless the user named each resource.
-4. After it runs, check the result: the job's log, and the AWS resources it should have changed.
+1. The change must be merged first. Open the pull request, and wait for the owner to merge it.
+2. For AWS resources, start a `plan` run on `main`. Read the plan from its log or summary, and tell the user what it creates, changes and destroys.
+3. Only when the user says to, start an `apply` run with `plan_run_id` set to that plan run's ID. Never pass `allow_destroy` unless the user named each resource.
+4. Then start the `vm`, `backend` or `smoke` runs the change needs, and check the result: the job's log, and the AWS resources it should have changed.
