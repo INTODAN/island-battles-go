@@ -13,15 +13,11 @@ from island_battles_client import (
     UpgradeType,
     log_line,
     logger,
+    next_upgrade_cost,
     send_soldier_group,
     turn_result,
     upgrade_castle,
 )
-
-# What reaching speed level 2, 3 and 4 costs. BotTurn doesn't carry the cost
-# table yet, so it is hard-coded here; the authoritative table is the server's
-# GET /game/upgrades, and issue #137 will put it in BotTurn.
-SPEED_COSTS = {2: 10, 3: 20, 4: 30}
 
 
 def play(turn: BotTurn) -> BotTurnResult:
@@ -34,7 +30,8 @@ def play(turn: BotTurn) -> BotTurnResult:
     for castle in castles:
         if castle.team_color != turn.team_color:
             continue
-        cost = SPEED_COSTS.get(castle.upgrades[UpgradeType.speed] + 1)
+        # The cost table comes with the turn: turn.upgrades.
+        cost = next_upgrade_cost(turn, castle, UpgradeType.speed)
         # Keep one soldier to send.
         if cost is None or cost >= castle.soldiers:
             continue

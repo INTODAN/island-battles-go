@@ -92,6 +92,9 @@ class Adapter:
                 "memory": turn.memory,
                 "team_color": turn.team_color,
                 "game_id": turn.game_id,
+                "upgrades": [
+                    upgrade.model_dump(mode="json") for upgrade in turn.upgrades
+                ],
                 "turn_deadline_at": turn.turn_deadline_at.isoformat()
                 if turn.turn_deadline_at
                 else None,

@@ -61,7 +61,9 @@ type BotTurn struct {
 	GameID     uint           `json:"game_id" minimum:"1"`
 	Generation GenerationView `json:"generation"`
 	TeamColor  uint           `json:"team_color" minimum:"1"`
-	Memory     BotMemory      `json:"memory" doc:"The memory the bot returned with its previous turn in this game, or null on its first turn and after a turn that returned null."`
+	// Upgrades is required: relayed turns are built by clients, which read it once per game.
+	Upgrades []UpgradeView `json:"upgrades" nullable:"false" doc:"The upgrade cost table, the same list GET /game/upgrades returns as its upgrades. It is the same for the whole game, so a client reads it once and reuses it in every turn. Reaching a level costs its soldier_cost."`
+	Memory   BotMemory     `json:"memory" doc:"The memory the bot returned with its previous turn in this game, or null on its first turn and after a turn that returned null."`
 	// TurnDeadlineAt is GenerationState.TurnDeadlineAt.
 	TurnDeadlineAt *time.Time `json:"turn_deadline_at" nullable:"true" doc:"When the turn times out, GenerationState.turn_deadline_at, or null when turns have no time limit. A bot that hasn't answered by then makes its whole team lose."`
 }

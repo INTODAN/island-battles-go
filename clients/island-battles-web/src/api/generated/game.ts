@@ -201,6 +201,8 @@ export interface components {
              * @description When the turn times out, GenerationState.turn_deadline_at, or null when turns have no time limit. A bot that hasn't answered by then makes its whole team lose.
              */
             turn_deadline_at: string | null;
+            /** @description The upgrade cost table, the same list GET /game/upgrades returns as its upgrades. It is the same for the whole game, so a client reads it once and reuses it in every turn. Reaching a level costs its soldier_cost. */
+            upgrades: components["schemas"]["Upgrade"][];
         };
         /** @description A bot's answer to a BotTurn. Its commands, logs and memory are sent as one completing batch of POST /generation/commands. */
         BotTurnResult: {

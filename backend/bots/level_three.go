@@ -66,13 +66,15 @@ type levelThreeTurn struct {
 	speeds   map[uint]float64
 	planned  planned
 	upgrades []models.PublicGenerationCommand
-	sends    []models.PublicGenerationCommand
-	actions  []string
-	notes    []string
+	// upgradeTable is the turn's upgrade cost table.
+	upgradeTable []models.UpgradeView
+	sends        []models.PublicGenerationCommand
+	actions      []string
+	notes        []string
 }
 
 func (LevelThree) Play(_ context.Context, turn models.BotTurn) (models.BotTurnResult, error) {
-	state := levelThreeTurn{board: newBoard(turn), budgets: map[uint]*castleBudget{}, speeds: map[uint]float64{}, planned: planned{}}
+	state := levelThreeTurn{board: newBoard(turn), budgets: map[uint]*castleBudget{}, speeds: map[uint]float64{}, planned: planned{}, upgradeTable: turn.Upgrades}
 	if len(turn.Memory) > 0 {
 		if err := json.Unmarshal(turn.Memory, &state.memory); err != nil {
 			// A memory it can't read is forgotten, rather than passing turns.
@@ -392,13 +394,12 @@ func (state *levelThreeTurn) upgrade(owned []models.CastleView) {
 		if err != nil || level >= maxSpeedLevel {
 			continue
 		}
-		next, err := castle.Upgrades.Upgraded(models.SpeedUpgrade)
-		if err != nil {
+		cost, found := upgradeCost(state.upgradeTable, models.SpeedUpgrade, level+1)
+		if !found {
 			continue
 		}
-		cost, err := next.Cost(models.SpeedUpgrade)
 		budget := state.budgets[castle.ID]
-		if err != nil || budget.spare(nil) < int(cost)+upgradeSlack {
+		if budget.spare(nil) < int(cost)+upgradeSlack {
 			continue
 		}
 		budget.used += int(cost)

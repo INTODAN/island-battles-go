@@ -18,3 +18,6 @@ func SetGoBotTimeBudgets(t *testing.T, write, read time.Duration) {
 	goBotWriteBudget, goBotReadBudget = write, read
 	t.Cleanup(func() { goBotWriteBudget, goBotReadBudget = previousWrite, previousRead })
 }
+
+// NewGoBotTurn exposes newGoBotTurn to the external tests.
+var NewGoBotTurn = newGoBotTurn

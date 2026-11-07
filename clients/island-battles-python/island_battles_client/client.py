@@ -27,6 +27,7 @@ from ._generated import (
     GenerationState,
     PublicGenerationCommand,
     RegisterGenerationCommands,
+    Upgrade,
 )
 from .bot import Play, add_result_lines, call_play
 from .errors import (
@@ -173,6 +174,8 @@ class IslandBattlesClient:
         self._sdk = None
         self._subscription = None
         self._state: GenerationState | None = None
+        # The upgrade cost table, read once for the first turn and reused.
+        self._upgrades: list[Upgrade] | None = None
         self._expected_identity: tuple[int, UUID, str, int] | None = None
         self._last_queued_generation = 0
         # Whether the state with the outcome was queued for on_game_ended. A
@@ -374,6 +377,14 @@ class IslandBattlesClient:
         )
         return self._install(_parse_state(data))
 
+    async def _fetch_upgrades(self) -> list[Upgrade]:
+        """Read the upgrade cost table, the same for the whole game."""
+        data = await self._request("GET", "/game/upgrades", retry_transport=True)
+        try:
+            return [Upgrade.model_validate(entry) for entry in data["upgrades"]]
+        except (KeyError, TypeError, ValidationError) as error:
+            raise GameProtocolError("invalid upgrade table") from error
+
     async def refresh(self) -> Generation:
         """Fetch the authorized state and schedule any new generation callback."""
         self._check_open()
@@ -495,9 +506,12 @@ class IslandBattlesClient:
                 # as the latest state of this generation says.
                 latest = self._state or state
                 self._game_log = GameLog(state.generation_id, latest.log_lines_stored)
+                if self._upgrades is None:
+                    self._upgrades = await self._fetch_upgrades()
                 turn = BotTurn(
                     game_id=state.game_id,
                     generation=state.generation,
+                    upgrades=self._upgrades,
                     memory=state.memory,
                     team_color=state.team_color,
                     turn_deadline_at=state.turn_deadline_at,

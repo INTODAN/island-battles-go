@@ -169,7 +169,7 @@ func playGoBots(ctx context.Context, transaction *gorm.DB, game *models.Game, ge
 		if !slices.Contains(standing, player.TeamColor) {
 			continue
 		}
-		turn := models.BotTurn{GameID: game.ID, TeamColor: player.TeamColor, Memory: memories[player.PlayerID], TurnDeadlineAt: turnDeadline(game, generation)}
+		turn := newGoBotTurn(game, generation, player.TeamColor, memories[player.PlayerID])
 		played, err := runGoBot(ctx, *player.BotLevel, turn, generation, inputs)
 		if err != nil {
 			slog.WarnContext(ctx, "A Go bot failed its turn and passes it", "game_id", game.ID, "generation_id", generation.ID, "bot_level", *player.BotLevel, "error", err)
@@ -351,4 +351,10 @@ func (service *GenerationService) playGoBotTurns(ctx context.Context, gameID uin
 		}
 	}
 	return played, nil
+}
+
+// newGoBotTurn builds the turn a Go bot is given. Its upgrade table is the one
+// GET /game/upgrades lists, as the turns of relayed bots carry it.
+func newGoBotTurn(game *models.Game, generation *models.Generation, teamColor uint, memory models.BotMemory) models.BotTurn {
+	return models.BotTurn{GameID: game.ID, TeamColor: teamColor, Upgrades: models.UpgradeTable(), Memory: memory, TurnDeadlineAt: turnDeadline(game, generation)}
 }
