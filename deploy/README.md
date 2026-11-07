@@ -26,9 +26,10 @@ The live deployment (#45, 2026-10-30) runs in `eu-central-1`, and its VM is `vm.
 | `.github/workflows/deploy.yml` | [Deploys from GitHub Actions](#deploying-from-github-actions), on demand. |
 | `deploy/aws.example.tfvars` | The template for the AWS settings. |
 | `deploy/vm.example.yml` | The template for the VM settings. |
-| `deploy/terraform/` | The AWS resources: the Lightsail VM in `vm.tf`, the Lambda in `lambda.tf`, the game's certificate and CloudFront distribution in `cloudfront.tf`, the Lambda's log group, alarms, collector settings and budget in `observability.tf`, and GitHub Actions' deploy role in `github.tf`. `tests/` checks the configuration offline. |
+| `deploy/terraform/` | The AWS resources: the Lightsail VM in `vm.tf`, the Lambda in `lambda.tf`, the game's certificate and CloudFront distribution in `cloudfront.tf`, the Lambda's log group, alarms, collector settings and budget in `observability.tf`, the database backups' bucket, key and alarm in `backups.tf`, and GitHub Actions' deploy role in `github.tf`. `tests/` checks the configuration offline. |
+| `deploy/github_apply_role.py` | Creates the role that the Deploy workflow's approved runs use ([Deploying from GitHub Actions](#deploying-from-github-actions)). `deploy/test_github_apply_role.py` tests it. |
 | `deploy/check_deploy_plan.py` | Reads the plan for `scripts/aws.sh`: stops a backend deploy that would change more than the backend, lists what an apply would destroy, and tells an apply whether to run the migrations. `deploy/test_check_deploy_plan.py` tests it. |
-| `deploy/ansible/` | The playbooks: `site.yml` deploys, `dump.yml` and `restore.yml` copy the database. The `base` role prepares Ubuntu, and the `app` role deploys the Compose project. |
+| `deploy/ansible/` | The playbooks: `site.yml` deploys, `dump.yml` and `restore.yml` copy the database. The `base` role prepares Ubuntu, and the `app` role deploys the Compose project and the [daily backup](#backups), whose script `deploy/test_database_backup.py` tests. |
 | `deploy/smoke.py` | The smoke test that `scripts/vm.sh smoke` runs. |
 | `deploy/local/` | Gitignored. The settings, the generated secrets, the Lambda's settings and the smoke test's guest credential, which the scripts sync with the [deploy bucket](#the-deploy-bucket), and this machine's built Lambda, plans and dumps, which they don't. |
 
@@ -104,10 +105,11 @@ The pieces depend on each other in a circle. Terraform creates the Lambda, whose
    scripts/aws.sh apply -var allow_missing_lambda_settings=true
    ```
 
-   It builds the backend and shows the plan: the instance, its firewall, the static IP and its attachment, the key pair, the Lambda's role, the function and its Function URL, the certificate's validation and the CloudFront distribution, and the function's log group, metric filter, alarms, alert topic and zero-spend budget ([Logs, alerts and traces](#logs-alerts-and-traces)). Type `yes`. There's no `lambda.env` yet, so it skips the migrations, and the function fails every request until step 8.
+   It builds the backend and shows the plan: the instance, its firewall, the static IP and its attachment, the key pair, the Lambda's role, the function and its Function URL, the certificate's validation and the CloudFront distribution, the function's log group, metric filter, alarms, alert topic and zero-spend budget ([Logs, alerts and traces](#logs-alerts-and-traces)), and the database backups' bucket, key and alarm ([Backups](#backups)). Type `yes`. It also writes the backups' key to `deploy/local/secrets/database_backups.json` for the VM deploy. There's no `lambda.env` yet, so it skips the migrations, and the function fails every request until step 8.
 
    - It waits until ACM has issued the certificate, usually within minutes of the record resolving, and then until CloudFront has deployed the distribution, which takes a few minutes more.
    - SNS then emails `alert_email` a confirmation link. Follow it, or the alarms send nothing.
+   - The `<name>-database-backups` alarm emails within the hour: there's no backup yet. It stops once the first one is made, the night after step 8.
 5. **Feed the outputs to the VM deploy.** `scripts/aws.sh output` prints the static IP, the Function URL and the game's URL. Put `function_url` into `deploy/local/vm.yml` as `lambda_function_url`, and `game_url` as `game_url`.
 6. **Add the DNS records** `vm.<domain>` for the static IP and `island-battles.<domain>` for the distribution, and wait until `vm.<domain>` resolves ([DNS](#dns)).
 7. **Deploy the VM.** Give the new instance a minute to boot first.
@@ -137,7 +139,7 @@ A deployment from before #75 serves players at the Function URL. To move them to
 
 | Resource | Details |
 |---|---|
-| Lightsail instance | Ubuntu 24.04 LTS on the 1 GB plan (`micro_3_0`), IPv4 only, with daily [automatic snapshots](#backups). |
+| Lightsail instance | Ubuntu 24.04 LTS on the 1 GB plan (`micro_3_0`), IPv4 only. Automatic snapshots are off: the database is [backed up to S3](#backups) instead. |
 | Static IP | Attached to the instance named by `static_ip_instance`. Terraform refuses to destroy it, because `vm.<domain>` points at it. |
 | Firewall | 22 from `ssh_allowed_cidrs`, and 443 and 5432 from anywhere. Nothing else, not even 80. Changing `ssh_allowed_cidrs` replaces the rules: their `port_info` forces replacement. On 2026-10-30 that closed every port for about 7 seconds. |
 | Key pair | Imported from `ssh_public_key`. Without it, Lightsail uses the region's default key, which you download from the Lightsail console. |
@@ -149,6 +151,8 @@ A deployment from before #75 serves players at the Function URL. To move them to
 | Log group | `/aws/lambda/<name>`, kept for 7 days. |
 | Metric filter and alarms | One metric that counts error lines, and two alarms, on it and on the function's `Errors`, that email `alert_email` through an SNS topic. |
 | Budget | A zero-spend cost budget that emails `alert_email`. |
+| Backups bucket | `<name>-backups-<account>`, private, versioned, TLS only. Each dump under `postgres/` expires after `database_backup_retention_days`, 7 by default, and an overwritten one is kept as long again. The GitHub deploy role can't read it. See [Backups](#backups). |
+| Backup key and alarm | An IAM user, `<name>-database-backups`, whose access key may only upload to `postgres/` and publish the `IslandBattles/VM` `DatabaseBackups` metric. An alarm on the metric emails `alert_email` when no backup succeeded for 26 hours. |
 
 There's no VPC, peering or EventBridge. [Logs, alerts and traces](#logs-alerts-and-traces) explains the last three rows, and why they stay inside AWS's free tier, and [Free allowances](#free-allowances) covers CloudFront's.
 
@@ -329,40 +333,58 @@ Run `scripts/aws.sh deploy` from the commit you want to publish. See [Deploying 
 
 Change `deploy/local/aws.tfvars` or `deploy/terraform/`, then run `scripts/aws.sh apply`. It shows the plan and applies it only when you type `yes`.
 
-- **Read the plan.** Changing an instance's zone, image or plan replaces it, and replacing an instance deletes its disk and its automatic snapshots. Add a new instance and [move to it](#moving-to-a-new-vm) instead.
+- **Read the plan.** Changing an instance's zone, image or plan replaces it, and replacing an instance deletes its disk, and with it everything since the last [backup](#backups). Add a new instance and [move to it](#moving-to-a-new-vm) instead.
 - **Destroying needs the name.** When the plan deletes or replaces an instance, the static IP, a disk or the distribution, the apply lists them and asks you to type each one's name before the usual `yes`. For the distribution, that's its domain, `<id>.cloudfront.net`: a new distribution gets a new one, and the `island-battles` CNAME must follow it. A wrong answer applies nothing. If you didn't mean to destroy it, `aws.tfvars` probably doesn't match the instances that run. Without a terminal, list the names in `ISLAND_BATTLES_ALLOW_DESTROY`, separated by commas.
 - **It may publish the backend too.** When the plan changes the function, the apply first runs the migrations and then publishes the backend built from your checkout, so run it from the commit you last deployed or a newer one. A plan that leaves the function alone, such as moving the static IP, runs no migrations: in the middle of a move, the old VM refuses the backend.
 
 ## Deploying from GitHub Actions
 
-The Deploy workflow, `.github/workflows/deploy.yml`, runs the same scripts on a GitHub runner. Start it by hand from the repository's **Actions** tab, or with `gh workflow run deploy.yml -f target=<target>`:
+The Deploy workflow, `.github/workflows/deploy.yml`, runs the same scripts on a GitHub runner. Start it from the repository's **Actions** tab, with `gh workflow run deploy.yml -f target=<target>`, or let an agent start it:
 
-| Target | Runs |
-|---|---|
-| `backend` | `scripts/aws.sh deploy` |
-| `vm` | `scripts/vm.sh deploy "$(scripts/aws.sh output static_ip)"` |
-| `smoke` | `scripts/vm.sh smoke` |
+| Target | Runs | Role |
+|---|---|---|
+| `backend` | `scripts/aws.sh deploy` | deploy |
+| `vm` | `scripts/vm.sh deploy "$(scripts/aws.sh output static_ip)"` | deploy |
+| `smoke` | `scripts/vm.sh smoke` | deploy |
+| `plan` | `scripts/aws.sh plan`: plans every AWS resource, like `scripts/aws.sh apply`, and saves the plan | deploy |
+| `apply` | `scripts/aws.sh apply-plan` with the plan that the `plan_run_id` run saved | apply |
 
-It deploys the commit of the branch you start it on. Runs wait for each other, and Terraform's lock keeps them apart from a machine's.
+**Only `main` deploys.** Every run is in the `production` environment, which is limited to `main`, and both roles trust only that environment. So only merged code gets AWS credentials, and merging a pull request is the approval. GitHub can't require a reviewer's approval for each run in a private repository on a personal plan. Runs wait for each other, and Terraform's lock keeps them apart from a machine's.
+
+**Applying:**
+
+1. Start a `plan` run. Its summary shows the plan, and the run ID to apply it with. It saves the plan, and the build it packages, under `plans/<run ID>/` in the deploy bucket. The bucket deletes a saved plan after 3 days.
+2. Read the plan. If it's right, start an `apply` run with `plan_run_id` set to that run ID. It applies exactly that plan, then deletes it. It refuses a plan made from another commit than `main`'s, and Terraform refuses one whose state changed since: plan again.
+3. A plan that deletes or replaces an instance, the static IP, a disk or the distribution stops the apply unless `allow_destroy` lists each one's name, like `ISLAND_BATTLES_ALLOW_DESTROY`.
+
+**The roles:**
+
+- **Deploy role**, `island-battles-github-deploy` (`deploy/terraform/github.tf`): reads the account (`ReadOnlyAccess`), which every plan needs, and writes only what a deploy writes: the backend function's code and settings, the deploy bucket's state, files and plans, and a temporary SSH key for the VM. It deletes nothing but the state's lock.
+- **Apply role**, `island-battles-github-apply` (`deploy/github_apply_role.py`): reads the account, and changes what `deploy/terraform/` manages: Lightsail, Lambda, CloudWatch logs and alarms, SNS, Budgets, ACM and CloudFront, buckets named `island-battles-*`, and IAM roles and users named `island-battles-*`. It can't change its own role. Because it can write IAM policies for `island-battles-*` roles, treat it as close to an administrator of the account: reviewing what merges to `main` is the control. It isn't part of the Terraform configuration, so an apply can't widen it.
+- Neither role can read the [backups](#backups). GitHub stores no AWS keys: each run gets credentials for an hour.
+
+**Deploying from an agent:** an agent in the cloud has no AWS credentials of its own. Once you've merged its pull request, it starts a `plan` run on `main`, reads the plan from the run's log and tells you what it changes. When you say so, it starts the `apply` run for that plan, then any `vm`, `backend` or `smoke` runs the change needs, and checks the result.
 
 **Setting it up**, once:
 
-1. Set `github_repository = "<owner>/<name>"` in `deploy/local/aws.tfvars` and run `scripts/aws.sh apply`. It creates GitHub's OIDC provider in IAM and the role `island-battles-github-deploy` (`deploy/terraform/github.tf`). `scripts/aws.sh output github_deploy_role_arn` prints the role.
-2. In the repository's **Settings → Environments**, create `production` and limit its deployment branches to `main`. Only jobs in that environment can assume the role. Add required reviewers there if a deploy should wait for an approval.
-3. Add two repository variables, which aren't secret: `AWS_DEPLOY_ROLE_ARN`, the role, and `AWS_REGION`, the deployment's region.
+1. Set `github_repository = "<owner>/<name>"` in `deploy/local/aws.tfvars` and run `scripts/aws.sh apply`. It creates GitHub's OIDC provider in IAM and the deploy role. `scripts/aws.sh output github_deploy_role_arn` prints the role.
+2. In the repository's **Settings → Environments**, create `production` and set **Deployment branches and tags** to **Selected branches and tags**, with only `main`. Both roles rely on that limit.
+3. Add two repository variables, which aren't secret: `AWS_DEPLOY_ROLE_ARN`, the deploy role, and `AWS_REGION`, the deployment's region. The workflow derives the apply role's ARN from the deploy role's; set `AWS_APPLY_ROLE_ARN` only to use another one.
 
    ```sh
    gh variable set AWS_DEPLOY_ROLE_ARN --body "$(scripts/aws.sh output github_deploy_role_arn)"
    gh variable set AWS_REGION --body <region>
    ```
 
-**What the role can do:** read the account, which every plan needs (`ReadOnlyAccess`), and write only what a deploy writes: the backend function's code and settings, the deploy bucket's state and files, and a temporary SSH key for the VM. It deletes nothing but the state's lock. GitHub stores no AWS keys: each run gets credentials for an hour.
+4. Create the apply role, with credentials that can manage IAM. Run it again after changing `deploy/github_apply_role.py`.
 
-**What stays on a person's machine:**
+   ```sh
+   python3 -I deploy/github_apply_role.py create --repository <owner>/<name>
+   ```
 
-- `scripts/aws.sh apply`, which asks before applying and may destroy resources.
-- A backend deploy whose plan also creates something new, such as an alarm: the plan check allows it, but the role can't create it. Run `scripts/aws.sh apply` once, then deploy again.
-- `-e app_generate_secrets=true`, dumps, restores and moves.
+5. Run `scripts/deploy-files.sh bootstrap --region <region>` again, which adds the rule that deletes saved plans after 3 days.
+
+**What still needs your own machine:** `-e app_generate_secrets=true`, dumps, restores and moves, and the setup above.
 
 ## Smoke test
 
@@ -416,28 +438,38 @@ Claude Code keeps the URL, password included, in `~/.claude.json`, which only yo
 
 ## Backups
 
-Backups are Lightsail's automatic snapshots (#33). Nothing is uploaded anywhere else.
+Postgres's data is the only state on the VM that can't be rebuilt: the playbooks rebuild the rest, the secrets are in the deploy bucket, and Centrifugo gets a new certificate on its own. So the VM backs up only the database, to S3, every day. Lightsail's automatic snapshots (#33) stored the whole disk seven times over, and are off.
 
-- **What:** Terraform turns on a daily snapshot of the whole instance at `snapshot_time`, 01:00 UTC by default. Lightsail keeps the last seven. Postgres in a snapshot is crash-consistent, and recovers from it as from a power loss.
-- **Automatic snapshots are deleted with their instance,** unless you copy them to manual snapshots first. In the Lightsail console, open the instance's **Snapshots** tab and choose **Keep snapshot** on an automatic snapshot to copy it. Manual snapshots stay until you delete them, and are billed for storage like the automatic ones. Keep the latest one before you delete an instance, as in step 7 of [Moving to a new VM](#moving-to-a-new-vm).
-- **What they don't cover:** they live in the same account and region as the instance, and a restore loses everything written since the snapshot, up to a day.
-- **Database dumps** are separate, for moving to a new VM: see [Dumps on their own](#dumps-on-their-own).
+- **What:** a systemd timer on the VM, `island-battles-backup.timer`, runs at `app_backup_time`, 01:30 UTC by default. It dumps the database with `pg_dump`, in the same custom format as `scripts/vm.sh dump`, and uploads the dump to `s3://<name>-backups-<account>/postgres/island_battles-<time>.dump`. The VM deploy also backs up once at the end, so a wrong key fails the deploy instead of the night. Pass `-e app_backup_now=false` to skip that.
+- **How long:** S3 deletes each dump after `database_backup_retention_days`, 7 by default. Versioning keeps a dump that was overwritten or deleted for as long again.
+- **The key:** Lightsail instances can't take an IAM role, so the VM has an access key of the `<name>-database-backups` user. It may only upload new dumps and publish the backup metric: it can't list, read or delete a backup, so a compromised VM can't destroy them. Terraform keeps the key in its state, and `scripts/aws.sh apply` copies it to `deploy/local/secrets/database_backups.json`, which the deploy bucket shares. The VM deploy installs it as `/etc/island-battles/backup.env`, readable only by root. To rotate it, run `scripts/aws.sh apply -replace=aws_iam_access_key.backups` and deploy the VM.
+- **Skipped:** a VM that a [move](#moving-to-a-new-vm) left behind, which has the moved-away marker, and a database without tables yet, such as a new VM before its restore or its first migration. A skip counts as no backup.
+- **The alarm:** each successful backup adds 1 to the `DatabaseBackups` metric. When none did for 26 hours, the `<name>-database-backups` alarm emails `alert_email`: the run failed, the VM was down, or the key stopped working. Read the run's log on the VM: `sudo journalctl -u island-battles-backup`. `systemctl list-timers island-battles-backup` shows the next run.
+- **What it costs:** a few MB of dumps and one upload a day, well under a cent a month. S3 has no always-free allowance, so this shows up in the zero-spend budget. The metric and the alarm are inside CloudWatch's free ones ([The budget](#the-budget)).
+- **What it doesn't cover:** the backups live in the same account and region as the VM, and a restore loses everything written since the last one, up to a day. The GitHub deploy role can't read them; reading them takes the account's own credentials.
 
-### Restoring from a snapshot
+### Listing and restoring backups
 
-1. In the Lightsail console, create a new instance from the snapshot, with a new name such as `island-battles-2` and the same plan or a bigger one.
-2. Add it to `vm_instances` in `deploy/local/aws.tfvars`, with the zone and plan you chose, and import it:
+```sh
+bucket="$(scripts/aws.sh output database_backup_bucket)"
+aws s3 ls "s3://$bucket/postgres/"
+aws s3 cp "s3://$bucket/postgres/island_battles-<time>.dump" deploy/local/dumps/
+scripts/vm.sh restore <IP> deploy/local/dumps/island_battles-<time>.dump
+```
 
-   ```sh
-   terraform -chdir=deploy/terraform import -var-file=../local/aws.tfvars 'aws_lightsail_instance.vm["island-battles-2"]' island-battles-2
-   ```
+The restore needs a deployed VM with an empty database, or `-e app_restore_replace_existing=true` to replace one, which first dumps the database it replaces to `deploy/local/dumps/` ([Dumps on their own](#dumps-on-their-own)). If the VM itself is gone, create a new instance and deploy it as in steps 1 and 2 of [Moving to a new VM](#moving-to-a-new-vm), restore the latest backup into it, then continue with steps 5 and 6.
 
-3. Run `scripts/aws.sh apply`. It gives the instance its firewall rules and turns on its automatic snapshots. If the plan wants to replace the imported instance, answer no, and change its `vm_instances` entry until it doesn't.
-4. Continue with steps 5 and 6 of [Moving to a new VM](#moving-to-a-new-vm).
+### Turning backups on for an existing deployment
+
+1. `scripts/aws.sh apply`. The plan creates the bucket, the key and the alarm, and turns off the instance's automatic snapshots. The alarm emails within the hour, until step 2 backs up.
+2. `scripts/vm.sh deploy <static IP>`. Its last step backs up for the first time.
+3. Check that the dump is there: `aws s3 ls "s3://$(scripts/aws.sh output database_backup_bucket)/postgres/"`. Within the hour, the alarm returns to OK.
+4. Check that the dump is usable: download it as in [Listing and restoring backups](#listing-and-restoring-backups), and `pg_restore --list <file>` must list the tables. To be thorough, restore it into a throwaway local Postgres.
+5. Delete the old automatic snapshots: turning snapshots off keeps the existing ones, and they cost more than the backups. In the Lightsail console, open the instance's **Snapshots** tab and delete each automatic snapshot, or run `aws lightsail delete-auto-snapshot --resource-name <instance> --date <YYYY-MM-DD>` for each date that `aws lightsail get-auto-snapshots --resource-name <instance>` lists.
 
 ## Moving to a new VM
 
-Moving copies the database with `pg_dump` and restores it on the new VM (#31). It takes a few minutes of downtime: from the moment the data is copied until the static IP points at the new VM, the backend can't reach a database. Backups are separate: they're Lightsail's [automatic snapshots](#backups) (#33).
+Moving copies the database with `pg_dump` and restores it on the new VM (#31). It takes a few minutes of downtime: from the moment the data is copied until the static IP points at the new VM, the backend can't reach a database. Backups are separate: they're [daily dumps in S3](#backups).
 
 1. **Create the new instance** without moving the static IP yet. Add it to `vm_instances` in `deploy/local/aws.tfvars`, next to the old one, and leave `static_ip_instance` alone:
 
@@ -479,9 +511,9 @@ Moving copies the database with `pg_dump` and restores it on the new VM (#31). I
    ```
 
    The deploy changes nothing, but it now runs the TLS check, which also gets the new VM's certificate. The smoke test should report that the saved credential still works. The restored schema is the old VM's. If the backend deploy brings newer migrations, its migrate step updates it.
-7. **Delete the old instance** once you're satisfied. First keep its latest automatic snapshot as a manual one, because deleting the instance deletes its automatic snapshots ([Backups](#backups)). A new instance has no automatic snapshot until Lightsail takes its first one, at or after its first `snapshot_time`. Then remove it from `vm_instances` and run `scripts/aws.sh apply`. The plan deletes the instance and its firewall rules, and the apply asks you to type the instance's name. To go back to the old instance instead, set `static_ip_instance` back, run `scripts/aws.sh apply`, and run `scripts/vm.sh deploy <static IP> -e app_unlock_after_move=true`. That lets the backend's role log in again and removes the marker. Anything written to the new VM in the meantime isn't copied back.
+7. **Delete the old instance** once you're satisfied. Its backups stopped when `move-data` marked it, and the deploy in step 6 made the new VM's first one ([Backups](#backups)). Remove it from `vm_instances` and run `scripts/aws.sh apply`. The plan deletes the instance and its firewall rules, and the apply asks you to type the instance's name. To go back to the old instance instead, set `static_ip_instance` back, run `scripts/aws.sh apply`, and run `scripts/vm.sh deploy <static IP> -e app_unlock_after_move=true`. That lets the backend's role log in again and removes the marker. Anything written to the new VM in the meantime isn't copied back.
 
-If the old VM is gone, there's nothing to dump. [Restore the latest snapshot](#restoring-from-a-snapshot) instead, then run steps 5 and 6.
+If the old VM is gone, there's nothing to dump. [Restore the latest backup](#listing-and-restoring-backups) into the new VM instead, then run steps 5 and 6.
 
 ### Dumps on their own
 
@@ -490,7 +522,7 @@ scripts/vm.sh dump <IP>                  # writes deploy/local/dumps/island_batt
 scripts/vm.sh restore <IP> <dump file>   # into an empty database
 ```
 
-Dumps use `pg_dump`'s custom format, without owners or grants. The restore makes the backend's role the owner of everything, and grants the admin MCP server's role read access again. Dumps hold player data, so keep them in `deploy/local/`.
+Dumps use `pg_dump`'s custom format, without owners or grants. The restore makes the backend's role the owner of everything, and grants the admin MCP server's role read access again. Dumps hold player data, so keep them in `deploy/local/`. The VM's daily [backups](#backups) are dumps of the same kind.
 
 ## Logs, alerts and traces
 
@@ -547,9 +579,9 @@ The worst case is a 31-day month, 44,640 minutes, with the function at its concu
 | Storage | 7 days' retention keeps at most 7/31 of a month's ingestion | 0.35 GB |
 | **Total of the bounded sources** | | **1.87 GB of 5 GB** |
 | Logs Insights scans and failed invocations | The other 3.1 GB. A query over the whole log group scans at most its 7 days, about 0.35 GB. A crash loop of one failed invocation a second all month comes to 2.7 GB. The `Errors` alarm emails within the hour of the first. | 3.1 GB left |
-| Custom metrics | The error-line metric filter, without dimensions. The SDK's and GORM plugin's metrics aren't exported, and the collector has no metrics pipeline. | 1 of 10 |
-| Alarms | The two alarms | 2 of 10 |
-| Alarm emails | Each alarm looks at one hour and notifies only on entering ALARM, after at least an hour in OK, so at most once every 2 hours: 372 each | 744 of 1,000 |
+| Custom metrics | The error-line metric filter, and the VM's `DatabaseBackups` metric, both without dimensions. The SDK's and GORM plugin's metrics aren't exported, and the collector has no metrics pipeline. | 2 of 10 |
+| Alarms | The two error alarms and the [backup alarm](#backups) | 3 of 10 |
+| Alarm emails | Each error alarm looks at one hour and notifies only on entering ALARM, after at least an hour in OK, so at most once every 2 hours: 372 each. The backup alarm needs 26 hours without a backup, so at most 28. | 772 of 1,000 |
 | Budget emails | Sent by Budgets, not SNS | free |
 | Traces recorded | Each instance starts at most one every T, and its first T after it starts: **C × 2,678,400 / T ≤ 80,000**, checked by Terraform and at startup | 74,400 of 100,000 |
 | Traces retrieved or scanned | Opening traces in the console, by hand | far under 1,000,000 |
@@ -632,6 +664,8 @@ These checks first ran on 2026-10-30, with `reserved_concurrency = null`, `accou
 - **`... over the free-tier budget`** from Terraform: the concurrency cap and the log or trace limits together could leave the free tier. Lower one of them ([The budget](#the-budget)).
 - **`Terraform sets ... itself`:** `lambda.env` or `extra_lambda_environment` sets the pool size, a log or trace limit, or a collector setting. Use the Terraform variables instead.
 - **No alarm emails:** follow the link in SNS's confirmation email, or resend it from the SNS console's subscription page.
+- **`The daily database backup needs .../database_backups.json`** from the VM deploy: run `scripts/aws.sh apply`, which creates the backups bucket and writes the file, then deploy again ([Backups](#backups)).
+- **`The database backup failed`** from the VM deploy, or the `<name>-database-backups` alarm emails: read `sudo journalctl -u island-battles-backup` on the VM. `AccessDenied` means the key in `/etc/island-battles/backup.env` is wrong or was rotated: run `scripts/aws.sh apply` and deploy the VM. To try a fix, run `sudo systemctl start island-battles-backup` and read the log again.
 - **Postgres from your machine:** `psql "host=vm.<domain> dbname=island_battles user=island_battles sslmode=require"`, with the password from `deploy/local/secrets/postgres_app_password`. To only read, use `user=island_battles_admin` and `deploy/local/secrets/postgres_admin_password`.
 - **The admin MCP server answers `permission denied`:** the role has no grants yet, for example on a new VM before its first migration, or after a restore that failed before granting them. Run `scripts/vm.sh deploy <static IP>` ([The admin MCP server](#the-admin-mcp-server)). A query that names `bearer_hash`, or `SELECT *` from `lobby_sessions`, is denied on purpose.
 
@@ -651,5 +685,5 @@ terraform -chdir=deploy/terraform init -backend=false
 terraform -chdir=deploy/terraform fmt -check -recursive
 terraform -chdir=deploy/terraform validate
 terraform -chdir=deploy/terraform test
-python3 -I -m unittest discover -s deploy -p 'test_*.py'   # the plan checks, on synthetic plans
+python3 -I -m unittest discover -s deploy -p 'test_*.py'   # the plan checks, the deploy bucket, the backup script and the apply role, offline
 ```

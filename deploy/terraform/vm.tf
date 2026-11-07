@@ -21,13 +21,16 @@ resource "aws_lightsail_instance" "vm" {
   # its firewall only has IPv4 rules.
   ip_address_type = "ipv4"
 
-  # Backups (#33): a daily snapshot of the whole instance. Lightsail keeps the
-  # last seven, and deletes them with the instance unless they were kept as
-  # manual snapshots first (deploy/README.md).
+  # No automatic snapshots: the database is backed up to S3 instead
+  # (backups.tf). Snapshots stored the whole disk seven times over, while
+  # everything but Postgres's data is rebuilt by the deploys. Lightsail keeps
+  # listing a disabled add-on, so it stays declared as Disabled: without the
+  # block, every plan would want to change the instance, which stops every
+  # backend deploy (check_deploy_plan.py). snapshot_time is ignored.
   add_on {
     type          = "AutoSnapshot"
-    snapshot_time = var.snapshot_time
-    status        = "Enabled"
+    snapshot_time = "01:00"
+    status        = "Disabled"
   }
 
   lifecycle {

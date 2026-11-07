@@ -62,3 +62,8 @@ app_unlock_after_move: false
 # Restoring a dump refuses to overwrite a database that already has tables.
 # When told to, it first dumps the database it replaces to deploy/local/dumps/.
 app_restore_replace_existing: false
+
+# The daily database backup to S3 (tasks/backups.yml), in UTC, as HH:MM. The
+# deploy also backs up once at the end, unless told not to.
+app_backup_time: "01:30"
+app_backup_now: true

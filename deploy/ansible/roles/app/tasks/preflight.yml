@@ -41,6 +41,27 @@
     quiet: true
   run_once: true
 
+- name: Look for the backup's key on the developer machine
+  ansible.builtin.stat:
+    path: "{{ app_database_backups_file }}"
+    get_checksum: false
+  register: app_database_backups_file_status
+  delegate_to: localhost
+  run_once: true
+  become: false
+
+- name: Stop unless the backup's key exists
+  ansible.builtin.assert:
+    that:
+      - app_database_backups_file_status.stat.exists
+      - app_backup_time is ansible.builtin.match('^([01][0-9]|2[0-3]):[0-5][0-9]$')
+    fail_msg: >-
+      The daily database backup needs {{ app_database_backups_file }}, with the backups bucket and its
+      upload-only key, and app_backup_time as HH:MM in UTC. Run scripts/aws.sh apply, which creates the
+      bucket and writes the file, then deploy again (deploy/README.md, "Backups").
+    quiet: true
+  run_once: true
+
 - name: Look for the moved-away marker
   ansible.builtin.stat:
     path: "{{ app_moved_away_marker }}"
