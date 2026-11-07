@@ -349,6 +349,7 @@ The Deploy workflow, `.github/workflows/deploy.yml`, runs the same scripts on a 
 |---|---|---|
 | `backend` | `scripts/aws.sh deploy` | deploy |
 | `vm` | `scripts/vm.sh deploy "$(scripts/aws.sh output static_ip)"` | deploy |
+| `web` | `scripts/deploy-web-client.sh`: builds the 3D web client and publishes it at `/play/` ([The web client](#the-web-client)) | deploy |
 | `smoke` | `scripts/vm.sh smoke` | deploy |
 | `plan` | `scripts/aws.sh plan`: plans every AWS resource, like `scripts/aws.sh apply`, and saves the plan | deploy |
 | `apply` | `scripts/aws.sh apply-plan` with the plan that the `plan_run_id` run saved | apply |
@@ -363,7 +364,7 @@ The Deploy workflow, `.github/workflows/deploy.yml`, runs the same scripts on a 
 
 **The roles:**
 
-- **Deploy role**, `island-battles-github-deploy` (`deploy/terraform/github.tf`): reads the account (`ReadOnlyAccess`), which every plan needs, and writes only what a deploy writes: the backend function's code and settings, the deploy bucket's state, files and plans, and a temporary SSH key for the VM. It deletes nothing but the state's lock.
+- **Deploy role**, `island-battles-github-deploy` (`deploy/terraform/github.tf`): reads the account (`ReadOnlyAccess`), which every plan needs, and writes only what a deploy writes: the backend function's code and settings, the deploy bucket's state, files and plans, the web client's files under `play/` in its bucket (it may put them, and list the bucket), invalidations of the game's distribution, and a temporary SSH key for the VM. In the deploy bucket it deletes nothing but the state's lock.
 - **Apply role**, `island-battles-github-apply` (`deploy/github_apply_role.py`): reads the account, and changes what `deploy/terraform/` manages: Lightsail, Lambda, CloudWatch logs and alarms, SNS, Budgets, ACM and CloudFront, buckets named `island-battles-*`, and IAM roles and users named `island-battles-*`. It can't change its own role. Because it can write IAM policies for `island-battles-*` roles, treat it as close to an administrator of the account: reviewing what merges to `main` is the control. It isn't part of the Terraform configuration, so an apply can't widen it.
 - Neither role can read the [backups](#backups). GitHub stores no AWS keys: each run gets credentials for an hour.
 
@@ -406,12 +407,14 @@ Or use the **Actions** tab, **Release**, **Run workflow** on `main`.
 
 1. **Checks** the commit with the same checks as a pull request (`checks.yml`).
 2. **Plans** the version. The previous release is the highest `vX.Y.Z` tag. The first release, with no tag yet, is `v0.1.0`, whatever `bump` says. The run's summary shows the version, the previous release and why the VM is or isn't deployed.
-3. **Deploys the VM** when the plan says so, then **the backend**, then runs the **smoke test**, each one a call of the Deploy workflow, one at a time. The backend is built with the version, and the smoke test fails unless `/healthz` reports it.
+3. **Deploys the VM** when the plan says so, then **the backend**, then **the web client** (`web` target, below), then runs the **smoke test**, each one a call of the Deploy workflow, one at a time. The backend is built with the version, and the smoke test fails unless `/healthz` reports it. The web client is built from the same commit and uploaded to `/play/`, so the backend and the client that talks to it go live together; the smoke test then fails unless `/play/` returns 200 and loads the script that was just uploaded.
 4. **Releases:** creates the annotated tags `vX.Y.Z` and `lobby/vX.Y.Z` on the deployed commit, and a GitHub release with generated notes that say whether the VM was redeployed. The `lobby/vX.Y.Z` tag marks the version of the lobby module, which is the same version; the module path `islandBattles/lobby` isn't go-gettable, so no Go module can fetch it by that path.
 
 If the tags were pushed but `gh release create` failed, re-running fails at the tag push. Create the release by hand with `gh release create vX.Y.Z --verify-tag --generate-notes`.
 
 **The VM deploy is automatic.** If anything `scripts/vm.sh deploy` uses changed since the previous release, the release redeploys the VM first and **the bump is major**, whatever you asked for, so nobody has to remember. Those inputs are `deploy/ansible/` (playbooks, roles and variables), `deploy/vm.example.yml`, `scripts/vm.sh` and `deploy/deploy_files.py`; the list is `vm_inputs` in `scripts/release-plan.sh`. The first release has nothing to compare with, so it deploys the VM too. Redeploying is safe: the playbooks are idempotent. Anything the VM deploy needs that isn't in the repository, such as `-e app_generate_secrets=true`, still needs your machine.
+
+**The web client** is uploaded by every release, after the backend deploy and before the smoke test, with `scripts/deploy-web-client.sh` ([The web client](#the-web-client)). The `web` target sets up Bun at the version pinned in `clients/island-battles-web/package.json`, and passes the entry script of the build it uploaded (such as `assets/index-1a2b3c4d.js`) to the smoke step. To upload a client on its own, start the Deploy workflow with `target` `web` (`gh workflow run deploy.yml --ref main -f target=web`). The upload is not tied to the version tag: a rollback of the client is `web` with `release_tag` set to an earlier release, which builds that tag's client. That works only for releases that include `scripts/deploy-web-client.sh` and the client's `packageManager` pin (from this change on); an earlier release has neither, so roll back the client by hand, as described below.
 
 **Releases can't create AWS resources.** The deploy role only updates the function. When a release needs a new or changed resource, such as a Terraform change under `deploy/terraform/`, merge it first and run `plan` and then `apply` on `main` ([Deploying from GitHub Actions](#deploying-from-github-actions)) before you start the release. The release's backend deploy refuses a plan that touches Lightsail, the certificate or the distribution.
 
@@ -430,7 +433,7 @@ Don't add `-f target=vm` to a rollback. Running older Ansible against a VM confi
 
 The workflow itself must run on `main`, because the `production` environment accepts nothing else. `release_tag` makes it check out that tag, which must be on `main`, build it with its version, and (for `smoke`) expect it. A rollback creates no tag or release, and the migrations only go forward: the older code runs against the newer schema, so roll back only past releases whose migrations the older code tolerates.
 
-**Later additions,** the web client in `/play/` (#114) and publishing the Python clients (#117), are jobs that `need` the `release` job in `release.yml`. A release made with the workflow's token doesn't trigger `on: release` workflows, so they can't be separate workflows.
+**Later additions,** publishing the Python clients (#117), are jobs that `need` the `release` job in `release.yml`. A release made with the workflow's token doesn't trigger `on: release` workflows, so they can't be separate workflows.
 
 **First release, once after merging:** start `release.yml` on `main`. It will be `v0.1.0` and deploys the VM as well.
 
@@ -481,7 +484,9 @@ It reads the bucket and the distribution from Terraform's outputs (`web_client_b
 3. uploads `index.html` last, with `Cache-Control: no-cache`, so a page never names a file that isn't there yet;
 4. invalidates `/play/` and `/play/index.html`, so the new build shows as soon as the script ends.
 
-It never deletes files, so the hashed files of earlier builds stay and tabs that are open keep working. They are small; remove old ones from the bucket by hand if they ever matter. It needs `bun`, the AWS CLI and Terraform, and the credentials that `scripts/aws.sh` uses. Releases don't upload it yet; that is #114.
+It never deletes files, so the hashed files of earlier builds stay and tabs that are open keep working. They are small; remove old ones from the bucket by hand if they ever matter. It needs `bun`, the AWS CLI and Terraform, and the credentials that `scripts/aws.sh` uses. Every release uploads it ([Releasing](#releasing)), and the Deploy workflow's `web` target does it on its own. If `ISLAND_BATTLES_WEB_BUNDLE_FILE` names a file, the script writes the build's entry script there, which is what the workflow hands to the smoke test.
+
+**Once, for the release to upload:** the deploy role needs the permissions that #114 adds (`s3:PutObject` on `play/*` of the bucket, `s3:ListBucket` on it, and `cloudfront:CreateInvalidation` on the distribution). They are a change to the role's policy in `deploy/terraform/github.tf`, so after merging, start a `plan` run on `main` (it shows only the role policy changing), read it, then start `apply` with that run's ID. Until then the `web` target fails with AccessDenied, and `backend` deploys, which would apply that policy change themselves without the permission to, fail too: apply first, then release.
 
 **Rolling back:** check out the commit of the earlier build and run `scripts/deploy-web-client.sh` again. Its `index.html` names the earlier hashed files, which are still in the bucket, and the invalidation makes it live.
 
@@ -503,6 +508,7 @@ It reads `game_url` from your settings and checks the whole path, through CloudF
 4. An authenticated GET reaches the backend with its `Authorization` header. CloudFront strips the header from GET requests unless the origin request policy forwards it.
 5. Centrifugo accepts the token at `wss://vm.<domain>/connection/websocket`, with a valid certificate and the game's origin.
 6. Centrifugo subscribes the guest to its personal channel through the backend's subscribe proxy, which needs the proxy secret and the Function URL.
+7. Only with `ISLAND_BATTLES_EXPECTED_WEB_BUNDLE` set to the entry script of a build, such as `assets/index-1a2b3c4d.js`: `/play/` returns 200, its `index.html` loads that script, and the script is served. CloudFront may serve the previous page for a few seconds after an invalidation, so it tries for up to 90 seconds. The release sets it from the `web` target's upload. A plain `smoke` run checks nothing of the web client, so it passes while nothing has been uploaded yet.
 
 The guest's credential is kept in `deploy/local/smoke-session.json`, and later runs reuse it. After a move to a new VM, that confirms the data came along. Guest credentials expire after 24 hours, and the test replaces one that expires within two hours. If the saved credential is rejected for another reason, delete the file and run the test again.
 

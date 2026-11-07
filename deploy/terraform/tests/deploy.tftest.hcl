@@ -662,6 +662,22 @@ run "lets_only_the_repositorys_production_jobs_deploy" {
     }
   }
 
+  override_resource {
+    target          = aws_s3_bucket.web_client
+    override_during = plan
+    values = {
+      arn = "arn:aws:s3:::island-battles-web-client-123456789012"
+    }
+  }
+
+  override_resource {
+    target          = aws_cloudfront_distribution.game
+    override_during = plan
+    values = {
+      arn = "arn:aws:cloudfront::123456789012:distribution/E1ABCDEFGHIJKL"
+    }
+  }
+
   override_data {
     target          = data.aws_caller_identity.current
     override_during = plan
@@ -687,9 +703,27 @@ run "lets_only_the_repositorys_production_jobs_deploy" {
     condition = toset(flatten([for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : statement.Action])) == toset([
       "lambda:UpdateFunctionCode", "lambda:UpdateFunctionConfiguration", "lambda:TagResource", "lambda:UntagResource",
       "iam:PassRole", "s3:ListBucket", "s3:GetObject", "s3:PutObject", "s3:DeleteObject",
-      "lightsail:GetInstanceAccessDetails",
+      "cloudfront:CreateInvalidation", "lightsail:GetInstanceAccessDetails",
     ])
-    error_message = "The role may write only the function, the deploy bucket and a temporary VM key."
+    error_message = "The role may write only the function, the deploy bucket, the web client and a temporary VM key."
+  }
+
+  assert {
+    condition     = one([for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : statement.Resource if statement.Sid == "ListTheWebClientBucket"]) == "arn:aws:s3:::island-battles-web-client-123456789012"
+    error_message = "The role may list the web client bucket."
+  }
+
+  assert {
+    condition = (
+      one([for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : statement.Resource if statement.Sid == "UploadTheWebClient"]) == "arn:aws:s3:::island-battles-web-client-123456789012/play/*"
+      && toset(one([for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : statement.Action if statement.Sid == "UploadTheWebClient"])) == toset(["s3:PutObject"])
+    )
+    error_message = "The role may only put the web client's files under play/: nothing deletes them."
+  }
+
+  assert {
+    condition     = one([for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : statement.Resource if statement.Sid == "InvalidateTheWebClient"]) == "arn:aws:cloudfront::123456789012:distribution/E1ABCDEFGHIJKL"
+    error_message = "The role may invalidate only the game's distribution."
   }
 
   assert {

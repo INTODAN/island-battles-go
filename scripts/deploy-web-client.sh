@@ -10,6 +10,10 @@
 # keep working. Then it invalidates /play/ and /play/index.html at CloudFront.
 # To roll back, check out the earlier commit and run it again.
 #
+# If ISLAND_BATTLES_WEB_BUNDLE_FILE names a file, the script writes the entry
+# script that index.html loads there (such as assets/index-1a2b3c4d.js), so the
+# smoke test can check that /play/ serves this build (deploy/smoke.py).
+#
 # Needs bun, python3, the AWS CLI and Terraform, and the AWS credentials of
 # scripts/aws.sh. The bucket and the distribution come from Terraform's outputs,
 # so the resources must have been applied first.
@@ -37,6 +41,13 @@ if [[ ! -f "$client_directory/dist/index.html" ]]; then
   exit 1
 fi
 
+bundle="$(grep -oE 'src="/play/assets/[^"]+\.js"' "$client_directory/dist/index.html" | head -n 1 \
+  | sed -E 's|^src="/play/(.*)"$|\1|' || true)"
+if [[ -z "$bundle" ]]; then
+  echo "dist/index.html loads no script from /play/assets/." >&2
+  exit 1
+fi
+
 # Only hashed files get the year-long cache. Anything else in dist/ would be
 # cached for a year under a name that never changes, so refuse it.
 unexpected="$(find "$client_directory/dist" -mindepth 1 -maxdepth 1 \
@@ -58,6 +69,10 @@ aws s3 cp "$client_directory/dist/index.html" "s3://$bucket/play/index.html" \
 
 aws cloudfront create-invalidation --distribution-id "$distribution_id" \
   --paths "/play/" "/play/index.html" --query Invalidation.Id --output text >&2
+
+if [[ -n "${ISLAND_BATTLES_WEB_BUNDLE_FILE:-}" ]]; then
+  echo "$bundle" >"$ISLAND_BATTLES_WEB_BUNDLE_FILE"
+fi
 
 game_url="$("$repository_root/scripts/aws.sh" output game_url)"
 echo "Published the web client to $game_url/play/"
