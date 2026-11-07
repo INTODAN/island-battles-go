@@ -1,0 +1,142 @@
+# The repository's checks, the same ones the root README's Commands list for a
+# person's machine (README.md, "Checks on every pull request"). They run on
+# every pull request to main, and the release workflow can call them with
+# `uses: ./.github/workflows/checks.yml` before it deploys.
+name: Checks
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+# A newer push to the same pull request replaces the run in progress. A call
+# from another workflow has its own group, because the caller's run id differs.
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      # go.mod names the version. The host and lobby modules each have a
+      # go.sum, so the module cache is keyed on both.
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            lobby/go.sum
+
+      - name: go vet
+        run: go vet ./... ./lobby/...
+
+      # Installs the binary only. The next step runs the README's command.
+      # Keep this version in step with the one the README names.
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.5.0
+          install-only: true
+
+      - name: golangci-lint
+        run: golangci-lint run --timeout=5m ./... ./lobby/...
+
+      # `go fmt` rewrites files and doesn't read go.work. gofmt -l lists the
+      # files that need formatting, from both modules, and the step fails if
+      # there are any.
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt (run: go fmt ./... && go -C lobby fmt ./...):"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      # The database tests start disposable PostgreSQL containers through
+      # Testcontainers, with the Docker that the runner has.
+      - name: go test
+        run: go test ./... ./lobby/...
+
+  api-contract:
+    name: API contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            lobby/go.sum
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: clients/island-battles-python/tools/uv.lock
+
+      - name: Lobby OpenAPI document and event schema are current
+        run: go run ./lobby/cmd/export-lobby-openapi --output lobby/api/openapi.json --events-output lobby/api/events.json --check
+
+      - name: Player OpenAPI document is current
+        run: go run ./backend/cmd/export-openapi --output backend/api/openapi.json --check
+
+      - name: Generated gameplay models are current
+        run: uv run --project clients/island-battles-python/tools --locked python clients/island-battles-python/scripts/generate.py --check
+
+  python:
+    name: Python
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      # uv installs the Python 3.14 that the projects require.
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            lobby/clients/lobby-python/uv.lock
+            clients/conformance/uv.lock
+
+      - name: Lobby client unit tests
+        run: uv run --project lobby/clients/lobby-python --locked pytest lobby/clients/lobby-python/tests
+
+      - name: Gameplay client conformance (offline)
+        run: uv run --project clients/conformance --locked pytest clients/conformance/tests/test_models.py
+
+  js:
+    name: JS
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      # The pages are plain modules with no package.json and no dependencies.
+      - name: node --test
+        run: node --test backend/demo/*.test.mjs backend/demoviewer/*.test.mjs backend/mapbuilder/*.test.mjs lobby/frontend/*.test.mjs
+
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      # The plan checks run on synthetic plans, so they need no AWS credentials
+      # and no Terraform.
+      - name: Deploy plan checks
+        run: python3 -I -m unittest discover -s deploy -p 'test_*.py'
