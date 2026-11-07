@@ -188,8 +188,8 @@ jobs:
           for dir in lobby/clients/lobby-python/generated lobby/clients/lobby-python clients/island-battles-python; do
             (cd "$dir" && uv version --frozen "$v")
           done
-          sed -i -E "s/^(    )\"lobby-api-client\",/\1\"lobby-api-client==$v\",/" lobby/clients/lobby-python/pyproject.toml
-          grep -qx "    \"lobby-api-client==$v\"," lobby/clients/lobby-python/pyproject.toml
+          sed -i -E "s/^(    )\"mpl-lobby-api-client\",/\1\"mpl-lobby-api-client==$v\",/" lobby/clients/lobby-python/pyproject.toml
+          grep -qx "    \"mpl-lobby-api-client==$v\"," lobby/clients/lobby-python/pyproject.toml
 
       - name: Build the packages
         run: |
@@ -197,7 +197,7 @@ jobs:
             uv build "$dir" --out-dir "$RUNNER_TEMP/dist"
           done
           v="${VERSION#v}"
-          for name in lobby_api_client generic_lobby_client island_battles_python; do
+          for name in mpl_lobby_api_client mpl_lobby_client island_battles_python; do
             test -f "$RUNNER_TEMP/dist/${name}-${v}-py3-none-any.whl"
             test -f "$RUNNER_TEMP/dist/${name}-${v}.tar.gz"
           done

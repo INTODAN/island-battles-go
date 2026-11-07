@@ -8,7 +8,7 @@ Each release publishes this client to PyPI as `island-battles-python`, at the re
 pip install island-battles-python==X.Y.Z   # or: uv add island-battles-python==X.Y.Z
 ```
 
-It needs Python 3.14 or newer. To obtain the guest credential and the lobby ID, install the lobby client too, `generic-lobby-client`, with the same version. The rest of this README describes the repository checkout.
+It needs Python 3.14 or newer. To obtain the guest credential and the lobby ID, install the lobby client too, `mpl-lobby-client`, with the same version. The rest of this README describes the repository checkout.
 
 An asyncio client for authenticated generation turns. It uses the existing lobby guest bearer credential and connection-token endpoint. Install with `uv sync --locked` (Python 3.14 or later). Keep the authenticated generic `LobbyClient` joined and running while the game client plays: it owns the lobby heartbeat and lease. Closing it can revoke game access after the lease expires.
 
