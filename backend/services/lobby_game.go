@@ -117,7 +117,7 @@ func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 		// The game has started, so a failure here only stops the Go bots
 		// until the next game request.
 		service := GenerationService{Database: database, Publisher: publisher}
-		if _, err := service.playGoBotTurns(ctx, binding.GameID); err != nil {
+		if _, err := service.playGoBotTurns(ctx, binding.GameID, goBotWriteBudget); err != nil {
 			observability.RecordError(ctx, fmt.Errorf("play Go bot turns: %w", err))
 		}
 	}

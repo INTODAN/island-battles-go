@@ -68,8 +68,14 @@ type GenerationService struct {
 }
 
 // Current returns the caller's state of the lobby's game, after applying an
-// overdue turn deadline, which ends the game.
+// overdue turn deadline, which ends the game. Go bots catch up for at most
+// goBotReadBudget first.
 func (service *GenerationService) Current(ctx context.Context, principal domain.Principal, lobbyID string) (models.GenerationState, error) {
+	return service.current(ctx, principal, lobbyID, goBotReadBudget)
+}
+
+// current is Current, with the time Go bots may play for first.
+func (service *GenerationService) current(ctx context.Context, principal domain.Principal, lobbyID string, goBotBudget time.Duration) (models.GenerationState, error) {
 	database := service.Database.WithContext(ctx)
 	game, err := dal.FindLobbyGame(database, lobbyID)
 	if err != nil {
@@ -80,7 +86,7 @@ func (service *GenerationService) Current(ctx context.Context, principal domain.
 		return models.GenerationState{}, err
 	}
 	if game.Outcome == nil {
-		if _, err = service.playGoBotTurns(ctx, game.ID); err != nil {
+		if _, err = service.playGoBotTurns(ctx, game.ID, goBotBudget); err != nil {
 			return models.GenerationState{}, err
 		}
 	}
@@ -126,9 +132,10 @@ func (service *GenerationService) Current(ctx context.Context, principal domain.
 // ApplyDeadline applies the deadline of the lobby game's open turn once it
 // has passed, and returns the caller's state, as Current does. Clients that
 // wait for other players call it at the deadline, because the server runs no
-// timers. Applying it again changes nothing.
+// timers. Applying it again changes nothing. Go bots catch up for at most
+// goBotWriteBudget first.
 func (service *GenerationService) ApplyDeadline(ctx context.Context, principal domain.Principal, lobbyID string) (models.GenerationState, error) {
-	return service.Current(ctx, principal, lobbyID)
+	return service.current(ctx, principal, lobbyID, goBotWriteBudget)
 }
 
 func frozenPlayer(players []models.FrozenGamePlayer, playerID string) (models.FrozenGamePlayer, error) {
@@ -173,7 +180,7 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 		return models.GenerationState{}, err
 	}
 	if game.Outcome == nil {
-		if _, err = service.playGoBotTurns(ctx, game.ID); err != nil {
+		if _, err = service.playGoBotTurns(ctx, game.ID, goBotWriteBudget); err != nil {
 			return models.GenerationState{}, err
 		}
 	}
@@ -309,7 +316,7 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 	if goBotsOnly {
 		// The batch is stored, so a failure here only stops the Go bots
 		// until the next game request.
-		if _, err := service.playGoBotTurns(ctx, game.ID); err != nil {
+		if _, err := service.playGoBotTurns(ctx, game.ID, goBotWriteBudget); err != nil {
 			observability.RecordError(ctx, fmt.Errorf("play Go bot turns: %w", err))
 		}
 	}
@@ -339,24 +346,13 @@ func commandPayloadHash(request models.RegisterGenerationCommands) (string, erro
 // already accepted this turn, by any player, and translates it into internal
 // commands. A batch it accepts cannot make simulation.Simulate fail.
 func validateCommands(generation *models.Generation, teamColor uint, inputs []models.GenerationInput, public []models.PublicGenerationCommand) ([]models.CommandFields, error) {
-	reservations := newTurnReservations(generation)
-	for _, input := range inputs {
-		var commands []models.CommandFields
-		if err := json.Unmarshal(input.Commands, &commands); err != nil {
-			return nil, err
-		}
-		for _, command := range commands {
-			// %v rather than %w: a stored command that no longer fits is a
-			// server fault, not a rejection of this batch.
-			if err := reservations.reserveStored(command); err != nil {
-				return nil, fmt.Errorf("persisted reservations do not fit the generation: %v", err)
-			}
-		}
+	reservations, err := reservedTurn(generation, inputs)
+	if err != nil {
+		return nil, err
 	}
 	commands := make([]models.CommandFields, 0, len(public))
 	for _, command := range public {
 		var internal models.CommandFields
-		var err error
 		switch command.CommandType {
 		case models.SendSoldierGroup:
 			internal, err = reservations.acceptSend(teamColor, command.Parameters)

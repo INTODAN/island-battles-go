@@ -63,14 +63,24 @@ func expireTurn(transaction *gorm.DB, game *models.Game, generation *models.Gene
 	}
 	// Only teams still in the game can time out. The players of an
 	// eliminated team have nothing to play, and the turn doesn't wait for
-	// them. A turn that every player still in the game has completed, which
-	// Go bots leave open until a request plays it, doesn't time out.
+	// them.
 	standing := simulation.StandingTeams(board, game.Teams)
-	late := map[uint][]string{}
+	waiting, late := 0, map[uint][]string{}
 	for _, player := range players {
-		if !completed[player.PlayerID] && slices.Contains(standing, player.TeamColor) {
-			late[player.TeamColor] = append(late[player.TeamColor], player.DisplayName)
+		if !completed[player.PlayerID] {
+			waiting++
+			if slices.Contains(standing, player.TeamColor) {
+				late[player.TeamColor] = append(late[player.TeamColor], player.DisplayName)
+			}
 		}
+	}
+	// The last completion plays the turn at once, so without Go bots an open
+	// turn always waits for someone. Go bots complete a turn in the
+	// transaction that creates it, and once only they are left a request plays
+	// it later, so with them the turn is open and complete between requests,
+	// and doesn't time out.
+	if waiting == 0 && !slices.ContainsFunc(players, isGoBot) {
+		return nil, fmt.Errorf("generation %d of game %d is open, but every roster player completed it", generation.ID, game.ID)
 	}
 	if len(late) == 0 {
 		return nil, nil
@@ -109,7 +119,7 @@ func (service *GenerationService) applyOverdueDeadline(ctx context.Context, game
 		return game, nil
 	}
 	// Go bots play first, so they never time out.
-	played, err := service.playGoBotTurns(ctx, game.ID)
+	played, err := service.playGoBotTurns(ctx, game.ID, goBotReadBudget)
 	if err != nil {
 		return nil, err
 	}

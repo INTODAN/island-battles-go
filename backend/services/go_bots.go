@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -24,11 +23,17 @@ import (
 // bot plays each generation's turn in the transaction that creates the
 // generation, and completes it at once, so it never times out.
 
-// goBotTimeBudget is how long one request keeps playing the turns of a game
-// in which every player still in the game is a Go bot. The next game request
-// continues where it stopped. A request plays at least one turn. Tests
-// shorten it.
-var goBotTimeBudget = 5 * time.Second
+// goBotWriteBudget and goBotReadBudget are how long one request keeps playing
+// the turns of a game in which every player still in the game is a Go bot.
+// The next game request continues where it stopped, and a request plays at
+// least one turn, so the game always makes progress. The game start, every
+// batch and the deadline call get the write budget. The reads, the state, the
+// replay, the game log and the demo, get the read budget, so that reading a
+// game that only Go bots play stays quick. Tests change them.
+var (
+	goBotWriteBudget = 5 * time.Second
+	goBotReadBudget  = time.Second
+)
 
 // goBotRequestMargin is how much of a request's own deadline, such as the
 // Lambda's, playing Go bots leaves for the rest of the request.
@@ -49,14 +54,18 @@ type goBotTurn struct {
 	memory   models.BotMemory
 }
 
-// runGoBot plays a Go bot's turn and checks its result with the rules of a
-// completing POST /generation/commands batch, against the commands already
-// accepted this turn. An error means the bot failed: it returned an error,
-// panicked, or answered with something the rules reject.
+// runGoBot plays a Go bot's turn, generation, and checks its result with the
+// rules of a completing POST /generation/commands batch, against the commands
+// already accepted this turn, inputs. It fills in turn's generation, as
+// goBotGeneration has the bot see it. An error means the bot failed: it
+// returned an error, panicked, or answered with something the rules reject.
 func runGoBot(ctx context.Context, level uint, turn models.BotTurn, generation *models.Generation, inputs []models.GenerationInput) (played goBotTurn, err error) {
 	bot, found := bots.ForLevel(level)
 	if !found {
 		return goBotTurn{}, fmt.Errorf("there is no default bot of level %d", level)
+	}
+	if turn.Generation, err = goBotGeneration(generation, turn.TeamColor, inputs); err != nil {
+		return goBotTurn{}, err
 	}
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -83,6 +92,31 @@ func runGoBot(ctx context.Context, level uint, turn models.BotTurn, generation *
 	return played, nil
 }
 
+// goBotGeneration is the generation that a Go bot of team teamColor plays: the
+// generation, where each of its team's castles shows the soldiers that the
+// commands already accepted this turn, inputs, leave unreserved, and the
+// upgrade levels with those the commands bought. Those are its teammates'
+// commands and any its own player stored before the backend took over, and
+// the validator counts them the same way, so a plan that fits the castles the
+// bot sees is accepted. Other teams' castles show the generation's values, as
+// every player sees them.
+func goBotGeneration(generation *models.Generation, teamColor uint, inputs []models.GenerationInput) (models.GenerationView, error) {
+	reservations, err := reservedTurn(generation, inputs)
+	if err != nil {
+		return models.GenerationView{}, err
+	}
+	view := GenerationView(generation)
+	for index, castle := range view.Castles {
+		if castle.TeamColor != teamColor {
+			continue
+		}
+		reservation := reservations[castle.ID]
+		view.Castles[index].Soldiers = reservation.unreserved
+		view.Castles[index].Upgrades = reservation.levels.Clone()
+	}
+	return view, nil
+}
+
 // standingTeams lists the colours of the teams that still have castles or
 // soldier groups in a generation, as simulation.StandingTeams does on its
 // board.
@@ -106,11 +140,13 @@ func standingTeams(generation *models.Generation, teams []models.GameTeam) []uin
 // playGoBots plays and completes the open turn, generation, for every Go bot
 // of a team still in the game that hasn't completed it, in the caller's
 // transaction, and returns the turn's inputs with theirs. inputs are the
-// turn's inputs so far. Each bot gets the memory it returned last turn and
-// sees the commands its teammates have already sent. Its commands, log lines
-// and memory are stored as a completing batch would store them. A bot that
-// fails passes the turn: it sends no commands, keeps its memory, and its game
-// log gets one error line.
+// turn's inputs so far. Each bot gets the memory it returned last turn, and
+// the generation as goBotGeneration has it: its team's castles show only the
+// soldiers left after the commands accepted so far this turn, including those
+// of the teammates' bots that played before it. Its commands, log lines and
+// memory are stored as a completing batch would store them. A bot that fails
+// passes the turn: it sends no commands, keeps its memory, and its game log
+// gets one error line.
 func playGoBots(ctx context.Context, transaction *gorm.DB, game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer, inputs []models.GenerationInput) ([]models.GenerationInput, error) {
 	completed := map[string]bool{}
 	for _, input := range inputs {
@@ -133,8 +169,7 @@ func playGoBots(ctx context.Context, transaction *gorm.DB, game *models.Game, ge
 		if !slices.Contains(standing, player.TeamColor) {
 			continue
 		}
-		turn := models.BotTurn{GameID: game.ID, Generation: GenerationView(generation), TeamColor: player.TeamColor,
-			Memory: memories[player.PlayerID], TurnDeadlineAt: turnDeadline(game, generation)}
+		turn := models.BotTurn{GameID: game.ID, TeamColor: player.TeamColor, Memory: memories[player.PlayerID], TurnDeadlineAt: turnDeadline(game, generation)}
 		played, err := runGoBot(ctx, *player.BotLevel, turn, generation, inputs)
 		if err != nil {
 			slog.WarnContext(ctx, "A Go bot failed its turn and passes it", "game_id", game.ID, "generation_id", generation.ID, "bot_level", *player.BotLevel, "error", err)
@@ -146,10 +181,17 @@ func playGoBots(ctx context.Context, transaction *gorm.DB, game *models.Game, ge
 		if index >= 0 {
 			input = inputs[index]
 		}
-		// The bot's lines follow any its player stored this turn. Lines that
-		// would pass the limit with those are left out, rather than the turn.
-		var rejected *GenerationError
-		if err := appendGenerationLogs(transaction, game.ID, generation.ID, player.PlayerID, played.logs); err != nil && !errors.As(err, &rejected) {
+		// The bot's lines follow any its player stored this turn. Its first
+		// lines are stored up to the limit, and the rest are left out, rather
+		// than the turn.
+		if len(played.logs) > 0 {
+			stored, err := dal.CountGenerationLogs(transaction, generation.ID, player.PlayerID)
+			if err != nil {
+				return nil, err
+			}
+			played.logs = played.logs[:min(len(played.logs), max(models.MaxGenerationLogLines-int(stored), 0))]
+		}
+		if err := appendGenerationLogs(transaction, game.ID, generation.ID, player.PlayerID, played.logs); err != nil {
 			return nil, err
 		}
 		var accumulated []models.CommandFields
@@ -257,15 +299,16 @@ func playTurn(ctx context.Context, transaction *gorm.DB, game *models.Game, play
 // hasn't yet, and plays the turn once every player still in the game has
 // completed it. While the players still in the game are all Go bots, it keeps
 // playing turns, each in its own transaction and pushed as it commits, until
-// the game ends or goBotTimeBudget runs out. The next game request continues.
-// A game without Go bots costs one read of its roster.
-func (service *GenerationService) playGoBotTurns(ctx context.Context, gameID uint) (bool, error) {
+// the game ends or budget, goBotWriteBudget or goBotReadBudget, runs out. It
+// plays at least one turn. The next game request continues. A game without Go
+// bots costs one read of its roster.
+func (service *GenerationService) playGoBotTurns(ctx context.Context, gameID uint, budget time.Duration) (bool, error) {
 	database := service.Database.WithContext(ctx)
 	players, err := dal.LoadFrozenPlayers(database, gameID)
 	if err != nil || !slices.ContainsFunc(players, isGoBot) {
 		return false, err
 	}
-	stop := time.Now().Add(goBotTimeBudget)
+	stop := time.Now().Add(budget)
 	if deadline, ok := ctx.Deadline(); ok {
 		if margin := deadline.Add(-goBotRequestMargin); margin.Before(stop) {
 			stop = margin

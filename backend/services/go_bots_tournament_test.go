@@ -107,7 +107,7 @@ func playTournamentGame(t *testing.T, gameID uint, gameMap models.Map, levels []
 			if !slices.Contains(standingTeams(generation, teams), color) {
 				continue
 			}
-			turn := models.BotTurn{GameID: gameID, Generation: GenerationView(generation), TeamColor: color, Memory: memories[index]}
+			turn := models.BotTurn{GameID: gameID, TeamColor: color, Memory: memories[index]}
 			played, err := runGoBot(context.Background(), level, turn, generation, inputs)
 			if err != nil {
 				t.Fatalf("level %d failed generation %d: %v", level, generations, err)

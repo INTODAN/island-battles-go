@@ -34,32 +34,47 @@ type goBotGame struct {
 // leaves the player to their client.
 func startGoBotGame(t *testing.T, settings string, blueLevel, redLevel uint) goBotGame {
 	t.Helper()
+	game, _ := startGoBotTeams(t, settings, []uint{blueLevel}, []uint{redLevel})
+	return game
+}
+
+// goBotPlayerNames are the display names of each team's players.
+var goBotPlayerNames = [][]string{{"Alex", "Lee"}, {"Sam", "Kim"}, {"Jo", "Max"}}
+
+// startGoBotTeams starts a game with the lobby settings and a team for each
+// list of levels, Blue first, with a player for each level, whom the backend
+// plays with the default bot of that level, or 0 for a player left to their
+// client. It returns each team's players; the game's blue and red are the
+// first players of the first two teams.
+func startGoBotTeams(t *testing.T, settings string, teams ...[]uint) (goBotGame, [][]domain.Principal) {
+	t.Helper()
 	database := testutils.InitTestDB(t)
 	clock := time.Now()
-	game := goBotGame{database: database, publisher: &testutils.RecordedPublisher{}, lobbyID: uuid.NewString(), clock: &clock,
-		blue: domain.Principal{PlayerID: uuid.NewString()}, red: domain.Principal{PlayerID: uuid.NewString()}}
+	game := goBotGame{database: database, publisher: &testutils.RecordedPublisher{}, lobbyID: uuid.NewString(), clock: &clock}
 	game.service = &services.GenerationService{Database: database, Publisher: game.publisher, Now: func() time.Time { return *game.clock }}
 	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: game.lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted, GameSettings: json.RawMessage(settings)}}
 	levels := map[string]uint{}
-	for index, player := range []struct {
-		principal domain.Principal
-		name      string
-		level     uint
-	}{{game.blue, "Alex", blueLevel}, {game.red, "Sam", redLevel}} {
+	players := make([][]domain.Principal, len(teams))
+	for index, teamLevels := range teams {
 		team := domain.Team{ID: uuid.NewString(), Order: index + 1, Name: deadlineTeamNames[index]}
 		snapshot.Teams = append(snapshot.Teams, team)
-		snapshot.StartRoster = append(snapshot.StartRoster, domain.StartRosterEntry{PlayerID: player.principal.PlayerID, TeamID: team.ID})
-		snapshot.Members = append(snapshot.Members, domain.Member{PlayerID: player.principal.PlayerID, DisplayName: player.name})
-		if player.level != 0 {
-			levels[player.principal.PlayerID] = player.level
+		for seat, level := range teamLevels {
+			player := domain.Principal{PlayerID: uuid.NewString()}
+			players[index] = append(players[index], player)
+			snapshot.StartRoster = append(snapshot.StartRoster, domain.StartRosterEntry{PlayerID: player.PlayerID, TeamID: team.ID})
+			snapshot.Members = append(snapshot.Members, domain.Member{PlayerID: player.PlayerID, DisplayName: goBotPlayerNames[index][seat]})
+			if level != 0 {
+				levels[player.PlayerID] = level
+			}
 		}
 	}
+	game.blue, game.red = players[0][0], players[1][0]
 	binding, err := services.RunLobbyGameWithGoBots(context.Background(), database, game.publisher, snapshot, levels)
 	if err != nil {
 		t.Fatal(err)
 	}
 	game.gameID = binding.GameID
-	return game
+	return game, players
 }
 
 func (game goBotGame) current(t *testing.T, player domain.Principal) models.GenerationState {
@@ -133,10 +148,12 @@ func TestGoBotsPlayAGameToItsOutcomeWithoutAnyClient(t *testing.T) {
 }
 
 func TestGoBotsPlayOnInLaterRequestsAfterTheTimeBudget(t *testing.T) {
-	services.SetGoBotTimeBudget(t, 0)
+	services.SetGoBotTimeBudgets(t, 0, 0)
 	game := startGoBotGame(t, `{"turn_timeout_seconds":5}`, 2, 1)
 	// Each request plays one more turn, also once the deadline of the turn
-	// that the last one left has passed: the bots completed it in time.
+	// that the last one left has passed: the bots completed it in time. The
+	// turn is open although every roster player has completed it, which
+	// isn't an error with Go bots.
 	for generations := int64(2); generations <= 5; generations++ {
 		if got := game.generations(t); got != generations {
 			t.Fatalf("got %d generations, want %d", got, generations)
@@ -237,5 +254,105 @@ func TestAGoBotAssignedDuringATurnPlaysBeforeTheDeadline(t *testing.T) {
 	}
 	if state.Outcome != nil || state.GenerationID == alex.GenerationID {
 		t.Fatalf("the bot didn't play in time: %+v", state)
+	}
+}
+
+// islandsSettings is the tournament's "islands" map: Blue's and Red's castles
+// of 30 soldiers, at (-4, 0) and (4, 0), and three pairs of mirrored neutral
+// castles between them.
+const islandsSettings = `{"turn_timeout_seconds":30,"map":{"map_name":"Islands","player_amount":2,"plane_size_x":10,"plane_size_y":8,"neutral_starting_soldier_amount":10,` +
+	`"castles":[{"team_color":1,"x":-4,"y":0,"starting_soldier_amount":30},{"team_color":2,"x":4,"y":0,"starting_soldier_amount":30},` +
+	`{"team_color":0,"x":-2.5,"y":2,"starting_soldier_amount":10},{"team_color":0,"x":2.5,"y":-2,"starting_soldier_amount":10},` +
+	`{"team_color":0,"x":-1,"y":1.5,"starting_soldier_amount":15},{"team_color":0,"x":1,"y":-1.5,"starting_soldier_amount":15},` +
+	`{"team_color":0,"x":-2.5,"y":-2.5,"starting_soldier_amount":20},{"team_color":0,"x":2.5,"y":2.5,"starting_soldier_amount":20}]}}`
+
+func TestTeammatesGoBotsSendOnlyWhatTheOthersLeft(t *testing.T) {
+	// Each team's bots used to see the same castles, so the second planned
+	// with the soldiers the first had already sent, and its whole turn
+	// failed. The game plays to its end.
+	game, players := startGoBotTeams(t, islandsSettings, []uint{2, 2}, []uint{3, 3})
+	for state := game.current(t, game.blue); state.Outcome == nil; {
+		var err error
+		if state, err = game.service.ApplyDeadline(context.Background(), game.blue, game.lobbyID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	generations, err := dal.LoadGameGenerations(game.database, game.gameID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// No bot failed a turn, and each team's bots sent commands in the same
+	// turn.
+	together := map[int]bool{}
+	for _, generation := range generations {
+		lines, err := dal.LoadGenerationLogs(game.database, generation.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range lines {
+			if line.Level == models.GenerationLogError {
+				t.Errorf("a bot failed generation %d: %s", generation.ID, line.Message)
+			}
+		}
+		inputs, err := dal.LoadGenerationInputs(game.database, generation.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sent := map[string]int{}
+		for _, input := range inputs {
+			var commands []models.CommandFields
+			if err := json.Unmarshal(input.Commands, &commands); err != nil {
+				t.Fatal(err)
+			}
+			sent[input.PlayerID] = len(commands)
+		}
+		for index, team := range players {
+			if sent[team[0].PlayerID] > 0 && sent[team[1].PlayerID] > 0 {
+				together[index] = true
+			}
+		}
+	}
+	if !together[0] || !together[1] {
+		t.Fatalf("not every team's bots sent commands in the same turn: %v", together)
+	}
+}
+
+func TestReadsPlayGoBotTurnsForLessTimeThanWrites(t *testing.T) {
+	services.SetGoBotTimeBudgets(t, 0, 0)
+	game := startGoBotGame(t, `{"turn_timeout_seconds":30}`, 2, 1)
+	ctx := context.Background()
+	// With a long write budget, each read still plays a single turn.
+	services.SetGoBotTimeBudgets(t, time.Minute, 0)
+	reads := []func() error{
+		func() error { _, err := game.service.Current(ctx, game.blue, game.lobbyID); return err },
+		func() error { _, err := game.service.Replay(ctx, game.blue, game.lobbyID); return err },
+		func() error {
+			state := game.current(t, game.blue)
+			_, err := game.service.Logs(ctx, game.blue, game.lobbyID, state.GenerationID)
+			return err
+		},
+		func() error { _, err := game.service.Demo(ctx, game.blue, game.lobbyID); return err },
+	}
+	for index, read := range reads {
+		before := game.generations(t)
+		if err := read(); err != nil {
+			t.Fatal(err)
+		}
+		// The logs read reads the state first.
+		want := int64(1)
+		if index == 2 {
+			want = 2
+		}
+		if got := game.generations(t) - before; got != want {
+			t.Fatalf("read %d played %d turns, want %d", index, got, want)
+		}
+	}
+	// The deadline call plays with the write budget, here to the end.
+	state, err := game.service.ApplyDeadline(ctx, game.blue, game.lobbyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Outcome == nil {
+		t.Fatalf("the deadline call didn't play the game to its end: %d generations", game.generations(t))
 	}
 }

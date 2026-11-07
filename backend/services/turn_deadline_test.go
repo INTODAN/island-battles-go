@@ -500,3 +500,24 @@ func TestEveryActiveTeamTimingOutIsADrawThatLeavesOutTheEliminatedTeam(t *testin
 		t.Fatalf("saved outcome = %+v", outcome)
 	}
 }
+
+func TestAnOpenTurnThatEveryPlayerCompletedIsAFaultWithoutGoBots(t *testing.T) {
+	fixture := newDeadlineFixture(t, mapSettings("30", 1, 2), []string{"Alex"}, []string{"Sam"})
+	// The last completion plays the turn at once, so only a fault leaves the
+	// turn open with every player's completion stored. A game with Go bots
+	// leaves it so between requests, which
+	// TestGoBotsPlayOnInLaterRequestsAfterTheTimeBudget covers.
+	generationID := fixture.states[fixture.players[0][0].PlayerID].GenerationID
+	for _, team := range fixture.players {
+		for _, player := range team {
+			if err := dal.StoreGenerationInput(fixture.database, &models.GenerationInput{GenerationID: generationID, PlayerID: player.PlayerID, Commands: []byte("[]"), Completed: true}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	*fixture.clock = fixture.deadline(t)
+	_, err := fixture.service.ApplyDeadline(context.Background(), fixture.players[0][0], fixture.lobbyID)
+	if err == nil || !strings.Contains(err.Error(), "is open, but every roster player completed it") {
+		t.Fatalf("got %v, want the open turn reported", err)
+	}
+}

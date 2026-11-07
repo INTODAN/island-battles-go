@@ -29,7 +29,7 @@ type defaultBot struct {
 // defaults are the default bots, in level order.
 var defaults = []defaultBot{
 	{models.DefaultBotView{Level: 1, Name: "Level 1",
-		Description: "Sends one soldier at a time from its first castle to the first enemy castle, like the example player."}, LevelOne{}},
+		Description: "Sends one soldier at a time from its first castle that has soldiers to the first enemy castle, like the example player."}, LevelOne{}},
 	{models.DefaultBotView{Level: 2, Name: "Level 2",
 		Description: "Attacks the nearest castle it can take with its free soldiers, counting how the defenders grow on the way; otherwise waits and grows."}, LevelTwo{}},
 	{models.DefaultBotView{Level: 3, Name: "Level 3",
