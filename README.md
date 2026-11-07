@@ -14,7 +14,7 @@
 
 - `lobby/`: Independent generic lobby component: Go module, clients, API artifacts, transport configuration, docs, and shared test tooling. See [its README](lobby/README.md).
 - `backend/`: Island Battles game logic and wiring to the generic lobby module. `backend/api/openapi.json` is the player API that gameplay clients are generated from.
-- `clients/island-battles-python/`: The Python gameplay SDK. Its models are generated; only the turn runtime and model utilities are hand-written.
+- `clients/island-battles-python/`: The Python gameplay SDK and the `island-battles-bot` command (serve, check and run a bot function). Its models are generated; only the turn runtime, the bot helpers and model utilities are hand-written.
 - `clients/island-battles-web/`: The 3D browser client (TypeScript, Babylon.js, Bun and Biome). Currently a scaffold. See [its README](clients/island-battles-web/README.md).
 - `clients/conformance/`: Language-agnostic tests that verify any gameplay client through a JSON Lines adapter.
 - `integration/island_battles/`: Host-specific lobby/game binding acceptance checks.
@@ -53,6 +53,7 @@ Teams and readiness belong to the generic lobby. Starting freezes a roster. The 
 *   **Check generated gameplay models:** `uv run --project clients/island-battles-python/tools --locked python clients/island-battles-python/scripts/generate.py --check`
 *   **Regenerate the web client's API types:** `bun run generate` in `clients/island-battles-web/` (`bun run generate --check` verifies they are current; `web-client.yml` runs it on any change to `lobby/api/` or `backend/api/`)
 *   **Python unit tests:** `uv run --project lobby/clients/lobby-python --locked pytest lobby/clients/lobby-python/tests`
+*   **Python bot client tests:** `uv run --project clients/island-battles-python --locked pytest clients/island-battles-python/tests`
 *   **Gameplay client conformance (offline):** `uv run --project clients/conformance --locked pytest clients/conformance/tests/test_models.py`
 *   **Gameplay client conformance (live, Linux Docker or Podman):** `./scripts/test-client-conformance.sh ["<adapter command>"]`
 *   **Live acceptance (Linux Docker or Podman):** `./scripts/test-lobby-acceptance.sh`
@@ -66,7 +67,7 @@ Teams and readiness belong to the generic lobby. Starting freezes a roster. The 
 |---|---|
 | Go | `go vet`, `golangci-lint` (pinned to the version in the workflow), a `gofmt -l` check of both modules, and `go test` with Testcontainers on the runner's Docker |
 | API contract | both OpenAPI `--check` commands and the generated gameplay models' `--check` |
-| Python | the lobby client's unit tests and the offline gameplay client conformance tests, with `uv --locked` |
+| Python | the lobby client's unit tests, the bot client's tests and the offline gameplay client conformance tests, with `uv --locked` |
 | JS | `node --test` for the tests in `backend/demo`, `backend/demoviewer`, `backend/mapbuilder` and `lobby/frontend` |
 | Deploy | `python3 -I -m unittest discover -s deploy -p 'test_*.py'` |
 

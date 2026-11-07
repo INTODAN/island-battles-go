@@ -9,8 +9,12 @@ dependencies = [
     "pydantic>=2.12,<3",
 ]
 
+[project.scripts]
+island-battles-bot = "island_battles_client.cli:main"
+
 [dependency-groups]
 dev = [
+    "pytest>=8.0,<9",
     "ruff>=0.16.9",
     "ty>=0.0.84",
 ]
@@ -39,3 +43,8 @@ module-root = ""
 [build-system]
 requires = ["uv_build>=0.11.0,<0.12.0"]
 build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+# examples.bot is imported from this directory.
+pythonpath = ["."]
+testpaths = ["tests"]

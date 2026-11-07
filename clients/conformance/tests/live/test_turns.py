@@ -2,6 +2,7 @@
 
 import asyncio
 import copy
+from datetime import datetime
 from uuid import uuid4
 
 from integration.test_live import EVENTS, container
@@ -35,39 +36,53 @@ def completions(proxy) -> list[dict]:
     return [body for body in posts(proxy) if body["complete"]]
 
 
-async def sent(alice: AdapterProcess, order: dict) -> dict:
-    return await alice.request(order, ("sent", "send_failed"))
+async def finish(alice: AdapterProcess, *orders: dict, memory=None) -> None:
+    """Return the bot's result: the orders as commands, and its memory."""
+    message = {"type": "finish", "commands": list(orders)}
+    if memory is not None:
+        message["memory"] = memory
+    await alice.send(message)
 
 
-async def test_callback_receives_authoritative_generation_then_commands_and_completion(
+async def test_bot_receives_the_authoritative_turn_and_answers_with_one_batch(
     launch, match, proxy
 ):
     alice, started, generation = await playing(launch, match)
     state = match.alice.state
     assert started["team_color"] == state["team_color"]
     assert_same_board(generation, state["generation"])
+    turn = alice.received[-1]
+    assert turn["team_color"] == state["team_color"]
+    assert turn["game_id"] == state["game_id"]
+    assert turn["memory"] is None
+    assert (turn["turn_deadline_at"] is None) == (state.get("turn_deadline_at") is None)
+    if turn["turn_deadline_at"] is not None:
+        assert datetime.fromisoformat(
+            turn["turn_deadline_at"]
+        ) == datetime.fromisoformat(state["turn_deadline_at"])
     origin, target = own_castle(state), enemy_castle(state)
-    for _ in range(2):
-        assert (await sent(alice, send(origin, target, 5)))["type"] == "sent"
-    await alice.send({"type": "finish"})
+    await finish(alice, send(origin, target, 5), send(origin, target, 5))
     await match.wait_submitted(match.alice)
-    batches = posts(proxy)
-    assert [batch["complete"] for batch in batches] == [False, False, True]
-    assert [len(batch["commands"]) for batch in batches] == [1, 1, 0]
-    assert len({batch["request_id"] for batch in batches}) == 3, (
-        "every new batch needs a new request ID"
+    [batch] = posts(proxy)
+    assert batch["complete"] is True
+    assert (batch["game_id"], batch["generation_id"]) == (
+        state["game_id"],
+        state["generation_id"],
     )
-    assert {(batch["game_id"], batch["generation_id"]) for batch in batches} == {
-        (state["game_id"], state["generation_id"])
-    }
-    assert batches[0]["commands"][0] == {
-        "command_type": "send_soldier_group",
-        "parameters": {
-            "origin_castle_id": origin,
-            "destination_castle_id": target,
-            "soldier_amount": 5,
-        },
-    }
+    assert (
+        batch["commands"]
+        == [
+            {
+                "command_type": "send_soldier_group",
+                "parameters": {
+                    "origin_castle_id": origin,
+                    "destination_castle_id": target,
+                    "soldier_amount": 5,
+                },
+            }
+        ]
+        * 2
+    )
     await match.complete(match.bob)
     advanced = (await alice.expect("generation"))["generation"]
     assert advanced["id"] > state["generation_id"]
@@ -83,97 +98,136 @@ async def test_callback_receives_authoritative_generation_then_commands_and_comp
 
 async def test_returning_without_commands_completes_the_turn(launch, match, proxy):
     alice, _, _ = await playing(launch, match)
-    await alice.send({"type": "finish"})
+    await finish(alice)
     await match.wait_submitted(match.alice)
     assert [(batch["complete"], batch["commands"]) for batch in posts(proxy)] == [
         (True, [])
     ]
 
 
-async def test_rejected_commands_reach_the_callback_and_leave_the_turn_open(
+async def test_memory_is_stored_with_the_turn_and_given_back_next_turn(
     launch, match, proxy
 ):
     alice, _, _ = await playing(launch, match)
-    state = match.alice.state
-    forbidden = await sent(alice, send(enemy_castle(state), own_castle(state), 1))
-    assert (
-        forbidden["type"] == "send_failed"
-        and forbidden["error"]["kind"] == "not_owned"
-        and forbidden["error"]["status"] == 403
-    )
-    excessive = await sent(alice, send(own_castle(state), enemy_castle(state), 1000))
-    assert (
-        excessive["type"] == "send_failed"
-        and excessive["error"]["kind"] == "insufficient_soldiers"
-        and excessive["error"]["status"] == 409
-    )
-    missing = await sent(alice, send(own_castle(state), 999, 1))
-    assert (
-        missing["type"] == "send_failed"
-        and missing["error"]["kind"] == "castle_not_found"
-        and missing["error"]["status"] == 422
+    await finish(alice, memory={"target": 3, "seen": [1, 2]})
+    await match.wait_submitted(match.alice)
+    [batch] = posts(proxy)
+    assert batch["memory"] == {"target": 3, "seen": [1, 2]}
+    await match.complete(match.bob)
+    await alice.expect("generation")
+    assert alice.received[-1]["memory"] == {"target": 3, "seen": [1, 2]}
+    assert (await match.read(match.alice))["memory"] == {"target": 3, "seen": [1, 2]}
+    # A turn that returns no memory clears it.
+    await finish(alice)
+    await match.wait_submitted(match.alice)
+    await match.complete(match.bob)
+    await alice.expect("generation")
+    assert alice.received[-1]["memory"] is None
+
+
+async def test_memory_over_64_kib_fails_before_any_request(launch, match, proxy):
+    alice, _, _ = await playing(launch, match)
+    await finish(alice, memory={"blob": "x" * 70_000})
+    stopped = await alice.expect("stopped")
+    assert stopped["error"]["kind"] == "memory_too_large"
+    assert stopped["error"]["status"] is None
+    # Only the failed turn's log is sent, with no commands and no memory.
+    assert all(
+        not batch["complete"] and not batch["commands"] and "memory" not in batch
+        for batch in posts(proxy)
     )
     assert not (await match.read(match.alice))["submitted"]
-    await alice.send({"type": "finish"})
-    await match.wait_submitted(match.alice)
+
+
+async def test_memory_the_server_refuses_leaves_the_turn_open(launch, match):
+    # A server-side rejection reaches the client as the same error, with status 422.
+    state = match.alice.state
+    response = await match.http.post(
+        COMMANDS,
+        headers={"Authorization": f"Bearer {match.alice.credential}"},
+        json={
+            "game_id": state["game_id"],
+            "generation_id": state["generation_id"],
+            "request_id": str(uuid4()),
+            "complete": True,
+            "commands": [],
+            "memory": {"blob": "x" * 70_000},
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["type"].endswith("bot-memory-too-large")
+    assert not (await match.read(match.alice))["submitted"]
+
+
+async def test_a_result_the_server_rejects_stops_the_client_and_leaves_the_turn_open(
+    launch, match, proxy
+):
+    for order, kind, status in (
+        (lambda own, enemy: send(enemy, own, 1), "not_owned", 403),
+        (lambda own, enemy: send(own, enemy, 1000), "insufficient_soldiers", 409),
+        (lambda own, enemy: send(own, 999, 1), "castle_not_found", 422),
+    ):
+        alice, _, _ = await playing(launch, match)
+        state = match.alice.state
+        # The valid command is rejected with the invalid one: the batch is atomic.
+        await finish(
+            alice,
+            send(own_castle(state), enemy_castle(state), 1),
+            order(own_castle(state), enemy_castle(state)),
+        )
+        stopped = await alice.expect("stopped")
+        assert (stopped["error"]["kind"], stopped["error"]["status"]) == (kind, status)
+        assert not (await match.read(match.alice))["submitted"]
+        await alice.close()
 
 
 async def test_invalid_arguments_are_rejected_before_any_request(launch, match, proxy):
-    alice, _, _ = await playing(launch, match)
     origin, target = own_castle(match.alice.state), enemy_castle(match.alice.state)
     for order in (
         send(origin, target, 0),
-        send(origin, target, -1),
         send(origin, target, 1.5),
         send(origin, target, "1"),
         send(origin, target, True),
         send(-1, target, 1),
         {"type": "send_soldier_group", "origin_castle_id": origin, "soldier_amount": 1},
     ):
-        failure = await sent(alice, order)
-        assert (
-            failure["type"] == "send_failed"
-            and failure["error"]["kind"] == "invalid_argument"
-        ), order
-    assert posts(proxy) == []
-    await alice.send({"type": "finish"})
-    await match.wait_submitted(match.alice)
-
-
-async def test_failed_callback_keeps_sent_commands_but_does_not_complete(
-    launch, match, proxy
-):
-    alice, _, _ = await playing(launch, match)
-    state = match.alice.state
-    assert (await sent(alice, send(own_castle(state), enemy_castle(state), 3)))[
-        "type"
-    ] == "sent"
-    await alice.send({"type": "fail"})
-    stopped = await alice.expect("stopped")
-    assert stopped["error"]["kind"] == "player"
-    # The last batch carries only the callback's game log, with its traceback.
-    batches = posts(proxy)
-    assert [batch["complete"] for batch in batches] == [False, False]
-    assert batches[1]["commands"] == []
+        alice, _, _ = await playing(launch, match)
+        await finish(alice, order)
+        stopped = await alice.expect("stopped")
+        assert stopped["error"]["kind"] == "invalid_argument", order
+        await alice.close()
+    # Only the failed turns' logs were sent: no command, no completion.
+    assert all(
+        not batch["complete"] and not batch["commands"] for batch in posts(proxy)
+    )
     assert not (await match.read(match.alice))["submitted"]
 
 
-async def test_lost_command_response_is_retried_with_the_same_request(
+async def test_failed_callback_does_not_complete(launch, match, proxy):
+    alice, _, _ = await playing(launch, match)
+    await alice.send({"type": "fail"})
+    stopped = await alice.expect("stopped")
+    assert stopped["error"]["kind"] == "player"
+    # The only batch carries the bot's game log, with its traceback.
+    [batch] = posts(proxy)
+    assert batch["complete"] is False and batch["commands"] == []
+    assert not (await match.read(match.alice))["submitted"]
+
+
+async def test_lost_result_response_is_retried_with_the_same_request(
     launch, match, proxy
 ):
     alice, _, _ = await playing(launch, match)
     state = match.alice.state
     proxy.drop_responses("POST", COMMANDS)
-    assert (await sent(alice, send(own_castle(state), enemy_castle(state), 4)))[
-        "type"
-    ] == "sent"
+    await finish(alice, send(own_castle(state), enemy_castle(state), 4))
+    await match.wait_submitted(match.alice)
+    await eventually(lambda: len(proxy.requests("POST", COMMANDS)) == 2)
     exchanges = proxy.requests("POST", COMMANDS)
     assert len(exchanges) == 2 and exchanges[0].injected == "drop"
     assert exchanges[0].body == exchanges[1].body, (
         "a retry must repeat the request ID and payload"
     )
-    await alice.send({"type": "finish"})
-    await match.wait_submitted(match.alice)
     await match.complete(match.bob)
     advanced = (await alice.expect("generation"))["generation"]
     groups = [
@@ -201,22 +255,7 @@ async def test_lost_completion_response_is_retried_with_the_same_request(
     await alice.assert_quiet("generation", 1)
 
 
-async def test_command_receiver_expires_when_the_callback_returns(launch, match, proxy):
-    alice, _, _ = await playing(launch, match)
-    state = match.alice.state
-    await alice.send({"type": "finish"})
-    await match.wait_submitted(match.alice)
-    expired = await sent(alice, send(own_castle(state), enemy_castle(state), 1))
-    assert (
-        expired["type"] == "send_failed"
-        and expired["error"]["kind"] == "receiver_closed"
-    )
-    assert len(posts(proxy)) == 1
-
-
-async def test_closing_during_a_callback_does_not_complete_the_turn(
-    launch, match, proxy
-):
+async def test_closing_during_a_turn_does_not_complete_it(launch, match, proxy):
     alice, _, _ = await playing(launch, match)
     await alice.request({"type": "close"}, "closed")
     assert posts(proxy) == []

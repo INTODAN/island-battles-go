@@ -25,17 +25,11 @@ class GameClientClosedError(GameError):
         super().__init__("client closed")
 
 
-class GameReceiverClosedError(GameError):
-    def __init__(self):
-        super().__init__("command receiver is closed; use it only during on_generation")
-
-
 class GameCommandError(GameError):
     """A command that the game rules reject, for a reason a strategy can act on.
 
-    The receiver raises it before any request, with ``status`` None, when the
-    callback's board already shows the problem. Otherwise the server rejects the
-    command, and ``status`` is the HTTP status.
+    The server rejects the whole result: its commands are not stored and the
+    turn stays open. ``status`` is the HTTP status.
     """
 
 
@@ -64,7 +58,15 @@ class GameLogLimitError(GameError):
 
 
 class BotMemoryTooLargeError(GameError):
-    """The server refused a batch whose memory is over 64 KiB as compact JSON."""
+    """A bot's memory is over 64 KiB as compact JSON.
+
+    The client raises it before any request, with ``status`` None. The server
+    refuses such a batch with the same error and its HTTP status.
+    """
+
+
+class InvalidBotResultError(GameError):
+    """A bot returned something other than a valid ``BotTurnResult``."""
 
 
 class GameEndedError(GameError):

@@ -68,7 +68,7 @@ def cut(message: str) -> str:
     return message[: MAX_MESSAGE_LENGTH - len(CUT_NOTE)] + CUT_NOTE
 
 
-def _clean(text: str) -> str:
+def clean(text: str) -> str:
     """Make text storable, replacing what UTF-8 text can't hold with U+FFFD.
 
     PostgreSQL text holds no NUL, and a surrogate code point, which Python
@@ -252,12 +252,12 @@ class _GameLogHandler(logging.Handler):
         ):
             return
         try:
-            message = cut(_clean(self.format(record)))
+            message = cut(clean(self.format(record)))
             if not message:
                 return
             line = GenerationLogLine(
                 level=_level(record),
-                logger=_clean(record.name[:MAX_LOGGER_LENGTH]),
+                logger=clean(record.name[:MAX_LOGGER_LENGTH]),
                 message=message,
             )
             if scope.game_log.add(line):

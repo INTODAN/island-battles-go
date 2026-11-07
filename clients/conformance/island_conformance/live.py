@@ -120,14 +120,6 @@ def upgrade(castle_id, upgrade_type) -> dict:
     }
 
 
-def cost(castle_id, upgrade_type) -> dict:
-    return {
-        "type": "upgrade_cost",
-        "castle_id": castle_id,
-        "upgrade_type": upgrade_type,
-    }
-
-
 async def centrifugo(method: str, payload: dict) -> None:
     """Call Centrifugo's server API, e.g. to publish or force a reconnect."""
     async with httpx.AsyncClient(timeout=10) as http:
