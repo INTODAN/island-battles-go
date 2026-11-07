@@ -9,6 +9,17 @@ const server = Bun.serve({
   routes: { "/": index },
   async fetch(request) {
     const url = new URL(request.url);
+    // Saved games for the 3D board's dev page, /?fixture=<file>.
+    if (url.pathname.startsWith("/fixtures/")) {
+      const name = decodeURIComponent(url.pathname.slice("/fixtures/".length));
+      if (!/^[\w.-]+\.json$/.test(name)) {
+        return new Response("Not found", { status: 404 });
+      }
+      const file = Bun.file(`${import.meta.dir}/test/fixtures/${name}`);
+      return (await file.exists())
+        ? new Response(file)
+        : new Response("Not found", { status: 404 });
+    }
     if (!isProxiedPath(url.pathname)) {
       return new Response("Not found", { status: 404 });
     }

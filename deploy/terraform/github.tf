@@ -3,8 +3,9 @@
 # Only jobs in var.github_environment of var.github_repository may assume it.
 #
 # It can read the account, as a plan must, and write only what a backend or VM
-# deploy writes: the function's code and settings, the deploy bucket, and a
-# temporary SSH key for the VM. Anything else, such as new alarms or a change
+# deploy writes: the function's code and settings, the deploy bucket, the web
+# client's files under play/ and their cache invalidation, and a temporary SSH
+# key for the VM. Anything else, such as new alarms or a change
 # to the VM, goes through `scripts/aws.sh apply`: on a person's machine, or in
 # the Deploy workflow's apply target, which applies a saved plan from main
 # with the apply role from deploy/github_apply_role.py.
@@ -95,6 +96,27 @@ resource "aws_iam_role_policy" "github_deploy" {
         Effect   = "Allow"
         Action   = "s3:DeleteObject"
         Resource = "arn:aws:s3:::${var.deploy_bucket}/terraform/terraform.tfstate.tflock"
+      },
+      {
+        # scripts/deploy-web-client.sh syncs the build into the web client
+        # bucket (web_client.tf). The bucket policy there lets the
+        # distribution read play/* and nothing else.
+        Sid      = "ListTheWebClientBucket"
+        Effect   = "Allow"
+        Action   = "s3:ListBucket"
+        Resource = aws_s3_bucket.web_client.arn
+      },
+      {
+        Sid      = "UploadTheWebClient"
+        Effect   = "Allow"
+        Action   = ["s3:PutObject"]
+        Resource = "${aws_s3_bucket.web_client.arn}/play/*"
+      },
+      {
+        Sid      = "InvalidateTheWebClient"
+        Effect   = "Allow"
+        Action   = "cloudfront:CreateInvalidation"
+        Resource = aws_cloudfront_distribution.game.arn
       },
       {
         Sid      = "LogInToTheVm"

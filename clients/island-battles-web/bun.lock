@@ -5,7 +5,8 @@
     "": {
       "name": "island-battles-web",
       "dependencies": {
-        "@babylonjs/core": "^9.33.1",
+        "@babylonjs/core": "9.33.1",
+        "@babylonjs/gui": "9.33.1",
         "centrifuge": "5.7.4",
         "openapi-fetch": "0.17.0",
       },
@@ -32,6 +33,8 @@
     "@babel/helper-validator-identifier": ["@babel/helper-validator-identifier@7.29.7", "", {}, "sha512-qehxGkRj55h/ff8EMaJ+cYhyaKlHIxqYDn682wQD7RNp9UujOQsHog2uS0r2vzr4pW+sXf90NeeayjcNaX3fFg=="],
 
     "@babylonjs/core": ["@babylonjs/core@9.33.1", "", {}, "sha512-NoIfREw4QeoXzRPpXnbUpmxxPIjuRi9iS4xFDbPgXHiLwCeHSI13DJHF8YB2gKHp6rA6T5R7BAevPvWHklvXWQ=="],
+
+    "@babylonjs/gui": ["@babylonjs/gui@9.33.1", "", { "peerDependencies": { "@babylonjs/core": "^9.0.0" } }, "sha512-3+VZSrATRu/rlHD3ufJa9lJCM0z4nssDm2OEeHUyyVqyQ2vqiZYSPQSZVOmPBz51TJIlgGcKG+hsemtnusCvKA=="],
 
     "@biomejs/biome": ["@biomejs/biome@2.6.4", "", { "optionalDependencies": { "@biomejs/cli-android-arm64": "2.6.4", "@biomejs/cli-android-x64": "2.6.4", "@biomejs/cli-darwin-arm64": "2.6.4", "@biomejs/cli-darwin-x64": "2.6.4", "@biomejs/cli-linux-arm64": "2.6.4", "@biomejs/cli-linux-arm64-musl": "2.6.4", "@biomejs/cli-linux-x64": "2.6.4", "@biomejs/cli-linux-x64-musl": "2.6.4", "@biomejs/cli-win32-arm64": "2.6.4", "@biomejs/cli-win32-x64": "2.6.4" }, "bin": { "biome": "bin/biome" } }, "sha512-8sKKwaNW4ot22awZ3lBjwWLHnUFXgXnrBPYS2gNlBAXRbDC++7kqjK2H7dR/FgCDtPvO1xfKpgEhJkGxAKYkxA=="],
 

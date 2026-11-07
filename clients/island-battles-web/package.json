@@ -13,7 +13,8 @@
     "check": "biome ci . && bun run tools/codegen/generate.ts --check && tsc --noEmit && bun test"
   },
   "dependencies": {
-    "@babylonjs/core": "^9.33.1",
+    "@babylonjs/core": "9.33.1",
+    "@babylonjs/gui": "9.33.1",
     "centrifuge": "5.7.4",
     "openapi-fetch": "0.17.0"
   },
