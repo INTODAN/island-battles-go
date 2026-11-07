@@ -2,8 +2,8 @@
 
 The deploy bucket is a private, versioned S3 bucket in the deployment's own
 AWS account. It holds Terraform's state under `terraform/` (the S3 backend
-writes it there) and every file in deploy/local/ that a deploy needs under
-`files/`: the settings, the generated secrets, the Lambda's settings and the
+writes it there), the Deploy workflow's saved plans under `plans/`, and every
+file in deploy/local/ that a deploy needs under `files/`: the settings, the generated secrets, the Lambda's settings and the
 smoke test's guest credential. The build, plans, dumps and the old local state
 stay on the machine.
 
@@ -45,6 +45,9 @@ LOCAL_DIRECTORY = pathlib.Path(__file__).resolve().parent / "local"
 BASE_FILE = ".sync-base.json"
 FILES_PREFIX = "files/"
 STATE_KEY = "terraform/terraform.tfstate"
+# The Deploy workflow's apply target saves its plan here between its two jobs.
+PLANS_PREFIX = "plans/"
+SAVED_PLAN_DAYS = 3
 # Top-level entries of deploy/local/ that stay on the machine: Terraform's
 # plans and its old local state, the built Lambda, and database dumps.
 LOCAL_ONLY = {"terraform", "lambda", "dumps", BASE_FILE}
@@ -313,6 +316,14 @@ def bootstrap(bucket, region):
             "NoncurrentVersionExpiration": {"NoncurrentDays": NONCURRENT_DAYS,
                                             "NewerNoncurrentVersions": NONCURRENT_KEPT},
             "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 7},
+        }, {
+            # Plans that the Deploy workflow saved for an apply that was
+            # rejected or never ran. They hold the Lambda's settings.
+            "ID": "expire-saved-plans",
+            "Status": "Enabled",
+            "Filter": {"Prefix": PLANS_PREFIX},
+            "Expiration": {"Days": SAVED_PLAN_DAYS},
+            "NoncurrentVersionExpiration": {"NoncurrentDays": 1},
         }]})],
         "put-bucket-tagging": ["--tagging", "TagSet=[{Key=Project,Value=island-battles},{Key=ManagedBy,Value=deploy_files.py}]"],
     }
