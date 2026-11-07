@@ -32,6 +32,27 @@ func newTurnReservations(generation *models.Generation) turnReservations {
 	return reservations
 }
 
+// reservedTurn is the generation's reservations after every command already
+// accepted this turn, by any player, as validateCommands checks a batch
+// against them.
+func reservedTurn(generation *models.Generation, inputs []models.GenerationInput) (turnReservations, error) {
+	reservations := newTurnReservations(generation)
+	for _, input := range inputs {
+		var commands []models.CommandFields
+		if err := json.Unmarshal(input.Commands, &commands); err != nil {
+			return nil, err
+		}
+		for _, command := range commands {
+			// %v rather than %w: a stored command that no longer fits is a
+			// server fault, not a rejection of this batch.
+			if err := reservations.reserveStored(command); err != nil {
+				return nil, fmt.Errorf("persisted reservations do not fit the generation: %v", err)
+			}
+		}
+	}
+	return reservations, nil
+}
+
 func (reservations turnReservations) find(castleID uint) (*castleReservation, error) {
 	reservation, exists := reservations[castleID]
 	if !exists {

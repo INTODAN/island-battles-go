@@ -2,7 +2,13 @@
 export const backendOrigin = "http://localhost:8888";
 
 /** Paths the dev server forwards to the backend, so the browser stays on one origin. */
-const proxiedPrefixes = ["/lobby/v1/", "/game/", "/generation/", "/map/"];
+const proxiedPrefixes = [
+  "/lobby/v1/",
+  "/game/",
+  "/generation/",
+  "/map/",
+  "/bots/",
+];
 const proxiedPaths = ["/healthz", "/openapi.json"];
 
 export function isProxiedPath(pathname: string): boolean {

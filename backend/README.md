@@ -174,6 +174,31 @@ The memory lives in the `game_player_bot_memory` table, one row per player who h
 
 Bots that the backend plays itself implement the Go interface `bots.Bot` in [`bots/`](bots/bots.go), `Play(ctx, BotTurn) (BotTurnResult, error)`, on the Go types `models.BotTurn` and `models.BotTurnResult` that the schemas are exported from.
 
+### Default bots
+
+The **default bots** are numbered levels that the backend plays itself, in Go, so they work with any client and with every tab closed. `GET /bots/defaults` lists them in level order, each with its `level`, `name` and `description`; it needs no authentication.
+
+| Level | Plays |
+|---|---|
+| 1 | The example player's strategy: each turn one soldier from its first castle with soldiers to the first enemy castle, in ID order. It never attacks neutral castles. |
+| 2 | Each of its castles attacks the nearest castle, enemy or neutral, that it can take: it forecasts the defenders when its group lands, as the turn rules play it (every castle grows by one soldier a turn, then the groups heading there land in ID order), and sends one more soldier plus a margin of 2 and a tenth. Otherwise it waits and grows. It doesn't defend. |
+| 3 | Level 2's forecasts, and it also keeps enough soldiers in each castle to hold against the groups heading for it and as a guard against the strongest enemy castle near it; sends help to a castle that would fall even keeping every soldier; combines attacks from several castles, the farthest sending first and the nearer ones later, so the groups land together; counts the enemy groups that its attack meets on the way; and buys speed levels 2 and 3 with soldiers it can spare from turn 15. Its memory keeps a turn counter and the launches its combined attacks have yet to send. |
+
+The bots are deterministic: the same `BotTurn` always gives the same result, and they use no randomness. Each writes one or two game log lines a turn that explain its choice, with the logger `island_battles.bots.level1` to `level3`.
+
+**Which players they play.** The game's frozen roster (`frozen_game_players`) has a nullable `bot_level` column: the level the backend plays for that player, or null for a player whose client plays. AutoMigrate adds it. Nothing sets it yet: a player's bot choice ([#111](https://github.com/INTODAN/island-battles-go/issues/111)) and bot seats ([#115](https://github.com/INTODAN/island-battles-go/issues/115)) will set it when the game starts.
+
+**How they play.** In the transaction that creates a generation, at the start or when a turn plays, the backend gives each Go bot of a team still in the game its `BotTurn`, with the memory it returned last turn, checks the result with the rules of a completing `POST /generation/commands` batch, and stores its commands, game log lines and memory and completes its turn, before the generation is pushed. So a Go bot never times out, and a game of one human and one Go bot plays each turn as soon as the human completes it. Teammates' Go bots play one after another, in player ID order, and each bot's `BotTurn.generation` shows its team's castles as the commands already accepted this turn leave them: the soldiers not yet reserved by its teammates' commands (and any its own player stored before the backend took over), and the upgrade levels with those the commands bought. The batch check counts the same reservations, so two bots on one team never send the same soldiers twice. Other teams' castles show what every player sees. A Go bot's game log lines follow any its player stored for the generation; its first lines are stored up to the [limit](#game-logs) of 100 a generation, and the rest are left out, rather than the turn being rejected. A Go bot that returns an error, panics or answers with something the rules reject passes the turn: it sends no commands, keeps its memory, and its game log gets one `error` line from the logger `island_battles.bots`.
+
+**Games that only Go bots play.** While every player still in the game is a Go bot, the turn is complete as soon as it is created. The request that got there keeps playing turns, each in its own transaction under the game lock and pushed as it commits, until the game ends or its time budget has passed, and less when the request's own deadline, such as the Lambda's, is nearer. Every game request first has the Go bots catch up the same way, so the next one continues where the last stopped, and its deadline never ends a turn that the Go bots completed. The budget depends on the request:
+
+| Requests | Budget |
+|---|---|
+| The game start, every `POST /generation/commands` batch, and the deadline call | about **5 seconds** |
+| The reads: `GET` state, the replay, the game log and the demo | about **1 second**, so reading a game that only Go bots play stays quick |
+
+Every request plays at least one turn, however small its budget, so a game always makes progress. A game without Go bots pays one read of its roster for this. Locally a game plays about 60 turns a second.
+
 ### Demos
 
 A roster player can save the game as a **demo file** at any time, and watch it later in the browser, after the lobby, the guest session and the game itself are gone.
@@ -464,7 +489,7 @@ With Ryuk off, normal runs still remove their containers through `t.Cleanup`. An
 
 ## Player API document
 
-[`api/openapi.json`](api/openapi.json) describes the operations a player client calls, including `GET /game/upgrades`, the `GenerationEvent` and `GameEndedEvent` pushed on its channel, the `MapTemplate` [map file format](#map-files), the `Demo` [demo file format](#demos), and `BotTurn` and `BotTurnResult`, the [bot turn contract](#bot-turns). Player clients are generated from it; see the [conformance suite](../clients/conformance/README.md) for the behavior they implement by hand. API view types are published without their `View` suffix (`CastleView` becomes `Castle`). After changing them, update the document; a test fails while it is stale:
+[`api/openapi.json`](api/openapi.json) describes the operations a player client calls, including `GET /game/upgrades` and `GET /bots/defaults` ([default bots](#default-bots)), the `GenerationEvent` and `GameEndedEvent` pushed on its channel, the `MapTemplate` [map file format](#map-files), the `Demo` [demo file format](#demos), and `BotTurn` and `BotTurnResult`, the [bot turn contract](#bot-turns). Player clients are generated from it; see the [conformance suite](../clients/conformance/README.md) for the behavior they implement by hand. API view types are published without their `View` suffix (`CastleView` becomes `Castle`). After changing them, update the document; a test fails while it is stale:
 
 ```sh
 go run ./backend/cmd/export-openapi --output backend/api/openapi.json

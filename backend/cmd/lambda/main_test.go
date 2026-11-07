@@ -177,6 +177,7 @@ var publicRoutes = map[string]string{
 	"POST /lobby/v1/sessions": "creates a guest credential",
 	"GET /map/templates":      "lists default map templates, which are not game data",
 	"GET /game/upgrades":      "lists the static upgrade cost table, which is not game data",
+	"GET /bots/defaults":      "lists the static default bot catalog, which is not game data",
 	"POST /map/validate":      "checks a map file and stores nothing",
 	"GET /lobby/ui":           "redirect to the embedded lobby UI",
 	"/lobby/ui/*":             "embedded static lobby UI",

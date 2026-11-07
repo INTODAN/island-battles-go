@@ -89,3 +89,11 @@ type GamePlayerBotMemory struct {
 }
 
 func (GamePlayerBotMemory) TableName() string { return "game_player_bot_memory" }
+
+// DefaultBotView is one of the default bots that the backend plays itself,
+// as GET /bots/defaults lists it.
+type DefaultBotView struct {
+	Level       uint   `json:"level" minimum:"1" doc:"The bot's level. Higher levels play better."`
+	Name        string `json:"name" doc:"A short name to show in a bot picker."`
+	Description string `json:"description" doc:"How the bot plays, in a sentence or two."`
+}

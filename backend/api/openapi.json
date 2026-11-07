@@ -300,6 +300,31 @@
         },
         "type": "object"
       },
+      "DefaultBot": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "description": "How the bot plays, in a sentence or two.",
+            "type": "string"
+          },
+          "level": {
+            "description": "The bot's level. Higher levels play better.",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "name": {
+            "description": "A short name to show in a bot picker.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "level",
+          "name",
+          "description"
+        ],
+        "type": "object"
+      },
       "Demo": {
         "additionalProperties": false,
         "properties": {
@@ -764,6 +789,30 @@
           "log_lines_stored",
           "memory",
           "turn_deadline_at"
+        ],
+        "type": "object"
+      },
+      "ListDefaultBotsResponseBody": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/ListDefaultBotsResponseBody.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "bots": {
+            "items": {
+              "$ref": "#/components/schemas/DefaultBot"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "bots"
         ],
         "type": "object"
       },
@@ -1329,12 +1378,41 @@
     }
   },
   "info": {
-    "description": "Operations a player client calls during a started game. After every turn, each roster player's Centrifugo channel `player:{player_id}` receives a `GenerationEvent`, except after the turn that ends the game, which pushes a `GameEndedEvent` with the final generation and its outcome instead. Clients reconcile with the generation read after subscribing or reconnecting; HTTP state is authoritative, and its `outcome` is set once the game has ended. A turn times out at its `turn_deadline_at`; the server runs no timers, so a client waiting for other players calls `POST /game/from-lobby/{lobby_id}/deadline` about a second after it. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the `game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose. `GET /game/upgrades` lists what each castle upgrade level costs. `Demo` is the demo file format, which `GET /game/from-lobby/{lobby_id}/demo` returns and the demo viewer at `/game/demo-viewer/` opens. `BotTurn` and `BotTurnResult` are the stateless bot contract: a bot gets a `BotTurn` each turn and answers with a `BotTurnResult`, which a client sends as one completing batch.",
+    "description": "Operations a player client calls during a started game. After every turn, each roster player's Centrifugo channel `player:{player_id}` receives a `GenerationEvent`, except after the turn that ends the game, which pushes a `GameEndedEvent` with the final generation and its outcome instead. Clients reconcile with the generation read after subscribing or reconnecting; HTTP state is authoritative, and its `outcome` is set once the game has ended. A turn times out at its `turn_deadline_at`; the server runs no timers, so a client waiting for other players calls `POST /game/from-lobby/{lobby_id}/deadline` about a second after it. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the `game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose. `GET /game/upgrades` lists what each castle upgrade level costs, and `GET /bots/defaults` the default bots that the backend plays. `Demo` is the demo file format, which `GET /game/from-lobby/{lobby_id}/demo` returns and the demo viewer at `/game/demo-viewer/` opens. `BotTurn` and `BotTurnResult` are the stateless bot contract: a bot gets a `BotTurn` each turn and answers with a `BotTurnResult`, which a client sends as one completing batch.",
     "title": "Island Battles Player API",
     "version": "1.0.0"
   },
   "openapi": "3.1.0",
   "paths": {
+    "/bots/defaults": {
+      "get": {
+        "description": "Lists the default bots in level order, each with its level, a name and a description of how it plays. Higher levels play better. The backend plays a default bot itself, with no client: it plays each turn as soon as the generation is created, so it never misses a turn's deadline. A game in which only default bots are left plays on by itself, and each game request continues it for a few seconds. The list is static and needs no authentication.",
+        "operationId": "listDefaultBots",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListDefaultBotsResponseBody"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "List the default bots that the backend plays."
+      }
+    },
     "/game/from-lobby/{lobby_id}/deadline": {
       "post": {
         "description": "Requires a place on the game's frozen roster; the lobby is not consulted. The server runs no timers, so a turn times out when a request applies its deadline, GenerationState.turn_deadline_at. Every game request does that first, and a client that is waiting for other players calls this once about a second after the deadline. Before the deadline, and for a game that has ended or has no turn timeout, it changes nothing. After it, every team with a player who hasn't completed the turn loses, the game ends with reason turn_timeout, and among the other teams still standing the team with the most castles wins; equal counts, or no team left, are a draw. The open generation stays the final one, game.ended is pushed to every roster player, and later commands conflict (409) with problem type urn:island-battles:problem:game-ended. Calling it again is safe and ends the game once. Returns your current state, as GET /game/from-lobby/{lobby_id}/generation does.",

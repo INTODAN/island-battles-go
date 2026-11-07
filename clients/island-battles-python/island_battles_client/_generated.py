@@ -173,6 +173,24 @@ class ConnectionTokenInputBody(GameModel):
     """
 
 
+class DefaultBot(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    description: StrictStr
+    """
+    How the bot plays, in a sentence or two.
+    """
+    level: Annotated[StrictInt, Field(ge=1)]
+    """
+    The bot's level. Higher levels play better.
+    """
+    name: StrictStr
+    """
+    A short name to show in a bot picker.
+    """
+
+
 class Demo(GameModel):
     model_config = ConfigDict(
         extra="ignore",
@@ -420,6 +438,23 @@ class GenerationState(GameModel):
 
 class HiddenTeamColor(RootModel[StrictInt]):
     root: Annotated[StrictInt, Field(ge=0)]
+
+
+class ListDefaultBotsResponseBody(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    field_schema: Annotated[
+        AnyUrl | None,
+        Field(
+            alias="$schema",
+            examples=["https://example.com/ListDefaultBotsResponseBody.json"],
+        ),
+    ] = None
+    """
+    A URL to the JSON Schema for this object.
+    """
+    bots: Sequence[DefaultBot]
 
 
 class ListMapTemplatesResponseBody(GameModel):

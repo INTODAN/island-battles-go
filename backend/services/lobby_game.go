@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
+	"islandBattles/backend/observability"
 	"islandBattles/lobby/domain"
 	"islandBattles/lobby/realtime"
 
@@ -19,12 +21,24 @@ import (
 // lobby's settings choose, or on the generated map without a choice. Repeated and concurrent starts reuse the
 // committed state.
 func RunLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, snapshot domain.Snapshot) (models.BindingResult, error) {
+	return runLobbyGame(ctx, database, publisher, snapshot, nil)
+}
+
+// runLobbyGame is RunLobbyGame, with the levels of the default bots that the
+// backend plays for some roster players, by player ID. Their Go bots play the
+// first generation before it is pushed. Nothing chooses the levels yet, so
+// RunLobbyGame passes none: the players' bot choice (#111) and bot seats
+// (#115) will.
+func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, snapshot domain.Snapshot, botLevels map[string]uint) (models.BindingResult, error) {
 	database = database.WithContext(ctx)
 	binding, err := dal.BindLobbyGame(database, snapshot)
 	if err != nil {
 		return models.BindingResult{}, err
 	}
 	var events []realtime.Publication
+	// goBotsOnly is set when Go bots alone play the first turn, and have
+	// completed it.
+	goBotsOnly := false
 	err = dal.WithLockedGame(database, binding.GameID, func(transaction *gorm.DB, game *models.Game) error {
 		// Teams are saved with the first generation, so they mark an initialized game.
 		if len(game.Teams) > 0 {
@@ -59,7 +73,11 @@ func RunLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 			if color == models.NeutralTeamColor {
 				return fmt.Errorf("frozen player has no team binding")
 			}
-			players = append(players, models.FrozenGamePlayer{GameID: binding.GameID, PlayerID: entry.PlayerID, TeamColor: color, DisplayName: startDisplayName(snapshot, index)})
+			player := models.FrozenGamePlayer{GameID: binding.GameID, PlayerID: entry.PlayerID, TeamColor: color, DisplayName: startDisplayName(snapshot, index)}
+			if level, found := botLevels[entry.PlayerID]; found {
+				player.BotLevel = &level
+			}
+			players = append(players, player)
 		}
 		if err := dal.StoreFrozenPlayers(transaction, players); err != nil {
 			return err
@@ -76,7 +94,16 @@ func RunLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 		if err := dal.SaveGameStart(transaction, game, teams, turnTimeout); err != nil {
 			return err
 		}
-		events, err = generationEvents(game, current, players, nil, nil)
+		inputs, err := playGoBots(ctx, transaction, game, current, players, nil)
+		if err != nil {
+			return err
+		}
+		goBotsOnly = slices.ContainsFunc(players, isGoBot) && turnComplete(game, current, players, inputs)
+		memories, err := dal.LoadBotMemories(transaction, game.ID)
+		if err != nil {
+			return err
+		}
+		events, err = generationEvents(game, current, players, inputs, memories)
 		return err
 	})
 	if err != nil {
@@ -85,6 +112,14 @@ func RunLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 	if len(events) > 0 {
 		// The game has committed. A failed push is logged and does not fail the start.
 		_ = publisher.Publish(ctx, events...)
+	}
+	if goBotsOnly {
+		// The game has started, so a failure here only stops the Go bots
+		// until the next game request.
+		service := GenerationService{Database: database, Publisher: publisher}
+		if _, err := service.playGoBotTurns(ctx, binding.GameID, goBotWriteBudget); err != nil {
+			observability.RecordError(ctx, fmt.Errorf("play Go bot turns: %w", err))
+		}
 	}
 	return binding, nil
 }

@@ -74,9 +74,12 @@ func expireTurn(transaction *gorm.DB, game *models.Game, generation *models.Gene
 			}
 		}
 	}
-	// The last completion plays the turn at once, so an open turn always
-	// waits for someone.
-	if waiting == 0 {
+	// The last completion plays the turn at once, so without Go bots an open
+	// turn always waits for someone. Go bots complete a turn in the
+	// transaction that creates it, and once only they are left a request plays
+	// it later, so with them the turn is open and complete between requests,
+	// and doesn't time out.
+	if waiting == 0 && !slices.ContainsFunc(players, isGoBot) {
 		return nil, fmt.Errorf("generation %d of game %d is open, but every roster player completed it", generation.ID, game.ID)
 	}
 	if len(late) == 0 {
@@ -106,12 +109,25 @@ func expireTurn(transaction *gorm.DB, game *models.Game, generation *models.Gene
 	return generationEvents(game, generation, players, inputs, memories)
 }
 
-// applyOverdueDeadline applies the deadline of the game's open turn for the
-// reads that take no game lock: the replay, the game log and the demo. It
-// first checks the deadline without the lock, so a running game's reads lock
-// it only once its deadline has passed. It returns the game as it is
-// afterwards.
+// applyOverdueDeadline has the Go bots play, as every game request does, and
+// then applies the deadline of the game's open turn, for the reads that take
+// no game lock: the replay, the game log and the demo. It checks the deadline
+// without the lock first, so a running game's reads lock it only once its
+// deadline has passed. It returns the game as it is afterwards.
 func (service *GenerationService) applyOverdueDeadline(ctx context.Context, game *models.Game) (*models.Game, error) {
+	if game.Outcome != nil {
+		return game, nil
+	}
+	// Go bots play first, so they never time out.
+	played, err := service.playGoBotTurns(ctx, game.ID, goBotReadBudget)
+	if err != nil {
+		return nil, err
+	}
+	if played {
+		if game, err = dal.FindGame(service.Database.WithContext(ctx), game.ID); err != nil {
+			return nil, err
+		}
+	}
 	if game.Outcome != nil || game.TurnTimeoutSeconds == nil {
 		return game, nil
 	}

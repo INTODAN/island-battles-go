@@ -13,7 +13,13 @@ type FrozenGamePlayer struct {
 	// DisplayName is the player's lobby name at the start. The game log names
 	// players by it, because the lobby is deleted later.
 	DisplayName string `gorm:"not null;default:''"`
-	CreatedAt   time.Time
+	// BotLevel is the level of the default bot that the backend plays for
+	// this player, one of bots.Defaults, or nil when the player's own client
+	// plays. The backend plays it as soon as each generation is created, so it
+	// never times out. Nothing sets it yet: the player's bot choice (#111) and
+	// bot seats (#115) will set it when the game starts.
+	BotLevel  *uint
+	CreatedAt time.Time
 }
 
 type GenerationInput struct {
