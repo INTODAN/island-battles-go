@@ -14,7 +14,6 @@ import (
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
 	"islandBattles/backend/observability"
-	"islandBattles/backend/simulation"
 	"islandBattles/lobby/domain"
 	"islandBattles/lobby/realtime"
 
@@ -79,6 +78,11 @@ func (service *GenerationService) Current(ctx context.Context, principal domain.
 	observability.Annotate(ctx, slog.Uint64("game_id", uint64(game.ID)))
 	if err = service.authorize(ctx, principal, game); err != nil {
 		return models.GenerationState{}, err
+	}
+	if game.Outcome == nil {
+		if _, err = service.playGoBotTurns(ctx, game.ID); err != nil {
+			return models.GenerationState{}, err
+		}
 	}
 	var state models.GenerationState
 	var events []realtime.Publication
@@ -168,11 +172,19 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 	if err = service.authorize(ctx, principal, game); err != nil {
 		return models.GenerationState{}, err
 	}
+	if game.Outcome == nil {
+		if _, err = service.playGoBotTurns(ctx, game.ID); err != nil {
+			return models.GenerationState{}, err
+		}
+	}
 	var state models.GenerationState
 	var events []realtime.Publication
 	// A batch that comes after its turn's deadline is rejected, but the
 	// transaction that applied the deadline still commits.
 	var late error
+	// goBotsOnly is set when this batch's turn left a turn that only Go bots
+	// play, and has already completed.
+	goBotsOnly := false
 	err = dal.WithLockedGame(database, request.GameID, func(transaction *gorm.DB, locked *models.Game) error {
 		players, err := dal.LoadFrozenPlayers(transaction, locked.ID)
 		if err != nil {
@@ -273,66 +285,13 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 		if err != nil {
 			return err
 		}
-		completed := map[string]bool{}
-		for _, candidate := range inputs {
-			completed[candidate.PlayerID] = candidate.Completed
-		}
-		// Players of eliminated teams have nothing to play, so the turn
-		// doesn't wait for them.
-		ready := len(players) > 0
-		var standing []uint
-		haveStanding := false
-		for _, participant := range players {
-			if completed[participant.PlayerID] {
-				continue
-			}
-			if !haveStanding {
-				current, err := dal.LoadGameState(transaction, locked.ID)
-				if err != nil {
-					return err
-				}
-				standing, haveStanding = simulation.StandingTeams(current, locked.Teams), true
-			}
-			if slices.Contains(standing, participant.TeamColor) {
-				ready = false
-				break
-			}
-		}
-		if ready {
-			allCommands := []models.CommandFields{}
-			for _, candidate := range inputs {
-				var playerCommands []models.CommandFields
-				if err := json.Unmarshal(candidate.Commands, &playerCommands); err != nil {
-					return err
-				}
-				allCommands = append(allCommands, playerCommands...)
-			}
-			generationID, board, err := migrateGeneration(transaction, locked.ID, allCommands)
-			if err != nil {
+		if turnComplete(locked, generation, players, inputs) {
+			if generation, inputs, events, err = playTurn(ctx, transaction, locked, players, inputs); err != nil {
 				return err
 			}
-			generations, err := dal.CountGenerationsForGame(transaction, locked.ID)
-			if err != nil {
-				return err
-			}
-			// A game that ends keeps this generation as its last one.
-			if outcome := simulation.Outcome(board, locked.Teams, generations >= MaxGenerations); outcome != nil {
-				if err := dal.SaveGameOutcome(transaction, locked, *outcome); err != nil {
-					return err
-				}
-			}
-			generation, err = dal.GetGeneration(transaction, generationID)
-			if err != nil {
-				return err
-			}
-			inputs = nil
-			memories, err := dal.LoadBotMemories(transaction, locked.ID)
-			if err != nil {
-				return err
-			}
-			if events, err = generationEvents(locked, generation, players, nil, memories); err != nil {
-				return err
-			}
+			// When only Go bots are left to play, they play on after this
+			// request's turn has committed.
+			goBotsOnly = locked.Outcome == nil && slices.ContainsFunc(players, isGoBot) && turnComplete(locked, generation, players, inputs)
 		}
 		if state, err = generationState(locked, generation, player, inputs, memory); err != nil {
 			return err
@@ -346,6 +305,13 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 	service.publish(ctx, events)
 	if late != nil {
 		return models.GenerationState{}, late
+	}
+	if goBotsOnly {
+		// The batch is stored, so a failure here only stops the Go bots
+		// until the next game request.
+		if _, err := service.playGoBotTurns(ctx, game.ID); err != nil {
+			observability.RecordError(ctx, fmt.Errorf("play Go bot turns: %w", err))
+		}
 	}
 	return state, nil
 }

@@ -190,6 +190,11 @@ func SetupRoutes(api huma.API, env *handlers.Env, adminAPIKey string) {
 		Summary: "List the castle upgrades, their levels and their costs.",
 		Description: "Lists every upgrade type, sorted by type, with what its levels measure and, for each level from 1 to max_level, its effect and the soldiers a castle pays to reach it from the level below. Every castle starts at level 1. " +
 			"The table is static and needs no authentication. Castles and soldier groups carry their current levels, and upgrade_castle in POST /generation/commands buys the next one."}, handlers.ListUpgrades)
+	huma.Register(api, huma.Operation{OperationID: "listDefaultBots", Path: "/bots/defaults", Method: http.MethodGet,
+		Summary: "List the default bots that the backend plays.",
+		Description: "Lists the default bots in level order, each with its level, a name and a description of how it plays. Higher levels play better. " +
+			"The backend plays a default bot itself, with no client: it plays each turn as soon as the generation is created, so it never misses a turn's deadline. " +
+			"A game in which only default bots are left plays on by itself, and each game request continues it for a few seconds. The list is static and needs no authentication."}, handlers.ListDefaultBots)
 	huma.Register(api, huma.Operation{OperationID: "listMapTemplates", Path: "/map/templates", Method: http.MethodGet,
 		Summary: "List the default maps a lobby can start on.",
 		Description: "Lists every default map whose castle team colours are exactly 1 to player_amount, ordered by name. " +

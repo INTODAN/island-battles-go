@@ -7,6 +7,7 @@ test("forwards API paths to the backend", () => {
     "/game/from-lobby/abc/generation",
     "/generation/1",
     "/map/create",
+    "/bots/defaults",
     "/healthz",
     "/openapi.json",
   ]) {

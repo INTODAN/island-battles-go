@@ -1,6 +1,26 @@
 // Generated from backend/api/openapi.json by tools/codegen/generate.ts. Do not edit; run `bun run generate`.
 
 export interface paths {
+    "/bots/defaults": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the default bots that the backend plays.
+         * @description Lists the default bots in level order, each with its level, a name and a description of how it plays. Higher levels play better. The backend plays a default bot itself, with no client: it plays each turn as soon as the generation is created, so it never misses a turn's deadline. A game in which only default bots are left plays on by itself, and each game request continues it for a few seconds. The list is static and needs no authentication.
+         */
+        get: operations["listDefaultBots"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/game/from-lobby/{lobby_id}/deadline": {
         parameters: {
             query?: never;
@@ -299,6 +319,17 @@ export interface components {
              */
             readonly $schema?: string;
         };
+        DefaultBot: {
+            /** @description How the bot plays, in a sentence or two. */
+            description: string;
+            /**
+             * Format: int64
+             * @description The bot's level. Higher levels play better.
+             */
+            level: number;
+            /** @description A short name to show in a bot picker. */
+            name: string;
+        };
         Demo: {
             /**
              * @description Marks the file as an Island Battles demo.
@@ -489,6 +520,15 @@ export interface components {
              * @description When this generation's turn times out: the generation's creation time plus the lobby's turn_timeout_seconds. Null when turns have no time limit, and once the game has ended. If a player of a team hasn't completed the turn by then, the team loses and the game ends. A client waiting for other players calls POST /game/from-lobby/{lobby_id}/deadline about a second after it, because the server runs no timers.
              */
             turn_deadline_at: string | null;
+        };
+        ListDefaultBotsResponseBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/ListDefaultBotsResponseBody.json
+             */
+            readonly $schema?: string;
+            bots: components["schemas"]["DefaultBot"][];
         };
         ListMapTemplatesResponseBody: {
             /**
@@ -728,6 +768,35 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    listDefaultBots: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListDefaultBotsResponseBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     applyIslandLobbyTurnDeadline: {
         parameters: {
             query?: never;
