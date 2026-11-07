@@ -2,6 +2,7 @@ package dal
 
 import (
 	"fmt"
+	"time"
 
 	"islandBattles/backend/models"
 
@@ -48,6 +49,24 @@ func GetLatestGenerationForGame(db *gorm.DB, gameID uint) (*models.Generation, e
 		return nil, err
 	}
 	return &generation, nil
+}
+
+// LatestGenerationCreatedAt returns when the game's latest generation was
+// created, without loading it, or found false for a game without one.
+func LatestGenerationCreatedAt(db *gorm.DB, gameID uint) (createdAt time.Time, found bool, err error) {
+	// GORM drops zero-valued struct conditions, which would match every game.
+	if gameID == 0 {
+		return time.Time{}, false, nil
+	}
+	var generations []models.Generation
+	err = db.Select("ID", "CreatedAt").
+		Where(&models.Generation{GameID: gameID}).
+		Order(clause.OrderByColumn{Column: clause.Column{Name: "id"}, Desc: true}).
+		Limit(1).Find(&generations).Error
+	if err != nil || len(generations) == 0 {
+		return time.Time{}, false, err
+	}
+	return generations[0].CreatedAt, true, nil
 }
 
 func CountGenerationsForGame(db *gorm.DB, gameID uint) (int64, error) {

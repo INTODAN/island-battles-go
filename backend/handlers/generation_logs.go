@@ -23,7 +23,7 @@ func (handler *LobbyGame) GenerationLogs(ctx context.Context, input *struct {
 	if err != nil {
 		return nil, huma.Error401Unauthorized("authentication required")
 	}
-	service := services.GenerationService{Database: handler.Database}
+	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher}
 	logs, err := service.Logs(ctx, verified.Principal, input.LobbyID, input.GenerationID)
 	if err != nil {
 		return nil, generationHTTPError(ctx, err)

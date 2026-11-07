@@ -99,6 +99,9 @@ func (service *GenerationService) Logs(ctx context.Context, principal domain.Pri
 	if err := service.authorize(ctx, principal, game); err != nil {
 		return models.GenerationLogs{}, err
 	}
+	if game, err = service.applyOverdueDeadline(ctx, game); err != nil {
+		return models.GenerationLogs{}, err
+	}
 	// Checked after authorization, so only roster players learn of it.
 	if generationID == 0 {
 		return models.GenerationLogs{}, reject(422, "generation_id must be a positive generation ID")

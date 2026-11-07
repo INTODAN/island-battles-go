@@ -22,11 +22,12 @@ The live deployment (#45, 2026-10-30) runs in `eu-central-1`, and its VM is `vm.
 |---|---|
 | `scripts/aws.sh` | Creates the AWS resources and deploys the backend to Lambda. |
 | `scripts/vm.sh` | Deploys the VM, moves its database and runs the smoke test. |
+| `scripts/deploy-web-client.sh` | Builds the [web client](#the-web-client) and uploads it to its bucket. |
 | `scripts/deploy-files.sh` | Creates the [deploy bucket](#the-deploy-bucket), and syncs `deploy/local/` with it by hand. `deploy/deploy_files.py` does the work, and `deploy/test_deploy_files.py` tests it. |
 | `.github/workflows/deploy.yml` | [Deploys from GitHub Actions](#deploying-from-github-actions), on demand. |
 | `deploy/aws.example.tfvars` | The template for the AWS settings. |
 | `deploy/vm.example.yml` | The template for the VM settings. |
-| `deploy/terraform/` | The AWS resources: the Lightsail VM in `vm.tf`, the Lambda in `lambda.tf`, the game's certificate and CloudFront distribution in `cloudfront.tf`, the Lambda's log group, alarms, collector settings and budget in `observability.tf`, the database backups' bucket, key and alarm in `backups.tf`, and GitHub Actions' deploy role in `github.tf`. `tests/` checks the configuration offline. |
+| `deploy/terraform/` | The AWS resources: the Lightsail VM in `vm.tf`, the Lambda in `lambda.tf`, the game's certificate and CloudFront distribution in `cloudfront.tf`, the Lambda's log group, alarms, collector settings and budget in `observability.tf`, the database backups' bucket, key and alarm in `backups.tf`, the [web client's](#the-web-client) bucket and redirect function in `web_client.tf`, and GitHub Actions' deploy role in `github.tf`. `tests/` checks the configuration offline. |
 | `deploy/github_apply_role.py` | Creates the role that the Deploy workflow's approved runs use ([Deploying from GitHub Actions](#deploying-from-github-actions)). `deploy/test_github_apply_role.py` tests it. |
 | `deploy/check_deploy_plan.py` | Reads the plan for `scripts/aws.sh`: stops a backend deploy that would change more than the backend, lists what an apply would destroy, and tells an apply whether to run the migrations. `deploy/test_check_deploy_plan.py` tests it. |
 | `deploy/check_concurrency.py` | Reads `aws.tfvars` for `scripts/aws.sh`: refuses to plan when `reserved_concurrency` is null and `account_concurrency_limit` is below the account's real limit ([The concurrency cap](#the-concurrency-cap)). `deploy/test_check_concurrency.py` tests it. |
@@ -148,7 +149,8 @@ A deployment from before #75 serves players at the Function URL. To move them to
 | IAM role | Basic execution and X-Ray writes: the function writes its logs, its collector layer sends traces to X-Ray, and it calls nothing else in AWS. |
 | Function URL | Auth type `NONE` and the `RESPONSE_STREAM` invoke mode, which the backend's `lambdaurl` host needs. The provider adds the public invoke permissions. |
 | Certificate | An ACM certificate for `game_hostname` in `us-east-1`, where CloudFront takes certificates from, validated by DNS. ACM renews it on its own while its validation record stays. |
-| CloudFront distribution | Serves `game_hostname` with the certificate, over HTTPS only: plain HTTP is redirected. Its one origin is the Function URL, over HTTPS. Every method reaches the Lambda uncached (`Managed-CachingDisabled`), with every viewer header, cookie and query string but `Host` (`Managed-AllViewerExceptHostHeader`), so the Function URL sees its own `Host` and the backend gets `Authorization`. Streamed answers stream through. No origin access control: for a Function URL it would need clients to send a SHA-256 of every POST body, and the Function URL is public anyway. Price class 100, no logs and no WAF. |
+| CloudFront distribution | Serves `game_hostname` with the certificate, over HTTPS only: plain HTTP is redirected. Its default origin is the Function URL, over HTTPS. Every method reaches the Lambda uncached (`Managed-CachingDisabled`), with every viewer header, cookie and query string but `Host` (`Managed-AllViewerExceptHostHeader`), so the Function URL sees its own `Host` and the backend gets `Authorization`. Streamed answers stream through. No origin access control: for a Function URL it would need clients to send a SHA-256 of every POST body, and the Function URL is public anyway. A second origin, the web client's bucket, serves `/play/*` and `/play` ahead of the default behaviour: cached and compressed (`Managed-CachingOptimized`), GET, HEAD and OPTIONS only, with a CloudFront Function that serves `/play/` as `play/index.html` and redirects `/play` to `/play/`. Price class 100, no logs and no WAF. |
+| Web client bucket | `<name>-web-client-<account>`, private, unversioned, encrypted, TLS only, with all public access blocked. Holds the built client under `play/`. Only this distribution may read it, through an origin access control. See [The web client](#the-web-client). |
 | Log group | `/aws/lambda/<name>`, kept for 7 days. |
 | Metric filter and alarms | One metric that counts error lines, and two alarms, on it and on the function's `Errors`, that email `alert_email` through an SNS topic. |
 | Budget | A zero-spend cost budget that emails `alert_email`. |
@@ -388,6 +390,84 @@ The Deploy workflow, `.github/workflows/deploy.yml`, runs the same scripts on a 
 
 **What still needs your own machine:** `-e app_generate_secrets=true`, dumps, restores and moves, and the setup above.
 
+## Releasing
+
+A release deploys the backend and the lobby, which is compiled into the same Lambda, tags the commit and publishes a GitHub release. Merging to `main` releases nothing: a person starts the Release workflow, `.github/workflows/release.yml`, by hand.
+
+```sh
+gh workflow run release.yml --ref main -f bump=patch   # or minor, or major
+```
+
+Or use the **Actions** tab, **Release**, **Run workflow** on `main`.
+
+**Starting it is the approval.** Only people with write access can start it, only from `main` (any other branch fails at once, before anything runs), and its deploy jobs run in the `production` environment, which is limited to `main`, like every Deploy run. GitHub offers no required reviewer on a private repository's environment on a personal plan, so the run doesn't wait for a second approval. Read what merged since the last release before you start it. Start it when no other Deploy run is going: a manual Deploy that runs during a release can make the release's smoke step fail, and then no tag is created.
+
+**What it does,** in order. A failure anywhere stops the rest and leaves no tag and no release:
+
+1. **Checks** the commit with the same checks as a pull request (`checks.yml`).
+2. **Plans** the version. The previous release is the highest `vX.Y.Z` tag. The first release, with no tag yet, is `v0.1.0`, whatever `bump` says. The run's summary shows the version, the previous release and why the VM is or isn't deployed.
+3. **Deploys the VM** when the plan says so, then **the backend**, then runs the **smoke test**, each one a call of the Deploy workflow, one at a time. The backend is built with the version, and the smoke test fails unless `/healthz` reports it.
+4. **Releases:** creates the annotated tags `vX.Y.Z` and `lobby/vX.Y.Z` on the deployed commit, and a GitHub release with generated notes that say whether the VM was redeployed. The `lobby/vX.Y.Z` tag marks the version of the lobby module, which is the same version; the module path `islandBattles/lobby` isn't go-gettable, so no Go module can fetch it by that path.
+
+If the tags were pushed but `gh release create` failed, re-running fails at the tag push. Create the release by hand with `gh release create vX.Y.Z --verify-tag --generate-notes`.
+
+**The VM deploy is automatic.** If anything `scripts/vm.sh deploy` uses changed since the previous release, the release redeploys the VM first and **the bump is major**, whatever you asked for, so nobody has to remember. Those inputs are `deploy/ansible/` (playbooks, roles and variables), `deploy/vm.example.yml`, `scripts/vm.sh` and `deploy/deploy_files.py`; the list is `vm_inputs` in `scripts/release-plan.sh`. The first release has nothing to compare with, so it deploys the VM too. Redeploying is safe: the playbooks are idempotent. Anything the VM deploy needs that isn't in the repository, such as `-e app_generate_secrets=true`, still needs your machine.
+
+**Releases can't create AWS resources.** The deploy role only updates the function. When a release needs a new or changed resource, such as a Terraform change under `deploy/terraform/`, merge it first and run `plan` and then `apply` on `main` ([Deploying from GitHub Actions](#deploying-from-github-actions)) before you start the release. The release's backend deploy refuses a plan that touches Lightsail, the certificate or the distribution.
+
+**The version.** `/healthz` still answers 204 and reports the build's version in the `X-Island-Battles-Version` header (`dev` for builds that set none). `ISLAND_BATTLES_VERSION=v0.1.0 scripts/aws.sh deploy` builds with a version, and `ISLAND_BATTLES_EXPECTED_VERSION=v0.1.0 scripts/vm.sh smoke` checks it. A plain `backend` deploy, or a `plan`/`apply` that publishes the backend, builds the commit as `dev`; the next release sets the version again.
+
+**Rolling back:** start the Deploy workflow on `main` with `target` `backend` and `release_tag` set to the previous release, for example:
+
+```sh
+gh workflow run deploy.yml --ref main -f target=backend -f release_tag=v0.1.0
+gh workflow run deploy.yml --ref main -f target=smoke -f release_tag=v0.1.0
+```
+
+A rollback is only for releases whose difference from the tag is code only: no change under `deploy/terraform/` and no VM change since that tag. A rollback runs the tag's `scripts/aws.sh` and the tag's Terraform configuration, so it can refuse, fail with AccessDenied, or revert Terraform-managed Lambda settings. Otherwise fix forward with a new release.
+
+Don't add `-f target=vm` to a rollback. Running older Ansible against a VM configured by newer playbooks can downgrade containers, including Postgres. Don't do it without a database backup and the owner's machine.
+
+The workflow itself must run on `main`, because the `production` environment accepts nothing else. `release_tag` makes it check out that tag, which must be on `main`, build it with its version, and (for `smoke`) expect it. A rollback creates no tag or release, and the migrations only go forward: the older code runs against the newer schema, so roll back only past releases whose migrations the older code tolerates.
+
+**Later additions,** the web client in `/play/` (#114) and publishing the Python clients (#117), are jobs that `need` the `release` job in `release.yml`. A release made with the workflow's token doesn't trigger `on: release` workflows, so they can't be separate workflows.
+
+**First release, once after merging:** start `release.yml` on `main`. It will be `v0.1.0` and deploys the VM as well.
+
+## The web client
+
+The 3D client in `clients/island-battles-web/` is served at `https://<game_hostname>/play/` (#104). It is a static build in a private S3 bucket, `<name>-web-client-<account>`, behind the game's own distribution:
+
+- **Same origin.** API calls stay on the game's host, so there's no CORS and Centrifugo's allowed origin needs no change.
+- **Cached at the edge.** `/play/*` uses `Managed-CachingOptimized` with compression, and never reaches the Lambda. Everything else still goes to the Lambda, uncached.
+- **Private bucket.** Public access is blocked, and the bucket policy lets only this distribution read `play/*`, through an origin access control.
+- **`/play/` and `/play/?join=CODE`** serve `play/index.html`: a CloudFront Function adds `index.html` to a path that ends in a slash. `/play` without the slash is redirected to `/play/`. Query strings aren't part of the cache key, so every `?join=CODE` gets the same cached page.
+
+**Creating the resources, once.** The change adds the bucket with its public access block, encryption setting, ownership controls and policy, the origin access control and the CloudFront function, and updates the distribution. It replaces and deletes nothing. Apply it like any other AWS change: start the Deploy workflow's `plan` target on `main`, read the plan, then start `apply` with that run's ID ([Deploying from GitHub Actions](#deploying-from-github-actions)), or run `scripts/aws.sh apply` on your machine. The apply role may create the bucket because its name starts with `island-battles-`. A backend deploy (`scripts/aws.sh deploy`) is unaffected afterwards: the new resources are unchanged in its plans, and it stops only on a plan that changes CloudFront.
+
+**Order for a fresh setup:** plan and apply the new resources, run `scripts/deploy-web-client.sh`, then run the backend deploy or release that shows the **Play in 3D** link, so the link never points at an empty bucket. Until the one-time apply has created the CloudFront resources, `backend` deploy runs are refused, because their plan would create them.
+
+**Uploading a build:**
+
+```sh
+scripts/deploy-web-client.sh
+```
+
+It reads the bucket and the distribution from Terraform's outputs (`web_client_bucket`, `distribution_id`), then:
+
+1. runs `bun run build` in `clients/island-battles-web/`, which builds for `/play/` with hashed files under `dist/assets/`;
+2. uploads `dist/assets/` to `s3://<bucket>/play/assets/` with `Cache-Control: public, max-age=31536000, immutable`;
+3. uploads `index.html` last, with `Cache-Control: no-cache`, so a page never names a file that isn't there yet;
+4. invalidates `/play/` and `/play/index.html`, so the new build shows as soon as the script ends.
+
+It never deletes files, so the hashed files of earlier builds stay and tabs that are open keep working. They are small; remove old ones from the bucket by hand if they ever matter. It needs `bun`, the AWS CLI and Terraform, and the credentials that `scripts/aws.sh` uses. Releases don't upload it yet; that is #114.
+
+**Rolling back:** check out the commit of the earlier build and run `scripts/deploy-web-client.sh` again. Its `index.html` names the earlier hashed files, which are still in the bucket, and the invalidation makes it live.
+
+**A missing file answers 403**, not 404: the bucket policy grants only `s3:GetObject`, so S3 doesn't reveal which keys exist.
+
+**Checking it:** `curl -sI https://<game_hostname>/play/assets/<file>` shows `x-cache: Hit from cloudfront` on the second request, and `/play` answers `301` to `/play/`.
+
 ## Smoke test
 
 ```sh
@@ -396,7 +476,7 @@ scripts/vm.sh smoke
 
 It reads `game_url` from your settings and checks the whole path, through CloudFront:
 
-1. `/healthz` returns 204, with a valid certificate for the game's name.
+1. `/healthz` returns 204, with a valid certificate for the game's name. With `ISLAND_BATTLES_EXPECTED_VERSION` set, its `X-Island-Battles-Version` header must name that version ([Releasing](#releasing)).
 2. `/` leads to the lobby UI.
 3. A guest credential works, and the backend issues a connection token for it, which needs Postgres.
 4. An authenticated GET reaches the backend with its `Authorization` header. CloudFront strips the header from GET requests unless the origin request policy forwards it.

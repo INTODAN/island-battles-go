@@ -1,7 +1,8 @@
-// Island Battles' map choice for the lobby frontend's create form. The host
-// either keeps the generated map, picks a default map from GET /map/templates,
-// or loads a map file made with the map builder. The chosen map sets the
-// lobby's teams: one per team colour, named after the colour the board draws.
+// Island Battles' map choice and turn timeout for the lobby frontend's create
+// form. The host either keeps the generated map, picks a default map from
+// GET /map/templates, or loads a map file made with the map builder. The
+// chosen map sets the lobby's teams: one per team colour, named after the
+// colour the board draws. The turn timeout sets how long each turn lasts.
 
 // The board's team colours, in team colour order (see replay.html).
 const colourNames = ["Blue", "Red", "Green", "Purple", "Amber", "Teal"];
@@ -17,6 +18,25 @@ export function teamNames(teamCount) {
 
 // Teams of a lobby on the generated map, which fits any number of teams.
 const generatedTeams = 2;
+
+// The turn timeouts the form offers, as game_settings.turn_timeout_seconds:
+// seconds, or null for no limit. The server's default, when the settings
+// leave it out, is 30 seconds.
+export const turnTimeouts = [
+  { seconds: 10, label: "10 s" },
+  { seconds: 30, label: "30 s" },
+  { seconds: 120, label: "2 min" },
+  { seconds: 600, label: "10 min" },
+  { seconds: null, label: "No limit" },
+];
+const defaultTurnTimeout = 30;
+
+// A short line naming a lobby's turn timeout, from its game_settings.
+export function describeTurnTimeout(settings) {
+  const seconds = settings && "turn_timeout_seconds" in settings ? settings.turn_timeout_seconds : defaultTurnTimeout;
+  if (seconds === null) return "No turn limit";
+  return `Turn limit: ${seconds % 60 === 0 ? `${seconds / 60} min` : `${seconds} s`}`;
+}
 
 let defaultMaps = null;
 
@@ -82,8 +102,13 @@ function describeMap(name, teamCount, width, height) {
   return `${name} · ${teamCount} teams · ${width}×${height}`;
 }
 
-// A short line for the room, naming the map that a lobby's settings chose.
+// A short line for the room, naming the map that a lobby's settings chose and
+// its turn timeout.
 export async function describeSettings(settings) {
+  return `${await describeMapChoice(settings)} · ${describeTurnTimeout(settings)}`;
+}
+
+async function describeMapChoice(settings) {
   if (settings?.map) return `Map: ${settings.map.map_name}`;
   if (settings?.map_template_id) {
     try {
@@ -101,9 +126,9 @@ function node(tag, properties = {}, ...children) {
   return element;
 }
 
-// The create form's map controls. The lobby page constructs it with a
-// container for its controls and an onChange callback, and calls choice()
-// when the host creates a lobby.
+// The create form's map and turn timeout controls. The lobby page constructs
+// it with a container for its controls and an onChange callback, and calls
+// choice() when the host creates a lobby.
 export class SettingsForm {
   constructor({ container, onChange = () => {} }) {
     this.onChange = onChange;
@@ -120,7 +145,11 @@ export class SettingsForm {
     this.status = node("p", { className: "hint" });
     this.status.setAttribute("role", "status");
     this.builderButton = node("button", { type: "button", className: "secondary" }, "Build a map…");
-    container.append(node("label", {}, "Map", this.select), this.fileInput, this.builderButton, this.status);
+    this.timeout = node("select", { id: "turn-timeout" },
+      ...turnTimeouts.map(({ seconds, label }) => new Option(label, seconds === null ? "none" : String(seconds), false, seconds === defaultTurnTimeout)));
+    container.append(node("label", {}, "Map", this.select), this.fileInput, this.builderButton, this.status,
+      node("label", {}, "Turn timeout", this.timeout),
+      node("p", { className: "hint" }, "A team whose player doesn’t finish a turn in time loses the game."));
     this.builderButton.addEventListener("click", () => this.openBuilder());
     window.addEventListener("message", (event) => this.receive(event));
     this.select.addEventListener("change", () => this.update());
@@ -223,14 +252,15 @@ export class SettingsForm {
   // the lobby's teams, so it keeps the two teams of a playground lobby.
   // Throws when the choice is not complete.
   choice() {
+    const timeout = { turn_timeout_seconds: this.timeout.value === "none" ? null : Number(this.timeout.value) };
     if (this.select.value === "file") {
       if (!this.file) throw new Error(this.fileError || "Choose a map file to load, or pick another map.");
-      return { settings: { map: this.file }, teams: teamNames(this.file.player_amount) };
+      return { settings: { map: this.file, ...timeout }, teams: teamNames(this.file.player_amount) };
     }
     if (this.select.value) {
       const map = this.chosenDefaultMap();
-      return { settings: { map_template_id: map.map_template_id }, teams: teamNames(map.team_count) };
+      return { settings: { map_template_id: map.map_template_id, ...timeout }, teams: teamNames(map.team_count) };
     }
-    return { settings: {}, teams: teamNames(generatedTeams) };
+    return { settings: timeout, teams: teamNames(generatedTeams) };
   }
 }

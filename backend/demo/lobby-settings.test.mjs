@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { builderWindowAction, describeSettings, loadDefaultMaps, mapFromBuilderMessage, readMapFile, teamNames } from "./lobby-settings.mjs";
+import { builderWindowAction, describeSettings, describeTurnTimeout, loadDefaultMaps, mapFromBuilderMessage, readMapFile, teamNames, turnTimeouts } from "./lobby-settings.mjs";
 
 test("a map's teams are named after the board's team colours", () => {
   assert.deepEqual(teamNames(2), ["Blue", "Red"]);
@@ -25,16 +25,28 @@ test("the room names the chosen map", async (context) => {
     if (!available) return new Response("", { status: 503 });
     return Response.json({ maps: [{ map_template_id: 4, map_name: "Strait", team_count: 2, plane_size_x: 10, plane_size_y: 6, castle_count: 3 }] });
   });
-  assert.equal(await describeSettings({}), "Map: generated for the players");
-  assert.equal(await describeSettings({ map: { map_name: "Loaded" } }), "Map: Loaded");
+  assert.equal(await describeSettings({}), "Map: generated for the players · Turn limit: 30 s");
+  assert.equal(await describeSettings({ map: { map_name: "Loaded" }, turn_timeout_seconds: 10 }), "Map: Loaded · Turn limit: 10 s");
   assert.equal(requests, 0);
   // A failed list falls back to the ID and is fetched again next time.
-  assert.equal(await describeSettings({ map_template_id: 4 }), "Map: default map #4");
+  assert.equal(await describeSettings({ map_template_id: 4 }), "Map: default map #4 · Turn limit: 30 s");
   available = true;
-  assert.equal(await describeSettings({ map_template_id: 4 }), "Map: Strait");
-  assert.equal(await describeSettings({ map_template_id: 9 }), "Map: default map #9");
+  assert.equal(await describeSettings({ map_template_id: 4, turn_timeout_seconds: null }), "Map: Strait · No turn limit");
+  assert.equal(await describeSettings({ map_template_id: 9 }), "Map: default map #9 · Turn limit: 30 s");
   assert.equal((await loadDefaultMaps()).length, 1);
   assert.equal(requests, 2);
+});
+
+test("the form offers the turn timeouts, and the room names the lobby's", () => {
+  assert.deepEqual(turnTimeouts.map(({ seconds }) => seconds), [10, 30, 120, 600, null]);
+  assert.deepEqual(turnTimeouts.map(({ label }) => label), ["10 s", "30 s", "2 min", "10 min", "No limit"]);
+  // Settings without a timeout get the server's default of 30 seconds.
+  assert.equal(describeTurnTimeout({}), "Turn limit: 30 s");
+  assert.equal(describeTurnTimeout(null), "Turn limit: 30 s");
+  assert.equal(describeTurnTimeout({ turn_timeout_seconds: 120 }), "Turn limit: 2 min");
+  assert.equal(describeTurnTimeout({ turn_timeout_seconds: 600 }), "Turn limit: 10 min");
+  assert.equal(describeTurnTimeout({ turn_timeout_seconds: 90 }), "Turn limit: 90 s");
+  assert.equal(describeTurnTimeout({ turn_timeout_seconds: null }), "No turn limit");
 });
 
 test("the form takes a map only from the builder window it opened, on its own origin", () => {

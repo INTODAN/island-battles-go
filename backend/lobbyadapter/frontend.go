@@ -20,8 +20,12 @@ func FrontendGame() frontend.Game {
 		// the map sets the lobby's teams.
 		SettingsModule: "/game/demo/lobby-settings.mjs",
 		// A saved demo opens without the lobby, so the viewer stays
-		// reachable after it closes.
-		Links: []frontend.Link{{Label: "Watch a saved demo", URL: "/game/demo-viewer/"}},
+		// reachable after it closes. The 3D web client is served at /play/ by
+		// the deployment (deploy/README.md, "The web client"), not by the backend.
+		Links: []frontend.Link{
+			{Label: "Watch a saved demo", URL: "/game/demo-viewer/"},
+			{Label: "Play in 3D", URL: "/play/"},
+		},
 		ExamplePlayer: &frontend.ExamplePlayer{
 			Module:   "/game/demo/example-player.mjs",
 			Strategy: "One soldier",

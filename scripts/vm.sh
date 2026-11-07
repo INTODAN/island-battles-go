@@ -26,7 +26,9 @@ Usage:
       restore it into the new VM.
   scripts/vm.sh smoke
       Check CloudFront, the Lambda, Postgres and Centrifugo together, reusing
-      the saved guest credential in deploy/local/smoke-session.json.
+      the saved guest credential in deploy/local/smoke-session.json. With
+      ISLAND_BATTLES_EXPECTED_VERSION set, e.g. v0.1.0, it also fails unless
+      /healthz reports that version.
 EOF
   exit 2
 }
@@ -190,7 +192,8 @@ EOF
     # The smoke test uses the lobby client's locked dependencies.
     uv run --project "$repository_root/lobby/clients/lobby-python" --locked \
       python "$repository_root/deploy/smoke.py" \
-      --game-url "$game_url" --session-file "$local_directory/smoke-session.json"
+      --game-url "$game_url" --session-file "$local_directory/smoke-session.json" \
+      ${ISLAND_BATTLES_EXPECTED_VERSION:+--expected-version "$ISLAND_BATTLES_EXPECTED_VERSION"}
     ;;
   *)
     usage

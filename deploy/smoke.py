@@ -3,7 +3,8 @@
 Run it with `scripts/vm.sh smoke`. It goes through the game's URL, which
 CloudFront serves from the Lambda Function URL (#75), and checks, in order:
 
-1. `/healthz` returns 204.
+1. `/healthz` returns 204, and with `--expected-version` its
+   `X-Island-Battles-Version` header names that release.
 2. `/` opens the lobby UI.
 3. A guest credential works. The credential is kept in a session file, so a
    later run reuses it. After moving to a new VM, that shows the database was
@@ -43,6 +44,10 @@ HTTP_TIMEOUT_SECONDS = 30
 WEBSOCKET_TIMEOUT_SECONDS = 30
 
 
+# What /healthz reports the binary's version in (backend/app/version.go).
+VERSION_HEADER = "X-Island-Battles-Version"
+
+
 class SmokeTestFailure(Exception):
     """A check failed. The message says which one and what to look at."""
 
@@ -76,12 +81,19 @@ def save_session(session_file: Path, session: dict[str, str]) -> None:
     os.replace(temporary_path, session_file)
 
 
-async def check_backend(http: httpx.AsyncClient, session_file: Path) -> tuple[dict[str, str], dict[str, str]]:
+async def check_backend(http: httpx.AsyncClient, session_file: Path,
+                        expected_version: str | None = None) -> tuple[dict[str, str], dict[str, str]]:
     """Returns the guest session and a connection token for it."""
     health = await http.get("/healthz")
     if health.status_code != 204:
         raise SmokeTestFailure(f"/healthz returned {health.status_code}, expected 204")
     report("the backend answers /healthz")
+    if expected_version:
+        version = health.headers.get(VERSION_HEADER)
+        if version != expected_version:
+            raise SmokeTestFailure(f"/healthz reports version {version!r}, expected {expected_version!r}. The backend "
+                                   "running is not the release's build.")
+        report(f"the backend reports version {version}")
 
     lobby_ui = await http.get("/", follow_redirects=True)
     if lobby_ui.status_code != 200 or lobby_ui.url.path != "/lobby/ui/":
@@ -158,10 +170,10 @@ async def check_centrifugo(game_origin: str, session: dict[str, str], connection
         report(f"subscribed to {channel} through the backend's subscribe proxy")
 
 
-async def run(game_url: str, session_file: Path) -> None:
+async def run(game_url: str, session_file: Path, expected_version: str | None = None) -> None:
     game_origin = origin_of(game_url)
     async with httpx.AsyncClient(base_url=game_origin, timeout=HTTP_TIMEOUT_SECONDS) as http:
-        session, connection_token = await check_backend(http, session_file)
+        session, connection_token = await check_backend(http, session_file, expected_version)
     await check_centrifugo(game_origin, session, connection_token)
 
 
@@ -170,9 +182,11 @@ def main() -> int:
     parser.add_argument("--game-url", required=True, help="where players open the game, through CloudFront")
     parser.add_argument("--session-file", type=Path, required=True,
                         help="where the guest credential is kept between runs")
+    parser.add_argument("--expected-version", default=None,
+                        help="fail unless /healthz reports this version, such as v0.1.0")
     arguments = parser.parse_args()
     try:
-        asyncio.run(run(arguments.game_url, arguments.session_file))
+        asyncio.run(run(arguments.game_url, arguments.session_file, arguments.expected_version))
     except SmokeTestFailure as failure:
         print(f"FAILED: {failure}", file=sys.stderr)
         return 1

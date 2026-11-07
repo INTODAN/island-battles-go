@@ -38,7 +38,7 @@ class BotTurn(GameModel):
     team_color: Annotated[StrictInt, Field(ge=1)]
     turn_deadline_at: AwareDatetime | None
     """
-    When the turn times out, or null when turns have no time limit.
+    When the turn times out, GenerationState.turn_deadline_at, or null when turns have no time limit. A bot that hasn't answered by then makes its whole team lose.
     """
 
 
@@ -285,13 +285,15 @@ class GameOutcome(GameModel):
     model_config = ConfigDict(
         extra="ignore",
     )
-    reason: Literal["last_team_standing", "all_eliminated", "generation_cap"]
+    reason: Literal[
+        "last_team_standing", "all_eliminated", "generation_cap", "turn_timeout"
+    ]
     """
-    last_team_standing: one team was left after every other team lost all its castles and soldier groups. all_eliminated: the last teams were eliminated in the same turn, a draw. generation_cap: the game reached its last generation; the team with the most castles won, and equal counts are a draw.
+    last_team_standing: one team was left after every other team lost all its castles and soldier groups. all_eliminated: the last teams were eliminated in the same turn, a draw. generation_cap: the game reached its last generation; the team with the most castles won, and equal counts are a draw. turn_timeout: a turn passed its deadline; every team with a player who hadn't completed it lost, and among the other teams still standing the team with the most castles won, while equal counts, or no team left, are a draw.
     """
     summary: StrictStr
     """
-    The outcome in one sentence, naming the winning team.
+    The outcome in one sentence, naming the winning team, and for turn_timeout the teams that lost and their players who didn't answer.
     """
     winner_team_color: Annotated[StrictInt | None, Field(ge=1)]
     """
@@ -410,6 +412,10 @@ class GenerationState(GameModel):
     Whether you completed this generation's turn.
     """
     team_color: Annotated[StrictInt, Field(ge=1)]
+    turn_deadline_at: AwareDatetime | None
+    """
+    When this generation's turn times out: the generation's creation time plus the lobby's turn_timeout_seconds. Null when turns have no time limit, and once the game has ended. If a player of a team hasn't completed the turn by then, the team loses and the game ends. A client waiting for other players calls POST /game/from-lobby/{lobby_id}/deadline about a second after it, because the server runs no timers.
+    """
 
 
 class HiddenTeamColor(RootModel[StrictInt]):
@@ -461,6 +467,10 @@ class LobbySettings(GameModel):
     map_template_id: Annotated[StrictInt | None, Field(ge=1)] = None
     """
     Start on this default map, a map_template_id from GET /map/templates. Cannot be combined with map.
+    """
+    turn_timeout_seconds: Annotated[StrictInt | None, Field(ge=5, le=600)] = 30
+    """
+    How long each turn lasts, in whole seconds from 5 to 600, counted from when its generation was created; 30 when left out. null means no limit, for example while debugging a bot. When a turn's deadline passes before every player has completed it, each team with a player who hadn't loses, and the game ends.
     """
 
 

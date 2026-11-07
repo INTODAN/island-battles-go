@@ -4,6 +4,14 @@ export const NEUTRAL_TEAM_COLOR = 0;
 // The problem type of the 409 that rejects commands for a finished game.
 export const GAME_ENDED_PROBLEM = "urn:island-battles:problem:game-ended";
 
+// The server runs no timers, so a waiting player asks it to apply the turn's
+// deadline this long after it. A turn that is still open then, for example
+// because the server's clock is behind, is asked about again after
+// DEADLINE_RETRY_MS, doubling up to DEADLINE_RETRY_MAX_MS.
+export const DEADLINE_SLACK_MS = 1000;
+const DEADLINE_RETRY_MS = 2000;
+const DEADLINE_RETRY_MAX_MS = 30000;
+
 // A deliberately small strategy: send one soldier, then finish this turn.
 export function singleSoldierCommands(state) {
   const castles = [...state.generation.castles].sort((left, right) => left.id - right.id);
@@ -18,8 +26,8 @@ export function singleSoldierCommands(state) {
 
 export class ExamplePlayer {
   constructor({ lobbyID, playerID, credential, subscription, enabled = true, pending = null, savePending = () => {},
-    onState = () => {}, onStatus = () => {}, retryDelay = 500, fetcher = (...args) => globalThis.fetch(...args) }) {
-    Object.assign(this, { lobbyID, playerID, credential, subscription, enabled, pending, savePending, onState, onStatus, retryDelay, fetcher });
+    onState = () => {}, onStatus = () => {}, retryDelay = 500, fetcher = (...args) => globalThis.fetch(...args), now = () => Date.now() }) {
+    Object.assign(this, { lobbyID, playerID, credential, subscription, enabled, pending, savePending, onState, onStatus, retryDelay, fetcher, now });
     this.stopped = false;
     // Set once the server rejects a command because the game has ended.
     this.ended = false;
@@ -33,18 +41,21 @@ export class ExamplePlayer {
     this.refreshRetry = null;
     this.refreshFailures = 0;
     this.requestController = null;
+    this.deadlineTimer = null;
+    // The generation whose deadline was applied, and how often.
+    this.deadlineAttempts = { key: null, count: 0, at: 0 };
   }
 
   // Override to try another strategy. Returning [] passes the turn.
   nextGeneration(state) { return singleSoldierCommands(state); }
 
-  async request(path, body) {
+  async request(path, body, method = body ? "POST" : "GET") {
     const controller = new AbortController();
     this.requestController = controller;
     const timeout = setTimeout(() => controller.abort(), 8000);
     try {
       const response = await this.fetcher(path, {
-        method: body ? "POST" : "GET", signal: controller.signal,
+        method, signal: controller.signal,
         headers: { Authorization: `Bearer ${this.credential}`, "Content-Type": "application/json" },
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
@@ -69,6 +80,9 @@ export class ExamplePlayer {
         (this.state && (state.game_id !== this.state.game_id || state.generation_id < this.state.generation_id))) return;
     // Late publications must not reopen a turn already completed over HTTP.
     if (this.state?.generation_id === state.generation_id && this.state.submitted) state = { ...state, submitted: true };
+    // A slow read or deadline answer for the same generation can arrive after
+    // the game ended; the outcome is final.
+    if (this.state?.generation_id === state.generation_id && this.state.outcome && !state.outcome) state = { ...state, outcome: this.state.outcome };
     this.state = state;
     if (this.pending && (this.pending.game_id !== state.game_id || this.pending.generation_id !== state.generation_id || state.submitted)) {
       this.remember(null);
@@ -77,7 +91,36 @@ export class ExamplePlayer {
       this.commandFailures = 0;
     }
     this.onState(state);
+    this.scheduleDeadline();
     this.scheduleTurn();
+  }
+
+  // A player that waits for the others, because it completed its turn or
+  // doesn't play (paused, or only following the game), asks the server to
+  // apply the turn's deadline a second after it. The answer is this player's
+  // state, with the outcome when someone didn't answer in time.
+  scheduleDeadline() {
+    clearTimeout(this.deadlineTimer);
+    this.deadlineTimer = null;
+    const state = this.state;
+    if (this.stopped || this.ended || !state || state.outcome || !state.turn_deadline_at || (this.enabled && !state.submitted)) return;
+    const key = `${state.game_id}:${state.generation_id}`;
+    const { count: attempts, at } = this.deadlineAttempts.key === key ? this.deadlineAttempts : { count: 0, at: 0 };
+    let wait = Date.parse(state.turn_deadline_at) + DEADLINE_SLACK_MS - this.now();
+    if (attempts) wait = Math.max(wait, at + Math.min(DEADLINE_RETRY_MS * 2 ** (attempts - 1), DEADLINE_RETRY_MAX_MS) - this.now());
+    this.deadlineTimer = setTimeout(() => void this.applyDeadline(key, attempts + 1), Math.max(0, wait));
+  }
+
+  async applyDeadline(key, attempts) {
+    this.deadlineTimer = null;
+    this.deadlineAttempts = { key, count: attempts, at: this.now() };
+    try {
+      const state = await this.request(`/game/from-lobby/${encodeURIComponent(this.lobbyID)}/deadline`, null, "POST");
+      if (!this.stopped) this.receive(state);
+    } catch {
+      // The next attempt waits longer.
+      if (!this.stopped) this.scheduleDeadline();
+    }
   }
 
   scheduleTurn() {
@@ -184,6 +227,7 @@ export class ExamplePlayer {
     clearTimeout(this.commandRetry);
     this.commandRetry = null;
     if (enabled && !this.state) void this.refresh();
+    this.scheduleDeadline();
     this.scheduleTurn();
   }
 
@@ -191,6 +235,7 @@ export class ExamplePlayer {
     this.stopped = true;
     clearTimeout(this.commandRetry);
     clearTimeout(this.refreshRetry);
+    clearTimeout(this.deadlineTimer);
     this.requestController?.abort();
     this.subscription.unsubscribe();
   }

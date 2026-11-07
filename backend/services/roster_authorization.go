@@ -38,6 +38,9 @@ func (service *GenerationService) Replay(ctx context.Context, principal domain.P
 	if err := service.authorize(ctx, principal, game); err != nil {
 		return GameReplay{}, err
 	}
+	if game, err = service.applyOverdueDeadline(ctx, game); err != nil {
+		return GameReplay{}, err
+	}
 	generations, err := dal.LoadGameGenerations(database, game.ID)
 	if err != nil {
 		return GameReplay{}, err

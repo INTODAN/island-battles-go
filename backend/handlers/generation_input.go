@@ -36,6 +36,25 @@ func (handler *LobbyGame) CurrentGeneration(ctx context.Context, input *struct {
 	return &GenerationStateResponse{Body: state}, nil
 }
 
+// ApplyTurnDeadline applies the open turn's deadline once it has passed and
+// answers the caller's state, as CurrentGeneration does.
+func (handler *LobbyGame) ApplyTurnDeadline(ctx context.Context, input *struct {
+	LobbyID       string `path:"lobby_id" format:"uuid"`
+	Authorization string `header:"Authorization"`
+}) (*GenerationStateResponse, error) {
+	defer handler.runRetention(ctx)
+	verified, err := handler.Authenticator.Authenticate(ctx, input.Authorization)
+	if err != nil {
+		return nil, huma.Error401Unauthorized("authentication required")
+	}
+	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher}
+	state, err := service.ApplyDeadline(ctx, verified.Principal, input.LobbyID)
+	if err != nil {
+		return nil, generationHTTPError(ctx, err)
+	}
+	return &GenerationStateResponse{Body: state}, nil
+}
+
 func (handler *LobbyGame) RegisterGenerationCommands(ctx context.Context, input *RegisterGenerationCommandsRequest) (*GenerationStateResponse, error) {
 	defer handler.runRetention(ctx)
 	verified, err := handler.Authenticator.Authenticate(ctx, input.Authorization)

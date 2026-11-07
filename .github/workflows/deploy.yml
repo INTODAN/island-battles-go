@@ -9,6 +9,10 @@
 # an agent in the cloud deploys: once its pull request is merged, it starts
 # these runs on main.
 #
+# The release workflow (release.yml) calls this one with workflow_call, once
+# each for vm, backend and smoke, and passes the release's version. A person can
+# deploy an earlier release again with release_tag, to roll back.
+#
 # - backend, vm, smoke and plan use the deploy role (deploy/terraform/github.tf),
 #   which can only publish the backend, log in to the VM and use the deploy
 #   bucket.
@@ -34,15 +38,24 @@ on:
         description: "apply only: comma-separated names of the instances, static IP, disks or distribution the plan may delete or replace."
         type: string
         default: ""
+      release_tag:
+        description: "backend, vm or smoke only: deploy this release (such as v0.1.0) instead of main, to roll back. The tag must be on main. The backend then reports that version, and smoke expects it."
+        type: string
+        default: ""
+  workflow_call:
+    inputs:
+      target:
+        description: "backend, vm or smoke (plan and apply are for people)."
+        type: string
+        required: true
+      version:
+        description: "The release's version, such as v0.1.0: the backend is built with it, and smoke expects /healthz to report it."
+        type: string
+        default: ""
 
 permissions:
   contents: read
   id-token: write
-
-# One deploy at a time. A second one waits instead of cancelling the first.
-concurrency:
-  group: deploy
-  cancel-in-progress: false
 
 jobs:
   deploy:
@@ -51,6 +64,18 @@ jobs:
     # repository's settings.
     environment: production
     timeout-minutes: 90
+    # One deploy at a time. A second one waits instead of cancelling the first.
+    # This is on the job, not the workflow, so the release workflow that calls
+    # this one must not use the group `deploy` itself: it would hold the group
+    # its called job waits for, and the call would never start.
+    concurrency:
+      group: deploy
+      cancel-in-progress: false
+    env:
+      # Build and smoke-test the release's version. Empty means a plain build,
+      # which reports "dev", and a smoke test that checks no version.
+      ISLAND_BATTLES_VERSION: ${{ inputs.release_tag || inputs.version }}
+      ISLAND_BATTLES_EXPECTED_VERSION: ${{ inputs.release_tag || inputs.version }}
     steps:
       # The environment's branch limit is the real gate; this says why early.
       - name: Check that the run is on main
@@ -59,7 +84,42 @@ jobs:
           echo "::error::Deploy runs only on main, so only merged code reaches AWS. Merge the pull request, then start the run on main."
           exit 1
 
+      - name: Check the release tag
+        if: inputs.release_tag != ''
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          TARGET: ${{ inputs.target }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::release_tag must look like v0.1.0."
+            exit 1
+          fi
+          if [[ "$TARGET" != backend && "$TARGET" != vm && "$TARGET" != smoke ]]; then
+            echo "::error::release_tag works with the backend, vm and smoke targets. plan and apply always use main."
+            exit 1
+          fi
+
+      # A release tag is checked out whole, so the scripts and the code that
+      # deploy are the release's own, with full history for the check that
+      # the tag is on main below. Other runs need only their commit. The
+      # strings matter: 0 is falsy in a GitHub expression, so 0 would give 1.
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.release_tag || github.sha }}
+          fetch-depth: ${{ inputs.release_tag != '' && '0' || '1' }}
+
+      # The environment limits the workflow's own ref, not the code it checks
+      # out, so require the tag's commit to be merged to main.
+      - name: Check that the tag is on main
+        if: inputs.release_tag != ''
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor HEAD FETCH_HEAD; then
+            echo "::error::$RELEASE_TAG isn't on main, so it was never merged."
+            exit 1
+          fi
 
       - id: role
         env:

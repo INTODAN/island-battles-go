@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# Work out the next release for the release workflow (.github/workflows/release.yml):
+# its version, and whether the VM must be deployed too. Prints version=,
+# previous=, bump=, vm= and reason= lines (for $GITHUB_OUTPUT) on stdout, and
+# explains itself in Markdown on stderr (for the run's summary).
+#
+# Usage: scripts/release-plan.sh <patch|minor|major> [commit]
+#
+# Run it in a clone that has all tags. The commit defaults to HEAD.
+set -euo pipefail
+
+# Everything scripts/vm.sh deploy reads from the repository: the playbooks and
+# roles, the settings template they document, the script itself and the deploy
+# bucket helper it calls. Any change here makes the release redeploy the VM.
+vm_inputs=(
+  deploy/ansible
+  deploy/vm.example.yml
+  scripts/vm.sh
+  deploy/deploy_files.py
+)
+
+[[ $# -ge 1 && $# -le 2 ]] || { echo "Usage: $0 <patch|minor|major> [commit]" >&2; exit 2; }
+requested="$1"
+commit="$(git rev-parse --verify "${2:-HEAD}^{commit}")"
+case "$requested" in
+  patch | minor | major) ;;
+  *) echo "The bump must be patch, minor or major, not '$requested'." >&2; exit 2 ;;
+esac
+
+previous="$(git tag --list 'v[0-9]*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n 1 || true)"
+
+if [[ -z "$previous" ]]; then
+  # Nothing to compare with, and nobody can tell what the VM runs, so the
+  # first release deploys it too. The owner decided the first version.
+  version="v0.1.0"
+  bump="first"
+  vm=true
+  reason="There is no earlier release, so this is the first one: $version. It deploys the VM too, because there's nothing to compare the VM's inputs with."
+else
+  if [[ "$(git rev-parse "$previous^{commit}")" == "$commit" ]]; then
+    echo "$previous is already this commit (${commit:0:7}). Merge something first." >&2
+    exit 1
+  fi
+  changed="$(git diff --name-only "$previous" "$commit" -- "${vm_inputs[@]}")"
+  bump="$requested"
+  if [[ -n "$changed" ]]; then
+    vm=true
+    bump=major
+    reason="Since $previous, the VM deploy's inputs changed, so the release deploys the VM and the bump is major (you asked for $requested). Changed:"$'\n'"$(sed 's/^/- `/; s/$/`/' <<<"$changed")"
+  else
+    vm=false
+    reason="Since $previous, none of the VM deploy's inputs changed ($(printf '`%s` ' "${vm_inputs[@]}")), so the VM stays as it is and the bump is $bump."
+  fi
+  IFS=. read -r major minor patch <<<"${previous#v}"
+  case "$bump" in
+    major) version="v$((major + 1)).0.0" ;;
+    minor) version="v$major.$((minor + 1)).0" ;;
+    patch) version="v$major.$minor.$((patch + 1))" ;;
+  esac
+fi
+
+if git rev-parse -q --verify "refs/tags/$version" >/dev/null || git rev-parse -q --verify "refs/tags/lobby/$version" >/dev/null; then
+  echo "The tag $version (or lobby/$version) already exists." >&2
+  exit 1
+fi
+
+{
+  echo "## Release $version"
+  echo
+  echo "Commit \`${commit:0:7}\`, previous release: ${previous:-none}."
+  echo
+  echo "$reason"
+} >&2
+
+echo "version=$version"
+echo "previous=$previous"
+echo "bump=$bump"
+echo "vm=$vm"
