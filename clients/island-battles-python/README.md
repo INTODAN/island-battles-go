@@ -18,6 +18,8 @@ A bot is a **function**: it gets a `BotTurn` (the board, your team and the `memo
 
 **This is a breaking change, and `BotTurn` now has a required `upgrades` field.** The `Player` class, `player_factory`, `CommandReceiver`, `UpgradeTable` and `client.upgrades` are gone: a strategy is now `play(turn)`. Pass it to `IslandBattlesClient(..., play=play)`. Port a strategy by moving `on_generation(generation, commands)` into `play(turn)` (the board is `turn.generation`, your team `turn.team_color`), returning the commands instead of sending them, and keeping state in `memory` instead of attributes. Update your bots before you upgrade the client.
 
+**Choosing a bot is also a breaking change; clients must upgrade.** Every player now chooses a bot in the lobby before getting ready (`PUT /game/lobbies/{lobby_id}/bot`), and `GenerationState` has a required `bot` field (`{"kind": "localhost"}` or `{"kind": "default", "level": N}`). `IslandBattlesClient` plays a seat only for `kind` `localhost`; for a seat that the backend plays (`default`) it stops with an error instead of submitting. What to do: upgrade the client, and choose your localhost bot in the lobby (the lobby page has the bot picker, or call the endpoint with your guest credential) before you get ready; getting ready without a choice fails with 409 `game_requirement` of type `urn:island-battles:problem:bot-not-chosen`.
+
 Install with `uv sync --locked` (Python 3.14 or later).
 
 ## Writing a bot

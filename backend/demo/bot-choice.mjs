@@ -74,7 +74,7 @@ export class RoomPanel {
     this.select.addEventListener("change", () => void this.save(this.select.value));
     void loadLevels().then((levels) => {
       this.select.append(...levels.map((level) => new Option(`Default bot, level ${level}`, `level-${level}`)));
-      if (this.chosen) this.select.value = choiceValue(this.chosen);
+      this.restore();
     });
   }
 
@@ -97,7 +97,13 @@ export class RoomPanel {
 
   async save(value) {
     const choice = choiceFromValue(value);
-    if (!choice || this.saving) return;
+    // The select shows only what is saved: the placeholder, a choice that
+    // is already saved, and a change while a save is in flight (the select
+    // is disabled then, but not every browser agrees) go back to it.
+    if (!choice || this.saving || value === choiceValue(this.chosen)) {
+      this.restore();
+      return;
+    }
     this.saving = true;
     this.select.disabled = true;
     try {
@@ -109,12 +115,18 @@ export class RoomPanel {
     } finally {
       this.saving = false;
       this.select.disabled = false;
+      this.restore();
     }
+  }
+
+  // Shows the saved choice, or the placeholder when there is none.
+  restore() {
+    this.select.value = choiceValue(this.chosen);
   }
 
   show(bots) {
     this.chosen = bots.members.find((member) => member.player_id === this.playerID)?.bot || null;
-    this.select.value = choiceValue(this.chosen);
+    this.restore();
     this.summary.textContent = describeChoices(bots.members, this.playerID);
   }
 }

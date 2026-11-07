@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"islandBattles/backend/dal"
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/lobbyadapter"
@@ -197,6 +198,11 @@ func TestEveryMemberChoosesABotBeforeGettingReady(t *testing.T) {
 	// Once the lobby starts, the game has its own copy, and choosing conflicts.
 	stack.expect(stack.choose(room, bob, `{"kind":"default","level":3}`), http.StatusConflict, nil)
 	stack.expect(stack.choose(room, alice, `{"kind":"default","level":1}`), http.StatusConflict, nil)
+	// A refused choice is not stored.
+	stored, err := dal.LoadBotChoices(stack.database, room.Lobby.ID)
+	if err != nil || stored[bob.playerID].Level == nil || *stored[bob.playerID].Level != 2 || stored[alice.playerID].Kind != models.LocalhostBot {
+		t.Fatalf("stored choices after refused choices = %+v, %v", stored, err)
+	}
 	assertFrozenBots := func() {
 		t.Helper()
 		aliceState, bobState := stack.state(room, alice), stack.state(room, bob)
@@ -218,6 +224,30 @@ func TestEveryMemberChoosesABotBeforeGettingReady(t *testing.T) {
 		t.Fatalf("choices left after the lobby was deleted: %d, %v", remaining, err)
 	}
 	assertFrozenBots()
+}
+
+func TestStartRefusalNamesTheMembersWithoutABot(t *testing.T) {
+	stack := newLobbyStack(t)
+	alice, bob := stack.guest("Alice"), stack.guest("Bob")
+	room := stack.room(lobbyadapter.GameKey, alice, bob)
+	stack.expect(stack.choose(room, alice, `{"kind":"localhost"}`), http.StatusOK, nil)
+	stack.expect(stack.choose(room, bob, `{"kind":"localhost"}`), http.StatusOK, nil)
+	stack.expect(stack.ready(room, alice), http.StatusOK, nil)
+	stack.expect(stack.ready(room, bob), http.StatusOK, nil)
+	// Bob got ready before choices were required, which the API can't
+	// reproduce, so remove his choice directly.
+	if err := stack.database.Where(&models.LobbyBotChoice{LobbyID: room.Lobby.ID, PlayerID: bob.playerID}).Delete(&models.LobbyBotChoice{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	var refusal struct {
+		Code   string `json:"code"`
+		Type   string `json:"type"`
+		Detail string `json:"detail"`
+	}
+	stack.expect(stack.api.Post(stack.lobbyPath(room)+"/start", alice.header, map[string]any{}), http.StatusConflict, &refusal)
+	if refusal.Code != "game_requirement" || refusal.Type != services.BotNotChosenProblemType || !strings.Contains(refusal.Detail, "Bob") || strings.Contains(refusal.Detail, "Alice") {
+		t.Fatalf("start without Bob's bot = %+v", refusal)
+	}
 }
 
 // deleteLobby deletes a lobby's rows, children first, as lobby retention does.

@@ -3,11 +3,11 @@ package dal
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"islandBattles/backend/models"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // botChoiceMembershipConstraint ties a bot choice to its lobby membership.
@@ -35,13 +35,21 @@ func MigrateBotChoices(ctx context.Context, database *gorm.DB) error {
 	return nil
 }
 
-// SaveBotChoice stores a lobby member's bot choice, replacing their earlier
-// one.
-func SaveBotChoice(database *gorm.DB, choice models.LobbyBotChoice) error {
-	return database.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "lobby_id"}, {Name: "player_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"kind", "level", "updated_at"}),
-	}).Create(&choice).Error
+// SaveBotChoiceWhileWaiting stores a lobby member's bot choice, replacing
+// their earlier one, only if the lobby is still waiting, and reports whether
+// it did. It is one statement on the caller's connection: it reads the lobby's
+// phase with a row share lock, which waits for a start that is committing and
+// then sees its result, and which makes a start wait for this statement. A
+// start copies the choices after it commits, so a stored choice is one that a
+// start will copy.
+func SaveBotChoiceWhileWaiting(database *gorm.DB, choice models.LobbyBotChoice) (bool, error) {
+	now := time.Now().UTC()
+	result := database.Exec(fmt.Sprintf(`INSERT INTO %s (lobby_id, player_id, kind, level, created_at, updated_at)
+SELECT id, ?, ?, ?, ?, ? FROM lobby_rooms WHERE id = ? AND phase = 'waiting' FOR SHARE
+ON CONFLICT (lobby_id, player_id) DO UPDATE SET kind = EXCLUDED.kind, level = EXCLUDED.level, updated_at = EXCLUDED.updated_at`,
+		models.LobbyBotChoice{}.TableName()),
+		choice.PlayerID, choice.Kind, choice.Level, now, now, choice.LobbyID)
+	return result.RowsAffected > 0, result.Error
 }
 
 // LoadBotChoices returns the bot choices of a lobby's members by player ID.

@@ -49,21 +49,16 @@ func (service LobbyBots) Choose(ctx context.Context, principal domain.Principal,
 		return models.LobbyBotsView{}, notWaiting()
 	}
 	record := models.LobbyBotChoice{LobbyID: lobbyID, PlayerID: principal.PlayerID, Kind: choice.Kind, Level: choice.Level}
-	if err := dal.SaveBotChoice(service.Database.WithContext(ctx), record); err != nil {
-		return models.LobbyBotsView{}, err
-	}
-	// The start copies the choices after it commits, so a lobby that is
-	// still waiting now will start with this choice. One that started
-	// meanwhile may have copied the earlier choice, so the caller learns
-	// that the choice came too late.
-	after, err := service.Lobbies.Snapshot(ctx, principal, scope)
+	// One statement stores the choice only while the lobby is waiting, so a
+	// 409 never leaves a choice behind that a start could copy.
+	saved, err := dal.SaveBotChoiceWhileWaiting(service.Database.WithContext(ctx), record)
 	if err != nil {
 		return models.LobbyBotsView{}, err
 	}
-	if after.Lobby.Phase != domain.PhaseWaiting {
+	if !saved {
 		return models.LobbyBotsView{}, notWaiting()
 	}
-	return service.view(ctx, after)
+	return service.view(ctx, before)
 }
 
 // List returns every member's bot choice, for any member of the lobby.
@@ -128,12 +123,26 @@ func BotReadyCheck(database *gorm.DB, lobbyID string) (domain.ReadyCheck, error)
 	if err != nil {
 		return nil, fmt.Errorf("%w: read bot choices: %w", domain.ErrUnavailable, err)
 	}
-	return func(playerID string) error {
-		if _, chosen := choices[playerID]; !chosen {
-			return domain.GameRequirement(BotNotChosenProblemType, botNotChosenMessage)
+	return func(members []domain.ReadyMember, atStart bool) error {
+		var missing []string
+		for _, member := range members {
+			if _, chosen := choices[member.PlayerID]; !chosen {
+				missing = append(missing, member.DisplayName)
+			}
 		}
-		return nil
+		if len(missing) == 0 {
+			return nil
+		}
+		if atStart {
+			return domain.GameRequirement(BotNotChosenProblemType, botNotChosenAtStartMessage(missing))
+		}
+		return domain.GameRequirement(BotNotChosenProblemType, botNotChosenMessage)
 	}, nil
+}
+
+// botNotChosenAtStartMessage names the members that the host is waiting for.
+func botNotChosenAtStartMessage(names []string) string {
+	return "Waiting for " + strings.Join(names, ", ") + " to choose a bot: their localhost bot or a default bot level."
 }
 
 // lobbyBotLevels returns the default bot levels that the roster's players
