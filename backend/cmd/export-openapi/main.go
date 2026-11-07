@@ -30,7 +30,8 @@ const (
 		"Centrifugo channel `player:{player_id}` receives a `GenerationEvent`, except after the turn that ends the game, " +
 		"which pushes a `GameEndedEvent` with the final generation and its outcome instead. Clients reconcile with the " +
 		"generation read after subscribing or reconnecting; HTTP state is authoritative, and its `outcome` is set once the " +
-		"game has ended. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the " +
+		"game has ended. A turn times out at its `turn_deadline_at`; the server runs no timers, so a client waiting for other " +
+		"players calls `POST /game/from-lobby/{lobby_id}/deadline` about a second after it. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the " +
 		"`game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose. " +
 		"`GET /game/upgrades` lists what each castle upgrade level costs. `Demo` is the demo file format, which " +
 		"`GET /game/from-lobby/{lobby_id}/demo` returns and the demo viewer at `/game/demo-viewer/` opens. " +
@@ -39,10 +40,10 @@ const (
 )
 
 // PlayerOperations are the endpoints a gameplay client uses, including the
-// upgrade cost table, the game log read that the replay also shows, the demo
+// turn deadline that waiting clients apply, the upgrade cost table, the game log read that the replay also shows, the demo
 // download, and the default map list for choosing a lobby's map. Lobby setup has its own
 // generated SDK in lobby/api/openapi.json.
-var PlayerOperations = []string{"createLobbyConnectionToken", "getIslandLobbyGeneration", "registerGenerationCommand", "getIslandLobbyGenerationLogs", "getIslandLobbyDemo", "listUpgrades", "listMapTemplates"}
+var PlayerOperations = []string{"createLobbyConnectionToken", "getIslandLobbyGeneration", "applyIslandLobbyTurnDeadline", "registerGenerationCommand", "getIslandLobbyGenerationLogs", "getIslandLobbyDemo", "listUpgrades", "listMapTemplates"}
 
 // PlayerEventSchemas are delivered by Centrifugo rather than HTTP responses.
 var PlayerEventSchemas = []string{"GenerationEvent", "GameEndedEvent"}

@@ -2,6 +2,7 @@ package retention_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -40,7 +41,8 @@ func startGame(t *testing.T, database *gorm.DB) playedGame {
 	}
 	blue, red := uuid.NewString(), uuid.NewString()
 	binding, err := services.RunLobbyGame(context.Background(), database, game.service.Publisher, domain.Snapshot{
-		Lobby:       domain.Lobby{ID: game.lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted},
+		// Retention ages games by days, which no turn deadline would survive.
+		Lobby:       domain.Lobby{ID: game.lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted, GameSettings: json.RawMessage(`{"turn_timeout_seconds":null}`)},
 		Teams:       []domain.Team{{ID: blue, Order: 1, Name: "Blue"}, {ID: red, Order: 2, Name: "Red"}},
 		StartRoster: domain.StartRoster{{PlayerID: game.players[0].PlayerID, TeamID: blue}, {PlayerID: game.players[1].PlayerID, TeamID: red}},
 	})

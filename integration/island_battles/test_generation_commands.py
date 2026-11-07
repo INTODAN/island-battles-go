@@ -216,3 +216,75 @@ async def test_rejection_retry_restart_and_public_migration_bypass(guests):
             )
             == "2"
         )
+
+
+class EndingPlayer(Player):
+    """Passes every turn and keeps how the game ended."""
+
+    def __init__(self, team_color):
+        super().__init__(team_color)
+        self.ended = None
+
+    async def on_generation(self, generation, commands):
+        pass
+
+    async def on_game_ended(self, outcome, generation):
+        self.ended = (outcome, generation)
+
+
+async def test_a_player_who_never_plays_loses_at_the_turn_deadline(guests):
+    alice, bob, scope = await started_lobby(
+        guests, "island-battles", {"turn_timeout_seconds": 5}
+    )
+    # Alice's client plays her turn and then waits for Bob, who never plays.
+    # The server runs no timers: her client applies the deadline a second
+    # after it, and the game ends with Bob's team, Blue, losing.
+    client = IslandBattlesClient(
+        BASE, alice.credential, scope.lobby_id, player_factory=EndingPlayer
+    )
+    try:
+        await client.start()
+        first = client._state
+        assert first.turn_deadline_at is not None
+        await asyncio.wait_for(client.wait(), 20)
+        outcome, final = client.player.ended
+        assert outcome.reason == "turn_timeout"
+        assert outcome.winner_team_color == client.player.team_color
+        assert outcome.summary == (
+            "Blue lost: Bob's bot didn't answer within 5 s; Red wins"
+        )
+        assert final.id == first.generation_id
+    finally:
+        await client.close()
+    game_id = first.game_id
+    assert (
+        await sql(f"SELECT count(*) FROM generations WHERE game_id={game_id}") == "1"
+    )
+    assert (
+        await sql(f"SELECT outcome->>'reason' FROM games WHERE id={game_id}")
+        == "turn_timeout"
+    )
+    headers = {"Authorization": f"Bearer {bob.credential}"}
+    async with httpx.AsyncClient(base_url=BASE) as http:
+        # Bob's late batch for the expired generation conflicts.
+        late = await http.post(
+            "/generation/commands",
+            headers=headers,
+            json={
+                "game_id": game_id,
+                "generation_id": first.generation_id,
+                "request_id": str(uuid4()),
+                "complete": True,
+                "commands": [],
+            },
+        )
+        assert late.status_code == 409, late.text
+        assert late.json()["type"] == "urn:island-battles:problem:game-ended"
+        # Applying the deadline again changes nothing.
+        again = await http.post(
+            f"/game/from-lobby/{scope.lobby_id}/deadline", headers=headers
+        )
+        assert again.status_code == 200, again.text
+        state = again.json()
+        assert state["outcome"]["summary"] == outcome.summary
+        assert state["turn_deadline_at"] is None and not state["submitted"]

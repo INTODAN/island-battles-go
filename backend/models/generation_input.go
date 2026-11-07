@@ -100,13 +100,17 @@ type GenerationState struct {
 	LogLinesStored uint `json:"log_lines_stored" doc:"How many game log lines you have stored for this generation, out of the 100 a player may store per generation. 0 when there are none. A client that restarts during a turn continues counting from it."`
 
 	Memory BotMemory `json:"memory" doc:"The memory sent with your latest completed turn of this game, for your bot's next BotTurn.memory. Null before your first completed turn, and after a completed turn without memory."`
+
+	// TurnDeadlineAt is nil when the lobby set no turn timeout, and once the
+	// game has ended.
+	TurnDeadlineAt *time.Time `json:"turn_deadline_at" nullable:"true" doc:"When this generation's turn times out: the generation's creation time plus the lobby's turn_timeout_seconds. Null when turns have no time limit, and once the game has ended. If a player of a team hasn't completed the turn by then, the team loses and the game ends. A client waiting for other players calls POST /game/from-lobby/{lobby_id}/deadline about a second after it, because the server runs no timers."`
 }
 
 // GameOutcomeView is how a finished game ended.
 type GameOutcomeView struct {
-	Reason          GameOutcomeReason `json:"reason" enum:"last_team_standing,all_eliminated,generation_cap" doc:"last_team_standing: one team was left after every other team lost all its castles and soldier groups. all_eliminated: the last teams were eliminated in the same turn, a draw. generation_cap: the game reached its last generation; the team with the most castles won, and equal counts are a draw."`
+	Reason          GameOutcomeReason `json:"reason" enum:"last_team_standing,all_eliminated,generation_cap,turn_timeout" doc:"last_team_standing: one team was left after every other team lost all its castles and soldier groups. all_eliminated: the last teams were eliminated in the same turn, a draw. generation_cap: the game reached its last generation; the team with the most castles won, and equal counts are a draw. turn_timeout: a turn passed its deadline; every team with a player who hadn't completed it lost, and among the other teams still standing the team with the most castles won, while equal counts, or no team left, are a draw."`
 	WinnerTeamColor *uint             `json:"winner_team_color" minimum:"1" nullable:"true" doc:"The winning team, or null for a draw."`
-	Summary         string            `json:"summary" doc:"The outcome in one sentence, naming the winning team."`
+	Summary         string            `json:"summary" doc:"The outcome in one sentence, naming the winning team, and for turn_timeout the teams that lost and their players who didn't answer."`
 }
 
 const (

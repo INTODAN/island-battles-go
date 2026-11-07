@@ -7,6 +7,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
+from datetime import UTC, datetime
 from os import PathLike
 from typing import Any, Self
 from uuid import UUID, uuid4
@@ -31,6 +32,7 @@ from .errors import (
     PROBLEM_TYPE_ERRORS,
     GameAuthenticationError,
     GameClientClosedError,
+    GameEndedError,
     GameError,
     GameLogLimitError,
     GameProtocolError,
@@ -42,6 +44,15 @@ from .player import Player
 from .upgrades import UpgradeTable
 
 _sdk_logger = logging.getLogger(SDK_LOGGER)
+
+# The server runs no timers, so a client waiting for other players asks it to
+# apply the turn's deadline this many seconds after the deadline.
+DEADLINE_SLACK_SECONDS = 1.0
+# If the turn is still open after that, for example because the server's clock
+# is behind, the client asks again after these many seconds, doubling up to
+# the maximum.
+DEADLINE_RETRY_SECONDS = 2.0
+DEADLINE_RETRY_MAX_SECONDS = 30.0
 
 
 def _parse_state(data: object) -> GenerationState:
@@ -104,7 +115,9 @@ class IslandBattlesClient:
     receives the authenticated team color once at startup. The resulting player's
     callbacks run serially; successful return automatically completes the turn.
     When the game ends, the player's ``on_game_ended`` runs once and ``wait()``
-    and ``run()`` return.
+    and ``run()`` return. While the player waits for others to complete a turn
+    that has a deadline, the client asks the server to apply the deadline a
+    second after it, which ends the game when someone didn't answer.
 
     From ``start()`` to ``close()`` the client attaches its log handlers to the
     player's logger: stdout unless ``log_to_stdout`` is false, ``log_file``
@@ -126,6 +139,7 @@ class IslandBattlesClient:
         retry_attempts: int = 3,
         subscription_timeout: float = 10.0,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
         log_level: int = logging.INFO,
         log_to_stdout: bool = True,
         log_file: str | PathLike[str] | None = None,
@@ -148,6 +162,7 @@ class IslandBattlesClient:
         )
         self._sdk_factory = sdk_factory
         self._sleep = sleep
+        self._clock = clock
         self._refresh_interval = refresh_interval
         self._retry_attempts = retry_attempts
         self._subscription_timeout = subscription_timeout
@@ -157,6 +172,10 @@ class IslandBattlesClient:
         self._upgrades: UpgradeTable | None = None
         self._expected_identity: tuple[int, UUID, str, int] | None = None
         self._last_queued_generation = 0
+        # Whether the state with the outcome was queued for on_game_ended. A
+        # turn deadline ends the game on a generation already queued.
+        self._ended_queued = False
+        self._state_changed = asyncio.Event()
         self._start_lock = asyncio.Lock()
         self._command_lock = asyncio.Lock()
         self._reconcile_lock = asyncio.Lock()
@@ -323,28 +342,31 @@ class IslandBattlesClient:
         current = self._state
         if current is not None and state.generation_id < current.generation_id:
             return current
-        if (
-            current is not None
-            and state.generation_id == current.generation_id
-            and current.submitted
-            and not state.submitted
-        ):
-            # A GET begun before a successful command can finish afterward.
-            # Completion is monotone within one generation.
-            return current
-        if (
-            current is not None
-            and state.generation_id == current.generation_id
-            and state.log_lines_stored < current.log_lines_stored
-        ):
-            # So is the stored line count. A pushed event says 0 for its
-            # generation, which a restarted client may receive after its read.
-            state = state.model_copy(
-                update={"log_lines_stored": current.log_lines_stored}
-            )
+        if current is not None and state.generation_id == current.generation_id:
+            if current.outcome is not None and state.outcome is None:
+                # A GET begun before a turn deadline ended the game can finish
+                # afterward. The outcome is final.
+                return current
+            if current.submitted and not state.submitted:
+                # A GET begun before a successful command can finish afterward.
+                # Completion is monotone within one generation. A deadline that
+                # ends the game on this generation still brings its outcome.
+                if state.outcome is None or current.outcome is not None:
+                    return current
+                state = state.model_copy(update={"submitted": True})
+            if state.log_lines_stored < current.log_lines_stored:
+                # So is the stored line count. A pushed event says 0 for its
+                # generation, which a restarted client may receive after its
+                # read.
+                state = state.model_copy(
+                    update={"log_lines_stored": current.log_lines_stored}
+                )
         self._state = state
-        if state.generation_id > self._last_queued_generation:
+        self._state_changed.set()
+        ends = state.outcome is not None and not self._ended_queued
+        if state.generation_id > self._last_queued_generation or ends:
             self._last_queued_generation = state.generation_id
+            self._ended_queued = state.outcome is not None
             self._callbacks.put_nowait(state)
         return state
 
@@ -436,6 +458,7 @@ class IslandBattlesClient:
                 if self._refresh_interval is not None:
                     self._spawn(self._periodic_worker())
                 self._spawn(self._callback_worker())
+                self._spawn(self._deadline_worker())
                 return state.generation
         except BaseException:
             await self.close()
@@ -483,6 +506,7 @@ class IslandBattlesClient:
                 if self._state is not None and (
                     self._state.generation_id != state.generation_id
                     or self._state.submitted
+                    or self._state.outcome is not None
                 ):
                     continue
                 # Count on from the lines an earlier run stored for this turn,
@@ -493,6 +517,8 @@ class IslandBattlesClient:
                     with self._logging.scope(self._game_log):
                         try:
                             await self._player.on_generation(state.generation, receiver)
+                        except GameEndedError:
+                            raise
                         except Exception as error:
                             receiver._close()
                             await self._send_failure_logs(state.generation_id, error)
@@ -501,10 +527,80 @@ class IslandBattlesClient:
                     receiver._close()
                 if not self._closed:
                     await self._register([], True, generation_id=state.generation_id)
+            except GameEndedError:
+                # The turn's deadline passed during the callback, and the game
+                # ended. Reconciling reads the final state, which queues
+                # on_game_ended, instead of failing the client.
+                self._wakeup.set()
             finally:
                 receiver._close()
                 self._game_log = None
                 self._callbacks.task_done()
+
+    async def _deadline_worker(self) -> None:
+        """Apply the turn's deadline while this player waits for the others.
+
+        The server runs no timers: a turn times out when a request applies its
+        deadline. Once this player has completed a turn that has a deadline,
+        the client posts to the deadline endpoint a second after it, unless a
+        new state arrives first. The server answers with this player's state,
+        which carries the outcome when someone didn't answer in time.
+        """
+        attempts: tuple[int, int] = (0, 0)
+        while not self._closed:
+            self._state_changed.clear()
+            state = self._state
+            if (
+                state is None
+                or state.outcome is not None
+                or state.turn_deadline_at is None
+                or not state.submitted
+            ):
+                await self._state_changed.wait()
+                continue
+            tries = attempts[1] if attempts[0] == state.generation_id else 0
+            delay = (
+                state.turn_deadline_at - self._clock()
+            ).total_seconds() + DEADLINE_SLACK_SECONDS
+            if tries:
+                # The turn was still open after an earlier attempt.
+                delay = max(
+                    delay,
+                    min(
+                        DEADLINE_RETRY_SECONDS * 2 ** (tries - 1),
+                        DEADLINE_RETRY_MAX_SECONDS,
+                    ),
+                )
+            if delay > 0 and await self._state_changes_within(delay):
+                continue
+            attempts = (state.generation_id, tries + 1)
+            try:
+                async with self._reconcile_lock:
+                    data = await self._request(
+                        "POST",
+                        f"/game/from-lobby/{self.lobby_id}/deadline",
+                        retry_transport=True,
+                    )
+                    self._install(_parse_state(data))
+            except GameAuthenticationError:
+                raise
+            except GameError as error:
+                # The next attempt waits longer; HTTP reads still recover the state.
+                _sdk_logger.warning("could not apply the turn deadline: %s", error)
+
+    async def _state_changes_within(self, delay: float) -> bool:
+        """Wait up to ``delay`` seconds; return whether the state changed meanwhile."""
+        changed = asyncio.create_task(self._state_changed.wait())
+        timer = asyncio.ensure_future(self._sleep(delay))
+        try:
+            done, _ = await asyncio.wait(
+                (changed, timer), return_when=asyncio.FIRST_COMPLETED
+            )
+        finally:
+            for task in (changed, timer):
+                task.cancel()
+            await asyncio.gather(changed, timer, return_exceptions=True)
+        return changed in done
 
     async def _send_failure_logs(self, generation_id: int, error: Exception) -> None:
         """Log the callback's exception and send the generation's remaining lines.

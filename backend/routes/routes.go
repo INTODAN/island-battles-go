@@ -55,9 +55,18 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 	}, game.Replay)
 	huma.Register(api, huma.Operation{
 		OperationID: "getIslandLobbyGeneration", Path: "/game/from-lobby/{lobby_id}/generation", Method: http.MethodGet,
-		Summary: "Read the current generation for a roster player", Description: "Requires a place on the game's frozen roster. The game does not consult the lobby, so access continues after the lobby is deleted. Returns castle and soldier group IDs, which are never reassigned within a game, troop state, every castle's and soldier group's upgrade levels, recorded clashes with per-participant before/after counts, your turn completion flag, and the outcome once the game has ended. A finished game stays readable until the game is deleted, 7 days after its last generation by default; then this returns 404.",
+		Summary: "Read the current generation for a roster player", Description: "Requires a place on the game's frozen roster. The game does not consult the lobby, so access continues after the lobby is deleted. Returns castle and soldier group IDs, which are never reassigned within a game, troop state, every castle's and soldier group's upgrade levels, recorded clashes with per-participant before/after counts, your turn completion flag, the turn's deadline, and the outcome once the game has ended. " +
+			"Like every game request, it first applies the turn's deadline once it has passed, which ends the game. A finished game stays readable until the game is deleted, 7 days after its last generation by default; then this returns 404.",
 		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
 	}, game.CurrentGeneration)
+	huma.Register(api, huma.Operation{
+		OperationID: "applyIslandLobbyTurnDeadline", Path: "/game/from-lobby/{lobby_id}/deadline", Method: http.MethodPost,
+		Summary: "Apply the current turn's deadline for a roster player",
+		Description: "Requires a place on the game's frozen roster; the lobby is not consulted. The server runs no timers, so a turn times out when a request applies its deadline, GenerationState.turn_deadline_at. Every game request does that first, and a client that is waiting for other players calls this once about a second after the deadline. " +
+			"Before the deadline, and for a game that has ended or has no turn timeout, it changes nothing. After it, every team with a player who hasn't completed the turn loses, the game ends with reason turn_timeout, and among the other teams still standing the team with the most castles wins; equal counts, or no team left, are a draw. The open generation stays the final one, game.ended is pushed to every roster player, and later commands conflict (409) with problem type " + services.GameEndedProblemType + ". " +
+			"Calling it again is safe and ends the game once. Returns your current state, as GET /game/from-lobby/{lobby_id}/generation does.",
+		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
+	}, game.ApplyTurnDeadline)
 	huma.Register(api, huma.Operation{
 		OperationID: "getIslandLobbyGenerationLogs", Path: "/game/from-lobby/{lobby_id}/logs", Method: http.MethodGet,
 		Summary: "Read a generation's game log lines for a roster player",
@@ -116,6 +125,7 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 			"Complete defaults to true; an empty batch can complete a turn. The last frozen roster completion advances exactly once. " +
 			"The game ends after the turn that leaves one team with castles or soldier groups, a draw when the last teams are eliminated in the same turn, or after the turn that creates generation 300, where the team with the most castles wins. " +
 			"That turn's generation is the last, its state carries the outcome, and every later command conflicts (409) with problem type " + services.GameEndedProblemType + ". " +
+			"A turn also ends the game when its deadline, GenerationState.turn_deadline_at, passes before every roster player completed it: each team with a player who hadn't loses (outcome reason turn_timeout), the open generation stays the last, and a batch for it after the deadline conflicts with the same problem type. " +
 			"Retry the same request UUID and payload safely, also after the game ended; changed payloads and stale new requests conflict. " +
 			"A batch may also carry game log lines, which are stored in order with the generation and read with GET /game/from-lobby/{lobby_id}/logs. A player has at most 100 lines per generation, each of at most 500 characters; a batch over either limit is rejected whole (422) with problem type " + services.GameLogLimitProblemType + ". " +
 			"A batch may also carry the memory of the player's bot, any JSON object of at most 64 KiB as compact JSON. The batch with complete true saves it, replacing the player's previous memory, and an absent or null memory clears it; other batches ignore it. " +
@@ -145,7 +155,7 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 	botTurnResult.Description = "A bot's answer to a BotTurn. Its commands, logs and memory are sent as one completing batch of POST /generation/commands."
 	// Sent inside the generic lobby create request as its game_settings.
 	settings := registry.SchemaFromRef(registry.Schema(reflect.TypeOf(models.LobbySettings{}), true, "").Ref)
-	settings.Description = "Island Battles game_settings for a lobby create request. Choose at most one map: map_template_id or map. The map must be made for exactly the lobby's teams: player_amount equal to the team count, and castle team colours exactly 1 to that count, in team order, with 0 for neutral castles. Without a map the game starts on a generated map. An invalid choice fails lobby creation with invalid_game_settings, and its detail names each invalid field, such as game_settings.map.castles[0].x."
+	settings.Description = "Island Battles game_settings for a lobby create request. Choose at most one map: map_template_id or map. The map must be made for exactly the lobby's teams: player_amount equal to the team count, and castle team colours exactly 1 to that count, in team order, with 0 for neutral castles. Without a map the game starts on a generated map. turn_timeout_seconds sets how long each turn lasts, from 5 to 600 seconds, 30 when left out, or null for no limit. An invalid choice fails lobby creation with invalid_game_settings, and its detail names each invalid field, such as game_settings.map.castles[0].x."
 	api.OpenAPI().Paths["/lobby/v1/lobbies"].Post.Description += " Island Battles reads game_settings as the LobbySettings schema."
 }
 

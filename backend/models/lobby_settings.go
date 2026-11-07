@@ -15,10 +15,22 @@ import (
 // lobby, its game_settings object. The lobby hands them back in the started
 // snapshot. They hold at most one map choice: a default map by its template
 // ID, or a whole map file. With neither, the game starts on the generated map.
+// They also set the turn timeout.
 type LobbySettings struct {
 	MapTemplateID uint             `json:"map_template_id,omitempty" minimum:"1" doc:"Start on this default map, a map_template_id from GET /map/templates. Cannot be combined with map."`
 	Map           *MapTemplateView `json:"map,omitempty" doc:"Start on this map file. Cannot be combined with map_template_id."`
+	// TurnTimeoutSeconds is nil for no limit. ParseLobbySettings fills in
+	// DefaultTurnTimeoutSeconds when the settings leave it out.
+	TurnTimeoutSeconds *uint `json:"turn_timeout_seconds,omitempty" minimum:"5" maximum:"600" nullable:"true" default:"30" doc:"How long each turn lasts, in whole seconds from 5 to 600, counted from when its generation was created; 30 when left out. null means no limit, for example while debugging a bot. When a turn's deadline passes before every player has completed it, each team with a player who hadn't loses, and the game ends."`
 }
+
+// Turn timeouts a lobby may set, in seconds, and the timeout of a lobby that
+// sets none.
+const (
+	MinTurnTimeoutSeconds     = 5
+	MaxTurnTimeoutSeconds     = 600
+	DefaultTurnTimeoutSeconds = 30
+)
 
 // LobbySettingsLocation is where the settings sit in a lobby create request.
 // Every LobbySettingsError detail is located under it.
@@ -54,17 +66,20 @@ func NewLobbySettingsError(field, message string) *LobbySettingsError {
 }
 
 // ParseLobbySettings decodes a lobby's game settings. It rejects unknown
-// fields, both map choices at once, and an inline map that DecodeMapTemplate
-// rejects. Whether a template exists, and whether a map fits the lobby's
-// teams, are checked separately. Every rejection is a *LobbySettingsError.
+// fields, both map choices at once, an inline map that DecodeMapTemplate
+// rejects, and a turn timeout that is neither null nor a whole number of
+// seconds from MinTurnTimeoutSeconds to MaxTurnTimeoutSeconds. Settings
+// without a turn timeout get DefaultTurnTimeoutSeconds. Whether a template
+// exists, and whether a map fits the lobby's teams, are checked separately.
+// Every rejection is a *LobbySettingsError.
 func ParseLobbySettings(raw json.RawMessage) (LobbySettings, error) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
 		return LobbySettings{}, &LobbySettingsError{Details: []*huma.ErrorDetail{{Location: LobbySettingsLocation, Message: "must be a JSON object"}}}
 	}
 	for _, field := range slices.Sorted(maps.Keys(fields)) {
-		if field != "map_template_id" && field != "map" {
-			return LobbySettings{}, NewLobbySettingsError(field, "is not an Island Battles setting; the settings are map_template_id or map")
+		if field != "map_template_id" && field != "map" && field != "turn_timeout_seconds" {
+			return LobbySettings{}, NewLobbySettingsError(field, "is not an Island Battles setting; the settings are map_template_id, map and turn_timeout_seconds")
 		}
 	}
 	rawTemplateID, hasTemplateID := fields["map_template_id"]
@@ -72,7 +87,11 @@ func ParseLobbySettings(raw json.RawMessage) (LobbySettings, error) {
 	if hasTemplateID && hasMap {
 		return LobbySettings{}, NewLobbySettingsError("map", "cannot be combined with map_template_id; choose a default map or a map file")
 	}
-	var settings LobbySettings
+	timeout, err := parseTurnTimeout(fields)
+	if err != nil {
+		return LobbySettings{}, err
+	}
+	settings := LobbySettings{TurnTimeoutSeconds: timeout}
 	if hasTemplateID {
 		if err := json.Unmarshal(rawTemplateID, &settings.MapTemplateID); err != nil || settings.MapTemplateID == 0 {
 			return LobbySettings{}, NewLobbySettingsError("map_template_id", "must be the positive integer ID of a default map")
@@ -94,6 +113,24 @@ func ParseLobbySettings(raw json.RawMessage) (LobbySettings, error) {
 		settings.Map = &template
 	}
 	return settings, nil
+}
+
+// parseTurnTimeout reads turn_timeout_seconds from the settings' fields: nil
+// for null, which means no limit, and DefaultTurnTimeoutSeconds when absent.
+func parseTurnTimeout(fields map[string]json.RawMessage) (*uint, error) {
+	raw, present := fields["turn_timeout_seconds"]
+	if !present {
+		timeout := uint(DefaultTurnTimeoutSeconds)
+		return &timeout, nil
+	}
+	if strings.TrimSpace(string(raw)) == "null" {
+		return nil, nil
+	}
+	var timeout uint
+	if err := json.Unmarshal(raw, &timeout); err != nil || timeout < MinTurnTimeoutSeconds || timeout > MaxTurnTimeoutSeconds {
+		return nil, NewLobbySettingsError("turn_timeout_seconds", fmt.Sprintf("must be a whole number of seconds from %d to %d, or null for no limit", MinTurnTimeoutSeconds, MaxTurnTimeoutSeconds))
+	}
+	return &timeout, nil
 }
 
 // MapTeamCount returns the number of teams a map is made for: its

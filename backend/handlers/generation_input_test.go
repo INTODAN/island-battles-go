@@ -54,8 +54,25 @@ func TestGenerationHTTPAuthenticationValidationAndStatus(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &state); err != nil {
 		t.Fatal(err)
 	}
-	if state.GameID != binding.GameID || len(state.Generation.Castles) != 1 || state.Generation.Castles[0].ID != 0 {
+	if state.GameID != binding.GameID || len(state.Generation.Castles) != 1 || state.Generation.Castles[0].ID != 0 || state.TurnDeadlineAt == nil {
 		t.Fatalf("state=%+v", state)
+	}
+	// Before the deadline, applying it answers the state and changes nothing.
+	huma.Register(api, huma.Operation{OperationID: "testDeadline", Method: "POST", Path: "/game/from-lobby/{lobby_id}/deadline"}, handler.ApplyTurnDeadline)
+	deadlinePath := "/game/from-lobby/" + lobbyID + "/deadline"
+	if response := api.Post(deadlinePath); response.Code != 401 {
+		t.Fatalf("unauthenticated deadline=%d", response.Code)
+	}
+	if response := api.Post("/game/from-lobby/"+uuid.NewString()+"/deadline", "Authorization: Bearer valid"); response.Code != 404 {
+		t.Fatalf("deadline of another lobby=%d", response.Code)
+	}
+	response = api.Post(deadlinePath, "Authorization: Bearer valid")
+	var applied models.GenerationState
+	if err := json.Unmarshal(response.Body.Bytes(), &applied); err != nil || response.Code != 200 {
+		t.Fatalf("deadline=%d %s", response.Code, response.Body.String())
+	}
+	if applied.GenerationID != state.GenerationID || applied.Outcome != nil || !applied.TurnDeadlineAt.Equal(*state.TurnDeadlineAt) {
+		t.Fatalf("deadline state=%+v", applied)
 	}
 	request := fmt.Sprintf(`{"game_id":%d,"generation_id":%d,"request_id":%q,"commands":[]}`, state.GameID, state.GenerationID, uuid.NewString())
 	if response := api.Post("/generation/commands", strings.NewReader(request)); response.Code != 401 {

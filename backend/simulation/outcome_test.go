@@ -67,6 +67,34 @@ func TestOutcome(t *testing.T) {
 	}
 }
 
+func TestTimeoutOutcome(t *testing.T) {
+	neutral := models.NeutralTeamColor
+	draw := &models.GameOutcome{Reason: models.GameOutcomeTurnTimeout}
+	for _, test := range []struct {
+		name     string
+		state    simulation.GameState
+		teams    []models.GameTeam
+		timedOut []uint
+		want     *models.GameOutcome
+	}{
+		{"the other team of two wins", board([]uint{1, 1, 1, 2}), teams(1, 2), []uint{1}, winner(models.GameOutcomeTurnTimeout, 2)},
+		{"the other team wins with soldier groups alone", board([]uint{1, neutral}, 2), teams(1, 2), []uint{1}, winner(models.GameOutcomeTurnTimeout, 2)},
+		{"the most castles win among the rest", board([]uint{1, 1, 1, 2, 3, 3}), teams(1, 2, 3), []uint{1}, winner(models.GameOutcomeTurnTimeout, 3)},
+		{"equal castle counts among the rest draw", board([]uint{1, 1, 1, 2, 3}), teams(1, 2, 3), []uint{1}, draw},
+		{"two teams timing out together both lose", board([]uint{1, 1, 2, 2, 3}), teams(1, 2, 3), []uint{1, 2}, winner(models.GameOutcomeTurnTimeout, 3)},
+		{"every team timing out is a draw", board([]uint{1, 2}), teams(1, 2), []uint{1, 2}, draw},
+		{"an eliminated team never wins", board([]uint{1, neutral}), teams(1, 2, 3), []uint{1}, draw},
+		{"a team that is still standing beats an eliminated one", board([]uint{1, neutral}, 3), teams(1, 2, 3), []uint{1}, winner(models.GameOutcomeTurnTimeout, 3)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := simulation.TimeoutOutcome(test.state, test.teams, test.timedOut)
+			if !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("outcome = %s, want %s", describe(got), describe(test.want))
+			}
+		})
+	}
+}
+
 func describe(outcome *models.GameOutcome) string {
 	switch {
 	case outcome == nil:

@@ -67,9 +67,20 @@ class BotMemoryTooLargeError(GameError):
     """The server refused a batch whose memory is over 64 KiB as compact JSON."""
 
 
+class GameEndedError(GameError):
+    """The server refused a batch because the game has ended.
+
+    A turn that passes its deadline ends the game while a slow callback may
+    still be sending commands. The client handles it itself: it reads the
+    final state and calls ``on_game_ended``, so the client doesn't fail.
+    """
+
+
 # The server's problem types that clients tell apart: the command rejections,
-# shared by every command, the game log limit and the bot memory limit.
+# shared by every command, the game's end, the game log limit and the bot
+# memory limit.
 PROBLEM_TYPE_ERRORS: dict[str, type[GameError]] = {
+    "urn:island-battles:problem:game-ended": GameEndedError,
     "urn:island-battles:problem:castle-not-found": CastleNotFoundError,
     "urn:island-battles:problem:castle-not-owned": CastleNotOwnedError,
     "urn:island-battles:problem:upgrade-max-level": UpgradeMaxLevelError,

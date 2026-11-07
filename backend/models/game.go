@@ -14,6 +14,10 @@ type Game struct {
 	Outcome *GameOutcome `gorm:"serializer:json;type:jsonb" json:"-"`
 	// NextSoldierGroupID is never decremented, so a departed group's ID is not reassigned.
 	NextSoldierGroupID uint `gorm:"not null" json:"-"`
+	// TurnTimeoutSeconds is how long each generation's turn lasts, from the
+	// lobby's settings. It is saved with the teams when the game is
+	// initialized. Nil means turns have no time limit.
+	TurnTimeoutSeconds *uint `json:"-"`
 	Generations        []Generation
 }
 
@@ -37,6 +41,11 @@ const (
 	// GameOutcomeGenerationCap means the game reached the generation cap. The
 	// team with the most castles won, and equal castle counts are a draw.
 	GameOutcomeGenerationCap GameOutcomeReason = "generation_cap"
+	// GameOutcomeTurnTimeout means a turn passed its deadline. Every team
+	// with a player who hadn't completed it lost. Among the other teams still
+	// standing, the team with the most castles won, and equal castle counts,
+	// or no team left, are a draw.
+	GameOutcomeTurnTimeout GameOutcomeReason = "turn_timeout"
 )
 
 // GameOutcome is how a finished game ended.
@@ -44,4 +53,16 @@ type GameOutcome struct {
 	Reason GameOutcomeReason `json:"reason"`
 	// WinnerTeamColor is nil for a draw.
 	WinnerTeamColor *uint `json:"winner_team_color"`
+	// TimedOut lists the teams that lost a turn_timeout game, in colour
+	// order. It is empty for every other reason.
+	TimedOut []TimedOutTeam `json:"timed_out,omitempty"`
+}
+
+// TimedOutTeam is a team that lost because some of its players didn't
+// complete a turn before its deadline.
+type TimedOutTeam struct {
+	Color uint `json:"color"`
+	// Players are the display names, from the start, of the team's players
+	// who didn't complete the turn, sorted.
+	Players []string `json:"players"`
 }
