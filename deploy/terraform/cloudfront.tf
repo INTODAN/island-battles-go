@@ -44,8 +44,8 @@ data "aws_cloudfront_origin_request_policy" "all_viewer_except_host_header" {
   name = "Managed-AllViewerExceptHostHeader"
 }
 
-# Nothing is cached: every request reaches the Lambda as if it came straight
-# to the Function URL. There's no origin access control. For a Function URL it
+# Except for /play/ (the web client, from S3), nothing is cached: every
+# request reaches the Lambda as if it came straight to the Function URL. There's no origin access control. For a Function URL it
 # would need clients to send a SHA-256 of every POST body, and the Function
 # URL is public anyway. Standard and real-time logs stay off.
 resource "aws_cloudfront_distribution" "game" {
@@ -72,6 +72,34 @@ resource "aws_cloudfront_distribution" "game" {
       # that runs out of it would be retried, so lambda_timeout_seconds stays
       # under it with room for a cold start.
       origin_read_timeout = 60
+    }
+  }
+
+  # The web client (web_client.tf): a private bucket through an origin access
+  # control, placed before the default behaviour. "/play/*" doesn't match
+  # "/play" itself, so that has a behaviour too, for the function's redirect.
+  origin {
+    origin_id                = "web-client"
+    domain_name              = aws_s3_bucket.web_client.bucket_regional_domain_name
+    origin_access_control_id = aws_cloudfront_origin_access_control.web_client.id
+  }
+
+  dynamic "ordered_cache_behavior" {
+    for_each = ["/play/*", "/play"]
+
+    content {
+      path_pattern           = ordered_cache_behavior.value
+      target_origin_id       = "web-client"
+      viewer_protocol_policy = "redirect-to-https"
+      allowed_methods        = ["GET", "HEAD", "OPTIONS"]
+      cached_methods         = ["GET", "HEAD"]
+      cache_policy_id        = data.aws_cloudfront_cache_policy.caching_optimized.id
+      compress               = true
+
+      function_association {
+        event_type   = "viewer-request"
+        function_arn = aws_cloudfront_function.web_client.arn
+      }
     }
   }
 
