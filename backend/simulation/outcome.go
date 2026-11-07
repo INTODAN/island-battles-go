@@ -38,6 +38,12 @@ func TimeoutOutcome(state GameState, teams []models.GameTeam, timedOut []uint) *
 	return &models.GameOutcome{Reason: models.GameOutcomeTurnTimeout, WinnerTeamColor: mostCastles(state, standingTeams(state, teams, timedOut))}
 }
 
+// StandingTeams lists the colours of teams that are still in the game: those
+// with castles or soldier groups on state. The others are eliminated.
+func StandingTeams(state GameState, teams []models.GameTeam) []uint {
+	return standingTeams(state, teams, nil)
+}
+
 // standingTeams lists the colours of teams, leaving out those in excluded,
 // that still have castles or soldier groups.
 func standingTeams(state GameState, teams []models.GameTeam, excluded []uint) []uint {

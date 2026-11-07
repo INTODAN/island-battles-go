@@ -203,7 +203,7 @@ func TestTheIncompletePlayersTeamLosesAtTheDeadline(t *testing.T) {
 	if !reflect.DeepEqual(state.Outcome, &want) || state.GenerationID != first.GenerationID || !state.Submitted || state.TurnDeadlineAt != nil {
 		t.Fatalf("state after the deadline = %+v, outcome %+v", state, state.Outcome)
 	}
-	saved := models.GameOutcome{Reason: models.GameOutcomeTurnTimeout, WinnerTeamColor: colour(1), TimedOut: []models.TimedOutTeam{{Color: 2, Players: []string{"Sam"}}}}
+	saved := models.GameOutcome{Reason: models.GameOutcomeTurnTimeout, WinnerTeamColor: colour(1), TimedOut: []models.TimedOutTeam{{Color: 2, Players: []string{"Sam"}}}, Survivors: []uint{1}}
 	if outcome := fixture.savedOutcome(t); !reflect.DeepEqual(outcome, &saved) {
 		t.Fatalf("saved outcome = %+v", outcome)
 	}
@@ -266,7 +266,7 @@ func TestALateBatchAppliesTheDeadlineAndConflicts(t *testing.T) {
 	if retried, err := fixture.service.Register(context.Background(), sam, inTime); err != nil || retried.Outcome == nil {
 		t.Fatalf("retry of an earlier batch = %+v, %v", retried, err)
 	}
-	if state := fixture.current(t, alex); state.Outcome == nil || state.Outcome.Summary != "Blue lost: Alex's bot didn't answer within 10 s; Red lost: Sam's bot didn't answer within 10 s" {
+	if state := fixture.current(t, alex); state.Outcome == nil || state.Outcome.Summary != "Draw: Blue's and Red's bots didn't answer within 10 s" {
 		t.Fatalf("outcome = %+v", state.Outcome)
 	}
 }
@@ -274,18 +274,19 @@ func TestALateBatchAppliesTheDeadlineAndConflicts(t *testing.T) {
 func TestTheMostCastlesWinAmongTheTeamsThatAnswered(t *testing.T) {
 	players := [][]string{{"Alex"}, {"Sam"}, {"Kim"}}
 	for _, scenario := range []struct {
-		name     string
-		castles  []uint
-		answered []int
-		winner   *uint
-		timedOut []models.TimedOutTeam
-		summary  string
+		name      string
+		castles   []uint
+		answered  []int
+		winner    *uint
+		timedOut  []models.TimedOutTeam
+		survivors []uint
+		summary   string
 	}{
-		{"most castles", []uint{1, 1, 1, 2, 3, 3, 0}, []int{1, 2}, colour(3), []models.TimedOutTeam{{Color: 1, Players: []string{"Alex"}}},
+		{"most castles", []uint{1, 1, 1, 2, 3, 3, 0}, []int{1, 2}, colour(3), []models.TimedOutTeam{{Color: 1, Players: []string{"Alex"}}}, []uint{2, 3},
 			"Blue lost: Alex's bot didn't answer within 2 min; Green wins"},
-		{"equal castle counts draw", []uint{1, 1, 1, 2, 3, 0}, []int{1, 2}, nil, []models.TimedOutTeam{{Color: 1, Players: []string{"Alex"}}},
+		{"equal castle counts draw", []uint{1, 1, 1, 2, 3, 0}, []int{1, 2}, nil, []models.TimedOutTeam{{Color: 1, Players: []string{"Alex"}}}, []uint{2, 3},
 			"Blue lost: Alex's bot didn't answer within 2 min; the other teams draw"},
-		{"two teams time out together", []uint{1, 1, 2, 2, 3}, []int{2}, colour(3), []models.TimedOutTeam{{Color: 1, Players: []string{"Alex"}}, {Color: 2, Players: []string{"Sam"}}},
+		{"two teams time out together", []uint{1, 1, 2, 2, 3}, []int{2}, colour(3), []models.TimedOutTeam{{Color: 1, Players: []string{"Alex"}}, {Color: 2, Players: []string{"Sam"}}}, []uint{3},
 			"Blue lost: Alex's bot didn't answer within 2 min; Red lost: Sam's bot didn't answer within 2 min; Green wins"},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
@@ -295,7 +296,7 @@ func TestTheMostCastlesWinAmongTheTeamsThatAnswered(t *testing.T) {
 			}
 			*fixture.clock = fixture.deadline(t)
 			state := fixture.applyDeadline(t, fixture.players[2][0])
-			want := models.GameOutcome{Reason: models.GameOutcomeTurnTimeout, WinnerTeamColor: scenario.winner, TimedOut: scenario.timedOut}
+			want := models.GameOutcome{Reason: models.GameOutcomeTurnTimeout, WinnerTeamColor: scenario.winner, TimedOut: scenario.timedOut, Survivors: scenario.survivors}
 			if outcome := fixture.savedOutcome(t); !reflect.DeepEqual(outcome, &want) {
 				t.Fatalf("outcome = %+v, want %+v", outcome, want)
 			}
@@ -399,5 +400,103 @@ func TestReadsWithoutTheGameLockApplyTheDeadline(t *testing.T) {
 				t.Fatal("the read did not push the game's end")
 			}
 		})
+	}
+}
+
+// eliminatedGreen starts a game of three teams in which Green has a single,
+// empty castle, and plays turns until Blue has captured it, so Green is
+// eliminated while Blue and Red go on. Green's player completes every turn
+// until then, as the barrier waits for Green while it is still standing.
+func eliminatedGreen(t *testing.T) deadlineFixture {
+	t.Helper()
+	fixture := newDeadlineFixture(t, mapSettings("30", 1, 1, 2, 2, 3), []string{"Alex"}, []string{"Sam"}, []string{"Kim"})
+	first := fixture.states[fixture.players[0][0].PlayerID]
+	var attacker, target models.CastleView
+	for _, castle := range first.Generation.Castles {
+		switch castle.TeamColor {
+		case 1:
+			attacker = castle
+		case 3:
+			target = castle
+		}
+	}
+	initial, err := dal.GetGeneration(fixture.database, first.GenerationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, castle := range initial.Map.Castles {
+		if castle.PersistentCastleID == target.ID {
+			if err := fixture.database.Model(&castle).Select("SoldierAmount").Updates(&models.Castle{SoldierAmount: 0}).Error; err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for turn := 0; ; turn++ {
+		if turn == 30 {
+			t.Fatal("Green was never eliminated")
+		}
+		for index, team := range fixture.players {
+			var commands []models.PublicGenerationCommand
+			if turn == 0 && index == 0 {
+				commands = append(commands, send(attacker.ID, target.ID, attacker.Soldiers))
+			}
+			if _, err := fixture.service.Register(context.Background(), team[0], batch(fixture.states[team[0].PlayerID], true, commands...)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, team := range fixture.players {
+			fixture.states[team[0].PlayerID] = fixture.current(t, team[0])
+		}
+		held := 0
+		for _, castle := range fixture.states[fixture.players[0][0].PlayerID].Generation.Castles {
+			if castle.TeamColor == 3 {
+				held++
+			}
+		}
+		if held == 0 {
+			return fixture
+		}
+	}
+}
+
+func TestAnEliminatedTeamsPlayerNeverTimesOut(t *testing.T) {
+	fixture := eliminatedGreen(t)
+	alex, sam := fixture.players[0][0], fixture.players[1][0]
+	open := fixture.states[alex.PlayerID].GenerationID
+	if fixture.states[alex.PlayerID].Outcome != nil {
+		t.Fatalf("the game ended: %+v", fixture.states[alex.PlayerID].Outcome)
+	}
+
+	// Kim never plays again, yet Alex's and Sam's completions play the turn.
+	fixture.complete(t, alex)
+	next := fixture.complete(t, sam)
+	if next.Outcome != nil || next.GenerationID == open {
+		t.Fatalf("the turn didn't advance without the eliminated player: %+v", next)
+	}
+	// In the next turn Sam is late and loses at the deadline, while Kim,
+	// who is late too, is never named.
+	fixture.states[alex.PlayerID] = fixture.current(t, alex)
+	fixture.states[sam.PlayerID] = fixture.current(t, sam)
+	fixture.complete(t, alex)
+	*fixture.clock = (*fixture.states[alex.PlayerID].TurnDeadlineAt).Add(time.Second)
+	state := fixture.applyDeadline(t, alex)
+	want := models.GameOutcome{Reason: models.GameOutcomeTurnTimeout, WinnerTeamColor: colour(1), TimedOut: []models.TimedOutTeam{{Color: 2, Players: []string{"Sam"}}}, Survivors: []uint{1}}
+	if outcome := fixture.savedOutcome(t); !reflect.DeepEqual(outcome, &want) {
+		t.Fatalf("saved outcome = %+v, want %+v", outcome, want)
+	}
+	if state.Outcome == nil || state.Outcome.Summary != "Red lost: Sam's bot didn't answer within 30 s; Blue wins" {
+		t.Fatalf("outcome = %+v", state.Outcome)
+	}
+}
+
+func TestEveryActiveTeamTimingOutIsADrawThatLeavesOutTheEliminatedTeam(t *testing.T) {
+	fixture := eliminatedGreen(t)
+	*fixture.clock = (*fixture.states[fixture.players[0][0].PlayerID].TurnDeadlineAt).Add(time.Second)
+	state := fixture.applyDeadline(t, fixture.players[2][0])
+	if state.Outcome == nil || state.Outcome.WinnerTeamColor != nil || state.Outcome.Summary != "Draw: Blue's and Red's bots didn't answer within 30 s" {
+		t.Fatalf("outcome = %+v", state.Outcome)
+	}
+	if outcome := fixture.savedOutcome(t); len(outcome.TimedOut) != 2 || len(outcome.Survivors) != 0 {
+		t.Fatalf("saved outcome = %+v", outcome)
 	}
 }

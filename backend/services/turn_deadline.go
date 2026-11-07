@@ -38,8 +38,9 @@ func (service *GenerationService) now() time.Time {
 // expireTurn applies the deadline of the game's open turn, generation, under
 // the game lock. The server runs no timers, so every game request calls it
 // before anything else. Before the deadline, or once the game has ended, it
-// does nothing. After it, every team with a player who hasn't completed the
-// turn has timed out and loses, and the game ends with
+// does nothing. After it, every team still in the game with a player who
+// hasn't completed the turn has timed out and loses; eliminated teams never
+// do, and when only their players are late nothing happens. The game ends with
 // simulation.TimeoutOutcome on generation's board, which stays the final
 // generation. It returns the game.ended events to push once the transaction
 // commits, or none when the game goes on.
@@ -56,16 +57,30 @@ func expireTurn(transaction *gorm.DB, game *models.Game, generation *models.Gene
 	for _, input := range inputs {
 		completed[input.PlayerID] = input.Completed
 	}
-	late := map[uint][]string{}
+	board, err := dal.LoadGameState(transaction, game.ID)
+	if err != nil {
+		return nil, err
+	}
+	// Only teams still in the game can time out. The players of an
+	// eliminated team have nothing to play, and the turn doesn't wait for
+	// them.
+	standing := simulation.StandingTeams(board, game.Teams)
+	waiting, late := 0, map[uint][]string{}
 	for _, player := range players {
 		if !completed[player.PlayerID] {
-			late[player.TeamColor] = append(late[player.TeamColor], player.DisplayName)
+			waiting++
+			if slices.Contains(standing, player.TeamColor) {
+				late[player.TeamColor] = append(late[player.TeamColor], player.DisplayName)
+			}
 		}
 	}
 	// The last completion plays the turn at once, so an open turn always
 	// waits for someone.
-	if len(late) == 0 {
+	if waiting == 0 {
 		return nil, fmt.Errorf("generation %d of game %d is open, but every roster player completed it", generation.ID, game.ID)
+	}
+	if len(late) == 0 {
+		return nil, nil
 	}
 	colors := slices.Sorted(maps.Keys(late))
 	timedOut := make([]models.TimedOutTeam, 0, len(colors))
@@ -73,12 +88,14 @@ func expireTurn(transaction *gorm.DB, game *models.Game, generation *models.Gene
 		slices.Sort(late[color])
 		timedOut = append(timedOut, models.TimedOutTeam{Color: color, Players: late[color]})
 	}
-	board, err := dal.LoadGameState(transaction, game.ID)
-	if err != nil {
-		return nil, err
-	}
 	outcome := simulation.TimeoutOutcome(board, game.Teams, colors)
 	outcome.TimedOut = timedOut
+	for _, color := range standing {
+		if !slices.Contains(colors, color) {
+			outcome.Survivors = append(outcome.Survivors, color)
+		}
+	}
+	slices.Sort(outcome.Survivors)
 	if err := dal.SaveGameOutcome(transaction, game, *outcome); err != nil {
 		return nil, err
 	}

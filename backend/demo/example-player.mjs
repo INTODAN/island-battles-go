@@ -80,6 +80,9 @@ export class ExamplePlayer {
         (this.state && (state.game_id !== this.state.game_id || state.generation_id < this.state.generation_id))) return;
     // Late publications must not reopen a turn already completed over HTTP.
     if (this.state?.generation_id === state.generation_id && this.state.submitted) state = { ...state, submitted: true };
+    // A slow read or deadline answer for the same generation can arrive after
+    // the game ended; the outcome is final.
+    if (this.state?.generation_id === state.generation_id && this.state.outcome && !state.outcome) state = { ...state, outcome: this.state.outcome };
     this.state = state;
     if (this.pending && (this.pending.game_id !== state.game_id || this.pending.generation_id !== state.generation_id || state.submitted)) {
       this.remember(null);

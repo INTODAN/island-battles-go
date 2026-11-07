@@ -3,6 +3,7 @@ package services
 import (
 	"bytes"
 	_ "embed"
+	"fmt"
 	"html/template"
 	"strings"
 
@@ -89,10 +90,22 @@ func describeOutcome(game *models.Game) string {
 
 // describeTimeoutOutcome sums up a game that ended at a turn's deadline: each
 // team that timed out, with its players who didn't answer, and then the
-// winner, or that the other teams drew. A game where every team timed out
-// names only the teams.
+// winner, or that the other teams drew. A game where every team still in it
+// timed out, and so has no survivors, is a draw: "Draw: Blue's and Red's bots didn't answer within
+// 30 s".
 func describeTimeoutOutcome(game *models.Game) string {
 	outcome := game.Outcome
+	if len(outcome.Survivors) == 0 && outcome.WinnerTeamColor == nil {
+		bots := make([]string, 0, len(outcome.TimedOut))
+		for _, team := range outcome.TimedOut {
+			bots = append(bots, teamName(game, team.Color)+"'s")
+		}
+		within := ""
+		if game.TurnTimeoutSeconds != nil {
+			within = " within " + describeTimeout(*game.TurnTimeoutSeconds)
+		}
+		return fmt.Sprintf("Draw: %s bots didn't answer%s", joinNames(bots), within)
+	}
 	clauses := make([]string, 0, len(outcome.TimedOut)+1)
 	for _, team := range outcome.TimedOut {
 		clauses = append(clauses, describeTimedOutTeam(game, team))
@@ -100,7 +113,7 @@ func describeTimeoutOutcome(game *models.Game) string {
 	switch {
 	case outcome.WinnerTeamColor != nil:
 		clauses = append(clauses, teamName(game, *outcome.WinnerTeamColor)+" wins")
-	case len(game.Teams) > len(outcome.TimedOut):
+	default:
 		clauses = append(clauses, "the other teams draw")
 	}
 	return strings.Join(clauses, "; ")

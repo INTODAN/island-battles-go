@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
 	"islandBattles/backend/dal"
@@ -276,9 +277,26 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 		for _, candidate := range inputs {
 			completed[candidate.PlayerID] = candidate.Completed
 		}
+		// Players of eliminated teams have nothing to play, so the turn
+		// doesn't wait for them.
 		ready := len(players) > 0
+		var standing []uint
+		haveStanding := false
 		for _, participant := range players {
-			ready = ready && completed[participant.PlayerID]
+			if completed[participant.PlayerID] {
+				continue
+			}
+			if !haveStanding {
+				current, err := dal.LoadGameState(transaction, locked.ID)
+				if err != nil {
+					return err
+				}
+				standing, haveStanding = simulation.StandingTeams(current, locked.Teams), true
+			}
+			if slices.Contains(standing, participant.TeamColor) {
+				ready = false
+				break
+			}
 		}
 		if ready {
 			allCommands := []models.CommandFields{}

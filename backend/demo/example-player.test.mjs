@@ -269,3 +269,18 @@ test("only a waiting player of a turn with a deadline applies it", (context) => 
   player.receive({ ...initial(), generation_id: 2, turn_deadline_at: null, outcome: { reason: "turn_timeout", winner_team_color: null, summary: "Draw" } });
   assert.equal(player.deadlineTimer, null);
 });
+
+test("a late state without the outcome does not replace the known outcome", (context) => {
+  const outcome = { reason: "turn_timeout", winner_team_color: 1, summary: "Red lost: Sam's bot didn't answer within 30 s; Blue wins" };
+  const shown = [];
+  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", credential: "test", subscription: new Subscription(),
+    fetcher: async () => new Promise(() => {}), onState: (state) => shown.push(state) });
+  context.after(() => player.stop());
+  player.setEnabled(false);
+  player.receive({ ...initial(), submitted: true, outcome });
+  // A slow read of the same generation, begun before the deadline, arrives.
+  player.receive({ ...initial(), submitted: true, turn_deadline_at: "2026-11-07T12:00:30Z" });
+  assert.deepEqual(player.state.outcome, outcome);
+  assert.deepEqual(shown.at(-1).outcome, outcome);
+  assert.equal(player.deadlineTimer, null);
+});

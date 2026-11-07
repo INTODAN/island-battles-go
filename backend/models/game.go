@@ -56,6 +56,11 @@ type GameOutcome struct {
 	// TimedOut lists the teams that lost a turn_timeout game, in colour
 	// order. It is empty for every other reason.
 	TimedOut []TimedOutTeam `json:"timed_out,omitempty"`
+	// Survivors lists the colours of the teams that were still in a
+	// turn_timeout game and didn't time out, in colour order. The winner is
+	// one of them, or they drew; without any, every team still in the game
+	// timed out, which is a draw.
+	Survivors []uint `json:"survivors,omitempty"`
 }
 
 // TimedOutTeam is a team that lost because some of its players didn't
