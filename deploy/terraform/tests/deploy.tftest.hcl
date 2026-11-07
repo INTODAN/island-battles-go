@@ -235,9 +235,9 @@ run "serves_the_game_through_cloudfront" {
 
   assert {
     condition = (
-      one(aws_cloudfront_distribution.game.origin).domain_name == "abcdefghijklmnopqrstuvwxyz012345.lambda-url.eu-central-1.on.aws" &&
-      one(aws_cloudfront_distribution.game.origin).custom_origin_config[0].origin_protocol_policy == "https-only" &&
-      try(length(one(aws_cloudfront_distribution.game.origin).origin_access_control_id), 0) == 0
+      one([for origin in aws_cloudfront_distribution.game.origin : origin if origin.origin_id == "backend"]).domain_name == "abcdefghijklmnopqrstuvwxyz012345.lambda-url.eu-central-1.on.aws" &&
+      one([for origin in aws_cloudfront_distribution.game.origin : origin if origin.origin_id == "backend"]).custom_origin_config[0].origin_protocol_policy == "https-only" &&
+      try(length(one([for origin in aws_cloudfront_distribution.game.origin : origin if origin.origin_id == "backend"]).origin_access_control_id), 0) == 0
     )
     error_message = "The distribution must call the Function URL's host over HTTPS, without origin access control."
   }
@@ -250,7 +250,7 @@ run "serves_the_game_through_cloudfront" {
       aws_cloudfront_distribution.game.default_cache_behavior[0].cache_policy_id == data.aws_cloudfront_cache_policy.caching_disabled.id &&
       data.aws_cloudfront_origin_request_policy.all_viewer_except_host_header.name == "Managed-AllViewerExceptHostHeader" &&
       aws_cloudfront_distribution.game.default_cache_behavior[0].origin_request_policy_id == data.aws_cloudfront_origin_request_policy.all_viewer_except_host_header.id &&
-      length(aws_cloudfront_distribution.game.ordered_cache_behavior) == 0
+      aws_cloudfront_distribution.game.default_cache_behavior[0].target_origin_id == "backend"
     )
     error_message = "Every request must reach the Lambda uncached over HTTPS, with every method and every viewer header but Host."
   }
@@ -263,6 +263,114 @@ run "serves_the_game_through_cloudfront" {
   assert {
     condition     = output.game_url == "https://island-battles.example.org"
     error_message = "The game's URL is game_hostname over HTTPS."
+  }
+}
+
+# The web client at /play/ (#104) ----------------------------------------------
+
+run "serves_the_web_client_from_a_private_bucket" {
+  command = plan
+
+  # AWS assigns these on creation.
+  override_resource {
+    target          = aws_lambda_function_url.backend
+    override_during = plan
+    values = {
+      function_url = "https://abcdefghijklmnopqrstuvwxyz012345.lambda-url.eu-central-1.on.aws/"
+    }
+  }
+
+  override_resource {
+    target          = aws_cloudfront_origin_access_control.web_client
+    override_during = plan
+    values = {
+      id = "E2ABCDEFGHIJKL"
+    }
+  }
+
+  override_resource {
+    target          = aws_cloudfront_distribution.game
+    override_during = plan
+    values = {
+      arn = "arn:aws:cloudfront::123456789012:distribution/E1ABCDEFGHIJKL"
+    }
+  }
+
+  override_resource {
+    target          = aws_s3_bucket.web_client
+    override_during = plan
+    values = {
+      arn = "arn:aws:s3:::island-battles-web-client-123456789012"
+    }
+  }
+
+  assert {
+    condition     = startswith(aws_s3_bucket.web_client.bucket, "island-battles-web-client-") && startswith(aws_s3_bucket.web_client.bucket, "island-battles-")
+    error_message = "The bucket must be named island-battles-*, which the apply role may change."
+  }
+
+  assert {
+    condition = (
+      aws_s3_bucket_public_access_block.web_client.block_public_acls &&
+      aws_s3_bucket_public_access_block.web_client.block_public_policy &&
+      aws_s3_bucket_public_access_block.web_client.ignore_public_acls &&
+      aws_s3_bucket_public_access_block.web_client.restrict_public_buckets &&
+      one(one(aws_s3_bucket_server_side_encryption_configuration.web_client.rule).apply_server_side_encryption_by_default).sse_algorithm == "AES256"
+    )
+    error_message = "The bucket must block all public access and encrypt objects."
+  }
+
+  assert {
+    condition     = one(aws_s3_bucket_ownership_controls.web_client.rule).object_ownership == "BucketOwnerEnforced"
+    error_message = "The bucket must have no ACLs."
+  }
+
+  assert {
+    condition = (
+      aws_cloudfront_origin_access_control.web_client.origin_access_control_origin_type == "s3" &&
+      aws_cloudfront_origin_access_control.web_client.signing_behavior == "always" &&
+      aws_cloudfront_origin_access_control.web_client.signing_protocol == "sigv4"
+    )
+    error_message = "The origin access control must sign S3 requests."
+  }
+
+  assert {
+    condition = (
+      one([for origin in aws_cloudfront_distribution.game.origin : origin if origin.origin_id == "web-client"]).origin_access_control_id == aws_cloudfront_origin_access_control.web_client.id &&
+      length(aws_cloudfront_distribution.game.origin) == 2
+    )
+    error_message = "The distribution must have the bucket as a second origin, through the origin access control."
+  }
+
+  assert {
+    condition = (
+      toset([for behavior in aws_cloudfront_distribution.game.ordered_cache_behavior : behavior.path_pattern]) == toset(["/play/*", "/play"]) &&
+      alltrue([for behavior in aws_cloudfront_distribution.game.ordered_cache_behavior : (
+        behavior.target_origin_id == "web-client" &&
+        behavior.compress &&
+        behavior.viewer_protocol_policy == "redirect-to-https" &&
+        toset(behavior.allowed_methods) == toset(["GET", "HEAD", "OPTIONS"]) &&
+        behavior.cache_policy_id == data.aws_cloudfront_cache_policy.caching_optimized.id &&
+        one(behavior.function_association).event_type == "viewer-request"
+      )]) &&
+      data.aws_cloudfront_cache_policy.caching_optimized.name == "Managed-CachingOptimized"
+    )
+    error_message = "/play/* and /play must be cached and compressed from the bucket, with the function on viewer requests, ahead of the uncached default."
+  }
+
+  assert {
+    condition     = aws_cloudfront_function.web_client.runtime == "cloudfront-js-2.0" && strcontains(aws_cloudfront_function.web_client.code, "index.html") && strcontains(aws_cloudfront_function.web_client.code, "301")
+    error_message = "The function must serve folders as index.html and redirect /play."
+  }
+
+  assert {
+    condition     = strcontains(aws_s3_bucket_policy.web_client.policy, "cloudfront.amazonaws.com") && strcontains(aws_s3_bucket_policy.web_client.policy, "AWS:SourceArn") && strcontains(aws_s3_bucket_policy.web_client.policy, "aws:SecureTransport") && strcontains(aws_s3_bucket_policy.web_client.policy, "distribution/E1ABCDEFGHIJKL")
+    error_message = "The bucket policy must allow only the distribution, over TLS."
+  }
+
+  assert {
+    condition     = output.web_client_bucket == aws_s3_bucket.web_client.bucket
+    error_message = "The upload script reads the bucket from an output."
   }
 }
 
