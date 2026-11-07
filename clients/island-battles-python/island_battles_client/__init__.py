@@ -3,6 +3,7 @@
 from .client import IslandBattlesClient
 from .commands import CommandReceiver
 from .errors import (
+    BotMemoryTooLargeError,
     CastleNotFoundError,
     CastleNotOwnedError,
     GameAuthenticationError,
@@ -35,6 +36,7 @@ from .upgrades import UpgradeTable
 __all__ = [
     "NEUTRAL_TEAM_COLOR",
     "BoardEntity",
+    "BotMemoryTooLargeError",
     "Castle",
     "CastleNotFoundError",
     "CastleNotOwnedError",

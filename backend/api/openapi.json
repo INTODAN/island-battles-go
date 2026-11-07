@@ -1,6 +1,84 @@
 {
   "components": {
     "schemas": {
+      "BotTurn": {
+        "additionalProperties": false,
+        "description": "What a bot is given to play one turn. A bot is a stateless function: whatever it needs to keep between turns goes in the memory it returns, which the server stores per player and game.",
+        "properties": {
+          "game_id": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "generation": {
+            "$ref": "#/components/schemas/Generation"
+          },
+          "memory": {
+            "additionalProperties": true,
+            "description": "The memory the bot returned with its previous turn in this game, or null on its first turn and after a turn that returned null.",
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "team_color": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "turn_deadline_at": {
+            "description": "When the turn times out, or null when turns have no time limit.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "game_id",
+          "generation",
+          "team_color",
+          "memory",
+          "turn_deadline_at"
+        ],
+        "type": "object"
+      },
+      "BotTurnResult": {
+        "additionalProperties": false,
+        "description": "A bot's answer to a BotTurn. Its commands, logs and memory are sent as one completing batch of POST /generation/commands.",
+        "properties": {
+          "commands": {
+            "items": {
+              "$ref": "#/components/schemas/PublicGenerationCommand"
+            },
+            "maxItems": 1000,
+            "type": "array"
+          },
+          "logs": {
+            "description": "Game log lines for this turn, of at most 500 characters each.",
+            "items": {
+              "$ref": "#/components/schemas/GenerationLogLine"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "memory": {
+            "additionalProperties": true,
+            "description": "Any JSON object of at most 64 KiB as compact JSON, given back as BotTurn.memory next turn, or null for none.",
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "commands",
+          "memory",
+          "logs"
+        ],
+        "type": "object"
+      },
       "Castle": {
         "additionalProperties": false,
         "properties": {
@@ -639,6 +717,14 @@
             "minimum": 0,
             "type": "integer"
           },
+          "memory": {
+            "additionalProperties": true,
+            "description": "The memory sent with your latest completed turn of this game, for your bot's next BotTurn.memory. Null before your first completed turn, and after a completed turn without memory.",
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "outcome": {
             "$ref": "#/components/schemas/GameOutcome",
             "description": "How the game ended. Absent while the game runs. A finished game keeps its final generation and rejects every command."
@@ -666,7 +752,8 @@
           "channel",
           "submitted",
           "generation",
-          "log_lines_stored"
+          "log_lines_stored",
+          "memory"
         ],
         "type": "object"
       },
@@ -966,6 +1053,14 @@
               "null"
             ]
           },
+          "memory": {
+            "additionalProperties": true,
+            "description": "Your bot's memory, the BotTurnResult.memory it returned: any JSON object of at most 64 KiB as compact JSON. Only the batch with complete true saves it, replacing your previous memory, and an absent or null memory clears it; other batches ignore it. GenerationState.memory returns it. Larger memory is rejected whole with 422 and problem type urn:island-battles:problem:bot-memory-too-large.",
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "request_id": {
             "description": "Identifies this batch. Retry a lost request with the same UUID and body; use a new UUID for every new batch.",
             "format": "uuid",
@@ -1213,7 +1308,7 @@
     }
   },
   "info": {
-    "description": "Operations a player client calls during a started game. After every turn, each roster player's Centrifugo channel `player:{player_id}` receives a `GenerationEvent`, except after the turn that ends the game, which pushes a `GameEndedEvent` with the final generation and its outcome instead. Clients reconcile with the generation read after subscribing or reconnecting; HTTP state is authoritative, and its `outcome` is set once the game has ended. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the `game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose. `GET /game/upgrades` lists what each castle upgrade level costs. `Demo` is the demo file format, which `GET /game/from-lobby/{lobby_id}/demo` returns and the demo viewer at `/game/demo-viewer/` opens.",
+    "description": "Operations a player client calls during a started game. After every turn, each roster player's Centrifugo channel `player:{player_id}` receives a `GenerationEvent`, except after the turn that ends the game, which pushes a `GameEndedEvent` with the final generation and its outcome instead. Clients reconcile with the generation read after subscribing or reconnecting; HTTP state is authoritative, and its `outcome` is set once the game has ended. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the `game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose. `GET /game/upgrades` lists what each castle upgrade level costs. `Demo` is the demo file format, which `GET /game/from-lobby/{lobby_id}/demo` returns and the demo viewer at `/game/demo-viewer/` opens. `BotTurn` and `BotTurnResult` are the stateless bot contract: a bot gets a `BotTurn` each turn and answers with a `BotTurnResult`, which a client sends as one completing batch.",
     "title": "Island Battles Player API",
     "version": "1.0.0"
   },
@@ -1442,7 +1537,7 @@
     },
     "/generation/commands": {
       "post": {
-        "description": "Requires a place on the game's frozen roster; the lobby is not consulted. Players send send_soldier_group and upgrade_castle commands for castles their team owns; other command types are forbidden (403). upgrade_castle buys the next level of one upgrade type and pays that level's soldier_cost, listed by GET /game/upgrades, from the castle's soldiers. A castle may be upgraded several times in one turn, and each upgrade buys the next level. Every command is checked against the generation and every command already accepted this turn, yours and your teammates', so an accepted command cannot fail when the turn runs. An invalid command rejects the whole batch, and nothing of it is stored. Malformed parameters are 422. Rejections that clients tell apart carry a problem type: a castle that is not in the generation is 422 urn:island-battles:problem:castle-not-found, an unknown upgrade_type is 422 urn:island-battles:problem:unknown-upgrade-type, a castle your team does not own is 403 urn:island-battles:problem:castle-not-owned, an upgrade past its type's max_level, counting this turn's upgrades, is 409 urn:island-battles:problem:upgrade-max-level, and soldiers or an upgrade cost beyond what the castle has left after this turn's reservations is 409 urn:island-battles:problem:insufficient-soldiers. A castle may spend all its soldiers. Complete defaults to true; an empty batch can complete a turn. The last frozen roster completion advances exactly once. The game ends after the turn that leaves one team with castles or soldier groups, a draw when the last teams are eliminated in the same turn, or after the turn that creates generation 300, where the team with the most castles wins. That turn's generation is the last, its state carries the outcome, and every later command conflicts (409) with problem type urn:island-battles:problem:game-ended. Retry the same request UUID and payload safely, also after the game ended; changed payloads and stale new requests conflict. A batch may also carry game log lines, which are stored in order with the generation and read with GET /game/from-lobby/{lobby_id}/logs. A player has at most 100 lines per generation, each of at most 500 characters; a batch over either limit is rejected whole (422) with problem type urn:island-battles:problem:game-log-limit.",
+        "description": "Requires a place on the game's frozen roster; the lobby is not consulted. Players send send_soldier_group and upgrade_castle commands for castles their team owns; other command types are forbidden (403). upgrade_castle buys the next level of one upgrade type and pays that level's soldier_cost, listed by GET /game/upgrades, from the castle's soldiers. A castle may be upgraded several times in one turn, and each upgrade buys the next level. Every command is checked against the generation and every command already accepted this turn, yours and your teammates', so an accepted command cannot fail when the turn runs. An invalid command rejects the whole batch, and nothing of it is stored. Malformed parameters are 422. Rejections that clients tell apart carry a problem type: a castle that is not in the generation is 422 urn:island-battles:problem:castle-not-found, an unknown upgrade_type is 422 urn:island-battles:problem:unknown-upgrade-type, a castle your team does not own is 403 urn:island-battles:problem:castle-not-owned, an upgrade past its type's max_level, counting this turn's upgrades, is 409 urn:island-battles:problem:upgrade-max-level, and soldiers or an upgrade cost beyond what the castle has left after this turn's reservations is 409 urn:island-battles:problem:insufficient-soldiers. A castle may spend all its soldiers. Complete defaults to true; an empty batch can complete a turn. The last frozen roster completion advances exactly once. The game ends after the turn that leaves one team with castles or soldier groups, a draw when the last teams are eliminated in the same turn, or after the turn that creates generation 300, where the team with the most castles wins. That turn's generation is the last, its state carries the outcome, and every later command conflicts (409) with problem type urn:island-battles:problem:game-ended. Retry the same request UUID and payload safely, also after the game ended; changed payloads and stale new requests conflict. A batch may also carry game log lines, which are stored in order with the generation and read with GET /game/from-lobby/{lobby_id}/logs. A player has at most 100 lines per generation, each of at most 500 characters; a batch over either limit is rejected whole (422) with problem type urn:island-battles:problem:game-log-limit. A batch may also carry the memory of the player's bot, any JSON object of at most 64 KiB as compact JSON. The batch with complete true saves it, replacing the player's previous memory, and an absent or null memory clears it; other batches ignore it. GenerationState.memory returns the memory sent with the player's latest completed turn, and the retry hash covers it. Larger memory is rejected whole (422) with problem type urn:island-battles:problem:bot-memory-too-large.",
         "operationId": "registerGenerationCommand",
         "parameters": [
           {

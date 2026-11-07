@@ -78,6 +78,9 @@ type RegisterGenerationCommands struct {
 	Complete     *bool                     `json:"complete,omitempty" doc:"Seals your turn after this batch. Defaults to true."`
 	Commands     []PublicGenerationCommand `json:"commands" maxItems:"1000" nullable:"false"`
 	Logs         []GenerationLogLine       `json:"logs,omitempty" maxItems:"100" doc:"Game log lines written since your previous batch for this generation, appended in order after the lines already stored. At most 100 lines per player per generation, each of at most 500 characters; a batch that would break either limit is rejected whole with 422 and problem type urn:island-battles:problem:game-log-limit."`
+	// Memory is empty when the batch has none; it is left out of the payload
+	// hash then, so batches without memory hash as they always have.
+	Memory BotMemory `json:"memory,omitempty" doc:"Your bot's memory, the BotTurnResult.memory it returned: any JSON object of at most 64 KiB as compact JSON. Only the batch with complete true saves it, replacing your previous memory, and an absent or null memory clears it; other batches ignore it. GenerationState.memory returns it. Larger memory is rejected whole with 422 and problem type urn:island-battles:problem:bot-memory-too-large."`
 }
 
 type GenerationState struct {
@@ -95,6 +98,8 @@ type GenerationState struct {
 	// LogLinesStored lets a restarted client continue counting toward the
 	// game log limit. Pushed events carry 0: a new generation has no lines.
 	LogLinesStored uint `json:"log_lines_stored" doc:"How many game log lines you have stored for this generation, out of the 100 a player may store per generation. 0 when there are none. A client that restarts during a turn continues counting from it."`
+
+	Memory BotMemory `json:"memory" doc:"The memory sent with your latest completed turn of this game, for your bot's next BotTurn.memory. Null before your first completed turn, and after a completed turn without memory."`
 }
 
 // GameOutcomeView is how a finished game ended.

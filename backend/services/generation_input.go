@@ -93,7 +93,11 @@ func (service *GenerationService) Current(ctx context.Context, principal domain.
 		if err != nil {
 			return err
 		}
-		if state, err = generationState(locked, generation, player, inputs); err != nil {
+		memory, err := dal.FindBotMemory(transaction, locked.ID, player.PlayerID)
+		if err != nil {
+			return err
+		}
+		if state, err = generationState(locked, generation, player, inputs, memory); err != nil {
 			return err
 		}
 		return countStoredLogLines(transaction, &state)
@@ -123,6 +127,9 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 		return models.GenerationState{}, reject(422, "commands must be an array of at most 1000 commands")
 	}
 	if err := validateLogLines(request.Logs); err != nil {
+		return models.GenerationState{}, err
+	}
+	if request.Memory, err = validateBotMemory(request.Memory); err != nil {
 		return models.GenerationState{}, err
 	}
 	complete := request.Complete == nil || *request.Complete
@@ -166,7 +173,11 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 			if previous.PayloadHash != payloadHash {
 				return reject(409, "request_id was already used for a different payload")
 			}
-			if state, err = generationState(locked, generation, player, inputs); err != nil {
+			memory, err := dal.FindBotMemory(transaction, locked.ID, player.PlayerID)
+			if err != nil {
+				return err
+			}
+			if state, err = generationState(locked, generation, player, inputs, memory); err != nil {
 				return err
 			}
 			return countStoredLogLines(transaction, &state)
@@ -205,6 +216,16 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 		}
 		input.Completed = complete
 		if err := dal.StoreGenerationInput(transaction, &input); err != nil {
+			return err
+		}
+		// Only the completing batch saves memory, so the stored memory is
+		// always the one sent with the player's latest completed turn.
+		memory := request.Memory
+		if complete {
+			if err := dal.SaveBotMemory(transaction, &models.GamePlayerBotMemory{GameID: locked.ID, PlayerID: player.PlayerID, GenerationID: generation.ID, Memory: memory}); err != nil {
+				return err
+			}
+		} else if memory, err = dal.FindBotMemory(transaction, locked.ID, player.PlayerID); err != nil {
 			return err
 		}
 		ledger := models.GenerationRequest{GameID: locked.ID, PlayerID: principal.PlayerID, RequestID: request.RequestID, GenerationID: generation.ID, PayloadHash: payloadHash}
@@ -251,11 +272,15 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 				return err
 			}
 			inputs = nil
-			if events, err = generationEvents(locked, generation, players); err != nil {
+			memories, err := dal.LoadBotMemories(transaction, locked.ID)
+			if err != nil {
+				return err
+			}
+			if events, err = generationEvents(locked, generation, players, memories); err != nil {
 				return err
 			}
 		}
-		if state, err = generationState(locked, generation, player, inputs); err != nil {
+		if state, err = generationState(locked, generation, player, inputs, memory); err != nil {
 			return err
 		}
 		return countStoredLogLines(transaction, &state)
@@ -327,13 +352,15 @@ func validateCommands(generation *models.Generation, teamColor uint, inputs []mo
 	return commands, nil
 }
 
-func generationState(game *models.Game, generation *models.Generation, player models.FrozenGamePlayer, inputs []models.GenerationInput) (models.GenerationState, error) {
+// generationState builds a player's state. memory is the memory sent with
+// the player's latest completed turn.
+func generationState(game *models.Game, generation *models.Generation, player models.FrozenGamePlayer, inputs []models.GenerationInput, memory models.BotMemory) (models.GenerationState, error) {
 	channel, err := domain.PlayerChannel(player.PlayerID)
 	if err != nil {
 		return models.GenerationState{}, err
 	}
 	state := models.GenerationState{GameID: game.ID, LobbyID: *game.LobbyID, GenerationID: generation.ID, PlayerID: player.PlayerID, TeamColor: player.TeamColor, Channel: channel,
-		Generation: GenerationView(generation), Outcome: outcomeView(game)}
+		Generation: GenerationView(generation), Outcome: outcomeView(game), Memory: memory}
 	for _, input := range inputs {
 		if input.PlayerID == player.PlayerID {
 			state.Submitted = input.Completed
@@ -344,15 +371,16 @@ func generationState(game *models.Game, generation *models.Generation, player mo
 
 // generationEvents builds each roster player's event for a new generation, for
 // pushing to their personal channel once the transaction commits. The
-// generation that ends the game is pushed as game.ended instead.
-func generationEvents(game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer) ([]realtime.Publication, error) {
+// generation that ends the game is pushed as game.ended instead. memories
+// holds each player's stored memory by player ID.
+func generationEvents(game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer, memories map[string]models.BotMemory) ([]realtime.Publication, error) {
 	events := make([]realtime.Publication, 0, len(players))
 	for _, player := range players {
 		channel, err := domain.PlayerChannel(player.PlayerID)
 		if err != nil {
 			return nil, err
 		}
-		state, err := generationState(game, generation, player, nil)
+		state, err := generationState(game, generation, player, nil, memories[player.PlayerID])
 		if err != nil {
 			return nil, err
 		}

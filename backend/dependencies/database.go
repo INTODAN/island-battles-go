@@ -101,7 +101,7 @@ func MigrateSchema(ctx context.Context, db *gorm.DB) error {
 		return fmt.Errorf("migrate map template schema: %w", err)
 	}
 	err := db.WithContext(ctx).AutoMigrate(&models.Game{}, &models.Map{}, &models.Castle{},
-		&models.Generation{}, &models.SoldierGroup{}, &models.Command{}, &models.TeamBindingRecord{}, &models.FrozenGamePlayer{}, &models.GenerationInput{}, &models.GenerationRequest{}, &models.GenerationLog{})
+		&models.Generation{}, &models.SoldierGroup{}, &models.Command{}, &models.TeamBindingRecord{}, &models.FrozenGamePlayer{}, &models.GenerationInput{}, &models.GenerationRequest{}, &models.GenerationLog{}, &models.GamePlayerBotMemory{})
 	if err != nil {
 		return fmt.Errorf("initialize game schema: %w", err)
 	}
