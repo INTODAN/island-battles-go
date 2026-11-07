@@ -4,8 +4,8 @@
 # Starting this workflow is the approval: only people with write access can,
 # only from main, and the deploy jobs run in the `production` environment,
 # which is limited to main. It runs the checks, deploys (the VM first when its
-# inputs changed since the last release, then the backend, then the smoke
-# test), and only after all of that creates the tags and the GitHub release.
+# inputs changed since the last release, then the backend, then the web client
+# in /play/, then the smoke test), and only after all of that creates the tags and the GitHub release.
 # A failed check or deploy leaves no tag and no release.
 name: Release
 
@@ -96,8 +96,21 @@ jobs:
       target: backend
       version: ${{ needs.plan.outputs.version }}
 
-  smoke:
+  # The client built from the released commit goes live with the backend it
+  # talks to; the smoke test checks that /play/ serves it.
+  deploy_web:
     needs: [plan, deploy_backend]
+    if: ${{ !cancelled() && !failure() }}
+    uses: ./.github/workflows/deploy.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      target: web
+      version: ${{ needs.plan.outputs.version }}
+
+  smoke:
+    needs: [plan, deploy_web]
     if: ${{ !cancelled() && !failure() }}
     uses: ./.github/workflows/deploy.yml
     permissions:
@@ -106,6 +119,7 @@ jobs:
     with:
       target: smoke
       version: ${{ needs.plan.outputs.version }}
+      web_bundle: ${{ needs.deploy_web.outputs.web_bundle }}
 
   release:
     needs: [plan, smoke]
@@ -147,14 +161,14 @@ jobs:
 
           The lobby module is tagged lobby/$VERSION."
 
-      # Hook for #117 (publishing the Python clients to PyPI) and #114 (the
-      # web client in /play/): add jobs here with `needs: release`. A release
+      # Hook for #117 (publishing the Python clients to PyPI): add jobs here
+      # with `needs: release`. A release
       # made with GITHUB_TOKEN doesn't trigger `on: release`, so they belong
       # in this workflow, not in a workflow of their own.
 
   # Says why nothing was tagged. The failed job above is the cause.
   not_released:
-    needs: [guard, check, plan, deploy_vm, deploy_backend, smoke, release]
+    needs: [guard, check, plan, deploy_vm, deploy_backend, deploy_web, smoke, release]
     if: ${{ always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
     runs-on: ubuntu-24.04
     steps:

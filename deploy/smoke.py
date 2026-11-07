@@ -18,6 +18,12 @@ CloudFront serves from the Lambda Function URL (#75), and checks, in order:
    certificate and the game's URL as the browser origin.
 7. Centrifugo subscribes the guest to its personal channel, so Centrifugo
    reaches the backend's subscribe proxy on the Function URL.
+
+With `--expected-web-bundle` (the entry script of the web client just
+uploaded, such as `assets/index-1a2b3c4d.js`), it also checks that `/play/`
+returns 200, that its `index.html` loads that script, and that the script is
+served (#114). Without it, the web client is not checked: nothing may be
+uploaded yet.
 """
 from __future__ import annotations
 
@@ -26,6 +32,7 @@ import asyncio
 import datetime as dt
 import json
 import os
+import re
 import sys
 import tempfile
 import uuid
@@ -41,6 +48,10 @@ from websockets.exceptions import WebSocketException
 MINIMUM_REMAINING_SESSION = dt.timedelta(hours=2)
 # Covers a Lambda cold start, and Centrifugo's subscribe proxy call to it.
 HTTP_TIMEOUT_SECONDS = 30
+# CloudFront finishes an invalidation a few seconds after the upload script
+# creates it; a page cached before it can be served until then.
+WEB_CLIENT_ATTEMPTS = 18
+WEB_CLIENT_RETRY_SECONDS = 5
 WEBSOCKET_TIMEOUT_SECONDS = 30
 
 
@@ -137,6 +148,36 @@ async def check_backend(http: httpx.AsyncClient, session_file: Path,
     return session, connection_token
 
 
+def web_bundle_referenced(index_html: str, bundle: str) -> bool:
+    """True when the page loads the script, under /play/ and with the exact file name."""
+    return f'"/play/{bundle}"' in index_html
+
+
+async def check_web_client(http: httpx.AsyncClient, expected_bundle: str,
+                           retry_seconds: float = WEB_CLIENT_RETRY_SECONDS) -> None:
+    """Checks that /play/ serves the build whose entry script is expected_bundle."""
+    problem = ""
+    for attempt in range(WEB_CLIENT_ATTEMPTS):
+        if attempt:
+            await asyncio.sleep(retry_seconds)
+        page = await http.get("/play/")
+        if page.status_code != 200:
+            problem = f"/play/ returned {page.status_code}, expected 200"
+        elif not web_bundle_referenced(page.text, expected_bundle):
+            problem = (f"/play/ loads a different build than {expected_bundle}. CloudFront may still serve the "
+                       "previous index.html from its cache, or the upload didn't happen")
+        else:
+            break
+    else:
+        raise SmokeTestFailure(problem)
+    report(f"/play/ loads {expected_bundle}")
+
+    bundle = await http.get(f"/play/{expected_bundle}")
+    if bundle.status_code != 200:
+        raise SmokeTestFailure(f"/play/{expected_bundle} returned {bundle.status_code}, expected 200")
+    report("the web client's script is served")
+
+
 async def check_centrifugo(game_origin: str, session: dict[str, str], connection_token: dict[str, str]) -> None:
     websocket_url = connection_token["websocket_url"]
     if game_origin.startswith("https://") and not websocket_url.startswith("wss://"):
@@ -170,10 +211,13 @@ async def check_centrifugo(game_origin: str, session: dict[str, str], connection
         report(f"subscribed to {channel} through the backend's subscribe proxy")
 
 
-async def run(game_url: str, session_file: Path, expected_version: str | None = None) -> None:
+async def run(game_url: str, session_file: Path, expected_version: str | None = None,
+              expected_web_bundle: str | None = None) -> None:
     game_origin = origin_of(game_url)
     async with httpx.AsyncClient(base_url=game_origin, timeout=HTTP_TIMEOUT_SECONDS) as http:
         session, connection_token = await check_backend(http, session_file, expected_version)
+        if expected_web_bundle:
+            await check_web_client(http, expected_web_bundle)
     await check_centrifugo(game_origin, session, connection_token)
 
 
@@ -184,9 +228,14 @@ def main() -> int:
                         help="where the guest credential is kept between runs")
     parser.add_argument("--expected-version", default=None,
                         help="fail unless /healthz reports this version, such as v0.1.0")
+    parser.add_argument("--expected-web-bundle", default=None,
+                        help="also fail unless /play/ loads this script, such as assets/index-1a2b3c4d.js")
     arguments = parser.parse_args()
+    if arguments.expected_web_bundle and not re.fullmatch(r"assets/[\w.-]+\.js", arguments.expected_web_bundle):
+        parser.error("--expected-web-bundle must look like assets/index-1a2b3c4d.js")
     try:
-        asyncio.run(run(arguments.game_url, arguments.session_file, arguments.expected_version))
+        asyncio.run(run(arguments.game_url, arguments.session_file, arguments.expected_version,
+                        arguments.expected_web_bundle))
     except SmokeTestFailure as failure:
         print(f"FAILED: {failure}", file=sys.stderr)
         return 1
