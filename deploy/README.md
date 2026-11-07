@@ -398,14 +398,16 @@ gh workflow run release.yml --ref main -f bump=patch   # or minor, or major
 
 Or use the **Actions** tab, **Release**, **Run workflow** on `main`.
 
-**Starting it is the approval.** Only people with write access can start it, only from `main` (any other branch fails at once, before anything runs), and its deploy jobs run in the `production` environment, which is limited to `main`, like every Deploy run. GitHub offers no required reviewer on a private repository's environment on a personal plan, so the run doesn't wait for a second approval. Read what merged since the last release before you start it.
+**Starting it is the approval.** Only people with write access can start it, only from `main` (any other branch fails at once, before anything runs), and its deploy jobs run in the `production` environment, which is limited to `main`, like every Deploy run. GitHub offers no required reviewer on a private repository's environment on a personal plan, so the run doesn't wait for a second approval. Read what merged since the last release before you start it. Start it when no other Deploy run is going: a manual Deploy that runs during a release can make the release's smoke step fail, and then no tag is created.
 
 **What it does,** in order. A failure anywhere stops the rest and leaves no tag and no release:
 
 1. **Checks** the commit with the same checks as a pull request (`checks.yml`).
 2. **Plans** the version. The previous release is the highest `vX.Y.Z` tag. The first release, with no tag yet, is `v0.1.0`, whatever `bump` says. The run's summary shows the version, the previous release and why the VM is or isn't deployed.
 3. **Deploys the VM** when the plan says so, then **the backend**, then runs the **smoke test**, each one a call of the Deploy workflow, one at a time. The backend is built with the version, and the smoke test fails unless `/healthz` reports it.
-4. **Releases:** creates the annotated tags `vX.Y.Z` and `lobby/vX.Y.Z` (the lobby module, the same version, so other Go modules can require it) on the deployed commit, and a GitHub release with generated notes that say whether the VM was redeployed.
+4. **Releases:** creates the annotated tags `vX.Y.Z` and `lobby/vX.Y.Z` on the deployed commit, and a GitHub release with generated notes that say whether the VM was redeployed. The `lobby/vX.Y.Z` tag marks the version of the lobby module, which is the same version; the module path `islandBattles/lobby` isn't go-gettable, so no Go module can fetch it by that path.
+
+If the tags were pushed but `gh release create` failed, re-running fails at the tag push. Create the release by hand with `gh release create vX.Y.Z --verify-tag --generate-notes`.
 
 **The VM deploy is automatic.** If anything `scripts/vm.sh deploy` uses changed since the previous release, the release redeploys the VM first and **the bump is major**, whatever you asked for, so nobody has to remember. Those inputs are `deploy/ansible/` (playbooks, roles and variables), `deploy/vm.example.yml`, `scripts/vm.sh` and `deploy/deploy_files.py`; the list is `vm_inputs` in `scripts/release-plan.sh`. The first release has nothing to compare with, so it deploys the VM too. Redeploying is safe: the playbooks are idempotent. Anything the VM deploy needs that isn't in the repository, such as `-e app_generate_secrets=true`, still needs your machine.
 
@@ -420,7 +422,11 @@ gh workflow run deploy.yml --ref main -f target=backend -f release_tag=v0.1.0
 gh workflow run deploy.yml --ref main -f target=smoke -f release_tag=v0.1.0
 ```
 
-The workflow itself must run on `main`, because the `production` environment accepts nothing else. `release_tag` makes it check out that tag, which must be on `main`, build it with its version, and (for `smoke`) expect it. Add `-f target=vm -f release_tag=...` first if the VM changed in between. A rollback creates no tag or release, and the migrations only go forward: the older code runs against the newer schema, so roll back only past releases whose migrations the older code tolerates, or fix forward with a new release.
+A rollback is only for releases whose difference from the tag is code only: no change under `deploy/terraform/` and no VM change since that tag. A rollback runs the tag's `scripts/aws.sh` and the tag's Terraform configuration, so it can refuse, fail with AccessDenied, or revert Terraform-managed Lambda settings. Otherwise fix forward with a new release.
+
+Don't add `-f target=vm` to a rollback. Running older Ansible against a VM configured by newer playbooks can downgrade containers, including Postgres. Don't do it without a database backup and the owner's machine.
+
+The workflow itself must run on `main`, because the `production` environment accepts nothing else. `release_tag` makes it check out that tag, which must be on `main`, build it with its version, and (for `smoke`) expect it. A rollback creates no tag or release, and the migrations only go forward: the older code runs against the newer schema, so roll back only past releases whose migrations the older code tolerates.
 
 **Later additions,** the web client in `/play/` (#114) and publishing the Python clients (#117), are jobs that `need` the `release` job in `release.yml`. A release made with the workflow's token doesn't trigger `on: release` workflows, so they can't be separate workflows.
 

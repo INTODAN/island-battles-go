@@ -100,12 +100,13 @@ jobs:
           fi
 
       # A release tag is checked out whole, so the scripts and the code that
-      # deploy are the release's own. A called run checks out the commit the
-      # release workflow started on.
+      # deploy are the release's own, with full history for the check that
+      # the tag is on main below. Other runs need only their commit. The
+      # strings matter: 0 is falsy in a GitHub expression, so 0 would give 1.
       - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.release_tag || github.sha }}
-          fetch-depth: ${{ inputs.release_tag != '' && 0 || 1 }}
+          fetch-depth: ${{ inputs.release_tag != '' && '0' || '1' }}
 
       # The environment limits the workflow's own ref, not the code it checks
       # out, so require the tag's commit to be merged to main.
