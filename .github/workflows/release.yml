@@ -1,0 +1,163 @@
+# Releases the backend and the lobby, started by hand from main (deploy/README.md,
+# "Releasing"). Merging to main releases nothing.
+#
+# Starting this workflow is the approval: only people with write access can,
+# only from main, and the deploy jobs run in the `production` environment,
+# which is limited to main. It runs the checks, deploys (the VM first when its
+# inputs changed since the last release, then the backend, then the smoke
+# test), and only after all of that creates the tags and the GitHub release.
+# A failed check or deploy leaves no tag and no release.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Which part of the version to raise. A release whose VM deploy inputs changed is always major."
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: read
+
+# One release at a time. This group must differ from `deploy`, the group of the
+# Deploy workflow's job that this workflow calls: a caller holding the group
+# its callee waits for would deadlock.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # Fails on any other ref, so the refusal shows in the run instead of every
+  # job being skipped.
+  guard:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check that the run is on main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::A release starts only from main, not from ${GITHUB_REF}. Nothing was tagged or deployed."
+          exit 1
+
+  check:
+    needs: guard
+    uses: ./.github/workflows/checks.yml
+
+  plan:
+    needs: check
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      previous: ${{ steps.plan.outputs.previous }}
+      vm: ${{ steps.plan.outputs.vm }}
+    steps:
+      # All history and tags, to find the previous release and diff against it.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - id: plan
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          scripts/release-plan.sh "$BUMP" "$GITHUB_SHA" >"$RUNNER_TEMP/outputs" 2>"$RUNNER_TEMP/summary" || {
+            cat "$RUNNER_TEMP/summary"
+            echo "::error::$(tail -n 1 "$RUNNER_TEMP/summary")"
+            exit 1
+          }
+          cat "$RUNNER_TEMP/summary" >>"$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/outputs" >>"$GITHUB_OUTPUT"
+
+  # Each deploy is a call of the Deploy workflow, whose job runs in the
+  # `production` environment (an environment can't be set on a calling job),
+  # needs id-token from here, and holds the group `deploy` while it runs.
+  deploy_vm:
+    needs: plan
+    if: needs.plan.outputs.vm == 'true'
+    uses: ./.github/workflows/deploy.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      target: vm
+      version: ${{ needs.plan.outputs.version }}
+
+  deploy_backend:
+    needs: [plan, deploy_vm]
+    # deploy_vm is skipped when the VM stays as it is.
+    if: ${{ !cancelled() && !failure() }}
+    uses: ./.github/workflows/deploy.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      target: backend
+      version: ${{ needs.plan.outputs.version }}
+
+  smoke:
+    needs: [plan, deploy_backend]
+    if: ${{ !cancelled() && !failure() }}
+    uses: ./.github/workflows/deploy.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      target: smoke
+      version: ${{ needs.plan.outputs.version }}
+
+  release:
+    needs: [plan, smoke]
+    if: ${{ !cancelled() && !failure() }}
+    runs-on: ubuntu-24.04
+    # The only job that writes to the repository.
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      PREVIOUS: ${{ needs.plan.outputs.previous }}
+      VM: ${{ needs.plan.outputs.vm }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+
+      # Annotated tags on the commit that was checked and deployed. The lobby
+      # module is tagged with the same version, as Go modules in a
+      # subdirectory require.
+      - name: Tag the release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$VERSION" -m "Release $VERSION" "$GITHUB_SHA"
+          git tag -a "lobby/$VERSION" -m "Lobby $VERSION" "$GITHUB_SHA"
+          git push --atomic origin "refs/tags/$VERSION" "refs/tags/lobby/$VERSION"
+
+      - name: Create the GitHub release
+        run: |
+          if [[ "$VM" == true ]]; then
+            note="The VM was redeployed too: something its deploy uses changed since ${PREVIOUS:-the start}."
+          else
+            note="The VM was not redeployed: nothing its deploy uses changed since $PREVIOUS."
+          fi
+          start=()
+          [[ -z "$PREVIOUS" ]] || start=(--notes-start-tag "$PREVIOUS")
+          gh release create "$VERSION" --verify-tag --title "$VERSION" --generate-notes \
+            "${start[@]}" --notes "$note
+
+          The lobby module is tagged lobby/$VERSION."
+
+      # Hook for #117 (publishing the Python clients to PyPI) and #114 (the
+      # web client in /play/): add jobs here with `needs: release`. A release
+      # made with GITHUB_TOKEN doesn't trigger `on: release`, so they belong
+      # in this workflow, not in a workflow of their own.
+
+  # Says why nothing was tagged. The failed job above is the cause.
+  not_released:
+    needs: [guard, check, plan, deploy_vm, deploy_backend, smoke, release]
+    if: ${{ always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: |
+          echo "::error::The release was not made: a step above failed or was cancelled. No tag and no GitHub release were created (unless the release job itself is the failed one: look for the tags in the repository before starting again). Fix the cause and start the release again."
+          exit 1
