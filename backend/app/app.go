@@ -139,7 +139,7 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	if err := registerPages(router); err != nil {
 		return nil, err
 	}
-	router.Get("/healthz", func(response http.ResponseWriter, request *http.Request) { response.WriteHeader(http.StatusNoContent) })
+	router.Get("/healthz", healthz(Version))
 	return router, nil
 }
 

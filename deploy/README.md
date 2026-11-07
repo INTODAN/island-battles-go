@@ -388,6 +388,44 @@ The Deploy workflow, `.github/workflows/deploy.yml`, runs the same scripts on a 
 
 **What still needs your own machine:** `-e app_generate_secrets=true`, dumps, restores and moves, and the setup above.
 
+## Releasing
+
+A release deploys the backend and the lobby, which is compiled into the same Lambda, tags the commit and publishes a GitHub release. Merging to `main` releases nothing: a person starts the Release workflow, `.github/workflows/release.yml`, by hand.
+
+```sh
+gh workflow run release.yml --ref main -f bump=patch   # or minor, or major
+```
+
+Or use the **Actions** tab, **Release**, **Run workflow** on `main`.
+
+**Starting it is the approval.** Only people with write access can start it, only from `main` (any other branch fails at once, before anything runs), and its deploy jobs run in the `production` environment, which is limited to `main`, like every Deploy run. GitHub offers no required reviewer on a private repository's environment on a personal plan, so the run doesn't wait for a second approval. Read what merged since the last release before you start it.
+
+**What it does,** in order. A failure anywhere stops the rest and leaves no tag and no release:
+
+1. **Checks** the commit with the same checks as a pull request (`checks.yml`).
+2. **Plans** the version. The previous release is the highest `vX.Y.Z` tag. The first release, with no tag yet, is `v0.1.0`, whatever `bump` says. The run's summary shows the version, the previous release and why the VM is or isn't deployed.
+3. **Deploys the VM** when the plan says so, then **the backend**, then runs the **smoke test**, each one a call of the Deploy workflow, one at a time. The backend is built with the version, and the smoke test fails unless `/healthz` reports it.
+4. **Releases:** creates the annotated tags `vX.Y.Z` and `lobby/vX.Y.Z` (the lobby module, the same version, so other Go modules can require it) on the deployed commit, and a GitHub release with generated notes that say whether the VM was redeployed.
+
+**The VM deploy is automatic.** If anything `scripts/vm.sh deploy` uses changed since the previous release, the release redeploys the VM first and **the bump is major**, whatever you asked for, so nobody has to remember. Those inputs are `deploy/ansible/` (playbooks, roles and variables), `deploy/vm.example.yml`, `scripts/vm.sh` and `deploy/deploy_files.py`; the list is `vm_inputs` in `scripts/release-plan.sh`. The first release has nothing to compare with, so it deploys the VM too. Redeploying is safe: the playbooks are idempotent. Anything the VM deploy needs that isn't in the repository, such as `-e app_generate_secrets=true`, still needs your machine.
+
+**Releases can't create AWS resources.** The deploy role only updates the function. When a release needs a new or changed resource, such as a Terraform change under `deploy/terraform/`, merge it first and run `plan` and then `apply` on `main` ([Deploying from GitHub Actions](#deploying-from-github-actions)) before you start the release. The release's backend deploy refuses a plan that touches Lightsail, the certificate or the distribution.
+
+**The version.** `/healthz` still answers 204 and reports the build's version in the `X-Island-Battles-Version` header (`dev` for builds that set none). `ISLAND_BATTLES_VERSION=v0.1.0 scripts/aws.sh deploy` builds with a version, and `ISLAND_BATTLES_EXPECTED_VERSION=v0.1.0 scripts/vm.sh smoke` checks it. A plain `backend` deploy, or a `plan`/`apply` that publishes the backend, builds the commit as `dev`; the next release sets the version again.
+
+**Rolling back:** start the Deploy workflow on `main` with `target` `backend` and `release_tag` set to the previous release, for example:
+
+```sh
+gh workflow run deploy.yml --ref main -f target=backend -f release_tag=v0.1.0
+gh workflow run deploy.yml --ref main -f target=smoke -f release_tag=v0.1.0
+```
+
+The workflow itself must run on `main`, because the `production` environment accepts nothing else. `release_tag` makes it check out that tag, which must be on `main`, build it with its version, and (for `smoke`) expect it. Add `-f target=vm -f release_tag=...` first if the VM changed in between. A rollback creates no tag or release, and the migrations only go forward: the older code runs against the newer schema, so roll back only past releases whose migrations the older code tolerates, or fix forward with a new release.
+
+**Later additions,** the web client in `/play/` (#114) and publishing the Python clients (#117), are jobs that `need` the `release` job in `release.yml`. A release made with the workflow's token doesn't trigger `on: release` workflows, so they can't be separate workflows.
+
+**First release, once after merging:** start `release.yml` on `main`. It will be `v0.1.0` and deploys the VM as well.
+
 ## Smoke test
 
 ```sh
@@ -396,7 +434,7 @@ scripts/vm.sh smoke
 
 It reads `game_url` from your settings and checks the whole path, through CloudFront:
 
-1. `/healthz` returns 204, with a valid certificate for the game's name.
+1. `/healthz` returns 204, with a valid certificate for the game's name. With `ISLAND_BATTLES_EXPECTED_VERSION` set, its `X-Island-Battles-Version` header must name that version ([Releasing](#releasing)).
 2. `/` leads to the lobby UI.
 3. A guest credential works, and the backend issues a connection token for it, which needs Postgres.
 4. An authenticated GET reaches the backend with its `Authorization` header. CloudFront strips the header from GET requests unless the origin request policy forwards it.

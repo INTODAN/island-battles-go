@@ -37,6 +37,8 @@ Usage:
       new code and deploy/local/lambda.env's settings to the Lambda. Doesn't
       ask, and refuses a plan that changes Lightsail resources or the game's
       certificate or distribution, or deletes anything. Never touches the VM.
+      ISLAND_BATTLES_VERSION=v0.1.0 embeds that version in any build here;
+      /healthz reports it in the X-Island-Battles-Version header ("dev" if unset).
   scripts/aws.sh plan <directory>
       Build the backend and plan, like apply, without asking or applying.
       Saves the plan, the build it packages and the plan as text in the
@@ -168,12 +170,19 @@ require_current_concurrency_limit() {
 }
 
 # The build command from backend/README.md. Terraform zips the result.
+# ISLAND_BATTLES_VERSION (the release workflow sets it, e.g. v0.1.0) is embedded
+# as the version /healthz reports; without it the binary says "dev".
 build_backend() {
   require_command go
+  local version="${ISLAND_BATTLES_VERSION:-dev}"
+  if [[ ! "$version" =~ ^[A-Za-z0-9._+-]+$ ]]; then
+    echo "ISLAND_BATTLES_VERSION must be a plain version such as v0.1.0, not '$version'." >&2
+    exit 1
+  fi
   mkdir -p "$build_directory"
   echo "Building the backend for Lambda..."
   (cd "$repository_root" && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 \
-    go build -tags lambda.norpc -trimpath -ldflags='-s -w' -o "$build_directory/bootstrap" ./backend/cmd/lambda)
+    go build -tags lambda.norpc -trimpath -ldflags="-s -w -X islandBattles/backend/app.Version=$version" -o "$build_directory/bootstrap" ./backend/cmd/lambda)
 }
 
 # Reads one KEY=value line from lambda.env without evaluating it as shell. Like
