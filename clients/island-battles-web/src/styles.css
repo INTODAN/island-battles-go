@@ -14,3 +14,52 @@ body {
   outline: none;
   touch-action: none;
 }
+
+.fixture-bar {
+  position: fixed;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+  font:
+    13px system-ui,
+    sans-serif;
+  color: #202d40;
+}
+
+.fixture-bar input {
+  flex: 1;
+  min-width: 60px;
+}
+
+.fixture-bar span {
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.board-tooltip {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  max-width: 260px;
+  padding: 6px 9px;
+  border-radius: 7px;
+  background: rgba(20, 32, 46, 0.92);
+  color: #fff;
+  font:
+    12px / 1.35 system-ui,
+    sans-serif;
+  pointer-events: none;
+}
+
+.board-tooltip[hidden] {
+  display: none;
+}

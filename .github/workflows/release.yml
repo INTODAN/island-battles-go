@@ -4,9 +4,9 @@
 # Starting this workflow is the approval: only people with write access can,
 # only from main, and the deploy jobs run in the `production` environment,
 # which is limited to main. It runs the checks, deploys (the VM first when its
-# inputs changed since the last release, then the backend, then the smoke
-# test), and only after all of that creates the tags and the GitHub release.
-# A failed check or deploy leaves no tag and no release.
+# inputs changed since the last release, then the backend, then the web client
+# in /play/, then the smoke test), and only after all of that creates the tags
+# and the GitHub release. A failed check or deploy leaves no tag and no release.
 name: Release
 
 on:
@@ -96,8 +96,21 @@ jobs:
       target: backend
       version: ${{ needs.plan.outputs.version }}
 
-  smoke:
+  # The client built from the released commit goes live with the backend it
+  # talks to; the smoke test checks that /play/ serves it.
+  deploy_web:
     needs: [plan, deploy_backend]
+    if: ${{ !cancelled() && !failure() }}
+    uses: ./.github/workflows/deploy.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      target: web
+      version: ${{ needs.plan.outputs.version }}
+
+  smoke:
+    needs: [plan, deploy_web]
     if: ${{ !cancelled() && !failure() }}
     uses: ./.github/workflows/deploy.yml
     permissions:
@@ -106,6 +119,7 @@ jobs:
     with:
       target: smoke
       version: ${{ needs.plan.outputs.version }}
+      web_bundle: ${{ needs.deploy_web.outputs.web_bundle }}
 
   release:
     needs: [plan, smoke]
@@ -147,14 +161,71 @@ jobs:
 
           The lobby module is tagged lobby/$VERSION."
 
-      # Hook for #117 (publishing the Python clients to PyPI) and #114 (the
-      # web client in /play/): add jobs here with `needs: release`. A release
+      # Hook for #117 (publishing the Python clients to PyPI): add jobs here
+      # with `needs: release`. A release
       # made with GITHUB_TOKEN doesn't trigger `on: release`, so they belong
       # in this workflow, not in a workflow of their own.
 
+  # Publishes the Python clients (#117) at the release's version, after the
+  # tags and the GitHub release exist, so a PyPI version never lacks its tag.
+  # It needs `release` rather than the deploy jobs: the deploy is done by then,
+  # and a failure here fails only this job and the run, visibly. The deploy and
+  # the tags and release stay. Fix the cause and re-run this job alone; the
+  # `skip-existing` setting makes a re-run skip the files a partial run uploaded.
+  # Trusted publishing: no PyPI token exists. The PyPI pending publishers name
+  # this workflow and the `pypi` environment (deploy/README.md, "Publishing the
+  # Python clients").
+  publish-python:
+    needs: [plan, release]
+    if: ${{ !cancelled() && needs.release.result == 'success' }}
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi
+    permissions:
+      contents: read
+      # Only the publish step uses it; PyPI exchanges this token for an upload token.
+      id-token: write
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v6
+
+      # The version comes from the tag and is set in this run's working copy
+      # only, never committed. PyPI wants PEP 440, so `v0.1.0` becomes `0.1.0`.
+      # The lobby client pins the generated package to the same version, so
+      # the two install together.
+      - name: Set the release version
+        run: |
+          v="${VERSION#v}"
+          for dir in lobby/clients/lobby-python/generated lobby/clients/lobby-python clients/island-battles-python; do
+            (cd "$dir" && uv version --frozen "$v")
+          done
+          sed -i -E "s/^(    )\"mpl-lobby-api-client\",/\1\"mpl-lobby-api-client==$v\",/" lobby/clients/lobby-python/pyproject.toml
+          grep -qx "    \"mpl-lobby-api-client==$v\"," lobby/clients/lobby-python/pyproject.toml
+
+      - name: Build the packages
+        run: |
+          for dir in lobby/clients/lobby-python/generated lobby/clients/lobby-python clients/island-battles-python; do
+            uv build "$dir" --out-dir "$RUNNER_TEMP/dist"
+          done
+          v="${VERSION#v}"
+          for name in mpl_lobby_api_client mpl_lobby_client island_battles_python; do
+            test -f "$RUNNER_TEMP/dist/${name}-${v}-py3-none-any.whl"
+            test -f "$RUNNER_TEMP/dist/${name}-${v}.tar.gz"
+          done
+          ls -l "$RUNNER_TEMP/dist"
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: ${{ runner.temp }}/dist
+          skip-existing: true
+
   # Says why nothing was tagged. The failed job above is the cause.
   not_released:
-    needs: [guard, check, plan, deploy_vm, deploy_backend, smoke, release]
+    needs: [guard, check, plan, deploy_vm, deploy_backend, deploy_web, smoke, release]
     if: ${{ always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
     runs-on: ubuntu-24.04
     steps:
