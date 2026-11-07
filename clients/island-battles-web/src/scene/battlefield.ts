@@ -46,13 +46,13 @@ type SoldierGroup = components["schemas"]["SoldierGroup"];
 /** The most upgrade rings drawn around a castle; the label still gives the exact levels. */
 const MAX_RINGS = 6;
 
-interface CastleEntity {
+export interface CastleEntity {
   parts: CastleParts;
   rings: Mesh[];
   team: number;
 }
 
-interface GroupEntity {
+export interface GroupEntity {
   parts: BoatParts;
 }
 
@@ -139,7 +139,7 @@ function prune<Key, Entity>(
   }
 }
 
-function setLabel(
+export function setLabel(
   field: Battlefield,
   id: string,
   spec: Partial<LabelSpec> & Pick<LabelSpec, "lines" | "anchor">,
@@ -157,7 +157,7 @@ function setLabel(
 }
 
 /** A node at a height above `parent`, which a label links to. It is found by name and reused. */
-function anchorFor(
+export function anchorFor(
   scene: Scene,
   name: string,
   parent: TransformNode,
@@ -175,7 +175,7 @@ function anchorFor(
   return anchor;
 }
 
-function updateCastle(
+export function updateCastle(
   field: Battlefield,
   castle: Castle,
   entity: CastleEntity,
@@ -224,7 +224,12 @@ function updateCastle(
   });
 }
 
-function updateGroup(
+/** Boats grow gently with their soldiers: ~1.05 for 1, ~1.2 for 10, ~1.6 for 100. */
+export function boatScale(soldiers: number): number {
+  return Math.min(1.7, 1 + 0.18 * Math.log2(1 + soldiers / 10));
+}
+
+export function updateGroup(
   field: Battlefield,
   group: SoldierGroup,
   destination: Castle | undefined,
@@ -238,10 +243,7 @@ function updateGroup(
     const target = toWorld(destination);
     root.rotation.y = Math.atan2(target.x - world.x, target.z - world.z);
   }
-  // Boats grow gently with their soldiers: ~1.05 for 1, ~1.2 for 10, ~1.6 for 100.
-  body.scaling.setAll(
-    Math.min(1.7, 1 + 0.18 * Math.log2(1 + group.soldiers / 10)),
-  );
+  body.scaling.setAll(boatScale(group.soldiers));
   const color = teamColorHex(group.team_color);
   for (const mesh of hull) mesh.material = materials.lit(color);
 
@@ -385,7 +387,10 @@ function setRibbon(mesh: Mesh, points: number[], indices: number[]): void {
   data.applyToMesh(mesh, true);
 }
 
-function updateHeadings(field: Battlefield, generation: Generation): void {
+export function updateHeadings(
+  field: Battlefield,
+  generation: Generation,
+): void {
   const { scene, materials } = field;
   const segments = computeHeadings(
     generation.castles,
