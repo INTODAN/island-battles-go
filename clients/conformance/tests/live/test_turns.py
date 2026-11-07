@@ -6,7 +6,6 @@ from datetime import datetime
 from uuid import uuid4
 
 from integration.test_live import EVENTS, container
-
 from island_conformance.adapter import AdapterProcess
 from island_conformance.live import (
     COMMANDS,
@@ -55,6 +54,10 @@ async def test_bot_receives_the_authoritative_turn_and_answers_with_one_batch(
     assert turn["team_color"] == state["team_color"]
     assert turn["game_id"] == state["game_id"]
     assert turn["memory"] is None
+    # The table is the one the server lists, and every turn has the same one.
+    assert (
+        turn["upgrades"] == (await match.http.get("/game/upgrades")).json()["upgrades"]
+    )
     assert (turn["turn_deadline_at"] is None) == (state.get("turn_deadline_at") is None)
     if turn["turn_deadline_at"] is not None:
         assert datetime.fromisoformat(

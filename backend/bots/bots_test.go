@@ -25,7 +25,7 @@ func turn(team uint, castles []models.CastleView, groups []models.SoldierGroupVi
 	if groups == nil {
 		groups = []models.SoldierGroupView{}
 	}
-	botTurn := models.BotTurn{GameID: 7, TeamColor: team, Generation: models.GenerationView{ID: 41, Castles: castles, SoldierGroups: groups, Clashes: []models.Clash{}}}
+	botTurn := models.BotTurn{GameID: 7, TeamColor: team, Upgrades: models.UpgradeTable(), Generation: models.GenerationView{ID: 41, Castles: castles, SoldierGroups: groups, Clashes: []models.Clash{}}}
 	if memory != "" {
 		botTurn.Memory = models.BotMemory(memory)
 	}
