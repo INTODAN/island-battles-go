@@ -37,9 +37,18 @@ if [[ ! -f "$client_directory/dist/index.html" ]]; then
   exit 1
 fi
 
+# Only hashed files get the year-long cache. Anything else in dist/ would be
+# cached for a year under a name that never changes, so refuse it.
+unexpected="$(find "$client_directory/dist" -mindepth 1 -maxdepth 1 \
+  ! -name index.html ! -name assets)"
+if [[ -n "$unexpected" ]]; then
+  echo "dist/ holds files other than index.html and assets/; they would be cached for a year:" >&2
+  echo "$unexpected" >&2
+  exit 1
+fi
+
 # No --delete: the files of earlier builds stay for open tabs.
-aws s3 sync "$client_directory/dist/" "s3://$bucket/play/" \
-  --exclude index.html \
+aws s3 sync "$client_directory/dist/assets/" "s3://$bucket/play/assets/" \
   --cache-control "public, max-age=31536000, immutable" \
   --only-show-errors
 aws s3 cp "$client_directory/dist/index.html" "s3://$bucket/play/index.html" \

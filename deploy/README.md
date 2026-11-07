@@ -149,7 +149,7 @@ A deployment from before #75 serves players at the Function URL. To move them to
 | IAM role | Basic execution and X-Ray writes: the function writes its logs, its collector layer sends traces to X-Ray, and it calls nothing else in AWS. |
 | Function URL | Auth type `NONE` and the `RESPONSE_STREAM` invoke mode, which the backend's `lambdaurl` host needs. The provider adds the public invoke permissions. |
 | Certificate | An ACM certificate for `game_hostname` in `us-east-1`, where CloudFront takes certificates from, validated by DNS. ACM renews it on its own while its validation record stays. |
-| CloudFront distribution | Serves `game_hostname` with the certificate, over HTTPS only: plain HTTP is redirected. Its one origin is the Function URL, over HTTPS. Every method reaches the Lambda uncached (`Managed-CachingDisabled`), with every viewer header, cookie and query string but `Host` (`Managed-AllViewerExceptHostHeader`), so the Function URL sees its own `Host` and the backend gets `Authorization`. Streamed answers stream through. No origin access control: for a Function URL it would need clients to send a SHA-256 of every POST body, and the Function URL is public anyway. A second origin, the web client's bucket, serves `/play/*` and `/play` ahead of the default behaviour: cached and compressed (`Managed-CachingOptimized`), GET, HEAD and OPTIONS only, with a CloudFront Function that serves `/play/` as `play/index.html` and redirects `/play` to `/play/`. Price class 100, no logs and no WAF. |
+| CloudFront distribution | Serves `game_hostname` with the certificate, over HTTPS only: plain HTTP is redirected. Its default origin is the Function URL, over HTTPS. Every method reaches the Lambda uncached (`Managed-CachingDisabled`), with every viewer header, cookie and query string but `Host` (`Managed-AllViewerExceptHostHeader`), so the Function URL sees its own `Host` and the backend gets `Authorization`. Streamed answers stream through. No origin access control: for a Function URL it would need clients to send a SHA-256 of every POST body, and the Function URL is public anyway. A second origin, the web client's bucket, serves `/play/*` and `/play` ahead of the default behaviour: cached and compressed (`Managed-CachingOptimized`), GET, HEAD and OPTIONS only, with a CloudFront Function that serves `/play/` as `play/index.html` and redirects `/play` to `/play/`. Price class 100, no logs and no WAF. |
 | Web client bucket | `<name>-web-client-<account>`, private, unversioned, encrypted, TLS only, with all public access blocked. Holds the built client under `play/`. Only this distribution may read it, through an origin access control. See [The web client](#the-web-client). |
 | Log group | `/aws/lambda/<name>`, kept for 7 days. |
 | Metric filter and alarms | One metric that counts error lines, and two alarms, on it and on the function's `Errors`, that email `alert_email` through an SNS topic. |
@@ -401,6 +401,8 @@ The 3D client in `clients/island-battles-web/` is served at `https://<game_hostn
 
 **Creating the resources, once.** The change adds the bucket with its public access block, encryption setting, ownership controls and policy, the origin access control and the CloudFront function, and updates the distribution. It replaces and deletes nothing. Apply it like any other AWS change: start the Deploy workflow's `plan` target on `main`, read the plan, then start `apply` with that run's ID ([Deploying from GitHub Actions](#deploying-from-github-actions)), or run `scripts/aws.sh apply` on your machine. The apply role may create the bucket because its name starts with `island-battles-`. A backend deploy (`scripts/aws.sh deploy`) is unaffected afterwards: the new resources are unchanged in its plans, and it stops only on a plan that changes CloudFront.
 
+**Order for a fresh setup:** plan and apply the new resources, run `scripts/deploy-web-client.sh`, then run the backend deploy or release that shows the **Play in 3D** link, so the link never points at an empty bucket. Until the one-time apply has created the CloudFront resources, `backend` deploy runs are refused, because their plan would create them.
+
 **Uploading a build:**
 
 ```sh
@@ -417,6 +419,8 @@ It reads the bucket and the distribution from Terraform's outputs (`web_client_b
 It never deletes files, so the hashed files of earlier builds stay and tabs that are open keep working. They are small; remove old ones from the bucket by hand if they ever matter. It needs `bun`, the AWS CLI and Terraform, and the credentials that `scripts/aws.sh` uses. It is not part of a release yet (#90).
 
 **Rolling back:** check out the commit of the earlier build and run `scripts/deploy-web-client.sh` again. Its `index.html` names the earlier hashed files, which are still in the bucket, and the invalidation makes it live.
+
+**A missing file answers 403**, not 404: the bucket policy grants only `s3:GetObject`, so S3 doesn't reveal which keys exist.
 
 **Checking it:** `curl -sI https://<game_hostname>/play/assets/<file>` shows `x-cache: Hit from cloudfront` on the second request, and `/play` answers `301` to `/play/`.
 

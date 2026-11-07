@@ -81,8 +81,10 @@ data "aws_cloudfront_cache_policy" "caching_optimized" {
 
 # /play redirects to /play/, and a path that ends in a slash serves that
 # folder's index.html. The query string (?join=CODE) isn't part of the URI, so
-# it reaches the page untouched. Redirects come from the function and aren't
-# cached.
+# it reaches the page untouched on /play/, and the redirect rebuilds it from
+# request.querystring so /play?join=CODE keeps its code. Redirects come from
+# the function and aren't cached. deploy/test_web_client_function.py runs this
+# code in node.
 resource "aws_cloudfront_function" "web_client" {
   name    = "${var.name}-web-client"
   runtime = "cloudfront-js-2.0"
@@ -92,10 +94,38 @@ resource "aws_cloudfront_function" "web_client" {
     function handler(event) {
       var request = event.request;
       if (request.uri === "/play") {
+        var parts = [];
+        var query = request.querystring || {};
+        function decode(text) {
+          try {
+            return decodeURIComponent(text);
+          } catch (e) {
+            return text;
+          }
+        }
+        function add(key, value) {
+          var pair = encodeURIComponent(decode(key));
+          if (value !== undefined && value !== "") {
+            pair += "=" + encodeURIComponent(decode(value));
+          }
+          parts.push(pair);
+        }
+        Object.keys(query).forEach(function (key) {
+          var entry = query[key];
+          if (entry.multiValue) {
+            entry.multiValue.forEach(function (item) {
+              add(key, item.value);
+            });
+          } else {
+            add(key, entry.value);
+          }
+        });
         return {
           statusCode: 301,
           statusDescription: "Moved Permanently",
-          headers: { location: { value: "/play/" } },
+          headers: {
+            location: { value: "/play/" + (parts.length ? "?" + parts.join("&") : "") },
+          },
         };
       }
       if (request.uri.endsWith("/")) {

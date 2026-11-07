@@ -44,8 +44,8 @@ data "aws_cloudfront_origin_request_policy" "all_viewer_except_host_header" {
   name = "Managed-AllViewerExceptHostHeader"
 }
 
-# Except for /play/ (the web client, from S3), nothing is cached: every request reaches the Lambda as if it came straight
-# to the Function URL. There's no origin access control. For a Function URL it
+# Except for /play/ (the web client, from S3), nothing is cached: every
+# request reaches the Lambda as if it came straight to the Function URL. There's no origin access control. For a Function URL it
 # would need clients to send a SHA-256 of every POST body, and the Function
 # URL is public anyway. Standard and real-time logs stay off.
 resource "aws_cloudfront_distribution" "game" {
