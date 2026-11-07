@@ -6,10 +6,14 @@ on:
   pull_request:
     paths:
       - "clients/island-battles-web/**"
+      - "lobby/api/**"
+      - "backend/api/**"
       - ".github/workflows/web-client.yml"
   push:
     paths:
       - "clients/island-battles-web/**"
+      - "lobby/api/**"
+      - "backend/api/**"
       - ".github/workflows/web-client.yml"
 
 permissions:

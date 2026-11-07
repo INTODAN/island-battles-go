@@ -51,11 +51,12 @@ Teams and readiness belong to the generic lobby. Starting freezes a roster. The 
 *   **Test (disposable PostgreSQL containers):** `go test ./... ./lobby/...`. On rootless Podman, enable the Podman socket and disable Ryuk first; see [database tests on rootless Podman](backend/README.md#database-tests-on-rootless-podman).
 *   **Check OpenAPI:** `go run ./lobby/cmd/export-lobby-openapi --output lobby/api/openapi.json --events-output lobby/api/events.json --check` and `go run ./backend/cmd/export-openapi --output backend/api/openapi.json --check`
 *   **Check generated gameplay models:** `uv run --project clients/island-battles-python/tools --locked python clients/island-battles-python/scripts/generate.py --check`
+*   **Regenerate the web client's API types:** `bun run generate` in `clients/island-battles-web/` (`bun run generate --check` verifies they are current; `web-client.yml` runs it on any change to `lobby/api/` or `backend/api/`)
 *   **Python unit tests:** `uv run --project lobby/clients/lobby-python --locked pytest lobby/clients/lobby-python/tests`
 *   **Gameplay client conformance (offline):** `uv run --project clients/conformance --locked pytest clients/conformance/tests/test_models.py`
 *   **Gameplay client conformance (live, Linux Docker or Podman):** `./scripts/test-client-conformance.sh ["<adapter command>"]`
 *   **Live acceptance (Linux Docker or Podman):** `./scripts/test-lobby-acceptance.sh`
-*   **Web client** (in `clients/island-battles-web/`, needs [Bun](https://bun.sh/)): `bun install`, then `bun run dev` (dev server on `:3000`, proxying the backend from `./scripts/dev.sh`), `bun run check` (Biome, `tsc`, `bun test`) and `bun run build`
+*   **Web client** (in `clients/island-battles-web/`, needs [Bun](https://bun.sh/)): `bun install`, then `bun run dev` (dev server on `:3000`, proxying the backend from `./scripts/dev.sh`), `bun run generate` (regenerate the TypeScript API types from the OpenAPI files and `events.json` after an API change), `bun run check` (Biome, `generate --check`, `tsc`, `bun test`) and `bun run build`
 
 ### Checks on every pull request
 

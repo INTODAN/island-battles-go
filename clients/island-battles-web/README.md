@@ -32,9 +32,17 @@ Open **http://localhost:3000/**. The dev server hot-reloads and proxies `/lobby/
 |---|---|
 | `bun run dev` | Dev server with hot reload on `:3000` |
 | `bun run build` | Production build to `dist/` with hashed asset names, for the `/play/` base path |
-| `bun run check` | `biome ci`, then `tsc --noEmit`, then `bun test` |
+| `bun run generate` | Regenerates `src/api/generated/` from the API contract |
+| `bun run generate --check` | Regenerates into a temporary directory and fails on any difference |
+| `bun run check` | `biome ci`, then `generate --check`, then `tsc --noEmit`, then `bun test` |
 
 `bunx biome check --write .` fixes formatting, lint and import order. Commit `bun.lock`; CI installs with `--frozen-lockfile`.
+
+## API types and client
+
+`src/api/generated/` is generated, never edited by hand, from the server's checked-in contract: `lobby/api/openapi.json` and `backend/api/openapi.json` with [openapi-typescript](https://openapi-ts.dev/), and `lobby/api/events.json` with [json-schema-to-typescript](https://github.com/bcherny/json-schema-to-typescript). After any change to those files, run `bun run generate` and commit the result. `bun run check` (and so CI, which also triggers on `lobby/api/**` and `backend/api/**`) fails while the generated files are stale. The generators live in the `tools/codegen` workspace because they need TypeScript 5, while the client itself uses TypeScript 7.
+
+`src/api/client.ts` exports `lobbyApi` and `gameApi` ([openapi-fetch](https://openapi-ts.dev/openapi-fetch/)) for the page's own origin; `createApiClients({ baseUrl })` builds clients for another base URL. Call `setAccessToken` after creating a session: every request except `POST /lobby/v1/sessions` then sends `Authorization: Bearer <token>`. Calls resolve with `{ data }` and reject with `ApiError` (`src/api/errors.ts`): `kind` is `problem` (with `code` for lobby, `problemType` for game, `title`, `detail`), `http` (error status without a problem body) or `transport` (no response). Responses are not validated, so unknown fields such as `$schema` are ignored.
 
 ## Layout
 
