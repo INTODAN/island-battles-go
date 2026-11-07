@@ -68,8 +68,11 @@ resource "aws_s3_bucket_lifecycle_configuration" "backups" {
   depends_on = [aws_s3_bucket_versioning.backups]
 }
 
-# Dumps hold player data. Only TLS connections, and the GitHub deploy role,
-# whose ReadOnlyAccess would otherwise let it download them, can't read them.
+# Dumps hold player data. The bucket refuses plain HTTP, and keeps them from
+# the GitHub roles, whose ReadOnlyAccess would otherwise let a workflow run
+# download them: the deploy role (github.tf) and the apply role
+# (deploy/github_apply_role.py). A condition on the caller's ARN, unlike a
+# principal, may name a role that doesn't exist yet.
 resource "aws_s3_bucket_policy" "backups" {
   bucket = aws_s3_bucket.backups.id
   policy = jsonencode({
@@ -84,11 +87,19 @@ resource "aws_s3_bucket_policy" "backups" {
         Condition = { Bool = { "aws:SecureTransport" = "false" } }
       }],
       local.github_deploy ? [{
-        Sid       = "KeepDumpsFromTheDeployRole"
+        Sid       = "KeepDumpsFromGitHubRoles"
         Effect    = "Deny"
-        Principal = { AWS = aws_iam_role.github_deploy[0].arn }
+        Principal = "*"
         Action    = ["s3:GetObject", "s3:GetObjectVersion"]
         Resource  = "${aws_s3_bucket.backups.arn}/*"
+        Condition = {
+          ArnEquals = {
+            "aws:PrincipalArn" = [
+              "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.name}-github-deploy",
+              "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.name}-github-apply",
+            ]
+          }
+        }
       }] : [],
     )
   })

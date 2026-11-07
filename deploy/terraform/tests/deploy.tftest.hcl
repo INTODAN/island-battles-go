@@ -694,9 +694,12 @@ run "backs_the_database_up_to_s3" {
   assert {
     condition = (
       one([for statement in jsondecode(aws_s3_bucket_policy.backups.policy).Statement : statement.Condition if statement.Sid == "RequireTls"]) == { Bool = { "aws:SecureTransport" = "false" } } &&
-      one([for statement in jsondecode(aws_s3_bucket_policy.backups.policy).Statement : statement.Principal.AWS if statement.Sid == "KeepDumpsFromTheDeployRole" && statement.Effect == "Deny"]) == "arn:aws:iam::123456789012:role/island-battles-github-deploy"
+      one([for statement in jsondecode(aws_s3_bucket_policy.backups.policy).Statement : statement.Condition.ArnEquals["aws:PrincipalArn"] if statement.Sid == "KeepDumpsFromGitHubRoles" && statement.Effect == "Deny"]) == [
+        "arn:aws:iam::123456789012:role/island-battles-github-deploy",
+        "arn:aws:iam::123456789012:role/island-battles-github-apply",
+      ]
     )
-    error_message = "The bucket must refuse plain HTTP, and keep the dumps from the GitHub deploy role."
+    error_message = "The bucket must refuse plain HTTP, and keep the dumps from both GitHub roles."
   }
 
   assert {

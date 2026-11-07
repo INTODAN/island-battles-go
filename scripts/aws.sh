@@ -37,6 +37,16 @@ Usage:
       new code and deploy/local/lambda.env's settings to the Lambda. Doesn't
       ask, and refuses a plan that changes Lightsail resources or the game's
       certificate or distribution, or deletes anything. Never touches the VM.
+  scripts/aws.sh plan <directory>
+      Build the backend and plan, like apply, without asking or applying.
+      Saves the plan, the build it packages and the plan as text in the
+      directory, which then holds the Lambda's settings. The Deploy workflow's
+      apply target runs it before it waits for an approval.
+  scripts/aws.sh apply-plan <directory>
+      Apply a plan that plan saved, without asking: the approval in GitHub
+      is the yes. Refuses a plan that destroys an instance, the static IP, a
+      disk or the distribution unless ISLAND_BATTLES_ALLOW_DESTROY lists it.
+      Runs the migrations first when the plan publishes the backend.
   scripts/aws.sh output [name]
       Print Terraform's outputs, or one of them, e.g. static_ip,
       function_url, game_url, certificate_validation_record or
@@ -200,6 +210,57 @@ save_backup_settings() {
   (umask 077 && printf '%s\n' "$settings" >"$backup_settings_file")
 }
 
+# The Deploy workflow's apply target plans in one job and applies in the next,
+# after an approval. The plan packages deploy/local/lambda/bootstrap.zip by
+# its hash, so the apply needs that same file, not a new build.
+save_plan() {
+  local directory="$1"
+  require_migrated_state
+  initialize_terraform
+  require_variables
+  build_backend
+  run_terraform plan -input=false -var-file="$variables_file" -out="$plan_file"
+  mkdir -p "$directory"
+  cp "$plan_file" "$directory/tfplan"
+  cp "$build_directory/bootstrap" "$build_directory/bootstrap.zip" "$directory/"
+  run_terraform show -no-color "$plan_file" >"$directory/plan.txt"
+  # One name per line; the descriptions go to stderr, into the log.
+  check_plan apply >"$directory/destroys"
+  check_plan publishes-backend >"$directory/publishes-backend"
+}
+
+apply_saved_plan() {
+  local directory="$1" name
+  require_migrated_state
+  initialize_terraform
+  mkdir -p "$build_directory" "$(dirname -- "$plan_file")"
+  cp "$directory/bootstrap" "$directory/bootstrap.zip" "$build_directory/"
+  cp "$directory/tfplan" "$plan_file"
+  # Assigned first, so a failing check stops the script.
+  local destroyed allowed=",${ISLAND_BATTLES_ALLOW_DESTROY:-},"
+  local refused=()
+  destroyed="$(check_plan apply)"
+  while IFS= read -r name; do
+    [[ -n "$name" ]] || continue
+    if [[ "$allowed" != *",$name,"* ]]; then
+      refused+=("$name")
+    fi
+  done <<<"$destroyed"
+  if [[ ${#refused[@]} -gt 0 ]]; then
+    echo "The plan destroys ${refused[*]}. Nothing applied. If that's intended, start the run again with allow_destroy listing each name." >&2
+    exit 1
+  fi
+  if [[ "$(check_plan publishes-backend)" == yes ]]; then
+    if [[ -f "$lambda_settings_file" ]]; then
+      migrate_database
+    else
+      echo "No $lambda_settings_file yet, so no migrations."
+    fi
+  fi
+  run_terraform apply -input=false "$plan_file"
+  save_backup_settings
+}
+
 # Plans, checks the plan, migrates and applies exactly the plan that was
 # checked. The plan file holds the Lambda's settings, so finish removes it.
 plan_and_apply() {
@@ -259,6 +320,17 @@ case "$command" in
       exit 1
     fi
     plan_and_apply deploy
+    ;;
+  plan)
+    [[ $# -eq 1 ]] || usage
+    sync_deploy_files
+    save_plan "$1"
+    ;;
+  apply-plan)
+    [[ $# -eq 1 ]] || usage
+    [[ -f "$1/tfplan" ]] || { echo "$1 has no saved plan. Run scripts/aws.sh plan $1 first." >&2; exit 1; }
+    sync_deploy_files
+    apply_saved_plan "$1"
     ;;
   output)
     [[ $# -le 1 ]] || usage

@@ -30,3 +30,12 @@ Each issue is written to be implemented on its own: read the whole issue, plus t
   - `game-state-testing`: generation, command and game-state tests
 - Keep `lobby/` game-neutral. Island Battles specifics belong in `backend/`.
 - After changing an API, re-export the OpenAPI documents and regenerate the clients in the same change. On a rebase conflict in generated files, regenerate them instead of merging by hand.
+
+## Deploying
+
+You have no AWS credentials. When the user asks you to deploy or apply a change, use the Deploy workflow (`.github/workflows/deploy.yml`) on your branch, as [deploy/README.md](deploy/README.md#deploying-from-github-actions) describes, and only when asked:
+
+1. Push your branch, and start the workflow on it with the target: `apply` for Terraform changes, then `vm`, `backend` or `smoke`.
+2. Each job waits for the owner's approval. Tell the user which run to approve and what it will do.
+3. For `apply`, read the first job's log or summary once it has planned, and tell the user what the plan creates, changes and destroys before they approve the second job. Never pass `allow_destroy` unless the user named each resource.
+4. After it runs, check the result: the job's log, and the AWS resources it should have changed.

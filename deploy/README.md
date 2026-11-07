@@ -27,6 +27,7 @@ The live deployment (#45, 2026-10-30) runs in `eu-central-1`, and its VM is `vm.
 | `deploy/aws.example.tfvars` | The template for the AWS settings. |
 | `deploy/vm.example.yml` | The template for the VM settings. |
 | `deploy/terraform/` | The AWS resources: the Lightsail VM in `vm.tf`, the Lambda in `lambda.tf`, the game's certificate and CloudFront distribution in `cloudfront.tf`, the Lambda's log group, alarms, collector settings and budget in `observability.tf`, the database backups' bucket, key and alarm in `backups.tf`, and GitHub Actions' deploy role in `github.tf`. `tests/` checks the configuration offline. |
+| `deploy/github_apply_role.py` | Creates the role that the Deploy workflow's approved runs use ([Deploying from GitHub Actions](#deploying-from-github-actions)). `deploy/test_github_apply_role.py` tests it. |
 | `deploy/check_deploy_plan.py` | Reads the plan for `scripts/aws.sh`: stops a backend deploy that would change more than the backend, lists what an apply would destroy, and tells an apply whether to run the migrations. `deploy/test_check_deploy_plan.py` tests it. |
 | `deploy/ansible/` | The playbooks: `site.yml` deploys, `dump.yml` and `restore.yml` copy the database. The `base` role prepares Ubuntu, and the `app` role deploys the Compose project and the [daily backup](#backups), whose script `deploy/test_database_backup.py` tests. |
 | `deploy/smoke.py` | The smoke test that `scripts/vm.sh smoke` runs. |
@@ -338,34 +339,50 @@ Change `deploy/local/aws.tfvars` or `deploy/terraform/`, then run `scripts/aws.s
 
 ## Deploying from GitHub Actions
 
-The Deploy workflow, `.github/workflows/deploy.yml`, runs the same scripts on a GitHub runner. Start it by hand from the repository's **Actions** tab, or with `gh workflow run deploy.yml -f target=<target>`:
+The Deploy workflow, `.github/workflows/deploy.yml`, runs the same scripts on a GitHub runner. Start it by hand from the repository's **Actions** tab, with `gh workflow run deploy.yml --ref <branch> -f target=<target>`, or let an agent start it:
 
 | Target | Runs |
 |---|---|
 | `backend` | `scripts/aws.sh deploy` |
 | `vm` | `scripts/vm.sh deploy "$(scripts/aws.sh output static_ip)"` |
 | `smoke` | `scripts/vm.sh smoke` |
+| `apply` | `scripts/aws.sh plan`, then, after a second approval, `scripts/aws.sh apply-plan` with that plan |
 
 It deploys the commit of the branch you start it on. Runs wait for each other, and Terraform's lock keeps them apart from a machine's.
 
+**Which role a run gets:**
+
+- `backend`, `vm` and `smoke` started from `main` run in the `production` environment, with the deploy role `island-battles-github-deploy` (`deploy/terraform/github.tf`), which can only publish the backend and log in to the VM.
+- The same targets started from any other branch, and every `apply`, run in the `production-approval` environment, with the apply role `island-battles-github-apply` (`deploy/github_apply_role.py`). Its required reviewer approves each job before the job gets any AWS credentials.
+- `apply` has two jobs. The first plans and puts the plan in the run's summary, and saves it, with the build it packages, under `plans/<run ID>/` in the deploy bucket. The second waits for its own approval and applies exactly that plan, so what you approve is what you read. Rejecting the second job is a plan without an apply. Terraform refuses the saved plan if anything changed the state in between: start a new run.
+- A plan that deletes or replaces an instance, the static IP, a disk or the distribution stops the apply unless the run's `allow_destroy` input lists each one's name, like `ISLAND_BATTLES_ALLOW_DESTROY`.
+
+**What the apply role can do:** read the account (`ReadOnlyAccess`) and change what `deploy/terraform/` manages: Lightsail, Lambda, CloudWatch logs and alarms, SNS, Budgets, ACM and CloudFront, buckets named `island-battles-*`, and IAM roles and users named `island-battles-*`. It can't change its own role, and neither GitHub role can read the [backups](#backups). Because it can write IAM policies for `island-battles-*` roles, treat it as close to an administrator of the account: the approval is the control. It isn't part of the Terraform configuration, so an apply can't widen it.
+
+**Deploying from an agent:** an agent in the cloud has no AWS credentials of its own. It pushes its branch, starts the Deploy workflow on it, and asks you to approve. You approve from GitHub, on the web or in the mobile app (**Review deployments**). Before asking you to approve an apply, the agent reads the plan from the first job's log and tells you what it changes.
+
 **Setting it up**, once:
 
-1. Set `github_repository = "<owner>/<name>"` in `deploy/local/aws.tfvars` and run `scripts/aws.sh apply`. It creates GitHub's OIDC provider in IAM and the role `island-battles-github-deploy` (`deploy/terraform/github.tf`). `scripts/aws.sh output github_deploy_role_arn` prints the role.
-2. In the repository's **Settings → Environments**, create `production` and limit its deployment branches to `main`. Only jobs in that environment can assume the role. Add required reviewers there if a deploy should wait for an approval.
-3. Add two repository variables, which aren't secret: `AWS_DEPLOY_ROLE_ARN`, the role, and `AWS_REGION`, the deployment's region.
+1. Set `github_repository = "<owner>/<name>"` in `deploy/local/aws.tfvars` and run `scripts/aws.sh apply`. It creates GitHub's OIDC provider in IAM and the deploy role. `scripts/aws.sh output github_deploy_role_arn` prints the role.
+2. In the repository's **Settings → Environments**:
+   - Create `production` and limit its deployment branches to `main`.
+   - Create `production-approval`. Tick **Required reviewers** and add yourself, and leave **Prevent self-review** unticked, or you couldn't approve runs you start. Leave its deployment branches open to all branches. **Do this before step 4:** a job that names an environment that doesn't exist creates it without reviewers.
+3. Add two repository variables, which aren't secret: `AWS_DEPLOY_ROLE_ARN`, the deploy role, and `AWS_REGION`, the deployment's region. The workflow derives the apply role's ARN from the deploy role's; set `AWS_APPLY_ROLE_ARN` only to use another one.
 
    ```sh
    gh variable set AWS_DEPLOY_ROLE_ARN --body "$(scripts/aws.sh output github_deploy_role_arn)"
    gh variable set AWS_REGION --body <region>
    ```
 
-**What the role can do:** read the account, which every plan needs (`ReadOnlyAccess`), and write only what a deploy writes: the backend function's code and settings, the deploy bucket's state and files, and a temporary SSH key for the VM. It deletes nothing but the state's lock. GitHub stores no AWS keys: each run gets credentials for an hour.
+4. Create the apply role, with credentials that can manage IAM. Run it again after changing `deploy/github_apply_role.py`.
 
-**What stays on a person's machine:**
+   ```sh
+   python3 -I deploy/github_apply_role.py create --repository <owner>/<name>
+   ```
 
-- `scripts/aws.sh apply`, which asks before applying and may destroy resources.
-- A backend deploy whose plan also creates something new, such as an alarm: the plan check allows it, but the role can't create it. Run `scripts/aws.sh apply` once, then deploy again.
-- `-e app_generate_secrets=true`, dumps, restores and moves.
+5. Run `scripts/deploy-files.sh bootstrap --region <region>` again, which adds the rule that deletes saved plans after 3 days.
+
+**What still needs your own machine:** `-e app_generate_secrets=true`, dumps, restores and moves, and the setup above.
 
 ## Smoke test
 
@@ -666,5 +683,5 @@ terraform -chdir=deploy/terraform init -backend=false
 terraform -chdir=deploy/terraform fmt -check -recursive
 terraform -chdir=deploy/terraform validate
 terraform -chdir=deploy/terraform test
-python3 -I -m unittest discover -s deploy -p 'test_*.py'   # the plan checks and the backup script, offline
+python3 -I -m unittest discover -s deploy -p 'test_*.py'   # the plan checks, the deploy bucket, the backup script and the apply role, offline
 ```

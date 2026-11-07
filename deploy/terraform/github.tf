@@ -5,7 +5,9 @@
 # It can read the account, as a plan must, and write only what a backend or VM
 # deploy writes: the function's code and settings, the deploy bucket, and a
 # temporary SSH key for the VM. Anything else, such as new alarms or a change
-# to the VM, goes through `scripts/aws.sh apply` on a person's machine.
+# to the VM, goes through `scripts/aws.sh apply`: on a person's machine, or in
+# the Deploy workflow's apply target, which uses the apply role from
+# deploy/github_apply_role.py after the owner's approval.
 
 data "aws_caller_identity" "current" {}
 
