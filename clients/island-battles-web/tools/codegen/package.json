@@ -1,0 +1,10 @@
+{
+  "name": "island-battles-codegen",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "json-schema-to-typescript": "16.0.0",
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3"
+  }
+}
