@@ -68,8 +68,8 @@ run "passes_every_lambda_setting" {
   }
 
   assert {
-    condition     = one([for add_on in aws_lightsail_instance.vm["island-battles-1"].add_on : add_on if add_on.type == "AutoSnapshot" && add_on.status == "Enabled"]) != null
-    error_message = "The instance must have automatic snapshots."
+    condition     = one([for add_on in aws_lightsail_instance.vm["island-battles-1"].add_on : add_on if add_on.type == "AutoSnapshot" && add_on.status == "Disabled"]) != null
+    error_message = "The instance's automatic snapshots must be declared off: the database is backed up to S3 instead."
   }
 
   assert {
@@ -614,4 +614,130 @@ run "rejects_a_github_repository_that_isnt_owner_and_name" {
   }
 
   expect_failures = [var.github_repository]
+}
+
+# Database backups ---------------------------------------------------------------
+
+run "backs_the_database_up_to_s3" {
+  command = plan
+
+  variables {
+    github_repository = "INTODAN/island-battles-go"
+    deploy_bucket     = "island-battles-deploy-123456789012"
+  }
+
+  override_data {
+    target          = data.aws_caller_identity.current
+    override_during = plan
+    values = {
+      account_id = "123456789012"
+    }
+  }
+
+  override_resource {
+    target          = aws_s3_bucket.backups
+    override_during = plan
+    values = {
+      arn = "arn:aws:s3:::island-battles-backups-123456789012"
+    }
+  }
+
+  override_resource {
+    target          = aws_iam_role.github_deploy
+    override_during = plan
+    values = {
+      arn = "arn:aws:iam::123456789012:role/island-battles-github-deploy"
+    }
+  }
+
+  assert {
+    condition     = aws_s3_bucket.backups.bucket == "island-battles-backups-123456789012" && nonsensitive(output.database_backups.bucket) == aws_s3_bucket.backups.bucket && nonsensitive(output.database_backups.region) == "eu-central-1"
+    error_message = "The backups bucket must be named after the account, in the deployment's region."
+  }
+
+  assert {
+    condition = (
+      aws_s3_bucket_public_access_block.backups.block_public_acls && aws_s3_bucket_public_access_block.backups.block_public_policy &&
+      aws_s3_bucket_public_access_block.backups.ignore_public_acls && aws_s3_bucket_public_access_block.backups.restrict_public_buckets
+    )
+    error_message = "The backups bucket must never be public."
+  }
+
+  assert {
+    condition = (
+      aws_s3_bucket_versioning.backups.versioning_configuration[0].status == "Enabled" &&
+      aws_s3_bucket_lifecycle_configuration.backups.rule[0].expiration[0].days == 7 &&
+      aws_s3_bucket_lifecycle_configuration.backups.rule[0].noncurrent_version_expiration[0].noncurrent_days == 7
+    )
+    error_message = "Each backup, and each overwritten one, must be kept for 7 days by default."
+  }
+
+  assert {
+    condition = jsondecode(aws_iam_user_policy.backups.policy).Statement == [
+      {
+        Sid      = "UploadDumps"
+        Effect   = "Allow"
+        Action   = "s3:PutObject"
+        Resource = "arn:aws:s3:::island-battles-backups-123456789012/postgres/*"
+      },
+      {
+        Sid       = "CountBackups"
+        Effect    = "Allow"
+        Action    = "cloudwatch:PutMetricData"
+        Resource  = "*"
+        Condition = { StringEquals = { "cloudwatch:namespace" = "IslandBattles/VM" } }
+      },
+    ]
+    error_message = "The VM's key may only upload dumps and publish the backup metric: no reading, listing or deleting backups."
+  }
+
+  assert {
+    condition = (
+      one([for statement in jsondecode(aws_s3_bucket_policy.backups.policy).Statement : statement.Condition if statement.Sid == "RequireTls"]) == { Bool = { "aws:SecureTransport" = "false" } } &&
+      one([for statement in jsondecode(aws_s3_bucket_policy.backups.policy).Statement : statement.Condition.ArnEquals["aws:PrincipalArn"] if statement.Sid == "KeepDumpsFromGitHubRoles" && statement.Effect == "Deny"]) == [
+        "arn:aws:iam::123456789012:role/island-battles-github-deploy",
+        "arn:aws:iam::123456789012:role/island-battles-github-apply",
+      ]
+    )
+    error_message = "The bucket must refuse plain HTTP, and keep the dumps from both GitHub roles."
+  }
+
+  assert {
+    condition = (
+      aws_cloudwatch_metric_alarm.database_backups.namespace == nonsensitive(output.database_backups.metric_namespace) &&
+      aws_cloudwatch_metric_alarm.database_backups.metric_name == nonsensitive(output.database_backups.metric_name) &&
+      aws_cloudwatch_metric_alarm.database_backups.period * aws_cloudwatch_metric_alarm.database_backups.evaluation_periods == 26 * 3600 &&
+      aws_cloudwatch_metric_alarm.database_backups.datapoints_to_alarm == aws_cloudwatch_metric_alarm.database_backups.evaluation_periods &&
+      aws_cloudwatch_metric_alarm.database_backups.threshold == 1 && aws_cloudwatch_metric_alarm.database_backups.comparison_operator == "LessThanThreshold" &&
+      aws_cloudwatch_metric_alarm.database_backups.treat_missing_data == "breaching" && length(aws_cloudwatch_metric_alarm.database_backups.alarm_actions) == 1
+    )
+    error_message = "The backup alarm must email when the metric the VM publishes saw no backup for 26 hours."
+  }
+}
+
+run "keeps_the_backups_without_a_github_role" {
+  command = plan
+
+  override_resource {
+    target          = aws_s3_bucket.backups
+    override_during = plan
+    values = {
+      arn = "arn:aws:s3:::island-battles-backups-123456789012"
+    }
+  }
+
+  assert {
+    condition     = [for statement in jsondecode(aws_s3_bucket_policy.backups.policy).Statement : statement.Sid] == ["RequireTls"]
+    error_message = "Without the GitHub role, the bucket policy must only require TLS."
+  }
+}
+
+run "rejects_backups_kept_under_a_day" {
+  command = plan
+
+  variables {
+    database_backup_retention_days = 0
+  }
+
+  expect_failures = [var.database_backup_retention_days]
 }

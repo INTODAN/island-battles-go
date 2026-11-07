@@ -28,6 +28,11 @@ app_admin_check_query: >-
 # Written when a move locks the backend out of this VM's database (dump.yml).
 # Deploys and restores refuse a VM that has it.
 app_moved_away_marker: "{{ vm_app_dir }}/moved-away"
+# The backup's bucket and upload-only AWS key. Terraform makes them, and
+# scripts/aws.sh apply writes them here; the deploy can't generate them.
+app_database_backups_file: "{{ deploy_secrets_dir }}/database_backups.json"
+app_database_backups: "{{ lookup('ansible.builtin.file', app_database_backups_file) | ansible.builtin.from_json }}"
+app_backup_settings_dir: /etc/island-battles
 # The files the deploy reads its secrets from (group_vars/all.yml, and the
 # Postgres TLS files in main.yml). Missing ones are only generated on request.
 app_secret_files:

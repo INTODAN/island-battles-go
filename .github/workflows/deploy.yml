@@ -1,18 +1,39 @@
 # Deploys from a GitHub runner, with the same scripts as a person's machine
-# (deploy/README.md, "Deploying from GitHub Actions"). The job assumes the
-# deploy role that Terraform creates (deploy/terraform/github.tf) through
-# GitHub's OIDC provider, so no AWS keys are stored here, and the scripts pull
-# deploy/local/ from the deploy bucket and push it back.
+# (deploy/README.md, "Deploying from GitHub Actions"). Jobs assume an AWS role
+# through GitHub's OIDC provider, so no AWS keys are stored here, and the
+# scripts pull deploy/local/ from the deploy bucket and push it back.
+#
+# Every job runs in the `production` environment, which the repository's
+# settings limit to main, and both roles trust only that environment. So only
+# merged code ever gets AWS credentials: merging is the approval. That is how
+# an agent in the cloud deploys: once its pull request is merged, it starts
+# these runs on main.
+#
+# - backend, vm, smoke and plan use the deploy role (deploy/terraform/github.tf),
+#   which can only publish the backend, log in to the VM and use the deploy
+#   bucket.
+# - plan saves a plan under plans/<run ID>/ in the deploy bucket and posts it
+#   to the run's summary. apply applies one saved plan, by that run ID, with
+#   the apply role (deploy/github_apply_role.py), so what was read is what's
+#   applied.
 name: Deploy
 
 on:
   workflow_dispatch:
     inputs:
       target:
-        description: "backend: scripts/aws.sh deploy. vm: scripts/vm.sh deploy to the static IP. smoke: scripts/vm.sh smoke."
+        description: "backend: scripts/aws.sh deploy. vm: scripts/vm.sh deploy to the static IP. smoke: scripts/vm.sh smoke. plan: plan every AWS resource and save the plan. apply: apply the plan that plan_run_id saved."
         type: choice
-        options: [backend, vm, smoke]
+        options: [backend, vm, smoke, plan, apply]
         default: backend
+      plan_run_id:
+        description: "apply only: the ID of the plan run whose plan to apply."
+        type: string
+        default: ""
+      allow_destroy:
+        description: "apply only: comma-separated names of the instances, static IP, disks or distribution the plan may delete or replace."
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -26,19 +47,39 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-24.04
-    # The role trusts only this environment's jobs. Limit it to main in the
+    # Both roles trust only this environment's jobs. Limit it to main in the
     # repository's settings.
     environment: production
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
+      # The environment's branch limit is the real gate; this says why early.
+      - name: Check that the run is on main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Deploy runs only on main, so only merged code reaches AWS. Merge the pull request, then start the run on main."
+          exit 1
+
       - uses: actions/checkout@v5
+
+      - id: role
+        env:
+          TARGET: ${{ inputs.target }}
+          DEPLOY_ROLE: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          APPLY_ROLE: ${{ vars.AWS_APPLY_ROLE_ARN }}
+        run: |
+          if [[ "$TARGET" == apply ]]; then
+            echo "arn=${APPLY_ROLE:-${DEPLOY_ROLE%/*}/island-battles-github-apply}" >>"$GITHUB_OUTPUT"
+          else
+            echo "arn=$DEPLOY_ROLE" >>"$GITHUB_OUTPUT"
+          fi
 
       - uses: aws-actions/configure-aws-credentials@v5
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ steps.role.outputs.arn }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      - if: inputs.target == 'backend'
+      # Builds the backend, and runs the migrations with `go run`.
+      - if: contains(fromJSON('["backend", "plan", "apply"]'), inputs.target)
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -49,7 +90,7 @@ jobs:
         with:
           terraform_wrapper: false
 
-      - if: inputs.target != 'backend'
+      - if: inputs.target == 'vm' || inputs.target == 'smoke'
         uses: astral-sh/setup-uv@v6
 
       - if: inputs.target == 'vm'
@@ -63,3 +104,79 @@ jobs:
 
       - if: inputs.target == 'smoke'
         run: scripts/vm.sh smoke
+
+      - if: inputs.target == 'plan'
+        run: |
+          scripts/aws.sh plan "$RUNNER_TEMP/plan"
+          echo "$GITHUB_SHA" >"$RUNNER_TEMP/plan/commit"
+
+      # The plan holds the Lambda's settings, so it goes to the private deploy
+      # bucket, not to an artifact. The apply deletes it, and the bucket
+      # expires one nobody applied (deploy/deploy_files.py).
+      - if: inputs.target == 'plan'
+        name: Save the plan
+        run: |
+          read -r bucket _ < <(python3 -I deploy/deploy_files.py bucket)
+          aws s3 cp --recursive --only-show-errors "$RUNNER_TEMP/plan" "s3://$bucket/plans/$GITHUB_RUN_ID/"
+
+      # Terraform's text output hides sensitive values.
+      - if: inputs.target == 'plan'
+        name: Show the plan
+        run: |
+          {
+            echo "## Plan at ${GITHUB_SHA::7}"
+            echo "Apply it with target \`apply\` and plan_run_id \`$GITHUB_RUN_ID\`."
+            if [[ -s "$RUNNER_TEMP/plan/destroys" ]]; then
+              echo
+              echo "**It destroys:** $(paste -sd, "$RUNNER_TEMP/plan/destroys"). The apply refuses unless allow_destroy lists each one."
+            fi
+            echo
+            echo "Publishes the backend and runs the migrations: $(cat "$RUNNER_TEMP/plan/publishes-backend")"
+            echo
+            echo '```'
+            grep -E '^(  # |Plan:|No changes)' "$RUNNER_TEMP/plan/plan.txt" || true
+            echo '```'
+            echo "<details><summary>The whole plan</summary>"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/plan/plan.txt"
+            echo '```'
+            echo "</details>"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - if: inputs.target == 'apply'
+        name: Fetch the plan
+        env:
+          PLAN_RUN_ID: ${{ inputs.plan_run_id }}
+        run: |
+          if [[ ! "$PLAN_RUN_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::Set plan_run_id to the ID of a plan run on main."
+            exit 1
+          fi
+          read -r bucket _ < <(python3 -I deploy/deploy_files.py bucket)
+          aws s3 cp --recursive --only-show-errors "s3://$bucket/plans/$PLAN_RUN_ID/" "$RUNNER_TEMP/plan"
+          if [[ ! -f "$RUNNER_TEMP/plan/tfplan" ]]; then
+            echo "::error::Run $PLAN_RUN_ID saved no plan, or it was applied or expired. Start a new plan run."
+            exit 1
+          fi
+          # The plan's build and the scripts that apply it must match.
+          if [[ "$(cat "$RUNNER_TEMP/plan/commit")" != "$GITHUB_SHA" ]]; then
+            echo "::error::Run $PLAN_RUN_ID planned $(cat "$RUNNER_TEMP/plan/commit"), but main is now $GITHUB_SHA. Start a new plan run."
+            exit 1
+          fi
+
+      - if: inputs.target == 'apply'
+        env:
+          ISLAND_BATTLES_ALLOW_DESTROY: ${{ inputs.allow_destroy }}
+        run: scripts/aws.sh apply-plan "$RUNNER_TEMP/plan"
+
+      # Applied or refused, the plan isn't applied again: Terraform would call
+      # it stale anyway.
+      - if: inputs.target == 'apply' && always()
+        name: Delete the saved plan
+        env:
+          PLAN_RUN_ID: ${{ inputs.plan_run_id }}
+        run: |
+          [[ "$PLAN_RUN_ID" =~ ^[0-9]+$ ]] || exit 0
+          read -r bucket _ < <(python3 -I deploy/deploy_files.py bucket)
+          aws s3 rm --recursive --only-show-errors "s3://$bucket/plans/$PLAN_RUN_ID/"
