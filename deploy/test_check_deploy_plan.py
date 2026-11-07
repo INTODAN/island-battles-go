@@ -86,7 +86,7 @@ class ApplyModeTest(unittest.TestCase):
         code, stdout, stderr = run("apply", INSTANCE_REPLACE, INSTANCE_DELETE, FUNCTION_UPDATE)
         self.assertEqual(code, 0)
         self.assertEqual(stdout.splitlines(), ["island-battles-2", "island-battles-1"])
-        self.assertIn("replaces the instance, with its disk and automatic snapshots", stderr)
+        self.assertIn("replaces the instance, with its disk and its database", stderr)
         self.assertIn("deletes the instance", stderr)
 
     def test_lists_a_deleted_static_ip(self):

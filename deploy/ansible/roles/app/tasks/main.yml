@@ -226,3 +226,6 @@
   run_once: true
   become: false
   no_log: true
+
+- name: Back the database up every day
+  ansible.builtin.include_tasks: backups.yml

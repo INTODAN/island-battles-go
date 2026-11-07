@@ -96,14 +96,14 @@ variable "postgres_port" {
   default     = 5432
 }
 
-variable "snapshot_time" {
-  description = "When Lightsail takes the daily automatic snapshot (#33), in UTC, on the hour."
-  type        = string
-  default     = "01:00"
+variable "database_backup_retention_days" {
+  description = "How many days S3 keeps each daily database backup (backups.tf), and each overwritten one."
+  type        = number
+  default     = 7
 
   validation {
-    condition     = can(regex("^([01][0-9]|2[0-3]):00$", var.snapshot_time))
-    error_message = "snapshot_time must be an hour in UTC, such as \"01:00\"."
+    condition     = var.database_backup_retention_days >= 1 && var.database_backup_retention_days == floor(var.database_backup_retention_days)
+    error_message = "database_backup_retention_days must be a whole number of days, at least 1."
   }
 }
 
