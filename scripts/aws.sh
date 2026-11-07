@@ -10,6 +10,7 @@ lambda_settings_file="$local_directory/lambda.env"
 build_directory="$local_directory/lambda"
 plan_file="$local_directory/terraform/scripts-aws.tfplan"
 local_state_file="$local_directory/terraform/terraform.tfstate"
+backup_settings_file="$local_directory/secrets/database_backups.json"
 
 usage() {
   cat >&2 <<'EOF'
@@ -19,8 +20,10 @@ from the bucket first and push it back at the end.
 Usage:
   scripts/aws.sh apply [terraform plan options]
       Build the backend, then create or update every AWS resource: the
-      Lightsail VM, its static IP and firewall, the Lambda, and the game's
-      certificate and CloudFront distribution. Shows the plan and asks first.
+      Lightsail VM, its static IP and firewall, the Lambda, the game's
+      certificate and CloudFront distribution, and the database backups'
+      bucket and key. Shows the plan and asks first. Writes the backups' key
+      to deploy/local/secrets/database_backups.json for the VM deploy.
       A plan that deletes or replaces an instance, the static IP, a disk or
       the distribution also needs each one's name typed, or listed in
       ISLAND_BATTLES_ALLOW_DESTROY, comma-separated. Runs the migrations before
@@ -157,8 +160,8 @@ check_plan() {
   run_terraform show -json "$plan_file" | python3 -I "$repository_root/deploy/check_deploy_plan.py" "$1"
 }
 
-# Deleting or replacing an instance deletes its disk and its automatic
-# snapshots, releasing the static IP gives vm.<domain>'s address away, and a
+# Deleting or replacing an instance deletes its disk and everything written
+# since the last backup, releasing the static IP gives vm.<domain>'s address away, and a
 # new distribution has a new domain for the game's CNAME. A generic yes isn't
 # enough for that: each one's name must be typed, or listed in
 # ISLAND_BATTLES_ALLOW_DESTROY.
@@ -182,6 +185,19 @@ confirm_destruction() {
       exit 1
     fi
   done
+}
+
+# The VM deploy installs the daily backup's bucket and upload-only key on the
+# VM (deploy/README.md, "Backups"). Only Terraform's state has the key, so
+# every apply copies it to deploy/local/secrets/, which the deploy bucket
+# shares. An apply of the certificate alone has no such output yet.
+save_backup_settings() {
+  local settings
+  if ! settings="$(run_terraform output -json database_backups 2>/dev/null)" || [[ -z "$settings" ]] || [[ "$settings" == null ]]; then
+    return 0
+  fi
+  mkdir -p "$(dirname -- "$backup_settings_file")"
+  (umask 077 && printf '%s\n' "$settings" >"$backup_settings_file")
 }
 
 # Plans, checks the plan, migrates and applies exactly the plan that was
@@ -219,6 +235,7 @@ plan_and_apply() {
     fi
   fi
   run_terraform apply -input=false "$plan_file"
+  save_backup_settings
   # The certificate's apply on its own leaves the rest for later.
   local function_url
   if function_url="$(run_terraform output -raw function_url 2>/dev/null)"; then

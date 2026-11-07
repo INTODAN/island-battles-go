@@ -39,7 +39,8 @@ resource "aws_iam_role" "github_deploy" {
 }
 
 # Every plan refreshes every resource, across Lightsail, Lambda, IAM, logs,
-# alarms, SNS, budgets, ACM and CloudFront.
+# alarms, SNS, budgets, ACM, CloudFront and the backups bucket. The bucket's
+# policy keeps the backups themselves from this role (backups.tf).
 resource "aws_iam_role_policy_attachment" "github_deploy_read" {
   count      = local.github_deploy ? 1 : 0
   role       = aws_iam_role.github_deploy[0].name

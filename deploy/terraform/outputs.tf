@@ -38,6 +38,27 @@ output "distribution_domain" {
   value       = aws_cloudfront_distribution.game.domain_name
 }
 
+output "database_backup_bucket" {
+  description = "The S3 bucket that holds the daily database backups, under postgres/."
+  value       = aws_s3_bucket.backups.bucket
+}
+
+# scripts/aws.sh writes this to deploy/local/secrets/database_backups.json
+# after every apply, and the VM deploy installs it on the VM.
+output "database_backups" {
+  description = "What the VM's daily backup needs, its upload-only access key included."
+  sensitive   = true
+  value = {
+    bucket            = aws_s3_bucket.backups.bucket
+    region            = var.region
+    prefix            = local.backup_prefix
+    metric_namespace  = local.backup_metric_namespace
+    metric_name       = local.backup_metric_name
+    access_key_id     = aws_iam_access_key.backups.id
+    secret_access_key = aws_iam_access_key.backups.secret
+  }
+}
+
 output "github_deploy_role_arn" {
   description = "The role the Deploy workflow assumes: the repository's AWS_DEPLOY_ROLE_ARN variable. Null without github_repository."
   value       = try(aws_iam_role.github_deploy[0].arn, null)
