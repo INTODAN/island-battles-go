@@ -34,7 +34,7 @@ func TestFrontendGameModulesAreServed(t *testing.T) {
 // The catalog links the demo viewer where app.go mounts it.
 func TestFrontendGameLinksTheDemoViewer(t *testing.T) {
 	links := lobbyadapter.FrontendGame().Links
-	if len(links) != 1 || links[0].Label != "Watch a saved demo" {
+	if len(links) != 2 || links[0].Label != "Watch a saved demo" {
 		t.Fatalf("links = %+v", links)
 	}
 	viewer, err := demoviewer.Handler()
@@ -45,5 +45,14 @@ func TestFrontendGameLinksTheDemoViewer(t *testing.T) {
 	http.StripPrefix("/game/demo-viewer/", viewer).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, links[0].URL, nil))
 	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "Open demo file") {
 		t.Fatalf("GET %s: status %d", links[0].URL, recorder.Code)
+	}
+}
+
+// The web client is served at /play/ by CloudFront, not the backend
+// (deploy/README.md, "The web client").
+func TestFrontendGameLinksThe3DClient(t *testing.T) {
+	links := lobbyadapter.FrontendGame().Links
+	if len(links) != 2 || links[1].Label != "Play in 3D" || links[1].URL != "/play/" {
+		t.Fatalf("links = %+v", links)
 	}
 }

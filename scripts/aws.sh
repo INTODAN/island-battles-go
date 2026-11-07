@@ -55,8 +55,9 @@ Usage:
       (deploy/README.md, "The concurrency cap").
   scripts/aws.sh output [name]
       Print Terraform's outputs, or one of them, e.g. static_ip,
-      function_url, game_url, certificate_validation_record or
-      distribution_domain.
+      function_url, game_url, certificate_validation_record,
+      distribution_domain, distribution_id or web_client_bucket (the bucket
+      scripts/deploy-web-client.sh uploads the /play/ web client to).
   scripts/aws.sh migrate-state
       Move Terraform's old local state, deploy/local/terraform/terraform.tfstate,
       into the deploy bucket. Once, on the machine that has it.
