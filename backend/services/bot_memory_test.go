@@ -240,3 +240,26 @@ func TestTooLargeBotMemoryIsRejectedAndStoresNothing(t *testing.T) {
 	assertMemory(t, register(t, fixture, 0, withMemory(batch(fixture.state, true), spaced)).Memory, largest)
 	assertMemory(t, currentMemory(t, fixture, 0).Memory, largest)
 }
+
+func TestBotMemoryIsStoredAsSent(t *testing.T) {
+	fixture := newTurnFixture(t, false)
+	// Numbers a database JSON type would expand to 131072 digits, and escapes
+	// it would reject, stay byte for byte as the compact input.
+	sent := `{ "a": 1e131071, "b": [1E2, 2.50], "z": 1, "a": 2, "s": "\u0000 \ud800" }`
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, []byte(sent)); err != nil {
+		t.Fatal(err)
+	}
+	want := compact.String()
+	completed := register(t, fixture, 0, withMemory(batch(fixture.state, true), sent))
+	if string(completed.Memory) != want {
+		t.Fatalf("completed memory=%s, want %s", completed.Memory, want)
+	}
+	if got := currentMemory(t, fixture, 0).Memory; string(got) != want {
+		t.Fatalf("current memory=%.100s (%d bytes), want %s", got, len(got), want)
+	}
+	register(t, fixture, 1, batch(fixture.state, true))
+	if got := pushedMemory(t, fixture, 0); string(got) != want {
+		t.Fatalf("pushed memory=%.100s (%d bytes), want %s", got, len(got), want)
+	}
+}

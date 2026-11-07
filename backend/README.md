@@ -160,7 +160,7 @@ Whoever runs the bot, a client relaying it or the backend itself, sends the resu
 - Every `GenerationState` has `memory`: the memory sent with the caller's latest completed turn of the game, or `null`. It's the next `BotTurn.memory`. Events pushed after a turn carry each player's own memory, on their personal channel only.
 - Memory is kept as sent: numbers keep every digit. PostgreSQL may reorder an object's keys.
 
-The memory lives in the `game_player_bot_memory` table, one row per player who has memory, keyed by the game and the player, with the generation whose turn saved it. A turn that clears the memory deletes the row. The table is game data: AutoMigrate creates it, and [retention](#game-retention) deletes it with the game.
+The memory lives in the `game_player_bot_memory` table, one row per player who has memory, keyed by the game and the player, with the generation whose turn saved it. The memory column is `bytea`, the exact compact JSON the service validated, because `jsonb` would reorder keys, expand numbers like `1e131071` into every digit and reject `\u0000`. A turn that clears the memory deletes the row. The table is game data: AutoMigrate creates it, and [retention](#game-retention) deletes it with the game.
 
 Bots that the backend plays itself implement the Go interface `bots.Bot` in [`bots/`](bots/bots.go), `Play(ctx, BotTurn) (BotTurnResult, error)`, on the Go types `models.BotTurn` and `models.BotTurnResult` that the schemas are exported from.
 

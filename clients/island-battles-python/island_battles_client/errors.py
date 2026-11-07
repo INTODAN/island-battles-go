@@ -63,12 +63,17 @@ class GameLogLimitError(GameError):
     """
 
 
+class BotMemoryTooLargeError(GameError):
+    """The server refused a batch whose memory is over 64 KiB as compact JSON."""
+
+
 # The server's problem types that clients tell apart: the command rejections,
-# shared by every command, and the game log limit.
+# shared by every command, the game log limit and the bot memory limit.
 PROBLEM_TYPE_ERRORS: dict[str, type[GameError]] = {
     "urn:island-battles:problem:castle-not-found": CastleNotFoundError,
     "urn:island-battles:problem:castle-not-owned": CastleNotOwnedError,
     "urn:island-battles:problem:upgrade-max-level": UpgradeMaxLevelError,
     "urn:island-battles:problem:insufficient-soldiers": InsufficientSoldiersError,
     "urn:island-battles:problem:game-log-limit": GameLogLimitError,
+    "urn:island-battles:problem:bot-memory-too-large": BotMemoryTooLargeError,
 }

@@ -81,9 +81,11 @@ type GamePlayerBotMemory struct {
 	GameID   uint   `gorm:"primaryKey;autoIncrement:false"`
 	PlayerID string `gorm:"type:uuid;primaryKey"`
 	// GenerationID is the generation whose completed turn sent the memory.
-	GenerationID uint   `gorm:"not null"`
-	Memory       []byte `gorm:"type:jsonb;not null"`
-	UpdatedAt    time.Time
+	GenerationID uint `gorm:"not null"`
+	// Memory is the compact JSON as validated, stored as bytea: jsonb would
+	// reformat it, expand exponent numbers and reject \u0000 and lone surrogates.
+	Memory    []byte `gorm:"type:bytea;not null"`
+	UpdatedAt time.Time
 }
 
 func (GamePlayerBotMemory) TableName() string { return "game_player_bot_memory" }
