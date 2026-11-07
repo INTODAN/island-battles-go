@@ -38,6 +38,16 @@ output "distribution_domain" {
   value       = aws_cloudfront_distribution.game.domain_name
 }
 
+output "web_client_bucket" {
+  description = "The S3 bucket that holds the web client, under play/. scripts/deploy-web-client.sh uploads to it."
+  value       = aws_s3_bucket.web_client.bucket
+}
+
+output "distribution_id" {
+  description = "The CloudFront distribution's ID, which scripts/deploy-web-client.sh invalidates."
+  value       = aws_cloudfront_distribution.game.id
+}
+
 output "database_backup_bucket" {
   description = "The S3 bucket that holds the daily database backups, under postgres/."
   value       = aws_s3_bucket.backups.bucket
