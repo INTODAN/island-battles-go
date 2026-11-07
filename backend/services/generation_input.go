@@ -377,7 +377,7 @@ func generationState(game *models.Game, generation *models.Generation, player mo
 		return models.GenerationState{}, err
 	}
 	state := models.GenerationState{GameID: game.ID, LobbyID: *game.LobbyID, GenerationID: generation.ID, PlayerID: player.PlayerID, TeamColor: player.TeamColor, Channel: channel,
-		Generation: GenerationView(generation), Outcome: outcomeView(game), Memory: memory, TurnDeadlineAt: turnDeadline(game, generation)}
+		Generation: GenerationView(generation), Outcome: outcomeView(game), Memory: memory, TurnDeadlineAt: turnDeadline(game, generation), Bot: models.FrozenBot(player)}
 	for _, input := range inputs {
 		if input.PlayerID == player.PlayerID {
 			state.Submitted = input.Completed

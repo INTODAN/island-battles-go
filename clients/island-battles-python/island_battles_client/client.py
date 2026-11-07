@@ -409,6 +409,13 @@ class IslandBattlesClient:
                 )
                 initial = _parse_state(discovery)
                 self._validate_identity(initial)
+                if initial.bot.kind != "localhost":
+                    # The backend plays this seat and completes its turns itself.
+                    raise GameError(
+                        f"the backend plays this seat with its level {initial.bot.level} "
+                        "default bot; to play it with your own bot, choose your "
+                        "localhost bot in the lobby before getting ready"
+                    )
                 self._expected_identity = (
                     initial.game_id,
                     initial.player_id,

@@ -18,6 +18,7 @@ from island_conformance.live import (
     COMMANDS,
     Match,
     Seat,
+    choose_localhost_bots,
     enemy_castle,
     own_castle,
     send,
@@ -47,6 +48,9 @@ async def match(guests):
     await alice.select_team(scope, room.teams[0].id)
     await carol.select_team(scope, room.teams[0].id)
     await bob.select_team(scope, room.teams[1].id)
+    await choose_localhost_bots(
+        BASE, scope.lobby_id, alice.credential, carol.credential, bob.credential
+    )
     for guest in (alice, carol, bob):
         await guest.set_ready(scope, True)
     await alice.start(scope)

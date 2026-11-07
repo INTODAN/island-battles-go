@@ -22,7 +22,7 @@ func TestFrontendGameIsAValidCatalogEntry(t *testing.T) {
 func TestFrontendGameModulesAreServed(t *testing.T) {
 	game := lobbyadapter.FrontendGame()
 	handler := http.StripPrefix("/game/demo/", demo.Handler())
-	for _, module := range []string{game.ExamplePlayer.Module, game.SettingsModule} {
+	for _, module := range []string{game.ExamplePlayer.Module, game.SettingsModule, game.RoomModule} {
 		recorder := httptest.NewRecorder()
 		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, module, nil))
 		if recorder.Code != http.StatusOK || !strings.Contains(recorder.Header().Get("Content-Type"), "javascript") {

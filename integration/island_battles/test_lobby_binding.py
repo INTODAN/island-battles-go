@@ -12,13 +12,29 @@ from integration.test_live import BASE, create, control_backend, guests, sql
 pytestmark = pytest.mark.asyncio
 
 
-async def started_lobby(guests, game_key, game_settings=None):
+LOCALHOST_BOT = {"kind": "localhost"}
+
+
+async def choose_bot(player, lobby_id, choice):
+    """Choose a player's bot for an Island Battles lobby, as every member must before getting ready."""
+    async with httpx.AsyncClient(base_url=BASE, headers={"Authorization": f"Bearer {player.credential}"}) as http:
+        response = await http.put(f"/game/lobbies/{lobby_id}/bot", json=choice)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+async def started_lobby(guests, game_key, game_settings=None, bots=(LOCALHOST_BOT, LOCALHOST_BOT)):
+    """A started two-player lobby. In Island Battles, Alice and Bob play with
+    bots, by default their localhost bots, whose turns the tests submit."""
     alice, bob = await guests("Alice"), await guests("Bob")
     room = await create(alice, game_key, game_settings)
     scope = Scope.from_snapshot(room)
     await bob.join_lobby(game_key=scope.game_key, join_code=room.lobby.join_code)
     await alice.select_team(scope, room.teams[0].id)
     await bob.select_team(scope, room.teams[1].id)
+    if game_key == "island-battles":
+        for player, choice in zip((alice, bob), bots):
+            await choose_bot(player, scope.lobby_id, choice)
     await alice.set_ready(scope, True)
     await bob.set_ready(scope, True)
     await alice.start(scope)
@@ -202,7 +218,7 @@ async def test_island_schema_survives_restart():
         "games", "maps", "castles", "castle_templates", "map_templates", "map_template_schema_migrations",
         "generations", "soldier_groups", "commands", "island_game_team_bindings",
         "frozen_game_players", "generation_inputs", "generation_requests", "generation_logs",
-        "game_player_bot_memory",
+        "game_player_bot_memory", "island_lobby_bot_choices",
     }
     columns = await sql("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='games' ORDER BY ordinal_position")
     assert set(columns.splitlines()) == {"id", "created_at", "updated_at", "deleted_at", "lobby_id", "teams", "outcome", "next_soldier_group_id", "turn_timeout_seconds"}

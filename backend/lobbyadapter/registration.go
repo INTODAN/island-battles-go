@@ -18,7 +18,9 @@ const GameKey = "island-battles"
 
 // Registration declares Island Battles to the lobby policy. Its settings
 // validator reads default maps from database. Every team owns castles on the
-// map, so a game can't start with an empty team.
+// map, so a game can't start with an empty team. Every member chooses a bot
+// before getting ready, so the ready gate refuses a member without one with
+// services.BotNotChosenProblemType.
 func Registration(database *gorm.DB) domain.GameRegistration {
 	return domain.GameRegistration{
 		Key: GameKey,
@@ -26,6 +28,9 @@ func Registration(database *gorm.DB) domain.GameRegistration {
 			return validateSettings(ctx, database, settings, teams)
 		},
 		StartRules: domain.StartRules{EveryTeamNeedsMember: true},
+		ReadyGate: func(ctx context.Context, lobbyID string) (domain.ReadyCheck, error) {
+			return services.BotReadyCheck(database.WithContext(ctx), lobbyID)
+		},
 	}
 }
 

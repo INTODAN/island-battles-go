@@ -25,6 +25,20 @@ from pydantic import (
 )
 
 
+class BotChoice(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    kind: Literal["localhost", "default"]
+    """
+    localhost: the player's own bot, which island-battles-bot serve runs on their machine; their game client relays each turn to it and submits its answer. default: a default bot of GET /bots/defaults, which the backend plays itself, so the player's client submits nothing.
+    """
+    level: Annotated[StrictInt | None, Field(ge=1)] = None
+    """
+    For kind default, the level of the default bot, one that GET /bots/defaults lists. Absent for kind localhost.
+    """
+
+
 class BotTurn(GameModel):
     model_config = ConfigDict(
         extra="ignore",
@@ -404,6 +418,10 @@ class GenerationState(GameModel):
     """
     A URL to the JSON Schema for this object.
     """
+    bot: BotChoice
+    """
+    Your bot in this game, the one you chose in the lobby, copied when the game started. For kind localhost your client relays each turn to your bot and submits its answer. For kind default the backend plays your turns itself as soon as each generation is created, so your client submits nothing.
+    """
     channel: StrictStr
     """
     Your personal Centrifugo channel, which receives GenerationEvent after each turn and GameEndedEvent after the last one.
@@ -489,6 +507,36 @@ class ListUpgradesResponseBody(GameModel):
     A URL to the JSON Schema for this object.
     """
     upgrades: Sequence[Upgrade]
+
+
+class LobbyBots(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    field_schema: Annotated[
+        AnyUrl | None,
+        Field(alias="$schema", examples=["https://example.com/LobbyBots.json"]),
+    ] = None
+    """
+    A URL to the JSON Schema for this object.
+    """
+    lobby_id: UUID
+    members: Sequence[LobbyMemberBot]
+    """
+    Every member of the lobby, in the lobby's member order.
+    """
+
+
+class LobbyMemberBot(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    bot: BotChoice | None = None
+    """
+    The member's bot. Absent until they choose one, and a member can't get ready without one.
+    """
+    display_name: StrictStr
+    player_id: UUID
 
 
 class LobbySettings(GameModel):
@@ -586,6 +634,7 @@ class Problem(GameModel):
         "idempotency_conflict",
         "invalid_input",
         "invalid_game_settings",
+        "game_requirement",
         "unavailable",
         "internal_error",
     ]
@@ -596,6 +645,10 @@ class Problem(GameModel):
     The teams the error is about. For empty_teams, the teams that still need a player, in team order.
     """
     title: StrictStr
+    type: StrictStr | None = None
+    """
+    For game_requirement, the game's own problem type, a URI that the game documents, such as one meaning a player has yet to choose something in the game's API. Absent for every other code.
+    """
 
 
 class RegisterGenerationCommands(GameModel):

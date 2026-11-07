@@ -87,7 +87,7 @@ calls the bot once on a fixture turn (or on your own `BotTurn` file with `--turn
 uv run island-battles-bot run mybot:play --base-url http://localhost:8888 --token GUEST_BEARER_TOKEN --lobby-id LOBBY_UUID
 ```
 
-plays one seat of a started lobby until the game ends, for CI and headless testing. `--log-file` and `--log-level` set the log output. The same in code:
+plays one seat of a started lobby until the game ends, for CI and headless testing. `--log-file` and `--log-level` set the log output. The seat's player must have chosen their localhost bot in the lobby before getting ready (`PUT /game/lobbies/{lobby_id}/bot` with `{"kind": "localhost"}`; see the [backend README](../../backend/README.md#choosing-a-bot)): a player who chose a default level is played by the backend, and the client stops at once with a `GameError` that says so. `GenerationState.bot` reports which bot a seat plays with. The same in code:
 
 ```python
 import asyncio

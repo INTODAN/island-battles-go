@@ -133,6 +133,7 @@ const snapshot = (version: number, overrides: object = {}): Snapshot =>
 
 const state = (generationId: number, overrides: object = {}): GenerationState =>
   ({
+    bot: { kind: "localhost" },
     channel: CHANNEL,
     game_id: 7,
     generation: {
