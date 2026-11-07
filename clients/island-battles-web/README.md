@@ -44,9 +44,21 @@ Open **http://localhost:3000/**. The dev server hot-reloads and proxies `/lobby/
 
 `src/api/client.ts` exports `lobbyApi` and `gameApi` ([openapi-fetch](https://openapi-ts.dev/openapi-fetch/)) for the page's own origin; `createApiClients({ baseUrl })` builds clients for another base URL. Call `setAccessToken` after creating a session: every request except `POST /lobby/v1/sessions` then sends `Authorization: Bearer <token>`. Calls resolve with `{ data }` and reject with `ApiError` (`src/api/errors.ts`): `kind` is `problem` (with `code` for lobby, `problemType` for game, `title`, `detail`), `http` (error status without a problem body) or `transport` (no response). Responses are not validated, so unknown fields such as `$schema` are ignored.
 
+## Realtime session
+
+`src/realtime/` keeps one [centrifuge-js](https://github.com/centrifugal/centrifuge-js) connection (pinned at an exact version) and follows a lobby and its game. It has no DOM or Babylon imports, so `bun test` runs it. `createRealtime()` returns four typed stores with a tiny `get()` / `subscribe(listener)` API: `session`, `lobby` (`Snapshot | null`), `game` (latest `GenerationState | null`) and `connection` (`connecting | connected | disconnected`), plus `problem` for a session, lobby or game that ended.
+
+- `signIn(name)` creates a guest session, or reuses the one saved in `sessionStorage` until `expires_at`. A 401 from any call, or from `getToken` (which re-calls `POST /lobby/v1/connection-token` when the 5-minute connection token expires), ends the session.
+- `followLobby({ gameKey, lobbyId })` (or `adoptSnapshot(snapshot)` with a snapshot an HTTP call returned) reads the snapshot, subscribes to its channel and re-reads it on `subscribed` and on each `lobby.changed` with a newer `version`. `followGame(lobbyId)` subscribes to `player:<id>` and reads `GET /game/from-lobby/{lobby_id}/generation` on `subscribed`.
+- Install rules (`install.ts`): a generation older than the one held, a duplicate, another game's state and anything after the outcome are ignored. Results of reads that finished after `leaveLobby()` / `leaveGame()` are dropped by an epoch counter.
+- Every `connected`, `subscribed` and `unsubscribed` event asks for a reconciling read. Requests close together share one read, a failed read is retried with backoff, and nothing polls while idle.
+
+Tests inject a fake Centrifugo client (`createClient`), fake `fetch` and fake storage. The turn deadline call (`POST /game/from-lobby/{lobby_id}/deadline`) is not part of this module.
+
 ## Layout
 
 - `index.html`, `src/main.ts`, `src/styles.css`: the page and the Babylon scene. `@babylonjs/core` is imported from its ES module paths so the bundle tree-shakes; add the side-effect imports a feature needs (for example `StandardMaterial`) instead of importing the package root.
+- `src/realtime/`: the Centrifugo session, described above.
 - `dev.ts` and `proxy.ts`: the dev server and its proxy rules.
 - `build.ts`: the production build, served under `/play/`.
 
