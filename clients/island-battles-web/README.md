@@ -1,6 +1,6 @@
 # Island Battles web client
 
-A 3D browser client for Island Battles, written in TypeScript with [Babylon.js](https://www.babylonjs.com/). It will let people watch a game's gameplay; today it is the scaffold: a full-window Babylon scene (engine, camera, light, ground) that later issues build on. See [#94](https://github.com/INTODAN/island-battles-go/issues/94) for the plan.
+A 3D browser client for Island Battles, written in TypeScript with [Babylon.js](https://www.babylonjs.com/). It will let people watch a game's gameplay. Today the `src/scene/` layer draws any one generation as a 3D board with placeholder art (see [The 3D board](#the-3d-board)); the page itself is still the scaffold that later issues build on. See [#94](https://github.com/INTODAN/island-battles-go/issues/94) for the plan.
 
 The tooling is [Bun](https://bun.sh/) (runtime, package manager, bundler, dev server and test runner) and [Biome](https://biomejs.dev/) (lint, format and import sorting). Bun does not type-check, so `tsc` does.
 
@@ -44,9 +44,23 @@ Open **http://localhost:3000/**. The dev server hot-reloads and proxies `/lobby/
 
 `src/api/client.ts` exports `lobbyApi` and `gameApi` ([openapi-fetch](https://openapi-ts.dev/openapi-fetch/)) for the page's own origin; `createApiClients({ baseUrl })` builds clients for another base URL. Call `setAccessToken` after creating a session: every request except `POST /lobby/v1/sessions` then sends `Authorization: Bearer <token>`. Calls resolve with `{ data }` and reject with `ApiError` (`src/api/errors.ts`): `kind` is `problem` (with `code` for lobby, `problemType` for game, `title`, `detail`), `http` (error status without a problem body) or `transport` (no response). Responses are not validated, so unknown fields such as `$schema` are ignored.
 
+## The 3D board
+
+`src/scene/` draws one `Generation` (the `Generation` type from `src/api/generated/game.ts`) and knows nothing about the server. `renderGeneration(scene, generation, teams)` builds or updates meshes by castle, group and clash ID, so a later call moves and relabels what is already there rather than rebuilding it. Everything is placeholder art made from Babylon primitives in `art.ts`; replace those builders to change the look.
+
+- `coordinates.ts`: the one map-to-world mapping. One map unit is one world unit; the map's `(x, y)` becomes `(x, 0, -y)`, so the board is laid out as the 2D replay is.
+- `palette.ts`: the team palette, checked against `backend/services/replay.html` by a test.
+- `board.ts` and `camera.ts`: the board fits the castles with a minimum of 8 by 6 units; the camera is a 3/4 `ArcRotateCamera` with tilt, zoom and pan limits. Double-click a castle to focus it, `F` to refit.
+- `islands.ts`: island shapes are seeded by castle ID and never change; castles closer than 1.5 units share a landmass.
+- `labelLayer.ts` and `labels.ts`: Babylon GUI labels linked to meshes, spread each frame so none covers another.
+- `headingLines.ts`: the heading lines of [#89](https://github.com/INTODAN/island-battles-go/issues/89). Every style choice (casing, arrowhead, lane offset, tint) is a value in `headingStyle`, since the owner has not yet picked treatments.
+- `picking.ts`: hover highlight and tooltip, double-click focus and the `F` key.
+
+**Dev page.** With `bun run dev`, open `http://localhost:3000/?fixture=busy-turn.json` (add `&frame=3` to start on the third frame). It draws a saved game from [`test/fixtures/`](test/fixtures/) with a frame slider and needs no backend. The fixtures are demo files: `generated-map.json` (the generated map's first turns), `busy-turn.json` (a bot match with clashes and upgrades) and `six-teams.json`. Regenerate them by playing seeded bots with the backend's own simulation: from the repository root, run `WEB_CLIENT_FIXTURES_DIR=<absolute path to clients/island-battles-web/test/fixtures> go test ./backend/simulation -run TestWriteWebClientFixtures`. Screenshots of each frame type are in [`docs/screenshots/`](docs/screenshots/).
+
 ## Layout
 
-- `index.html`, `src/main.ts`, `src/styles.css`: the page and the Babylon scene. `@babylonjs/core` is imported from its ES module paths so the bundle tree-shakes; add the side-effect imports a feature needs (for example `StandardMaterial`) instead of importing the package root.
+- `index.html`, `src/main.ts`, `src/styles.css`: the page and the Babylon scene. `src/main.ts` starts the dev page when the URL has `?fixture=`. `@babylonjs/core` is imported from its ES module paths so the bundle tree-shakes; add the side-effect imports a feature needs (for example `StandardMaterial`) instead of importing the package root.
 - `dev.ts` and `proxy.ts`: the dev server and its proxy rules.
 - `build.ts`: the production build, served under `/play/`.
 
