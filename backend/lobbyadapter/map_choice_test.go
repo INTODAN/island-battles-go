@@ -44,7 +44,7 @@ func TestRegistrationValidatesTheMapChoice(t *testing.T) {
 	twoTeams := []domain.TeamDefinition{{Name: "Blue", Capacity: 1}, {Name: "Red", Capacity: 1}}
 	threeTeams := slices.Concat(twoTeams, []domain.TeamDefinition{{Name: "Green", Capacity: 1}})
 	ctx := context.Background()
-	for _, settings := range []string{``, `{}`, fmt.Sprintf(`{"map_template_id":%d}`, templateID), `{"map":` + twoTeamMapFile + `}`} {
+	for _, settings := range []string{``, `{}`, fmt.Sprintf(`{"map_template_id":%d}`, templateID), `{"map":` + twoTeamMapFile + `}`, `{"turn_timeout_seconds":null}`, fmt.Sprintf(`{"map_template_id":%d,"turn_timeout_seconds":600}`, templateID)} {
 		if _, err := policy.ValidateGameSettings(ctx, lobbyadapter.GameKey, json.RawMessage(settings), twoTeams); err != nil {
 			t.Errorf("settings %s rejected: %v", settings, err)
 		}
@@ -60,6 +60,7 @@ func TestRegistrationValidatesTheMapChoice(t *testing.T) {
 		{`{"map":` + strings.Replace(twoTeamMapFile, `"x":4`, `"x":6`, 1) + `}`, twoTeams, "game_settings.map.castles[2].x: must be inside the plane, from -5 to 5"},
 		{fmt.Sprintf(`{"map_template_id":%d,"map":%s}`, templateID, twoTeamMapFile), twoTeams, "game_settings.map: cannot be combined with map_template_id"},
 		{`{"map":"Strait"}`, twoTeams, "game_settings.map: expected object"},
+		{`{"turn_timeout_seconds":3}`, twoTeams, "game_settings.turn_timeout_seconds: must be a whole number of seconds from 5 to 600, or null for no limit"},
 	}
 	for _, rejection := range rejections {
 		_, err := policy.ValidateGameSettings(ctx, lobbyadapter.GameKey, json.RawMessage(rejection.settings), rejection.teams)

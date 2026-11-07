@@ -43,6 +43,10 @@ func RunLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 		if chosenMap != nil {
 			gameMap = models.BuildMap(*chosenMap)
 		}
+		turnTimeout, err := LobbyTurnTimeout(snapshot.Lobby.GameSettings)
+		if err != nil {
+			return fmt.Errorf("lobby turn timeout: %w", err)
+		}
 		players := make([]models.FrozenGamePlayer, 0, len(snapshot.StartRoster))
 		for index, entry := range snapshot.StartRoster {
 			color := models.NeutralTeamColor
@@ -69,10 +73,10 @@ func RunLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 		if err != nil {
 			return err
 		}
-		if err := dal.SaveGameTeams(transaction, game, teams); err != nil {
+		if err := dal.SaveGameStart(transaction, game, teams, turnTimeout); err != nil {
 			return err
 		}
-		events, err = generationEvents(game, current, players, nil)
+		events, err = generationEvents(game, current, players, nil, nil)
 		return err
 	})
 	if err != nil {

@@ -62,8 +62,8 @@ type BotTurn struct {
 	Generation GenerationView `json:"generation"`
 	TeamColor  uint           `json:"team_color" minimum:"1"`
 	Memory     BotMemory      `json:"memory" doc:"The memory the bot returned with its previous turn in this game, or null on its first turn and after a turn that returned null."`
-	// TurnDeadlineAt stays nil until turns have a deadline.
-	TurnDeadlineAt *time.Time `json:"turn_deadline_at" nullable:"true" doc:"When the turn times out, or null when turns have no time limit."`
+	// TurnDeadlineAt is GenerationState.TurnDeadlineAt.
+	TurnDeadlineAt *time.Time `json:"turn_deadline_at" nullable:"true" doc:"When the turn times out, GenerationState.turn_deadline_at, or null when turns have no time limit. A bot that hasn't answered by then makes its whole team lose."`
 }
 
 // BotTurnResult is a bot's answer to a BotTurn: the commands and game log

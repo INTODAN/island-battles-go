@@ -42,7 +42,7 @@ func (handler *LobbyGame) Replay(ctx context.Context, input *struct {
 	if err != nil {
 		return nil, huma.Error401Unauthorized("authentication required")
 	}
-	service := services.GenerationService{Database: handler.Database}
+	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher}
 	replay, err := service.Replay(ctx, verified.Principal, input.LobbyID)
 	if err != nil {
 		return nil, generationHTTPError(ctx, err)
@@ -71,7 +71,7 @@ func (handler *LobbyGame) Demo(ctx context.Context, input *struct {
 	if err != nil {
 		return nil, huma.Error401Unauthorized("authentication required")
 	}
-	service := services.GenerationService{Database: handler.Database}
+	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher}
 	demo, err := service.Demo(ctx, verified.Principal, input.LobbyID)
 	if err != nil {
 		return nil, generationHTTPError(ctx, err)

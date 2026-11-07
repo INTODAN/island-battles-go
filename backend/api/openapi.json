@@ -27,7 +27,7 @@
             "type": "integer"
           },
           "turn_deadline_at": {
-            "description": "When the turn times out, or null when turns have no time limit.",
+            "description": "When the turn times out, GenerationState.turn_deadline_at, or null when turns have no time limit. A bot that hasn't answered by then makes its whole team lose.",
             "format": "date-time",
             "type": [
               "string",
@@ -487,16 +487,17 @@
         "additionalProperties": false,
         "properties": {
           "reason": {
-            "description": "last_team_standing: one team was left after every other team lost all its castles and soldier groups. all_eliminated: the last teams were eliminated in the same turn, a draw. generation_cap: the game reached its last generation; the team with the most castles won, and equal counts are a draw.",
+            "description": "last_team_standing: one team was left after every other team lost all its castles and soldier groups. all_eliminated: the last teams were eliminated in the same turn, a draw. generation_cap: the game reached its last generation; the team with the most castles won, and equal counts are a draw. turn_timeout: a turn passed its deadline; every team with a player who hadn't completed it lost, and among the other teams still standing the team with the most castles won, while equal counts, or no team left, are a draw.",
             "enum": [
               "last_team_standing",
               "all_eliminated",
-              "generation_cap"
+              "generation_cap",
+              "turn_timeout"
             ],
             "type": "string"
           },
           "summary": {
-            "description": "The outcome in one sentence, naming the winning team.",
+            "description": "The outcome in one sentence, naming the winning team, and for turn_timeout the teams that lost and their players who didn't answer.",
             "type": "string"
           },
           "winner_team_color": {
@@ -741,6 +742,14 @@
             "format": "int64",
             "minimum": 1,
             "type": "integer"
+          },
+          "turn_deadline_at": {
+            "description": "When this generation's turn times out: the generation's creation time plus the lobby's turn_timeout_seconds. Null when turns have no time limit, and once the game has ended. If a player of a team hasn't completed the turn by then, the team loses and the game ends. A client waiting for other players calls POST /game/from-lobby/{lobby_id}/deadline about a second after it, because the server runs no timers.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -753,7 +762,8 @@
           "submitted",
           "generation",
           "log_lines_stored",
-          "memory"
+          "memory",
+          "turn_deadline_at"
         ],
         "type": "object"
       },
@@ -807,7 +817,7 @@
       },
       "LobbySettings": {
         "additionalProperties": false,
-        "description": "Island Battles game_settings for a lobby create request. Choose at most one map: map_template_id or map. The map must be made for exactly the lobby's teams: player_amount equal to the team count, and castle team colours exactly 1 to that count, in team order, with 0 for neutral castles. Without a map the game starts on a generated map. An invalid choice fails lobby creation with invalid_game_settings, and its detail names each invalid field, such as game_settings.map.castles[0].x.",
+        "description": "Island Battles game_settings for a lobby create request. Choose at most one map: map_template_id or map. The map must be made for exactly the lobby's teams: player_amount equal to the team count, and castle team colours exactly 1 to that count, in team order, with 0 for neutral castles. Without a map the game starts on a generated map. turn_timeout_seconds sets how long each turn lasts, from 5 to 600 seconds, 30 when left out, or null for no limit. An invalid choice fails lobby creation with invalid_game_settings, and its detail names each invalid field, such as game_settings.map.castles[0].x.",
         "properties": {
           "map": {
             "$ref": "#/components/schemas/MapTemplate",
@@ -818,6 +828,17 @@
             "format": "int64",
             "minimum": 1,
             "type": "integer"
+          },
+          "turn_timeout_seconds": {
+            "default": 30,
+            "description": "How long each turn lasts, in whole seconds from 5 to 600, counted from when its generation was created; 30 when left out. null means no limit, for example while debugging a bot. When a turn's deadline passes before every player has completed it, each team with a player who hadn't loses, and the game ends.",
+            "format": "int64",
+            "maximum": 600,
+            "minimum": 5,
+            "type": [
+              "integer",
+              "null"
+            ]
           }
         },
         "type": "object"
@@ -1308,12 +1329,67 @@
     }
   },
   "info": {
-    "description": "Operations a player client calls during a started game. After every turn, each roster player's Centrifugo channel `player:{player_id}` receives a `GenerationEvent`, except after the turn that ends the game, which pushes a `GameEndedEvent` with the final generation and its outcome instead. Clients reconcile with the generation read after subscribing or reconnecting; HTTP state is authoritative, and its `outcome` is set once the game has ended. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the `game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose. `GET /game/upgrades` lists what each castle upgrade level costs. `Demo` is the demo file format, which `GET /game/from-lobby/{lobby_id}/demo` returns and the demo viewer at `/game/demo-viewer/` opens. `BotTurn` and `BotTurnResult` are the stateless bot contract: a bot gets a `BotTurn` each turn and answers with a `BotTurnResult`, which a client sends as one completing batch.",
+    "description": "Operations a player client calls during a started game. After every turn, each roster player's Centrifugo channel `player:{player_id}` receives a `GenerationEvent`, except after the turn that ends the game, which pushes a `GameEndedEvent` with the final generation and its outcome instead. Clients reconcile with the generation read after subscribing or reconnecting; HTTP state is authoritative, and its `outcome` is set once the game has ended. A turn times out at its `turn_deadline_at`; the server runs no timers, so a client waiting for other players calls `POST /game/from-lobby/{lobby_id}/deadline` about a second after it. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the `game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose. `GET /game/upgrades` lists what each castle upgrade level costs. `Demo` is the demo file format, which `GET /game/from-lobby/{lobby_id}/demo` returns and the demo viewer at `/game/demo-viewer/` opens. `BotTurn` and `BotTurnResult` are the stateless bot contract: a bot gets a `BotTurn` each turn and answers with a `BotTurnResult`, which a client sends as one completing batch.",
     "title": "Island Battles Player API",
     "version": "1.0.0"
   },
   "openapi": "3.1.0",
   "paths": {
+    "/game/from-lobby/{lobby_id}/deadline": {
+      "post": {
+        "description": "Requires a place on the game's frozen roster; the lobby is not consulted. The server runs no timers, so a turn times out when a request applies its deadline, GenerationState.turn_deadline_at. Every game request does that first, and a client that is waiting for other players calls this once about a second after the deadline. Before the deadline, and for a game that has ended or has no turn timeout, it changes nothing. After it, every team with a player who hasn't completed the turn loses, the game ends with reason turn_timeout, and among the other teams still standing the team with the most castles wins; equal counts, or no team left, are a draw. The open generation stays the final one, game.ended is pushed to every roster player, and later commands conflict (409) with problem type urn:island-battles:problem:game-ended. Calling it again is safe and ends the game once. Returns your current state, as GET /game/from-lobby/{lobby_id}/generation does.",
+        "operationId": "applyIslandLobbyTurnDeadline",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lobby_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerationState"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "LobbyBearer": []
+          }
+        ],
+        "summary": "Apply the current turn's deadline for a roster player",
+        "tags": [
+          "Island Battles"
+        ]
+      }
+    },
     "/game/from-lobby/{lobby_id}/demo": {
       "get": {
         "description": "Requires a place on the game's frozen roster; the lobby is not consulted. Returns the game as a demo file, the Demo schema, as an attachment named island-battles-game-\u003cgame_id\u003e-generation-\u003cn\u003e.json, where n is the number of generations played. Any roster player can save a demo at any time: one saved during the game holds the generations played so far and a null outcome. Each frame's game log lines follow the rule of GET /game/from-lobby/{lobby_id}/logs when the demo is saved: while the game runs only your own team's lines, once it has ended every team's. The demo viewer at /game/demo-viewer/ opens the file without the lobby, a session or the game. The body is streamed, and a long game with full logs takes tens of megabytes, so it is packed with gzip (Content-Encoding: gzip) when Accept-Encoding allows it. The game is deleted 7 days after its last generation by default; then this returns 404.",
@@ -1385,7 +1461,7 @@
     },
     "/game/from-lobby/{lobby_id}/generation": {
       "get": {
-        "description": "Requires a place on the game's frozen roster. The game does not consult the lobby, so access continues after the lobby is deleted. Returns castle and soldier group IDs, which are never reassigned within a game, troop state, every castle's and soldier group's upgrade levels, recorded clashes with per-participant before/after counts, your turn completion flag, and the outcome once the game has ended. A finished game stays readable until the game is deleted, 7 days after its last generation by default; then this returns 404.",
+        "description": "Requires a place on the game's frozen roster. The game does not consult the lobby, so access continues after the lobby is deleted. Returns castle and soldier group IDs, which are never reassigned within a game, troop state, every castle's and soldier group's upgrade levels, recorded clashes with per-participant before/after counts, your turn completion flag, the turn's deadline, and the outcome once the game has ended. Like every game request, it first applies the turn's deadline once it has passed, which ends the game. A finished game stays readable until the game is deleted, 7 days after its last generation by default; then this returns 404.",
         "operationId": "getIslandLobbyGeneration",
         "parameters": [
           {
@@ -1537,7 +1613,7 @@
     },
     "/generation/commands": {
       "post": {
-        "description": "Requires a place on the game's frozen roster; the lobby is not consulted. Players send send_soldier_group and upgrade_castle commands for castles their team owns; other command types are forbidden (403). upgrade_castle buys the next level of one upgrade type and pays that level's soldier_cost, listed by GET /game/upgrades, from the castle's soldiers. A castle may be upgraded several times in one turn, and each upgrade buys the next level. Every command is checked against the generation and every command already accepted this turn, yours and your teammates', so an accepted command cannot fail when the turn runs. An invalid command rejects the whole batch, and nothing of it is stored. Malformed parameters are 422. Rejections that clients tell apart carry a problem type: a castle that is not in the generation is 422 urn:island-battles:problem:castle-not-found, an unknown upgrade_type is 422 urn:island-battles:problem:unknown-upgrade-type, a castle your team does not own is 403 urn:island-battles:problem:castle-not-owned, an upgrade past its type's max_level, counting this turn's upgrades, is 409 urn:island-battles:problem:upgrade-max-level, and soldiers or an upgrade cost beyond what the castle has left after this turn's reservations is 409 urn:island-battles:problem:insufficient-soldiers. A castle may spend all its soldiers. Complete defaults to true; an empty batch can complete a turn. The last frozen roster completion advances exactly once. The game ends after the turn that leaves one team with castles or soldier groups, a draw when the last teams are eliminated in the same turn, or after the turn that creates generation 300, where the team with the most castles wins. That turn's generation is the last, its state carries the outcome, and every later command conflicts (409) with problem type urn:island-battles:problem:game-ended. Retry the same request UUID and payload safely, also after the game ended; changed payloads and stale new requests conflict. A batch may also carry game log lines, which are stored in order with the generation and read with GET /game/from-lobby/{lobby_id}/logs. A player has at most 100 lines per generation, each of at most 500 characters; a batch over either limit is rejected whole (422) with problem type urn:island-battles:problem:game-log-limit. A batch may also carry the memory of the player's bot, any JSON object of at most 64 KiB as compact JSON. The batch with complete true saves it, replacing the player's previous memory, and an absent or null memory clears it; other batches ignore it. GenerationState.memory returns the memory sent with the player's latest completed turn, and the retry hash covers it. Larger memory is rejected whole (422) with problem type urn:island-battles:problem:bot-memory-too-large.",
+        "description": "Requires a place on the game's frozen roster; the lobby is not consulted. Players send send_soldier_group and upgrade_castle commands for castles their team owns; other command types are forbidden (403). upgrade_castle buys the next level of one upgrade type and pays that level's soldier_cost, listed by GET /game/upgrades, from the castle's soldiers. A castle may be upgraded several times in one turn, and each upgrade buys the next level. Every command is checked against the generation and every command already accepted this turn, yours and your teammates', so an accepted command cannot fail when the turn runs. An invalid command rejects the whole batch, and nothing of it is stored. Malformed parameters are 422. Rejections that clients tell apart carry a problem type: a castle that is not in the generation is 422 urn:island-battles:problem:castle-not-found, an unknown upgrade_type is 422 urn:island-battles:problem:unknown-upgrade-type, a castle your team does not own is 403 urn:island-battles:problem:castle-not-owned, an upgrade past its type's max_level, counting this turn's upgrades, is 409 urn:island-battles:problem:upgrade-max-level, and soldiers or an upgrade cost beyond what the castle has left after this turn's reservations is 409 urn:island-battles:problem:insufficient-soldiers. A castle may spend all its soldiers. Complete defaults to true; an empty batch can complete a turn. The last frozen roster completion advances exactly once. The game ends after the turn that leaves one team with castles or soldier groups, a draw when the last teams are eliminated in the same turn, or after the turn that creates generation 300, where the team with the most castles wins. That turn's generation is the last, its state carries the outcome, and every later command conflicts (409) with problem type urn:island-battles:problem:game-ended. A turn also ends the game when its deadline, GenerationState.turn_deadline_at, passes before every roster player completed it: each team with a player who hadn't loses (outcome reason turn_timeout), the open generation stays the last, and a batch for it after the deadline conflicts with the same problem type. Retry the same request UUID and payload safely, also after the game ended; changed payloads and stale new requests conflict. A batch may also carry game log lines, which are stored in order with the generation and read with GET /game/from-lobby/{lobby_id}/logs. A player has at most 100 lines per generation, each of at most 500 characters; a batch over either limit is rejected whole (422) with problem type urn:island-battles:problem:game-log-limit. A batch may also carry the memory of the player's bot, any JSON object of at most 64 KiB as compact JSON. The batch with complete true saves it, replacing the player's previous memory, and an absent or null memory clears it; other batches ignore it. GenerationState.memory returns the memory sent with the player's latest completed turn, and the retry hash covers it. Larger memory is rejected whole (422) with problem type urn:island-battles:problem:bot-memory-too-large.",
         "operationId": "registerGenerationCommand",
         "parameters": [
           {

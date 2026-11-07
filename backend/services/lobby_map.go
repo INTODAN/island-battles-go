@@ -10,6 +10,18 @@ import (
 	"gorm.io/gorm"
 )
 
+// LobbyTurnTimeout returns the turn timeout, in seconds, that a lobby's game
+// settings set, or nil for no limit. Settings without one, and absent
+// settings, get models.DefaultTurnTimeoutSeconds. The lobby checked the
+// settings at creation, so an error means they changed since.
+func LobbyTurnTimeout(rawSettings json.RawMessage) (*uint, error) {
+	if len(rawSettings) == 0 {
+		rawSettings = json.RawMessage(`{}`)
+	}
+	settings, err := models.ParseLobbySettings(rawSettings)
+	return settings.TurnTimeoutSeconds, err
+}
+
 // LobbyMap returns the map that a lobby's game settings choose, ready for
 // models.BuildMap, or nil when they choose none, or are absent, and the game
 // starts on the generated map. The chosen default map must exist, and the map must be made

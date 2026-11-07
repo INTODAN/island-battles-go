@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"fmt"
 	"html/template"
+	"strings"
 
 	"islandBattles/backend/models"
 )
@@ -64,6 +65,9 @@ func outcomeView(game *models.Game) *models.GameOutcomeView {
 // describeOutcome sums up the outcome of a game that has ended.
 func describeOutcome(game *models.Game) string {
 	outcome := game.Outcome
+	if outcome.Reason == models.GameOutcomeTurnTimeout {
+		return describeTimeoutOutcome(game)
+	}
 	// Without a winner the game is a draw, whatever its reason.
 	if outcome.WinnerTeamColor == nil {
 		switch outcome.Reason {
@@ -74,13 +78,7 @@ func describeOutcome(game *models.Game) string {
 		}
 		return "Draw"
 	}
-	winner := fmt.Sprintf("Team %d", *outcome.WinnerTeamColor)
-	for _, team := range game.Teams {
-		if team.Color == *outcome.WinnerTeamColor {
-			winner = team.Name
-			break
-		}
-	}
+	winner := teamName(game, *outcome.WinnerTeamColor)
 	switch outcome.Reason {
 	case models.GameOutcomeLastTeamStanding:
 		return winner + " wins as the last team standing"
@@ -88,6 +86,37 @@ func describeOutcome(game *models.Game) string {
 		return winner + " wins with the most castles at the generation limit"
 	}
 	return winner + " wins"
+}
+
+// describeTimeoutOutcome sums up a game that ended at a turn's deadline: each
+// team that timed out, with its players who didn't answer, and then the
+// winner, or that the other teams drew. A game where every team still in it
+// timed out, and so has no survivors, is a draw: "Draw: Blue's and Red's bots didn't answer within
+// 30 s".
+func describeTimeoutOutcome(game *models.Game) string {
+	outcome := game.Outcome
+	if len(outcome.Survivors) == 0 && outcome.WinnerTeamColor == nil {
+		bots := make([]string, 0, len(outcome.TimedOut))
+		for _, team := range outcome.TimedOut {
+			bots = append(bots, teamName(game, team.Color)+"'s")
+		}
+		within := ""
+		if game.TurnTimeoutSeconds != nil {
+			within = " within " + describeTimeout(*game.TurnTimeoutSeconds)
+		}
+		return fmt.Sprintf("Draw: %s bots didn't answer%s", joinNames(bots), within)
+	}
+	clauses := make([]string, 0, len(outcome.TimedOut)+1)
+	for _, team := range outcome.TimedOut {
+		clauses = append(clauses, describeTimedOutTeam(game, team))
+	}
+	switch {
+	case outcome.WinnerTeamColor != nil:
+		clauses = append(clauses, teamName(game, *outcome.WinnerTeamColor)+" wins")
+	default:
+		clauses = append(clauses, "the other teams draw")
+	}
+	return strings.Join(clauses, "; ")
 }
 
 // replayPage is the data of the page template, which renders both the replay

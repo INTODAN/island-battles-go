@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
+	"time"
 
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
@@ -62,8 +64,12 @@ type Publisher interface {
 type GenerationService struct {
 	Database  *gorm.DB
 	Publisher Publisher
+	// Now is the clock that turn deadlines are applied by; nil is time.Now.
+	Now func() time.Time
 }
 
+// Current returns the caller's state of the lobby's game, after applying an
+// overdue turn deadline, which ends the game.
 func (service *GenerationService) Current(ctx context.Context, principal domain.Principal, lobbyID string) (models.GenerationState, error) {
 	database := service.Database.WithContext(ctx)
 	game, err := dal.FindLobbyGame(database, lobbyID)
@@ -75,6 +81,7 @@ func (service *GenerationService) Current(ctx context.Context, principal domain.
 		return models.GenerationState{}, err
 	}
 	var state models.GenerationState
+	var events []realtime.Publication
 	err = dal.WithLockedGame(database, game.ID, func(transaction *gorm.DB, locked *models.Game) error {
 		players, err := dal.LoadFrozenPlayers(transaction, locked.ID)
 		if err != nil {
@@ -89,6 +96,9 @@ func (service *GenerationService) Current(ctx context.Context, principal domain.
 			return err
 		}
 		observability.Annotate(ctx, slog.Uint64("generation_id", uint64(generation.ID)))
+		if events, err = expireTurn(transaction, locked, generation, players, service.now()); err != nil {
+			return err
+		}
 		inputs, err := dal.LoadGenerationInputs(transaction, generation.ID)
 		if err != nil {
 			return err
@@ -102,7 +112,19 @@ func (service *GenerationService) Current(ctx context.Context, principal domain.
 		}
 		return countStoredLogLines(transaction, &state)
 	})
-	return state, err
+	if err != nil {
+		return models.GenerationState{}, err
+	}
+	service.publish(ctx, events)
+	return state, nil
+}
+
+// ApplyDeadline applies the deadline of the lobby game's open turn once it
+// has passed, and returns the caller's state, as Current does. Clients that
+// wait for other players call it at the deadline, because the server runs no
+// timers. Applying it again changes nothing.
+func (service *GenerationService) ApplyDeadline(ctx context.Context, principal domain.Principal, lobbyID string) (models.GenerationState, error) {
+	return service.Current(ctx, principal, lobbyID)
 }
 
 func frozenPlayer(players []models.FrozenGamePlayer, playerID string) (models.FrozenGamePlayer, error) {
@@ -148,6 +170,9 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 	}
 	var state models.GenerationState
 	var events []realtime.Publication
+	// A batch that comes after its turn's deadline is rejected, but the
+	// transaction that applied the deadline still commits.
+	var late error
 	err = dal.WithLockedGame(database, request.GameID, func(transaction *gorm.DB, locked *models.Game) error {
 		players, err := dal.LoadFrozenPlayers(transaction, locked.ID)
 		if err != nil {
@@ -165,13 +190,25 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 		if err != nil {
 			return err
 		}
+		if events, err = expireTurn(transaction, locked, generation, players, service.now()); err != nil {
+			return err
+		}
+		// After this request ended the game, its rejection must not roll the
+		// ending back.
+		rejectAfterDeadline := func(rejection error) error {
+			if len(events) > 0 {
+				late = rejection
+				return nil
+			}
+			return rejection
+		}
 		inputs, err := dal.LoadGenerationInputs(transaction, generation.ID)
 		if err != nil {
 			return err
 		}
 		if previous != nil {
 			if previous.PayloadHash != payloadHash {
-				return reject(409, "request_id was already used for a different payload")
+				return rejectAfterDeadline(reject(409, "request_id was already used for a different payload"))
 			}
 			memory, err := dal.FindBotMemory(transaction, locked.ID, player.PlayerID)
 			if err != nil {
@@ -183,7 +220,7 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 			return countStoredLogLines(transaction, &state)
 		}
 		if locked.Outcome != nil {
-			return &GenerationError{Status: 409, Detail: "the game has ended: " + describeOutcome(locked), Type: GameEndedProblemType}
+			return rejectAfterDeadline(&GenerationError{Status: 409, Detail: "the game has ended: " + describeOutcome(locked), Type: GameEndedProblemType})
 		}
 		if generation.ID != request.GenerationID {
 			return reject(409, "generation is no longer current")
@@ -240,9 +277,26 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 		for _, candidate := range inputs {
 			completed[candidate.PlayerID] = candidate.Completed
 		}
+		// Players of eliminated teams have nothing to play, so the turn
+		// doesn't wait for them.
 		ready := len(players) > 0
+		var standing []uint
+		haveStanding := false
 		for _, participant := range players {
-			ready = ready && completed[participant.PlayerID]
+			if completed[participant.PlayerID] {
+				continue
+			}
+			if !haveStanding {
+				current, err := dal.LoadGameState(transaction, locked.ID)
+				if err != nil {
+					return err
+				}
+				standing, haveStanding = simulation.StandingTeams(current, locked.Teams), true
+			}
+			if slices.Contains(standing, participant.TeamColor) {
+				ready = false
+				break
+			}
 		}
 		if ready {
 			allCommands := []models.CommandFields{}
@@ -276,7 +330,7 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 			if err != nil {
 				return err
 			}
-			if events, err = generationEvents(locked, generation, players, memories); err != nil {
+			if events, err = generationEvents(locked, generation, players, nil, memories); err != nil {
 				return err
 			}
 		}
@@ -288,9 +342,10 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 	if err != nil {
 		return models.GenerationState{}, err
 	}
-	if len(events) > 0 {
-		// The turn has committed. A failed push is logged and does not fail the request.
-		_ = service.Publisher.Publish(ctx, events...)
+	// The turn, or the deadline, has committed.
+	service.publish(ctx, events)
+	if late != nil {
+		return models.GenerationState{}, late
 	}
 	return state, nil
 }
@@ -360,7 +415,7 @@ func generationState(game *models.Game, generation *models.Generation, player mo
 		return models.GenerationState{}, err
 	}
 	state := models.GenerationState{GameID: game.ID, LobbyID: *game.LobbyID, GenerationID: generation.ID, PlayerID: player.PlayerID, TeamColor: player.TeamColor, Channel: channel,
-		Generation: GenerationView(generation), Outcome: outcomeView(game), Memory: memory}
+		Generation: GenerationView(generation), Outcome: outcomeView(game), Memory: memory, TurnDeadlineAt: turnDeadline(game, generation)}
 	for _, input := range inputs {
 		if input.PlayerID == player.PlayerID {
 			state.Submitted = input.Completed
@@ -369,18 +424,20 @@ func generationState(game *models.Game, generation *models.Generation, player mo
 	return state, nil
 }
 
-// generationEvents builds each roster player's event for a new generation, for
-// pushing to their personal channel once the transaction commits. The
-// generation that ends the game is pushed as game.ended instead. memories
-// holds each player's stored memory by player ID.
-func generationEvents(game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer, memories map[string]models.BotMemory) ([]realtime.Publication, error) {
+// generationEvents builds each roster player's event for a generation, for
+// pushing to their personal channel once the transaction commits: a new
+// generation, whose inputs are nil, or the open one that a turn deadline
+// ended, with its inputs. The generation that ends the game is pushed as
+// game.ended instead. memories holds each player's stored memory by player
+// ID.
+func generationEvents(game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer, inputs []models.GenerationInput, memories map[string]models.BotMemory) ([]realtime.Publication, error) {
 	events := make([]realtime.Publication, 0, len(players))
 	for _, player := range players {
 		channel, err := domain.PlayerChannel(player.PlayerID)
 		if err != nil {
 			return nil, err
 		}
-		state, err := generationState(game, generation, player, nil, memories[player.PlayerID])
+		state, err := generationState(game, generation, player, inputs, memories[player.PlayerID])
 		if err != nil {
 			return nil, err
 		}

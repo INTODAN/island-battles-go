@@ -32,6 +32,9 @@ func (service *GenerationService) Demo(ctx context.Context, principal domain.Pri
 	if err := service.authorize(ctx, principal, game); err != nil {
 		return models.Demo{}, err
 	}
+	if game, err = service.applyOverdueDeadline(ctx, game); err != nil {
+		return models.Demo{}, err
+	}
 	generations, err := dal.LoadGameGenerations(database, game.ID)
 	if err != nil {
 		return models.Demo{}, err

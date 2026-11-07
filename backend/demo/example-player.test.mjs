@@ -207,3 +207,80 @@ test("a stale turn is retried for the new generation, but a repeated conflict st
   assert.equal(player.enabled, false);
   assert.deepEqual(statuses.at(-1), ["Player needs attention", "insufficient soldiers after accepted team reservations"]);
 });
+
+test("a waiting player applies the turn's deadline a second after it", async (context) => {
+  const subscription = new Subscription();
+  const deadline = "2026-11-07T12:00:30Z";
+  let clock = Date.parse(deadline) - 5000;
+  const deadlines = [];
+  const statuses = [];
+  const outcome = { reason: "turn_timeout", winner_team_color: 1, summary: "Red lost: Sam's bot didn't answer within 30 s; Blue wins" };
+  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", credential: "test", subscription, now: () => clock,
+    onStatus: (title, detail) => statuses.push([title, detail]),
+    fetcher: async (url, options) => {
+      assert.equal(options.method, "POST");
+      if (url === "/generation/commands") return { ok: true, json: async () => ({ ...initial(), turn_deadline_at: deadline, submitted: true }) };
+      assert.equal(url, "/game/from-lobby/room/deadline");
+      assert.equal(options.body, undefined);
+      deadlines.push(clock);
+      // The first request reaches a server whose clock is behind, and changes nothing.
+      const state = deadlines.length === 1 ? { ...initial(), submitted: true, turn_deadline_at: deadline } : { ...initial(), submitted: true, turn_deadline_at: null, outcome };
+      return { ok: true, json: async () => state };
+    },
+  });
+  context.after(() => player.stop());
+  // A player whose own turn is open plays it, and then waits for the deadline.
+  player.receive({ ...initial(), turn_deadline_at: deadline });
+  await until(() => player.state.submitted && !player.inFlight);
+  assert.ok(player.deadlineTimer);
+  assert.equal(deadlines.length, 0);
+  // Its clock passes the deadline and the second of slack.
+  clock = Date.parse(deadline) + 1000;
+  player.scheduleDeadline();
+  await until(() => deadlines.length === 1);
+  // The turn was still open, so it asks again, later.
+  await until(() => player.deadlineTimer);
+  clock += 2000;
+  player.scheduleDeadline();
+  await until(() => player.state.outcome);
+  assert.equal(deadlines.length, 2);
+  assert.equal(player.deadlineTimer, null);
+  assert.deepEqual(statuses.at(-1), ["Game over", outcome.summary]);
+});
+
+test("only a waiting player of a turn with a deadline applies it", (context) => {
+  const subscription = new Subscription();
+  const deadline = "2026-11-07T12:00:30Z";
+  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", credential: "test", subscription,
+    fetcher: async () => new Promise(() => {}) });
+  context.after(() => player.stop());
+  // A player whose own turn is open is playing it.
+  player.inFlight = true;
+  player.receive({ ...initial(), turn_deadline_at: deadline });
+  assert.equal(player.deadlineTimer, null);
+  // A turn without a time limit has no deadline to apply.
+  player.receive({ ...initial(), turn_deadline_at: null, submitted: true });
+  assert.equal(player.deadlineTimer, null);
+  // A paused or following player waits for the others, also with its turn open.
+  player.setEnabled(false);
+  player.receive({ ...initial(), generation_id: 2, turn_deadline_at: deadline });
+  assert.ok(player.deadlineTimer);
+  // So does a finished game: nothing.
+  player.receive({ ...initial(), generation_id: 2, turn_deadline_at: null, outcome: { reason: "turn_timeout", winner_team_color: null, summary: "Draw" } });
+  assert.equal(player.deadlineTimer, null);
+});
+
+test("a late state without the outcome does not replace the known outcome", (context) => {
+  const outcome = { reason: "turn_timeout", winner_team_color: 1, summary: "Red lost: Sam's bot didn't answer within 30 s; Blue wins" };
+  const shown = [];
+  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", credential: "test", subscription: new Subscription(),
+    fetcher: async () => new Promise(() => {}), onState: (state) => shown.push(state) });
+  context.after(() => player.stop());
+  player.setEnabled(false);
+  player.receive({ ...initial(), submitted: true, outcome });
+  // A slow read of the same generation, begun before the deadline, arrives.
+  player.receive({ ...initial(), submitted: true, turn_deadline_at: "2026-11-07T12:00:30Z" });
+  assert.deepEqual(player.state.outcome, outcome);
+  assert.deepEqual(shown.at(-1).outcome, outcome);
+  assert.equal(player.deadlineTimer, null);
+});
