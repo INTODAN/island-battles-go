@@ -15,6 +15,7 @@
 - `lobby/`: Independent generic lobby component: Go module, clients, API artifacts, transport configuration, docs, and shared test tooling. See [its README](lobby/README.md).
 - `backend/`: Island Battles game logic and wiring to the generic lobby module. `backend/api/openapi.json` is the player API that gameplay clients are generated from.
 - `clients/island-battles-python/`: The Python gameplay SDK. Its models are generated; only the turn runtime and model utilities are hand-written.
+- `clients/island-battles-web/`: The 3D browser client (TypeScript, Babylon.js, Bun and Biome). Currently a scaffold. See [its README](clients/island-battles-web/README.md).
 - `clients/conformance/`: Language-agnostic tests that verify any gameplay client through a JSON Lines adapter.
 - `integration/island_battles/`: Host-specific lobby/game binding acceptance checks.
 - `scripts/test-lobby-acceptance.sh`: Runs the shared acceptance suite against the Island Battles host, including its game-specific checks.
@@ -54,6 +55,7 @@ Teams and readiness belong to the generic lobby. Starting freezes a roster. The 
 *   **Gameplay client conformance (offline):** `uv run --project clients/conformance --locked pytest clients/conformance/tests/test_models.py`
 *   **Gameplay client conformance (live, Linux Docker or Podman):** `./scripts/test-client-conformance.sh ["<adapter command>"]`
 *   **Live acceptance (Linux Docker or Podman):** `./scripts/test-lobby-acceptance.sh`
+*   **Web client** (in `clients/island-battles-web/`, needs [Bun](https://bun.sh/)): `bun install`, then `bun run dev` (dev server on `:3000`, proxying the backend from `./scripts/dev.sh`), `bun run check` (Biome, `tsc`, `bun test`) and `bun run build`
 
 ### Checks on every pull request
 

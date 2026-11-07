@@ -19,7 +19,7 @@ Change their schema only through a new versioned migration that keeps existing r
 ## Do
 
 - Rename, retype or remove fields, endpoints and columns outright, in a single change.
-- Update the server and every in-repository client together: export `backend/api/openapi.json` (and `lobby/api/openapi.json` for lobby changes), regenerate the Python models, update the conformance adapters and fixtures, the browser demo and the docs.
+- Update the server and every in-repository client together: export `backend/api/openapi.json` (and `lobby/api/openapi.json` for lobby changes), regenerate the Python models, update the web client (`clients/island-battles-web/`), update the conformance adapters and fixtures, the browser demo and the docs.
 - Say in the pull request description and the affected client README that the change is breaking and that clients must upgrade.
 - Reset game data when a schema change strands it: games, their maps, castles, generations, soldier groups, commands, player inputs, requests, notifications, team bindings, frozen rosters and replays. In development, `docker compose down -v` or removing the `island-battles-dev-postgres` Podman volume does this, but it also wipes lobby data and map templates, so only do it locally.
 
