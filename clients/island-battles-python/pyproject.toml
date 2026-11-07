@@ -1,6 +1,6 @@
 [project]
 name = "island-battles-python"
-version = "0.1.0"
+version = "0.0.0.dev0"
 description = "Async player client for Island Battles generation turns"
 requires-python = ">=3.14"
 dependencies = [
@@ -16,13 +16,13 @@ dev = [
 ]
 # The shared lobby acceptance runner executes integration/island_battles here.
 integration = [
-    "lobby-python",
+    "generic-lobby-client",
     "pytest>=8.0,<9",
     "pytest-asyncio>=0.24,<1",
 ]
 
 [tool.uv.sources]
-lobby-python = { path = "../../lobby/clients/lobby-python", editable = true }
+generic-lobby-client = { path = "../../lobby/clients/lobby-python", editable = true }
 lobby-api-client = { path = "../../lobby/clients/lobby-python/generated", editable = true }
 
 [tool.ruff]
