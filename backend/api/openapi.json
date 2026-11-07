@@ -33,12 +33,20 @@
               "string",
               "null"
             ]
+          },
+          "upgrades": {
+            "description": "The upgrade cost table, the same list GET /game/upgrades returns as its upgrades. It is the same for the whole game, so a client reads it once and reuses it in every turn. Reaching a level costs its soldier_cost.",
+            "items": {
+              "$ref": "#/components/schemas/Upgrade"
+            },
+            "type": "array"
           }
         },
         "required": [
           "game_id",
           "generation",
           "team_color",
+          "upgrades",
           "memory",
           "turn_deadline_at"
         ],

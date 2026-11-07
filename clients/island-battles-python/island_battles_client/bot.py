@@ -37,6 +37,7 @@ from .game_log import (
     clean,
     cut,
 )
+from .models import Castle
 
 Play = Callable[[BotTurn], BotTurnResult | Awaitable[BotTurnResult]]
 """A bot: ``def play(turn)`` or ``async def play(turn)``."""
@@ -76,6 +77,29 @@ def upgrade_castle(
             ),
         )
     )
+
+
+def next_upgrade_cost(
+    turn: BotTurn, castle: Castle, upgrade_type: UpgradeType | str
+) -> int | None:
+    """Soldiers it costs the castle to buy its next level of an upgrade type.
+
+    The cost is read from ``turn.upgrades``, the server's table. Returns
+    ``None`` when the castle is at the type's maximum level. Upgrades bought
+    earlier in the same result are not counted: add them to the castle's level.
+    """
+    level = castle.upgrades[upgrade_type] + 1
+    for upgrade in turn.upgrades:
+        if upgrade.type == upgrade_type:
+            return next(
+                (
+                    entry.soldier_cost
+                    for entry in upgrade.levels
+                    if entry.level == level
+                ),
+                None,
+            )
+    return None
 
 
 def log_line(

@@ -169,6 +169,22 @@ func sendCommand(origin, destination, soldiers uint) models.PublicGenerationComm
 	return models.PublicGenerationCommand{CommandType: models.SendSoldierGroup, Parameters: parameters}
 }
 
+// upgradeCost is what reaching a level of an upgrade type costs in the turn's
+// table, and whether the table lists that level.
+func upgradeCost(table []models.UpgradeView, upgradeType models.UpgradeType, level int) (uint, bool) {
+	for _, upgrade := range table {
+		if upgrade.Type != upgradeType {
+			continue
+		}
+		for _, entry := range upgrade.Levels {
+			if entry.Level == level {
+				return entry.SoldierCost, true
+			}
+		}
+	}
+	return 0, false
+}
+
 func upgradeCommand(castle uint, upgradeType models.UpgradeType) models.PublicGenerationCommand {
 	parameters, _ := json.Marshal(models.UpgradeCastleParameters{CastleID: &castle, UpgradeType: &upgradeType})
 	return models.PublicGenerationCommand{CommandType: models.UpgradeCastle, Parameters: parameters}
