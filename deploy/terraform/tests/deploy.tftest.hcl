@@ -716,9 +716,9 @@ run "lets_only_the_repositorys_production_jobs_deploy" {
   assert {
     condition = (
       one([for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : statement.Resource if statement.Sid == "UploadTheWebClient"]) == "arn:aws:s3:::island-battles-web-client-123456789012/play/*"
-      && toset(one([for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : statement.Action if statement.Sid == "UploadTheWebClient"])) == toset(["s3:PutObject", "s3:DeleteObject"])
+      && toset(one([for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : statement.Action if statement.Sid == "UploadTheWebClient"])) == toset(["s3:PutObject"])
     )
-    error_message = "The role may put and delete only the web client's files under play/."
+    error_message = "The role may only put the web client's files under play/: nothing deletes them."
   }
 
   assert {

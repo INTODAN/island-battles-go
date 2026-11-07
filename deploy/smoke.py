@@ -43,6 +43,8 @@ import httpx
 from websockets.asyncio.client import connect
 from websockets.exceptions import WebSocketException
 
+from web_client_page import web_bundle_referenced
+
 # Guest sessions are kept for 24 hours. A credential this close to expiring is
 # replaced, so it can't expire between the run before a move and the one after.
 MINIMUM_REMAINING_SESSION = dt.timedelta(hours=2)
@@ -146,11 +148,6 @@ async def check_backend(http: httpx.AsyncClient, session_file: Path,
         raise SmokeTestFailure(f"getting a missing lobby returned {response.status_code}, expected 404: {response.text}")
     report("an authenticated GET reaches the backend with its Authorization header")
     return session, connection_token
-
-
-def web_bundle_referenced(index_html: str, bundle: str) -> bool:
-    """True when the page loads the script, under /play/ and with the exact file name."""
-    return f'"/play/{bundle}"' in index_html
 
 
 async def check_web_client(http: httpx.AsyncClient, expected_bundle: str,

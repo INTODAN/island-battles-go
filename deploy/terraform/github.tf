@@ -109,7 +109,7 @@ resource "aws_iam_role_policy" "github_deploy" {
       {
         Sid      = "UploadTheWebClient"
         Effect   = "Allow"
-        Action   = ["s3:PutObject", "s3:DeleteObject"]
+        Action   = ["s3:PutObject"]
         Resource = "${aws_s3_bucket.web_client.arn}/play/*"
       },
       {

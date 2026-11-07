@@ -5,8 +5,8 @@
 # only from main, and the deploy jobs run in the `production` environment,
 # which is limited to main. It runs the checks, deploys (the VM first when its
 # inputs changed since the last release, then the backend, then the web client
-# in /play/, then the smoke test), and only after all of that creates the tags and the GitHub release.
-# A failed check or deploy leaves no tag and no release.
+# in /play/, then the smoke test), and only after all of that creates the tags
+# and the GitHub release. A failed check or deploy leaves no tag and no release.
 name: Release
 
 on:
