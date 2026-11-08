@@ -11,7 +11,9 @@ import {
   type GenerationState,
   nextGeneration,
   nextSnapshot,
+  nextWatch,
   type Snapshot,
+  type WatchState,
 } from "./install";
 import { Reconciler } from "./reconciler";
 import {
@@ -27,7 +29,7 @@ export type ConnectionState = "connecting" | "connected" | "disconnected";
 
 /** Why a store was emptied or stopped following, for the UI to explain. */
 export interface RealtimeProblem {
-  scope: "session" | "lobby" | "game";
+  scope: "session" | "lobby" | "game" | "watch";
   error: ApiError;
 }
 
@@ -57,6 +59,8 @@ export interface Realtime {
   readonly lobby: ReadableStore<Snapshot | null>;
   /** The latest generation state of the followed game. */
   readonly game: ReadableStore<GenerationState | null>;
+  /** The latest state of the watched game, for a watcher outside its roster. */
+  readonly watch: ReadableStore<WatchState | null>;
   readonly connection: ReadableStore<ConnectionState>;
   /** Set when the session ended or a followed lobby or game became unavailable. */
   readonly problem: ReadableStore<RealtimeProblem | null>;
@@ -72,6 +76,14 @@ export interface Realtime {
   /** Reads the followed game again now, for a caller that learned the game exists. */
   refreshGame(): void;
   leaveGame(): void;
+  /**
+   * Watches a lobby's game on its watch channel (from `POST /lobby/v1/watches`), reading
+   * `GET /game/from-lobby/{lobby_id}/watch` on every subscribe. There is no lease and no
+   * heartbeat. A watcher the host kicked is unsubscribed by the server; the read that follows
+   * fails, and `problem` gets scope `watch`.
+   */
+  followWatch(target: { lobbyId: string; channel: string }): void;
+  leaveWatch(): void;
   /** Ends the session and closes the connection. */
   signOut(): void;
 }
@@ -119,6 +131,14 @@ interface GameFollow {
   reconciler: Reconciler;
 }
 
+interface WatchFollow {
+  epoch: number;
+  lobbyId: string;
+  channel: string;
+  subscription: SubscriptionLike | undefined;
+  reconciler: Reconciler;
+}
+
 export function createRealtime(options: RealtimeOptions = {}): Realtime {
   const now = options.now ?? (() => Date.now());
   const storage =
@@ -133,6 +153,7 @@ export function createRealtime(options: RealtimeOptions = {}): Realtime {
   const session = createStore<Session | null>(loadSession(storage, now()));
   const lobby = createStore<Snapshot | null>(null);
   const game = createStore<GenerationState | null>(null);
+  const watch = createStore<WatchState | null>(null);
   const connection = createStore<ConnectionState>("disconnected");
   const problem = createStore<RealtimeProblem | null>(null);
 
@@ -147,8 +168,10 @@ export function createRealtime(options: RealtimeOptions = {}): Realtime {
   let sessionEpoch = 0;
   let lobbyEpoch = 0;
   let gameEpoch = 0;
+  let watchEpoch = 0;
   let lobbyFollow: LobbyFollow | undefined;
   let gameFollow: GameFollow | undefined;
+  let watchFollow: WatchFollow | undefined;
   let client: CentrifugeLike | undefined;
   let clientStarting = false;
   let clientRetry: ReturnType<typeof setTimeout> | undefined;
@@ -166,10 +189,13 @@ export function createRealtime(options: RealtimeOptions = {}): Realtime {
     sessionEpoch++;
     lobbyEpoch++;
     gameEpoch++;
+    watchEpoch++;
     lobbyFollow?.reconciler.cancel();
     gameFollow?.reconciler.cancel();
+    watchFollow?.reconciler.cancel();
     lobbyFollow = undefined;
     gameFollow = undefined;
+    watchFollow = undefined;
     clearTimeout(clientRetry);
     clearTimeout(expiryTimer);
     clientRetry = undefined;
@@ -182,6 +208,7 @@ export function createRealtime(options: RealtimeOptions = {}): Realtime {
     session.set(null);
     lobby.set(null);
     game.set(null);
+    watch.set(null);
     connection.set("disconnected");
     problem.set(error ? { scope: "session", error } : null);
   }
@@ -271,6 +298,7 @@ export function createRealtime(options: RealtimeOptions = {}): Realtime {
           connection.set("connected");
           lobbyFollow?.reconciler.request();
           gameFollow?.reconciler.request();
+          watchFollow?.reconciler.request();
         });
         attachSubscriptions();
         created.connect();
@@ -303,6 +331,7 @@ export function createRealtime(options: RealtimeOptions = {}): Realtime {
       }
     }
     if (gameFollow && !gameFollow.subscription) attachGame(gameFollow);
+    if (watchFollow && !watchFollow.subscription) attachWatch(watchFollow);
   }
 
   // --- Lobby ---
@@ -475,6 +504,71 @@ export function createRealtime(options: RealtimeOptions = {}): Realtime {
     game.set(null);
   }
 
+  // --- Watching ---
+
+  function attachWatch(follow: WatchFollow): void {
+    follow.subscription = subscribeChannel(
+      follow.channel,
+      (data) => {
+        if (follow.epoch !== watchEpoch) return;
+        if (
+          !isRecord(data) ||
+          data.schema_version !== 1 ||
+          (data.type !== "game.next_generation" &&
+            data.type !== "game.ended") ||
+          !isRecord(data.state)
+        ) {
+          return;
+        }
+        installWatch(follow, data.state as unknown as WatchState);
+      },
+      () => {
+        if (follow.epoch === watchEpoch) follow.reconciler.request();
+      },
+    );
+  }
+
+  /** Installs a state only for this lobby's game on its watch channel. */
+  function installWatch(follow: WatchFollow, state: WatchState): void {
+    if (state.channel !== follow.channel || state.lobby_id !== follow.lobbyId) {
+      return;
+    }
+    const next = nextWatch(watch.get(), state);
+    if (next) watch.set(next);
+  }
+
+  async function readWatch(follow: WatchFollow): Promise<void> {
+    try {
+      const { data } = await gameApi.GET("/game/from-lobby/{lobby_id}/watch", {
+        params: { path: { lobby_id: follow.lobbyId } },
+      });
+      if (follow.epoch !== watchEpoch) return;
+      installWatch(follow, required(data));
+    } catch (error) {
+      if (follow.epoch !== watchEpoch) return;
+      if (isUnauthorized(error)) {
+        endSession(error as ApiError);
+      } else if (error instanceof ApiError && error.status === 404) {
+        // No game yet: its first turn arrives on the channel.
+      } else if (error instanceof ApiError && error.status === 403) {
+        // The host kicked this watcher.
+        leaveWatch();
+        problem.set({ scope: "watch", error });
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  function leaveWatch(): void {
+    watchEpoch++;
+    const follow = watchFollow;
+    watchFollow = undefined;
+    follow?.reconciler.cancel();
+    dropSubscription(follow?.subscription);
+    watch.set(null);
+  }
+
   // --- Public API ---
 
   function leaveLobbyPublic(): void {
@@ -486,6 +580,7 @@ export function createRealtime(options: RealtimeOptions = {}): Realtime {
     session,
     lobby,
     game,
+    watch,
     connection,
     problem,
 
@@ -561,6 +656,32 @@ export function createRealtime(options: RealtimeOptions = {}): Realtime {
     },
 
     leaveGame,
+
+    followWatch({ lobbyId, channel }) {
+      if (!session.get()) throw new Error("sign in before watching a game");
+      if (watchFollow && watchFollow.lobbyId === lobbyId) return;
+      leaveWatch();
+      problem.set(null);
+      const epoch = watchEpoch;
+      const follow: WatchFollow = {
+        epoch,
+        lobbyId,
+        channel,
+        subscription: undefined,
+        reconciler: new Reconciler({
+          run: () => readWatch(follow),
+          retryable: () => true,
+          settleMs,
+          retryBaseMs,
+          retryMaxMs,
+        }),
+      };
+      watchFollow = follow;
+      if (client) attachWatch(follow);
+      else ensureClient();
+    },
+
+    leaveWatch,
 
     signOut() {
       endSession();

@@ -124,6 +124,29 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 			Content: map[string]*huma.MediaType{"application/json": {Schema: demo}},
 		}},
 	}, game.Demo)
+	huma.Register(api, huma.Operation{
+		OperationID: "watchIslandLobbyGeneration", Path: "/game/from-lobby/{lobby_id}/watch", Method: http.MethodGet,
+		Summary: "Read the current generation of a lobby's game for a watcher",
+		Description: "For the people who watch the lobby with its join code (POST /lobby/v1/watches): a watcher the host hasn't kicked, an active member of the lobby, or a roster player. Returns the WatchState: the board, the teams, the turn's deadline and the outcome once the game has ended, without the player-only fields of GenerationState. " +
+			"The lobby's watch channel, WatchState.channel, receives WatchGenerationEvent after each turn and WatchGameEndedEvent after the last one, in the same push as the players' events; read this after subscribing or reconnecting. A watcher never plays and never delays a turn. " +
+			"Like the other game reads, it first applies the turn's deadline once it has passed. A kicked watcher gets 403. Anyone else, a lobby whose game hasn't started, and a lobby that was deleted get 404.",
+		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
+	}, game.WatchGeneration)
+	huma.Register(api, huma.Operation{
+		OperationID: "watchIslandLobbyDemo", Path: "/game/from-lobby/{lobby_id}/watch/demo", Method: http.MethodGet,
+		Summary: "Read a lobby game's history for a watcher",
+		Description: "For the people who may read GET /game/from-lobby/{lobby_id}/watch. Returns the game so far as a demo file, the Demo schema, as GET /game/from-lobby/{lobby_id}/demo does, for scrubbing back through it. " +
+			"A watcher belongs to no team, so while the game runs no game log lines are included and every frame's hidden_team_colors names every team; once the game has ended every team's lines are. Packed with gzip when Accept-Encoding allows it.",
+		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
+		Responses: map[string]*huma.Response{"200": {
+			Description: "The demo file.",
+			Headers: map[string]*huma.Param{
+				"Content-Disposition": {Description: "attachment, with the demo's file name.", Schema: &huma.Schema{Type: huma.TypeString}},
+				"Content-Encoding":    {Description: "gzip when the request's Accept-Encoding allows it; absent otherwise.", Schema: &huma.Schema{Type: huma.TypeString}},
+			},
+			Content: map[string]*huma.MediaType{"application/json": {Schema: demo}},
+		}},
+	}, game.WatchDemo)
 	// A demo is a file format, like a map file.
 	dropSchemaLink(api, reflect.TypeFor[models.Demo]())
 	for _, parameter := range api.OpenAPI().Paths["/game/from-lobby/{lobby_id}/logs"].Get.Parameters {
@@ -168,9 +191,12 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 		OneOf:         []*huma.Schema{send, upgrade},
 		Discriminator: &huma.Discriminator{PropertyName: "command_type", Mapping: map[string]string{string(models.SendSoldierGroup): send.Ref, string(models.UpgradeCastle): upgrade.Ref}},
 	}
-	// Published on each roster player's personal channel rather than over HTTP.
+	// Published on each roster player's personal channel, and for watchers on
+	// the lobby's watch channel, rather than over HTTP.
 	registry.Schema(reflect.TypeOf(models.GenerationEvent{}), true, "")
 	registry.Schema(reflect.TypeOf(models.GameEndedEvent{}), true, "")
+	registry.Schema(reflect.TypeOf(models.WatchGenerationEvent{}), true, "")
+	registry.Schema(reflect.TypeOf(models.WatchGameEndedEvent{}), true, "")
 	// The stateless bot contract: what a bot is given each turn and what it
 	// answers, whoever runs it.
 	botTurn := registry.SchemaFromRef(registry.Schema(reflect.TypeOf(models.BotTurn{}), true, "").Ref)

@@ -135,7 +135,7 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	if selected.gameGraph {
 		routes.SetupGameGraphRoute(api, &environment)
 	}
-	routes.SetupLobbyRoutes(api, lobbyService, authenticated, gameBinding, lobbyRetention, &handlers.LobbyGame{Database: database, Authenticator: authenticated, Publisher: publisher, Retention: gameRetention})
+	routes.SetupLobbyRoutes(api, lobbyService, authenticated, gameBinding, lobbyRetention, &handlers.LobbyGame{Database: database, Authenticator: authenticated, Publisher: publisher, Retention: gameRetention, Watchers: lobbyService})
 	proxy.Register(router)
 	if err := registerPages(router); err != nil {
 		return nil, err

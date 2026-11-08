@@ -20,6 +20,7 @@ import {
   seatBody,
   type TeamRow,
 } from "./roomModel";
+import { mountWatchersPanel } from "./watchersPanel";
 
 export interface RoomScreenOptions {
   realtime: Realtime;
@@ -121,6 +122,9 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
       return handleProblem(cause, "bot").message;
     },
   });
+
+  // The people who watch with the join code, in a section of their own.
+  const watchersPanel = mountWatchersPanel({ realtime, actions });
 
   function flash(button: HTMLButtonElement, text: string, original: string) {
     button.textContent = text;
@@ -598,6 +602,7 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
           readyError,
           startError,
         ),
+        watchersPanel.el,
       ),
     ),
   );
@@ -609,6 +614,7 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
       for (const unsubscribe of unsubscribers) unsubscribe();
       window.removeEventListener("focus", onFocus);
       picker.dispose();
+      watchersPanel.dispose();
     },
   };
 }

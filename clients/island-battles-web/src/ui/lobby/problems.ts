@@ -19,7 +19,8 @@ export type ProblemContext =
   | "start"
   | "bot"
   | "seat"
-  | "create";
+  | "create"
+  | "watch";
 
 const isBotNotChosen = (error: ApiError) =>
   error.problemType?.endsWith(":bot-not-chosen") === true;
@@ -35,6 +36,9 @@ const sentences: Record<string, string> = {
   stale_membership:
     "You're no longer connected to that lobby. Use its code to join again.",
   not_found: "No lobby found for that code.",
+  watcher_kicked: "The host removed you from this game's watchers.",
+  watchers_full:
+    "This game has as many watchers as it allows. Try again later.",
   unavailable: "The lobby server is temporarily unavailable. Please try again.",
   idempotency_conflict:
     "That create request was already used for a different lobby. Try again.",
@@ -79,6 +83,10 @@ export function describeProblem(
     return shown;
   }
   const code = error.code;
+  if (context === "watch" && code === "not_found") {
+    shown.message = "No game found for that code.";
+    return shown;
+  }
   if (
     code === "stale_membership" ||
     (code === "not_found" && context !== "join" && context !== "create")

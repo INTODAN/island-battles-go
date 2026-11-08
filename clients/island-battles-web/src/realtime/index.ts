@@ -4,8 +4,13 @@ export type {
   CreateCentrifuge,
   SubscriptionLike,
 } from "./centrifuge";
-export type { GenerationState, Snapshot } from "./install";
-export { nextGeneration, nextSnapshot } from "./install";
+export type {
+  GenerationState,
+  Snapshot,
+  WatchAccess,
+  WatchState,
+} from "./install";
+export { nextGeneration, nextSnapshot, nextWatch } from "./install";
 export type {
   ConnectionState,
   Realtime,

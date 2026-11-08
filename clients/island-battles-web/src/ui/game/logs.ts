@@ -9,6 +9,8 @@ export type GenerationLogs = components["schemas"]["GenerationLogs"];
 export const OTHER_TEAMS_HIDDEN =
   "Logs of other teams appear when the game ends";
 
+export const ALL_TEAMS_HIDDEN = "Bot logs appear when the game ends";
+
 export const SAVED_BEFORE_END =
   "This demo was saved before the game ended, so it holds only the saver’s team’s logs";
 
@@ -64,11 +66,13 @@ export class LogBook {
  */
 export function hiddenNotice(
   logs: GenerationLogs | undefined,
-  options: { ended: boolean; live: boolean },
+  options: { ended: boolean; live: boolean; watching?: boolean },
 ): string | null {
   if (!logs || logs.hidden_team_colors.length === 0) return null;
   if (!options.live) {
     return options.ended ? null : SAVED_BEFORE_END;
   }
-  return options.ended ? null : OTHER_TEAMS_HIDDEN;
+  if (options.ended) return null;
+  // A watcher belongs to no team, so every team is hidden until the end.
+  return options.watching ? ALL_TEAMS_HIDDEN : OTHER_TEAMS_HIDDEN;
 }

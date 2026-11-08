@@ -101,6 +101,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/game/from-lobby/{lobby_id}/watch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the current generation of a lobby's game for a watcher
+         * @description For the people who watch the lobby with its join code (POST /lobby/v1/watches): a watcher the host hasn't kicked, an active member of the lobby, or a roster player. Returns the WatchState: the board, the teams, the turn's deadline and the outcome once the game has ended, without the player-only fields of GenerationState. The lobby's watch channel, WatchState.channel, receives WatchGenerationEvent after each turn and WatchGameEndedEvent after the last one, in the same push as the players' events; read this after subscribing or reconnecting. A watcher never plays and never delays a turn. Like the other game reads, it first applies the turn's deadline once it has passed. A kicked watcher gets 403. Anyone else, a lobby whose game hasn't started, and a lobby that was deleted get 404.
+         */
+        get: operations["watchIslandLobbyGeneration"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/game/from-lobby/{lobby_id}/watch/demo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a lobby game's history for a watcher
+         * @description For the people who may read GET /game/from-lobby/{lobby_id}/watch. Returns the game so far as a demo file, the Demo schema, as GET /game/from-lobby/{lobby_id}/demo does, for scrubbing back through it. A watcher belongs to no team, so while the game runs no game log lines are included and every frame's hidden_team_colors names every team; once the game has ended every team's lines are. Packed with gzip when Accept-Encoding allows it.
+         */
+        get: operations["watchIslandLobbyDemo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/game/lobbies/{lobby_id}/bot": {
         parameters: {
             query?: never;
@@ -695,7 +735,7 @@ export interface components {
         };
         Problem: {
             /** @enum {string} */
-            code: "unauthenticated" | "not_found" | "not_host" | "lobby_full" | "team_full" | "phase_conflict" | "not_ready" | "empty_teams" | "stale_membership" | "idempotency_conflict" | "invalid_input" | "invalid_game_settings" | "invalid_seat_settings" | "game_requirement" | "unavailable" | "internal_error";
+            code: "unauthenticated" | "not_found" | "not_host" | "lobby_full" | "team_full" | "phase_conflict" | "not_ready" | "empty_teams" | "stale_membership" | "idempotency_conflict" | "invalid_input" | "invalid_game_settings" | "invalid_seat_settings" | "game_requirement" | "watcher_kicked" | "watchers_full" | "unavailable" | "internal_error";
             detail: string;
             /** Format: int64 */
             status: number;
@@ -836,6 +876,53 @@ export interface components {
          * @enum {string}
          */
         UpgradeType: "clash_stop_generations" | "speed";
+        WatchGameEndedEvent: {
+            /**
+             * Format: int64
+             * @enum {integer}
+             */
+            schema_version: 1;
+            /** @description The final generation, with its outcome. */
+            state: components["schemas"]["WatchState"];
+            /** @enum {string} */
+            type: "game.ended";
+        };
+        WatchGenerationEvent: {
+            /**
+             * Format: int64
+             * @enum {integer}
+             */
+            schema_version: 1;
+            state: components["schemas"]["WatchState"];
+            /** @enum {string} */
+            type: "game.next_generation";
+        };
+        WatchState: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/WatchState.json
+             */
+            readonly $schema?: string;
+            /** @description The lobby's watch channel, watch:island-battles:<lobby_id>, which receives WatchGenerationEvent after each turn and WatchGameEndedEvent after the last one. */
+            channel: string;
+            /** Format: int64 */
+            game_id: number;
+            generation: components["schemas"]["Generation"];
+            /** Format: int64 */
+            generation_id: number;
+            /** Format: uuid */
+            lobby_id: string;
+            /** @description How the game ended. Absent while the game runs. */
+            outcome?: components["schemas"]["GameOutcome"];
+            /** @description The teams that play, with their lobby names and the display names their players had at the start. */
+            teams: components["schemas"]["GameTeam"][];
+            /**
+             * Format: date-time
+             * @description When this generation's turn times out, as in GenerationState. Null when turns have no time limit, and once the game has ended. Watchers never apply a deadline themselves.
+             */
+            turn_deadline_at: string | null;
+        };
     };
     responses: never;
     parameters: never;
@@ -1000,6 +1087,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GenerationLogs"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    watchIslandLobbyGeneration: {
+        parameters: {
+            query?: never;
+            header?: {
+                Authorization?: string;
+            };
+            path: {
+                lobby_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchState"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    watchIslandLobbyDemo: {
+        parameters: {
+            query?: never;
+            header?: {
+                Authorization?: string;
+            };
+            path: {
+                lobby_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The demo file. */
+            200: {
+                headers: {
+                    /** @description attachment, with the demo's file name. */
+                    "Content-Disposition"?: string;
+                    /** @description gzip when the request's Accept-Encoding allows it; absent otherwise. */
+                    "Content-Encoding"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Demo"];
                 };
             };
             /** @description Error */

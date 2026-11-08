@@ -14,7 +14,7 @@ import (
 )
 
 // GameKey identifies Island Battles lobbies.
-const GameKey = "island-battles"
+const GameKey = models.LobbyGameKey
 
 // Registration declares Island Battles to the lobby policy. Its settings
 // validator reads default maps from database. Every team owns castles on the

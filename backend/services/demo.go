@@ -32,7 +32,23 @@ func (service *GenerationService) Demo(ctx context.Context, principal domain.Pri
 	if err := service.authorize(ctx, principal, game); err != nil {
 		return models.Demo{}, err
 	}
-	if game, err = service.applyOverdueDeadline(ctx, game); err != nil {
+	caller, err := dal.FindFrozenPlayer(database, game.ID, principal.PlayerID)
+	if err != nil {
+		return models.Demo{}, err
+	}
+	if caller == nil {
+		return models.Demo{}, reject(404, "game not found")
+	}
+	return service.demo(ctx, game, *caller)
+}
+
+// demo saves the game as a demo for caller, whose team's lines it shows while
+// the game runs. A caller of no team, such as a watcher, sees lines only once
+// the game has ended.
+func (service *GenerationService) demo(ctx context.Context, game *models.Game, caller models.FrozenGamePlayer) (models.Demo, error) {
+	database := service.Database.WithContext(ctx)
+	game, err := service.applyOverdueDeadline(ctx, game)
+	if err != nil {
 		return models.Demo{}, err
 	}
 	generations, err := dal.LoadGameGenerations(database, game.ID)
@@ -40,10 +56,6 @@ func (service *GenerationService) Demo(ctx context.Context, principal domain.Pri
 		return models.Demo{}, err
 	}
 	players, err := dal.LoadFrozenPlayers(database, game.ID)
-	if err != nil {
-		return models.Demo{}, err
-	}
-	caller, err := frozenPlayer(players, principal.PlayerID)
 	if err != nil {
 		return models.Demo{}, err
 	}

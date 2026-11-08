@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"islandBattles/backend/models"
 	"islandBattles/backend/observability"
 	"islandBattles/backend/services"
 	"islandBattles/lobby/domain"
@@ -23,6 +24,9 @@ type LobbyGame struct {
 	// deletes nothing. retention.Retention is the real one; it has the same
 	// shape as the lobby's runner but deletes only game data.
 	Retention domain.RetentionRunner
+	// Watchers lets the watcher reads admit the lobby's watchers. Nil admits
+	// only roster players.
+	Watchers domain.WatchAuthorizer
 }
 
 // runRetention runs after the handler has its response, and after a turn has
@@ -76,6 +80,51 @@ func (handler *LobbyGame) Demo(ctx context.Context, input *struct {
 	if err != nil {
 		return nil, generationHTTPError(ctx, err)
 	}
+	return streamDemo(ctx, demo)
+}
+
+// WatchDemo serves the game's history to its watchers, in the demo format,
+// with the game log only once the game has ended.
+func (handler *LobbyGame) WatchDemo(ctx context.Context, input *struct {
+	LobbyID       string `path:"lobby_id" format:"uuid"`
+	Authorization string `header:"Authorization"`
+}) (*huma.StreamResponse, error) {
+	defer handler.runRetention(ctx)
+	verified, err := handler.Authenticator.Authenticate(ctx, input.Authorization)
+	if err != nil {
+		return nil, huma.Error401Unauthorized("authentication required")
+	}
+	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher, Watchers: handler.Watchers}
+	demo, err := service.WatchDemo(ctx, verified.Principal, input.LobbyID)
+	if err != nil {
+		return nil, generationHTTPError(ctx, err)
+	}
+	return streamDemo(ctx, demo)
+}
+
+type WatchStateResponse struct{ Body models.WatchState }
+
+// WatchGeneration serves the game's current generation to its watchers.
+func (handler *LobbyGame) WatchGeneration(ctx context.Context, input *struct {
+	LobbyID       string `path:"lobby_id" format:"uuid"`
+	Authorization string `header:"Authorization"`
+}) (*WatchStateResponse, error) {
+	defer handler.runRetention(ctx)
+	verified, err := handler.Authenticator.Authenticate(ctx, input.Authorization)
+	if err != nil {
+		return nil, huma.Error401Unauthorized("authentication required")
+	}
+	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher, Watchers: handler.Watchers}
+	state, err := service.Watch(ctx, verified.Principal, input.LobbyID)
+	if err != nil {
+		return nil, generationHTTPError(ctx, err)
+	}
+	return &WatchStateResponse{Body: state}, nil
+}
+
+// streamDemo writes a demo as a file download, packed when the client
+// accepts gzip.
+func streamDemo(ctx context.Context, demo models.Demo) (*huma.StreamResponse, error) {
 	if len(demo.Frames) == 0 {
 		return nil, huma.Error404NotFound("game is not ready")
 	}

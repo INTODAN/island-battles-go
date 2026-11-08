@@ -5,6 +5,7 @@ import (
 	"context"
 	"math"
 	"reflect"
+	"time"
 
 	"islandBattles/lobby/domain"
 
@@ -51,6 +52,17 @@ func (store *Store) Transact(ctx context.Context, scope domain.Scope, mutation d
 				return domain.NewError(domain.CodeInvalidInput, "lease history cannot be removed")
 			}
 		}
+		// A kick is final: the row stays, so the join code can't let the
+		// watcher back in.
+		for _, watcher := range original.Watchers {
+			if watcher.Watching() {
+				continue
+			}
+			current := domain.FindWatcher(&aggregate, watcher.PlayerID)
+			if current == nil || current.Watching() {
+				return domain.NewError(domain.CodeInvalidInput, "a kicked watcher cannot be removed")
+			}
+		}
 		aggregate.Lobby.Version = original.Lobby.Version
 		if change.PublicChanged {
 			if aggregate.Lobby.Version == math.MaxInt64 {
@@ -62,7 +74,7 @@ func (store *Store) Transact(ctx context.Context, scope domain.Scope, mutation d
 		if err := tx.Model(&RoomRecord{}).Where(&RoomRecord{ID: scope.LobbyID, GameKey: scope.GameKey}).Select("*").Updates(&room).Error; err != nil {
 			return err
 		}
-		if err := persistChildren(tx, aggregate, false); err != nil {
+		if err := persistChildren(tx, aggregate, false, original.Watchers); err != nil {
 			return err
 		}
 		if err := validateRevocations(aggregate.Lobby.Scope(), change); err != nil {
@@ -78,7 +90,10 @@ func (store *Store) Transact(ctx context.Context, scope domain.Scope, mutation d
 	}
 	return committed.DeepCopy(), nil
 }
-func persistChildren(tx *gorm.DB, aggregate domain.Aggregate, create bool) error {
+
+// persistChildren stores the aggregate's children. A create passes no
+// original watchers.
+func persistChildren(tx *gorm.DB, aggregate domain.Aggregate, create bool, originalWatchers []domain.Watcher) error {
 	if create {
 		for _, team := range aggregate.Teams {
 			record := TeamRecord{ID: team.ID, LobbyID: aggregate.Lobby.ID, Name: team.Name, NormalizedName: domain.TeamNameKey(team.Name), Capacity: team.Capacity, TeamOrder: team.Order}
@@ -134,14 +149,52 @@ func persistChildren(tx *gorm.DB, aggregate domain.Aggregate, create bool) error
 			return err
 		}
 	}
-	return nil
+	return persistWatchers(tx, aggregate, originalWatchers)
+}
+
+// persistWatchers writes only the watcher rows that changed since the
+// mutation loaded them: new rows are inserted, and rows whose kick changed
+// are updated. Rows the mutation left alone, as every heartbeat does, aren't
+// written. Rows of watchers who left are deleted by key.
+func persistWatchers(tx *gorm.DB, aggregate domain.Aggregate, original []domain.Watcher) error {
+	before := make(map[string]domain.Watcher, len(original))
+	for _, watcher := range original {
+		before[watcher.PlayerID] = watcher
+	}
+	for _, watcher := range aggregate.Watchers {
+		if previous, found := before[watcher.PlayerID]; found {
+			delete(before, watcher.PlayerID)
+			if sameKick(previous.KickedAt, watcher.KickedAt) {
+				continue
+			}
+		}
+		record := WatcherRecord{LobbyID: aggregate.Lobby.ID, PlayerID: watcher.PlayerID, DisplayName: watcher.DisplayName, JoinedAt: watcher.JoinedAt, KickedAt: watcher.KickedAt}
+		if err := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "lobby_id"}, {Name: "player_id"}}, DoUpdates: clause.AssignmentColumns([]string{"kicked_at"})}).Create(&record).Error; err != nil {
+			return err
+		}
+	}
+	if len(before) == 0 {
+		return nil
+	}
+	left := make([]any, 0, len(before))
+	for playerID := range before {
+		left = append(left, playerID)
+	}
+	return tx.Where(&WatcherRecord{LobbyID: aggregate.Lobby.ID}).Where(clause.IN{Column: clause.Column{Name: "player_id"}, Values: left}).Delete(&WatcherRecord{}).Error
+}
+
+func sameKick(first, second *time.Time) bool {
+	if first == nil || second == nil {
+		return first == second
+	}
+	return first.Equal(*second)
 }
 
 // validateRevocations rejects a revocation for another room or an invalid
 // membership before commit, because it is pushed only after commit.
 func validateRevocations(scope domain.Scope, change domain.Change) error {
 	for _, intent := range change.Revocations {
-		if intent.Scope != scope || intent.Generation < 1 || domain.ValidateUUID(intent.PlayerID) != nil {
+		if intent.Scope != scope || (intent.Watch != (intent.Generation == 0)) || intent.Generation < 0 || domain.ValidateUUID(intent.PlayerID) != nil {
 			return domain.NewError(domain.CodeInvalidInput, "invalid revocation intent")
 		}
 	}

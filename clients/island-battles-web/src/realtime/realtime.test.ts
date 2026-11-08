@@ -809,6 +809,92 @@ describe("game subscription", () => {
 
 // --- Recovery ---
 
+const WATCH_CHANNEL = `watch:island-battles:${LOBBY_ID}`;
+const watchPath = `/game/from-lobby/${LOBBY_ID}/watch`;
+const watchState = (generationId: number, overrides: object = {}) => ({
+  channel: WATCH_CHANNEL,
+  game_id: 7,
+  generation: {
+    id: generationId,
+    castles: [],
+    clashes: [],
+    soldier_groups: [],
+  },
+  generation_id: generationId,
+  lobby_id: LOBBY_ID,
+  teams: [],
+  turn_deadline_at: null,
+  ...overrides,
+});
+
+async function watchedGame() {
+  const h = harness();
+  h.routes.set(`GET ${watchPath}`, () => json(watchState(5)));
+  await h.realtime.signIn("Robin");
+  h.realtime.followWatch({ lobbyId: LOBBY_ID, channel: WATCH_CHANNEL });
+  await until(
+    () => h.clients.length > 0 && (h.clients[0]?.subscriptions.length ?? 0) > 0,
+  );
+  h.client().sub(WATCH_CHANNEL).emit("subscribed");
+  await until(() => h.realtime.watch.get() !== null, "watch");
+  return h;
+}
+
+describe("watching", () => {
+  test("subscribes to the watch channel, reads the watch state and installs newer turns", async () => {
+    const h = await watchedGame();
+    const sub = h.client().sub(WATCH_CHANNEL);
+    expect(sub.options).toEqual({ recoverable: true, positioned: true });
+    expect(h.realtime.watch.get()?.generation_id).toBe(5);
+    expect(h.realtime.game.get()).toBeNull();
+    const next = (generationId: number, overrides: object = {}) => ({
+      schema_version: 1,
+      type: "game.next_generation",
+      state: watchState(generationId, overrides),
+    });
+    sub.publish(next(4));
+    sub.publish(next(6, { channel: CHANNEL }));
+    sub.publish({ ...next(6), schema_version: 2 });
+    expect(h.realtime.watch.get()?.generation_id).toBe(5);
+    sub.publish(next(6));
+    expect(h.realtime.watch.get()?.generation_id).toBe(6);
+    sub.publish({
+      schema_version: 1,
+      type: "game.ended",
+      state: watchState(7, { outcome }),
+    });
+    sub.publish(next(8));
+    expect(h.realtime.watch.get()?.generation_id).toBe(7);
+    // A watcher never heartbeats a lobby or reads the player's generation.
+    expect(h.calls.some((call) => call.path.endsWith("/heartbeat"))).toBe(
+      false,
+    );
+    expect(h.count("GET", generationPath)).toBe(0);
+  });
+
+  test("a kicked watcher is told so when the server unsubscribes them", async () => {
+    const h = await watchedGame();
+    h.routes.set(`GET ${watchPath}`, () =>
+      json({ title: "Forbidden", status: 403, detail: "kicked" }, 403),
+    );
+    const sub = h.client().sub(WATCH_CHANNEL);
+    sub.emit("unsubscribed", { code: 2000 });
+    await until(() => h.realtime.problem.get() !== null, "problem");
+    expect(h.realtime.problem.get()?.scope).toBe("watch");
+    expect(h.realtime.watch.get()).toBeNull();
+    expect(sub.state).toBe("unsubscribed");
+  });
+
+  test("leaving the watch drops the subscription", async () => {
+    const h = await watchedGame();
+    const sub = h.client().sub(WATCH_CHANNEL);
+    h.realtime.leaveWatch();
+    expect(sub.state).toBe("unsubscribed");
+    expect(h.client().removed).toContain(sub);
+    expect(h.realtime.watch.get()).toBeNull();
+  });
+});
+
 describe("recovery", () => {
   test("a disconnect and reconnect reconciles once per followed target", async () => {
     const h = await followedLobby(3);

@@ -65,6 +65,9 @@ type GenerationService struct {
 	Publisher Publisher
 	// Now is the clock that turn deadlines are applied by; nil is time.Now.
 	Now func() time.Time
+	// Watchers authorizes the watcher reads, Watch and WatchDemo, against
+	// the lobby's watcher rows. Nil lets only roster players read them.
+	Watchers domain.WatchAuthorizer
 }
 
 // Current returns the caller's state of the lobby's game, after applying an
@@ -391,9 +394,17 @@ func generationState(game *models.Game, generation *models.Generation, player mo
 // generation, whose inputs are nil, or the open one that a turn deadline
 // ended, with its inputs. The generation that ends the game is pushed as
 // game.ended instead. memories holds each player's stored memory by player
-// ID.
+// ID. The lobby's watch channel gets the same event with the watchers'
+// WatchState, in the same push.
 func generationEvents(game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer, inputs []models.GenerationInput, memories map[string]models.BotMemory) ([]realtime.Publication, error) {
-	events := make([]realtime.Publication, 0, len(players))
+	events := make([]realtime.Publication, 0, len(players)+1)
+	if game.LobbyID != nil {
+		watch, err := watchEvent(game, generation)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, watch)
+	}
 	for _, player := range players {
 		channel, err := domain.PlayerChannel(player.PlayerID)
 		if err != nil {

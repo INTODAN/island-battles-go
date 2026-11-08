@@ -9,6 +9,8 @@ export interface Screen {
 export interface NameScreenOptions {
   /** A join code from the page's link, shown so the person knows where they are going. */
   joinCode: string | undefined;
+  /** A code from the page's `?watch=` link, for a person who will watch the game. */
+  watchCode?: string | undefined;
   initialName: string;
   /** Signs in; rejects with the sentence to show. */
   onSubmit(name: string): Promise<void>;
@@ -31,7 +33,11 @@ export function mountNameScreen(options: NameScreenOptions): Screen {
   const button = h(
     "button",
     { type: "submit", class: "primary" },
-    options.joinCode ? `Continue and join ${options.joinCode}` : "Continue",
+    options.joinCode
+      ? `Continue and join ${options.joinCode}`
+      : options.watchCode
+        ? `Continue and watch ${options.watchCode}`
+        : "Continue",
   );
   const form = h(
     "form",
@@ -42,7 +48,9 @@ export function mountNameScreen(options: NameScreenOptions): Screen {
       { class: "lead" },
       options.joinCode
         ? `You were invited to lobby ${options.joinCode}. Choose a name to join it.`
-        : "Command your castles across the sea. Choose a name to begin.",
+        : options.watchCode
+          ? `You were invited to watch game ${options.watchCode}. Choose a name to watch it.`
+          : "Command your castles across the sea. Choose a name to begin.",
     ),
     h("label", { htmlFor: "player-name" }, "Your name"),
     input,

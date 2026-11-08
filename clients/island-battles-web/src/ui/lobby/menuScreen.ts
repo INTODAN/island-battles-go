@@ -28,6 +28,10 @@ export interface MenuScreenOptions {
   actions: LobbyActions;
   /** A join code to prefill and try at once (the page's `?join=` link). */
   joinCode: string | undefined;
+  /** A code to watch at once (the page's `?watch=` link). */
+  watchCode?: string | undefined;
+  /** Starts watching the game with this code; rejects with the refusal. */
+  onWatch(joinCode: string): Promise<void>;
   /** A sentence to show first, such as why the previous lobby ended. */
   notice: string;
   /** The session ended while a call ran. */
@@ -99,6 +103,63 @@ export function mountMenuScreen(options: MenuScreenOptions): Screen {
   joinForm.addEventListener("submit", (event) => {
     event.preventDefault();
     void join(codeInput.value);
+  });
+
+  // --- Watch ---
+  const watchInput = h("input", {
+    id: "watch-code",
+    type: "text",
+    maxLength: 12,
+    autocomplete: "off",
+    spellcheck: false,
+    placeholder: "ABCD1234",
+    value: options.watchCode ?? "",
+  });
+  const watchError = h("p", {
+    class: "field-error",
+    attrs: { role: "alert" },
+  });
+  const watchButton = h(
+    "button",
+    { type: "submit", class: "secondary" },
+    "Watch game",
+  );
+  const watchForm = h(
+    "form",
+    { class: "card", noValidate: true },
+    h("h2", {}, "Watch a game"),
+    h(
+      "p",
+      { class: "hint" },
+      "Follow a game live without taking a seat. Ask a player for its code.",
+    ),
+    h("label", { htmlFor: "watch-code" }, "Join code"),
+    watchInput,
+    watchError,
+    h("div", { class: "actions" }, watchButton),
+  );
+
+  async function watch(rawCode: string): Promise<void> {
+    const problem = validateJoinCode(rawCode);
+    if (problem) {
+      watchError.textContent = problem;
+      return;
+    }
+    watchError.textContent = "";
+    watchButton.disabled = true;
+    try {
+      await options.onWatch(normalizeJoinCode(rawCode));
+    } catch (cause) {
+      const shown = describeProblem(cause, "watch");
+      watchError.textContent = shown.message;
+      if (shown.signedOut) options.onSignedOut();
+    } finally {
+      if (!disposed) watchButton.disabled = false;
+    }
+  }
+  watchForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void watch(watchInput.value);
   });
 
   // --- Create ---
@@ -406,9 +467,17 @@ export function mountMenuScreen(options: MenuScreenOptions): Screen {
     "div",
     { class: "menu" },
     heading,
-    h("div", { class: "cards" }, createForm, joinForm),
+    h(
+      "div",
+      { class: "cards" },
+      createForm,
+      h("div", { class: "card-stack" }, joinForm, watchForm),
+    ),
   );
   if (options.joinCode) queueMicrotask(() => void join(options.joinCode ?? ""));
+  else if (options.watchCode) {
+    queueMicrotask(() => void watch(options.watchCode ?? ""));
+  }
   return {
     el,
     dispose() {

@@ -1,15 +1,26 @@
-// The game view. `mountGameView` shows a lobby's game live; `mountDemoView` opens a demo file.
-// Both are entry points for the app shell (#98), which supplies the container and what
-// "Back to lobby" does. #103 reuses the same screen for spectators.
+// The game view. `mountGameView` shows a lobby's game live to a roster player;
+// `mountWatchView` shows it read-only to a watcher outside the roster; `mountDemoView` opens a
+// demo file. They are entry points for the app shell (#98), which supplies the container and
+// what the back button does.
 
 import type { Realtime } from "../../realtime";
 import { mountDemo, mountDemoFile } from "./demo";
 import { mountLive } from "./live";
+import { type LiveSource, playerSource, watchSource } from "./sources";
 
-export { DemoFileError, readDemo, readDemoFile } from "./demoFile";
+export { DemoFileError, readDemoFile } from "./demoFile";
+export type { LiveSource } from "./sources";
 
 export interface GameViewOptions {
   lobbyId: string;
+  realtime: Realtime;
+  onBack: () => void;
+}
+
+export interface WatchViewOptions {
+  lobbyId: string;
+  /** The watch channel `POST /lobby/v1/watches` returned. */
+  channel: string;
   realtime: Realtime;
   onBack: () => void;
 }
@@ -29,15 +40,48 @@ export function mountGameView(
   container: HTMLElement,
   options: GameViewOptions,
 ): { dispose(): void } {
+  return mountSource(
+    container,
+    options.realtime,
+    playerSource(options.realtime, options.lobbyId),
+    options.onBack,
+  );
+}
+
+/**
+ * Shows a watched game read-only: the watch channel and the watcher reads, with no lease,
+ * heartbeat, relay or deadline call. It says so when the host kicks the watcher.
+ */
+export function mountWatchView(
+  container: HTMLElement,
+  options: WatchViewOptions,
+): { dispose(): void } {
+  return mountSource(
+    container,
+    options.realtime,
+    watchSource(options.realtime, {
+      lobbyId: options.lobbyId,
+      channel: options.channel,
+    }),
+    options.onBack,
+  );
+}
+
+function mountSource(
+  container: HTMLElement,
+  realtime: Realtime,
+  source: LiveSource,
+  onBack: () => void,
+): { dispose(): void } {
   let current: { dispose(): void } | undefined;
   let disposed = false;
 
   const showLive = () => {
     current?.dispose();
     current = mountLive(container, {
-      lobbyId: options.lobbyId,
-      realtime: options.realtime,
-      onBack: options.onBack,
+      realtime,
+      source,
+      onBack,
       onDemo: (demo) => {
         current?.dispose();
         current = mountDemo(container, demo, {

@@ -640,6 +640,8 @@ class Problem(GameModel):
         "invalid_game_settings",
         "invalid_seat_settings",
         "game_requirement",
+        "watcher_kicked",
+        "watchers_full",
         "unavailable",
         "internal_error",
     ]
@@ -812,3 +814,57 @@ class UpgradeLevel(GameModel):
 class UpgradeType(StrEnum):
     clash_stop_generations = "clash_stop_generations"
     speed = "speed"
+
+
+class WatchGameEndedEvent(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    schema_version: Literal[1]
+    state: WatchState
+    """
+    The final generation, with its outcome.
+    """
+    type: Literal["game.ended"]
+
+
+class WatchGenerationEvent(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    schema_version: Literal[1]
+    state: WatchState
+    type: Literal["game.next_generation"]
+
+
+class WatchState(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    field_schema: Annotated[
+        AnyUrl | None,
+        Field(alias="$schema", examples=["https://example.com/WatchState.json"]),
+    ] = None
+    """
+    A URL to the JSON Schema for this object.
+    """
+    channel: StrictStr
+    """
+    The lobby's watch channel, watch:island-battles:<lobby_id>, which receives WatchGenerationEvent after each turn and WatchGameEndedEvent after the last one.
+    """
+    game_id: Annotated[StrictInt, Field(ge=1)]
+    generation: Generation
+    generation_id: Annotated[StrictInt, Field(ge=1)]
+    lobby_id: UUID
+    outcome: GameOutcome | None = None
+    """
+    How the game ended. Absent while the game runs.
+    """
+    teams: Sequence[GameTeam]
+    """
+    The teams that play, with their lobby names and the display names their players had at the start.
+    """
+    turn_deadline_at: AwareDatetime | None
+    """
+    When this generation's turn times out, as in GenerationState. Null when turns have no time limit, and once the game has ended. Watchers never apply a deadline themselves.
+    """

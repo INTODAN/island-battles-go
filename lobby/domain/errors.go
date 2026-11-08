@@ -22,6 +22,11 @@ const (
 	// error's Type names the game's problem.
 	CodeGameRequirement ErrorCode = "game_requirement"
 	CodeUnavailable     ErrorCode = "unavailable"
+	// CodeWatcherKicked refuses a watcher whom the host kicked from the lobby.
+	CodeWatcherKicked ErrorCode = "watcher_kicked"
+	// CodeWatchersFull refuses a new watcher once the lobby has
+	// MaxWatchersPerLobby of them.
+	CodeWatchersFull ErrorCode = "watchers_full"
 	// PermissionDenied is private proxy authorization only, not a player API code.
 	CodePermissionDenied ErrorCode = "permission_denied"
 )
@@ -76,6 +81,8 @@ var (
 	ErrIdempotencyConflict = NewError(CodeIdempotencyConflict, "request ID was used with different input")
 	ErrInvalidInput        = NewError(CodeInvalidInput, "invalid input")
 	ErrUnavailable         = NewError(CodeUnavailable, "service temporarily unavailable")
+	ErrWatcherKicked       = NewError(CodeWatcherKicked, "the host removed you from this lobby's watchers")
+	ErrWatchersFull        = NewError(CodeWatchersFull, "this lobby has as many watchers as it allows")
 	ErrPermissionDenied    = NewError(CodePermissionDenied, "permission denied")
 	// Internal storage sentinel, never returned directly through player HTTP.
 	ErrJoinCodeCollision = errors.New("lobby join code collision")

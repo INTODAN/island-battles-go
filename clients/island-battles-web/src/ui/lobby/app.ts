@@ -2,7 +2,7 @@ import { createApiClients } from "../../api/client";
 import { type BotRelay, startBotRelay } from "../../bots";
 import type { Realtime } from "../../realtime";
 import { h } from "../dom";
-import { mountDemoView, mountGameView } from "../game/index";
+import { mountDemoView, mountGameView, mountWatchView } from "../game/index";
 import { createLobbyActions } from "./actions";
 import { releaseLease, startHeartbeat } from "./lease";
 import { mountMenuScreen } from "./menuScreen";
@@ -12,8 +12,16 @@ import { describeProblem } from "./problems";
 import { mountRelayBanner } from "./relayBanner";
 import { mountRoomScreen } from "./roomScreen";
 import { watchForGame } from "./startRetry";
+import { mountWatchersPanel } from "./watchersPanel";
 
 const roomKey = "island-battles-web.room";
+const watchKey = "island-battles-web.watch";
+
+interface SavedWatch {
+  lobbyId: string;
+  channel: string;
+  joinCode: string;
+}
 const nameKey = "island-battles-web.name";
 
 interface SavedRoom {
@@ -60,6 +68,23 @@ function savedRoom(): SavedRoom | undefined {
   return undefined;
 }
 
+function savedWatch(): SavedWatch | undefined {
+  try {
+    const value = JSON.parse(read(() => sessionStorage, watchKey) ?? "null");
+    if (
+      value &&
+      typeof value.lobbyId === "string" &&
+      typeof value.channel === "string" &&
+      typeof value.joinCode === "string"
+    ) {
+      return value as SavedWatch;
+    }
+  } catch {
+    // Treated as not watching.
+  }
+  return undefined;
+}
+
 export interface LobbyApp {
   dispose(): void;
 }
@@ -82,8 +107,10 @@ export function mountLobbyApp(options: {
 
   const params = new URLSearchParams(location.search);
   let pendingJoin = params.get("join")?.trim() || undefined;
-  if (params.has("join")) {
+  let pendingWatch = params.get("watch")?.trim() || undefined;
+  if (params.has("join") || params.has("watch")) {
     params.delete("join");
+    params.delete("watch");
     const query = params.toString();
     history.replaceState(
       null,
@@ -98,6 +125,7 @@ export function mountLobbyApp(options: {
   let ocean: Ocean | undefined;
   let screen: { key: string; screen: Screen } | undefined;
   let game: { lobbyId: string; stop(): void } | undefined;
+  let watching: { lobbyId: string; stop(): void } | undefined;
   let heartbeat: { lobbyId: string; stop(): void } | undefined;
 
   const stage = h("div", { class: "overlay" });
@@ -239,7 +267,9 @@ export function mountLobbyApp(options: {
       },
     });
     const viewHost = h("div", { class: "game-view" });
-    gameHost.replaceChildren(viewHost, banner.el);
+    // The people watching with the join code; the host can kick one.
+    const watchers = mountWatchersPanel({ realtime, actions, overlay: true });
+    gameHost.replaceChildren(viewHost, banner.el, watchers.el);
     // The shell follows the game for the relay and ends it itself, so the view's own
     // `leaveGame()` (on dispose, or when it swaps to a demo file) must not stop the relay.
     const view = mountGameView(viewHost, {
@@ -263,6 +293,7 @@ export function mountLobbyApp(options: {
         watcher.stop();
         relay.dispose();
         banner.dispose();
+        watchers.dispose();
         view.dispose();
         gameHost.replaceChildren();
         gameHost.hidden = true;
@@ -287,6 +318,71 @@ export function mountLobbyApp(options: {
     route();
   }
 
+  // --- Watching a game from outside the roster ---
+
+  /**
+   * Watches the game of a join code: the server adds a watcher row and returns the watch
+   * channel. A member of that lobby gets their own lobby instead.
+   */
+  async function startWatch(joinCode: string): Promise<void> {
+    const access = await actions.watch(joinCode);
+    if (access.member) {
+      realtime.followLobby({
+        gameKey: access.game_key,
+        lobbyId: access.lobby_id,
+      });
+      return;
+    }
+    enterWatch(access.lobby_id, access.channel, joinCode);
+  }
+
+  function enterWatch(lobbyId: string, channel: string, joinCode: string) {
+    demo?.stop();
+    demo = undefined;
+    screen?.screen.dispose();
+    screen = undefined;
+    stage.replaceChildren();
+    setOcean(false);
+    stage.hidden = true;
+    demoLink.hidden = true;
+    gameHost.hidden = false;
+    write(
+      () => sessionStorage,
+      watchKey,
+      JSON.stringify({ lobbyId, channel, joinCode } satisfies SavedWatch),
+    );
+    const viewHost = h("div", { class: "game-view" });
+    gameHost.replaceChildren(viewHost);
+    // No lease, heartbeat, relay or deadline call: a watcher only reads.
+    const view = mountWatchView(viewHost, {
+      lobbyId,
+      channel,
+      realtime,
+      onBack: () => stopWatch(),
+    });
+    watching = {
+      lobbyId,
+      stop() {
+        view.dispose();
+        gameHost.replaceChildren();
+        gameHost.hidden = true;
+        stage.hidden = false;
+      },
+    };
+  }
+
+  /** Stops watching and goes back to the menu. */
+  function stopWatch(): void {
+    const current = watching;
+    if (!current) return;
+    watching = undefined;
+    current.stop();
+    realtime.leaveWatch();
+    void actions.unwatch(current.lobbyId).catch(() => undefined);
+    write(() => sessionStorage, watchKey, null);
+    route();
+  }
+
   // --- Routing from the stores ---
 
   function show(key: string, make: () => Screen): void {
@@ -308,6 +404,11 @@ export function mountLobbyApp(options: {
     if (!session) {
       game?.stop();
       game = undefined;
+      if (watching) {
+        watching.stop();
+        watching = undefined;
+        realtime.leaveWatch();
+      }
       setOcean(true);
       if (problem?.scope === "session")
         notice = describeProblem(problem.error, "ready").message;
@@ -316,6 +417,7 @@ export function mountLobbyApp(options: {
         notice = "";
         return mountNameScreen({
           joinCode: pendingJoin,
+          watchCode: pendingWatch,
           initialName: read(() => localStorage, nameKey) ?? "",
           notice: message,
           async onSubmit(name) {
@@ -330,6 +432,8 @@ export function mountLobbyApp(options: {
       });
       return;
     }
+    // A watcher stays on the watched game until they stop watching.
+    if (watching) return;
     if (demo && !(lobby && lobby.lobby.phase === "started")) return;
     if (lobby && lobby.lobby.phase === "started") {
       if (game?.lobbyId !== lobby.lobby.id) {
@@ -390,10 +494,14 @@ export function mountLobbyApp(options: {
       notice = "";
       const joinCode = pendingJoin;
       pendingJoin = undefined;
+      const watchCode = pendingWatch;
+      pendingWatch = undefined;
       return mountMenuScreen({
         playerName: session.displayName,
         actions,
         joinCode,
+        watchCode,
+        onWatch: startWatch,
         notice: message,
         onSignedOut: () => realtime.signOut(),
         onChangeName: () => realtime.signOut(),
@@ -426,6 +534,17 @@ export function mountLobbyApp(options: {
         route();
       });
   }
+  // A tab that reloaded while watching watches again: the code finds its watcher row.
+  const watched = savedWatch();
+  if (
+    realtime.session.get() &&
+    watched &&
+    !saved &&
+    !pendingJoin &&
+    !pendingWatch
+  ) {
+    pendingWatch = watched.joinCode;
+  }
   setOcean(true);
   route();
 
@@ -437,6 +556,7 @@ export function mountLobbyApp(options: {
       heartbeat?.stop();
       game?.stop();
       demo?.stop();
+      watching?.stop();
       screen?.screen.dispose();
       setOcean(false);
     },
