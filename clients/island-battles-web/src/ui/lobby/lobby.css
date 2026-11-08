@@ -1,0 +1,572 @@
+/* The lobby screens: glass panels over the orbiting ocean. */
+
+:root {
+  --ink: #12283a;
+  --ink-soft: #3d5568;
+  --glass: rgba(250, 253, 255, 0.9);
+  --glass-edge: rgba(255, 255, 255, 0.65);
+  --accent: #1d6fb8;
+  --accent-ink: #ffffff;
+  --good: #1f7a4d;
+  --bad: #b3261e;
+  --team-1: #3464e0;
+  --team-2: #d94d5b;
+  --team-3: #288562;
+  --team-4: #9560cb;
+  --team-5: #b37914;
+  --team-6: #24828f;
+}
+
+#scene[hidden] {
+  display: none;
+}
+
+#app:empty {
+  display: none;
+}
+
+.overlay,
+.game-host {
+  position: fixed;
+  inset: 0;
+}
+
+.overlay {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 16px;
+  box-sizing: border-box;
+  font:
+    15px / 1.45 system-ui,
+    sans-serif;
+  color: var(--ink);
+}
+
+.overlay[hidden],
+.game-host[hidden] {
+  display: none;
+}
+
+.overlay > * {
+  margin: auto;
+}
+
+.game-host .game-view {
+  position: absolute;
+  inset: 0;
+}
+
+.panel,
+.card {
+  box-sizing: border-box;
+  border-radius: 14px;
+  background: var(--glass);
+  border: 1px solid var(--glass-edge);
+  box-shadow: 0 10px 30px rgba(8, 30, 50, 0.28);
+  padding: 18px 20px;
+}
+
+.card {
+  padding: 14px 16px;
+}
+
+.panel.narrow {
+  width: min(420px, 100%);
+}
+
+h1,
+h2,
+h3 {
+  margin: 0 0 6px;
+  line-height: 1.2;
+}
+
+h1 {
+  font-size: 28px;
+}
+
+h2 {
+  font-size: 18px;
+}
+
+h3 {
+  font-size: 16px;
+}
+
+.lead {
+  margin: 0 0 12px;
+  color: var(--ink-soft);
+}
+
+.hint {
+  margin: 4px 0;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+label {
+  display: block;
+  margin: 10px 0 4px;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+input[type="text"],
+input[type="number"],
+input[type="file"],
+select {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #9db4c6;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+}
+
+input:disabled,
+select:disabled {
+  background: #e7eef3;
+  color: #6b7f8f;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+button.primary,
+button.secondary {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  font-weight: 600;
+}
+
+button.primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+button.primary.is-ready {
+  background: var(--good);
+}
+
+button.secondary {
+  background: #fff;
+  color: var(--ink);
+  border-color: #9db4c6;
+}
+
+button.small {
+  padding: 4px 10px;
+  font-size: 13px;
+}
+
+button.link {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 3px solid #f2b705;
+  outline-offset: 1px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.field-error {
+  margin: 4px 0 0;
+  min-height: 0;
+  font-size: 13px;
+  color: var(--bad);
+}
+
+.field-error:empty {
+  display: none;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* Create or join */
+
+.menu {
+  width: min(900px, 100%);
+}
+
+.greeting {
+  margin-bottom: 12px;
+  padding: 14px 18px;
+  border-radius: 14px;
+  background: rgba(10, 36, 56, 0.62);
+  color: #fff;
+}
+
+.greeting .lead {
+  margin: 0;
+  color: #d4e6f3;
+}
+
+.greeting button.link {
+  color: #bfe1ff;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  gap: 14px;
+  align-items: start;
+}
+
+/* Room */
+
+.room {
+  width: min(1100px, 100%);
+}
+
+.room-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px 24px;
+  margin-bottom: 12px;
+}
+
+.room-title h1 {
+  font-size: 24px;
+}
+
+.room-title .lead {
+  margin: 0;
+}
+
+.invite {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.join-code {
+  font:
+    700 26px / 1 ui-monospace,
+    Menlo,
+    monospace;
+  letter-spacing: 0.14em;
+  user-select: all;
+}
+
+.invite .actions {
+  margin-top: 4px;
+}
+
+.pill {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: #e3ecf2;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pill[data-state="connected"],
+.pill[data-status="up"] {
+  background: #d3efdf;
+  color: var(--good);
+}
+
+.pill[data-state="disconnected"],
+.pill[data-status="down"] {
+  background: #f6dedb;
+  color: var(--bad);
+}
+
+.room-body {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.room-main,
+.room-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.teams {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.team {
+  border-top: 6px solid var(--team);
+}
+
+.team.mine {
+  box-shadow:
+    0 0 0 3px var(--team),
+    0 10px 30px rgba(8, 30, 50, 0.28);
+}
+
+.team.needs-player {
+  background: #fff1d6;
+  box-shadow:
+    0 0 0 3px var(--bad),
+    0 10px 30px rgba(8, 30, 50, 0.28);
+}
+
+.team header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.team header h3 {
+  flex: 1;
+  margin: 0;
+}
+
+.swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--team);
+}
+
+.count {
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.members {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.member {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(29, 111, 184, 0.07);
+}
+
+.member.you {
+  background: rgba(29, 111, 184, 0.16);
+}
+
+.member.offline {
+  opacity: 0.6;
+}
+
+.member-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.tag {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: #dbe6ee;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.tag.host {
+  background: #fbe7a6;
+}
+
+.tag.offline {
+  background: #f6dedb;
+  color: var(--bad);
+}
+
+.bot-label {
+  grid-column: 1;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.bot-label.none {
+  font-style: italic;
+}
+
+.ready-mark {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  align-self: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.ready-mark.is-ready {
+  color: var(--good);
+}
+
+.empty {
+  margin: 10px 0;
+}
+
+/* Bot picker */
+
+.bot-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 6px 0;
+  padding: 8px 10px;
+  border: 1px solid #c3d3df;
+  border-radius: 10px;
+  background: #fff;
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.bot-option:has(input:checked) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(29, 111, 184, 0.35);
+}
+
+.bot-option input {
+  margin-top: 4px;
+}
+
+.bot-text .hint {
+  margin: 2px 0 0;
+  font-size: 12px;
+}
+
+.bot-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.bot-help {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 0 0 8px 4px;
+}
+
+.command {
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #0f2536;
+  color: #d6f0ff;
+  font:
+    12px ui-monospace,
+    Menlo,
+    monospace;
+  overflow-wrap: anywhere;
+}
+
+.bot-picker.saving {
+  opacity: 0.85;
+}
+
+/* Over the game view */
+
+.relay-banner {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(640px, calc(100% - 24px));
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: #fde7e4;
+  color: var(--bad);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+  font:
+    13px / 1.35 system-ui,
+    sans-serif;
+  white-space: pre-wrap;
+}
+
+.relay-banner[hidden] {
+  display: none;
+}
+
+.game-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font:
+    20px system-ui,
+    sans-serif;
+}
+
+@media (max-width: 760px) {
+  .cards,
+  .room-body {
+    grid-template-columns: 1fr;
+  }
+
+  .invite {
+    align-items: flex-start;
+  }
+
+  h1 {
+    font-size: 24px;
+  }
+}
+
+.demo-link {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--glass);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.demo-link[hidden] {
+  display: none;
+}

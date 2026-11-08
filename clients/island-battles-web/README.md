@@ -1,6 +1,6 @@
 # Island Battles web client
 
-A 3D browser client for Island Battles, written in TypeScript with [Babylon.js](https://www.babylonjs.com/). It will let people watch a game's gameplay. Today the `src/scene/` layer draws any one generation as a 3D board with placeholder art (see [The 3D board](#the-3d-board)); the page itself is still the scaffold that later issues build on. See [#94](https://github.com/INTODAN/island-battles-go/issues/94) for the plan.
+A 3D browser client for Island Battles, written in TypeScript with [Babylon.js](https://www.babylonjs.com/). It has its own lobby screens (name, create or join, lobby room with a bot picker) over an orbiting ocean, relays turns to a player's localhost bot, and switches to the game view when the game starts. The `src/scene/` layer draws any one generation as a 3D board with placeholder art (see [The 3D board](#the-3d-board)). See [#94](https://github.com/INTODAN/island-battles-go/issues/94) for the plan.
 
 The tooling is [Bun](https://bun.sh/) (runtime, package manager, bundler, dev server and test runner) and [Biome](https://biomejs.dev/) (lint, format and import sorting). Bun does not type-check, so `tsc` does.
 
@@ -80,9 +80,23 @@ Tests inject a fake Centrifugo client (`createClient`), fake `fetch` and fake st
 - `stage.ts`: `SceneStage` applies samples to the meshes `renderGeneration` built, by castle and group ID; boats that leave the board during the turn get meshes of their own until it ends. `createScenePlayer(scene, teams)` advances with the render loop.
 - `effects.ts`: the placeholder clash flash, sink tween and castle pop behind the small `TurnEffects` interface, for the art pass to replace.
 
+## Lobby screens and the bot relay
+
+`src/main.ts` mounts `src/ui/lobby/app.ts`, which picks the screen from the realtime stores alone (no screen state is guessed from a button press): no session shows the name step; a session with no lobby shows create or join; a `waiting` lobby shows the room; a `started` lobby mounts the game view (`mountGameView` from `src/ui/game/`). `/play/?join=CODE` (or `/?join=CODE` in dev) asks for a name and then joins that lobby.
+
+- **Create form** (`form.ts`, pure and tested): lobby name, 2 to 6 teams, players per team, map (generated, a default map from `GET /map/templates`, or a map file checked by `POST /map/validate` before it is sent) and turn limit (10 s, 30 s, 2 min, 10 min, No limit, sent as `game_settings.turn_timeout_seconds`). A template or file fixes the team count. Each create gets a fresh `request_id`; after a transport failure the same body goes out again with the same id.
+- **Room** (`roomScreen.ts`, `botPicker.ts`): teams with their members, bot choices and ready marks, the join code with copy buttons, the map summary, the bot picker and the ready, start and leave buttons. The members' bot choices come from `GET /game/lobbies/{lobby_id}/bots`, read again on every lobby change. A choice does not publish a lobby event, so another tab sees a changed choice at the next lobby change (or when it gets focus).
+- **Problems** (`problems.ts`): each refusal shows a plain sentence next to the control that caused it; `empty_teams` also highlights the teams in `team_ids`.
+- **Lease** (`lease.ts`): one `client_instance_id` per page load, a heartbeat every 15 s with the current `membership_generation`, a `keepalive` `DELETE` of the lease on `pagehide`, and a Leave button. A reloaded tab keeps its session and lobby, and joins again under a new instance id.
+- **Start** (`startRetry.ts`): the lobby is `started` before its game exists, so the game read can get 404 or 409. It is retried after 1 s, 2 s, 4 s, then every 10 s until it works or the screen leaves the lobby.
+- **Bot picker**: "My localhost bot" shows connected or not running from `GET http://127.0.0.1:41414/health` and the command to copy, or a default level from `GET /bots/defaults`; the choice is saved with `PUT /game/lobbies/{lobby_id}/bot`. The bot server must allow the page's origin (`island-battles-bot serve --allow-origin ...`; `http://localhost:3000` and `http://localhost:8888` are allowed already).
+- **Relay** (`src/bots/`, no DOM imports): for a player whose `GenerationState.bot` is `localhost`, each new generation becomes a `BotTurn` (the state's `memory` and `turn_deadline_at`, and the `upgrades` table read once from `GET /game/upgrades`), is posted to `127.0.0.1:41414/turn`, and the `BotTurnResult` is submitted to `POST /generation/commands` with `complete: true` and the new memory. A bot that is not running is asked again every 2 s; a bot that crashed or a refused result is shown and waits for **Try again**; a lost submission is resent with the same `request_id`. Once the turn is submitted (or for a default bot) the relay calls `POST /game/from-lobby/{lobby_id}/deadline` a second after `turn_deadline_at`, again after 2 s doubling up to 30 s while the turn stays open. Another client can reuse `createBotRelay` with its own `fetch`, timers and stores.
+
+Screenshots of each screen at desktop width and at 450 px are in [`docs/screenshots/`](docs/screenshots/) (`lobby-*.png`). "Add bot" per team (#115) is not here yet.
+
 ## The game view
 
-`src/ui/game/` is the screen a player sees once their lobby starts: the 3D board with a HUD, a timeline, the outcome and the bot logs. `mountGameView(container, { lobbyId, realtime, onBack })` shows a lobby's game live; `mountDemoView(container, { file, onBack })` opens a saved demo file with no server. Both return `{ dispose() }`. The lobby screens ([#98](https://github.com/INTODAN/island-battles-go/issues/98)) own the app shell and call them; [#103](https://github.com/INTODAN/island-battles-go/issues/103) reuses the same screen for spectators. Until the shell wires them in, `/?game=<lobby_id>` (for the guest session saved in the tab's `sessionStorage`) and `/?demo` or `/?demo=<fixture.json>` open them from the dev server.
+`src/ui/game/` is the screen a player sees once their lobby starts: the 3D board with a HUD, a timeline, the outcome and the bot logs. `mountGameView(container, { lobbyId, realtime, onBack })` shows a lobby's game live; `mountDemoView(container, { file, onBack })` opens a saved demo file with no server. Both return `{ dispose() }`. The lobby screens ([#98](https://github.com/INTODAN/island-battles-go/issues/98)) own the app shell and call them (an **Open demo file** button on the name and create-or-join screens opens a demo; the shell follows the game for the relay and passes the view a `realtime` whose `leaveGame()` does nothing, so the relay keeps running while the view mounts, swaps to a demo or goes away); [#103](https://github.com/INTODAN/island-battles-go/issues/103) reuses the same screen for spectators. `/?game=<lobby_id>` (for the guest session saved in the tab's `sessionStorage`) and `/?demo` or `/?demo=<fixture.json>` open them alone from the dev server, beside the app shell.
 
 - **History** (`live.ts`): the view subscribes to the player channel first (`realtime.followGame`), then loads `GET /game/from-lobby/{lobby_id}/demo`, then merges the live generations into it by `id`, ignoring ones it holds (`history.ts`). A turn that arrives while the history loads is kept and merged after it. After a reconnect the history is read again and merged, so a turn the channel skipped is not lost. Turns are numbered by their index in the history, "Turn 37 / 120", because generation IDs have gaps.
 - **Timeline** (`controller.ts`, no DOM): play/pause, step back and forward, a scrubber and **Follow live**. Playing forward and stepping forward use the turn animation of `src/scene/animation/`; scrubbing and stepping back seek with no animation. Follow live turns off when you scrub back, and on when you return to the newest turn of a running game; pausing while following stops following. When the game has an outcome, or in a demo, nothing follows, and the timeline stays usable.
@@ -94,10 +108,11 @@ The turn deadline call (`POST .../deadline`) is not made here: the relay of [#98
 
 ## Layout
 
-- `index.html`, `src/main.ts`, `src/styles.css`: the page and the Babylon scene. `src/main.ts` starts the dev page when the URL has `?fixture=`. `@babylonjs/core` is imported from its ES module paths so the bundle tree-shakes; add the side-effect imports a feature needs (for example `StandardMaterial`) instead of importing the package root.
+- `index.html`, `src/main.ts`, `src/styles.css`: the page and the Babylon scene. `src/main.ts` starts the dev page when the URL has `?fixture=`, and the lobby app otherwise. `@babylonjs/core` is imported from its ES module paths so the bundle tree-shakes; add the side-effect imports a feature needs (for example `StandardMaterial`) instead of importing the package root.
 - `src/realtime/`: the Centrifugo session, described above.
+- `src/bots/`: the localhost bot relay.
+- `src/ui/lobby/`: the lobby screens and the app shell's flow; `src/ui/game/`: the game view, described above.
 - `src/scene/`: the 3D board, described above.
-- `src/ui/game/`: the game view, described above.
 - `dev.ts` and `proxy.ts`: the dev server and its proxy rules.
 - `build.ts`: the production build, served under `/play/`.
 
