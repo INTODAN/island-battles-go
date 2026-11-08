@@ -12,13 +12,10 @@ import type { Scene } from "@babylonjs/core/scene";
 import type { components } from "../api/generated/game";
 import {
   type BoatParts,
-  type CastleParts,
   createBoat,
-  createCastle,
   createFlatRing,
   createIsland,
   createIslandBlob,
-  createUpgradeRing,
   ISLAND_TOP,
   MaterialCache,
   markPickable,
@@ -26,8 +23,18 @@ import {
 } from "./art";
 import { type BoardBounds, boardBounds } from "./board";
 import { createBoardCamera, fitCamera } from "./camera";
+import { castleDisplayLevel } from "./castleLevel";
+import {
+  type CastleView,
+  castleLabelHeight,
+  createCastleView,
+  disposeCastleView,
+  type PopHandle,
+  popCastleView,
+  setCastleView,
+} from "./castles";
 import { toWorld } from "./coordinates";
-import { castleTitle, upgradeLevels, upgradeRingCount } from "./format";
+import { castleTitle, hasUpgrades, upgradeLevels } from "./format";
 import {
   computeHeadings,
   type HeadingSegment,
@@ -43,12 +50,9 @@ type GameTeam = components["schemas"]["GameTeam"];
 type Castle = components["schemas"]["Castle"];
 type SoldierGroup = components["schemas"]["SoldierGroup"];
 
-/** The most upgrade rings drawn around a castle; the label still gives the exact levels. */
-const MAX_RINGS = 6;
-
 export interface CastleEntity {
-  parts: CastleParts;
-  rings: Mesh[];
+  /** The castle's model for its display level, or the placeholder keep while models load. */
+  view: CastleView;
   team: number;
 }
 
@@ -175,36 +179,35 @@ export function anchorFor(
   return anchor;
 }
 
+/**
+ * Places, recolours and relabels a castle. It shows the model of `level`, by default the display
+ * level of its upgrades: a new level swaps the model at once (seeking), and a capture changes only
+ * its team material. The turn animation passes the level of the moment, so a castle keeps its old
+ * model until its level-up pop.
+ */
 export function updateCastle(
   field: Battlefield,
   castle: Castle,
   entity: CastleEntity,
+  level = castleDisplayLevel(castle.upgrades),
 ): void {
   const { scene, materials } = field;
   const world = toWorld(castle);
-  entity.parts.root.position.set(world.x, 0, world.z);
+  const { view } = entity;
+  view.root.position.set(world.x, 0, world.z);
   const color = teamColorHex(castle.team_color);
-  entity.parts.roof.material = materials.lit(color);
-  entity.parts.flag.material = materials.lit(color);
+  setCastleView(view, level, castle.team_color, materials);
   entity.team = castle.team_color;
 
-  const rings = Math.min(MAX_RINGS, upgradeRingCount(castle.upgrades));
-  while (entity.rings.length < rings) {
-    const ring = createUpgradeRing(
-      scene,
-      castle.id,
-      entity.rings.length,
-      materials,
-    );
-    ring.parent = entity.parts.root;
-    entity.rings.push(ring);
-  }
-  while (entity.rings.length > rings) entity.rings.pop()?.dispose();
-
-  const root = entity.parts.root;
+  const root = view.root;
   setLabel(field, `castle:${castle.id}:soldiers`, {
     lines: [String(castle.soldiers)],
-    anchor: anchorFor(scene, `castle:${castle.id}:soldiers`, root, 1.45),
+    anchor: anchorFor(
+      scene,
+      `castle:${castle.id}:soldiers`,
+      root,
+      castleLabelHeight(scene, level),
+    ),
     accent: color,
     textColor: color,
     fontSize: 15,
@@ -213,8 +216,9 @@ export function updateCastle(
     required: true,
   });
   // The levels show once a castle has an upgrade; every castle starts at level 1 of each.
-  const upgrades =
-    upgradeRingCount(castle.upgrades) > 0 ? upgradeLevels(castle.upgrades) : "";
+  const upgrades = hasUpgrades(castle.upgrades)
+    ? upgradeLevels(castle.upgrades)
+    : "";
   setLabel(field, `castle:${castle.id}:info`, {
     lines: upgrades ? [castleTitle(castle), upgrades] : [castleTitle(castle)],
     fontSize: 11,
@@ -258,7 +262,7 @@ export function updateGroup(
     priority: 80,
     required: true,
   });
-  if (upgradeRingCount(group.upgrades) > 0) {
+  if (hasUpgrades(group.upgrades)) {
     setLabel(field, `group:${group.id}:upgrades`, {
       lines: [upgradeLevels(group.upgrades)],
       anchor: anchorFor(scene, `group:${group.id}:upgrades`, root, 0.05, -0.4),
@@ -475,6 +479,31 @@ function updateIslands(field: Battlefield, castles: readonly Castle[]): void {
 }
 
 /**
+ * The level-up pop of a castle (about 0.4 s): it swaps to the model of `toLevel`, then the old
+ * model sinks into the island while the new one rises with a slight overshoot. The turn animation
+ * calls it at the start of a turn; `finish()` on the handle ends it at once, as seeking does.
+ */
+export function popCastle(
+  scene: Scene,
+  id: number,
+  fromLevel: number,
+  toLevel: number,
+): PopHandle | null {
+  const field = battlefields.get(scene);
+  const entity = field?.castles.get(id);
+  if (!field || !entity) return null;
+  const { view } = entity;
+  setCastleView(view, toLevel, view.team, field.materials);
+  anchorFor(
+    scene,
+    `castle:${id}:soldiers`,
+    view.root,
+    castleLabelHeight(scene, toLevel),
+  );
+  return popCastleView(view, fromLevel, toLevel);
+}
+
+/**
  * Draws a generation. Meshes are found by castle and group ID and reused from one call to the
  * next, so a later call only moves, recolours and relabels them. `teams` names the teams for
  * tooltips; colours come from the team numbers.
@@ -504,18 +533,29 @@ export function renderGeneration(
     castleIds.add(castle.id);
     let entity = field.castles.get(castle.id);
     if (!entity) {
-      const parts = createCastle(scene, castle.id, field.materials);
-      markPickable(parts.meshes, { kind: "castle", id: castle.id });
-      entity = { parts, rings: [], team: castle.team_color };
+      const view = createCastleView(
+        scene,
+        castle.id,
+        castleDisplayLevel(castle.upgrades),
+        castle.team_color,
+        field.materials,
+        { kind: "castle", id: castle.id },
+        (ready) => {
+          // The models arrived: lift the soldier count to the model's height.
+          anchorFor(
+            scene,
+            `castle:${ready.id}:soldiers`,
+            ready.root,
+            castleLabelHeight(scene, ready.level),
+          );
+        },
+      );
+      entity = { view, team: castle.team_color };
       field.castles.set(castle.id, entity);
     }
     updateCastle(field, castle, entity);
   }
-  prune(field.castles, castleIds, (entity) => {
-    for (const ring of entity.rings) ring.dispose();
-    for (const mesh of entity.parts.meshes) mesh.dispose();
-    entity.parts.root.dispose();
-  });
+  prune(field.castles, castleIds, (entity) => disposeCastleView(entity.view));
 
   const castleById = new Map(
     generation.castles.map((castle) => [castle.id, castle]),

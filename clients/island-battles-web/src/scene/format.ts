@@ -23,12 +23,9 @@ export function upgradeLevels(upgrades: Record<string, number>): string {
     .join(" · ");
 }
 
-/** The number of rings a castle shows: one per upgrade level above the starting level 1. */
-export function upgradeRingCount(upgrades: Record<string, number>): number {
-  return Object.values(upgrades).reduce(
-    (total, level) => total + Math.max(0, level - 1),
-    0,
-  );
+/** Whether any upgrade is above the starting level 1, so a label shows the upgrade line. */
+export function hasUpgrades(upgrades: Record<string, number>): boolean {
+  return Object.values(upgrades).some((level) => level > 1);
 }
 
 export function teamName(

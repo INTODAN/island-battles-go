@@ -1,6 +1,7 @@
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder";
 import { CreateDisc } from "@babylonjs/core/Meshes/Builders/discBuilder";
@@ -10,7 +11,6 @@ import { Mesh as MeshClass } from "@babylonjs/core/Meshes/mesh";
 import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
-import { CASTLE_RADIUS } from "./board";
 import { ISLAND_RADIUS, ISLAND_SIDES, islandRadii } from "./islands";
 
 // Placeholder art, each piece a few primitives. Replace these builders to change the look; the
@@ -20,7 +20,6 @@ export const SEA_COLOR = "#5db2d8";
 export const SAND_COLOR = "#ecdba6";
 export const GRASS_COLOR = "#86bd68";
 export const STONE_COLOR = "#d6ccb4";
-export const RING_COLOR = "#fbf6e4";
 /** The top of an island, where castles stand. */
 export const ISLAND_TOP = 0.12;
 const ISLAND_BOTTOM = -0.14;
@@ -76,7 +75,10 @@ export interface PickTarget {
   id: number;
 }
 
-export function markPickable(meshes: Mesh[], target: PickTarget): void {
+export function markPickable(
+  meshes: readonly AbstractMesh[],
+  target: PickTarget,
+): void {
   for (const mesh of meshes) {
     mesh.isPickable = true;
     mesh.metadata = target;
@@ -169,8 +171,11 @@ export interface CastleParts {
   meshes: Mesh[];
 }
 
-/** A round keep with a conical roof and a banner; the roof and banner carry the team colour. */
-export function createCastle(
+/**
+ * A round keep with a conical roof and a banner; the roof and banner carry the team colour. It
+ * stands in for a castle until the castle models of castles.ts have loaded.
+ */
+export function createPlaceholderCastle(
   scene: Scene,
   id: number,
   materials: MaterialCache,
@@ -211,25 +216,6 @@ export function createCastle(
   const meshes = [base, keep, roof, pole, flag];
   for (const mesh of meshes) mesh.parent = root;
   return { root, roof, flag, meshes };
-}
-
-/** One flat ring on the ground around a castle, for one upgrade level. */
-export function createUpgradeRing(
-  scene: Scene,
-  castleId: number,
-  index: number,
-  materials: MaterialCache,
-): Mesh {
-  const diameter = (CASTLE_RADIUS + 0.09 + index * 0.075) * 2;
-  const ring = CreateTorus(
-    `castle-${castleId}-ring-${index}`,
-    { diameter, thickness: 0.03, tessellation: 40 },
-    scene,
-  );
-  ring.position.y = ISLAND_TOP + 0.015;
-  ring.material = materials.lit(RING_COLOR);
-  ring.isPickable = false;
-  return ring;
 }
 
 export interface BoatParts {

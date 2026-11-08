@@ -8,25 +8,24 @@ import { CreateGround } from "@babylonjs/core/Meshes/Builders/groundBuilder";
 import { Scene } from "@babylonjs/core/scene";
 import {
   createBoat,
-  createCastle,
   createIsland,
   MaterialCache,
   SEA_COLOR,
 } from "../../scene/art";
-import { teamColorHex } from "../../scene/palette";
+import { createCastleView } from "../../scene/castles";
 
 export interface Ocean {
   dispose(): void;
 }
 
-// A handful of islands, each with a castle in a team colour: [x, z, team].
-const islands: [number, number, number][] = [
-  [-3.2, 0.6, 1],
-  [3.4, -0.8, 2],
-  [0.2, 3.6, 3],
-  [-1.4, -3.6, 4],
-  [5.6, 3.2, 5],
-  [-6, -2.6, 6],
+// A handful of islands, each with a castle in a team colour: [x, z, team, castle level].
+const islands: [number, number, number, number][] = [
+  [-3.2, 0.6, 1, 4],
+  [3.4, -0.8, 2, 3],
+  [0.2, 3.6, 3, 2],
+  [-1.4, -3.6, 4, 1],
+  [5.6, 3.2, 5, 2],
+  [-6, -2.6, 6, 3],
 ];
 
 /**
@@ -66,14 +65,18 @@ export function startOcean(canvas: HTMLCanvasElement): Ocean {
   const sea = CreateGround("ocean-sea", { width: 200, height: 200 }, scene);
   sea.material = materials.flat(SEA_COLOR);
 
-  islands.forEach(([x, z, team], index) => {
+  islands.forEach(([x, z, team, level], index) => {
     const island = createIsland(scene, 100 + index, materials);
     island.position.set(x, 0, z);
-    const castle = createCastle(scene, 100 + index, materials);
+    const castle = createCastleView(
+      scene,
+      100 + index,
+      level,
+      team,
+      materials,
+      null,
+    );
     castle.root.position.set(x, 0, z);
-    const colour = materials.lit(teamColorHex(team));
-    castle.roof.material = colour;
-    castle.flag.material = colour;
   });
 
   const boats = islands.slice(0, 4).map(([x, z], index) => {

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import type { components } from "../api/generated/game";
-import { upgradeLevels, upgradeRingCount } from "./format";
+import { hasUpgrades, upgradeLevels } from "./format";
 
 type Demo = components["schemas"]["Demo"];
 
@@ -62,7 +62,7 @@ describe("fixtures", () => {
     expect(demo.frames.some((frame) => frame.clashes.length > 0)).toBe(true);
     expect(
       demo.frames.some((frame) =>
-        frame.castles.some((castle) => upgradeRingCount(castle.upgrades) > 0),
+        frame.castles.some((castle) => hasUpgrades(castle.upgrades)),
       ),
     ).toBe(true);
   });
@@ -76,8 +76,9 @@ describe("upgrade text", () => {
     expect(upgradeLevels({ other: 3, speed: 1 })).toBe("Speed 1 · other 3");
   });
 
-  test("one ring per level above the first", () => {
-    expect(upgradeRingCount({ speed: 1, clash_stop_generations: 1 })).toBe(0);
-    expect(upgradeRingCount({ speed: 3, clash_stop_generations: 2 })).toBe(3);
+  test("the upgrade line shows once a level is above the first", () => {
+    expect(hasUpgrades({})).toBe(false);
+    expect(hasUpgrades({ speed: 1, clash_stop_generations: 1 })).toBe(false);
+    expect(hasUpgrades({ speed: 1, clash_stop_generations: 2 })).toBe(true);
   });
 });

@@ -1,6 +1,6 @@
 # Island Battles web client
 
-A 3D browser client for Island Battles, written in TypeScript with [Babylon.js](https://www.babylonjs.com/). It has its own lobby screens (name, create or join, lobby room with a bot picker) over an orbiting ocean, relays turns to a player's localhost bot, and switches to the game view when the game starts. The `src/scene/` layer draws any one generation as a 3D board with placeholder art (see [The 3D board](#the-3d-board)). See [#94](https://github.com/INTODAN/island-battles-go/issues/94) for the plan.
+A 3D browser client for Island Battles, written in TypeScript with [Babylon.js](https://www.babylonjs.com/). It has its own lobby screens (name, create or join, lobby room with a bot picker) over an orbiting ocean, relays turns to a player's localhost bot, and switches to the game view when the game starts. The `src/scene/` layer draws any one generation as a 3D board, with the Unity game's castle models and placeholder art for the rest (see [The 3D board](#the-3d-board)). See [#94](https://github.com/INTODAN/island-battles-go/issues/94) for the plan.
 
 The tooling is [Bun](https://bun.sh/) (runtime, package manager, bundler, dev server and test runner) and [Biome](https://biomejs.dev/) (lint, format and import sorting). Bun does not type-check, so `tsc` does.
 
@@ -35,6 +35,7 @@ Open **http://localhost:3000/**. The dev server hot-reloads and proxies `/lobby/
 | `bun run generate` | Regenerates `src/api/generated/` from the API contract |
 | `bun run generate --check` | Regenerates into a temporary directory and fails on any difference |
 | `bun run check` | `biome ci`, then `generate --check`, then `tsc --noEmit`, then `bun test` |
+| `blender -b -P tools/castles/convert.py -- <island-battles checkout>` | Rebuilds the castle models in `assets/castles/` from the Unity game (see [Castle models](#castle-models)) |
 
 `bunx biome check --write .` fixes formatting, lint and import order. Commit `bun.lock`; CI installs with `--frozen-lockfile`.
 
@@ -85,7 +86,7 @@ Tests inject a fake Centrifugo client (`createClient`), fake `fetch` and fake st
 
 ## The 3D board
 
-`src/scene/` draws one `Generation` (the `Generation` type from `src/api/generated/game.ts`) and knows nothing about the server. `renderGeneration(scene, generation, teams)` builds or updates meshes by castle, group and clash ID, so a later call moves and relabels what is already there rather than rebuilding it. Everything is placeholder art made from Babylon primitives in `art.ts`; replace those builders to change the look.
+`src/scene/` draws one `Generation` (the `Generation` type from `src/api/generated/game.ts`) and knows nothing about the server. `renderGeneration(scene, generation, teams)` builds or updates meshes by castle, group and clash ID, so a later call moves and relabels what is already there rather than rebuilding it. Castles are the Unity game's models (see [Castle models](#castle-models)); everything else is placeholder art made from Babylon primitives in `art.ts`; replace those builders to change the look.
 
 - `coordinates.ts`: the one map-to-world mapping. One map unit is one world unit; the map's `(x, y)` becomes `(x, 0, -y)`, so the board is laid out as the 2D replay is.
 - `palette.ts`: the team palette, checked against `backend/services/replay.html` by a test.
@@ -95,16 +96,37 @@ Tests inject a fake Centrifugo client (`createClient`), fake `fetch` and fake st
 - `headingLines.ts`: the heading lines of [#89](https://github.com/INTODAN/island-battles-go/issues/89). Every style choice (casing, arrowhead, lane offset, tint) is a value in `headingStyle`, since the owner has not yet picked treatments.
 - `picking.ts`: hover highlight and tooltip, double-click focus and the `F` key.
 
-**Dev page.** With `bun run dev`, open `http://localhost:3000/?fixture=busy-turn.json` (add `&frame=3` to start on the third frame). It draws a saved game from [`test/fixtures/`](test/fixtures/) with a frame slider and needs no backend. The fixtures are demo files: `generated-map.json` (the generated map's first turns), `busy-turn.json` (a bot match with clashes and upgrades) and `six-teams.json`. Regenerate them by playing seeded bots with the backend's own simulation: from the repository root, run `WEB_CLIENT_FIXTURES_DIR=<absolute path to clients/island-battles-web/test/fixtures> go test ./backend/simulation -run TestWriteWebClientFixtures`. Screenshots of each frame type are in [`docs/screenshots/`](docs/screenshots/). The slider and arrows jump to a frame with no animation; **Play** plays the game on a turn at a time (`&play=1` starts playing, `&speed=2` sets the pace, `&turn=800` sets the length of a turn in milliseconds).
+**Dev page.** With `bun run dev`, open `http://localhost:3000/?fixture=busy-turn.json` (add `&frame=3` to start on the third frame). It draws a saved game from [`test/fixtures/`](test/fixtures/) with a frame slider and needs no backend. The fixtures are demo files: `generated-map.json` (the generated map's first turns), `busy-turn.json` (a bot match with clashes and upgrades) and `six-teams.json`. Regenerate them by playing seeded bots with the backend's own simulation: from the repository root, run `WEB_CLIENT_FIXTURES_DIR=<absolute path to clients/island-battles-web/test/fixtures> go test ./backend/simulation -run TestWriteWebClientFixtures`. Screenshots of each frame type are in [`docs/screenshots/`](docs/screenshots/). The slider and arrows jump to a frame with no animation; **Play** plays the game on a turn at a time (`&play=1` starts playing, `&speed=2` sets the pace, `&turn=800` sets the length of a turn in milliseconds, `&still=1` freezes the castles' flags and windmills).
 
 ### Turn animation
 
 `src/scene/animation/` animates the turn between two generations. A generation holds end-of-turn positions only, so the animation is rebuilt from the clashes' `time` and contact positions and from the turn's rules (backend/simulation).
 
-- `plan.ts`: `planTurn(previous, next)` is pure (no Babylon) and returns tracks over `t` in [0, 1]: a group's path (to the contact position at `clash.time` first), launches from the origin castle's edge, arrivals to the destination castle's edge and into it, sinking after `clash.time` for `soldiers_after == 0`, clash effects, counts that roll at the clash, castle counts and team flips when a capture lands, and a castle display-level change at the start of the turn (a later castle pop hooks on it). `sampleTurn(plan, t)` gives every pose at `t`; at `t = 1` it equals the next generation exactly. A castle's count replays the turn's arithmetic (sends and upgrade cost at `t = 0`, growth by one, landings in group ID order); a group sent and defeated within one turn is in neither generation and is placed by the soldiers missing from its castle.
+- `plan.ts`: `planTurn(previous, next)` is pure (no Babylon) and returns tracks over `t` in [0, 1]: a group's path (to the contact position at `clash.time` first), launches from the origin castle's edge, arrivals to the destination castle's edge and into it, sinking after `clash.time` for `soldiers_after == 0`, clash effects, counts that roll at the clash, castle counts and team flips when a capture lands, and a castle display-level change at the start of the turn, which plays the castle's level-up pop. `sampleTurn(plan, t)` gives every pose at `t`; at `t = 1` it equals the next generation exactly. A castle's count replays the turn's arithmetic (sends and upgrade cost at `t = 0`, growth by one, landings in group ID order); a group sent and defeated within one turn is in neither generation and is placed by the soldiers missing from its castle.
 - `player.ts`: `TurnPlayer` has `play(previous, next)`, `seek(generation)` (no animation, drops the queue, never leaves anything half-way), `setSpeed` and `scrub` (a frozen mid-turn still). A turn takes 1.5 s at 1x. Turns that arrive while one plays are queued and play faster as the queue grows, 1x with nothing waiting up to 4x; more than 3 waiting and it skips to the newest. It drives a `Stage`, so tests run it with a fake stage and fake time.
 - `stage.ts`: `SceneStage` applies samples to the meshes `renderGeneration` built, by castle and group ID; boats that leave the board during the turn get meshes of their own until it ends. `createScenePlayer(scene, teams)` advances with the render loop.
-- `effects.ts`: the placeholder clash flash, sink tween and castle pop behind the small `TurnEffects` interface, for the art pass to replace.
+- `effects.ts`: the placeholder clash flash and sink tween behind the small `TurnEffects` interface, for the art pass to replace, and the call to `popCastle` when a castle's level changes.
+
+### Castle models
+
+Castles use the four castle models of the Unity game ([INTODAN/island-battles](https://github.com/INTODAN/island-battles), [#140](https://github.com/INTODAN/island-battles-go/issues/140)), one per upgrade level. Most of a castle is light grey stone; only roofs, pennants, bands, flags and the windmill's sails take the team colour.
+
+- **Which model** (`castleLevel.ts`): `castleDisplayLevel(upgrades)` is the highest level across the castle's upgrade types, clamped to 1 to 4 (a missing type is level 1). The turn planner uses the same function. The castle's label still gives each type's level; the upgrade rings of #99 are gone.
+- **Team colours** (`castleAtlas.ts`): every mesh samples one 512 by 512 atlas of vertical-gradient swatches, `assets/castles/atlas.png`. `teamSwatches(hex)` gives the three swatches a team changes (stone/team, flags, accent); the flags run from the team colour to the colour mixed `FLAG_GOLD_MIX` (35%) toward gold, and neutral uses Unity's grey copy. `teamAtlas(scene, team)` paints those swatches into a copy of the atlas, one cached texture and `castle-team` material per team colour (wrapping past the sixth team); `baseAtlasMaterial(scene)` is the one `castle-base` material every castle shares. Both are for #102's boats and props too.
+- **Loading** (`castles.ts`): the four GLBs load once per scene, in parallel, with Babylon's glTF 2.0 loader only (`@babylonjs/loaders`, with `KHR_mesh_quantization`, no Draco or meshopt, and no materials: the atlas materials replace them, so Babylon's PBR shaders are never downloaded). Until they are ready a castle shows #99's placeholder keep, then swaps. The build splits code (`splitting` in `build.ts`), so the loader's unused PBR code stays in chunks that are never fetched. `import`ing the GLBs and atlas gives their hashed `/play/assets/` URLs, and the desktop build serves them from its own origin.
+- **On the board**: levels 1 and 2 are instances of one hidden source mesh per level and team; levels 3 and 4 are skinned, so each castle gets its own copy with its own skeleton and its own loop of the `Take 001` clip, started at an offset seeded by the castle's ID. `setCastleAnimation(false)` freezes every loop in the bind pose (for #102's slow-device setting); the dev page's `&still=1` does that. Every castle is turned (`CASTLE_YAW`) so its gate faces the default camera. A capture changes only the team material (or, for instances, the team's source mesh). A level change swaps the model at once when seeking; during a turn `popCastle(scene, id, from, to)` swaps it and plays a 0.4 s pop: the old model sinks into the island and the new one rises with a slight overshoot. The soldier count sits just over each level's model.
+- **The files** (`assets/castles/`, with a row each in [`assets/LICENSES.md`](assets/LICENSES.md)) are made by [`tools/castles/convert.py`](tools/castles/convert.py) from the Unity repository at a pinned commit (`UNITY_COMMIT`, now `c8b43b3`; the script fails on any other). It imports each level's FBX with Blender, copies the per-polygon split between base and team faces from `Castle_all_team.fbx`, puts the big flags' cloth back on its joints, trims `Take 001` to the frames Unity plays, scales all four so that level 1 is 0.9 across (2: 0.96, 3: 1.16, 4: 1.19), puts each footprint's centre at the origin and its base at y = 0, writes GLBs with two materials (`castle-base`, `castle-team`), UVs and no texture, quantises them with `KHR_mesh_quantization`, and copies the atlas with its pixels unchanged. Run it with Blender, or with Blender as a Python module (CPython 3.13); both give byte-for-byte the same files:
+
+  ```sh
+  blender -b -P tools/castles/convert.py -- /path/to/island-battles
+  uv run --python 3.13 --with bpy==5.2.3 python tools/castles/convert.py -- /path/to/island-battles
+  ```
+
+![Levels 1 (front) to 4 (back) for the six teams and neutral, from the default camera](docs/screenshots/castles-grid.png)
+
+![A level 4 blue castle beside a frame of the old game; the flags differ on purpose](docs/screenshots/castles-level-4-video.png)
+
+Recordings: [a level-up pop](docs/screenshots/castles-level-up.gif), [a capture recolouring roofs and flags](docs/screenshots/castles-capture.gif) and [level 3 and 4 loops out of step](docs/screenshots/castles-flags.gif).
 
 ## Lobby screens and the bot relay
 
@@ -165,6 +187,7 @@ Someone outside the roster can watch a game live and scrub its history with only
 - `src/ui/lobby/`: the lobby screens and the app shell's flow; `src/ui/game/`: the game view, described above.
 - `src/scene/`: the 3D board, described above.
 - `dev.ts` and `proxy.ts`: the dev server and its proxy rules.
+- `assets/`: files the client loads (the castle models and atlas), each with a row in `assets/LICENSES.md`; `tools/castles/`: the script that makes the castle files.
 - `build.ts`: the production build, served under `/play/`; with `--desktop` the build for the desktop app.
 - `src/platform.ts` and `src/desktop.ts`: what differs in the desktop app (base URL, storage, HTTP plugin).
 - `src-tauri/`: the Tauri shell of the desktop app, described above.

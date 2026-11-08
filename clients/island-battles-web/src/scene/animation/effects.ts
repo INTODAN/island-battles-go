@@ -3,21 +3,25 @@ import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { CreateDisc } from "@babylonjs/core/Meshes/Builders/discBuilder";
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { BoatParts } from "../art";
-import type { Battlefield } from "../battlefield";
+import { type Battlefield, popCastle } from "../battlefield";
+import type { PopHandle } from "../castles";
 import { toWorld } from "../coordinates";
 import type { FlashPose } from "./plan";
 
 /**
  * What a turn shows besides movement. The placeholders below are a flash and a sink tween; the
- * art pass (#102) replaces this object with smoke, splashes and bubbles, and the castle models
- * (#140) replace `castleLevelUp` with their pop.
+ * art pass (#102) replaces this object with smoke, splashes and bubbles, and adds its sparkle to
+ * the castle models' level-up pop (#140, `popCastle`).
  */
 export interface TurnEffects {
   /** Called every frame with the clash flashes alive at that moment; others are removed. */
   clash(field: Battlefield, flashes: readonly FlashPose[]): void;
   /** Poses a boat that is going under: `progress` 0 afloat to 1 gone. */
   sink(boat: BoatParts, progress: number): void;
-  /** A castle's display level changed at the start of the turn. */
+  /**
+   * A castle's display level changed at the start of the turn. Until now the castle showed its
+   * old model; call `popCastle` to swap it and play the pop.
+   */
   castleLevelUp(
     field: Battlefield,
     castleId: number,
@@ -31,23 +35,16 @@ export interface TurnEffects {
 }
 
 const FLASH_COLOR = "#ffb326";
-const POP_MS = 400;
 
 interface Flash {
   mesh: Mesh;
   material: StandardMaterial;
 }
 
-interface Pop {
-  node: { scaling: { setAll(value: number): unknown } };
-  start: number;
-}
-
 export function createPlaceholderEffects(): TurnEffects {
   const flashes = new Map<string, Flash>();
-  const pops = new Map<number, Pop>();
+  const pops = new Map<number, PopHandle>();
   const sunk = new Set<BoatParts>();
-  let now = 0;
 
   return {
     clash(field, active) {
@@ -93,23 +90,13 @@ export function createPlaceholderEffects(): TurnEffects {
       boat.root.rotation.z = 0.7 * progress;
     },
 
-    castleLevelUp(field, castleId) {
-      const castle = field.castles.get(castleId);
-      if (castle) pops.set(castleId, { node: castle.parts.root, start: now });
+    castleLevelUp(field, castleId, from, to) {
+      pops.get(castleId)?.finish();
+      const pop = popCastle(field.scene, castleId, from, to);
+      if (pop) pops.set(castleId, pop);
     },
 
-    tick(nowMs) {
-      now = nowMs;
-      for (const [id, pop] of pops) {
-        const s = (nowMs - pop.start) / POP_MS;
-        if (s >= 1) {
-          pop.node.scaling.setAll(1);
-          pops.delete(id);
-        } else {
-          pop.node.scaling.setAll(1 + 0.25 * Math.sin(Math.PI * s));
-        }
-      }
-    },
+    tick() {},
 
     clear() {
       for (const entry of flashes.values()) {
@@ -117,7 +104,8 @@ export function createPlaceholderEffects(): TurnEffects {
         entry.material.dispose();
       }
       flashes.clear();
-      for (const pop of pops.values()) pop.node.scaling.setAll(1);
+      // Seeking never leaves a castle half-way out of the island.
+      for (const pop of pops.values()) pop.finish();
       pops.clear();
       for (const boat of sunk) {
         boat.body.position.y = 0.1;

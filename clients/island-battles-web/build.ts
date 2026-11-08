@@ -20,6 +20,7 @@ const result = await Bun.build({
   outdir,
   publicPath: desktop ? "/" : "/play/",
   minify: true,
+  splitting: true,
   define: {
     __DESKTOP_API_BASE__: desktop
       ? JSON.stringify(dev ? localServer : productionServer)
