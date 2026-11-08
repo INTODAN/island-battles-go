@@ -13,7 +13,7 @@ func FrontendGame() frontend.Game {
 		Key:         "island-battles",
 		Name:        "Island Battles",
 		ResultURL:   "/game/from-lobby/" + frontend.LobbyIDPlaceholder + "/replay",
-		StartedHint: "Island Battles waits for player commands through the Python client. The board follows recorded generations live.",
+		StartedHint: "A default bot is played by the backend; a localhost bot is played by its player, whose open lobby tab relays each turn to the bot on their machine. The board follows recorded generations live.",
 		// The replay reads each generation's game log and saves the demo
 		// through the page.
 		DataURLPrefix: "/game/from-lobby/" + frontend.LobbyIDPlaceholder + "/",
