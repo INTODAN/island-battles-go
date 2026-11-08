@@ -18,17 +18,22 @@ import (
 
 // RunLobbyGame initializes one playable generation for the frozen roster and
 // pushes it to every roster player. The generation starts on the map that the
-// lobby's settings choose, or on the generated map without a choice. Repeated and concurrent starts reuse the
-// committed state.
+// lobby's settings choose, or on the generated map without a choice. Each
+// roster player keeps the bot they chose in the lobby: the backend plays the
+// default bots, and the players' own clients relay their localhost bots.
+// Repeated and concurrent starts reuse the committed state.
 func RunLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, snapshot domain.Snapshot) (models.BindingResult, error) {
-	return runLobbyGame(ctx, database, publisher, snapshot, nil)
+	botLevels, err := lobbyBotLevels(database.WithContext(ctx), snapshot)
+	if err != nil {
+		return models.BindingResult{}, err
+	}
+	return runLobbyGame(ctx, database, publisher, snapshot, botLevels)
 }
 
 // runLobbyGame is RunLobbyGame, with the levels of the default bots that the
 // backend plays for some roster players, by player ID. Their Go bots play the
-// first generation before it is pushed. Nothing chooses the levels yet, so
-// RunLobbyGame passes none: the players' bot choice (#111) and bot seats
-// (#115) will.
+// first generation before it is pushed. RunLobbyGame passes the levels that
+// the players chose; bot seats (#115) will add their own.
 func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, snapshot domain.Snapshot, botLevels map[string]uint) (models.BindingResult, error) {
 	database = database.WithContext(ctx)
 	binding, err := dal.BindLobbyGame(database, snapshot)

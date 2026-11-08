@@ -111,7 +111,7 @@ export interface paths {
         get?: never;
         /**
          * Set readiness
-         * @description ready is required; false explicitly clears readiness.
+         * @description ready is required; false explicitly clears readiness. A member needs a team to get ready, or it fails with not_ready. A game can also require something of its own first, such as a choice made in the game's API: then getting ready fails with 409 game_requirement, whose type is the game's problem type and whose detail says what to do.
          */
         put: operations["setLobbyReady"];
         post?: never;
@@ -132,7 +132,7 @@ export interface paths {
         put?: never;
         /**
          * Start a lobby
-         * @description Starts an eligible lobby and freezes its roster. The host can start once at least two members are present and every member has chosen a team, is ready and is connected; otherwise it fails with not_ready. The snapshot's start_rules list the game's extra conditions: with every_team_needs_member, a lobby with an empty team fails with empty_teams, whose team_ids name the empty teams.
+         * @description Starts an eligible lobby and freezes its roster. The host can start once at least two members are present and every member has chosen a team, is ready and is connected; otherwise it fails with not_ready. The snapshot's start_rules list the game's extra conditions: with every_team_needs_member, a lobby with an empty team fails with empty_teams, whose team_ids name the empty teams. A game that requires something of each member before they get ready checks the whole roster again, and fails with game_requirement for a member who doesn't meet it.
          */
         post: operations["startLobby"];
         delete?: never;
@@ -426,13 +426,15 @@ export interface components {
         };
         Problem: {
             /** @enum {string} */
-            code: "unauthenticated" | "not_found" | "not_host" | "lobby_full" | "team_full" | "phase_conflict" | "not_ready" | "empty_teams" | "stale_membership" | "idempotency_conflict" | "invalid_input" | "invalid_game_settings" | "unavailable" | "internal_error";
+            code: "unauthenticated" | "not_found" | "not_host" | "lobby_full" | "team_full" | "phase_conflict" | "not_ready" | "empty_teams" | "stale_membership" | "idempotency_conflict" | "invalid_input" | "invalid_game_settings" | "game_requirement" | "unavailable" | "internal_error";
             detail: string;
             /** Format: int64 */
             status: number;
             /** @description The teams the error is about. For empty_teams, the teams that still need a player, in team order. */
             team_ids?: string[] | null;
             title: string;
+            /** @description For game_requirement, the game's own problem type, a URI that the game documents, such as one meaning a player has yet to choose something in the game's API. Absent for every other code. */
+            type?: string;
         };
         ReadyBody: {
             /**

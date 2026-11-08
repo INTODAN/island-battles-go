@@ -46,7 +46,30 @@ type LobbyAuthentication interface {
 func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authentication LobbyAuthentication, gameBinding *application.GameBinding[models.BindingResult], retention domain.RetentionRunner, game *handlers.LobbyGame) {
 	httpapi.Register(api, lobbyadapter.WithGameStart(lobbyApplication, gameBinding), authentication, authentication, retention)
 	lobbyadapter.Register(api, gameBinding, authentication)
-	api.OpenAPI().Paths["/lobby/v1/games/{game_key}/lobbies/{lobby_id}/start"].Post.Description += " Island Battles initializes one playable generation and waits for every frozen roster player to complete their turn. Retrying resumes a failed initialization."
+	api.OpenAPI().Paths["/lobby/v1/games/{game_key}/lobbies/{lobby_id}/start"].Post.Description += " Island Battles initializes one playable generation and waits for every frozen roster player to complete their turn. Retrying resumes a failed initialization. Each roster player keeps the bot they chose with PUT /game/lobbies/{lobby_id}/bot; a roster player without one fails the start with game_requirement of type " + services.BotNotChosenProblemType + "."
+	api.OpenAPI().Paths["/lobby/v1/games/{game_key}/lobbies/{lobby_id}/ready"].Put.Description += " Island Battles requires a bot choice first, made with PUT /game/lobbies/{lobby_id}/bot, and refuses to set a member without one ready with game_requirement of type " + services.BotNotChosenProblemType + "."
+	lobbyBots := &handlers.LobbyBots{Authenticator: authentication, Service: services.LobbyBots{Database: game.Database, Lobbies: lobbyApplication, GameKey: lobbyadapter.GameKey}}
+	huma.Register(api, huma.Operation{
+		OperationID: "chooseIslandLobbyBot", Path: "/game/lobbies/{lobby_id}/bot", Method: http.MethodPut,
+		Summary: "Choose your bot for a waiting lobby",
+		Description: "Requires an active membership of the Island Battles lobby, while it is waiting. Every member chooses a bot before getting ready: kind localhost is the member's own bot, which island-battles-bot serve runs on their machine and their game client relays each turn to; kind default, with a level that GET /bots/defaults lists, is a default bot that the backend plays itself. " +
+			"Getting ready without a choice fails with the lobby's 409 problem game_requirement of type " + services.BotNotChosenProblemType + ". A member can change their choice while the lobby waits, also once ready. " +
+			"When the lobby starts, the game copies each roster player's choice, which GenerationState.bot reports from then on, and choosing conflicts (409). A 409 stores nothing: the choice is saved only while the lobby is still waiting, so the one a start copies is always the last that was answered 200. " +
+			"An invalid choice is 422, and a caller who isn't a member of the lobby gets 404. Choosing changes nothing in the lobby itself, so it publishes no lobby.changed; clients re-read the choices when the lobby changes, as it does when a member gets ready. Returns every member's choice, as GET /game/lobbies/{lobby_id}/bots does.",
+		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
+		// The service checks the choice itself, after authenticating the
+		// caller, so a request without credentials is refused first.
+		SkipValidateBody: true,
+	}, lobbyBots.Choose)
+	// GenerationState carries the same schema, so it describes only a bot.
+	dropSchemaLink(api, reflect.TypeFor[models.BotChoiceView]())
+	huma.Register(api, huma.Operation{
+		OperationID: "listIslandLobbyBots", Path: "/game/lobbies/{lobby_id}/bots", Method: http.MethodGet,
+		Summary: "List the bots that a lobby's members chose",
+		Description: "Requires an active membership of the Island Battles lobby, in any phase. Lists every member in the lobby's member order with the bot they chose with PUT /game/lobbies/{lobby_id}/bot, which is absent until they choose one, so a lobby can show who plays with which bot. " +
+			"The choices are deleted with the lobby, and a member who leaves keeps their choice for when they rejoin. A started game keeps its own copy of each roster player's choice, which GenerationState.bot reports.",
+		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
+	}, lobbyBots.List)
 	huma.Register(api, huma.Operation{
 		OperationID: "getIslandLobbyReplay", Path: "/game/from-lobby/{lobby_id}/replay", Method: http.MethodGet,
 		Summary:     "View the Island Battles replay history for a started lobby",

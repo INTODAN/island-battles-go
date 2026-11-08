@@ -101,6 +101,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/game/lobbies/{lobby_id}/bot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Choose your bot for a waiting lobby
+         * @description Requires an active membership of the Island Battles lobby, while it is waiting. Every member chooses a bot before getting ready: kind localhost is the member's own bot, which island-battles-bot serve runs on their machine and their game client relays each turn to; kind default, with a level that GET /bots/defaults lists, is a default bot that the backend plays itself. Getting ready without a choice fails with the lobby's 409 problem game_requirement of type urn:island-battles:problem:bot-not-chosen. A member can change their choice while the lobby waits, also once ready. When the lobby starts, the game copies each roster player's choice, which GenerationState.bot reports from then on, and choosing conflicts (409). A 409 stores nothing: the choice is saved only while the lobby is still waiting, so the one a start copies is always the last that was answered 200. An invalid choice is 422, and a caller who isn't a member of the lobby gets 404. Choosing changes nothing in the lobby itself, so it publishes no lobby.changed; clients re-read the choices when the lobby changes, as it does when a member gets ready. Returns every member's choice, as GET /game/lobbies/{lobby_id}/bots does.
+         */
+        put: operations["chooseIslandLobbyBot"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/game/lobbies/{lobby_id}/bots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the bots that a lobby's members chose
+         * @description Requires an active membership of the Island Battles lobby, in any phase. Lists every member in the lobby's member order with the bot they chose with PUT /game/lobbies/{lobby_id}/bot, which is absent until they choose one, so a lobby can show who plays with which bot. The choices are deleted with the lobby, and a member who leaves keeps their choice for when they rejoin. A started game keeps its own copy of each roster player's choice, which GenerationState.bot reports.
+         */
+        get: operations["listIslandLobbyBots"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/game/upgrades": {
         parameters: {
             query?: never;
@@ -185,6 +225,18 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        BotChoice: {
+            /**
+             * @description localhost: the player's own bot, which island-battles-bot serve runs on their machine; their game client relays each turn to it and submits its answer. default: a default bot of GET /bots/defaults, which the backend plays itself, so the player's client submits nothing.
+             * @enum {string}
+             */
+            kind: "localhost" | "default";
+            /**
+             * Format: int64
+             * @description For kind default, the level of the default bot, one that GET /bots/defaults lists. Absent for kind localhost.
+             */
+            level?: number;
+        };
         /** @description What a bot is given to play one turn. A bot is a stateless function: whatever it needs to keep between turns goes in the memory it returns, which the server stores per player and game. */
         BotTurn: {
             /** Format: int64 */
@@ -491,6 +543,8 @@ export interface components {
              * @example https://example.com/GenerationState.json
              */
             readonly $schema?: string;
+            /** @description Your bot in this game, the one you chose in the lobby, copied when the game started. For kind localhost your client relays each turn to your bot and submits its answer. For kind default the backend plays your turns itself as soon as each generation is created, so your client submits nothing. */
+            bot: components["schemas"]["BotChoice"];
             /** @description Your personal Centrifugo channel, which receives GenerationEvent after each turn and GameEndedEvent after the last one. */
             channel: string;
             /** Format: int64 */
@@ -549,6 +603,25 @@ export interface components {
              */
             readonly $schema?: string;
             upgrades: components["schemas"]["Upgrade"][];
+        };
+        LobbyBots: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/LobbyBots.json
+             */
+            readonly $schema?: string;
+            /** Format: uuid */
+            lobby_id: string;
+            /** @description Every member of the lobby, in the lobby's member order. */
+            members: components["schemas"]["LobbyMemberBot"][];
+        };
+        LobbyMemberBot: {
+            /** @description The member's bot. Absent until they choose one, and a member can't get ready without one. */
+            bot?: components["schemas"]["BotChoice"];
+            display_name: string;
+            /** Format: uuid */
+            player_id: string;
         };
         /** @description Island Battles game_settings for a lobby create request. Choose at most one map: map_template_id or map. The map must be made for exactly the lobby's teams: player_amount equal to the team count, and castle team colours exactly 1 to that count, in team order, with 0 for neutral castles. Without a map the game starts on a generated map. turn_timeout_seconds sets how long each turn lasts, from 5 to 600 seconds, 30 when left out, or null for no limit. An invalid choice fails lobby creation with invalid_game_settings, and its detail names each invalid field, such as game_settings.map.castles[0].x. */
         LobbySettings: {
@@ -622,13 +695,15 @@ export interface components {
         };
         Problem: {
             /** @enum {string} */
-            code: "unauthenticated" | "not_found" | "not_host" | "lobby_full" | "team_full" | "phase_conflict" | "not_ready" | "empty_teams" | "stale_membership" | "idempotency_conflict" | "invalid_input" | "invalid_game_settings" | "unavailable" | "internal_error";
+            code: "unauthenticated" | "not_found" | "not_host" | "lobby_full" | "team_full" | "phase_conflict" | "not_ready" | "empty_teams" | "stale_membership" | "idempotency_conflict" | "invalid_input" | "invalid_game_settings" | "game_requirement" | "unavailable" | "internal_error";
             detail: string;
             /** Format: int64 */
             status: number;
             /** @description The teams the error is about. For empty_teams, the teams that still need a player, in team order. */
             team_ids?: string[] | null;
             title: string;
+            /** @description For game_requirement, the game's own problem type, a URI that the game documents, such as one meaning a player has yet to choose something in the game's API. Absent for every other code. */
+            type?: string;
         };
         PublicGenerationCommand: components["schemas"]["SendSoldierGroupCommand"] | components["schemas"]["UpgradeCastleCommand"];
         RegisterGenerationCommands: {
@@ -925,6 +1000,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GenerationLogs"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    chooseIslandLobbyBot: {
+        parameters: {
+            query?: never;
+            header?: {
+                Authorization?: string;
+            };
+            path: {
+                lobby_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BotChoice"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LobbyBots"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    listIslandLobbyBots: {
+        parameters: {
+            query?: never;
+            header?: {
+                Authorization?: string;
+            };
+            path: {
+                lobby_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LobbyBots"];
                 };
             };
             /** @description Error */

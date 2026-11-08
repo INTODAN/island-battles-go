@@ -1,5 +1,6 @@
 // Package demo serves the Island Battles browser modules that the lobby
-// frontend loads: the example player and the create form's map choice.
+// frontend loads: the example player, the create form's map choice and the
+// waiting room's bot choice.
 package demo
 
 import (
@@ -7,7 +8,7 @@ import (
 	"net/http"
 )
 
-//go:embed example-player.mjs lobby-settings.mjs
+//go:embed example-player.mjs lobby-settings.mjs bot-choice.mjs
 var assets embed.FS
 
 func Handler() http.Handler {

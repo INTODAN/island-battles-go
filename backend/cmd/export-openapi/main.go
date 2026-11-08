@@ -33,17 +33,19 @@ const (
 		"game has ended. A turn times out at its `turn_deadline_at`; the server runs no timers, so a client waiting for other " +
 		"players calls `POST /game/from-lobby/{lobby_id}/deadline` about a second after it. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the " +
 		"`game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose. " +
-		"`GET /game/upgrades` lists what each castle upgrade level costs, and `GET /bots/defaults` the default bots that the backend plays. `Demo` is the demo file format, which " +
+		"`GET /game/upgrades` lists what each castle upgrade level costs, and `GET /bots/defaults` the default bots that the backend plays. Before getting ready in a lobby, every member chooses " +
+		"their bot with `PUT /game/lobbies/{lobby_id}/bot`: their localhost bot, whose turns their client relays, or a default bot level; `GenerationState.bot` " +
+		"reports it during the game. `Demo` is the demo file format, which " +
 		"`GET /game/from-lobby/{lobby_id}/demo` returns and the demo viewer at `/game/demo-viewer/` opens. " +
 		"`BotTurn` and `BotTurnResult` are the stateless bot contract: a bot gets a `BotTurn` each turn and answers with a " +
 		"`BotTurnResult`, which a client sends as one completing batch."
 )
 
 // PlayerOperations are the endpoints a gameplay client uses, including the
-// turn deadline that waiting clients apply, the upgrade cost table, the default bot list, the game log read that the replay also shows, the demo
+// bot choice that every lobby member makes before getting ready, the turn deadline that waiting clients apply, the upgrade cost table, the default bot list, the game log read that the replay also shows, the demo
 // download, and the default map list for choosing a lobby's map. Lobby setup has its own
 // generated SDK in lobby/api/openapi.json.
-var PlayerOperations = []string{"createLobbyConnectionToken", "getIslandLobbyGeneration", "applyIslandLobbyTurnDeadline", "registerGenerationCommand", "getIslandLobbyGenerationLogs", "getIslandLobbyDemo", "listUpgrades", "listMapTemplates", "listDefaultBots"}
+var PlayerOperations = []string{"createLobbyConnectionToken", "chooseIslandLobbyBot", "listIslandLobbyBots", "getIslandLobbyGeneration", "applyIslandLobbyTurnDeadline", "registerGenerationCommand", "getIslandLobbyGenerationLogs", "getIslandLobbyDemo", "listUpgrades", "listMapTemplates", "listDefaultBots"}
 
 // PlayerEventSchemas are delivered by Centrifugo rather than HTTP responses.
 var PlayerEventSchemas = []string{"GenerationEvent", "GameEndedEvent"}

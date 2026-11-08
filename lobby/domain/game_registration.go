@@ -25,6 +25,69 @@ type GameRegistration struct {
 	// Retention overrides when the game's lobbies are deleted. Each zero
 	// period keeps the policy's default.
 	Retention LobbyRetention
+	// ReadyGate lets the game keep members from getting ready, and a lobby
+	// from starting, until they meet a condition of the game's own. Nil adds
+	// no condition.
+	ReadyGate ReadyGate
+}
+
+// ReadyGate loads what a game needs to decide which members of a lobby may get
+// ready, such as a choice each player makes in the game's own API. The lobby
+// calls it with the lobby's ID before the transaction of a request that sets a
+// member ready or starts the lobby, so the game never reads its data while the
+// lobby holds the room's lock. The returned ReadyCheck then runs inside the
+// transaction, for the member getting ready or for every member of the start
+// roster. Because the data is read first, a member must keep meeting the
+// condition once they do, for as long as the lobby is waiting: a game may let
+// a member change what they chose, but not take the choice away.
+//
+// To report that the gate itself could not run, return the context's error or
+// an error wrapping ErrUnavailable; any other error is reported as unavailable
+// too.
+type ReadyGate func(ctx context.Context, lobbyID string) (ReadyCheck, error)
+
+// ReadyMember is a member that a ReadyCheck decides about.
+type ReadyMember struct {
+	PlayerID    string
+	DisplayName string
+}
+
+// ReadyCheck reports whether members may be ready. It gets the one member who
+// is getting ready, with atStart false, or the whole start roster in the
+// lobby's member order, with atStart true, so a refusal at the start can name
+// the members who must act, who are not the host who sees it. It returns nil,
+// or an error from GameRequirement that names the game's problem type and
+// says what to do. Any other error is reported as unavailable.
+type ReadyCheck func(members []ReadyMember, atStart bool) error
+
+// CheckReady loads the game's ready gate for a lobby, or returns nil when the
+// game declares none. Its errors are reported as unavailable.
+func (game GameRegistration) CheckReady(ctx context.Context, lobbyID string) (ReadyCheck, error) {
+	if game.ReadyGate == nil {
+		return nil, nil
+	}
+	check, err := game.ReadyGate(ctx, lobbyID)
+	if err != nil {
+		return nil, gateUnavailable(err)
+	}
+	if check == nil {
+		return nil, gateUnavailable(errors.New("the game's ready gate returned no check"))
+	}
+	return func(members []ReadyMember, atStart bool) error {
+		err := check(members, atStart)
+		if err == nil || ErrorCodeOf(err) == CodeGameRequirement {
+			return err
+		}
+		return gateUnavailable(err)
+	}, nil
+}
+
+// gateUnavailable reports a ready gate that could not decide.
+func gateUnavailable(cause error) error {
+	if errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) || ErrorCodeOf(cause) == CodeUnavailable {
+		return cause
+	}
+	return &Error{Code: CodeUnavailable, Message: ErrUnavailable.Message, Cause: cause}
 }
 
 // StartRules are conditions a game declares for starting its lobbies, on top

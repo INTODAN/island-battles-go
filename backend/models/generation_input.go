@@ -15,9 +15,9 @@ type FrozenGamePlayer struct {
 	DisplayName string `gorm:"not null;default:''"`
 	// BotLevel is the level of the default bot that the backend plays for
 	// this player, one of bots.Defaults, or nil when the player's own client
-	// plays. The backend plays it as soon as each generation is created, so it
-	// never times out. Nothing sets it yet: the player's bot choice (#111) and
-	// bot seats (#115) will set it when the game starts.
+	// plays, relaying their localhost bot. The backend plays it as soon as
+	// each generation is created, so it never times out. The start copies it
+	// from the player's LobbyBotChoice; bot seats (#115) will set it too.
 	BotLevel  *uint
 	CreatedAt time.Time
 }
@@ -106,6 +106,8 @@ type GenerationState struct {
 	LogLinesStored uint `json:"log_lines_stored" doc:"How many game log lines you have stored for this generation, out of the 100 a player may store per generation. 0 when there are none. A client that restarts during a turn continues counting from it."`
 
 	Memory BotMemory `json:"memory" doc:"The memory sent with your latest completed turn of this game, for your bot's next BotTurn.memory. Null before your first completed turn, and after a completed turn without memory."`
+
+	Bot BotChoiceView `json:"bot" doc:"Your bot in this game, the one you chose in the lobby, copied when the game started. For kind localhost your client relays each turn to your bot and submits its answer. For kind default the backend plays your turns itself as soon as each generation is created, so your client submits nothing."`
 
 	// TurnDeadlineAt is nil when the lobby set no turn timeout, and once the
 	// game has ended.

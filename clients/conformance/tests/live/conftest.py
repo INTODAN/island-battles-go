@@ -10,7 +10,7 @@ from integration.test_live import guests as guests_fixture
 from lobby_client import Scope
 
 from island_conformance.adapter import AdapterProcess
-from island_conformance.live import Match, Seat
+from island_conformance.live import Match, Seat, choose_localhost_bots
 from island_conformance.proxy import FaultProxy
 
 guests = guests_fixture
@@ -24,6 +24,7 @@ async def match(guests):
     await bob.join_lobby(game_key=scope.game_key, join_code=room.lobby.join_code)
     await alice.select_team(scope, room.teams[0].id)
     await bob.select_team(scope, room.teams[1].id)
+    await choose_localhost_bots(BASE, scope.lobby_id, alice.credential, bob.credential)
     await alice.set_ready(scope, True)
     await bob.set_ready(scope, True)
     await alice.start(scope)
