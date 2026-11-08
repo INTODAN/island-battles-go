@@ -1,3 +1,5 @@
+import { BotError, buildBotTurn, playTurn } from "./localhost-bot.mjs";
+
 // Castles and soldiers with this color belong to no player team.
 export const NEUTRAL_TEAM_COLOR = 0;
 
@@ -24,10 +26,25 @@ export function singleSoldierCommands(state) {
   }];
 }
 
+// How long the player waits before it asks an unreachable localhost bot again.
+const BOT_RETRY_MS = 2000;
+
+// The example player has two jobs. In a demo (the default), it plays the
+// example strategy while it is enabled. Outside a demo, it relays the turns of
+// a player whose bot is the localhost bot to that bot, and submits its answer;
+// a player with a default bot level is only followed, since the backend plays
+// for them. In both, a player that isn't playing a turn asks the server to
+// apply its deadline.
 export class ExamplePlayer {
-  constructor({ lobbyID, playerID, credential, subscription, enabled = true, pending = null, savePending = () => {},
-    onState = () => {}, onStatus = () => {}, retryDelay = 500, fetcher = (...args) => globalThis.fetch(...args), now = () => Date.now() }) {
-    Object.assign(this, { lobbyID, playerID, credential, subscription, enabled, pending, savePending, onState, onStatus, retryDelay, fetcher, now });
+  constructor({ lobbyID, playerID, credential, subscription, enabled = true, demo = true, pending = null, savePending = () => {},
+    onState = () => {}, onStatus = () => {}, retryDelay = 500, botRetryDelay = BOT_RETRY_MS, playBot = (turn) => playTurn(turn),
+    fetcher = (...args) => globalThis.fetch(...args), now = () => Date.now() }) {
+    Object.assign(this, { lobbyID, playerID, credential, subscription, enabled, demo, pending, savePending, onState, onStatus, retryDelay,
+      botRetryDelay, playBot, fetcher, now });
+    // The upgrade cost table that the bot's turns carry, read once.
+    this.upgrades = null;
+    // The generation whose turn the localhost bot failed to answer.
+    this.failed = null;
     this.stopped = false;
     // Set once the server rejects a command because the game has ended.
     this.ended = false;
@@ -44,6 +61,12 @@ export class ExamplePlayer {
     this.deadlineTimer = null;
     // The generation whose deadline was applied, and how often.
     this.deadlineAttempts = { key: null, count: 0, at: 0 };
+  }
+
+  // Whether this player takes the turn of a state: the demo's player while it
+  // is enabled, otherwise a player with a localhost bot.
+  playing(state) {
+    return this.enabled && (this.demo || state?.bot?.kind === "localhost");
   }
 
   // Override to try another strategy. Returning [] passes the turn.
@@ -103,8 +126,9 @@ export class ExamplePlayer {
     clearTimeout(this.deadlineTimer);
     this.deadlineTimer = null;
     const state = this.state;
-    if (this.stopped || this.ended || !state || state.outcome || !state.turn_deadline_at || (this.enabled && !state.submitted)) return;
-    const key = `${state.game_id}:${state.generation_id}`;
+    const key = state && `${state.game_id}:${state.generation_id}`;
+    if (this.stopped || this.ended || !state || state.outcome || !state.turn_deadline_at ||
+        (this.playing(state) && !state.submitted && this.failed !== key)) return;
     const { count: attempts, at } = this.deadlineAttempts.key === key ? this.deadlineAttempts : { count: 0, at: 0 };
     let wait = Date.parse(state.turn_deadline_at) + DEADLINE_SLACK_MS - this.now();
     if (attempts) wait = Math.max(wait, at + Math.min(DEADLINE_RETRY_MS * 2 ** (attempts - 1), DEADLINE_RETRY_MAX_MS) - this.now());
@@ -125,10 +149,13 @@ export class ExamplePlayer {
 
   scheduleTurn() {
     if (this.stopped || this.inFlight || this.commandRetry || this.refreshing || this.refreshRetry || !this.state) return;
+    // A default bot's player has nothing to relay or report.
+    if (!this.demo && this.state.bot?.kind !== "localhost") return;
+    if (this.failed === `${this.state.game_id}:${this.state.generation_id}`) return;
     if (this.ended || this.state.outcome) {
       // The final generation has no turn to play.
       this.onStatus("Game over", this.state.outcome?.summary || "The game has ended.");
-    } else if (!this.enabled) {
+    } else if (!this.playing(this.state)) {
       // A rejected turn pauses the player until it is resumed.
       if (this.attention) this.onStatus("Player needs attention", this.attention);
       else this.onStatus("Paused", "This player will wait before submitting its next turn.");
@@ -141,14 +168,14 @@ export class ExamplePlayer {
   }
 
   async submitTurn() {
-    if (this.stopped || this.inFlight || !this.enabled || !this.state || this.state.submitted || this.ended || this.state.outcome) return;
+    if (this.stopped || this.inFlight || !this.playing(this.state) || !this.state || this.state.submitted || this.ended || this.state.outcome) return;
     this.inFlight = true;
     try {
       if (!this.pending) {
         const state = this.state;
-        const commands = await this.nextGeneration(state);
+        const turn = this.demo ? { commands: await this.nextGeneration(state) } : await this.relayTurn(state);
         if (this.stopped || !this.enabled) return;
-        this.remember({ game_id: state.game_id, generation_id: state.generation_id, request_id: crypto.randomUUID(), complete: true, commands });
+        this.remember({ game_id: state.game_id, generation_id: state.generation_id, request_id: crypto.randomUUID(), complete: true, ...turn });
       }
       const submitted = this.pending;
       const result = await this.request("/generation/commands", submitted);
@@ -157,12 +184,17 @@ export class ExamplePlayer {
       this.remember(null);
       this.receive(result);
       const order = submitted.commands[0]?.parameters;
-      this.onStatus("Example player running", order
+      if (!this.demo) {
+        const count = submitted.commands.length;
+        this.onStatus("Turn submitted", `Your bot sent ${count} ${count === 1 ? "command" : "commands"}. Waiting for the other players.`);
+      } else this.onStatus("Example player running", order
         ? `Sent 1 soldier: Castle ${order.origin_castle_id + 1} → Castle ${order.destination_castle_id + 1}.`
         : "No enemy castle or available soldiers. Passed this turn.");
     } catch (error) {
       if (this.stopped) return;
-      if (error.status === 409 && error.type === GAME_ENDED_PROBLEM) {
+      if (error instanceof BotError) {
+        this.botFailed(error);
+      } else if (error.status === 409 && error.type === GAME_ENDED_PROBLEM) {
         // A finished game accepts no commands; read its final state once.
         this.remember(null);
         this.ended = true;
@@ -192,6 +224,35 @@ export class ExamplePlayer {
       this.inFlight = false;
       this.scheduleTurn();
     }
+  }
+
+  // The strategy's answer for a state: the commands, and for a localhost bot
+  // its logs and memory too. A localhost bot gets a BotTurn with the memory the
+  // server returned with this player's last completed turn.
+  async relayTurn(state) {
+    this.upgrades ??= (await this.request("/game/upgrades")).upgrades || [];
+    this.onStatus("Your bot is playing", "Waiting for your bot's answer.");
+    const { commands, logs, memory } = await this.playBot(buildBotTurn(state, this.upgrades));
+    return { commands, logs, memory };
+  }
+
+  // A bot that isn't running is asked again until it is; one that failed is
+  // shown with its traceback and its turn is not submitted, so the turn's
+  // deadline decides. Either way the player asks for the deadline to be applied.
+  botFailed(error) {
+    this.failed = `${this.state.game_id}:${this.state.generation_id}`;
+    this.remember(null);
+    if (error.kind === "unreachable") {
+      this.onStatus("Your bot is not running", `${error.message} Trying again…`);
+      this.commandRetry = setTimeout(() => {
+        this.commandRetry = null;
+        this.failed = null;
+        this.scheduleTurn();
+      }, this.botRetryDelay);
+    } else {
+      this.onStatus(error.kind === "too-slow" ? "Your bot was too slow" : "Your bot failed", error.message);
+    }
+    this.scheduleDeadline();
   }
 
   refresh() {
@@ -224,6 +285,7 @@ export class ExamplePlayer {
   setEnabled(enabled) {
     this.enabled = enabled;
     this.attention = null;
+    this.failed = null;
     clearTimeout(this.commandRetry);
     this.commandRetry = null;
     if (enabled && !this.state) void this.refresh();

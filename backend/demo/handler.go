@@ -8,7 +8,7 @@ import (
 	"net/http"
 )
 
-//go:embed example-player.mjs lobby-settings.mjs bot-choice.mjs
+//go:embed example-player.mjs lobby-settings.mjs bot-choice.mjs localhost-bot.mjs
 var assets embed.FS
 
 func Handler() http.Handler {
