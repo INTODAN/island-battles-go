@@ -10,8 +10,8 @@ type SoldierGroup = components["schemas"]["SoldierGroup"];
 export const headingStyle = {
   /** Width of a line, in map units. */
   lineWidth: 0.1,
-  /** Extra width of the sea-coloured casing around a line; 0 draws no casing (#89 case 1). */
-  casingWidth: 0.05,
+  /** Extra width of the sea-coloured casing around a line, 2px (0.02) on each side as the owner picked 1B on #89; 0 draws none. */
+  casingWidth: 0.04,
   arrowLength: 0.34,
   arrowWidth: 0.3,
   /** How far a line's colour is mixed toward white: a light tint of the team colour. */
@@ -22,13 +22,17 @@ export const headingStyle = {
   stackStep: 0.006,
   /** Gap between a group's circle and the start of its line. */
   startGap: 0.06,
-  /** Opposite directions on one route are shifted this far to the right of travel (#89 case 4). */
-  laneOffset: 0.12,
+  /** Opposite directions on one route are shifted this far (7px, pick 4B on #89) to the right of travel. */
+  laneOffset: 0.07,
   /** Same-team lines that arrive within this angle share one arrowhead (#89 case 2). */
   sharedArrowDegrees: 15,
   /** Same-team lines to one castle within this angle are one route, drawn once (#89 case 3). */
-  samePathDegrees: 2,
-  /** A line passing within this distance of a castle's edge gets a gap ring there (#89 case 5). */
+  samePathDegrees: 1.5,
+  /**
+   * A line passing within this distance of a castle's edge is reported in `passesUnder`. The 2D board draws a gap ring
+   * there and haloes castle text and groups (picks 5B and 6B on #89); the 3D scene has no text or ring to cut, so it
+   * draws lines under castles and groups and makes no ring or halo.
+   */
   passUnderMargin: 0.08,
 } as const;
 
