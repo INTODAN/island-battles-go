@@ -41,7 +41,17 @@ function startScaffold(canvas: HTMLCanvasElement) {
   window.addEventListener("resize", () => engine.resize());
 }
 
-if (fixture !== null) {
+// Dev entry points for the game view (src/ui/game/devpage.ts) until #98 wires it into the app.
+const gameLobby = new URLSearchParams(location.search).get("game");
+const demoFile = new URLSearchParams(location.search).get("demo");
+
+if (gameLobby !== null) {
+  const { startGamePage } = await import("./ui/game/devpage");
+  startGamePage(gameLobby);
+} else if (demoFile !== null) {
+  const { startDemoPage } = await import("./ui/game/devpage");
+  await startDemoPage(demoFile);
+} else if (fixture !== null) {
   const { startFixturePage } = await import("./scene/devpage");
   await startFixturePage(canvas, fixture);
 } else {
