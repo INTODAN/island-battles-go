@@ -641,6 +641,7 @@ class Problem(GameModel):
         "invalid_seat_settings",
         "game_requirement",
         "watcher_kicked",
+        "watchers_full",
         "unavailable",
         "internal_error",
     ]

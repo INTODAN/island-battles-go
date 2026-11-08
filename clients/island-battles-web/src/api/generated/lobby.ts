@@ -253,7 +253,7 @@ export interface paths {
         post?: never;
         /**
          * Kick a watcher
-         * @description Lets the host remove a watcher, in any phase. The watcher is unsubscribed from the watch channel at once and can't watch again with the join code (watcher_kicked). Kicking them again changes nothing; a player who isn't a watcher of the lobby is not_found.
+         * @description Lets the host remove a watcher, in any phase. The watcher is unsubscribed from the watch channel at once and can't watch again with that session and the join code (watcher_kicked); the kick bars the player ID, so a new guest session can watch again, and in a waiting lobby the kicked player can still join as a member. Kicking them again changes nothing; a player who isn't a watcher of the lobby is not_found.
          */
         delete: operations["kickLobbyWatcher"];
         options?: never;
@@ -332,7 +332,7 @@ export interface paths {
         put?: never;
         /**
          * Watch a lobby
-         * @description Lets anyone with a guest session and the lobby's join code watch it, in any phase: waiting, started or closed while it still exists. Adds your watcher row, or finds the one you have, and returns the lobby and its watch channel, where its game publishes what watchers may see; the game documents its own watcher reads. A watcher takes no seat and counts toward nothing: not the lobby's capacity, the start roster, leases, the grace period or the lobby's retention. Starting to watch changes the snapshot's watcher_count. An active member of the lobby gets no watcher row and keeps their member access (member is true). A wrong code, or a code of another game, is not_found; a watcher the host kicked is refused with watcher_kicked.
+         * @description Lets anyone with a guest session and the lobby's join code watch it, in any phase: waiting, started or closed while it still exists. Adds your watcher row, or finds the one you have, and returns the lobby and its watch channel, where its game publishes what watchers may see; the game documents its own watcher reads. A watcher takes no seat and counts toward nothing: not the lobby's capacity, the start roster, leases, the grace period or the lobby's retention. Starting to watch changes the snapshot's watcher_count. An active member of the lobby gets no watcher row and keeps their member access (member is true). A wrong code, or a code of another game, is not_found; a watcher the host kicked is refused with watcher_kicked, and a new watcher beyond the lobby's limit of watchers with watchers_full.
          */
         post: operations["watchLobby"];
         delete?: never;
@@ -577,7 +577,7 @@ export interface components {
         };
         Problem: {
             /** @enum {string} */
-            code: "unauthenticated" | "not_found" | "not_host" | "lobby_full" | "team_full" | "phase_conflict" | "not_ready" | "empty_teams" | "stale_membership" | "idempotency_conflict" | "invalid_input" | "invalid_game_settings" | "invalid_seat_settings" | "game_requirement" | "watcher_kicked" | "unavailable" | "internal_error";
+            code: "unauthenticated" | "not_found" | "not_host" | "lobby_full" | "team_full" | "phase_conflict" | "not_ready" | "empty_teams" | "stale_membership" | "idempotency_conflict" | "invalid_input" | "invalid_game_settings" | "invalid_seat_settings" | "game_requirement" | "watcher_kicked" | "watchers_full" | "unavailable" | "internal_error";
             detail: string;
             /** Format: int64 */
             status: number;

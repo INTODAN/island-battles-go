@@ -3,6 +3,7 @@ package services_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"slices"
 	"strings"
@@ -35,6 +36,13 @@ func (watchers lobbyWatchers) AuthorizeWatch(_ context.Context, principal domain
 		return domain.ErrWatcherKicked
 	}
 	return domain.ErrNotFound
+}
+
+// failingWatchers is a lobby store that is down.
+type failingWatchers struct{}
+
+func (failingWatchers) AuthorizeWatch(context.Context, domain.Principal, domain.Scope) error {
+	return domain.ErrUnavailable
 }
 
 // batchPublisher records each push as one batch, to check what a turn pushes
@@ -106,6 +114,25 @@ func TestWatchersGetEveryTurnInThePlayersPushAndNoPlayerFields(t *testing.T) {
 		t.Fatal("a stranger read the history")
 	} else {
 		assertTurnStatus(t, err, 404)
+	}
+	// A roster player reads what watchers read, also when the lobby kicked
+	// their session as a watcher or its store fails.
+	rosterKicked := &services.GenerationService{Database: fixture.database, Publisher: publisher,
+		Watchers: lobbyWatchers{kicked: map[string]bool{fixture.players[1].PlayerID: true}}}
+	for name, read := range map[string]func() error{
+		"watch": func() error { _, err := rosterKicked.Watch(ctx, fixture.players[1], state.LobbyID); return err },
+		"demo":  func() error { _, err := rosterKicked.WatchDemo(ctx, fixture.players[1], state.LobbyID); return err },
+	} {
+		if err := read(); err != nil {
+			t.Fatalf("kicked roster player's %s read = %v", name, err)
+		}
+	}
+	broken := &services.GenerationService{Database: fixture.database, Publisher: publisher, Watchers: failingWatchers{}}
+	if _, err := broken.Watch(ctx, fixture.players[1], state.LobbyID); err != nil {
+		t.Fatalf("roster player's watch read with the lobby store failing = %v", err)
+	}
+	if _, err := broken.Watch(ctx, stranger, state.LobbyID); err == nil || errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("a stranger's read with the lobby store failing = %v", err)
 	}
 	// A roster player reads what watchers read, also without a lobby.
 	withoutLobby := &services.GenerationService{Database: fixture.database, Publisher: publisher}

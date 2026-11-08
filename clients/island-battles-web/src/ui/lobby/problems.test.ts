@@ -88,6 +88,21 @@ describe("problem sentences", () => {
     );
   });
 
+  test("a lobby with its maximum of watchers", () => {
+    const full = describeProblem(
+      new ApiError({
+        kind: "problem",
+        status: 409,
+        code: "watchers_full",
+      }),
+      "watch",
+    );
+    expect(full.message).toBe(
+      "This game has as many watchers as it allows. Try again later.",
+    );
+    expect(full.lostMembership).toBe(false);
+  });
+
   test("session and network problems", () => {
     const expired = describeProblem(
       new ApiError({ kind: "problem", status: 401, code: "unauthenticated" }),

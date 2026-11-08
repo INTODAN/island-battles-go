@@ -52,21 +52,13 @@ func watchEvent(game *models.Game, generation *models.Generation) (realtime.Publ
 	return realtime.Publication{Channel: state.Channel, Data: payload}, nil
 }
 
-// authorizeWatcher admits the lobby's watchers that the host hasn't kicked
-// and its active members, which the lobby checks, and the game's roster
-// players, whose lobby may be gone. A kicked watcher gets 403, and anyone
-// else 404, as for a game that doesn't exist.
+// authorizeWatcher admits the game's roster players, whose lobby may be
+// gone, and then the lobby's watchers that the host hasn't kicked and its
+// active members, which the lobby checks. The roster comes first: a roster
+// player always reads the watch views, whatever their watcher row says and
+// whether or not the lobby store answers. A kicked watcher who isn't on the
+// roster gets 403, and anyone else 404, as for a game that doesn't exist.
 func (service *GenerationService) authorizeWatcher(ctx context.Context, principal domain.Principal, lobbyID string) (*models.Game, error) {
-	var err error = domain.ErrNotFound
-	if service.Watchers != nil {
-		err = service.Watchers.AuthorizeWatch(ctx, principal, domain.Scope{GameKey: models.LobbyGameKey, LobbyID: lobbyID})
-	}
-	switch {
-	case errors.Is(err, domain.ErrWatcherKicked):
-		return nil, reject(403, domain.ErrWatcherKicked.Message)
-	case err != nil && !errors.Is(err, domain.ErrNotFound):
-		return nil, err
-	}
 	game, findError := dal.FindLobbyGame(service.Database.WithContext(ctx), lobbyID)
 	if errors.Is(findError, domain.ErrNotFound) {
 		return nil, reject(404, "game not found")
@@ -75,13 +67,27 @@ func (service *GenerationService) authorizeWatcher(ctx context.Context, principa
 		return nil, findError
 	}
 	observability.Annotate(ctx, slog.Uint64("game_id", uint64(game.ID)))
-	if err != nil {
-		// Not a watcher or a member: a roster player still reads it.
-		if rosterError := service.authorize(ctx, principal, game); rosterError != nil {
-			return nil, rosterError
-		}
+	rosterError := service.authorize(ctx, principal, game)
+	if rosterError == nil {
+		return game, nil
 	}
-	return game, nil
+	var rejected *GenerationError
+	if !errors.As(rosterError, &rejected) || rejected.Status != 404 {
+		return nil, rosterError
+	}
+	var err error = domain.ErrNotFound
+	if service.Watchers != nil {
+		err = service.Watchers.AuthorizeWatch(ctx, principal, domain.Scope{GameKey: models.LobbyGameKey, LobbyID: lobbyID})
+	}
+	switch {
+	case err == nil:
+		return game, nil
+	case errors.Is(err, domain.ErrWatcherKicked):
+		return nil, reject(403, domain.ErrWatcherKicked.Message)
+	case errors.Is(err, domain.ErrNotFound):
+		return nil, rosterError
+	}
+	return nil, err
 }
 
 // Watch returns a lobby game's current generation as watchers see it. Like
