@@ -65,7 +65,7 @@ input { flex: 1; min-width: 100px; accent-color: #3464e0; }
 {{end}}
 <div id="view"{{if .Viewer}} hidden{{end}}>
 {{if .Viewer}}<p id="demo-summary"></p>{{end}}
-<p>Circles are castles; moving dots are troops. Numbers show soldiers.</p>
+<p>Circles are castles; moving dots are troops. Lines show where troops are heading. Numbers show soldiers.</p>
 <div id="teams"></div>
 <svg id="battlefield" viewBox="0 0 800 600" role="img" aria-label="Battlefield showing castles and moving troops"></svg>
 <div class="controls">
@@ -124,6 +124,117 @@ const upgradeLevels = (castle) => Object.keys(castle.upgrades)
 const scoreLabels = new Map();
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 let renderedTurn = null;
+// heading-lines:begin
+// Heading lines (#89): the segment from each moving group to the castle it is heading for. This block is pure
+// geometry in board pixels, so backend/demoviewer/heading-lines.test.mjs runs it on its own.
+const fieldColor = "#edf5fb";
+const headingStyle = {
+  width: 5,          // Line width.
+  tint: .55,         // How much of the team colour is mixed into the field colour; opaque, so overlaps never darken.
+  casing: 2,         // Field-colour casing on each side of a line (1B).
+  headLength: 20,
+  headWidth: 17,
+  sharedHeadDegrees: 15, // Same-team lines arriving within this angle share one arrowhead (2B).
+  samePathDegrees: 1.5,  // Same-team groups this close to one route are one route, drawn once (3B).
+  lane: 7,           // Opposite directions on one path keep this far to the right of their travel (4B).
+  castleGap: 1.5,    // The arrowhead's tip sits this far outside the castle's circle.
+  groupHalo: 4,      // The field-colour halo round a group reaches this far past its circle (6B).
+  castleHalo: 6,     // The gap ring round a castle that a line passes under (5B).
+};
+const toRadians = (degrees) => degrees * Math.PI / 180;
+const unitVector = (x, y) => { const length = Math.hypot(x, y) || 1; return [x / length, y / length]; };
+const rgb = (hex) => [1, 3, 5].map((index) => parseInt(hex.slice(index, index + 2), 16));
+// An opaque lighter tint: the team colour blended into the field colour.
+function tintOf(hex) {
+  const back = rgb(fieldColor);
+  return "#" + rgb(hex).map((value, index) => Math.round(value * headingStyle.tint + back[index] * (1 - headingStyle.tint)).toString(16).padStart(2, "0")).join("");
+}
+function angleApart(left, right) {
+  const difference = Math.abs(left - right) % (2 * Math.PI);
+  return Math.min(difference, 2 * Math.PI - difference);
+}
+function distanceToSegment(point, start, end) {
+  const dx = end[0] - start[0];
+  const dy = end[1] - start[1];
+  const squared = dx * dx + dy * dy;
+  const along = squared === 0 ? 0 : Math.max(0, Math.min(1, ((point.x - start[0]) * dx + (point.y - start[1]) * dy) / squared));
+  return Math.hypot(point.x - (start[0] + dx * along), point.y - (start[1] + dy * along));
+}
+// planHeadings works out every line to draw, in group ID order, which is the stacking order.
+// castles: {id, x, y, radius}; groups: {id, team, x, y, radius, origin, destination}, all in board pixels.
+// A line is {id, team, start, tip, direction, head, passes}: it runs from the group's center to the arrowhead's tip
+// on the destination castle's circle; head says whether it draws an arrowhead (lines sharing one let only the first
+// draw it); passes lists the castles, other than its destination, that it runs under.
+function planHeadings(castles, groups) {
+  const style = headingStyle;
+  const castleById = new Map(castles.map((castle) => [castle.id, castle]));
+  const candidates = [];
+  for (const group of groups) {
+    const castle = castleById.get(group.destination);
+    if (castle) candidates.push({ group, castle, distance: Math.hypot(group.x - castle.x, group.y - castle.y), angle: Math.atan2(group.y - castle.y, group.x - castle.x) });
+  }
+  // Groups of one team on one route lie on one line: keep the rearmost (3B).
+  const kept = candidates.filter((candidate) => !candidates.some((other) => other !== candidate
+    && other.castle === candidate.castle && other.group.team === candidate.group.team
+    && angleApart(other.angle, candidate.angle) < toRadians(style.samePathDegrees)
+    && (other.distance > candidate.distance || (other.distance === candidate.distance && other.group.id < candidate.group.id))));
+  // A route that someone walks the other way too is split into lanes (4B).
+  const routes = new Set(groups.map((group) => `${group.origin}>${group.destination}`));
+  const lines = [];
+  for (const { group, castle, angle } of kept) {
+    const [ux, uy] = unitVector(castle.x - group.x, castle.y - group.y);
+    const opposed = group.origin !== group.destination && routes.has(`${group.destination}>${group.origin}`);
+    const lane = opposed ? style.lane : 0;
+    // To the right of travel on a screen whose y points down.
+    const side = [-uy, ux];
+    const start = [group.x + side[0] * lane, group.y + side[1] * lane];
+    let tip;
+    if (opposed) {
+      // Meet the circle where the shifted line does.
+      const reach = Math.sqrt(Math.max(0, castle.radius * castle.radius - lane * lane));
+      tip = [castle.x + side[0] * lane - ux * reach, castle.y + side[1] * lane - uy * reach];
+    } else {
+      tip = [castle.x + Math.cos(angle) * (castle.radius + style.castleGap), castle.y + Math.sin(angle) * (castle.radius + style.castleGap)];
+    }
+    // A group close to its castle has no room for an arrowhead: no line, no stub, no backward head (7B).
+    // The length is measured along the way to the castle, so a group on top of it has none.
+    if ((tip[0] - group.x) * ux + (tip[1] - group.y) * uy - group.radius < style.headLength + 3) continue;
+    lines.push({ id: group.id, team: group.team, start, tip, head: true, castle, angle, lane });
+  }
+  // Same-team lines arriving from nearly one direction share the first one's arrowhead (2B).
+  const byCastleAndTeam = new Map();
+  for (const line of lines) {
+    if (line.lane) continue;
+    const key = `${line.castle.id}/${line.team}`;
+    byCastleAndTeam.set(key, [...(byCastleAndTeam.get(key) || []), line]);
+  }
+  for (const same of byCastleAndTeam.values()) {
+    same.sort((left, right) => left.angle - right.angle);
+    const clusters = [];
+    for (const line of same) {
+      const cluster = clusters[clusters.length - 1];
+      if (cluster && angleApart(cluster[cluster.length - 1].angle, line.angle) < toRadians(style.sharedHeadDegrees)) cluster.push(line);
+      else clusters.push([line]);
+    }
+    for (const cluster of clusters) {
+      if (cluster.length < 2) continue;
+      // The circular mean, so a cluster across the seam averages correctly.
+      const mean = Math.atan2(cluster.reduce((total, line) => total + Math.sin(line.angle), 0), cluster.reduce((total, line) => total + Math.cos(line.angle), 0));
+      const leader = Math.min(...cluster.map((line) => line.id));
+      for (const line of cluster) {
+        line.tip = [line.castle.x + Math.cos(mean) * (line.castle.radius + style.castleGap), line.castle.y + Math.sin(mean) * (line.castle.radius + style.castleGap)];
+        line.head = line.id === leader;
+      }
+    }
+  }
+  return lines.sort((left, right) => left.id - right.id).map((line) => {
+    const [ux, uy] = unitVector(line.tip[0] - line.start[0], line.tip[1] - line.start[1]);
+    const passes = castles.filter((other) => other.id !== line.castle.id
+      && distanceToSegment(other, line.start, line.tip) < other.radius + style.castleHalo + 4).map((other) => other.id);
+    return { id: line.id, team: line.team, start: line.start, tip: line.tip, direction: [ux, uy], head: line.head, passes };
+  });
+}
+// heading-lines:end
 // show starts the view over with a replay, or with a demo and its logs by
 // generation ID.
 function show(next, logs = null) {
@@ -213,17 +324,53 @@ function outcomeText() {
   if (replay.outcome) return replay.outcome.summary;
   return demoLogs ? "The demo was saved before the game ended." : "Waiting for player turns";
 }
+// A field-colour halo behind castle names, so a line that runs through them stays readable (5B).
+const textHalo = { stroke: fieldColor, "stroke-width": 5, "paint-order": "stroke", "stroke-linejoin": "round" };
+// renderHeadings draws the heading lines, then the halos that keep them off groups and castles. The caller draws
+// castles, groups, labels and the clash overlay over them. Shafts come first, in group ID order, so the stacking
+// never flips between generations; arrowheads follow the castles' gap rings so a ring never cuts the head that
+// arrives at that castle.
+function renderHeadings(frame) {
+  const castles = frame.castles.map((castle) => { const [x, y] = point(castle); return { id: castle.id, x, y, radius: castleRadius * worldScale }; });
+  const groups = frame.soldier_groups.map((group) => { const [x, y] = point(group); return { id: group.id, team: group.team_color, x, y, radius: group.clash_radius * worldScale, origin: group.origin_castle_id, destination: group.destination_castle_id }; });
+  const lines = planHeadings(castles, groups);
+  const { width, casing, headLength, headWidth, castleHalo, groupHalo } = headingStyle;
+  const shaftEnd = (line) => line.tip.map((value, axis) => value - line.direction[axis] * (line.head ? headLength * .8 : 2));
+  for (const line of lines) {
+    const [x2, y2] = shaftEnd(line);
+    svg("line", { x1: line.start[0], y1: line.start[1], x2, y2, stroke: fieldColor, "stroke-width": width + 2 * casing, "stroke-linecap": "round", "data-kind": "heading-casing", "pointer-events": "none" });
+    svg("line", { x1: line.start[0], y1: line.start[1], x2, y2, stroke: tintOf(color(line.team)), "stroke-width": width, "data-kind": "heading-line", "data-group-id": line.id, "pointer-events": "none" });
+  }
+  for (const id of new Set(lines.flatMap((line) => line.passes))) {
+    const castle = castles.find((candidate) => candidate.id === id);
+    svg("circle", { cx: castle.x, cy: castle.y, r: castle.radius + castleHalo, fill: "none", stroke: fieldColor, "stroke-width": 8, "data-kind": "castle-gap", "pointer-events": "none" });
+  }
+  for (const line of lines) {
+    if (!line.head) continue;
+    const [ux, uy] = line.direction;
+    const [tipX, tipY] = line.tip;
+    const baseX = tipX - ux * headLength;
+    const baseY = tipY - uy * headLength;
+    const points = `${tipX},${tipY} ${baseX - uy * headWidth / 2},${baseY + ux * headWidth / 2} ${baseX + uy * headWidth / 2},${baseY - ux * headWidth / 2}`;
+    svg("polygon", { points, fill: fieldColor, stroke: fieldColor, "stroke-width": 2 * casing, "stroke-linejoin": "round", "data-kind": "heading-casing", "pointer-events": "none" });
+    const tint = tintOf(color(line.team));
+    svg("polygon", { points, fill: tint, stroke: tint, "stroke-width": .5, "stroke-linejoin": "round", "data-kind": "heading-head", "data-group-id": line.id, "pointer-events": "none" });
+  }
+  if (!lines.length) return;
+  for (const group of groups) svg("circle", { cx: group.x, cy: group.y, r: group.radius + groupHalo, fill: "none", stroke: fieldColor, "stroke-width": 7, "data-kind": "group-halo", "pointer-events": "none" });
+}
 function render(animateClashes = false) {
   const frame = replay.frames[turn];
   const animate = animateClashes && renderedTurn !== turn;
   renderedTurn = turn;
   field.replaceChildren();
+  renderHeadings(frame);
   for (const castle of frame.castles) {
     const [x, y] = point(castle);
     svg("circle", { cx: x, cy: y, r: castleRadius * worldScale, fill: "#fff", stroke: color(castle.team_color), "stroke-width": 3, "data-kind": "castle" });
     svg("text", { x, y: y + 8, "text-anchor": "middle", "font-size": 26, "font-weight": 700, fill: color(castle.team_color) }, castle.soldiers);
-    svg("text", { x, y: y + 72, "text-anchor": "middle", "font-size": 17, fill: "#52667b" }, `Castle ${castle.id + 1}`);
-    svg("text", { x, y: y + 92, "text-anchor": "middle", "font-size": 14, fill: "#52667b", "data-kind": "castle-upgrades" }, upgradeLevels(castle));
+    svg("text", { x, y: y + 72, "text-anchor": "middle", "font-size": 17, fill: "#52667b", ...textHalo }, `Castle ${castle.id + 1}`);
+    svg("text", { x, y: y + 92, "text-anchor": "middle", "font-size": 14, fill: "#52667b", ...textHalo, "data-kind": "castle-upgrades" }, upgradeLevels(castle));
   }
   for (const group of frame.soldier_groups) {
     const [x, y] = point(group);
