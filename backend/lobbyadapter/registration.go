@@ -20,7 +20,8 @@ const GameKey = "island-battles"
 // validator reads default maps from database. Every team owns castles on the
 // map, so a game can't start with an empty team. Every member chooses a bot
 // before getting ready, so the ready gate refuses a member without one with
-// services.BotNotChosenProblemType.
+// services.BotNotChosenProblemType. The host can add bot seats, whose
+// seat_settings {"bot_level": N} name a default bot that the backend plays.
 func Registration(database *gorm.DB) domain.GameRegistration {
 	return domain.GameRegistration{
 		Key: GameKey,
@@ -30,6 +31,9 @@ func Registration(database *gorm.DB) domain.GameRegistration {
 		StartRules: domain.StartRules{EveryTeamNeedsMember: true},
 		ReadyGate: func(ctx context.Context, lobbyID string) (domain.ReadyCheck, error) {
 			return services.BotReadyCheck(database.WithContext(ctx), lobbyID)
+		},
+		ValidateSeat: func(_ context.Context, settings json.RawMessage) (string, error) {
+			return services.ValidateBotSeat(settings)
 		},
 	}
 }

@@ -25,14 +25,14 @@ type BotChoiceView struct {
 // LobbyBotsView lists the bot choices of a lobby's members.
 type LobbyBotsView struct {
 	LobbyID string               `json:"lobby_id" format:"uuid"`
-	Members []LobbyMemberBotView `json:"members" nullable:"false" doc:"Every member of the lobby, in the lobby's member order."`
+	Members []LobbyMemberBotView `json:"members" nullable:"false" doc:"Every member of the lobby, in the lobby's member order, bot seats included."`
 }
 
 // LobbyMemberBotView is one lobby member's bot choice.
 type LobbyMemberBotView struct {
 	PlayerID    string         `json:"player_id" format:"uuid"`
 	DisplayName string         `json:"display_name"`
-	Bot         *BotChoiceView `json:"bot,omitempty" doc:"The member's bot. Absent until they choose one, and a member can't get ready without one."`
+	Bot         *BotChoiceView `json:"bot,omitempty" doc:"The member's bot. Absent until they choose one, and a member can't get ready without one. A bot seat that the host added has the default bot of its level."`
 }
 
 // LobbyBotChoice is a lobby member's bot choice, kept while the lobby waits.

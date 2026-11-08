@@ -1,7 +1,9 @@
 package services
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -78,7 +80,12 @@ func (service LobbyBots) view(ctx context.Context, snapshot domain.Snapshot) (mo
 	view := models.LobbyBotsView{LobbyID: snapshot.Lobby.ID, Members: make([]models.LobbyMemberBotView, 0, len(snapshot.Members))}
 	for _, member := range snapshot.Members {
 		entry := models.LobbyMemberBotView{PlayerID: member.PlayerID, DisplayName: member.DisplayName}
-		if choice, found := choices[member.PlayerID]; found {
+		if member.IsSeat() {
+			// A bot seat plays the default bot of its level.
+			if level, err := BotSeatLevel(member.SeatSettings); err == nil {
+				entry.Bot = &models.BotChoiceView{Kind: models.DefaultBot, Level: &level}
+			}
+		} else if choice, found := choices[member.PlayerID]; found {
 			chosen := choice.View()
 			entry.Bot = &chosen
 		}
@@ -145,9 +152,10 @@ func botNotChosenAtStartMessage(names []string) string {
 	return "Waiting for " + strings.Join(names, ", ") + " to choose a bot: their localhost bot or a default bot level."
 }
 
-// lobbyBotLevels returns the default bot levels that the roster's players
-// chose, by player ID. A player who chose their localhost bot is absent. The
-// start requires a choice of every roster player, so only a lobby that started
+// lobbyBotLevels returns the default bot levels that the backend plays for
+// the roster, by player ID: each bot seat's level, and the level that each
+// player chose. A player who chose their localhost bot is absent. The start
+// requires a choice of every roster player, so only a lobby that started
 // before choices were required has players without one; their own clients
 // play, as before.
 func lobbyBotLevels(database *gorm.DB, snapshot domain.Snapshot) (map[string]uint, error) {
@@ -155,12 +163,66 @@ func lobbyBotLevels(database *gorm.DB, snapshot domain.Snapshot) (map[string]uin
 	if err != nil {
 		return nil, fmt.Errorf("read bot choices: %w", err)
 	}
+	seats := map[string]domain.Member{}
+	for _, member := range snapshot.Members {
+		if member.IsSeat() {
+			seats[member.PlayerID] = member
+		}
+	}
 	levels := map[string]uint{}
 	for _, entry := range snapshot.StartRoster {
+		if seat, found := seats[entry.PlayerID]; found {
+			level, err := BotSeatLevel(seat.SeatSettings)
+			if err != nil {
+				return nil, fmt.Errorf("bot seat %s: %w", seat.ID, err)
+			}
+			levels[entry.PlayerID] = level
+			continue
+		}
 		choice, found := choices[entry.PlayerID]
 		if found && choice.Kind == models.DefaultBot && choice.Level != nil {
 			levels[entry.PlayerID] = *choice.Level
 		}
 	}
 	return levels, nil
+}
+
+// botSeatSettings are the seat_settings of an Island Battles bot seat.
+type botSeatSettings struct {
+	BotLevel *uint `json:"bot_level"`
+}
+
+// BotSeatName is the display name of a bot seat of a level.
+func BotSeatName(level uint) string { return fmt.Sprintf("Bot (level %d)", level) }
+
+// BotSeatLevel reads a bot seat's seat_settings, {"bot_level": N}, and
+// returns the level, which must be one that GET /bots/defaults lists. Its
+// errors are written for the host who adds the seat.
+func BotSeatLevel(settings json.RawMessage) (uint, error) {
+	var levels []string
+	for _, bot := range bots.Defaults() {
+		levels = append(levels, fmt.Sprint(bot.Level))
+	}
+	invalid := fmt.Errorf(`seat_settings must be {"bot_level": N} with a level that GET /bots/defaults lists: %s`, strings.Join(levels, ", "))
+	var decoded botSeatSettings
+	decoder := json.NewDecoder(bytes.NewReader(settings))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil || decoded.BotLevel == nil {
+		return 0, invalid
+	}
+	if _, found := bots.ForLevel(*decoded.BotLevel); !found {
+		return 0, invalid
+	}
+	return *decoded.BotLevel, nil
+}
+
+// ValidateBotSeat is Island Battles' seat validator for the lobby: a seat is
+// a default bot of the level in its settings, which the backend plays, and
+// is named after the level, such as "Bot (level 2)".
+func ValidateBotSeat(settings json.RawMessage) (string, error) {
+	level, err := BotSeatLevel(settings)
+	if err != nil {
+		return "", err
+	}
+	return BotSeatName(level), nil
 }

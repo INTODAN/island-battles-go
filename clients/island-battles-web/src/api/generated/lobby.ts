@@ -121,6 +121,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/lobby/v1/games/{game_key}/lobbies/{lobby_id}/seats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a seat
+         * @description Adds a seat that no person plays, such as the game's bot, to a team, and returns the snapshot, where the seat is a member of kind seat. Only the host can add one (otherwise not_host), and only while the lobby waits (otherwise phase_conflict). The game checks seat_settings and names the seat; settings it doesn't understand fail with invalid_seat_settings, and a game without seats refuses every one. The seat counts toward the lobby's and the team's capacity (lobby_full, team_full) and toward the members a start needs, is always ready, never disconnects, and joins the start roster with its own player_id. A start still needs the host, a person. A team_id that isn't one of the lobby's teams is invalid_input. Each call adds a seat, so a retry after a lost response can add a second one; the host removes it.
+         */
+        post: operations["addLobbySeat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/lobby/v1/games/{game_key}/lobbies/{lobby_id}/seats/{seat_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a seat
+         * @description Removes a seat that the host added, by its member ID, and returns the snapshot. Only the host can remove one, and only while the lobby waits. Removing a seat again changes nothing; an ID that names no seat of the lobby is invalid_input.
+         */
+        delete: operations["removeLobbySeat"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/lobby/v1/games/{game_key}/lobbies/{lobby_id}/start": {
         parameters: {
             query?: never;
@@ -225,6 +265,23 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AddSeatBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/AddSeatBody.json
+             */
+            readonly $schema?: string;
+            /** @description Settings for a seat that no person plays, as a JSON object that only the game reads, such as the level of the game's bot that plays the seat. The game checks them when the host adds the seat; invalid settings fail with invalid_seat_settings. */
+            seat_settings: {
+                [key: string]: unknown;
+            };
+            /**
+             * Format: uuid
+             * @description The team the seat joins.
+             */
+            team_id: string;
+        };
         ConnectionToken: {
             /**
              * Format: uri
@@ -420,13 +477,22 @@ export interface components {
             join_sequence: number;
             /** Format: date-time */
             joined_at: string;
+            /**
+             * @description human: a person who joined. seat: a seat that no person plays, such as the game's bot, which the host added to a team; it is always ready, never disconnects or hosts, and the game plays it from seat_settings. Its id is the seat ID for removing it.
+             * @enum {string}
+             */
+            kind: "human" | "seat";
             player_id: string;
             ready: boolean;
+            /** @description For a seat, the settings the host added it with, compacted with sorted keys, which only the game reads. Null for a person. */
+            seat_settings: {
+                [key: string]: unknown;
+            } | null;
             team_id: string | null;
         };
         Problem: {
             /** @enum {string} */
-            code: "unauthenticated" | "not_found" | "not_host" | "lobby_full" | "team_full" | "phase_conflict" | "not_ready" | "empty_teams" | "stale_membership" | "idempotency_conflict" | "invalid_input" | "invalid_game_settings" | "game_requirement" | "unavailable" | "internal_error";
+            code: "unauthenticated" | "not_found" | "not_host" | "lobby_full" | "team_full" | "phase_conflict" | "not_ready" | "empty_teams" | "stale_membership" | "idempotency_conflict" | "invalid_input" | "invalid_game_settings" | "invalid_seat_settings" | "game_requirement" | "unavailable" | "internal_error";
             detail: string;
             /** Format: int64 */
             status: number;
@@ -961,6 +1027,184 @@ export interface operations {
                 "application/json": components["schemas"]["ReadyBody"];
             };
         };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Snapshot"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    addLobbySeat: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_key: string;
+                lobby_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddSeatBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Snapshot"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    removeLobbySeat: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_key: string;
+                lobby_id: string;
+                /** @description The seat's member ID. */
+                seat_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description OK */
             200: {
