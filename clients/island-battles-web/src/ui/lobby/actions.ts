@@ -1,12 +1,14 @@
 import { createApiClients } from "../../api/client";
 import { ApiError } from "../../api/errors";
 import type { components as GameComponents } from "../../api/generated/game";
+import type { components as LobbyComponents } from "../../api/generated/lobby";
 import type { Realtime, Snapshot } from "../../realtime";
 import { type CreateLobbyBody, gameKey, type MapTemplate } from "./form";
 
 export type BotChoice = GameComponents["schemas"]["BotChoice"];
 export type LobbyBots = GameComponents["schemas"]["LobbyBots"];
 export type DefaultBot = GameComponents["schemas"]["DefaultBot"];
+export type AddSeatBody = LobbyComponents["schemas"]["AddSeatBody"];
 export type MapTemplateSummary =
   GameComponents["schemas"]["MapTemplateSummary"];
 
@@ -141,6 +143,25 @@ export function createLobbyActions(options: {
       const { data } = await lobbyApi.POST(
         "/lobby/v1/games/{game_key}/lobbies/{lobby_id}/start",
         { params: { path }, body: {} },
+      );
+      adopt(data);
+    },
+
+    /** Adds a bot seat; the body carries its request ID, so a resend after a lost reply adds nothing twice. */
+    async addSeat(body: AddSeatBody) {
+      const { path } = room();
+      const { data } = await lobbyApi.POST(
+        "/lobby/v1/games/{game_key}/lobbies/{lobby_id}/seats",
+        { params: { path }, body },
+      );
+      adopt(data);
+    },
+
+    async removeSeat(seatId: string) {
+      const { path } = room();
+      const { data } = await lobbyApi.DELETE(
+        "/lobby/v1/games/{game_key}/lobbies/{lobby_id}/seats/{seat_id}",
+        { params: { path: { ...path, seat_id: seatId } } },
       );
       adopt(data);
     },

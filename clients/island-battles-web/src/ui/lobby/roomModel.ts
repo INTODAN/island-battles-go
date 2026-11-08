@@ -1,17 +1,60 @@
 import type { Snapshot } from "../../realtime";
-import type { BotChoice, LobbyBots, MapTemplateSummary } from "./actions";
+import type {
+  AddSeatBody,
+  BotChoice,
+  LobbyBots,
+  MapTemplateSummary,
+} from "./actions";
 import { describeTurnTimeout } from "./form";
 
 export interface MemberRow {
+  /** The member ID; for a seat, the seat ID that removing it takes. */
   memberId: string;
   playerId: string;
   name: string;
+  /** A person, or a seat the host added: a bot the game plays. */
+  kind: "human" | "seat";
   ready: boolean;
-  /** False while the member's lease is lapsed. */
+  /** False while a person's lease is lapsed. Seats are always connected. */
   connected: boolean;
   isYou: boolean;
   isHost: boolean;
+  /** A person's bot choice, or a seat's default level. */
   bot: BotChoice | undefined;
+}
+
+/** The bot level a seat was added with, from its settings. */
+export function seatLevel(
+  settings: Record<string, unknown> | null | undefined,
+): number | undefined {
+  const level = settings?.bot_level;
+  return typeof level === "number" ? level : undefined;
+}
+
+/** A seat's bot as a default choice of its level, or none if its settings name no level. */
+function seatChoice(
+  settings: Record<string, unknown> | null | undefined,
+): BotChoice | undefined {
+  const level = seatLevel(settings);
+  return level === undefined ? undefined : { kind: "default", level };
+}
+
+/** The body that adds a bot seat of `level` to a team; the request ID makes a retry safe. */
+export function seatBody(
+  teamId: string,
+  level: number,
+  requestId: string,
+): AddSeatBody {
+  return {
+    request_id: requestId,
+    team_id: teamId,
+    seat_settings: { bot_level: level },
+  };
+}
+
+/** The people in a list of members: seats are bots, so they are not counted. */
+export function countPeople(members: MemberRow[]): number {
+  return members.filter((member) => member.kind === "human").length;
 }
 
 export interface TeamRow {
@@ -67,17 +110,23 @@ export function buildRoom(
   const rows = (snapshot.members ?? [])
     .filter((member) => member.active)
     .sort((left, right) => left.join_sequence - right.join_sequence)
-    .map((member): MemberRow & { teamId: string | null } => ({
-      memberId: member.id,
-      playerId: member.player_id,
-      name: member.display_name,
-      ready: member.ready,
-      connected: member.disconnected_until === null,
-      isYou: member.player_id === playerId,
-      isHost: member.player_id === snapshot.lobby.host_player_id,
-      bot: botOf.get(member.player_id),
-      teamId: member.team_id,
-    }));
+    .map((member): MemberRow & { teamId: string | null } => {
+      const seat = member.kind === "seat";
+      return {
+        memberId: member.id,
+        playerId: member.player_id,
+        name: member.display_name,
+        kind: seat ? "seat" : "human",
+        ready: member.ready,
+        connected: seat || member.disconnected_until === null,
+        isYou: member.player_id === playerId,
+        isHost: member.player_id === snapshot.lobby.host_player_id,
+        bot: seat
+          ? seatChoice(member.seat_settings)
+          : botOf.get(member.player_id),
+        teamId: member.team_id,
+      };
+    });
   const teams = [...(snapshot.teams ?? [])]
     .sort((left, right) => left.order - right.order)
     .map(

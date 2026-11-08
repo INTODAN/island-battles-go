@@ -18,6 +18,7 @@ export type ProblemContext =
   | "ready"
   | "start"
   | "bot"
+  | "seat"
   | "create";
 
 const isBotNotChosen = (error: ApiError) =>
@@ -37,6 +38,16 @@ const sentences: Record<string, string> = {
   unavailable: "The lobby server is temporarily unavailable. Please try again.",
   idempotency_conflict:
     "That create request was already used for a different lobby. Try again.",
+};
+
+/** The sentences for adding or removing a bot seat, which replace the lobby's where they differ. */
+const seatSentences: Record<string, string> = {
+  not_host: "Only the host can add or remove bots.",
+  team_full: "That team is full.",
+  phase_conflict: "The lobby has already started, so its bots can't change.",
+  invalid_seat_settings: "That bot level was refused. Choose another level.",
+  idempotency_conflict:
+    "The lobby changed while that bot was being added. Try again.",
 };
 
 const botNotChosen =
@@ -96,7 +107,12 @@ export function describeProblem(
     shown.message = error.detail ?? "Check what you entered and try again.";
     return shown;
   }
-  const known = code === undefined ? undefined : sentences[code];
+  const known =
+    code === undefined
+      ? undefined
+      : context === "seat"
+        ? (seatSentences[code] ?? sentences[code])
+        : sentences[code];
   if (known) {
     shown.message = known;
     return shown;

@@ -1,15 +1,23 @@
 import type { Realtime, Snapshot } from "../../realtime";
 import { copyText, h } from "../dom";
-import type { LobbyActions, LobbyBots, MapTemplateSummary } from "./actions";
+import {
+  type DefaultBot,
+  type LobbyActions,
+  type LobbyBots,
+  type MapTemplateSummary,
+  retryTransport,
+} from "./actions";
 import { mountBotPicker } from "./botPicker";
 import type { Screen } from "./nameScreen";
 import { describeProblem, type ProblemContext } from "./problems";
 import {
   buildRoom,
+  countPeople,
   describeBot,
   describeSettings,
   type MemberRow,
   type RoomModel,
+  seatBody,
   type TeamRow,
 } from "./roomModel";
 
@@ -23,6 +31,8 @@ export interface RoomScreenOptions {
 
 interface Problems {
   team: { teamId: string; message: string } | undefined;
+  /** A refused add or remove of a bot seat, shown in its team. */
+  seat: { teamId: string; message: string } | undefined;
   bot: string;
   ready: string;
   start: string;
@@ -31,11 +41,19 @@ interface Problems {
 
 const noProblems = (): Problems => ({
   team: undefined,
+  seat: undefined,
   bot: "",
   ready: "",
   start: "",
   highlight: [],
 });
+
+/** Used until `GET /bots/defaults` answers. */
+const fallbackLevels: DefaultBot[] = [1, 2, 3].map((level) => ({
+  level,
+  name: `Level ${level}`,
+  description: "",
+}));
 
 /** Screen 3: the lobby room. Everything shown comes from the realtime stores and the server's answers. */
 export function mountRoomScreen(options: RoomScreenOptions): Screen {
@@ -44,6 +62,9 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
   let busy = false;
   let problems = noProblems();
   let templates: MapTemplateSummary[] = [];
+  let levels: DefaultBot[] = fallbackLevels;
+  /** The level each team's Add bot select shows, by team ID. */
+  const chosenLevel = new Map<string, number>();
   let bots: LobbyBots | null = null;
   let botsKey = "";
   let botsReading = false;
@@ -189,6 +210,29 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
       },
     );
   };
+  /** A fresh request ID per click; a transport retry resends the same body, so the seat is added once. */
+  const addBot = (teamId: string) => {
+    const level = chosenLevel.get(teamId) ?? levels[0]?.level ?? 1;
+    const body = seatBody(teamId, level, crypto.randomUUID());
+    problems.seat = undefined;
+    return run(
+      "seat",
+      () => retryTransport(() => actions.addSeat(body)),
+      (shown) => {
+        problems.seat = { teamId, message: shown.message };
+      },
+    );
+  };
+  const removeBot = (member: MemberRow, teamId: string) => {
+    problems.seat = undefined;
+    return run(
+      "seat",
+      () => actions.removeSeat(member.memberId),
+      (shown) => {
+        problems.seat = { teamId, message: shown.message };
+      },
+    );
+  };
   readyButton.addEventListener("click", () => void toggleReady());
   startButton.addEventListener("click", () => void start());
   leaveButton.addEventListener("click", () => {
@@ -218,17 +262,21 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
 
   // --- Rendering ---
 
-  function memberItem(member: MemberRow): HTMLElement {
+  /** A seat is a bot: always ready, with no lease, and the host may remove it while waiting. */
+  function memberItem(member: MemberRow, remove?: () => void): HTMLElement {
+    const seat = member.kind === "seat";
+    const ready = seat || member.ready;
     return h(
       "li",
       {
-        class: `member${member.isYou ? " you" : ""}${member.connected ? "" : " offline"}`,
+        class: `member${seat ? " seat" : ""}${member.isYou ? " you" : ""}${member.connected ? "" : " offline"}`,
         attrs: { "data-player-id": member.playerId },
       },
       h(
         "span",
         { class: "member-name" },
         member.name,
+        seat ? h("span", { class: "tag bot" }, "bot") : null,
         member.isYou ? h("span", { class: "tag" }, "you") : null,
         member.isHost ? h("span", { class: "tag host" }, "host") : null,
         member.connected
@@ -243,11 +291,27 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
       h(
         "span",
         {
-          class: `ready-mark${member.ready ? " is-ready" : ""}`,
-          attrs: { "aria-label": member.ready ? "Ready" : "Not ready" },
+          class: `ready-mark${ready ? " is-ready" : ""}`,
+          attrs: { "aria-label": ready ? "Ready" : "Not ready" },
         },
-        member.ready ? "✓ Ready" : "Not ready",
+        ready ? "✓ Ready" : "Not ready",
       ),
+      remove
+        ? h(
+            "div",
+            { class: "seat-actions" },
+            h(
+              "button",
+              {
+                type: "button",
+                class: "secondary small",
+                disabled: busy,
+                onclick: remove,
+              },
+              "Remove",
+            ),
+          )
+        : null,
     );
   }
 
@@ -258,6 +322,48 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
     const colour = `var(--team-${((team.colour - 1) % 6) + 1})`;
     const error =
       problems.team?.teamId === team.id ? problems.team.message : "";
+    const seatError =
+      problems.seat?.teamId === team.id ? problems.seat.message : "";
+    // Bots are added and removed by the host, while the lobby waits.
+    const editSeats = model.isHost && model.phase === "waiting";
+    const level = chosenLevel.get(team.id) ?? levels[0]?.level ?? 1;
+    const addSeat = editSeats
+      ? h(
+          "div",
+          { class: "seat-add" },
+          h(
+            "select",
+            {
+              attrs: { "aria-label": `Bot level for ${team.name}` },
+              onchange: (event: Event) =>
+                chosenLevel.set(
+                  team.id,
+                  Number((event.target as HTMLSelectElement).value),
+                ),
+            },
+            ...levels.map((bot) =>
+              h(
+                "option",
+                {
+                  attrs: { value: String(bot.level) },
+                  selected: bot.level === level,
+                },
+                `Bot level ${bot.level}`,
+              ),
+            ),
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              class: "secondary small",
+              disabled: busy,
+              onclick: () => void addBot(team.id),
+            },
+            "Add bot",
+          ),
+        )
+      : null;
     const action = mine
       ? h(
           "button",
@@ -297,7 +403,18 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
         ),
       ),
       team.members.length > 0
-        ? h("ul", { class: "members" }, ...team.members.map(memberItem))
+        ? h(
+            "ul",
+            { class: "members" },
+            ...team.members.map((member) =>
+              memberItem(
+                member,
+                editSeats && member.kind === "seat"
+                  ? () => void removeBot(member, team.id)
+                  : undefined,
+              ),
+            ),
+          )
         : h(
             "p",
             { class: "hint empty" },
@@ -306,6 +423,8 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
       needsPlayer && team.members.length > 0
         ? h("p", { class: "field-error" }, "This team needs a player.")
         : null,
+      addSeat,
+      h("p", { class: "field-error", attrs: { role: "alert" } }, seatError),
       action,
       h("p", { class: "field-error", attrs: { role: "alert" } }, error),
     );
@@ -344,7 +463,11 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
     unassignedEl.hidden = model.unassigned.length === 0;
     unassignedEl.replaceChildren(
       h("h3", {}, "Choosing a team"),
-      h("ul", { class: "members" }, ...model.unassigned.map(memberItem)),
+      h(
+        "ul",
+        { class: "members" },
+        ...model.unassigned.map((member) => memberItem(member)),
+      ),
     );
 
     picker.update(
@@ -360,9 +483,10 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
     startError.hidden = !model.isHost;
     startButton.disabled = busy || started;
     leaveButton.disabled = busy;
-    const members =
-      model.teams.reduce((n, t) => n + t.members.length, 0) +
-      model.unassigned.length;
+    const members = countPeople([
+      ...model.teams.flatMap((team) => team.members),
+      ...model.unassigned,
+    ]);
     hint.textContent = started
       ? "The game is starting…"
       : members < 2
@@ -429,6 +553,14 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
     .mapTemplates()
     .then((maps) => {
       templates = maps;
+      render();
+    })
+    .catch(() => undefined);
+  void actions
+    .defaultBots()
+    .then((list) => {
+      if (disposed || list.length === 0) return;
+      levels = list;
       render();
     })
     .catch(() => undefined);
