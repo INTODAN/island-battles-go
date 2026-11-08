@@ -1,4 +1,5 @@
 import type { components } from "../api/generated/game";
+import { platformFetch } from "../platform";
 
 export type BotTurn = components["schemas"]["BotTurn"];
 export type BotTurnResult = components["schemas"]["BotTurnResult"];
@@ -37,8 +38,7 @@ export interface BotCallOptions {
   timeoutMs?: number;
 }
 
-const defaultFetch = ((...args: Parameters<typeof fetch>) =>
-  globalThis.fetch(...args)) as typeof fetch;
+const defaultFetch = platformFetch;
 
 /** True when `island-battles-bot serve` answers `GET /health`. */
 export async function checkBotHealth(

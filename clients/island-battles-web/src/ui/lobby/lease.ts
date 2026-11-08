@@ -1,4 +1,5 @@
 import { ApiError } from "../../api/errors";
+import { platformFetch } from "../../platform";
 
 export const heartbeatIntervalMs = 15_000;
 
@@ -61,8 +62,7 @@ export interface ReleaseTarget {
  */
 export function releaseLease(
   target: ReleaseTarget,
-  doFetch: typeof fetch = ((...args: Parameters<typeof fetch>) =>
-    globalThis.fetch(...args)) as typeof fetch,
+  doFetch: typeof fetch = platformFetch,
 ): void {
   const path = `/lobby/v1/games/${encodeURIComponent(target.gameKey)}/lobbies/${encodeURIComponent(target.lobbyId)}/leases/${encodeURIComponent(target.clientInstanceId)}`;
   try {

@@ -35,6 +35,22 @@ export const webClientUrl = (): string =>
 export const tabStorage = (): Storage =>
   isDesktop ? globalThis.localStorage : globalThis.sessionStorage;
 
+let desktopFetch: typeof fetch | undefined;
+
+/** Desktop build only (or a test, which passes undefined to undo it): what `platformFetch` sends requests through (see `src/desktop.ts`). */
+export function setDesktopFetch(replacement: typeof fetch | undefined): void {
+  desktopFetch = replacement;
+}
+
+/**
+ * The `fetch` the client's own calls use: the desktop build's HTTP plugin once
+ * installed, else the page's `fetch`, looked up per call so a later replacement
+ * (tests) is honoured. Not `globalThis.fetch` itself: Tauri's own IPC calls it,
+ * so replacing it with something that uses IPC never returns.
+ */
+export const platformFetch = ((...args: Parameters<typeof fetch>) =>
+  (desktopFetch ?? globalThis.fetch)(...args)) as typeof fetch;
+
 /** Resolves a path such as `/game/...` against the desktop build's game server. */
 export function resolveAgainstBase(
   input: Parameters<typeof fetch>[0],

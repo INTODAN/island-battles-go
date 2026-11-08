@@ -1,5 +1,5 @@
 import createClient, { type Middleware } from "openapi-fetch";
-import { apiBaseUrl } from "../platform";
+import { apiBaseUrl, platformFetch } from "../platform";
 import { ApiError, errorFromResponse } from "./errors";
 import type { paths as GamePaths } from "./generated/game";
 import type { paths as LobbyPaths } from "./generated/lobby";
@@ -76,9 +76,7 @@ export function createApiClients(options: ApiOptions = {}) {
     // Look fetch up per call so a later global replacement (and tests) is honoured.
     const client = createClient<P>({
       baseUrl,
-      fetch: transportFetch(
-        inner ?? (((...args) => globalThis.fetch(...args)) as typeof fetch),
-      ),
+      fetch: transportFetch(inner ?? platformFetch),
     });
     client.use(authMiddleware(getAccessToken), errorMiddleware);
     return client;

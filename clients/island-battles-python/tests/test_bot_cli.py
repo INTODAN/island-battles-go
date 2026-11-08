@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from island_battles_client import BotTurnResult
-from island_battles_client.cli import BotServer, ReloadingPlay
+from island_battles_client.cli import DEFAULT_ORIGINS, BotServer, ReloadingPlay
 from island_battles_client.fixture import fixture_turn_data
 
 GAME_ORIGIN = "https://game.example.org"
@@ -358,3 +358,14 @@ def test_check_exits_at_once_for_a_bot_that_never_returns(tmp_path: Path) -> Non
         assert result.returncode == 1
         assert "took longer than 2 s" in result.stderr
         assert time.monotonic() - started < 5
+
+
+def test_the_desktop_apps_origins_may_relay_by_default() -> None:
+    """The desktop app (#105) sends its web view's origin through Tauri's HTTP plugin."""
+    bot_server = BotServer(("127.0.0.1", 0), ReloadingPlay("x:y"), [*DEFAULT_ORIGINS])
+    try:
+        assert "tauri://localhost" in bot_server.origins
+        assert "http://tauri.localhost" in bot_server.origins
+        assert "https://evil.example.com" not in bot_server.origins
+    finally:
+        bot_server.server_close()

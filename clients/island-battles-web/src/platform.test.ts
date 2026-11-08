@@ -3,7 +3,9 @@ import { createApiClients } from "./api/client";
 import {
   apiBaseUrl,
   isDesktop,
+  platformFetch,
   resolveAgainstBase,
+  setDesktopFetch,
   tabStorage,
   webClientUrl,
 } from "./platform";
@@ -68,4 +70,25 @@ test("API clients use an explicit base URL over the default", async () => {
   });
   await gameApi.GET("/healthz" as never);
   expect(seen).toBe("https://island-battles.elidan.org/healthz");
+});
+
+test("platformFetch calls the page's fetch as it is at call time, until the desktop one is set", async () => {
+  const saved = globalThis.fetch;
+  const calls: string[] = [];
+  globalThis.fetch = (async (input: string) => {
+    calls.push(`page ${input}`);
+    return new Response("");
+  }) as unknown as typeof fetch;
+  try {
+    await platformFetch("/a");
+    setDesktopFetch((async (input: string) => {
+      calls.push(`desktop ${input}`);
+      return new Response("");
+    }) as unknown as typeof fetch);
+    await platformFetch("/b");
+    expect(calls).toEqual(["page /a", "desktop /b"]);
+  } finally {
+    setDesktopFetch(undefined);
+    globalThis.fetch = saved;
+  }
 });
