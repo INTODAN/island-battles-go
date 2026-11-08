@@ -16,6 +16,8 @@ export interface ApiErrorInit {
   problemType?: string | undefined;
   title?: string | undefined;
   detail?: string | undefined;
+  /** For `empty_teams`, the teams that still need a player, from the problem's `team_ids`. */
+  teamIds?: string[] | undefined;
   cause?: unknown;
 }
 
@@ -27,6 +29,7 @@ export class ApiError extends Error {
   readonly problemType: string | undefined;
   readonly title: string | undefined;
   readonly detail: string | undefined;
+  readonly teamIds: string[] | undefined;
 
   constructor(init: ApiErrorInit) {
     const summary = init.detail ?? init.title ?? `HTTP ${init.status}`;
@@ -41,6 +44,7 @@ export class ApiError extends Error {
     this.problemType = init.problemType;
     this.title = init.title;
     this.detail = init.detail;
+    this.teamIds = init.teamIds;
   }
 }
 
@@ -69,6 +73,9 @@ export async function errorFromResponse(response: Response): Promise<ApiError> {
       problemType: type === "about:blank" ? undefined : type,
       title: text(problem.title) ?? (response.statusText || undefined),
       detail: text(problem.detail),
+      teamIds: Array.isArray(problem.team_ids)
+        ? problem.team_ids.filter((id): id is string => typeof id === "string")
+        : undefined,
     });
   }
   return new ApiError({

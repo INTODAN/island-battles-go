@@ -69,6 +69,8 @@ export interface Realtime {
   leaveLobby(): void;
   /** Follows the signed-in player's game of a lobby. */
   followGame(lobbyId: string): void;
+  /** Reads the followed game again now, for a caller that learned the game exists. */
+  refreshGame(): void;
   leaveGame(): void;
   /** Ends the session and closes the connection. */
   signOut(): void;
@@ -552,6 +554,10 @@ export function createRealtime(options: RealtimeOptions = {}): Realtime {
       gameFollow = follow;
       if (client) attachGame(follow);
       else ensureClient();
+    },
+
+    refreshGame() {
+      gameFollow?.reconciler.request();
     },
 
     leaveGame,
