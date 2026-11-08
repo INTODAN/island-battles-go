@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { choiceFromValue, choiceValue, describeBot, describeChoices, prepareDemo } from "./bot-choice.mjs";
+import { choiceFromValue, choiceValue, describeBot, describeChoices, prepareDemo, seatOptions } from "./bot-choice.mjs";
 
 test("select values stand for choices and back", () => {
   for (const choice of [{ kind: "localhost" }, { kind: "default", level: 1 }, { kind: "default", level: 3 }]) {
@@ -30,4 +30,14 @@ test("a demo player chooses the localhost bot, which leaves its turns to the pag
     prepareDemo({ lobbyID: "lobby-1", request: async () => ({ status: 409, body: { detail: "the lobby has started" } }) }),
     /the lobby has started/,
   );
+});
+
+test("the host can seat a default bot of each level", async () => {
+  assert.deepEqual(await seatOptions({ levels: async () => [1, 2] }), {
+    label: "Add bot",
+    choices: [
+      { label: "Default bot, level 1", settings: { bot_level: 1 } },
+      { label: "Default bot, level 2", settings: { bot_level: 2 } },
+    ],
+  });
 });

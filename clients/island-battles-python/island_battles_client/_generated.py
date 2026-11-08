@@ -527,7 +527,7 @@ class LobbyBots(GameModel):
     lobby_id: UUID
     members: Sequence[LobbyMemberBot]
     """
-    Every member of the lobby, in the lobby's member order.
+    Every member of the lobby, in the lobby's member order, bot seats included.
     """
 
 
@@ -537,7 +537,7 @@ class LobbyMemberBot(GameModel):
     )
     bot: BotChoice | None = None
     """
-    The member's bot. Absent until they choose one, and a member can't get ready without one.
+    The member's bot. Absent until they choose one, and a member can't get ready without one. A bot seat that the host added has the default bot of its level.
     """
     display_name: StrictStr
     player_id: UUID
@@ -638,6 +638,7 @@ class Problem(GameModel):
         "idempotency_conflict",
         "invalid_input",
         "invalid_game_settings",
+        "invalid_seat_settings",
         "game_requirement",
         "unavailable",
         "internal_error",

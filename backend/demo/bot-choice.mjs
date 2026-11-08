@@ -3,7 +3,9 @@
 // PUT /game/lobbies/{lobby_id}/bot: their localhost bot, which
 // island-battles-bot serve runs on their machine and their game client relays
 // turns to, or a default bot level that the backend plays itself. The room
-// lists every member's choice from GET /game/lobbies/{lobby_id}/bots.
+// lists every member's choice from GET /game/lobbies/{lobby_id}/bots. The
+// host can also seat a default bot on a team, through the lobby page's seat
+// controls, which seatOptions fills.
 
 // The default bot levels the select offers when GET /bots/defaults can't be
 // read.
@@ -47,6 +49,16 @@ function loadLevels() {
     return fallbackLevels;
   });
   return defaultBots;
+}
+
+// The bot seats that the host can add to a team: a default bot of each level,
+// whose seat_settings {bot_level} the lobby page sends with POST …/seats.
+// The backend plays the seat with that bot.
+export async function seatOptions({ levels = loadLevels } = {}) {
+  return {
+    label: "Add bot",
+    choices: (await levels()).map((level) => ({ label: `Default bot, level ${level}`, settings: { bot_level: level } })),
+  };
 }
 
 // botsPath is the path of the lobby's bot endpoints.

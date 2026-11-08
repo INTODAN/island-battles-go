@@ -1,6 +1,6 @@
 import asyncio
 import json
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import centrifuge
 import httpx
@@ -215,6 +215,49 @@ async def test_rejected_game_settings_carry_the_game_message(h):
         await h.client.set_ready(SCOPE, True)
     assert (refused.value.code, refused.value.status, refused.value.detail, refused.value.problem_type) == (
         "game_requirement", 409, "Choose your bot first.", "urn:example:problem:bot-not-chosen")
+
+
+async def test_seats_send_the_games_settings_and_show_their_kind(h):
+    team, seat = str(uuid4()), str(uuid4())
+    seen = []
+
+    def member(kind, settings):
+        return dict(id=seat, player_id=str(uuid4()), display_name="Bot (level 2)", generation=1, active=True,
+                    team_id=team, ready=True, joined_at="2026-09-20T00:00:00Z", join_sequence=2,
+                    disconnected_until=None, kind=kind, seat_settings=settings)
+
+    async def seats(request):
+        if "/seats" not in request.url.path:
+            return None
+        seen.append((request.method, request.url.path, request.content and json.loads(request.content)))
+        if request.method == "POST" and json.loads(request.content)["seat_settings"].get("bot_level") == 9:
+            return httpx.Response(422, json={"code": "invalid_seat_settings", "status": 422, "title": "Unprocessable Entity",
+                                             "detail": "bot_level must be 1, 2 or 3"})
+        body = snapshot(3 if request.method == "POST" else 4)
+        if request.method == "POST":
+            body["members"] = [member("seat", {"bot_level": 2})]
+        return httpx.Response(200, json=body)
+    h.hook = seats
+    await h.join()
+    added = await h.client.add_seat(SCOPE, team, {"bot_level": 2})
+    assert (added.members[0].kind.value, added.members[0].seat_settings.to_dict()) == ("seat", {"bot_level": 2})
+    generated = seen[0][2].pop("request_id")
+    assert UUID(generated).version == 4
+    assert seen[0] == ("POST", f"/lobby/v1/games/quiz-demo/lobbies/{SCOPE.lobby_id}/seats",
+                       {"team_id": team, "seat_settings": {"bot_level": 2}})
+    # A caller's retry after a transport failure resends the same request ID.
+    mine = str(uuid4())
+    await h.client.add_seat(SCOPE, team, {"bot_level": 2}, request_id=mine)
+    await h.client.add_seat(SCOPE, team, {"bot_level": 2}, request_id=mine)
+    assert [call[2]["request_id"] for call in seen[1:3]] == [mine, mine]
+    assert generated != mine
+    seen.clear()
+    with pytest.raises(LobbyError) as invalid:
+        await h.client.add_seat(SCOPE, team, {"bot_level": 9})
+    assert (invalid.value.code, invalid.value.status, invalid.value.detail) == (
+        "invalid_seat_settings", 422, "bot_level must be 1, 2 or 3")
+    removed = await h.client.remove_seat(SCOPE, seat)
+    assert removed.members == [] and seen[-1][:2] == ("DELETE", f"/lobby/v1/games/quiz-demo/lobbies/{SCOPE.lobby_id}/seats/{seat}")
 
 
 async def test_explicit_identity(h):

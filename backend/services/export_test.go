@@ -7,7 +7,7 @@ import (
 
 // RunLobbyGameWithGoBots starts a lobby's game with the default bot levels
 // that the backend plays for some roster players, by player ID, as the
-// players' bot choice (#111) and bot seats (#115) will.
+// players' bot choices and the lobby's bot seats do.
 var RunLobbyGameWithGoBots = runLobbyGame
 
 // SetGoBotTimeBudgets changes how long one request plays the turns of a game

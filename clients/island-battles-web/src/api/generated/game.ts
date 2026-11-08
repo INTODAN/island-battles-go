@@ -613,11 +613,11 @@ export interface components {
             readonly $schema?: string;
             /** Format: uuid */
             lobby_id: string;
-            /** @description Every member of the lobby, in the lobby's member order. */
+            /** @description Every member of the lobby, in the lobby's member order, bot seats included. */
             members: components["schemas"]["LobbyMemberBot"][];
         };
         LobbyMemberBot: {
-            /** @description The member's bot. Absent until they choose one, and a member can't get ready without one. */
+            /** @description The member's bot. Absent until they choose one, and a member can't get ready without one. A bot seat that the host added has the default bot of its level. */
             bot?: components["schemas"]["BotChoice"];
             display_name: string;
             /** Format: uuid */
@@ -695,7 +695,7 @@ export interface components {
         };
         Problem: {
             /** @enum {string} */
-            code: "unauthenticated" | "not_found" | "not_host" | "lobby_full" | "team_full" | "phase_conflict" | "not_ready" | "empty_teams" | "stale_membership" | "idempotency_conflict" | "invalid_input" | "invalid_game_settings" | "game_requirement" | "unavailable" | "internal_error";
+            code: "unauthenticated" | "not_found" | "not_host" | "lobby_full" | "team_full" | "phase_conflict" | "not_ready" | "empty_teams" | "stale_membership" | "idempotency_conflict" | "invalid_input" | "invalid_game_settings" | "invalid_seat_settings" | "game_requirement" | "unavailable" | "internal_error";
             detail: string;
             /** Format: int64 */
             status: number;

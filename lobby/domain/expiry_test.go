@@ -143,3 +143,23 @@ func TestExpiryElectsHostDeterministically(t *testing.T) {
 		t.Fatal("incorrect successor")
 	}
 }
+
+func TestSeatsNeverExpireOrHost(t *testing.T) {
+	now := time.Now().UTC()
+	aggregate := expiryFixture(now.Add(-time.Hour))
+	team := "team"
+	aggregate.Members = append(aggregate.Members, domain.Member{ID: "seat", PlayerID: "seat-player", Active: true, Generation: 1, TeamID: &team, Ready: true, JoinSequence: 0, Kind: domain.MemberSeat, SeatSettings: []byte(`{"level":1}`)})
+	if _, err := domain.NormalizeExpired(&aggregate, now, domain.DefaultPolicy(domain.GameRegistration{Key: "island-battles"})); err != nil {
+		t.Fatal(err)
+	}
+	// The host's grace ran out; the seat, which joined earlier, doesn't host,
+	// so the waiting lobby closes, and its seat leaves with it. The seat held
+	// no lease, so it never disconnected.
+	if aggregate.Lobby.HostPlayerID != nil || aggregate.Lobby.Phase != domain.PhaseClosed {
+		t.Fatalf("host %v, phase %s", aggregate.Lobby.HostPlayerID, aggregate.Lobby.Phase)
+	}
+	seat := domain.FindMember(&aggregate, "seat-player")
+	if seat.Active || seat.Ready || seat.TeamID != nil || seat.DisconnectedUntil != nil {
+		t.Fatalf("seat after the lobby closed = %#v", seat)
+	}
+}

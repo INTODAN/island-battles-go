@@ -917,7 +917,7 @@
             "type": "string"
           },
           "members": {
-            "description": "Every member of the lobby, in the lobby's member order.",
+            "description": "Every member of the lobby, in the lobby's member order, bot seats included.",
             "items": {
               "$ref": "#/components/schemas/LobbyMemberBot"
             },
@@ -935,7 +935,7 @@
         "properties": {
           "bot": {
             "$ref": "#/components/schemas/BotChoice",
-            "description": "The member's bot. Absent until they choose one, and a member can't get ready without one."
+            "description": "The member's bot. Absent until they choose one, and a member can't get ready without one. A bot seat that the host added has the default bot of its level."
           },
           "display_name": {
             "type": "string"
@@ -1115,6 +1115,7 @@
               "idempotency_conflict",
               "invalid_input",
               "invalid_game_settings",
+              "invalid_seat_settings",
               "game_requirement",
               "unavailable",
               "internal_error"
