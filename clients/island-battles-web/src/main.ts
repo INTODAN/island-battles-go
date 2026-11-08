@@ -19,7 +19,17 @@ if (!root) {
 // The dev page for the 3D board: /?fixture=<file> draws a saved game from test/fixtures, no server.
 const fixture = new URLSearchParams(location.search).get("fixture");
 
-if (fixture !== null) {
+// Dev entry points for the game view (src/ui/game/devpage.ts): they run beside the app shell.
+const gameLobby = new URLSearchParams(location.search).get("game");
+const demoFile = new URLSearchParams(location.search).get("demo");
+
+if (gameLobby !== null) {
+  const { startGamePage } = await import("./ui/game/devpage");
+  startGamePage(gameLobby);
+} else if (demoFile !== null) {
+  const { startDemoPage } = await import("./ui/game/devpage");
+  await startDemoPage(demoFile);
+} else if (fixture !== null) {
   const { startFixturePage } = await import("./scene/devpage");
   await startFixturePage(canvas, fixture);
 } else {

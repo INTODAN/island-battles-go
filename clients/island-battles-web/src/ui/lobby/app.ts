@@ -2,7 +2,7 @@ import { createApiClients } from "../../api/client";
 import { type BotRelay, startBotRelay } from "../../bots";
 import type { Realtime } from "../../realtime";
 import { h } from "../dom";
-import { mountGameView } from "../game/index";
+import { mountDemoView, mountGameView } from "../game/index";
 import { createLobbyActions } from "./actions";
 import { releaseLease, startHeartbeat } from "./lease";
 import { mountMenuScreen } from "./menuScreen";
@@ -104,6 +104,51 @@ export function mountLobbyApp(options: {
   const gameHost = h("div", { class: "game-host", hidden: true });
   root.replaceChildren(stage, gameHost);
 
+  // A demo file opened from the name or create-or-join screen, shown over the screens.
+  const demoInput = h("input", {
+    type: "file",
+    accept: ".json,application/json",
+    hidden: true,
+  });
+  demoInput.setAttribute("aria-label", "Demo file");
+  const demoLink = h(
+    "button",
+    { type: "button", class: "demo-link", hidden: true },
+    "Open demo file",
+  );
+  demoLink.addEventListener("click", () => demoInput.click());
+  let demo: { stop(): void } | undefined;
+
+  function closeDemo(): void {
+    if (!demo) return;
+    demo.stop();
+    demo = undefined;
+    demoLink.hidden = !(screen?.key === "name" || screen?.key === "menu");
+    route();
+  }
+
+  demoInput.addEventListener("change", () => {
+    const file = demoInput.files?.[0];
+    demoInput.value = "";
+    if (!file || game || demo) return;
+    setOcean(false);
+    stage.hidden = true;
+    demoLink.hidden = true;
+    gameHost.hidden = false;
+    const viewHost = h("div", { class: "game-view" });
+    gameHost.replaceChildren(viewHost);
+    const view = mountDemoView(viewHost, { file, onBack: closeDemo });
+    demo = {
+      stop() {
+        view.dispose();
+        gameHost.replaceChildren();
+        gameHost.hidden = true;
+        stage.hidden = false;
+      },
+    };
+  });
+  root.append(demoLink, demoInput);
+
   function setOcean(on: boolean): void {
     if (on && !ocean) {
       canvas.hidden = false;
@@ -164,6 +209,8 @@ export function mountLobbyApp(options: {
   // --- Game ---
 
   function enterGame(lobbyId: string): void {
+    demo?.stop();
+    demo = undefined;
     setOcean(false);
     stage.hidden = true;
     gameHost.hidden = false;
@@ -193,9 +240,11 @@ export function mountLobbyApp(options: {
     });
     const viewHost = h("div", { class: "game-view" });
     gameHost.replaceChildren(viewHost, banner.el);
+    // The shell follows the game for the relay and ends it itself, so the view's own
+    // `leaveGame()` (on dispose, or when it swaps to a demo file) must not stop the relay.
     const view = mountGameView(viewHost, {
       lobbyId,
-      realtime,
+      realtime: { ...realtime, leaveGame() {} },
       onBack: () => leaveGame(""),
     });
     const stopOnGame = realtime.game.subscribe((state) => {
@@ -245,6 +294,7 @@ export function mountLobbyApp(options: {
     screen?.screen.dispose();
     const next = make();
     screen = { key, screen: next };
+    demoLink.hidden = !(key === "name" || key === "menu");
     stage.replaceChildren(next.el);
     stage.scrollTop = 0;
   }
@@ -280,6 +330,7 @@ export function mountLobbyApp(options: {
       });
       return;
     }
+    if (demo && !(lobby && lobby.lobby.phase === "started")) return;
     if (lobby && lobby.lobby.phase === "started") {
       if (game?.lobbyId !== lobby.lobby.id) {
         screen?.screen.dispose();
@@ -385,6 +436,7 @@ export function mountLobbyApp(options: {
       window.removeEventListener("pagehide", onPageHide);
       heartbeat?.stop();
       game?.stop();
+      demo?.stop();
       screen?.screen.dispose();
       setOcean(false);
     },

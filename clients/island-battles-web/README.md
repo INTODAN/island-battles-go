@@ -24,7 +24,7 @@ bun install
 bun run dev
 ```
 
-Open **http://localhost:3000/**. The dev server hot-reloads and proxies `/lobby/v1/*`, `/game/*`, `/generation/*`, `/map/*`, `/bots/*`, `/healthz` and `/openapi.json` to the backend on `http://localhost:8888`, so the browser talks to one origin and needs no CORS (the backend sends none). The Centrifugo WebSocket goes straight to `:8000`, whose allowed origins already include `http://localhost:3000`. The proxied paths live in [`proxy.ts`](proxy.ts).
+Open **http://localhost:3000/**. The dev server hot-reloads and proxies `/lobby/v1/*`, `/game/*`, `/generation/*`, `/map/*`, `/bots/*`, `/healthz` and `/openapi.json` to the backend on `http://localhost:8888`, so the browser talks to one origin and needs no CORS (the backend sends none). The Centrifugo WebSocket goes straight to `:8000`, whose allowed origins already include `http://localhost:3000`. The proxied paths live in [`proxy.ts`](proxy.ts). The dev proxy drops `content-encoding` and `content-length` from what it forwards, because Bun unpacks the gzipped demo itself.
 
 ## Commands
 
@@ -94,12 +94,24 @@ Tests inject a fake Centrifugo client (`createClient`), fake `fetch` and fake st
 
 Screenshots of each screen at desktop width and at 450 px are in [`docs/screenshots/`](docs/screenshots/) (`lobby-*.png`). "Add bot" per team (#115) is not here yet.
 
+## The game view
+
+`src/ui/game/` is the screen a player sees once their lobby starts: the 3D board with a HUD, a timeline, the outcome and the bot logs. `mountGameView(container, { lobbyId, realtime, onBack })` shows a lobby's game live; `mountDemoView(container, { file, onBack })` opens a saved demo file with no server. Both return `{ dispose() }`. The lobby screens ([#98](https://github.com/INTODAN/island-battles-go/issues/98)) own the app shell and call them (an **Open demo file** button on the name and create-or-join screens opens a demo; the shell follows the game for the relay and passes the view a `realtime` whose `leaveGame()` does nothing, so the relay keeps running while the view mounts, swaps to a demo or goes away); [#103](https://github.com/INTODAN/island-battles-go/issues/103) reuses the same screen for spectators. `/?game=<lobby_id>` (for the guest session saved in the tab's `sessionStorage`) and `/?demo` or `/?demo=<fixture.json>` open them alone from the dev server, beside the app shell.
+
+- **History** (`live.ts`): the view subscribes to the player channel first (`realtime.followGame`), then loads `GET /game/from-lobby/{lobby_id}/demo`, then merges the live generations into it by `id`, ignoring ones it holds (`history.ts`). A turn that arrives while the history loads is kept and merged after it. After a reconnect the history is read again and merged, so a turn the channel skipped is not lost. Turns are numbered by their index in the history, "Turn 37 / 120", because generation IDs have gaps.
+- **Timeline** (`controller.ts`, no DOM): play/pause, step back and forward, a scrubber and **Follow live**. Playing forward and stepping forward use the turn animation of `src/scene/animation/`; scrubbing and stepping back seek with no animation. Follow live turns off when you scrub back, and on when you return to the newest turn of a running game; pausing while following stops following. When the game has an outcome, or in a demo, nothing follows, and the timeline stays usable.
+- **HUD** (`screen.ts`): each team's name, colour and players, its soldiers (in castles and on the way) and castles for the shown turn, the turn, and a connection indicator.
+- **Bot logs** (`logs.ts`): a collapsible panel for the shown turn. The history carries the logs it could see when read; a live turn's logs are read with `GET .../logs?generation_id=N`. While teams are hidden it says "Logs of other teams appear when the game ends", and when the outcome arrives it reads them again.
+- **Demo files** (`demoFile.ts`): a TypeScript port of `backend/demoviewer/demo-file.mjs` against the generated `Demo` type, with the same checks and messages (format, `schema_version`, the 128 MiB cap, every drawn value). The file is read in the browser and uploaded nowhere. A demo from an unfinished game says so. A wrong file shows its message and leaves the game or demo shown before open.
+
+The turn deadline call (`POST .../deadline`) is not made here: the relay of [#98](https://github.com/INTODAN/island-battles-go/issues/98) does that. Screenshots of a live match, its outcome and a 450 px wide screen are in [`docs/screenshots/`](docs/screenshots/) (`game-*.png`).
+
 ## Layout
 
 - `index.html`, `src/main.ts`, `src/styles.css`: the page and the Babylon scene. `src/main.ts` starts the dev page when the URL has `?fixture=`, and the lobby app otherwise. `@babylonjs/core` is imported from its ES module paths so the bundle tree-shakes; add the side-effect imports a feature needs (for example `StandardMaterial`) instead of importing the package root.
 - `src/realtime/`: the Centrifugo session, described above.
 - `src/bots/`: the localhost bot relay.
-- `src/ui/lobby/`: the lobby screens and the app shell's flow; `src/ui/game/`: the game view.
+- `src/ui/lobby/`: the lobby screens and the app shell's flow; `src/ui/game/`: the game view, described above.
 - `src/scene/`: the 3D board, described above.
 - `dev.ts` and `proxy.ts`: the dev server and its proxy rules.
 - `build.ts`: the production build, served under `/play/`.

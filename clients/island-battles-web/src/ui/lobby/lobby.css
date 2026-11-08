@@ -553,3 +553,20 @@ select:focus-visible {
     font-size: 24px;
   }
 }
+
+.demo-link {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--glass);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.demo-link[hidden] {
+  display: none;
+}
