@@ -23,9 +23,19 @@ const server = Bun.serve({
     if (!isProxiedPath(url.pathname)) {
       return new Response("Not found", { status: 404 });
     }
-    return fetch(
+    const response = await fetch(
       new Request(backendOrigin + url.pathname + url.search, request),
     );
+    // Bun's fetch unpacks a gzipped body (the demo is sent gzipped), so passing the headers on
+    // unchanged would make the browser unpack it a second time and fail.
+    const headers = new Headers(response.headers);
+    headers.delete("content-encoding");
+    headers.delete("content-length");
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
   },
 });
 
