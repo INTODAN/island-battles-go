@@ -1,6 +1,6 @@
 import type { Scene } from "@babylonjs/core/scene";
 import type { components } from "../../api/generated/game";
-import { createBoat } from "../art";
+import { createBoat, disposeBoat } from "../art";
 import {
   type Battlefield,
   boatScale,
@@ -12,7 +12,7 @@ import {
 } from "../battlefield";
 import { castleDisplayLevel } from "../castleLevel";
 import { toWorld } from "../coordinates";
-import { createPlaceholderEffects, type TurnEffects } from "./effects";
+import { createTurnEffects, type TurnEffects } from "./effects";
 import type { TurnPlan, TurnSample } from "./plan";
 import { type PlayerOptions, type Stage, TurnPlayer } from "./player";
 
@@ -30,12 +30,13 @@ export class SceneStage implements Stage {
   private readonly shownCounts = new Map<number, string>();
   private readonly shownCastles = new Map<number, string>();
   private readonly shownLevels = new Map<number, number>();
+  private readonly shownTeams = new Map<number, number>();
   private field: Battlefield | undefined;
 
   constructor(
     private readonly scene: Scene,
     private readonly teams: readonly GameTeam[],
-    readonly effects: TurnEffects = createPlaceholderEffects(),
+    readonly effects: TurnEffects = createTurnEffects(),
   ) {}
 
   settle(generation: Generation): void {
@@ -59,7 +60,12 @@ export class SceneStage implements Stage {
       [...plan.previous.castles, ...plan.next.castles].map((c) => [c.id, c]),
     );
     for (const group of plan.transients) {
-      const parts = createBoat(this.scene, group.id, field.materials);
+      const parts = createBoat(
+        this.scene,
+        group.id,
+        field.materials,
+        group.team_color,
+      );
       const entity = { parts };
       this.transients.set(group.id, entity);
       updateGroup(
@@ -71,6 +77,7 @@ export class SceneStage implements Stage {
     }
     for (const castle of plan.previous.castles) {
       this.shownLevels.set(castle.id, castleDisplayLevel(castle.upgrades));
+      this.shownTeams.set(castle.id, castle.team_color);
     }
   }
 
@@ -131,6 +138,11 @@ export class SceneStage implements Stage {
         this.effects.castleLevelUp(field, id, level, pose.level);
       }
       this.shownLevels.set(id, pose.level);
+      const team = this.shownTeams.get(id);
+      if (team !== undefined && team !== pose.team) {
+        this.effects.castleCaptured(field, id, pose.team);
+      }
+      this.shownTeams.set(id, pose.team);
       const key = `${pose.count}:${pose.team}:${pose.level}`;
       if (this.shownCastles.get(id) !== key) {
         this.shownCastles.set(id, key);
@@ -154,9 +166,18 @@ export class SceneStage implements Stage {
   }
 
   end(plan: TurnPlan): void {
+    // A capture that lands as the turn ends has not been shown yet.
+    const captured = plan.next.castles.filter((castle) => {
+      const shown = this.shownTeams.get(castle.id);
+      return shown !== undefined && shown !== castle.team_color;
+    });
     this.reset();
-    this.field = renderGeneration(this.scene, plan.next, this.teams);
-    this.showClashes(this.field, true);
+    const field = renderGeneration(this.scene, plan.next, this.teams);
+    this.field = field;
+    this.showClashes(field, true);
+    for (const castle of captured) {
+      this.effects.castleCaptured(field, castle.id, castle.team_color);
+    }
   }
 
   /** Drops what a turn in progress added, so the next draw starts from nothing half-way. */
@@ -166,15 +187,14 @@ export class SceneStage implements Stage {
       for (const label of this.field?.labels.ids() ?? []) {
         if (label.startsWith(`group:${id}:`)) this.field?.labels.remove(label);
       }
-      for (const mesh of entity.parts.meshes) mesh.dispose();
-      entity.parts.body.dispose();
-      entity.parts.root.dispose();
+      disposeBoat(entity.parts);
     }
     this.transients.clear();
     this.hidden.clear();
     this.shownCounts.clear();
     this.shownCastles.clear();
     this.shownLevels.clear();
+    this.shownTeams.clear();
     const field = this.field;
     if (field) {
       for (const entity of field.groups.values()) {
@@ -204,7 +224,7 @@ export function createScenePlayer(
   scene: Scene,
   teams: readonly GameTeam[],
   options: PlayerOptions = {},
-  effects: TurnEffects = createPlaceholderEffects(),
+  effects: TurnEffects = createTurnEffects(scene),
 ): ScenePlayer {
   const stage = new SceneStage(scene, teams, effects);
   const player = new TurnPlayer(stage, options);

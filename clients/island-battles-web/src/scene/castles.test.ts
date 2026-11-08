@@ -7,7 +7,7 @@ import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import { InstancedMesh } from "@babylonjs/core/Meshes/instancedMesh";
 import { Scene } from "@babylonjs/core/scene";
 import type { components } from "../api/generated/game";
-import { MaterialCache } from "./art";
+import { ISLAND_TOP, MaterialCache } from "./art";
 import { CASTLE_ATLAS_URL, CASTLE_MODEL_URLS } from "./castleAssets";
 import { baseAtlasMaterial, teamAtlas } from "./castleAtlas";
 import { castleDisplayLevel } from "./castleLevel";
@@ -287,7 +287,7 @@ describe("animation", () => {
     expect(view.holder.position.y).toBeLessThan(0);
     pop.finish();
     expect(view.pop).toBeNull();
-    expect(view.holder.position.y).toBeCloseTo(0.12, 5);
+    expect(view.holder.position.y).toBeCloseTo(ISLAND_TOP, 5);
     expect(
       scene.meshes.some(
         (mesh) =>

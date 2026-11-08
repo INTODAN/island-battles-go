@@ -1,32 +1,66 @@
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
-import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder";
-import { CreateDisc } from "@babylonjs/core/Meshes/Builders/discBuilder";
 import { CreateTorus } from "@babylonjs/core/Meshes/Builders/torusBuilder";
-import type { Mesh } from "@babylonjs/core/Meshes/mesh";
-import { Mesh as MeshClass } from "@babylonjs/core/Meshes/mesh";
-import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
+import { Mesh } from "@babylonjs/core/Meshes/mesh";
+import "@babylonjs/core/Meshes/thinInstanceMesh";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
-import { ISLAND_RADIUS, ISLAND_SIDES, islandRadii } from "./islands";
+import {
+  baseAtlasMaterial,
+  hasAtlasPixels,
+  onAtlasPixels,
+  teamAtlas,
+} from "./castleAtlas";
+import { hashSeed, seededRandom } from "./islands";
+import {
+  BRIDGE_TOP,
+  bridgeOutline,
+  buildLandform,
+  ISLAND_TOP,
+  islandOutline,
+  type PropPlacement,
+} from "./landforms";
+import { FlatGeometry, type Point3, type SwatchPoint, solid } from "./lowPoly";
+import { teamColorHex } from "./palette";
+import { attachWake } from "./wakes";
 
-// Placeholder art, each piece a few primitives. Replace these builders to change the look; the
-// rest of the scene only uses their return values.
+// The board's own art (issue #102): islands, boats and props built in code, low-poly and
+// flat-shaded, and coloured from the castle atlas's swatches with the castles' own `castle-base`
+// and `castle-team` materials (castleAtlas.ts), so everything lights and recolours the same way.
 
-export const SEA_COLOR = "#5db2d8";
-export const SAND_COLOR = "#ecdba6";
-export const GRASS_COLOR = "#86bd68";
+export { ISLAND_TOP } from "./landforms";
+
+/**
+ * The open sea. #102 asked for about #1f4f63; it is darker so every team colour keeps 3:1
+ * contrast against it (contrast.test.ts lists each pair).
+ */
+export const DEEP_SEA_COLOR = "#081f2a";
+/** The shallows around each island; light enough for 3:1 against every team colour. */
+export const SHALLOWS_COLOR = "#cbf6ee";
+/** The foam line at the shore. */
+export const FOAM_COLOR = "#f4f1e6";
+/** The colour behind everything: the deep sea. */
+export const SEA_COLOR = DEEP_SEA_COLOR;
+/** The colour the castle placeholders stand on before the atlas arrives. */
 export const STONE_COLOR = "#d6ccb4";
-/** The top of an island, where castles stand. */
-export const ISLAND_TOP = 0.12;
-const ISLAND_BOTTOM = -0.14;
+/** The wood of a boat before the atlas arrives. */
+const WOOD_COLOR = "#9b6a47";
+
+/** How far a boat's body sits above the sea, so the hull's keel is just under the water. */
+export const BOAT_FLOAT = 0.04;
 
 export class MaterialCache {
   private readonly materials = new Map<string, StandardMaterial>();
-  constructor(private readonly scene: Scene) {}
+  /** Meshes waiting for the atlas, with the team their material is for (null: castle-base). */
+  private readonly pending = new Map<AbstractMesh, number | null>();
+
+  constructor(private readonly scene: Scene) {
+    onAtlasPixels(scene, () => this.flush());
+  }
 
   /** A lit colour; a little emissive so the team colours stay close to the palette. */
   lit(hex: string): StandardMaterial {
@@ -35,20 +69,46 @@ export class MaterialCache {
     });
   }
 
-  /** For meshes that carry their own vertex colours; lighting shades them. */
-  vertexColored(): StandardMaterial {
-    return this.get("vertex-colors", "#ffffff", (material) => {
-      material.emissiveColor = new Color3(0.22, 0.22, 0.22);
-    });
-  }
-
-  /** A flat colour that lighting never changes, for lines and the sea. */
+  /** A flat colour that lighting never changes, for lines and rings. */
   flat(hex: string, alpha = 1): StandardMaterial {
     return this.get(`flat:${hex}:${alpha}`, hex, (material, color) => {
       material.disableLighting = true;
       material.emissiveColor = color;
       material.alpha = alpha;
     });
+  }
+
+  /** Gives `mesh` the shared `castle-base` atlas material, now or when the atlas arrives. */
+  useBase(mesh: AbstractMesh, fallback = STONE_COLOR): void {
+    if (hasAtlasPixels(this.scene)) {
+      this.pending.delete(mesh);
+      mesh.material = baseAtlasMaterial(this.scene);
+      return;
+    }
+    mesh.material = this.lit(fallback);
+    this.pending.set(mesh, null);
+  }
+
+  /** Gives `mesh` the team's `castle-team` atlas material, now or when the atlas arrives. */
+  useTeam(mesh: AbstractMesh, team: number): void {
+    if (hasAtlasPixels(this.scene)) {
+      this.pending.delete(mesh);
+      mesh.material = teamAtlas(this.scene, team);
+      return;
+    }
+    mesh.material = this.lit(teamColorHex(team));
+    this.pending.set(mesh, team);
+  }
+
+  private flush(): void {
+    for (const [mesh, team] of this.pending) {
+      if (mesh.isDisposed()) continue;
+      mesh.material =
+        team === null
+          ? baseAtlasMaterial(this.scene)
+          : teamAtlas(this.scene, team);
+    }
+    this.pending.clear();
   }
 
   private get(
@@ -85,82 +145,47 @@ export function markPickable(
   }
 }
 
-function hexToRgba(hex: string): [number, number, number, number] {
-  const color = Color3.FromHexString(hex);
-  return [color.r, color.g, color.b, 1];
-}
-
-/**
- * An island blob: a sandy shore rising to a grassy top, with a rim shaped by `radii`. `stretch`
- * lengthens it along its local x axis, which land bridges use to join two castles' islands.
- */
-export function createIslandBlob(
-  scene: Scene,
-  name: string,
-  radii: readonly number[],
-  radius: number,
-  stretch = 1,
-): Mesh {
-  const sides = radii.length;
-  const positions: number[] = [];
-  const colors: number[] = [];
-  const indices: number[] = [];
-  const sand = hexToRgba(SAND_COLOR);
-  const grass = hexToRgba(GRASS_COLOR);
-  const ring = (scale: number, height: number, color: number[]) => {
-    const start = positions.length / 3;
-    for (let index = 0; index < sides; index++) {
-      const angle = (index / sides) * Math.PI * 2;
-      const length = (radii[index] ?? 1) * radius * scale;
-      positions.push(
-        Math.cos(angle) * length * stretch,
-        height,
-        Math.sin(angle) * length,
-      );
-      colors.push(...color);
-    }
-    return start;
-  };
-  const bottom = ring(1, ISLAND_BOTTOM, sand);
-  const shoreTop = ring(0.88, ISLAND_TOP - 0.02, sand);
-  const grassRim = ring(0.88, ISLAND_TOP - 0.02, grass);
-  const topRim = ring(0.74, ISLAND_TOP, grass);
-  const centre = positions.length / 3;
-  positions.push(0, ISLAND_TOP, 0);
-  colors.push(...grass);
-  for (let index = 0; index < sides; index++) {
-    const next = (index + 1) % sides;
-    indices.push(bottom + index, shoreTop + index, shoreTop + next);
-    indices.push(bottom + index, shoreTop + next, bottom + next);
-    indices.push(grassRim + index, topRim + index, topRim + next);
-    indices.push(grassRim + index, topRim + next, grassRim + next);
-    indices.push(topRim + index, centre, topRim + next);
-  }
-  const normals: number[] = [];
-  VertexData.ComputeNormals(positions, indices, normals);
-  const data = new VertexData();
-  data.positions = positions;
-  data.indices = indices;
-  data.normals = normals;
-  data.colors = colors;
-  const mesh = new MeshClass(name, scene);
-  data.applyToMesh(mesh);
+function meshOf(scene: Scene, name: string, geometry: FlatGeometry): Mesh {
+  const mesh = new Mesh(name, scene);
+  geometry.toVertexData().applyToMesh(mesh);
   mesh.isPickable = false;
   return mesh;
 }
 
+/** A castle's island: faceted cliffs, a grass top with a flat plateau, and a sand beach. */
 export function createIsland(
   scene: Scene,
   castleId: number,
   materials: MaterialCache,
 ): Mesh {
-  const mesh = createIslandBlob(
+  const mesh = meshOf(
     scene,
     `island-${castleId}`,
-    islandRadii(castleId, ISLAND_SIDES),
-    ISLAND_RADIUS,
+    buildLandform(islandOutline(castleId), ISLAND_TOP, hashSeed(castleId, 7)),
   );
-  mesh.material = materials.vertexColored();
+  materials.useBase(mesh, "#5b7a45");
+  mesh.receiveShadows = true;
+  return mesh;
+}
+
+/**
+ * The low land joining two castles of one landmass, `length` apart, along local x. The board
+ * places it at their midpoint and turns it to face from one to the other.
+ */
+export function createBridge(
+  scene: Scene,
+  key: string,
+  length: number,
+  seed: number,
+  materials: MaterialCache,
+): Mesh {
+  const mesh = meshOf(
+    scene,
+    `bridge-${key}`,
+    buildLandform(bridgeOutline(length, seed), BRIDGE_TOP, seed),
+  );
+  materials.useBase(mesh, "#5b7a45");
+  mesh.receiveShadows = true;
   return mesh;
 }
 
@@ -218,56 +243,380 @@ export function createPlaceholderCastle(
   return { root, roof, flag, meshes };
 }
 
+// ---- boats -----------------------------------------------------------------------------------
+
 export interface BoatParts {
   root: TransformNode;
   /** Scales with the soldier count; the root is placed and turned. */
   body: TransformNode;
+  /** The wooden hull and mast, on `castle-base`. */
   hull: Mesh[];
+  /** The sail and pennant, on the team's `castle-team`. */
+  sail: Mesh[];
+  /** The foam trail behind the boat, shown while it moves. */
+  wake: Mesh;
   meshes: Mesh[];
 }
 
-/** A small sailing boat whose bow points along local +z. */
+/** The hull's cross-sections from stern to bow: z, half-width at the deck and at the bottom. */
+const HULL_SECTIONS: readonly [number, number, number][] = [
+  [-0.17, 0.085, 0.05],
+  [-0.03, 0.105, 0.062],
+  [0.1, 0.082, 0.042],
+  [0.215, 0.0, 0.0],
+];
+/**
+ * How far along the team's stone swatch the sails sample, at their top and bottom: close to its
+ * top row, the team colour itself, as roofs are.
+ */
+export const SAIL_ALONG: readonly [number, number] = [0.005, 0.035];
+const DECK_Y = 0.085;
+const KEEL_Y = -0.04;
+const MAST_Z = -0.015;
+const MAST_TOP = 0.5;
+
+let cachedBoat: { hull: FlatGeometry; sail: FlatGeometry } | null = null;
+
+/** The boat's two pieces, built once: the wooden hull and mast, and the sail and pennant. */
+export function boatGeometry(): { hull: FlatGeometry; sail: FlatGeometry } {
+  if (cachedBoat) return cachedBoat;
+  const hull = new FlatGeometry();
+  const wood = (along: number): SwatchPoint => ({ swatch: "wood", along });
+  const side = (y: number) =>
+    wood(0.32 + ((DECK_Y - y) / (DECK_Y - KEEL_Y)) * 0.5);
+  for (let index = 0; index < HULL_SECTIONS.length - 1; index++) {
+    const [z0, deck0, bottom0] = HULL_SECTIONS[index] as [
+      number,
+      number,
+      number,
+    ];
+    const [z1, deck1, bottom1] = HULL_SECTIONS[index + 1] as [
+      number,
+      number,
+      number,
+    ];
+    const keel1 = index === HULL_SECTIONS.length - 2 ? 0.0 : KEEL_Y;
+    for (const sign of [1, -1]) {
+      const a: Point3 = [sign * deck0, DECK_Y, z0];
+      const b: Point3 = [sign * deck1, DECK_Y + (index === 2 ? 0.02 : 0), z1];
+      const c: Point3 = [sign * bottom1, keel1, z1];
+      const d: Point3 = [sign * bottom0, KEEL_Y, z0];
+      hull.quad(
+        a,
+        b,
+        c,
+        d,
+        [side(a[1]), side(b[1]), side(c[1]), side(d[1])],
+        [sign, 0, 0],
+      );
+    }
+    // The bottom and the deck.
+    hull.quad(
+      [bottom0, KEEL_Y, z0],
+      [bottom1, keel1, z1],
+      [-bottom1, keel1, z1],
+      [-bottom0, KEEL_Y, z0],
+      solid("wood", 0.9),
+      [0, -1, 0],
+    );
+    hull.quad(
+      [deck0, DECK_Y, z0],
+      [deck1, DECK_Y + (index === 2 ? 0.02 : 0), z1],
+      [-deck1, DECK_Y + (index === 2 ? 0.02 : 0), z1],
+      [-deck0, DECK_Y, z0],
+      solid("wood", 0.12),
+      [0, 1, 0],
+    );
+  }
+  const [sternZ, sternDeck, sternBottom] = HULL_SECTIONS[0] as [
+    number,
+    number,
+    number,
+  ];
+  hull.quad(
+    [sternDeck, DECK_Y, sternZ],
+    [-sternDeck, DECK_Y, sternZ],
+    [-sternBottom, KEEL_Y, sternZ],
+    [sternBottom, KEEL_Y, sternZ],
+    solid("wood", 0.55),
+    [0, 0, -1],
+  );
+  // The mast: a thin square post.
+  const m = 0.012;
+  const corners: [number, number][] = [
+    [m, MAST_Z + m],
+    [-m, MAST_Z + m],
+    [-m, MAST_Z - m],
+    [m, MAST_Z - m],
+  ];
+  for (let index = 0; index < 4; index++) {
+    const [ax, az] = corners[index] as [number, number];
+    const [bx, bz] = corners[(index + 1) % 4] as [number, number];
+    hull.quad(
+      [ax, DECK_Y, az],
+      [bx, DECK_Y, bz],
+      [bx, MAST_TOP, bz],
+      [ax, MAST_TOP, az],
+      solid("wood", 0.7),
+      [(ax + bx) / 2, 0, (az + bz) / 2 - MAST_Z],
+    );
+  }
+
+  // A square sail across the hull, billowing forward, and a pennant streaming back from the
+  // masthead. Both are drawn from both sides.
+  const sail = new FlatGeometry();
+  const cloth = (along: number): SwatchPoint => ({ swatch: "stone", along });
+  const top = 0.44;
+  const bottom = 0.17;
+  const half = 0.13;
+  const billow = 0.05;
+  const z = MAST_Z + 0.02;
+  const panels: [Point3, Point3, Point3, Point3][] = [
+    [
+      [0, top, z + billow * 0.6],
+      [half, top - 0.02, z],
+      [half * 1.08, bottom, z],
+      [0, bottom, z + billow],
+    ],
+    [
+      [-half, top - 0.02, z],
+      [0, top, z + billow * 0.6],
+      [0, bottom, z + billow],
+      [-half * 1.08, bottom, z],
+    ],
+  ];
+  const [clothTop, clothBottom] = SAIL_ALONG;
+  for (const [a, b, c, d] of panels) {
+    const colours: [SwatchPoint, SwatchPoint, SwatchPoint, SwatchPoint] = [
+      cloth(clothTop),
+      cloth(clothTop),
+      cloth(clothBottom),
+      cloth(clothBottom),
+    ];
+    sail.quad(a, b, c, d, colours, [0, 0, 1]);
+    sail.quad(a, b, c, d, colours, [0, 0, -1]);
+  }
+  // A jib from the masthead to the bow, along the hull, so a boat sailing across the screen
+  // shows its colour too.
+  const jib: [Point3, Point3, Point3] = [
+    [0.01, top - 0.01, MAST_Z + 0.03],
+    [0.02, DECK_Y + 0.05, MAST_Z + 0.06],
+    [0.0, DECK_Y + 0.04, 0.2],
+  ];
+  const jibColours: [SwatchPoint, SwatchPoint, SwatchPoint] = [
+    cloth(clothTop),
+    cloth(clothBottom),
+    cloth(clothBottom),
+  ];
+  sail.triangle(...jib, jibColours, [1, 0, 0]);
+  sail.triangle(...jib, jibColours, [-1, 0, 0]);
+  const flag = { swatch: "flags", along: 0.1 } as const;
+  const pennant: [Point3, Point3, Point3] = [
+    [0, MAST_TOP, MAST_Z],
+    [0, MAST_TOP - 0.07, MAST_Z],
+    [0, MAST_TOP - 0.03, MAST_Z - 0.14],
+  ];
+  sail.triangle(...pennant, [flag, flag, flag], [1, 0, 0]);
+  sail.triangle(...pennant, [flag, flag, flag], [-1, 0, 0]);
+  cachedBoat = { hull, sail };
+  return cachedBoat;
+}
+
+/** A small sailing boat whose bow points along local +z, in the team's colours. */
 export function createBoat(
   scene: Scene,
   id: number,
   materials: MaterialCache,
+  team = 0,
 ): BoatParts {
   const root = new TransformNode(`boat-${id}`, scene);
   const body = new TransformNode(`boat-${id}-body`, scene);
   body.parent = root;
-  const hullBack = CreateBox(
-    `boat-${id}-hull`,
-    { width: 0.2, height: 0.1, depth: 0.28 },
-    scene,
-  );
-  hullBack.position.z = -0.04;
-  const bow = CreateBox(
-    `boat-${id}-bow`,
-    { width: 0.14, height: 0.1, depth: 0.14 },
-    scene,
-  );
-  bow.rotation.y = Math.PI / 4;
-  bow.position.z = 0.1;
-  const mast = CreateCylinder(
-    `boat-${id}-mast`,
-    { diameter: 0.02, height: 0.34, tessellation: 6 },
-    scene,
-  );
-  mast.position.y = 0.2;
-  mast.position.z = -0.02;
-  const sail = CreateDisc(
-    `boat-${id}-sail`,
-    { radius: 0.17, tessellation: 3 },
-    scene,
-  );
-  sail.rotation = new Vector3(0, Math.PI / 2, Math.PI / 2);
-  sail.position.set(0, 0.24, -0.02);
-  sail.material = materials.flat("#fbfbf6");
-  mast.material = materials.lit("#6b5233");
-  const meshes = [hullBack, bow, mast, sail];
-  for (const mesh of meshes) mesh.parent = body;
-  body.position.y = 0.1;
-  return { root, body, hull: [hullBack, bow], meshes };
+  body.position.y = BOAT_FLOAT;
+  const geometry = boatGeometry();
+  const hull = meshOf(scene, `boat-${id}-hull`, geometry.hull);
+  const sail = meshOf(scene, `boat-${id}-sail`, geometry.sail);
+  hull.parent = body;
+  sail.parent = body;
+  materials.useBase(hull, WOOD_COLOR);
+  materials.useTeam(sail, team);
+  const wake = attachWake(scene, id, root);
+  return {
+    root,
+    body,
+    hull: [hull],
+    sail: [sail],
+    wake,
+    meshes: [hull, sail],
+  };
+}
+
+/** Recolours a boat's sail and pennant for `team`; the hull stays wood. */
+export function setBoatTeam(
+  parts: BoatParts,
+  team: number,
+  materials: MaterialCache,
+): void {
+  for (const mesh of parts.sail) materials.useTeam(mesh, team);
+}
+
+export function disposeBoat(parts: BoatParts): void {
+  for (const mesh of parts.meshes) mesh.dispose();
+  parts.wake.dispose();
+  parts.body.dispose();
+  parts.root.dispose();
+}
+
+// ---- props -----------------------------------------------------------------------------------
+
+/** A low-poly pine: a short trunk and two stacked cones of leaves, about 0.32 high. */
+export function treeGeometry(): FlatGeometry {
+  const geometry = new FlatGeometry();
+  const sides = 6;
+  const ring = (radius: number, y: number, turn = 0): Point3[] =>
+    Array.from({ length: sides }, (_, index) => {
+      const angle = ((index + turn) / sides) * Math.PI * 2;
+      return [Math.cos(angle) * radius, y, Math.sin(angle) * radius] as const;
+    });
+  const trunkBottom = ring(0.026, -0.01);
+  const trunkTop = ring(0.022, 0.08);
+  for (let index = 0; index < sides; index++) {
+    const next = (index + 1) % sides;
+    const a = trunkBottom[index] as Point3;
+    const b = trunkBottom[next] as Point3;
+    const c = trunkTop[next] as Point3;
+    const d = trunkTop[index] as Point3;
+    geometry.quad(a, b, c, d, solid("wood", 0.75), [
+      a[0] + b[0],
+      0,
+      a[2] + b[2],
+    ]);
+  }
+  const cone = (base: number, radius: number, height: number, turn: number) => {
+    const rim = ring(radius, base, turn);
+    const tip: Point3 = [0, base + height, 0];
+    const leaf = (y: number): SwatchPoint => ({
+      swatch: "green",
+      along: 0.12 + ((y - base) / height) * 0.45,
+    });
+    for (let index = 0; index < sides; index++) {
+      const a = rim[index] as Point3;
+      const b = rim[(index + 1) % sides] as Point3;
+      geometry.triangle(
+        a,
+        b,
+        tip,
+        [leaf(a[1]), leaf(b[1]), leaf(tip[1])],
+        [a[0] + b[0], radius * 0.6, a[2] + b[2]],
+      );
+      geometry.triangle(
+        a,
+        b,
+        [0, base, 0],
+        [leaf(base), leaf(base), leaf(base)],
+        [0, -1, 0],
+      );
+    }
+  };
+  cone(0.06, 0.12, 0.17, 0);
+  cone(0.16, 0.085, 0.16, 0.5);
+  return geometry;
+}
+
+/** A low-poly boulder of grey cliff rock, about 0.14 across. */
+export function rockGeometry(): FlatGeometry {
+  const geometry = new FlatGeometry();
+  const random = seededRandom(1020);
+  const sides = 6;
+  const base = Array.from({ length: sides }, (_, index) => {
+    const angle = (index / sides) * Math.PI * 2;
+    const radius = 0.065 * (0.8 + random() * 0.4);
+    return [Math.cos(angle) * radius, -0.02, Math.sin(angle) * radius] as const;
+  });
+  const middle = Array.from({ length: sides }, (_, index) => {
+    const angle = ((index + 0.5) / sides) * Math.PI * 2;
+    const radius = 0.055 * (0.8 + random() * 0.4);
+    return [
+      Math.cos(angle) * radius,
+      0.04 + random() * 0.02,
+      Math.sin(angle) * radius,
+    ] as const;
+  });
+  const top: Point3 = [0.01, 0.085, -0.005];
+  const grey = (y: number): SwatchPoint => ({
+    swatch: "cliff",
+    along: 0.18 + y * 3,
+  });
+  for (let index = 0; index < sides; index++) {
+    const next = (index + 1) % sides;
+    const a = base[index] as Point3;
+    const b = base[next] as Point3;
+    const m = middle[index] as Point3;
+    const n = middle[next] as Point3;
+    geometry.triangle(
+      a,
+      b,
+      m,
+      [grey(a[1]), grey(b[1]), grey(m[1])],
+      [m[0], 0.2, m[2]],
+    );
+    geometry.triangle(
+      b,
+      n,
+      m,
+      [grey(b[1]), grey(n[1]), grey(m[1])],
+      [b[0] + n[0], 0.3, b[2] + n[2]],
+    );
+    geometry.triangle(
+      m,
+      n,
+      top,
+      [grey(m[1]), grey(n[1]), grey(top[1])],
+      [m[0] + n[0], 0.6, m[2] + n[2]],
+    );
+  }
+  return geometry;
+}
+
+/** The two prop meshes of a scene, drawn as thin instances: one draw call each. */
+export interface PropMeshes {
+  tree: Mesh;
+  rock: Mesh;
+}
+
+export function createPropMeshes(
+  scene: Scene,
+  materials: MaterialCache,
+): PropMeshes {
+  const tree = meshOf(scene, "props-tree", treeGeometry());
+  const rock = meshOf(scene, "props-rock", rockGeometry());
+  for (const mesh of [tree, rock]) {
+    materials.useBase(mesh, "#6d8a50");
+    mesh.receiveShadows = true;
+    mesh.alwaysSelectAsActiveMesh = true;
+  }
+  return { tree, rock };
+}
+
+/** Puts one thin instance of each prop at its placement, replacing any before. */
+export function placeProps(
+  meshes: PropMeshes,
+  props: readonly PropPlacement[],
+): void {
+  for (const kind of ["tree", "rock"] as const) {
+    const mesh = meshes[kind];
+    const chosen = props.filter((prop) => prop.kind === kind);
+    const matrices = new Float32Array(chosen.length * 16);
+    chosen.forEach((prop, index) => {
+      Matrix.Compose(
+        new Vector3(prop.scale, prop.scale, prop.scale),
+        Quaternion.RotationAxis(Vector3.Up(), prop.yaw),
+        new Vector3(prop.x, prop.y, prop.z),
+      ).copyToArray(matrices, index * 16);
+    });
+    mesh.thinInstanceSetBuffer("matrix", matrices, 16, true);
+    mesh.setEnabled(chosen.length > 0);
+  }
 }
 
 /** A flat ring on the sea, lying in the XZ plane. */

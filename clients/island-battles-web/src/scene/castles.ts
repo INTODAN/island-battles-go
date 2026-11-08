@@ -21,12 +21,12 @@ import {
   type MaterialCache,
   type PickTarget,
 } from "./art";
+import { fetchAsset } from "./assetLoader";
 import { CASTLE_ATLAS_URL, CASTLE_MODEL_URLS } from "./castleAssets";
 import {
   baseAtlasMaterial,
-  hasAtlasPixels,
   loadAtlasPixels,
-  setAtlasPixels,
+  requestAtlasPixels,
   teamAtlas,
 } from "./castleAtlas";
 import { MAX_CASTLE_LEVEL } from "./castleLevel";
@@ -91,21 +91,6 @@ interface SceneModels {
 }
 
 const byScene = new WeakMap<Scene, SceneModels>();
-const bytes = new Map<string, Promise<ArrayBuffer>>();
-
-/** Fetches a model's bytes once for the page, however many scenes use it. */
-function fetchOnce(url: string): Promise<ArrayBuffer> {
-  let request = bytes.get(url);
-  if (!request) {
-    request = fetch(url).then((response) => {
-      if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
-      return response.arrayBuffer();
-    });
-    bytes.set(url, request);
-  }
-  return request;
-}
-
 async function loadLevel(
   scene: Scene,
   level: number,
@@ -113,7 +98,7 @@ async function loadLevel(
 ): Promise<LevelModel> {
   const data =
     typeof source === "string"
-      ? new Uint8Array(await fetchOnce(source))
+      ? new Uint8Array(await fetchAsset(source))
       : source;
   const container = await LoadAssetContainerAsync(data, scene, {
     pluginExtension: ".glb",
@@ -198,9 +183,9 @@ async function loadModels(
   }
   // The four models download while the atlas decodes.
   for (const source of sources.models) {
-    if (typeof source === "string") fetchOnce(source).catch(() => {});
+    if (typeof source === "string") fetchAsset(source).catch(() => {});
   }
-  if (!hasAtlasPixels(scene)) setAtlasPixels(scene, await sources.atlas());
+  await requestAtlasPixels(scene, sources.atlas);
   const levels = await Promise.all(
     sources.models.map((source, index) => loadLevel(scene, index + 1, source)),
   );

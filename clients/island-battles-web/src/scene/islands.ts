@@ -5,7 +5,14 @@ export const SHARED_LANDMASS_DISTANCE = 1.5;
 /** The radius of the island under one castle, in map units. */
 export const ISLAND_RADIUS = 1;
 export const ISLAND_SIDES = 16;
-
+/**
+ * The smallest radius multiplier of an island. It was 0.75 until #102, which keeps a flat
+ * plateau of PLATEAU_RADIUS (0.78, landforms.ts) for the level 4 castle's base (0.745) inside
+ * every island's cliff, so the narrowest sides of the seeded outlines are a little wider now.
+ */
+export const MIN_ISLAND_RADIUS = 0.84;
+/** The largest radius multiplier of an island. */
+export const MAX_ISLAND_RADIUS = 1.25;
 // mulberry32: a small seeded generator, so an island's shape is a function of the castle ID.
 export function seededRandom(seed: number): () => number {
   let state = seed >>> 0;
@@ -29,8 +36,9 @@ export function hashSeed(...values: number[]): number {
 }
 
 /**
- * The radius multipliers around an island, from 0.75 to 1.25 of ISLAND_RADIUS, a smooth
- * blend of a few seeded waves. They depend only on the castle ID, so the island never changes.
+ * The radius multipliers around an island, from MIN_ISLAND_RADIUS to MAX_ISLAND_RADIUS of
+ * ISLAND_RADIUS, a smooth blend of a few seeded waves. They depend only on the castle ID, so the
+ * island never changes; more `sides` sample the same outline more finely.
  */
 export function islandRadii(castleId: number, sides = ISLAND_SIDES): number[] {
   const random = seededRandom(hashSeed(castleId, 1));
@@ -46,7 +54,7 @@ export function islandRadii(castleId: number, sides = ISLAND_SIDES): number[] {
         total + wave.amplitude * Math.sin(wave.frequency * angle + wave.phase),
       0,
     );
-    return Math.min(1.25, Math.max(0.75, 1 + offset));
+    return Math.min(MAX_ISLAND_RADIUS, Math.max(MIN_ISLAND_RADIUS, 1 + offset));
   });
 }
 

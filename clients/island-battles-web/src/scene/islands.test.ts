@@ -5,6 +5,8 @@ import {
   islandRadii,
   landmasses,
   landmassLinks,
+  MAX_ISLAND_RADIUS,
+  MIN_ISLAND_RADIUS,
   seededRandom,
 } from "./islands";
 
@@ -24,10 +26,18 @@ describe("island seeding", () => {
   test("radii stay within a gentle range, so islands never collapse or spike", () => {
     for (let id = 0; id < 50; id++) {
       for (const radius of islandRadii(id)) {
-        expect(radius).toBeGreaterThanOrEqual(0.75);
-        expect(radius).toBeLessThanOrEqual(1.25);
+        expect(radius).toBeGreaterThanOrEqual(MIN_ISLAND_RADIUS);
+        expect(radius).toBeLessThanOrEqual(MAX_ISLAND_RADIUS);
       }
     }
+  });
+
+  test("a finer sampling follows the same outline", () => {
+    const coarse = islandRadii(7, 16);
+    const fine = islandRadii(7, 32);
+    coarse.forEach((radius, index) => {
+      expect(fine[index * 2]).toBeCloseTo(radius, 10);
+    });
   });
 
   test("the seeded generator repeats and stays in [0, 1)", () => {

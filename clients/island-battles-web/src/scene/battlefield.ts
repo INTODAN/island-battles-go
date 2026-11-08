@@ -1,9 +1,4 @@
 import type { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
-import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
-import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
-import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
-import { Vector3 } from "@babylonjs/core/Maths/math.vector";
-import { CreateGround } from "@babylonjs/core/Meshes/Builders/groundBuilder";
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { Mesh as MeshClass } from "@babylonjs/core/Meshes/mesh";
 import { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
@@ -13,13 +8,18 @@ import type { components } from "../api/generated/game";
 import {
   type BoatParts,
   createBoat,
+  createBridge,
   createFlatRing,
   createIsland,
-  createIslandBlob,
+  createPropMeshes,
+  disposeBoat,
   ISLAND_TOP,
   MaterialCache,
   markPickable,
+  type PropMeshes,
+  placeProps,
   SEA_COLOR,
+  setBoatTeam,
 } from "./art";
 import { type BoardBounds, boardBounds } from "./board";
 import { createBoardCamera, fitCamera } from "./camera";
@@ -41,8 +41,16 @@ import {
   headingStyle,
   ribbonGeometry,
 } from "./headingLines";
-import { hashSeed, islandRadii, landmassLinks } from "./islands";
+import { hashSeed, landmassLinks } from "./islands";
 import { LabelLayer, type LabelSpec } from "./labelLayer";
+import {
+  bridgeOutline,
+  islandOutline,
+  islandProps,
+  type Outline,
+  waterline,
+} from "./landforms";
+import { createBoardLook } from "./look";
 import { CLASH_COLOR, LOSS_COLOR, teamColorHex, tint } from "./palette";
 
 type Generation = components["schemas"]["Generation"];
@@ -83,6 +91,10 @@ export interface Battlefield {
   islands: Map<number, Mesh>;
   bridges: Map<string, Mesh>;
   groups: Map<number, GroupEntity>;
+  /** The trees and rocks, as thin instances. */
+  props: PropMeshes;
+  /** The castles the islands, props and shallows were last built for. */
+  islandKey: string;
   clashes: Map<string, ClashEntity>;
   headings: Map<number, HeadingEntity>;
   /** The headings of the last render, for tests. */
@@ -98,17 +110,9 @@ export function battlefieldOf(scene: Scene): Battlefield | undefined {
 function createBattlefield(scene: Scene): Battlefield {
   const canvas = scene.getEngine().getRenderingCanvas();
   if (!canvas) throw new Error("the scene's engine has no canvas");
-  scene.clearColor = Color4.FromColor3(Color3.FromHexString(SEA_COLOR), 1);
+  createBoardLook(scene);
   const materials = new MaterialCache(scene);
   const bounds = boardBounds([]);
-  const sea = CreateGround("sea", { width: 400, height: 400 }, scene);
-  sea.material = materials.flat(SEA_COLOR);
-  sea.isPickable = false;
-  const sky = new HemisphericLight("sky", new Vector3(0.2, 1, -0.3), scene);
-  sky.intensity = 0.8;
-  sky.groundColor = new Color3(0.6, 0.62, 0.66);
-  const sun = new DirectionalLight("sun", new Vector3(-0.4, -1, 0.5), scene);
-  sun.intensity = 0.45;
   const camera = createBoardCamera(scene, canvas, bounds);
   const battlefield: Battlefield = {
     scene,
@@ -122,6 +126,8 @@ function createBattlefield(scene: Scene): Battlefield {
     islands: new Map(),
     bridges: new Map(),
     groups: new Map(),
+    props: createPropMeshes(scene, materials),
+    islandKey: "",
     clashes: new Map(),
     headings: new Map(),
     headingSegments: [],
@@ -240,7 +246,7 @@ export function updateGroup(
   entity: GroupEntity,
 ): void {
   const { scene, materials } = field;
-  const { root, body, hull } = entity.parts;
+  const { root, body } = entity.parts;
   const world = toWorld(group);
   root.position.set(world.x, 0, world.z);
   if (destination) {
@@ -249,7 +255,7 @@ export function updateGroup(
   }
   body.scaling.setAll(boatScale(group.soldiers));
   const color = teamColorHex(group.team_color);
-  for (const mesh of hull) mesh.material = materials.lit(color);
+  setBoatTeam(entity.parts, group.team_color, materials);
 
   setLabel(field, `group:${group.id}:soldiers`, {
     lines: [String(group.soldiers)],
@@ -315,7 +321,8 @@ function updateClashes(field: Battlefield, generation: Generation): void {
           for (const mesh of entity.ghost.meshes) {
             mesh.material = materials.flat(tint(color, 0.2), 0.4);
           }
-          entity.ghost.body.position.y = -0.02;
+          entity.ghost.wake.setEnabled(false);
+          entity.ghost.body.position.y = -0.04;
           entity.ghost.root.rotation.z = 0.35;
         }
         entity.ghost.root.position.set(world.x, 0, world.z);
@@ -341,11 +348,7 @@ function updateClashes(field: Battlefield, generation: Generation): void {
   }
   prune(field.clashes, seen, (entity) => {
     entity.ring.dispose();
-    if (entity.ghost) {
-      for (const mesh of entity.ghost.meshes) mesh.dispose();
-      entity.ghost.body.dispose();
-      entity.ghost.root.dispose();
-    }
+    if (entity.ghost) disposeBoat(entity.ghost);
   });
   for (const id of field.labels.ids()) {
     if (
@@ -440,42 +443,78 @@ export function updateHeadings(
   });
 }
 
+/** A polygon in local x and z, turned by `yaw` about y and moved to (`x`, `z`). */
+function placeOutline(
+  outline: Outline,
+  x: number,
+  z: number,
+  yaw = 0,
+): Outline {
+  const cos = Math.cos(yaw);
+  const sin = Math.sin(yaw);
+  return outline.map(
+    ([lx, lz]) => [x + lx * cos + lz * sin, z - lx * sin + lz * cos] as const,
+  );
+}
+
 function updateIslands(field: Battlefield, castles: readonly Castle[]): void {
   const { scene, materials } = field;
+  const key = castles
+    .map((castle) => `${castle.id}:${castle.x}:${castle.y}`)
+    .sort()
+    .join(",");
+  if (key === field.islandKey) return;
+  field.islandKey = key;
+  const waterlines: Outline[] = [];
+  const ids = new Set<number>();
   for (const castle of castles) {
-    if (field.islands.has(castle.id)) continue;
-    const island = createIsland(scene, castle.id, materials);
+    ids.add(castle.id);
     const world = toWorld(castle);
+    let island = field.islands.get(castle.id);
+    if (!island) {
+      island = createIsland(scene, castle.id, materials);
+      field.islands.set(castle.id, island);
+    }
     island.position.set(world.x, 0, world.z);
-    field.islands.set(castle.id, island);
+    waterlines.push(
+      placeOutline(waterline(islandOutline(castle.id)), world.x, world.z),
+    );
   }
-  // Neighbouring castles share a landmass: a land bridge joins their islands.
+  prune(field.islands, ids, (island) => island.dispose());
+  // Neighbouring castles share a landmass: a low land bridge joins their islands.
   const byId = new Map(castles.map((castle) => [castle.id, castle]));
   const wanted = new Set<string>();
   for (const [firstId, secondId] of landmassLinks(castles)) {
     const first = byId.get(firstId);
     const second = byId.get(secondId);
     if (!first || !second) continue;
-    const key = `${firstId}-${secondId}`;
-    wanted.add(key);
-    if (field.bridges.has(key)) continue;
+    const bridgeKey = `${firstId}-${secondId}`;
+    wanted.add(bridgeKey);
     const start = toWorld(first);
     const end = toWorld(second);
     const length = Math.hypot(end.x - start.x, end.z - start.z);
-    const radius = 0.62;
-    const bridge = createIslandBlob(
-      scene,
-      `bridge-${key}`,
-      islandRadii(hashSeed(firstId, secondId), 12),
-      radius,
-      (length / 2 + 0.45) / radius,
+    const seed = hashSeed(firstId, secondId);
+    const yaw = -Math.atan2(end.z - start.z, end.x - start.x);
+    const middle = { x: (start.x + end.x) / 2, z: (start.z + end.z) / 2 };
+    let bridge = field.bridges.get(bridgeKey);
+    if (!bridge) {
+      bridge = createBridge(scene, bridgeKey, length, seed, materials);
+      field.bridges.set(bridgeKey, bridge);
+    }
+    bridge.position.set(middle.x, 0, middle.z);
+    bridge.rotation.y = yaw;
+    waterlines.push(
+      placeOutline(
+        waterline(bridgeOutline(length, seed)),
+        middle.x,
+        middle.z,
+        yaw,
+      ),
     );
-    bridge.material = materials.vertexColored();
-    bridge.position.set((start.x + end.x) / 2, 0, (start.z + end.z) / 2);
-    bridge.rotation.y = -Math.atan2(end.z - start.z, end.x - start.x);
-    field.bridges.set(key, bridge);
   }
   prune(field.bridges, wanted, (bridge) => bridge.dispose());
+  createBoardLook(scene).setIslands(waterlines);
+  placeProps(field.props, islandProps(castles));
 }
 
 /**
@@ -565,7 +604,12 @@ export function renderGeneration(
     groupIds.add(group.id);
     let entity = field.groups.get(group.id);
     if (!entity) {
-      const parts = createBoat(scene, group.id, field.materials);
+      const parts = createBoat(
+        scene,
+        group.id,
+        field.materials,
+        group.team_color,
+      );
       markPickable(parts.meshes, { kind: "group", id: group.id });
       entity = { parts };
       field.groups.set(group.id, entity);
@@ -577,11 +621,7 @@ export function renderGeneration(
       entity,
     );
   }
-  prune(field.groups, groupIds, (entity) => {
-    for (const mesh of entity.parts.meshes) mesh.dispose();
-    entity.parts.body.dispose();
-    entity.parts.root.dispose();
-  });
+  prune(field.groups, groupIds, (entity) => disposeBoat(entity.parts));
   for (const id of field.labels.ids()) {
     const match = /^group:(\d+):/.exec(id);
     if (match && !groupIds.has(Number(match[1]))) {

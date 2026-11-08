@@ -1,18 +1,19 @@
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { Engine } from "@babylonjs/core/Engines/engine";
-import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
-import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
-import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
-import { CreateGround } from "@babylonjs/core/Meshes/Builders/groundBuilder";
 import { Scene } from "@babylonjs/core/scene";
 import {
   createBoat,
   createIsland,
+  createPropMeshes,
   MaterialCache,
-  SEA_COLOR,
+  placeProps,
 } from "../../scene/art";
+import { loadBoardAssets } from "../../scene/boardAssets";
 import { createCastleView } from "../../scene/castles";
+import { applyGraphics, savedGraphics } from "../../scene/graphics";
+import { islandOutline, islandProps, waterline } from "../../scene/landforms";
+import { createBoardLook } from "../../scene/look";
 
 export interface Ocean {
   dispose(): void;
@@ -29,15 +30,16 @@ const islands: [number, number, number, number][] = [
 ];
 
 /**
- * The backdrop of the lobby screens: a few castles on islands and some boats
- * on a calm sea, with the camera slowly circling. It makes no network calls
- * and reads no state.
+ * The backdrop of the lobby screens: a few castles on islands and some boats on the board's
+ * sea, with the camera slowly circling. It makes no calls but for the board's art, which loads
+ * after the screens are up; the canvas fades in once it has. It reads no state.
  */
 export function startOcean(canvas: HTMLCanvasElement): Ocean {
   const engine = new Engine(canvas, true);
   const scene = new Scene(engine);
-  scene.clearColor = Color4.FromColor3(Color3.FromHexString(SEA_COLOR), 1);
+  const look = createBoardLook(scene);
   const materials = new MaterialCache(scene);
+  canvas.classList.add("ocean-loading");
 
   const camera = new ArcRotateCamera(
     "ocean-camera",
@@ -48,23 +50,12 @@ export function startOcean(canvas: HTMLCanvasElement): Ocean {
     scene,
   );
   camera.fov = 0.7;
-  const sky = new HemisphericLight(
-    "ocean-sky",
-    new Vector3(0.2, 1, -0.3),
-    scene,
-  );
-  sky.intensity = 0.65;
-  sky.groundColor = new Color3(0.4, 0.55, 0.65);
-  const sun = new DirectionalLight(
-    "ocean-sun",
-    new Vector3(-0.4, -1, 0.5),
-    scene,
-  );
-  sun.intensity = 0.7;
 
-  const sea = CreateGround("ocean-sea", { width: 200, height: 200 }, scene);
-  sea.material = materials.flat(SEA_COLOR);
-
+  const castles = islands.map(([x, z], index) => ({
+    id: 100 + index,
+    x,
+    y: -z,
+  }));
   islands.forEach(([x, z, team, level], index) => {
     const island = createIsland(scene, 100 + index, materials);
     island.position.set(x, 0, z);
@@ -78,13 +69,27 @@ export function startOcean(canvas: HTMLCanvasElement): Ocean {
     );
     castle.root.position.set(x, 0, z);
   });
+  look.setIslands(
+    islands.map(([x, z], index) =>
+      waterline(islandOutline(100 + index)).map(
+        ([lx, lz]) => [x + lx, z + lz] as const,
+      ),
+    ),
+  );
+  placeProps(createPropMeshes(scene, materials), islandProps(castles));
 
-  const boats = islands.slice(0, 4).map(([x, z], index) => {
-    const boat = createBoat(scene, 100 + index, materials);
+  const boats = islands.slice(0, 4).map(([x, z, team], index) => {
+    const boat = createBoat(scene, 100 + index, materials, team);
     const radius = 2.2 + index * 0.35;
     const phase = index * 1.7;
     return { boat, x, z, radius, phase };
   });
+
+  void applyGraphics(scene, camera, savedGraphics());
+  loadBoardAssets(scene).then(
+    () => canvas.classList.remove("ocean-loading"),
+    () => canvas.classList.remove("ocean-loading"),
+  );
 
   const started = performance.now();
   scene.onBeforeRenderObservable.add(() => {
@@ -109,6 +114,7 @@ export function startOcean(canvas: HTMLCanvasElement): Ocean {
   return {
     dispose() {
       window.removeEventListener("resize", onResize);
+      canvas.classList.remove("ocean-loading");
       engine.stopRenderLoop();
       scene.dispose();
       engine.dispose();

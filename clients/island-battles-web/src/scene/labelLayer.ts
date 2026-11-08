@@ -60,6 +60,9 @@ export class LabelLayer {
     );
     // Labels never take the pointer, so hovering and clicking reach the meshes below.
     this.texture.isForeground = true;
+    // Labels are drawn after the board's post-processing (#102), so tone mapping, bloom and FXAA
+    // never soften their text or shift their team colours.
+    if (this.texture.layer) this.texture.layer.applyPostProcess = false;
     scene.onBeforeRenderObservable.add(() => this.place());
   }
 

@@ -2,10 +2,13 @@ import { Engine } from "@babylonjs/core/Engines/engine";
 import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Scene } from "@babylonjs/core/scene";
 import type { components } from "../api/generated/game";
+import { showBoardLoading } from "../ui/boardLoading";
 import { createScenePlayer, DEFAULT_TURN_MS } from "./animation";
 import { type Battlefield, battlefieldOf } from "./battlefield";
+import { loadBoardAssets } from "./boardAssets";
 import { setCastleAnimation } from "./castles";
 import { toWorld } from "./coordinates";
+import { applyGraphics, type Graphics, savedGraphics } from "./graphics";
 import { installBoardControls } from "./picking";
 
 type Demo = components["schemas"]["Demo"];
@@ -49,6 +52,24 @@ declare global {
         y: number,
         height?: number,
       ) => { x: number; y: number };
+      /** Settles once the board's art has loaded. */
+      assets: Promise<void>;
+      /** Switches post-processing, shadows and castle loops. */
+      setGraphics: (value: Graphics) => Promise<void>;
+      /** Counts for one rendered frame, from Babylon's own counters. */
+      stats: () => {
+        drawCalls: number | null;
+        activeMeshes: number;
+        triangles: number;
+        meshes: number;
+        particleSystems: number;
+      };
+      /**
+       * Stops the render loop and makes every later `renderFrame` advance time by `ms`, so a
+       * recording is steady however slowly frames render.
+       */
+      fixedTime: (ms: number) => void;
+      renderFrame: () => void;
     };
   }
 }
@@ -101,8 +122,17 @@ export async function startFixturePage(
       }),
     );
   }
-  bar.append(previous, play, slider, next, speedBox, status);
+  const effects = Object.assign(document.createElement("input"), {
+    type: "checkbox",
+    ariaLabel: "Effects",
+  });
+  const effectsLabel = document.createElement("label");
+  effectsLabel.append(effects, " Effects");
+  bar.append(previous, play, slider, next, speedBox, effectsLabel, status);
   canvas.parentElement?.append(bar);
+  const loading = canvas.parentElement
+    ? showBoardLoading(canvas.parentElement)
+    : null;
 
   let demo: Demo;
   try {
@@ -116,9 +146,22 @@ export async function startFixturePage(
   const scene = new Scene(engine);
   installBoardControls(scene);
   window.addEventListener("resize", () => engine.resize());
+  const assets = loadBoardAssets(scene, (progress) =>
+    loading?.update(progress),
+  );
+  assets.then(
+    () => loading?.done(),
+    (error) => {
+      console.error("the board's art failed to load", error);
+      loading?.failed();
+    },
+  );
 
   const query = new URLSearchParams(location.search);
-  setCastleAnimation(query.get("still") !== "1");
+  const fx = query.get("fx");
+  let graphics: Graphics =
+    fx === "0" ? "low" : fx === "1" ? "high" : savedGraphics();
+  effects.checked = graphics === "high";
   const turnMs = Number(query.get("turn") ?? DEFAULT_TURN_MS);
   slider.max = String(demo.frames.length - 1);
   let current = 0;
@@ -217,6 +260,30 @@ export async function startFixturePage(
       );
       return { x: projected.x, y: projected.y };
     },
+    assets,
+    setGraphics: (value) => setGraphics(value),
+    stats: () => {
+      const counter = (
+        engine as unknown as {
+          _drawCalls?: { fetchNewFrame(): void; current: number };
+        }
+      )._drawCalls;
+      counter?.fetchNewFrame();
+      scene.render();
+      return {
+        drawCalls: counter?.current ?? null,
+        activeMeshes: scene.getActiveMeshes().length,
+        triangles: Math.round(scene.getActiveIndices() / 3),
+        meshes: scene.meshes.length,
+        particleSystems: scene.particleSystems.length,
+      };
+    },
+    fixedTime: (ms) => {
+      engine.stopRenderLoop();
+      (engine as unknown as { getDeltaTime: () => number }).getDeltaTime = () =>
+        ms;
+    },
+    renderFrame: () => scene.render(),
   };
 
   slider.addEventListener("input", () => showFrame(Number(slider.value)));
@@ -231,6 +298,20 @@ export async function startFixturePage(
   );
   const start = Number(query.get("frame") ?? "1");
   showFrame(Number.isFinite(start) ? start - 1 : 0);
+  const still = query.get("still") === "1";
+  const setGraphics = async (value: Graphics) => {
+    graphics = value;
+    effects.checked = value === "high";
+    const camera = scene.activeCamera;
+    const applied = camera ? applyGraphics(scene, camera, value) : undefined;
+    // `&still=1` keeps the castles still whatever the setting.
+    if (still) setCastleAnimation(false);
+    await applied;
+  };
+  void setGraphics(graphics);
+  effects.addEventListener("change", () => {
+    void setGraphics(effects.checked ? "high" : "low");
+  });
   if (query.get("play") === "1") setPlaying(true);
   scene.onBeforeRenderObservable.add(() => {
     if (playing && !player.busy) feed();
