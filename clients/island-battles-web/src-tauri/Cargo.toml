@@ -1,0 +1,25 @@
+[package]
+name = "island-battles-desktop"
+version = "0.1.0"
+description = "Island Battles desktop app: the web client in a Tauri window"
+edition = "2021"
+rust-version = "1.77"
+publish = false
+
+[lib]
+name = "island_battles_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-http = "2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

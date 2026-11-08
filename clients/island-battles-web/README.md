@@ -38,6 +38,32 @@ Open **http://localhost:3000/**. The dev server hot-reloads and proxies `/lobby/
 
 `bunx biome check --write .` fixes formatting, lint and import order. Commit `bun.lock`; CI installs with `--frozen-lockfile`.
 
+## Desktop app
+
+The same client as an app for Windows, macOS and Linux, built with [Tauri v2](https://v2.tauri.app/) ([#105](https://github.com/INTODAN/island-battles-go/issues/105)). It wraps the output of `bun run build.ts --desktop` in the system's web view (a few MB, not an Electron-sized download) and adds no game code. `src-tauri/` holds the shell: `tauri.conf.json` (window, bundle, CSP), `capabilities/` (what the window may call), `icons/` and a Rust crate that only registers the HTTP plugin.
+
+**Build it.** Install Rust ([rustup](https://rustup.rs/)) and Tauri's [system libraries](https://v2.tauri.app/start/prerequisites/) (on Debian and Ubuntu: `libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf`), then, in this directory:
+
+| Command | Does |
+|---|---|
+| `bun run build:desktop` | Builds the web client into `dist-desktop/`, served from `/`, talking to `https://island-battles.elidan.org` |
+| `bun run desktop:build` | The above, then `tauri build`: installers in `src-tauri/target/release/bundle/` (`.msi` on Windows, `.dmg` on macOS, `.AppImage` and `.deb` on Linux) |
+| `bun run desktop:dev` | A desktop **dev build**: the client built against `http://localhost:8888` (start `./scripts/dev.sh` first) and opened with `tauri dev` using `src-tauri/tauri.dev.conf.json`, which adds the local backend and its Centrifugo (`ws://localhost:8000`) to the CSP and HTTP scope. There is no hot reload; rebuild with the command |
+
+The **Desktop app** workflow ([`desktop.yml`](../../.github/workflows/desktop.yml)) builds all three on manual dispatch (Actions, Desktop app, Run workflow) and keeps them as artifacts: `island-battles-windows`, `island-battles-macos-universal` (a universal `.dmg` for Apple silicon and Intel) and `island-battles-linux`. It publishes and deploys nothing.
+
+**Unsigned builds.** Nothing is signed or notarized yet. Windows SmartScreen says "Windows protected your PC" (More info, then Run anyway); macOS says the app "cannot be opened" because the developer cannot be verified (open it once with right-click, Open, or allow it under System Settings, Privacy & Security); Linux shows no warning. Code signing, notarization and auto-update are follow-ups.
+
+**One base URL, three environments.** `build.ts` replaces `__DESKTOP_API_BASE__` (read in `src/platform.ts`), so the browser build has none and uses its own origin (`/play/`, unchanged), `--desktop` uses `https://island-battles.elidan.org`, and `--desktop --dev` uses `http://localhost:8888`. `createApiClients` takes this as its default `baseUrl`, and nothing else in the client knows which build it is in, except the share link (`webClientUrl`, which points at the game's `/play/` rather than the window's `tauri://localhost`).
+
+**Cross-origin: the HTTP plugin, not CORS.** The window's origin is `tauri://localhost` (macOS and Linux) or `http://tauri.localhost` (Windows), and the backend has no CORS on purpose. Two options were open: allow those origins with CORS on the backend, or send requests through [`tauri-plugin-http`](https://v2.tauri.app/plugin/http-client/), which makes them from Rust. The plugin was chosen because it needs no change to the backend, which stays free of CORS for every other client; it can be limited to exactly the game hostname and the bot port, so a bug or injected script in the web view cannot call anything else with the player's token; and system web views differ in what they allow cross-origin (Safari blocks `http://127.0.0.1` from an `https` or custom-scheme page), which requests made from Rust avoid. `src/desktop.ts` replaces `globalThis.fetch` once at start-up in the desktop build, which the API clients, the realtime session, the lease and the bot relay all call at call time, and resolves a path such as `/lobby/v1/sessions` against the base URL. The plugin's scope is in `src-tauri/capabilities/main.json`: `https://island-battles.elidan.org/*` and `http://127.0.0.1:41414/*`; `dev.json` adds `http://localhost:8888/*` for a dev build only.
+
+**WebSocket.** `centrifuge-js` still runs in the web view and opens its WebSocket from the window's origin, which Centrifugo checks. The deployed template (`deploy/ansible/roles/app/templates/centrifugo-config.toml.j2`, via `app_desktop_origins`), `lobby/centrifugo/centrifugo-config.toml`, `docker-compose.yml`, `.env.example` and `scripts/dev.sh` allow `tauri://localhost` and `http://tauri.localhost`; any other origin is still refused. The CSP (`tauri.conf.json`) allows `wss://vm.elidan.org` for the production Centrifugo (`websocket_url` from `POST /lobby/v1/connection-token`); if the VM's hostname changes, change it there too.
+
+**Localhost bots.** The relay posts to `http://127.0.0.1:41414/turn` through the plugin, so the request comes from Rust and carries no `Origin` header; the bot server (`island-battles-bot serve`) treats that like `curl` and needs no `--allow-origin` for the desktop app. The Host check still applies.
+
+**The guest session.** A browser tab keeps its session, room and watch in `sessionStorage`. The desktop app keeps them in `localStorage` (`tabStorage()` in `src/platform.ts`), which the web view stores in the app's data folder, so closing and reopening the app within the session's 24 hours signs in again with the same guest, and joins the same lobby again.
+
 ## API types and client
 
 **This is a breaking change; clients must upgrade.** The regenerated types add the lobby's `game_requirement` error code with its `type` field, `BotChoice`/`LobbyBots` and `PUT /game/lobbies/{lobby_id}/bot`, the required `GenerationState.bot` and `BotTurn.upgrades`. What to do: rebuild against the new types (`bun run generate`). Getting ready now needs a bot choice, so the web client's own lobby flow must show the bot picker and, for a localhost bot, relay each turn to it; that is [#98](https://github.com/INTODAN/island-battles-go/issues/98). Until then, choose the bot through the lobby page or the API.
@@ -50,7 +76,7 @@ Open **http://localhost:3000/**. The dev server hot-reloads and proxies `/lobby/
 
 `src/realtime/` keeps one [centrifuge-js](https://github.com/centrifugal/centrifuge-js) connection (pinned at an exact version) and follows a lobby and its game. A watcher outside the roster follows a game with `followWatch` instead (see [Watching a game](#watching-a-game)). It has no DOM or Babylon imports, so `bun test` runs it. `createRealtime()` returns four typed stores with a tiny `get()` / `subscribe(listener)` API: `session`, `lobby` (`Snapshot | null`), `game` (latest `GenerationState | null`) and `connection` (`connecting | connected | disconnected`), plus `problem` for a session, lobby or game that ended.
 
-- `signIn(name)` creates a guest session, or reuses the one saved in `sessionStorage` until `expires_at`. A 401 from any call, or from `getToken` (which re-calls `POST /lobby/v1/connection-token` when the 5-minute connection token expires), ends the session.
+- `signIn(name)` creates a guest session, or reuses the one saved in `sessionStorage` (`localStorage` in the desktop app) until `expires_at`. A 401 from any call, or from `getToken` (which re-calls `POST /lobby/v1/connection-token` when the 5-minute connection token expires), ends the session.
 - `followLobby({ gameKey, lobbyId })` (or `adoptSnapshot(snapshot)` with a snapshot an HTTP call returned) reads the snapshot, subscribes to its channel and re-reads it on `subscribed` and on each `lobby.changed` with a newer `version`. `followGame(lobbyId)` subscribes to `player:<id>` and reads `GET /game/from-lobby/{lobby_id}/generation` on `subscribed`.
 - Install rules (`install.ts`): a generation older than the one held, a duplicate, another game's state and anything after the outcome are ignored. Results of reads that finished after `leaveLobby()` / `leaveGame()` are dropped by an epoch counter.
 - Every `connected`, `subscribed` and `unsubscribed` event asks for a reconciling read. Requests close together share one read, a failed read is retried with backoff, and nothing polls while idle.
@@ -139,6 +165,8 @@ Someone outside the roster can watch a game live and scrub its history with only
 - `src/ui/lobby/`: the lobby screens and the app shell's flow; `src/ui/game/`: the game view, described above.
 - `src/scene/`: the 3D board, described above.
 - `dev.ts` and `proxy.ts`: the dev server and its proxy rules.
-- `build.ts`: the production build, served under `/play/`.
+- `build.ts`: the production build, served under `/play/`; with `--desktop` the build for the desktop app.
+- `src/platform.ts` and `src/desktop.ts`: what differs in the desktop app (base URL, storage, HTTP plugin).
+- `src-tauri/`: the Tauri shell of the desktop app, described above.
 
 CI runs `bun install --frozen-lockfile`, `bun run check` and `bun run build` in [`.github/workflows/web-client.yml`](../../.github/workflows/web-client.yml). It deploys nothing.

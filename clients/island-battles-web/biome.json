@@ -6,6 +6,9 @@
       "**",
       "!node_modules",
       "!dist",
+      "!dist-desktop",
+      "!src-tauri/target",
+      "!src-tauri/gen",
       "!bun.lock",
       "!src/api/generated",
       "!**/*.md"

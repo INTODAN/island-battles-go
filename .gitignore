@@ -54,3 +54,4 @@ deploy/ansible/.collections/
 # Web client dependencies and build output
 node_modules/
 dist/
+dist-desktop/

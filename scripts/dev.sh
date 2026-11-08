@@ -51,7 +51,7 @@ elif command -v podman >/dev/null && [[ "$(uname -s)" == Linux ]]; then
     -e CENTRIFUGO_HTTP_API_KEY="$ISLAND_BATTLES_CENTRIFUGO_API_KEY" \
     -e CENTRIFUGO_VAR_LOBBY_PROXY_SECRET="$ISLAND_BATTLES_LOBBY_PROXY_SECRET" \
     -e CENTRIFUGO_ADMIN_ENABLED=false \
-    -e CENTRIFUGO_CLIENT_ALLOWED_ORIGINS="${ISLAND_BATTLES_CENTRIFUGO_ALLOWED_ORIGINS:-http://localhost:8888 http://127.0.0.1:8888}" \
+    -e CENTRIFUGO_CLIENT_ALLOWED_ORIGINS="${ISLAND_BATTLES_CENTRIFUGO_ALLOWED_ORIGINS:-http://localhost:8888 http://127.0.0.1:8888 tauri://localhost http://tauri.localhost}" \
     docker.io/centrifugo/centrifugo:v6.9.6 centrifugo -c /centrifugo/centrifugo-config.toml >/dev/null
 else
   echo "Install Docker with Compose, or Podman on Linux, to run local dependencies." >&2

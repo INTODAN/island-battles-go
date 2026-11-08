@@ -16,6 +16,12 @@ app_centrifugo_published_port: 443
 # lobby/centrifugo/centrifugo-config.toml), and on Lambda it can also wait for
 # a cold start and a new TLS connection to Postgres.
 app_game_origin: "{{ game_url | regex_replace('/+$', '') }}"
+# The desktop app (Tauri, #105) runs at tauri://localhost on macOS and Linux and
+# at http://tauri.localhost on Windows. Its HTTP calls go through Tauri's HTTP
+# plugin, so only Centrifugo's WebSocket origin check needs these.
+app_desktop_origins:
+  - tauri://localhost
+  - http://tauri.localhost
 app_lambda_origin: "{{ lambda_function_url | regex_replace('/+$', '') }}"
 app_centrifugo_proxy_timeout: 10s
 

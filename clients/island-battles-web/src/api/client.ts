@@ -1,18 +1,17 @@
 import createClient, { type Middleware } from "openapi-fetch";
+import { apiBaseUrl } from "../platform";
 import { ApiError, errorFromResponse } from "./errors";
 import type { paths as GamePaths } from "./generated/game";
 import type { paths as LobbyPaths } from "./generated/lobby";
 
 export interface ApiOptions {
-  /** Server origin. Defaults to the page's own origin. */
+  /** Server origin. Defaults to the page's own origin, or the game server in the desktop build. */
   baseUrl?: string;
   /** Returns the current bearer token, or undefined before a session exists. */
   getAccessToken?: () => string | undefined;
   /** Replaces `fetch`; tests use it. */
   fetch?: typeof fetch;
 }
-
-const defaultBaseUrl = () => globalThis.location?.origin ?? "";
 
 let accessToken: string | undefined;
 
@@ -70,7 +69,7 @@ function transportFetch(inner: typeof fetch): typeof fetch {
  * and reject with ApiError on any failure, so callers never see `error`.
  */
 export function createApiClients(options: ApiOptions = {}) {
-  const baseUrl = options.baseUrl ?? defaultBaseUrl();
+  const baseUrl = options.baseUrl ?? apiBaseUrl();
   const getAccessToken = options.getAccessToken ?? (() => accessToken);
   const inner = options.fetch;
   const make = <P extends {}>() => {

@@ -7,6 +7,14 @@ declare global {
   }
 }
 
+// The desktop build sends its requests through Tauri's HTTP plugin (src/desktop.ts).
+// The define folds this to false in the browser build, which then carries no desktop code.
+declare const __DESKTOP_API_BASE__: string | undefined;
+if (typeof __DESKTOP_API_BASE__ === "string") {
+  const { installDesktopFetch } = await import("./desktop");
+  installDesktopFetch();
+}
+
 const canvas = document.getElementById("scene");
 if (!(canvas instanceof HTMLCanvasElement)) {
   throw new Error("index.html has no #scene canvas");

@@ -1,3 +1,4 @@
+import { webClientUrl } from "../../platform";
 import type { Realtime, Snapshot } from "../../realtime";
 import { copyText, h } from "../dom";
 import {
@@ -142,7 +143,7 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
   });
   copyLink.addEventListener("click", async () => {
     const code = realtime.lobby.get()?.lobby.join_code ?? "";
-    const link = `${location.origin}${location.pathname}?join=${encodeURIComponent(code)}`;
+    const link = `${webClientUrl()}?join=${encodeURIComponent(code)}`;
     flash(
       copyLink,
       (await copyText(link)) ? "Copied" : "Copy failed",
