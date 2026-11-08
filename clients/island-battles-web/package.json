@@ -19,6 +19,7 @@
   "dependencies": {
     "@babylonjs/core": "9.33.1",
     "@babylonjs/gui": "9.33.1",
+    "@babylonjs/loaders": "9.33.1",
     "@tauri-apps/api": "2.12.4",
     "@tauri-apps/plugin-http": "2.8.3",
     "centrifuge": "5.7.4",

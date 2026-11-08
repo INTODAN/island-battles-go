@@ -18,8 +18,11 @@ export const CAMERA = {
   maxRadiusFactor: 1.5,
   /** How much of the view, from the centre to the edge, the board may fill. */
   fitFill: 0.9,
-  /** The height of the tallest thing on the board, which the fit keeps in view. */
-  featureHeight: 1.3,
+  /**
+   * The height of the tallest thing on the board, which the fit keeps in view: the level 4 castle
+   * model (about 1.46 high) on an island's top.
+   */
+  featureHeight: 1.6,
   /** How far past the board's edge the camera may pan. */
   panMargin: 1,
   focusRadius: 5,

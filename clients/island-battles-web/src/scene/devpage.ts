@@ -4,6 +4,7 @@ import { Scene } from "@babylonjs/core/scene";
 import type { components } from "../api/generated/game";
 import { createScenePlayer, DEFAULT_TURN_MS } from "./animation";
 import { type Battlefield, battlefieldOf } from "./battlefield";
+import { setCastleAnimation } from "./castles";
 import { toWorld } from "./coordinates";
 import { installBoardControls } from "./picking";
 
@@ -55,8 +56,9 @@ declare global {
 /**
  * The dev page, `/?fixture=<file>`: one saved game on the 3D board with a frame slider, and no
  * server. `&frame=<n>` starts on the n-th frame, `&play=1` plays on from it, `&speed=<x>` sets the
- * pace and `&turn=<ms>` the length of a turn (1500 by default). The slider and the arrows jump
- * with no animation; the play button plays the game on, a turn at a time.
+ * pace and `&turn=<ms>` the length of a turn (1500 by default). `&still=1` freezes the level 3
+ * and 4 castles' flags and blades in their bind pose. The slider and the arrows jump with no
+ * animation; the play button plays the game on, a turn at a time.
  */
 export async function startFixturePage(
   canvas: HTMLCanvasElement,
@@ -116,6 +118,7 @@ export async function startFixturePage(
   window.addEventListener("resize", () => engine.resize());
 
   const query = new URLSearchParams(location.search);
+  setCastleAnimation(query.get("still") !== "1");
   const turnMs = Number(query.get("turn") ?? DEFAULT_TURN_MS);
   slider.max = String(demo.frames.length - 1);
   let current = 0;

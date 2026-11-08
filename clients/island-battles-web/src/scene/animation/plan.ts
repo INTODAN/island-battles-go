@@ -10,6 +10,7 @@
 
 import type { components } from "../../api/generated/game";
 import { CASTLE_RADIUS } from "../board";
+import { castleDisplayLevel } from "../castleLevel";
 
 type Generation = components["schemas"]["Generation"];
 type Castle = components["schemas"]["Castle"];
@@ -151,8 +152,6 @@ export const UPGRADE_COSTS: Readonly<Record<string, readonly number[]>> = {
   speed: [0, 10, 20, 30],
   clash_stop_generations: [0, 10, 20],
 };
-/** Castle models exist for levels 1 to 4. */
-export const MAX_CASTLE_LEVEL = 4;
 
 /** World units a group moves per turn, from its snapshotted speed upgrade. */
 export function speedOf(upgrades: Record<string, number>): number {
@@ -161,15 +160,6 @@ export function speedOf(upgrades: Record<string, number>): number {
     Math.max(1, Math.trunc(upgrades.speed ?? 1)),
   );
   return SPEED_BY_LEVEL[level - 1] ?? 0.5;
-}
-
-/**
- * The model level a castle shows: its highest upgrade level, 1 to 4 (the rule of issue #140; the
- * castle models replace this function with their own `castleDisplayLevel`).
- */
-export function castleLevelOf(upgrades: Record<string, number>): number {
-  const highest = Math.max(1, ...Object.values(upgrades));
-  return Math.min(MAX_CASTLE_LEVEL, Math.max(1, Math.trunc(highest)));
 }
 
 function upgradeCost(
@@ -540,8 +530,8 @@ function planCastle(
   arrived: readonly Arrival[],
 ): void {
   const level = {
-    from: castleLevelOf(before.upgrades),
-    to: castleLevelOf(after.upgrades),
+    from: castleDisplayLevel(before.upgrades),
+    to: castleDisplayLevel(after.upgrades),
   };
   if (level.from !== level.to) {
     tracks.push({ kind: "castleLevel", castleId: after.id, t: 0, ...level });
@@ -669,7 +659,7 @@ export function sampleTurn(plan: TurnPlan, time: number): TurnSample {
     castles.set(castle.id, {
       count: castle.soldiers,
       team: castle.team_color,
-      level: castleLevelOf(castle.upgrades),
+      level: castleDisplayLevel(castle.upgrades),
     });
   }
   const flashes: FlashPose[] = [];

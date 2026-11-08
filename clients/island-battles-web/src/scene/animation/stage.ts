@@ -10,9 +10,10 @@ import {
   updateGroup,
   updateHeadings,
 } from "../battlefield";
+import { castleDisplayLevel } from "../castleLevel";
 import { toWorld } from "../coordinates";
 import { createPlaceholderEffects, type TurnEffects } from "./effects";
-import { castleLevelOf, type TurnPlan, type TurnSample } from "./plan";
+import type { TurnPlan, TurnSample } from "./plan";
 import { type PlayerOptions, type Stage, TurnPlayer } from "./player";
 
 type GameTeam = components["schemas"]["GameTeam"];
@@ -69,7 +70,7 @@ export class SceneStage implements Stage {
       );
     }
     for (const castle of plan.previous.castles) {
-      this.shownLevels.set(castle.id, castleLevelOf(castle.upgrades));
+      this.shownLevels.set(castle.id, castleDisplayLevel(castle.upgrades));
     }
   }
 
@@ -124,20 +125,23 @@ export class SceneStage implements Stage {
       const castle = castles.get(id);
       const entity = field.castles.get(id);
       if (!castle || !entity) continue;
-      const key = `${pose.count}:${pose.team}`;
-      if (this.shownCastles.get(id) !== key) {
-        this.shownCastles.set(id, key);
-        updateCastle(
-          field,
-          { ...castle, soldiers: pose.count, team_color: pose.team },
-          entity,
-        );
-      }
+      // The level-up comes first: its pop swaps the model, so the update below keeps it.
       const level = this.shownLevels.get(id);
       if (level !== undefined && level !== pose.level) {
         this.effects.castleLevelUp(field, id, level, pose.level);
       }
       this.shownLevels.set(id, pose.level);
+      const key = `${pose.count}:${pose.team}:${pose.level}`;
+      if (this.shownCastles.get(id) !== key) {
+        this.shownCastles.set(id, key);
+        // The model of the level at this moment: the old one until the pop.
+        updateCastle(
+          field,
+          { ...castle, soldiers: pose.count, team_color: pose.team },
+          entity,
+          pose.level,
+        );
+      }
     }
 
     this.effects.clash(field, sample.flashes);

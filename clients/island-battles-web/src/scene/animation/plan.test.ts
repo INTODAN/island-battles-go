@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { components } from "../../api/generated/game";
 import { CASTLE_RADIUS } from "../board";
+import { castleDisplayLevel } from "../castleLevel";
 import {
-  castleLevelOf,
   type MoveTrack,
   planTurn,
   sampleTurn,
@@ -379,7 +379,7 @@ describe("planTurn on every fixture pair", () => {
         expect(sample.castles.get(castle.id)).toEqual({
           count: castle.soldiers,
           team: castle.team_color,
-          level: castleLevelOf(castle.upgrades),
+          level: castleDisplayLevel(castle.upgrades),
         });
       }
     });
@@ -397,7 +397,7 @@ describe("planTurn on every fixture pair", () => {
       for (const castle of previous.castles) {
         const pose = sample.castles.get(castle.id);
         expect(pose?.team).toBe(castle.team_color);
-        expect(pose?.level).toBe(castleLevelOf(castle.upgrades));
+        expect(pose?.level).toBe(castleDisplayLevel(castle.upgrades));
         // The soldiers that leave the castle or pay for upgrades are gone from t = 0 on, but the
         // count has not ticked yet at the very start.
         expect(pose?.count).toBe(castle.soldiers);
@@ -504,16 +504,10 @@ describe("planTurn on every fixture pair", () => {
   });
 });
 
-describe("speed and level", () => {
+describe("speed", () => {
   test("speed follows the upgrade table", () => {
     expect(speedOf({})).toBe(0.5);
     expect(speedOf({ speed: 3 })).toBe(1.5);
     expect(speedOf({ speed: 9 })).toBe(2);
-  });
-
-  test("the display level is the highest level, 1 to 4", () => {
-    expect(castleLevelOf({})).toBe(1);
-    expect(castleLevelOf({ speed: 2, clash_stop_generations: 3 })).toBe(3);
-    expect(castleLevelOf({ speed: 7 })).toBe(4);
   });
 });
