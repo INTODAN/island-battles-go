@@ -415,6 +415,27 @@ select:focus-visible {
   color: var(--bad);
 }
 
+.tag.bot {
+  background: #d9ecf7;
+}
+
+.member.seat {
+  background: rgba(29, 111, 184, 0.04);
+  border: 1px dashed #9db8cc;
+}
+
+.seat-actions {
+  grid-column: 1 / -1;
+}
+
+.seat-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+}
+
 .bot-label {
   grid-column: 1;
   font-size: 12px;
