@@ -1,21 +1,23 @@
-// The live game view: the history of a game the player is on, then each new turn as it arrives.
+// The live game view: the history of a game, then each new turn as it arrives. A roster
+// player and a watcher outside the roster see the same view, from different sources
+// (`sources.ts`).
 //
-// Order matters. The view subscribes to the player channel first (`followGame`), then loads the
-// history from `/demo`, then merges the live generations into it by `id`, ignoring ones it
-// already holds. A turn that arrives while the history loads is kept and merged after it.
+// Order matters. The view subscribes to the game's channel first (`source.follow`), then loads
+// the history, then merges the live generations into it by `id`, ignoring ones it already
+// holds. A turn that arrives while the history loads is kept and merged after it.
 
-import { createApiClients } from "../../api/client";
 import { ApiError } from "../../api/errors";
-import type { GenerationState, Realtime } from "../../realtime";
+import type { Realtime } from "../../realtime";
 import type { GameController } from "./controller";
 import { type Demo, DemoFileError, readDemoFile } from "./demoFile";
 import { mergeGenerations } from "./history";
 import { LogBook } from "./logs";
 import { GameScreen } from "./screen";
+import type { LiveSource, LiveTurn } from "./sources";
 
 export interface LiveOptions {
-  lobbyId: string;
   realtime: Realtime;
+  source: LiveSource;
   onBack: () => void;
   /** A demo file the player opened was valid: show it in place of this view. */
   onDemo: (demo: Demo) => void;
@@ -38,32 +40,50 @@ export function loadFailureText(error: unknown): string {
   return "The game could not be loaded.";
 }
 
+/** Why a watcher's view stopped or could not load, in words for them. */
+export function watchFailureText(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 403) {
+      return "The host removed you from this game's watchers.";
+    }
+    if (error.status === 404) {
+      return "This game has not started yet, or it is gone. It appears here when its first turn is played.";
+    }
+  }
+  return loadFailureText(error);
+}
+
 export function mountLive(
   container: HTMLElement,
   options: LiveOptions,
 ): { dispose(): void } {
-  const { realtime, lobbyId } = options;
+  const { realtime, source } = options;
+  const watching = source.readLogs === undefined;
+  const failureText = watching ? watchFailureText : loadFailureText;
   const logs = new LogBook();
-  const { gameApi } = createApiClients({
-    getAccessToken: () => realtime.session.get()?.accessToken,
-  });
   const screen = new GameScreen(container, {
     live: true,
+    watching,
     logs,
     onBack: options.onBack,
+    ...(source.backLabel === undefined ? {} : { backLabel: source.backLabel }),
     onOpenFile: (file) => void openFile(file),
     requestLogs: (generationId, ended) => void fetchLogs(generationId, ended),
   });
-  screen.setTitle("Game");
+  screen.setTitle(source.title);
 
   let disposed = false;
   let controller: GameController | undefined;
   let gameId: number | undefined;
-  /** States that arrived before the history was loaded. */
-  let pending: GenerationState[] = [];
+  let teamColors: number[] = [];
+  /** Turns that arrived before the history was loaded. */
+  let pending: LiveTurn[] = [];
   let loading = false;
   let wasConnected = false;
   let resyncTimer: ReturnType<typeof setTimeout> | undefined;
+  let endedResync = false;
+  /** The host removed this watcher: no more turns arrive. */
+  let stopped = false;
   const requested = new Set<string>();
 
   async function openFile(file: File): Promise<void> {
@@ -78,17 +98,34 @@ export function mountLive(
   }
 
   async function fetchLogs(generationId: number, ended: boolean) {
+    if (!source.readLogs) {
+      // A watcher sees no logs while the game runs: every team is hidden. Once it has ended,
+      // the history carries every turn's logs, so it is read once more.
+      if (!ended) {
+        if (
+          logs.add({
+            generation_id: generationId,
+            players: [],
+            hidden_team_colors: teamColors,
+          })
+        ) {
+          // The panel asked while drawing: draw again once it has finished.
+          queueMicrotask(() => {
+            if (!disposed) screen.refreshLogs();
+          });
+        }
+      } else if (!endedResync && controller) {
+        endedResync = true;
+        void resync();
+      }
+      return;
+    }
     const key = `${generationId}:${ended}`;
     if (requested.has(key)) return;
     requested.add(key);
     try {
-      const { data } = await gameApi.GET("/game/from-lobby/{lobby_id}/logs", {
-        params: {
-          path: { lobby_id: lobbyId },
-          query: { generation_id: generationId },
-        },
-      });
-      if (disposed || !data) return;
+      const data = await source.readLogs(generationId);
+      if (disposed) return;
       if (logs.add(data)) screen.refreshLogs();
     } catch {
       // Try again later, not at once: the panel asks again whenever the view redraws.
@@ -96,22 +133,13 @@ export function mountLive(
     }
   }
 
-  /** The history read from the server. */
-  async function readHistory(): Promise<Demo> {
-    const { data } = await gameApi.GET("/game/from-lobby/{lobby_id}/demo", {
-      params: { path: { lobby_id: lobbyId } },
-    });
-    if (!data) throw new ApiError({ kind: "http", status: 0, detail: "empty" });
-    return data;
-  }
-
-  function installState(state: GenerationState): void {
+  function installTurn(turn: LiveTurn): void {
     if (gameId === undefined) {
-      pending.push(state);
+      pending.push(turn);
       return;
     }
-    if (state.game_id !== gameId) return;
-    controller?.merge([state.generation], state.outcome ?? null);
+    if (turn.game_id !== gameId) return;
+    controller?.merge([turn.generation], turn.outcome ?? null);
   }
 
   async function load(): Promise<void> {
@@ -119,27 +147,36 @@ export function mountLive(
     loading = true;
     screen.showLoading("Loading the game so far…");
     try {
-      const demo = await readHistory();
+      const demo = await source.readHistory();
       if (disposed) return;
       logs.addAll(demo.logs);
-      const states = [...pending];
-      const held = realtime.game.get();
-      if (held) states.push(held);
-      const live = states.filter((state) => state.game_id === demo.game_id);
+      const turns = [...pending];
+      const held = source.current();
+      if (held) turns.push(held);
+      const live = turns.filter((turn) => turn.game_id === demo.game_id);
       const frames = mergeGenerations(
         demo.frames,
-        live.map((state) => state.generation),
+        live.map((turn) => turn.generation),
       );
       const outcome =
-        demo.outcome ?? live.find((state) => state.outcome)?.outcome ?? null;
+        demo.outcome ?? live.find((turn) => turn.outcome)?.outcome ?? null;
       pending = [];
       gameId = demo.game_id;
-      screen.setTitle(`Game ${demo.game_id}`);
+      teamColors = demo.teams.map((team) => team.color);
+      screen.setTitle(
+        watching ? `Watching game ${demo.game_id}` : `Game ${demo.game_id}`,
+      );
       controller = screen.start(demo.teams, frames, outcome);
+      endedResync = demo.outcome !== null;
       screen.hideOverlay();
     } catch (error) {
       if (disposed) return;
-      screen.showFailure(loadFailureText(error), () => void load());
+      if (watching && error instanceof ApiError && error.status === 404) {
+        // Not started yet: the first turn on the channel loads it.
+        screen.showLoading(watchFailureText(error));
+        return;
+      }
+      screen.showFailure(failureText(error), () => void load());
     } finally {
       loading = false;
     }
@@ -149,7 +186,7 @@ export function mountLive(
   async function resync(): Promise<void> {
     clearTimeout(resyncTimer);
     try {
-      const demo = await readHistory();
+      const demo = await source.readHistory();
       if (disposed || !controller || demo.game_id !== gameId) return;
       logs.addAll(demo.logs);
       controller.merge(demo.frames, demo.outcome);
@@ -170,14 +207,17 @@ export function mountLive(
       },
     };
   }
-  // 1. Subscribe to the player channel first.
-  realtime.followGame(lobbyId);
+  // 1. Subscribe to the game's channel first.
+  source.follow();
   const stops = [
-    realtime.game.subscribe((state) => {
-      if (state) installState(state);
+    source.subscribe((turn) => {
+      if (!turn) return;
+      installTurn(turn);
+      // A watcher may arrive before the game starts: its first turn loads the view.
+      if (gameId === undefined && !loading) void load();
     }),
     realtime.connection.subscribe((state) => {
-      screen.setConnection(state);
+      screen.setConnection(stopped ? "stopped" : state);
       if (state === "connected") {
         if (controller && !wasConnected) void resync();
         wasConnected = true;
@@ -189,9 +229,13 @@ export function mountLive(
     realtime.problem.subscribe((problem) => {
       if (
         problem &&
-        (problem.scope === "game" || problem.scope === "session")
+        (problem.scope === source.problemScope || problem.scope === "session")
       ) {
-        screen.setNotice(loadFailureText(problem.error));
+        screen.setNotice(failureText(problem.error));
+        if (problem.scope === "watch") {
+          stopped = true;
+          screen.setConnection("stopped");
+        }
       }
     }),
   ];
@@ -206,7 +250,7 @@ export function mountLive(
       disposed = true;
       clearTimeout(resyncTimer);
       for (const stop of stops) stop();
-      realtime.leaveGame();
+      source.leave();
       screen.dispose();
     },
   };

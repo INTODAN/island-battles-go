@@ -1117,6 +1117,7 @@
               "invalid_game_settings",
               "invalid_seat_settings",
               "game_requirement",
+              "watcher_kicked",
               "unavailable",
               "internal_error"
             ],
@@ -1460,6 +1461,125 @@
           "speed"
         ],
         "type": "string"
+      },
+      "WatchGameEndedEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "enum": [
+              1
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "state": {
+            "$ref": "#/components/schemas/WatchState",
+            "description": "The final generation, with its outcome."
+          },
+          "type": {
+            "enum": [
+              "game.ended"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "type",
+          "state"
+        ],
+        "type": "object"
+      },
+      "WatchGenerationEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "schema_version": {
+            "enum": [
+              1
+            ],
+            "format": "int64",
+            "type": "integer"
+          },
+          "state": {
+            "$ref": "#/components/schemas/WatchState"
+          },
+          "type": {
+            "enum": [
+              "game.next_generation"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema_version",
+          "type",
+          "state"
+        ],
+        "type": "object"
+      },
+      "WatchState": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/WatchState.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "channel": {
+            "description": "The lobby's watch channel, watch:island-battles:\u003clobby_id\u003e, which receives WatchGenerationEvent after each turn and WatchGameEndedEvent after the last one.",
+            "type": "string"
+          },
+          "game_id": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "generation": {
+            "$ref": "#/components/schemas/Generation"
+          },
+          "generation_id": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "lobby_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/GameOutcome",
+            "description": "How the game ended. Absent while the game runs."
+          },
+          "teams": {
+            "description": "The teams that play, with their lobby names and the display names their players had at the start.",
+            "items": {
+              "$ref": "#/components/schemas/GameTeam"
+            },
+            "type": "array"
+          },
+          "turn_deadline_at": {
+            "description": "When this generation's turn times out, as in GenerationState. Null when turns have no time limit, and once the game has ended. Watchers never apply a deadline themselves.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "game_id",
+          "lobby_id",
+          "generation_id",
+          "channel",
+          "teams",
+          "generation",
+          "turn_deadline_at"
+        ],
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -1471,7 +1591,7 @@
     }
   },
   "info": {
-    "description": "Operations a player client calls during a started game. After every turn, each roster player's Centrifugo channel `player:{player_id}` receives a `GenerationEvent`, except after the turn that ends the game, which pushes a `GameEndedEvent` with the final generation and its outcome instead. Clients reconcile with the generation read after subscribing or reconnecting; HTTP state is authoritative, and its `outcome` is set once the game has ended. A turn times out at its `turn_deadline_at`; the server runs no timers, so a client waiting for other players calls `POST /game/from-lobby/{lobby_id}/deadline` about a second after it. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the `game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose. `GET /game/upgrades` lists what each castle upgrade level costs, and `GET /bots/defaults` the default bots that the backend plays. Before getting ready in a lobby, every member chooses their bot with `PUT /game/lobbies/{lobby_id}/bot`: their localhost bot, whose turns their client relays, or a default bot level; `GenerationState.bot` reports it during the game. `Demo` is the demo file format, which `GET /game/from-lobby/{lobby_id}/demo` returns and the demo viewer at `/game/demo-viewer/` opens. `BotTurn` and `BotTurnResult` are the stateless bot contract: a bot gets a `BotTurn` each turn and answers with a `BotTurnResult`, which a client sends as one completing batch.",
+    "description": "Operations a player client calls during a started game. After every turn, each roster player's Centrifugo channel `player:{player_id}` receives a `GenerationEvent`, except after the turn that ends the game, which pushes a `GameEndedEvent` with the final generation and its outcome instead. Clients reconcile with the generation read after subscribing or reconnecting; HTTP state is authoritative, and its `outcome` is set once the game has ended. A turn times out at its `turn_deadline_at`; the server runs no timers, so a client waiting for other players calls `POST /game/from-lobby/{lobby_id}/deadline` about a second after it. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the `game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose. `GET /game/upgrades` lists what each castle upgrade level costs, and `GET /bots/defaults` the default bots that the backend plays. Before getting ready in a lobby, every member chooses their bot with `PUT /game/lobbies/{lobby_id}/bot`: their localhost bot, whose turns their client relays, or a default bot level; `GenerationState.bot` reports it during the game. `Demo` is the demo file format, which `GET /game/from-lobby/{lobby_id}/demo` returns and the demo viewer at `/game/demo-viewer/` opens. People outside the roster watch a game with its lobby's join code (`POST /lobby/v1/watches`): the lobby's watch channel `watch:island-battles:{lobby_id}` receives a `WatchGenerationEvent` after every turn and a `WatchGameEndedEvent` after the last, in the same push as the players' events, and `GET /game/from-lobby/{lobby_id}/watch` and `/watch/demo` are their reads. `BotTurn` and `BotTurnResult` are the stateless bot contract: a bot gets a `BotTurn` each turn and answers with a `BotTurnResult`, which a client sends as one completing batch.",
     "title": "Island Battles Player API",
     "version": "1.0.0"
   },
@@ -1748,6 +1868,130 @@
           }
         ],
         "summary": "Read a generation's game log lines for a roster player",
+        "tags": [
+          "Island Battles"
+        ]
+      }
+    },
+    "/game/from-lobby/{lobby_id}/watch": {
+      "get": {
+        "description": "For the people who watch the lobby with its join code (POST /lobby/v1/watches): a watcher the host hasn't kicked, an active member of the lobby, or a roster player. Returns the WatchState: the board, the teams, the turn's deadline and the outcome once the game has ended, without the player-only fields of GenerationState. The lobby's watch channel, WatchState.channel, receives WatchGenerationEvent after each turn and WatchGameEndedEvent after the last one, in the same push as the players' events; read this after subscribing or reconnecting. A watcher never plays and never delays a turn. Like the other game reads, it first applies the turn's deadline once it has passed. A kicked watcher gets 403. Anyone else, a lobby whose game hasn't started, and a lobby that was deleted get 404.",
+        "operationId": "watchIslandLobbyGeneration",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lobby_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchState"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "LobbyBearer": []
+          }
+        ],
+        "summary": "Read the current generation of a lobby's game for a watcher",
+        "tags": [
+          "Island Battles"
+        ]
+      }
+    },
+    "/game/from-lobby/{lobby_id}/watch/demo": {
+      "get": {
+        "description": "For the people who may read GET /game/from-lobby/{lobby_id}/watch. Returns the game so far as a demo file, the Demo schema, as GET /game/from-lobby/{lobby_id}/demo does, for scrubbing back through it. A watcher belongs to no team, so while the game runs no game log lines are included and every frame's hidden_team_colors names every team; once the game has ended every team's lines are. Packed with gzip when Accept-Encoding allows it.",
+        "operationId": "watchIslandLobbyDemo",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lobby_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Demo"
+                }
+              }
+            },
+            "description": "The demo file.",
+            "headers": {
+              "Content-Disposition": {
+                "description": "attachment, with the demo's file name.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Content-Encoding": {
+                "description": "gzip when the request's Accept-Encoding allows it; absent otherwise.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "LobbyBearer": []
+          }
+        ],
+        "summary": "Read a lobby game's history for a watcher",
         "tags": [
           "Island Battles"
         ]

@@ -3,6 +3,7 @@ package testutils
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 
@@ -25,10 +26,45 @@ func (publisher *RecordedPublisher) Publish(_ context.Context, publications ...r
 	return publisher.Err
 }
 
+// Publications returns what was pushed to players' channels, in order.
+// WatchEvents returns what went to watch channels.
 func (publisher *RecordedPublisher) Publications() []realtime.Publication {
+	return publisher.filter(func(channel string) bool { return !strings.HasPrefix(channel, "watch:") })
+}
+
+// Pushes returns every push, watch channels included, in order.
+func (publisher *RecordedPublisher) Pushes() []realtime.Publication {
+	return publisher.filter(func(string) bool { return true })
+}
+
+func (publisher *RecordedPublisher) filter(keep func(channel string) bool) []realtime.Publication {
 	publisher.mutex.Lock()
 	defer publisher.mutex.Unlock()
-	return append([]realtime.Publication{}, publisher.publications...)
+	kept := []realtime.Publication{}
+	for _, publication := range publisher.publications {
+		if keep(publication.Channel) {
+			kept = append(kept, publication)
+		}
+	}
+	return kept
+}
+
+// WatchEvents decodes every event pushed to a watch channel, of either type,
+// in order, checking that each went to its state's channel.
+func (publisher *RecordedPublisher) WatchEvents(t *testing.T) []models.WatchGameEndedEvent {
+	t.Helper()
+	var events []models.WatchGameEndedEvent
+	for _, publication := range publisher.filter(func(channel string) bool { return strings.HasPrefix(channel, "watch:") }) {
+		var event models.WatchGameEndedEvent
+		if err := json.Unmarshal(publication.Data, &event); err != nil {
+			t.Fatal(err)
+		}
+		if publication.Channel != event.State.Channel {
+			t.Fatalf("watch event for %s was pushed to %s", event.State.Channel, publication.Channel)
+		}
+		events = append(events, event)
+	}
+	return events
 }
 
 // GenerationEvents decodes every pushed game.next_generation event in order.

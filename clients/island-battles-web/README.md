@@ -48,7 +48,7 @@ Open **http://localhost:3000/**. The dev server hot-reloads and proxies `/lobby/
 
 ## Realtime session
 
-`src/realtime/` keeps one [centrifuge-js](https://github.com/centrifugal/centrifuge-js) connection (pinned at an exact version) and follows a lobby and its game. It has no DOM or Babylon imports, so `bun test` runs it. `createRealtime()` returns four typed stores with a tiny `get()` / `subscribe(listener)` API: `session`, `lobby` (`Snapshot | null`), `game` (latest `GenerationState | null`) and `connection` (`connecting | connected | disconnected`), plus `problem` for a session, lobby or game that ended.
+`src/realtime/` keeps one [centrifuge-js](https://github.com/centrifugal/centrifuge-js) connection (pinned at an exact version) and follows a lobby and its game. A watcher outside the roster follows a game with `followWatch` instead (see [Watching a game](#watching-a-game)). It has no DOM or Babylon imports, so `bun test` runs it. `createRealtime()` returns four typed stores with a tiny `get()` / `subscribe(listener)` API: `session`, `lobby` (`Snapshot | null`), `game` (latest `GenerationState | null`) and `connection` (`connecting | connected | disconnected`), plus `problem` for a session, lobby or game that ended.
 
 - `signIn(name)` creates a guest session, or reuses the one saved in `sessionStorage` until `expires_at`. A 401 from any call, or from `getToken` (which re-calls `POST /lobby/v1/connection-token` when the 5-minute connection token expires), ends the session.
 - `followLobby({ gameKey, lobbyId })` (or `adoptSnapshot(snapshot)` with a snapshot an HTTP call returned) reads the snapshot, subscribes to its channel and re-reads it on `subscribed` and on each `lobby.changed` with a newer `version`. `followGame(lobbyId)` subscribes to `player:<id>` and reads `GET /game/from-lobby/{lobby_id}/generation` on `subscribed`.
@@ -82,7 +82,7 @@ Tests inject a fake Centrifugo client (`createClient`), fake `fetch` and fake st
 
 ## Lobby screens and the bot relay
 
-`src/main.ts` mounts `src/ui/lobby/app.ts`, which picks the screen from the realtime stores alone (no screen state is guessed from a button press): no session shows the name step; a session with no lobby shows create or join; a `waiting` lobby shows the room; a `started` lobby mounts the game view (`mountGameView` from `src/ui/game/`). `/play/?join=CODE` (or `/?join=CODE` in dev) asks for a name and then joins that lobby.
+`src/main.ts` mounts `src/ui/lobby/app.ts`, which picks the screen from the realtime stores alone (no screen state is guessed from a button press): no session shows the name step; a session with no lobby shows create, join or [watch](#watching-a-game); a `waiting` lobby shows the room; a `started` lobby mounts the game view (`mountGameView` from `src/ui/game/`). `/play/?join=CODE` (or `/?join=CODE` in dev) asks for a name and then joins that lobby.
 
 - **Create form** (`form.ts`, pure and tested): lobby name, 2 to 6 teams, players per team, map (generated, a default map from `GET /map/templates`, or a map file checked by `POST /map/validate` before it is sent) and turn limit (10 s, 30 s, 2 min, 10 min, No limit, sent as `game_settings.turn_timeout_seconds`). A template or file fixes the team count. Each create gets a fresh `request_id`; after a transport failure the same body goes out again with the same id.
 - **Room** (`roomScreen.ts`, `botPicker.ts`): teams with their members, bot choices and ready marks, the join code with copy buttons, the map summary, the bot picker and the ready, start and leave buttons. The members' bot choices come from `GET /game/lobbies/{lobby_id}/bots`, read again on every lobby change. A choice does not publish a lobby event, so another tab sees a changed choice at the next lobby change (or when it gets focus).
@@ -105,7 +105,31 @@ Screenshots of each screen at desktop width and at 450 px are in [`docs/screensh
 - **Bot logs** (`logs.ts`): a collapsible panel for the shown turn. The history carries the logs it could see when read; a live turn's logs are read with `GET .../logs?generation_id=N`. While teams are hidden it says "Logs of other teams appear when the game ends", and when the outcome arrives it reads them again.
 - **Demo files** (`demoFile.ts`): a TypeScript port of `backend/demoviewer/demo-file.mjs` against the generated `Demo` type, with the same checks and messages (format, `schema_version`, the 128 MiB cap, every drawn value). The file is read in the browser and uploaded nowhere. A demo from an unfinished game says so. A wrong file shows its message and leaves the game or demo shown before open.
 
-The turn deadline call (`POST .../deadline`) is not made here: the relay of [#98](https://github.com/INTODAN/island-battles-go/issues/98) does that. Screenshots of a live match, its outcome and a 450 px wide screen are in [`docs/screenshots/`](docs/screenshots/) (`game-*.png`).
+The view gets its game from a `LiveSource` (`sources.ts`): `playerSource` (the player channel, `/demo` and `/logs`) for `mountGameView`, and `watchSource` for `mountWatchView`, described next. The turn deadline call (`POST .../deadline`) is not made here: the relay of [#98](https://github.com/INTODAN/island-battles-go/issues/98) does that.
+
+## Watching a game
+
+Someone outside the roster can watch a game live and scrub its history with only its join code ([#103](https://github.com/INTODAN/island-battles-go/issues/103)). **Watch a game** on the start screen takes a code, and `/play/?watch=CODE` (or `/?watch=CODE` in dev) asks for a name and then watches that game.
+
+- **Starting.** The shell calls `POST /lobby/v1/watches`. A member of that lobby gets their own lobby instead. Anyone else gets the watch view, `mountWatchView(container, { lobbyId, channel, realtime, onBack })`, the game view in read-only mode: there is no lease, heartbeat, bot relay or deadline call. A reloaded tab watches again with the code it saved in `sessionStorage`. **Stop watching** removes the watcher row with `DELETE …/watch`.
+- **Live turns.** `realtime.followWatch({ lobbyId, channel })` subscribes to the watch channel and keeps `realtime.watch` (the latest `WatchState`), reading `GET /game/from-lobby/{lobby_id}/watch` on every subscribe, by the install rules of the player's game. The history comes from `GET …/watch/demo`. A watcher who arrives before the start waits on the channel; the first turn loads the view.
+- **Logs.** A watcher belongs to no team, so the logs panel says "Bot logs appear when the game ends"; when the outcome arrives the view reads the history again, which then holds every team's logs.
+- **Kicked.** The host's kick unsubscribes the watcher at once. The read that follows gets 403, `realtime.problem` gets scope `watch`, and the view says "The host removed you from this game's watchers" and "Not receiving turns", keeping the turns it has. The code no longer lets them watch.
+- **For members.** The lobby room has a **Watchers** card (`watchersPanel.ts`) with the count and names, read again on every lobby change; the host has a **Kick** button for each. The game view shows the same list in a small **Watchers** box over the board.
+
+![The watch view following a bot match live](docs/screenshots/watch-live.png)
+
+![The watcher scrubbed back to turn 3; the logs wait for the end](docs/screenshots/watch-scrubbed.png)
+
+![The host's watchers card in the lobby room](docs/screenshots/watch-room-host.png)
+
+![The host's watchers box in the game view, with a Kick button](docs/screenshots/watch-host-game.png)
+
+![The kicked watcher: no more turns arrive](docs/screenshots/watch-kicked.png)
+
+![Watch a game on the start screen, refusing a wrong code](docs/screenshots/watch-menu.png)
+
+![Watch a game at 450 px](docs/screenshots/watch-menu-450.png) Screenshots of a live match, its outcome and a 450 px wide screen are in [`docs/screenshots/`](docs/screenshots/) (`game-*.png`).
 
 ## Layout
 

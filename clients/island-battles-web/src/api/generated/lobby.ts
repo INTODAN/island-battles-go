@@ -201,6 +201,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/lobby/v1/games/{game_key}/lobbies/{lobby_id}/watch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Stop watching a lobby
+         * @description Removes your watcher row and unsubscribes you from the watch channel. A kicked watcher stays kicked. Without a watcher row it is not_found.
+         */
+        delete: operations["unwatchLobby"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/lobby/v1/games/{game_key}/lobbies/{lobby_id}/watchers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a lobby's watchers
+         * @description Lists the watchers the host hasn't kicked, with their display names, for the lobby's active members.
+         */
+        get: operations["listLobbyWatchers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/lobby/v1/games/{game_key}/lobbies/{lobby_id}/watchers/{player_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Kick a watcher
+         * @description Lets the host remove a watcher, in any phase. The watcher is unsubscribed from the watch channel at once and can't watch again with the join code (watcher_kicked). Kicking them again changes nothing; a player who isn't a watcher of the lobby is not_found.
+         */
+        delete: operations["kickLobbyWatcher"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/lobby/v1/lobbies": {
         parameters: {
             query?: never;
@@ -255,6 +315,26 @@ export interface paths {
          * @description Creates one guest identity and bearer credential.
          */
         post: operations["createLobbySession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/lobby/v1/watches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Watch a lobby
+         * @description Lets anyone with a guest session and the lobby's join code watch it, in any phase: waiting, started or closed while it still exists. Adds your watcher row, or finds the one you have, and returns the lobby and its watch channel, where its game publishes what watchers may see; the game documents its own watcher reads. A watcher takes no seat and counts toward nothing: not the lobby's capacity, the start roster, leases, the grace period or the lobby's retention. Starting to watch changes the snapshot's watcher_count. An active member of the lobby gets no watcher row and keeps their member access (member is true). A wrong code, or a code of another game, is not_found; a watcher the host kicked is refused with watcher_kicked.
+         */
+        post: operations["watchLobby"];
         delete?: never;
         options?: never;
         head?: never;
@@ -497,7 +577,7 @@ export interface components {
         };
         Problem: {
             /** @enum {string} */
-            code: "unauthenticated" | "not_found" | "not_host" | "lobby_full" | "team_full" | "phase_conflict" | "not_ready" | "empty_teams" | "stale_membership" | "idempotency_conflict" | "invalid_input" | "invalid_game_settings" | "invalid_seat_settings" | "game_requirement" | "unavailable" | "internal_error";
+            code: "unauthenticated" | "not_found" | "not_host" | "lobby_full" | "team_full" | "phase_conflict" | "not_ready" | "empty_teams" | "stale_membership" | "idempotency_conflict" | "invalid_input" | "invalid_game_settings" | "invalid_seat_settings" | "game_requirement" | "watcher_kicked" | "unavailable" | "internal_error";
             detail: string;
             /** Format: int64 */
             status: number;
@@ -541,6 +621,11 @@ export interface components {
             start_roster: components["schemas"]["StartRosterEntry"][] | null;
             start_rules: components["schemas"]["StartRules"];
             teams: components["schemas"]["Team"][] | null;
+            /**
+             * Format: int64
+             * @description How many people watch the lobby with its join code, kicked watchers left out. Watchers take no seat. A change to it is a lobby change, announced with lobby.changed.
+             */
+            watcher_count: number;
         };
         StartInputBody: {
             /**
@@ -573,6 +658,54 @@ export interface components {
             /** Format: int64 */
             capacity: number;
             name: string;
+        };
+        WatchAccess: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/WatchAccess.json
+             */
+            readonly $schema?: string;
+            /** @description The lobby's watch channel, watch:<game_key>:<lobby_id>, where its game publishes what watchers may see. The subscribe proxy allows it while you are a watcher the host hasn't kicked, or an active member. */
+            channel: string;
+            game_key: string;
+            /** Format: uuid */
+            lobby_id: string;
+            /** @description True when you are an active member of the lobby. You get no watcher row and keep your member access, which includes the watch channel. */
+            member: boolean;
+        };
+        WatchLobbyBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/WatchLobbyBody.json
+             */
+            readonly $schema?: string;
+            game_key: string;
+            join_code: string;
+        };
+        Watcher: {
+            display_name: string;
+            /**
+             * Format: date-time
+             * @description When they started watching.
+             */
+            joined_at: string;
+            /**
+             * Format: uuid
+             * @description The watcher's player ID, for kicking them.
+             */
+            player_id: string;
+        };
+        WatcherList: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/WatcherList.json
+             */
+            readonly $schema?: string;
+            /** @description The watchers the host hasn't kicked, in the order they started watching. */
+            watchers: components["schemas"]["Watcher"][];
         };
     };
     responses: never;
@@ -1465,6 +1598,262 @@ export interface operations {
             };
         };
     };
+    unwatchLobby: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_key: string;
+                lobby_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    listLobbyWatchers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_key: string;
+                lobby_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatcherList"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    kickLobbyWatcher: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_key: string;
+                lobby_id: string;
+                /** @description The watcher's player ID. */
+                player_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     createLobby: {
         parameters: {
             query?: never;
@@ -1659,6 +2048,93 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GuestSession"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    watchLobby: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WatchLobbyBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchAccess"];
                 };
             };
             /** @description Unauthorized */

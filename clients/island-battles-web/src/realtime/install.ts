@@ -3,6 +3,9 @@ import type { components as LobbyComponents } from "../api/generated/lobby";
 
 export type Snapshot = LobbyComponents["schemas"]["Snapshot"];
 export type GenerationState = GameComponents["schemas"]["GenerationState"];
+/** What a watcher outside the roster sees of a game: no player-only fields. */
+export type WatchState = GameComponents["schemas"]["WatchState"];
+export type WatchAccess = LobbyComponents["schemas"]["WatchAccess"];
 
 /** Structural equality of JSON values, ignoring the `$schema` annotation HTTP bodies carry. */
 export function sameJson(left: unknown, right: unknown): boolean {
@@ -66,6 +69,22 @@ export function nextGeneration(
       ? { ...incoming, submitted: true }
       : incoming;
   return sameJson(next, held) ? null : next;
+}
+
+/**
+ * Decides which watch state to hold, by the rules of `nextGeneration`: another
+ * game's state and older generations are dropped, nothing changes once the game
+ * has an outcome, and a duplicate changes nothing.
+ */
+export function nextWatch(
+  held: WatchState | null,
+  incoming: WatchState,
+): WatchState | null {
+  if (held === null) return incoming;
+  if (incoming.game_id !== held.game_id) return null;
+  if (incoming.generation_id < held.generation_id) return null;
+  if (held.outcome) return null;
+  return sameJson(incoming, held) ? null : incoming;
 }
 
 /**

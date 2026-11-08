@@ -25,6 +25,8 @@ import { hiddenNotice, type LogBook } from "./logs";
 export interface ScreenOptions {
   /** True when new turns can arrive: the live view. */
   live: boolean;
+  /** True for a watcher outside the roster, who sees no team's logs until the end. */
+  watching?: boolean;
   logs: LogBook;
   onBack: () => void;
   /** The label of the button that leaves the screen. Default "Back to lobby". */
@@ -35,13 +37,15 @@ export interface ScreenOptions {
   requestLogs?: (generationId: number, ended: boolean) => void;
 }
 
-export type ConnectionLabel = ConnectionState | "saved";
+/** `stopped`: a watcher the host removed, who receives no more turns. */
+export type ConnectionLabel = ConnectionState | "saved" | "stopped";
 
 const connectionText: Record<ConnectionLabel, string> = {
   connecting: "Connecting…",
   connected: "Live",
   disconnected: "Disconnected, reconnecting…",
   saved: "Saved demo",
+  stopped: "Not receiving turns",
 };
 
 function element<K extends keyof HTMLElementTagNameMap>(
@@ -398,7 +402,11 @@ export class GameScreen {
       this.options.requestLogs?.(frame.id, ended);
     }
     const parts: HTMLElement[] = [];
-    const notice = hiddenNotice(logs, { ended, live: state.live });
+    const notice = hiddenNotice(logs, {
+      ended,
+      live: state.live,
+      watching: this.options.watching === true,
+    });
     if (notice) parts.push(element("p", "gv-logs-note", notice));
     if (!logs) {
       parts.push(element("p", "gv-logs-note", "Loading the logs…"));

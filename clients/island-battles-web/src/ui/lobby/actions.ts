@@ -2,13 +2,14 @@ import { createApiClients } from "../../api/client";
 import { ApiError } from "../../api/errors";
 import type { components as GameComponents } from "../../api/generated/game";
 import type { components as LobbyComponents } from "../../api/generated/lobby";
-import type { Realtime, Snapshot } from "../../realtime";
+import type { Realtime, Snapshot, WatchAccess } from "../../realtime";
 import { type CreateLobbyBody, gameKey, type MapTemplate } from "./form";
 
 export type BotChoice = GameComponents["schemas"]["BotChoice"];
 export type LobbyBots = GameComponents["schemas"]["LobbyBots"];
 export type DefaultBot = GameComponents["schemas"]["DefaultBot"];
 export type AddSeatBody = LobbyComponents["schemas"]["AddSeatBody"];
+export type Watcher = LobbyComponents["schemas"]["Watcher"];
 export type MapTemplateSummary =
   GameComponents["schemas"]["MapTemplateSummary"];
 
@@ -185,6 +186,42 @@ export function createLobbyActions(options: {
       await lobbyApi.DELETE(
         "/lobby/v1/games/{game_key}/lobbies/{lobby_id}/membership",
         { params: { path } },
+      );
+    },
+
+    /** Watches a lobby's game with its join code, without taking a seat. */
+    async watch(joinCode: string): Promise<WatchAccess> {
+      const { data } = await retryTransport(() =>
+        lobbyApi.POST("/lobby/v1/watches", {
+          body: { game_key: gameKey, join_code: joinCode },
+        }),
+      );
+      return required(data);
+    },
+
+    async unwatch(lobbyId: string) {
+      await lobbyApi.DELETE(
+        "/lobby/v1/games/{game_key}/lobbies/{lobby_id}/watch",
+        { params: { path: { game_key: gameKey, lobby_id: lobbyId } } },
+      );
+    },
+
+    /** The lobby's watchers, for its members. */
+    async listWatchers(): Promise<Watcher[]> {
+      const { path } = room();
+      const { data } = await lobbyApi.GET(
+        "/lobby/v1/games/{game_key}/lobbies/{lobby_id}/watchers",
+        { params: { path } },
+      );
+      return required(data).watchers;
+    },
+
+    /** The host removes a watcher, who can't watch again with the code. */
+    async kickWatcher(playerId: string) {
+      const { path } = room();
+      await lobbyApi.DELETE(
+        "/lobby/v1/games/{game_key}/lobbies/{lobby_id}/watchers/{player_id}",
+        { params: { path: { ...path, player_id: playerId } } },
       );
     },
 

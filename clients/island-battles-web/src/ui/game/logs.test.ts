@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  ALL_TEAMS_HIDDEN,
   type GenerationLogs,
   hiddenNotice,
   LogBook,
@@ -41,6 +42,12 @@ describe("hiddenNotice", () => {
     expect(OTHER_TEAMS_HIDDEN).toBe(
       "Logs of other teams appear when the game ends",
     );
+  });
+
+  test("a watcher is told every team's logs appear when the game ends", () => {
+    const options = { ended: false, live: true, watching: true };
+    expect(hiddenNotice(logs(1, [1, 2]), options)).toBe(ALL_TEAMS_HIDDEN);
+    expect(hiddenNotice(logs(1, []), { ...options, ended: true })).toBeNull();
   });
 
   test("says nothing when no team is hidden, or the game has ended", () => {
