@@ -1,0 +1,92 @@
+# Builds the desktop app (Tauri, clients/island-battles-web/src-tauri) for
+# Windows, macOS and Linux. Manual dispatch only. The builds are unsigned and
+# are kept as workflow artifacts; nothing is published and nothing is deployed.
+name: Desktop app
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows (.msi)
+            os: windows-2022
+            bundles: msi
+            target: ""
+            rust_targets: ""
+            artifact: island-battles-windows
+            files: clients/island-battles-web/src-tauri/target/release/bundle/msi/*.msi
+          - name: macOS universal (.dmg)
+            os: macos-14
+            bundles: dmg
+            target: universal-apple-darwin
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
+            artifact: island-battles-macos-universal
+            files: clients/island-battles-web/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          - name: Linux (.AppImage, .deb)
+            os: ubuntu-24.04
+            bundles: appimage,deb
+            target: ""
+            rust_targets: ""
+            artifact: island-battles-linux
+            files: |
+              clients/island-battles-web/src-tauri/target/release/bundle/appimage/*.AppImage
+              clients/island-battles-web/src-tauri/target/release/bundle/deb/*.deb
+    defaults:
+      run:
+        working-directory: clients/island-battles-web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the pinned Bun version
+        id: bun
+        shell: bash
+        run: echo "version=$(jq -r '.packageManager | sub("^bun@"; "")' package.json)" >> "$GITHUB_OUTPUT"
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ steps.bun.outputs.version }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: clients/island-battles-web/src-tauri
+
+      - name: Install the Linux build libraries
+        if: runner.os == 'Linux'
+        working-directory: .
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - run: bun install --frozen-lockfile
+
+      # The web build comes first (tauri.conf.json has no beforeBuildCommand) so
+      # the same command works on every OS.
+      - name: Build the web client for the desktop app
+        run: bun run build:desktop
+
+      - name: Build the app
+        shell: bash
+        run: |
+          args=(--bundles "${{ matrix.bundles }}")
+          if [ -n "${{ matrix.target }}" ]; then args+=(--target "${{ matrix.target }}"); fi
+          bunx tauri build "${args[@]}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.files }}
+          if-no-files-found: error

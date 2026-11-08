@@ -1,3 +1,5 @@
+import { tabStorage } from "../platform";
+
 /** The part of `Storage` the module uses; `sessionStorage` fits. */
 export interface StorageLike {
   getItem(key: string): string | null;
@@ -53,10 +55,10 @@ export function saveSession(
   }
 }
 
-/** `sessionStorage`, or undefined where the browser blocks it. */
+/** The tab's storage (`localStorage` in the desktop build), or undefined where the browser blocks it. */
 export function defaultStorage(): StorageLike | undefined {
   try {
-    return globalThis.sessionStorage;
+    return tabStorage();
   } catch {
     return undefined;
   }

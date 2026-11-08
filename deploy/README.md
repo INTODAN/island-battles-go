@@ -50,7 +50,7 @@ The live deployment (#45, 2026-10-30) runs in `eu-central-1`, and its VM is `vm.
   - Firewall rules for 22, 443 and 5432. Port 22 stays open to all, so that any machine or GitHub runner can deploy: logins need a key, and password logins are off. Port 80 stays closed, because Centrifugo answers Let's Encrypt's challenge on 443.
   - Ansible doesn't set up a host firewall: ports that Docker publishes bypass ufw, so the Lightsail firewall is the one that counts.
 - **The Lambda's Function URL:** `scripts/aws.sh output function_url`. Centrifugo calls the backend's subscribe proxy through it.
-- **The game's URL:** `scripts/aws.sh output game_url`. Centrifugo accepts browser connections only from its origin.
+- **The game's URL:** `scripts/aws.sh output game_url`. Centrifugo accepts browser connections only from its origin and the desktop app's (`tauri://localhost`, `http://tauri.localhost`; `app_desktop_origins`, #105).
 - **DNS** (#30): see below.
 
 ### DNS

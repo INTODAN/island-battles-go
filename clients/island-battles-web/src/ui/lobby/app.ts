@@ -1,5 +1,6 @@
 import { createApiClients } from "../../api/client";
 import { type BotRelay, startBotRelay } from "../../bots";
+import { tabStorage } from "../../platform";
 import type { Realtime } from "../../realtime";
 import { h } from "../dom";
 import { mountDemoView, mountGameView, mountWatchView } from "../game/index";
@@ -53,7 +54,7 @@ function write(
 
 function savedRoom(): SavedRoom | undefined {
   try {
-    const value = JSON.parse(read(() => sessionStorage, roomKey) ?? "null");
+    const value = JSON.parse(read(tabStorage, roomKey) ?? "null");
     if (
       value &&
       typeof value.gameKey === "string" &&
@@ -70,7 +71,7 @@ function savedRoom(): SavedRoom | undefined {
 
 function savedWatch(): SavedWatch | undefined {
   try {
-    const value = JSON.parse(read(() => sessionStorage, watchKey) ?? "null");
+    const value = JSON.parse(read(tabStorage, watchKey) ?? "null");
     if (
       value &&
       typeof value.lobbyId === "string" &&
@@ -189,7 +190,7 @@ export function mountLobbyApp(options: {
   }
 
   function forgetRoom(message: string): void {
-    write(() => sessionStorage, roomKey, null);
+    write(tabStorage, roomKey, null);
     notice = message;
   }
 
@@ -347,7 +348,7 @@ export function mountLobbyApp(options: {
     demoLink.hidden = true;
     gameHost.hidden = false;
     write(
-      () => sessionStorage,
+      tabStorage,
       watchKey,
       JSON.stringify({ lobbyId, channel, joinCode } satisfies SavedWatch),
     );
@@ -379,7 +380,7 @@ export function mountLobbyApp(options: {
     current.stop();
     realtime.leaveWatch();
     void actions.unwatch(current.lobbyId).catch(() => undefined);
-    write(() => sessionStorage, watchKey, null);
+    write(tabStorage, watchKey, null);
     route();
   }
 
@@ -464,7 +465,7 @@ export function mountLobbyApp(options: {
     if (lobby) {
       pendingJoin = undefined;
       write(
-        () => sessionStorage,
+        tabStorage,
         roomKey,
         JSON.stringify({
           gameKey: lobby.lobby.game_key,
@@ -487,7 +488,7 @@ export function mountLobbyApp(options: {
     }
     if (problem?.scope === "lobby") {
       notice = describeProblem(problem.error, "ready").message;
-      write(() => sessionStorage, roomKey, null);
+      write(tabStorage, roomKey, null);
     }
     show("menu", () => {
       const message = notice;

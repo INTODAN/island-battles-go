@@ -2,6 +2,7 @@ import { createApiClients } from "../../api/client";
 import { ApiError } from "../../api/errors";
 import type { components as GameComponents } from "../../api/generated/game";
 import type { components as LobbyComponents } from "../../api/generated/lobby";
+import { platformFetch } from "../../platform";
 import type { Realtime, Snapshot, WatchAccess } from "../../realtime";
 import { type CreateLobbyBody, gameKey, type MapTemplate } from "./form";
 
@@ -61,10 +62,7 @@ export function createLobbyActions(options: {
   fetch?: typeof fetch;
 }) {
   const { realtime, clientInstanceId } = options;
-  const doFetch =
-    options.fetch ??
-    (((...args: Parameters<typeof fetch>) =>
-      globalThis.fetch(...args)) as typeof fetch);
+  const doFetch = options.fetch ?? platformFetch;
   const { lobbyApi, gameApi } = createApiClients({
     getAccessToken: () => realtime.session.get()?.accessToken,
     fetch: doFetch,

@@ -35,8 +35,9 @@ enabled = true
 
 [client]
 # The lobby UI and the demo player are served from the game's URL, through
-# CloudFront. The proxy endpoints below call the Function URL directly.
-allowed_origins = ["{{ app_game_origin }}"]
+# CloudFront. The proxy endpoints below call the Function URL directly. The
+# desktop app (#105) opens WebSockets from its web view's own origins.
+allowed_origins = [{% for origin in [app_game_origin] + app_desktop_origins %}"{{ origin }}"{{ ", " if not loop.last else "" }}{% endfor %}]
 
 [client.subscribe_to_user_personal_channel]
 enabled = false

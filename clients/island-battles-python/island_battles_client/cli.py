@@ -37,12 +37,15 @@ from .game_log import ClientLogging
 DEFAULT_PORT = 41414
 HOST = "127.0.0.1"
 # The game clients that may relay turns by default: the local backend's lobby
-# page and the web client's dev server. Add more, such as the deployed game's
-# origin, with --allow-origin.
+# page and the web client's dev server, the deployed game, and the desktop app
+# (#105), whose web view sends its own origin: `tauri://localhost` on macOS and
+# Linux, `http://tauri.localhost` on Windows. Add more with --allow-origin.
 DEFAULT_ORIGINS = (
     "http://localhost:8888",
     "http://localhost:3000",
     "https://island-battles.elidan.org",
+    "tauri://localhost",
+    "http://tauri.localhost",
 )
 CHECK_SECONDS = 2.0
 # The lobby's shortest turn timeout is 10 s; answer before the game moves on.
