@@ -151,25 +151,25 @@ test("the download is named after the map", () => {
   assert.equal(fileName({}), "map.json");
 });
 
-test("a map reaches the lobby only when it can be downloaded and every team owns a castle", () => {
+test("a map reaches the lobby only when the server accepted it", () => {
   const map = crossing();
   const text = serialize(map);
   const valid = { text, state: "valid", errors: [] };
-  assert.deepEqual(lobbyGate(map, text, valid), { ready: true, reason: "" });
-  assert.deepEqual(lobbyGate(map, text, null), { ready: false, reason: "Checking the map…" });
-  assert.equal(lobbyGate(map, text, { text, state: "pending" }).ready, false);
-  assert.equal(lobbyGate(map, text, { text: `${text} `, state: "valid", errors: [] }).ready, false);
-  assert.match(lobbyGate(map, text, { text, state: "invalid", errors: serverErrors.slice(0, 1) }).reason, /Fix 1 problem before sending/);
-  assert.match(lobbyGate(map, text, { text, state: "failed", message: "Couldn't reach the server: offline." }).reason, /offline/);
+  assert.deepEqual(lobbyGate(text, valid), { ready: true, reason: "" });
+  assert.deepEqual(lobbyGate(text, null), { ready: false, reason: "Checking the map…" });
+  assert.equal(lobbyGate(text, { text, state: "pending" }).ready, false);
+  assert.equal(lobbyGate(text, { text: `${text} `, state: "valid", errors: [] }).ready, false);
+  assert.match(lobbyGate(text, { text, state: "invalid", errors: serverErrors.slice(0, 1) }).reason, /Fix 1 problem before sending/);
+  assert.match(lobbyGate(text, { text, state: "failed", message: "Couldn't reach the server: offline." }).reason, /offline/);
 
-  // Download is allowed without a castle for every team; the lobby is not.
+  // The server refuses a map with a team that owns no castle, so neither the
+  // download nor the lobby gets it; the hint names the team.
   map.castles = map.castles.filter((castle) => castle.team_color !== 2);
   const unevenText = serialize(map);
-  const uneven = { text: unevenText, state: "valid", errors: [] };
-  assert.equal(downloadGate(unevenText, uneven).ready, true);
-  assert.deepEqual(lobbyGate(map, unevenText, uneven), { ready: false, reason: "A lobby needs a castle for every team. Team 2 owns none." });
-  map.castles = [];
-  assert.match(lobbyGate(map, serialize(map), { text: serialize(map), state: "valid", errors: [] }).reason, /Teams 1, 2 own none/);
+  const refused = { text: unevenText, state: "invalid", errors: [{ location: "castles", message: "team colour 2 of player_amount 2 owns no castle" }] };
+  assert.equal(downloadGate(unevenText, refused).ready, false);
+  assert.match(lobbyGate(unevenText, refused).reason, /Fix 1 problem before sending/);
+  assert.deepEqual(missingTeams(map), [2]);
 });
 
 test("the lobby message holds exactly the accepted text", () => {

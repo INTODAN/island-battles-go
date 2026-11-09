@@ -25,7 +25,7 @@ const twoTeamLobbyMapFile = `{
 
 const threeTeamLobbyMapFile = `{
   "map_name": "Lobby battle",
-  "player_amount": 4,
+  "player_amount": 3,
   "plane_size_x": 8,
   "plane_size_y": 6,
   "neutral_starting_soldier_amount": 0,
@@ -43,10 +43,10 @@ func TestLobbyMapIsAMapTemplate(t *testing.T) {
 		mapFile     string
 	}{
 		{name: "two teams", teamPlayers: []int{1, 1}, mapFile: twoTeamLobbyMapFile},
-		{name: "three teams", teamPlayers: []int{2, 1, 1}, mapFile: threeTeamLobbyMapFile},
-		// The lobby refuses to start with an empty team, but the map still
-		// gives every configured team its castle.
-		{name: "a team without players", teamPlayers: []int{2, 0}, mapFile: twoTeamLobbyMapFile},
+		{name: "three teams", teamPlayers: []int{1, 1, 1}, mapFile: threeTeamLobbyMapFile},
+		// The lobby refuses to start with an empty team, but the map is still
+		// made for every configured team, each with its castle.
+		{name: "a team without players", teamPlayers: []int{1, 0}, mapFile: twoTeamLobbyMapFile},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			binding := models.BindingResult{GameID: 1, LobbyID: "lobby"}

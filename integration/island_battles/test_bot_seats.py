@@ -2,8 +2,11 @@
 
 import httpx
 import pytest
+from uuid import uuid4
+
 from integration.test_live import BASE, create
 from integration.test_live import guests as guests_fixture
+from lobby_api_client.models import TeamDefinition
 from lobby_client import LobbyError, Scope
 from test_bot_choice import run_bot
 from test_lobby_binding import choose_bot
@@ -65,7 +68,13 @@ async def test_one_person_plays_a_whole_game_against_a_level_two_bot_seat(guests
 
 async def test_only_the_host_changes_seats_and_seats_alone_never_start(guests):
     alice, bob = await guests("Alice"), await guests("Bob")
-    room = await create(alice, "island-battles")
+    # Four teams hold the two people and two seats, one member each.
+    room = await alice.create_lobby(
+        game_key="island-battles", name="Seats",
+        teams=[TeamDefinition(name=name) for name in ("Blue", "Red", "Green", "Purple")],
+        request_id=uuid4(),
+    )
+    assert room.lobby.capacity == 4
     scope = Scope.from_snapshot(room)
     await bob.join_lobby(game_key=scope.game_key, join_code=room.lobby.join_code)
     with pytest.raises(LobbyError) as refused:
@@ -73,6 +82,13 @@ async def test_only_the_host_changes_seats_and_seats_alone_never_start(guests):
     assert (refused.value.code, refused.value.status) == ("not_host", 403)
 
     first = seats(await alice.add_seat(scope, str(room.teams[0].id), {"bot_level": 1}))[0]
+    # A team holds one member, so a seat's team takes no other seat or person.
+    with pytest.raises(LobbyError) as taken:
+        await alice.add_seat(scope, str(room.teams[0].id), {"bot_level": 2})
+    assert (taken.value.code, taken.value.status) == ("team_full", 409)
+    with pytest.raises(LobbyError) as taken:
+        await bob.select_team(scope, str(room.teams[0].id))
+    assert (taken.value.code, taken.value.status) == ("team_full", 409)
     both = seats(await alice.add_seat(scope, str(room.teams[1].id), {"bot_level": 3}))
     assert [seat.display_name for seat in both] == ["Bot (level 1)", "Bot (level 3)"]
     with pytest.raises(LobbyError) as refused:

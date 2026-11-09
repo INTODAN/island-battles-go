@@ -47,7 +47,7 @@ const sentences: Record<string, string> = {
 /** The sentences for adding or removing a bot seat, which replace the lobby's where they differ. */
 const seatSentences: Record<string, string> = {
   not_host: "Only the host can add or remove bots.",
-  team_full: "That team is full.",
+  team_full: "That team already has a player or a bot.",
   phase_conflict: "The lobby has already started, so its bots can't change.",
   invalid_seat_settings: "That bot level was refused. Choose another level.",
   idempotency_conflict:

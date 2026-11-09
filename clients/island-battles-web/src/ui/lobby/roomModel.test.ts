@@ -8,6 +8,7 @@ import {
   describeBot,
   describeSettings,
   startBlocker,
+  teamTaken,
 } from "./roomModel";
 
 const member = (
@@ -40,8 +41,9 @@ const snapshot = {
     game_settings: {},
   },
   teams: [
-    { id: "t-red", name: "Red", order: 2, capacity: 1 },
-    { id: "t-blue", name: "Blue", order: 1, capacity: 2 },
+    { id: "t-red", name: "Red", order: 2 },
+    { id: "t-blue", name: "Blue", order: 1 },
+    { id: "t-green", name: "Green", order: 3 },
   ],
   members: [
     member("p2", "t-red", { ready: true }),
@@ -66,6 +68,7 @@ describe("the room model", () => {
     expect(room.teams.map((team) => [team.name, team.colour])).toEqual([
       ["Blue", 1],
       ["Red", 2],
+      ["Green", 3],
     ]);
     expect(room.teams[0]?.members.map((m) => [m.name, m.bot?.kind])).toEqual([
       ["P1", "localhost"],
@@ -86,6 +89,14 @@ describe("the room model", () => {
       ...room.unassigned,
     ].map((m) => m.name);
     expect(names).not.toContain("P4");
+  });
+
+  test("a team with a member is taken, an empty one is free", () => {
+    expect(room.teams.map((team) => [team.name, teamTaken(team)])).toEqual([
+      ["Blue", true],
+      ["Red", true],
+      ["Green", false],
+    ]);
   });
 
   test("who you are", () => {

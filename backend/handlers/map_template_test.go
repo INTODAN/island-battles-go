@@ -44,7 +44,8 @@ func TestCreateMapTemplateHTTP(t *testing.T) {
 	for _, detail := range problem.Errors {
 		locations = append(locations, detail.Location)
 	}
-	if expected := []string{"body.castles[0].team_color", "body.castles[1].x", "body.castles[1].upgrades.speed"}; !reflect.DeepEqual(locations, expected) {
+	// Colour 2 owns no castle, since castles[0] has colour 3.
+	if expected := []string{"body.castles[0].team_color", "body.castles[1].x", "body.castles[1].upgrades.speed", "body.castles"}; !reflect.DeepEqual(locations, expected) {
 		t.Fatalf("locations=%v, want %v", locations, expected)
 	}
 	var stored int64
@@ -89,14 +90,30 @@ func TestListMapTemplatesHTTP(t *testing.T) {
 	for _, mapFile := range []string{
 		`{"map_name":"Zigzag","player_amount":3,"plane_size_x":12,"plane_size_y":9,"neutral_starting_soldier_amount":5,"castles":[{"team_color":1,"x":0,"y":0},{"team_color":2,"x":1,"y":0},{"team_color":3,"x":2,"y":0},{"team_color":0,"x":3,"y":0}]}`,
 		testutils.MapExampleInput,
+	} {
+		if created := api.Post("/map/create", adminHeader, json.RawMessage(mapFile)); created.Code != http.StatusOK {
+			t.Fatalf("create status=%d body=%s", created.Code, created.Body.String())
+		}
+	}
+	// No lobby can use these maps, so /map/create refuses them. Templates
+	// stored before that rule stay, and the list leaves them out.
+	for _, mapFile := range []string{
 		// A lobby has at least two teams.
 		`{"map_name":"Solo","player_amount":1,"plane_size_x":4,"plane_size_y":4,"neutral_starting_soldier_amount":5,"castles":[{"team_color":1,"x":0,"y":0}]}`,
 		seventeenTeamMap,
 		// Colour 2 owns no castle, so the map fits no lobby.
 		`{"map_name":"Gap","player_amount":3,"plane_size_x":4,"plane_size_y":4,"neutral_starting_soldier_amount":5,"castles":[{"team_color":1,"x":0,"y":0},{"team_color":3,"x":1,"y":0}]}`,
 	} {
-		if created := api.Post("/map/create", adminHeader, json.RawMessage(mapFile)); created.Code != http.StatusOK {
-			t.Fatalf("create status=%d body=%s", created.Code, created.Body.String())
+		if refused := api.Post("/map/create", adminHeader, json.RawMessage(mapFile)); refused.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("unusable map status=%d body=%s", refused.Code, refused.Body.String())
+		}
+		var template models.MapTemplateView
+		if err := json.Unmarshal([]byte(mapFile), &template); err != nil {
+			t.Fatal(err)
+		}
+		stored := models.NewMapTemplate(template)
+		if err := database.Create(&stored).Error; err != nil {
+			t.Fatal(err)
 		}
 	}
 	listed := api.Get("/map/templates")

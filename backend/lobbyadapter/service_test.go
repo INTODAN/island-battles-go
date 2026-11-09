@@ -190,7 +190,7 @@ func startedSnapshot() (domain.Principal, domain.Scope, domain.Snapshot) {
 	teamOne, teamTwo := uuid.NewString(), uuid.NewString()
 	scope := domain.Scope{GameKey: "island-battles", LobbyID: lobbyID}
 	guestID := uuid.NewString()
-	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: lobbyID, GameKey: scope.GameKey, Phase: domain.PhaseStarted, HostPlayerID: &host}, Teams: []domain.Team{{ID: teamOne, LobbyID: lobbyID, Name: "Blue", Capacity: 4, Order: 1}, {ID: teamTwo, LobbyID: lobbyID, Name: "Red", Capacity: 4, Order: 2}}, StartRoster: domain.StartRoster{{PlayerID: playerID, TeamID: teamOne, MemberID: uuid.NewString(), TeamOrder: 1}, {PlayerID: guestID, TeamID: teamTwo, MemberID: uuid.NewString(), TeamOrder: 2}}, Members: []domain.Member{{PlayerID: playerID, DisplayName: "Host"}, {PlayerID: guestID, DisplayName: "Guest"}}}
+	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: lobbyID, GameKey: scope.GameKey, Phase: domain.PhaseStarted, HostPlayerID: &host}, Teams: []domain.Team{{ID: teamOne, LobbyID: lobbyID, Name: "Blue", Order: 1}, {ID: teamTwo, LobbyID: lobbyID, Name: "Red", Order: 2}}, StartRoster: domain.StartRoster{{PlayerID: playerID, TeamID: teamOne, MemberID: uuid.NewString(), TeamOrder: 1}, {PlayerID: guestID, TeamID: teamTwo, MemberID: uuid.NewString(), TeamOrder: 2}}, Members: []domain.Member{{PlayerID: playerID, DisplayName: "Host"}, {PlayerID: guestID, DisplayName: "Guest"}}}
 	return domain.Principal{PlayerID: playerID, SessionID: sessionID, DisplayName: "Host"}, scope, snapshot
 }
 

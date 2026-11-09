@@ -1014,9 +1014,10 @@
             "type": "integer"
           },
           "player_amount": {
-            "description": "Players the map is made for. Castle team colours run from 1 to player_amount.",
+            "description": "Teams the map is made for, from 2 to 16, one player each. Castle team colours run from 1 to player_amount, and every one of them owns at least one castle.",
             "format": "int64",
-            "minimum": 1,
+            "maximum": 16,
+            "minimum": 2,
             "type": "integer"
           }
         },

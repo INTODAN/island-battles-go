@@ -701,7 +701,7 @@ export interface components {
             plane_size_y: number;
             /**
              * Format: int64
-             * @description Players the map is made for. Castle team colours run from 1 to player_amount.
+             * @description Teams the map is made for, from 2 to 16, one player each. Castle team colours run from 1 to player_amount, and every one of them owns at least one castle.
              */
             player_amount: number;
         };

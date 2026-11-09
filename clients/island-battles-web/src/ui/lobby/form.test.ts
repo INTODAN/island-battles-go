@@ -36,7 +36,6 @@ const templates: MapTemplateSummary[] = [
 const values = (extra: Partial<CreateFormValues> = {}): CreateFormValues => ({
   lobbyName: "Alex's lobby",
   teamCount: 2,
-  teamCapacity: 1,
   map: { kind: "generated" },
   turnTimeoutSeconds: 30,
   ...extra,
@@ -44,18 +43,11 @@ const values = (extra: Partial<CreateFormValues> = {}): CreateFormValues => ({
 
 describe("the create form", () => {
   test("a generated map takes the chosen teams, named after the board's colours", () => {
-    const result = validateCreateForm(
-      values({ teamCount: 3, teamCapacity: 2 }),
-      templates,
-    );
+    const result = validateCreateForm(values({ teamCount: 3 }), templates);
+    // One player per team: the request names the teams and nothing else.
     expect(result).toEqual({
       ok: true,
-      teams: [
-        { name: "Blue", capacity: 2 },
-        { name: "Red", capacity: 2 },
-        { name: "Green", capacity: 2 },
-      ],
-      capacity: 6,
+      teams: [{ name: "Blue" }, { name: "Red" }, { name: "Green" }],
       gameSettings: { turn_timeout_seconds: 30 },
     });
   });
@@ -67,9 +59,9 @@ describe("the create form", () => {
     );
     expect(template).toMatchObject({
       ok: true,
-      capacity: 3,
       gameSettings: { map_template_id: 4, turn_timeout_seconds: 30 },
     });
+    if (template.ok) expect(template.teams).toHaveLength(3);
 
     const map = {
       map_name: "Mine",
@@ -81,7 +73,6 @@ describe("the create form", () => {
     );
     expect(file).toMatchObject({
       ok: true,
-      capacity: 4,
       gameSettings: { map, turn_timeout_seconds: 30 },
     });
     if (file.ok)
@@ -109,7 +100,6 @@ describe("the create form", () => {
       values({
         lobbyName: "  ",
         teamCount: 7,
-        teamCapacity: 0,
         turnTimeoutSeconds: 7,
       }),
       templates,
@@ -118,7 +108,6 @@ describe("the create form", () => {
     if (!result.ok) {
       expect(Object.keys(result.errors).sort()).toEqual([
         "lobbyName",
-        "teamCapacity",
         "teamCount",
         "turnTimeout",
       ]);
@@ -260,10 +249,10 @@ describe("create requests", () => {
   test("the same id is resent after a transport failure, until the body changes", () => {
     let count = 0;
     const requests = new CreateRequests(() => `id-${++count}`);
-    const first = requests.idFor({ name: "A", capacity: 2 });
+    const first = requests.idFor({ name: "A", teams: 2 });
     // The create did not get an answer, so the same body goes out again.
-    expect(requests.idFor({ name: "A", capacity: 2 })).toBe(first);
+    expect(requests.idFor({ name: "A", teams: 2 })).toBe(first);
     // A different lobby is a different create.
-    expect(requests.idFor({ name: "A", capacity: 4 })).not.toBe(first);
+    expect(requests.idFor({ name: "A", teams: 4 })).not.toBe(first);
   });
 });

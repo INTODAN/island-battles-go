@@ -49,7 +49,7 @@ func TestMapCreateAcceptsTheMapFileFormat(t *testing.T) {
 		t.Fatal("the map file format publishes Huma's $schema link property")
 	}
 	// Validation rejects the body before the handler would reach the database.
-	linkedFile := `{"$schema":"https://example.com/MapTemplate.json","map_name":"linked","player_amount":1,"plane_size_x":2,"plane_size_y":2,"neutral_starting_soldier_amount":1,"castles":[{"team_color":1,"x":0,"y":0}]}`
+	linkedFile := `{"$schema":"https://example.com/MapTemplate.json","map_name":"linked","player_amount":2,"plane_size_x":2,"plane_size_y":2,"neutral_starting_soldier_amount":1,"castles":[{"team_color":1,"x":0,"y":0}]}`
 	if response := api.Post("/map/create", routes.AdminAPIKeyHeader+": admin-key", strings.NewReader(linkedFile)); response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "body.$schema") {
 		t.Fatalf("a map file with $schema got status=%d body=%s", response.Code, response.Body.String())
 	}

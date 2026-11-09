@@ -8,9 +8,9 @@ import (
 )
 
 func TestMapTemplateErrorsAreCapped(t *testing.T) {
-	template := MapTemplateView{MapFields: MapFields{MapName: "far", PlayerAmount: 1, PlaneSizeX: 2, PlaneSizeY: 2}}
-	for range MaxMapTemplateProblems + 50 {
-		template.Castles = append(template.Castles, CastleTemplateView{X: 5})
+	template := MapTemplateView{MapFields: MapFields{MapName: "far", PlayerAmount: 2, PlaneSizeX: 2, PlaneSizeY: 2}}
+	for index := range MaxMapTemplateProblems + 50 {
+		template.Castles = append(template.Castles, CastleTemplateView{TeamColor: uint(min(index+1, 2)), X: 5})
 	}
 	var invalidTemplate *MapTemplateError
 	if err := ValidateMapTemplate(template); !errors.As(err, &invalidTemplate) {
@@ -26,7 +26,7 @@ func TestMapTemplateErrorsAreCapped(t *testing.T) {
 }
 
 func TestDecodeMapTemplateEchoesOnlyScalarValues(t *testing.T) {
-	_, err := DecodeMapTemplate([]byte(`{"map_name":"a","player_amount":1,"plane_size_x":2,"plane_size_y":2,"neutral_starting_soldier_amount":1,"castles":[{"team_color":1,"x":"0","y":0,"extra":true}]}`))
+	_, err := DecodeMapTemplate([]byte(`{"map_name":"a","player_amount":2,"plane_size_x":2,"plane_size_y":2,"neutral_starting_soldier_amount":1,"castles":[{"team_color":1,"x":"0","y":0,"extra":true}]}`))
 	var invalidTemplate *MapTemplateError
 	if !errors.As(err, &invalidTemplate) || len(invalidTemplate.Details) != 2 {
 		t.Fatalf("err=%v", err)

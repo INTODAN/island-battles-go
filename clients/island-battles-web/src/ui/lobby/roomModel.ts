@@ -62,8 +62,16 @@ export interface TeamRow {
   name: string;
   /** The team colour, 1 to N, as the board draws it. */
   colour: number;
-  capacity: number;
+  /**
+   * The team's member: a team holds one person or bot. Only a lobby created
+   * before that rule can list more.
+   */
   members: MemberRow[];
+}
+
+/** A team with a member, person or bot, has no room for anyone else. */
+export function teamTaken(team: TeamRow): boolean {
+  return team.members.length > 0;
 }
 
 export interface RoomModel {
@@ -134,7 +142,6 @@ export function buildRoom(
         id: team.id,
         name: team.name,
         colour: index + 1,
-        capacity: team.capacity,
         members: rows.filter((row) => row.teamId === team.id),
       }),
     );

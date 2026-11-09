@@ -118,9 +118,9 @@ func TestMapCreateCountsHandlerProblemsPastTheCap(t *testing.T) {
 	const farCastles = 150
 	castles := make([]string, farCastles)
 	for index := range castles {
-		castles[index] = `{"team_color":1,"x":5,"y":0}`
+		castles[index] = fmt.Sprintf(`{"team_color":%d,"x":5,"y":0}`, index%2+1)
 	}
-	body := `{"map_name":"far","player_amount":1,"plane_size_x":2,"plane_size_y":2,"neutral_starting_soldier_amount":1,"castles":[` + strings.Join(castles, ",") + `]}`
+	body := `{"map_name":"far","player_amount":2,"plane_size_x":2,"plane_size_y":2,"neutral_starting_soldier_amount":1,"castles":[` + strings.Join(castles, ",") + `]}`
 	status, answer := serveProblem(t, newBackendAPI(t), "/map/create", body)
 	if status != http.StatusUnprocessableEntity || answer.Errors[0].Location != "body.castles[0].x" {
 		t.Fatalf("status=%d first=%+v", status, answer.Errors[0])
