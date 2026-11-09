@@ -28,7 +28,7 @@ import {
   teamStats,
   turnLabel,
 } from "./history";
-import { hiddenNotice, type LogBook } from "./logs";
+import { hiddenNotice, type LogBook, LogFetchScheduler } from "./logs";
 
 export interface ScreenOptions {
   /** True when new turns can arrive: the live view. */
@@ -116,6 +116,9 @@ export class GameScreen {
   private readonly logsBox = element("details", "gv-logs");
   private readonly logsSummary = element("summary");
   private readonly logsBody = element("div", "gv-logs-body");
+  private readonly logScheduler = new LogFetchScheduler((generationId, ended) =>
+    this.options.requestLogs?.(generationId, ended),
+  );
   private teamRows = new Map<
     number,
     { soldiers: HTMLElement; castles: HTMLElement }
@@ -203,6 +206,8 @@ export class GameScreen {
 
     this.logsSummary.textContent = "Bot logs";
     this.logsBox.append(this.logsSummary, this.logsBody);
+    // Logs are fetched only while the panel is open; opening it asks for the turn on screen.
+    this.logsBox.addEventListener("toggle", () => this.refreshLogs());
 
     const topStack = element("div", "gv-stack gv-stack-top");
     topStack.append(top, this.notice, this.summary, this.teamsBox, this.banner);
@@ -351,6 +356,7 @@ export class GameScreen {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.logScheduler.cancel();
     this.stop();
     this.container.replaceChildren();
   }
@@ -440,9 +446,12 @@ export class GameScreen {
     const logs = this.options.logs.get(frame.id);
     const ended = state.outcome !== null;
     this.logsSummary.textContent = `Bot logs · ${turnLabel(state.index, state.frames.length)}`;
-    if (this.options.logs.needsFetch(frame.id, ended)) {
-      this.options.requestLogs?.(frame.id, ended);
-    }
+    this.logScheduler.update({
+      open: this.logsBox.open,
+      generationId: frame.id,
+      ended,
+      needsFetch: this.options.logs.needsFetch(frame.id, ended),
+    });
     const parts: HTMLElement[] = [];
     const notice = hiddenNotice(logs, {
       ended,
