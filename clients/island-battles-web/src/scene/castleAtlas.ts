@@ -3,6 +3,7 @@ import { RawTexture } from "@babylonjs/core/Materials/Textures/rawTexture";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import type { Scene } from "@babylonjs/core/scene";
+import { fetchAsset } from "./assetLoader";
 import { mix, NEUTRAL_COLOR, teamColorHex } from "./palette";
 
 // The castle atlas and its team copies (issue #140). Every castle mesh samples one 512 by 512
@@ -138,12 +139,14 @@ export function paintTeamAtlas(
  * Unity used the raw values, and the copied atlas carries no colour profile.
  */
 export async function loadAtlasPixels(url: string): Promise<Uint8ClampedArray> {
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`castle atlas: HTTP ${response.status}`);
-  const bitmap = await createImageBitmap(await response.blob(), {
-    colorSpaceConversion: "none",
-    premultiplyAlpha: "none",
-  });
+  const bytes = await fetchAsset(url);
+  const bitmap = await createImageBitmap(
+    new Blob([bytes], { type: "image/png" }),
+    {
+      colorSpaceConversion: "none",
+      premultiplyAlpha: "none",
+    },
+  );
   const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
   const context = canvas.getContext("2d");
   if (!context) throw new Error("castle atlas: no 2D canvas");
@@ -159,6 +162,8 @@ interface AtlasCache {
 
 const caches = new WeakMap<Scene, AtlasCache>();
 const pixelsByScene = new WeakMap<Scene, Uint8Array | Uint8ClampedArray>();
+const listenersByScene = new WeakMap<Scene, (() => void)[]>();
+const requestsByScene = new WeakMap<Scene, Promise<void>>();
 
 /** Gives a scene the base atlas's pixels; `teamAtlas` and `baseAtlasMaterial` need them first. */
 export function setAtlasPixels(
@@ -169,10 +174,42 @@ export function setAtlasPixels(
     throw new Error(`castle atlas: expected ${ATLAS_SIZE}² RGBA pixels`);
   }
   pixelsByScene.set(scene, pixels);
+  const listeners = listenersByScene.get(scene) ?? [];
+  listenersByScene.delete(scene);
+  for (const listener of listeners) listener();
 }
 
 export function hasAtlasPixels(scene: Scene): boolean {
   return pixelsByScene.has(scene);
+}
+
+/**
+ * Calls `listener` once the scene has the atlas's pixels, so meshes built before it arrived can
+ * take the atlas materials; it is not called if the scene has them already.
+ */
+export function onAtlasPixels(scene: Scene, listener: () => void): void {
+  if (pixelsByScene.has(scene)) return;
+  const listeners = listenersByScene.get(scene) ?? [];
+  listeners.push(listener);
+  listenersByScene.set(scene, listeners);
+}
+
+/** Loads the atlas's pixels into the scene once, however many callers ask for them. */
+export function requestAtlasPixels(
+  scene: Scene,
+  load: () => Promise<Uint8Array | Uint8ClampedArray>,
+): Promise<void> {
+  if (pixelsByScene.has(scene)) return Promise.resolve();
+  let request = requestsByScene.get(scene);
+  if (!request) {
+    request = load().then((pixels) => {
+      if (!pixelsByScene.has(scene)) setAtlasPixels(scene, pixels);
+    });
+    requestsByScene.set(scene, request);
+    // A failed load can be tried again.
+    request.catch(() => requestsByScene.delete(scene));
+  }
+  return request;
 }
 
 function atlasTexture(

@@ -7,9 +7,17 @@ import { Scene } from "@babylonjs/core/scene";
 import type { ConnectionState } from "../../realtime";
 import { createScenePlayer } from "../../scene/animation";
 import { battlefieldOf } from "../../scene/battlefield";
+import { loadBoardAssets } from "../../scene/boardAssets";
 import { fitCamera } from "../../scene/camera";
+import {
+  applyGraphics,
+  type Graphics,
+  savedGraphics,
+  saveGraphics,
+} from "../../scene/graphics";
 import { teamColorHex } from "../../scene/palette";
 import { installBoardControls } from "../../scene/picking";
+import { showBoardLoading } from "../boardLoading";
 import { GameController, type ViewState } from "./controller";
 import "./game.css";
 import {
@@ -103,6 +111,8 @@ export class GameScreen {
   private readonly follow = element("input");
   private readonly followLabel = element("label", "gv-follow");
   private readonly speed = element("select", "gv-speed");
+  private readonly effects = element("input");
+  private readonly effectsLabel = element("label", "gv-follow gv-effects");
   private readonly logsBox = element("details", "gv-logs");
   private readonly logsSummary = element("summary");
   private readonly logsBody = element("div", "gv-logs-body");
@@ -177,7 +187,19 @@ export class GameScreen {
     }
     const buttons = element("div", "gv-buttons");
     buttons.append(this.backButton, this.playButton, this.forwardButton);
-    timeline.append(buttons, this.slider, this.followLabel, this.speed);
+    this.effects.type = "checkbox";
+    this.effects.setAttribute("aria-label", "Effects");
+    this.effects.checked = savedGraphics() === "high";
+    this.effectsLabel.title =
+      "Post-processing, shadows and moving flags. Turn off on a slow device.";
+    this.effectsLabel.append(this.effects, " Effects");
+    timeline.append(
+      buttons,
+      this.slider,
+      this.followLabel,
+      this.speed,
+      this.effectsLabel,
+    );
 
     this.logsSummary.textContent = "Bot logs";
     this.logsBox.append(this.logsSummary, this.logsBody);
@@ -245,6 +267,15 @@ export class GameScreen {
     });
     const scene = new Scene(engine);
     installBoardControls(scene);
+    // The board's art loads behind a loading screen; the board draws placeholders meanwhile.
+    const loading = showBoardLoading(this.root);
+    loadBoardAssets(scene, (progress) => loading.update(progress)).then(
+      () => loading.done(),
+      (error) => {
+        console.error("the board's art failed to load", error);
+        loading.failed();
+      },
+    );
     const { player } = createScenePlayer(scene, sorted);
     const controller = new GameController(
       {
@@ -281,8 +312,19 @@ export class GameScreen {
     this.follow.onchange = () => controller.setFollow(this.follow.checked);
     this.speed.onchange = () => player.setSpeed(Number(this.speed.value));
     player.setSpeed(Number(this.speed.value));
+    const setGraphics = (value: Graphics) => {
+      const camera = scene.activeCamera;
+      if (camera) void applyGraphics(scene, camera, value);
+    };
+    this.effects.onchange = () => {
+      const value: Graphics = this.effects.checked ? "high" : "low";
+      saveGraphics(value);
+      setGraphics(value);
+    };
 
     controller.load(frames, outcome);
+    // The board's camera exists once the first turn is drawn.
+    setGraphics(this.effects.checked ? "high" : "low");
     engine.runRenderLoop(() => scene.render());
     engine.resize();
     this.running = {

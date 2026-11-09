@@ -1,4 +1,4 @@
-export { createPlaceholderEffects, type TurnEffects } from "./effects";
+export { createTurnEffects, type TurnEffects } from "./effects";
 export {
   planTurn,
   sampleTurn,

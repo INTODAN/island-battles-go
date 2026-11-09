@@ -11,3 +11,9 @@ The castle files are made by [`tools/castles/convert.py`](../tools/castles/conve
 | `castles/castle-level-3.glb` | `Models/Castle_level_3.fbx` (castle, flag, skin and `Take 001` clip, trimmed as in `Models/Castle_level_3.fbx.meta`), with the material split of `Models/Castle_all_team.fbx` | `c8b43b3` | the owner's own asset |
 | `castles/castle-level-4.glb` | `Models/Castle_level_4.fbx` (castle, flags, blades, skins and `Take 001` clip, trimmed as in `Models/Castle_level_4.fbx.meta`), with the material split of `Models/Castle_all_team.fbx` | `c8b43b3` | the owner's own asset |
 | `castles/atlas.png` | `Textures/Castles/basic_mat_color.png` (pixels unchanged; colour profile and metadata dropped) | `c8b43b3` | the owner's own asset |
+
+The board's other art (#102) is made in this repository. Islands, boats, trees and rocks are built in code (`src/scene/landforms.ts`, `src/scene/art.ts`) on the castle atlas above, and the particle textures are drawn in code (`src/scene/particles.ts`); none of them is a file. No third-party pack is used.
+
+| File | Source | Licence |
+|---|---|---|
+| `environment/sky.png` | Made by [`tools/environment/sky.ts`](../tools/environment/sky.ts): a 256 by 128 equirectangular sky gradient with the sun's glow, drawn from the sun direction in `src/scene/lookConstants.ts`. Run `bun run tools/environment/sky.ts` to make it again | the owner's own asset, made in this repository |

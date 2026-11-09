@@ -13,6 +13,12 @@ body {
   height: 100%;
   outline: none;
   touch-action: none;
+  transition: opacity 0.6s ease;
+}
+
+/* The lobby's ocean fades in once the board's art has loaded (src/ui/lobby/ocean.ts). */
+#scene.ocean-loading {
+  opacity: 0;
 }
 
 .fixture-bar {
@@ -62,4 +68,44 @@ body {
 
 .board-tooltip[hidden] {
   display: none;
+}
+
+/* The loading screen over a board while its art downloads (src/ui/boardLoading.ts). */
+.board-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: #0b2531;
+  color: #f4f1e6;
+  font:
+    15px system-ui,
+    sans-serif;
+  transition: opacity 0.4s ease;
+}
+
+.board-loading p {
+  margin: 0;
+  max-width: 80%;
+  text-align: center;
+}
+
+.board-loading progress {
+  width: min(320px, 70%);
+  height: 10px;
+  accent-color: #c2efe4;
+}
+
+.board-loading-percent {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+
+.board-loading-out {
+  opacity: 0;
+  pointer-events: none;
 }
