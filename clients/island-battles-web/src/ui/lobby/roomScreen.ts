@@ -19,6 +19,7 @@ import {
   type MemberRow,
   type RoomModel,
   seatBody,
+  startBlocker,
   type TeamRow,
 } from "./roomModel";
 import { mountWatchersPanel } from "./watchersPanel";
@@ -486,7 +487,8 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
     readyButton.disabled = busy || started || !model.you;
     startButton.hidden = !model.isHost;
     startError.hidden = !model.isHost;
-    startButton.disabled = busy || started;
+    const blocker = startBlocker(model, snapshot.start_rules);
+    startButton.disabled = busy || started || blocker !== null;
     leaveButton.disabled = busy;
     const members = countPeople([
       ...model.teams.flatMap((team) => team.members),
@@ -494,11 +496,13 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
     ]);
     hint.textContent = started
       ? "The game is starting…"
-      : members < 2
-        ? "Share the code above to invite the other players."
-        : model.isHost
-          ? "Once every player has a team, a bot and is ready, you can start the game."
-          : "Choose a team and a bot, then mark ready. The host will start the game.";
+      : model.isHost && blocker !== null
+        ? blocker
+        : members < 2
+          ? "Share the code above to invite the other players."
+          : model.isHost
+            ? "Once every player has a team, a bot and is ready, you can start the game."
+            : "Choose a team and a bot, then mark ready. The host will start the game.";
     renderProblems();
   }
 

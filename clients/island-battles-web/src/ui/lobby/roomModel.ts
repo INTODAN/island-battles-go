@@ -151,6 +151,36 @@ export function buildRoom(
   };
 }
 
+/**
+ * The first condition the server would refuse a start for, as one sentence,
+ * or null when the lobby can start. Checked in the server's order of concern;
+ * the server stays the authority.
+ */
+export function startBlocker(
+  room: RoomModel,
+  startRules: Snapshot["start_rules"] | undefined,
+): string | null {
+  const members = [
+    ...room.teams.flatMap((team) => team.members),
+    ...room.unassigned,
+  ];
+  if (members.length < 2) return "Waiting for another player or bot.";
+  if (room.unassigned.length > 0) return "Everyone needs a team.";
+  const away = members.find((member) => !member.connected);
+  if (away) return `Waiting for ${away.name} to reconnect.`;
+  const unready = members.find(
+    (member) => !member.ready && member.kind === "human",
+  );
+  if (unready) return `Waiting for ${unready.name} to be ready.`;
+  if (
+    startRules?.every_team_needs_member &&
+    room.teams.some((team) => team.members.length === 0)
+  ) {
+    return "Every team needs a player or a bot.";
+  }
+  return null;
+}
+
 /** One line naming the map and the turn limit a lobby's settings chose. */
 export function describeSettings(
   settings: Record<string, unknown> | undefined,
