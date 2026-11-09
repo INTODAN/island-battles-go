@@ -34,13 +34,10 @@ import { attachWake } from "./wakes";
 
 export { ISLAND_TOP } from "./landforms";
 
-/**
- * The open sea. #102 asked for about #1f4f63; it is darker so every team colour keeps 3:1
- * contrast against it (contrast.test.ts lists each pair).
- */
-export const DEEP_SEA_COLOR = "#081f2a";
-/** The shallows around each island; light enough for 3:1 against every team colour. */
-export const SHALLOWS_COLOR = "#cbf6ee";
+/** The open sea: the issue's shade, so the board matches the reference video. */
+export const DEEP_SEA_COLOR = "#1f4f63";
+/** The shallows around each island: the issue's shade. */
+export const SHALLOWS_COLOR = "#4fa3a5";
 /** The foam line at the shore. */
 export const FOAM_COLOR = "#f4f1e6";
 /** The colour behind everything: the deep sea. */

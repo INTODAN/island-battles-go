@@ -11,8 +11,8 @@ import { TEAM_COLORS } from "./palette";
 
 // The contrast of team colours against the board (issue #102): every team's roof colour (the
 // stone/team swatch of `teamSwatches`) and boat sail against the deep sea, the shallows and the
-// grass top, by WCAG's contrast ratio. None may fall under 3:1; the sea and grass shades give
-// way, never the team palette.
+// grass top, by WCAG's contrast ratio. The owner dropped the 3:1 minimum on #102 (the issue's
+// shades give 1.3 to 2.4), so this only measures and reports; nothing enforces a threshold.
 
 export type Rgb = readonly [number, number, number];
 

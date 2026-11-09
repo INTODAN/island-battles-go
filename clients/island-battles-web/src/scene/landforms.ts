@@ -36,11 +36,10 @@ export const ISLAND_CORNERS = 24;
 /** How far along the green swatch the grass top samples (0 dark green, 1 lime). */
 export const GRASS_ALONG = 0.3;
 /**
- * The grass top's tint, multiplied into the atlas colour per channel (vertex colours). It darkens
- * the grass to a deep green so every team colour keeps 3:1 contrast against it (contrast.test.ts
- * lists each pair); [1, 1, 1] would keep the swatch's own colour.
+ * The grass top's tint, multiplied into the atlas colour per channel (vertex colours). [1, 1, 1]
+ * keeps the atlas swatch's own green, as the owner decided on #102.
  */
-export const GRASS_TINT: readonly [number, number, number] = [0.18, 0.255, 0.1];
+export const GRASS_TINT: readonly [number, number, number] = [1, 1, 1];
 /** The beach: the cream end of the cliff swatch. */
 export const SAND_ALONG = 0.98;
 /** The cliff runs from this point of the cliff swatch at the waterline (dark grey)... */
