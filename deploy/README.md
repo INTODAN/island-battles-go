@@ -439,20 +439,19 @@ The workflow itself must run on `main`, because the `production` environment acc
 
 ### Publishing the Python clients
 
-After the release is made, the `publish-python` job in `release.yml` publishes three packages to PyPI at the release's version, `X.Y.Z` for the tag `vX.Y.Z`:
+After the release is made, the `publish-python` job in `release.yml` publishes two packages to PyPI at the release's version, `X.Y.Z` for the tag `vX.Y.Z`:
 
-| PyPI project | Import name | Source |
-| --- | --- | --- |
-| `mpl-lobby-client` | `lobby_client` | `lobby/clients/lobby-python/` |
-| `mpl-lobby-api-client` | `lobby_api_client` | `lobby/clients/lobby-python/generated/`, the generated HTTP SDK that the lobby client needs |
-| `island-battles-python` | `island_battles_client` | `clients/island-battles-python/` |
+| PyPI project | Import name | Source | GitHub environment |
+| --- | --- | --- | --- |
+| `mpl-lobby-client` | `lobby_client` and `lobby_api_client` | `lobby/clients/lobby-python/`: the wrapper and the generated HTTP SDK it needs, in one wheel | `pypi` |
+| `island-battles-python` | `island_battles_client` | `clients/island-battles-python/` | `pypi-island-battles` |
 
-The job runs `uv build` on each, with the version set from the tag in its own working copy (`uv version --frozen`, never committed), and uploads with PyPI **trusted publishing**: the workflow exchanges a short-lived OIDC token for an upload token, so the repository holds no PyPI token. The repository keeps the placeholder version `0.0.0.dev0` in the two hand-written projects; `mpl-lobby-api-client` keeps the generator's version from `generator-config.yaml`, and the release overrides it too. The owner chose the names: the generic multiplayer infrastructure is called "mpl", so the lobby client and its generated SDK are `mpl-lobby-client` and `mpl-lobby-api-client`, and the Island Battles client stays `island-battles-python`. Only the distribution names carry the prefix; the import names are unchanged. All three were free on PyPI when chosen (a name like `lobby-python` is taken by another project).
+The job runs once per package, each in its own GitHub environment, because PyPI refuses two pending publishers with identical settings (owner, repository, workflow and environment). Each run builds only its own package with `uv build` and checks that its wheel and sdist exist and, for the lobby client, that the `mpl-lobby-client` wheel holds both import packages. The version is set from the tag in its own working copy (`uv version --frozen`, never committed), and it uploads with PyPI **trusted publishing**: the workflow exchanges a short-lived OIDC token for an upload token, so the repository holds no PyPI token. The repository keeps the placeholder version `0.0.0.dev0` in both projects. The owner chose the names: the generic multiplayer infrastructure is called "mpl", so the lobby client is `mpl-lobby-client`, and the Island Battles client stays `island-battles-python`. Only the distribution names carry the prefix; the import names are unchanged. The generated HTTP SDK is not a distribution of its own: it is the `lobby_api_client` package inside `mpl-lobby-client`, so there is no `mpl-lobby-api-client` on PyPI. Both names were free on PyPI when chosen (a name like `lobby-python` is taken by another project).
 
 **Owner setup, once, before the first release** (an agent can't do it on PyPI):
 
-1. On pypi.org, under your account's **Publishing**, add three **pending publishers**, named `mpl-lobby-client`, `mpl-lobby-api-client` and `island-battles-python`. Each takes the same values: owner `INTODAN`, repository `island-battles-go`, workflow `release.yml`, environment `pypi`. A pending publisher creates its project on the first upload.
-2. On GitHub, in **Settings → Environments**, make sure the `pypi` environment exists (the first run creates it) and, under deployment branches, limit it to `main`, as `production` is.
+1. On pypi.org, under your account's **Publishing**, add two **pending publishers**, named `mpl-lobby-client` and `island-battles-python`. Both take owner `INTODAN`, repository `island-battles-go` and workflow `release.yml`, but different environments: `mpl-lobby-client` uses `pypi` and `island-battles-python` uses `pypi-island-battles`. A pending publisher creates its project on the first upload.
+2. On GitHub, in **Settings → Environments**, make sure the `pypi` and `pypi-island-battles` environments exist (the first run creates them) and, under deployment branches, limit both to `main`, as `production` is.
 
 **Failures.** The job runs after `release`, so a failed publish fails the run visibly, but the deploy, the tags and the GitHub release stay. Typical causes are a missing or misspelled pending publisher (the environment or workflow name must match exactly) or a PyPI outage. Fix the cause and re-run the `publish-python` job from the run's page; `skip-existing` makes it skip the files that an earlier partial run uploaded. Don't upload by hand with a token.
 
