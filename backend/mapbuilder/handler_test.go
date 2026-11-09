@@ -30,9 +30,6 @@ func TestHandlerServesThePage(t *testing.T) {
 		if response.StatusCode != http.StatusOK || !strings.HasPrefix(response.Header.Get("Content-Type"), contentType) {
 			t.Fatalf("%s: status=%d content type=%q", path, response.StatusCode, response.Header.Get("Content-Type"))
 		}
-		if response.Header.Get("Cache-Control") != "no-store" {
-			t.Fatalf("%s may be cached", path)
-		}
 	}
 	page, _ := io.ReadAll(get(t, handler, "/").Body)
 	for _, asset := range []string{`src="./app.mjs"`, `href="./style.css"`} {
@@ -75,5 +72,20 @@ func TestHandlerListsTheGamesUpgrades(t *testing.T) {
 	}
 	if upgrades[0].Type != models.ClashStopGenerationsUpgrade {
 		t.Fatalf("upgrades are not sorted by type: %v", upgrades)
+	}
+}
+
+func TestHandlerCachesOnlyTheScriptsAndTheStyle(t *testing.T) {
+	handler, err := mapbuilder.Handler()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]string{
+		"/": "no-store", "/index.html": "no-store", "/upgrades.json": "no-store",
+		"/app.mjs": "public, max-age=300", "/builder.mjs": "public, max-age=300", "/style.css": "public, max-age=300",
+	} {
+		if got := get(t, handler, path).Header.Get("Cache-Control"); got != want {
+			t.Errorf("%s: Cache-Control %q, want %q", path, got, want)
+		}
 	}
 }

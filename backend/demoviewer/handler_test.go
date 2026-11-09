@@ -81,3 +81,14 @@ func TestTheViewerServesItsModulesAndNothingElse(t *testing.T) {
 		}
 	}
 }
+
+func TestTheViewerCachesOnlyItsModules(t *testing.T) {
+	for path, want := range map[string]string{
+		"/game/demo-viewer/": "no-store", "/game/demo-viewer/index.html": "no-store",
+		"/game/demo-viewer/viewer.mjs": "public, max-age=300", "/game/demo-viewer/demo-file.mjs": "public, max-age=300",
+	} {
+		if got := get(t, path).Header().Get("Cache-Control"); got != want {
+			t.Errorf("%s: Cache-Control %q, want %q", path, got, want)
+		}
+	}
+}

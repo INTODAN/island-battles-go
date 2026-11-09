@@ -36,6 +36,12 @@ data "aws_cloudfront_cache_policy" "caching_disabled" {
   name = "Managed-CachingDisabled"
 }
 
+# Caches an answer for as long as the origin's Cache-Control says, and not at
+# all without one or with no-store.
+data "aws_cloudfront_cache_policy" "use_origin_cache_control_headers" {
+  name = "UseOriginCacheControlHeaders"
+}
+
 # Every header, cookie and query string except Host, which the Function URL
 # needs to be its own. CloudFront strips Authorization from GET and HEAD
 # requests unless the policy forwards all viewer headers, so the smoke test
@@ -44,8 +50,10 @@ data "aws_cloudfront_origin_request_policy" "all_viewer_except_host_header" {
   name = "Managed-AllViewerExceptHostHeader"
 }
 
-# Except for /play/ (the web client, from S3), nothing is cached: every
-# request reaches the Lambda as if it came straight to the Function URL. There's no origin access control. For a Function URL it
+# Except for /play/ (the web client, from S3) and the static files of the
+# Lambda's pages (below), nothing is cached: every request reaches the Lambda
+# as if it came straight to the Function URL. There's no origin access
+# control. For a Function URL it
 # would need clients to send a SHA-256 of every POST body, and the Function
 # URL is public anyway. Standard and real-time logs stay off.
 resource "aws_cloudfront_distribution" "game" {
@@ -100,6 +108,25 @@ resource "aws_cloudfront_distribution" "game" {
         event_type   = "viewer-request"
         function_arn = aws_cloudfront_function.web_client.arn
       }
+    }
+  }
+
+  # The pages the Lambda serves besides the API (#162): the lobby page, the
+  # game's modules, the demo viewer and the map builder. Their handlers say in
+  # Cache-Control what may be kept: scripts and styles for five minutes, the
+  # HTML and the game catalog not at all, so this policy obeys the origin.
+  # No API route lies under these prefixes, so API answers stay uncached.
+  dynamic "ordered_cache_behavior" {
+    for_each = ["/lobby/ui/*", "/game/demo/*", "/game/demo-viewer/*", "/map/builder/*"]
+
+    content {
+      path_pattern             = ordered_cache_behavior.value
+      target_origin_id         = "backend"
+      viewer_protocol_policy   = "redirect-to-https"
+      allowed_methods          = ["GET", "HEAD", "OPTIONS"]
+      cached_methods           = ["GET", "HEAD"]
+      cache_policy_id          = data.aws_cloudfront_cache_policy.use_origin_cache_control_headers.id
+      origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host_header.id
     }
   }
 

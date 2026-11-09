@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"islandBattles/backend/services"
+	"islandBattles/lobby/frontend"
 )
 
 //go:embed viewer.mjs demo-file.mjs
@@ -26,13 +27,16 @@ func Handler() (http.Handler, error) {
 	}
 	files := http.FileServer(http.FS(modules))
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		// The page is rebuilt with the backend, so browsers must not keep an old copy.
-		response.Header().Set("Cache-Control", "no-store")
-		if path := strings.TrimPrefix(request.URL.Path, "/"); path == "" || path == "index.html" {
+		// The page is rebuilt with the backend, so nothing may keep an old
+		// copy. The modules may be cached for a few minutes.
+		path := strings.TrimPrefix(request.URL.Path, "/")
+		if path == "" || path == "index.html" {
+			response.Header().Set("Cache-Control", "no-store")
 			response.Header().Set("Content-Type", "text/html; charset=utf-8")
 			http.ServeContent(response, request, "index.html", time.Time{}, strings.NewReader(page))
 			return
 		}
+		response.Header().Set("Cache-Control", frontend.StaticAssetCacheControl)
 		files.ServeHTTP(response, request)
 	}), nil
 }
