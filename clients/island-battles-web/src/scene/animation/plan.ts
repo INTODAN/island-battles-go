@@ -11,6 +11,7 @@
 import type { components } from "../../api/generated/game";
 import { CASTLE_RADIUS } from "../board";
 import { castleDisplayLevel } from "../castleLevel";
+import { toMapDistance } from "../coordinates";
 
 type Generation = components["schemas"]["Generation"];
 type Castle = components["schemas"]["Castle"];
@@ -225,6 +226,9 @@ interface Arrival {
   landing: number;
 }
 
+/** How far from a castle's centre a boat starts and ends its sail, in map units. */
+const CASTLE_REACH = toMapDistance(CASTLE_RADIUS);
+
 /** Where a group launched at `origin` starts: the castle's edge, toward where it first is. */
 function edgePoint(
   origin: { x: number; y: number },
@@ -232,7 +236,7 @@ function edgePoint(
 ): { x: number; y: number } {
   const distance = Math.hypot(toward.x - origin.x, toward.y - origin.y);
   if (distance === 0) return { x: origin.x, y: origin.y };
-  const reach = Math.min(CASTLE_RADIUS, distance);
+  const reach = Math.min(CASTLE_REACH, distance);
   return {
     x: origin.x + ((toward.x - origin.x) / distance) * reach,
     y: origin.y + ((toward.y - origin.y) / distance) * reach,
@@ -366,14 +370,14 @@ export function planTurn(previous: Generation, next: Generation): TurnPlan {
     const speed = speedOf(group.upgrades);
     const distance = Math.hypot(castle.x - last.x, castle.y - last.y);
     const landing = Math.min(1, last.t + distance / speed);
-    const reach = Math.min(distance, CASTLE_RADIUS);
+    const reach = Math.min(distance, CASTLE_REACH);
     const edgeTime = Math.max(last.t, landing - reach / speed);
     const edge =
-      distance <= CASTLE_RADIUS
+      distance <= CASTLE_REACH
         ? { x: last.x, y: last.y }
         : {
-            x: castle.x + ((last.x - castle.x) / distance) * CASTLE_RADIUS,
-            y: castle.y + ((last.y - castle.y) / distance) * CASTLE_RADIUS,
+            x: castle.x + ((last.x - castle.x) / distance) * CASTLE_REACH,
+            y: castle.y + ((last.y - castle.y) / distance) * CASTLE_REACH,
           };
     keys.push({ t: edgeTime, ...edge });
     keys.push({ t: landing, x: castle.x, y: castle.y, ease: "out" });

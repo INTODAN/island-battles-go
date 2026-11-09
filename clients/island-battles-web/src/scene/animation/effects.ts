@@ -4,7 +4,7 @@ import type { Scene } from "@babylonjs/core/scene";
 import { BOAT_FLOAT, type BoatParts, ISLAND_TOP } from "../art";
 import { type Battlefield, popCastle } from "../battlefield";
 import type { PopHandle } from "../castles";
-import { toWorld } from "../coordinates";
+import { toWorld, toWorldDistance } from "../coordinates";
 import { teamColorHex, tint } from "../palette";
 import type { Bursts, Stream } from "../particles";
 import type { FlashPose } from "./plan";
@@ -129,7 +129,10 @@ export function createTurnEffects(scene?: Scene): TurnEffects {
         seenFlashes.add(key);
         const world = toWorld(flash, 0.14);
         const at = new Vector3(world.x, world.y, world.z);
-        const scale = Math.max(0.6, Math.min(1.6, flash.radius / 0.3));
+        const scale = Math.max(
+          0.6,
+          Math.min(1.6, toWorldDistance(flash.radius) / 0.3),
+        );
         // The muzzle flash: a few big, short-lived glows.
         emitter.emit({
           name: `clash-flash-${key}`,

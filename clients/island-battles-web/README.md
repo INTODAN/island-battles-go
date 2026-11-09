@@ -89,7 +89,7 @@ Tests inject a fake Centrifugo client (`createClient`), fake `fetch` and fake st
 
 `src/scene/` draws one `Generation` (the `Generation` type from `src/api/generated/game.ts`) and knows nothing about the server. `renderGeneration(scene, generation, teams)` builds or updates meshes by castle, group and clash ID, so a later call moves and relabels what is already there rather than rebuilding it. Castles are the Unity game's models (see [Castle models](#castle-models)); the islands, boats, props, sea, light and effects are built in code in their style (see [Art pass](#art-pass)).
 
-- `coordinates.ts`: the one map-to-world mapping. One map unit is one world unit; the map's `(x, y)` becomes `(x, 0, -y)`, so the board is laid out as the 2D replay is.
+- `coordinates.ts`: the one map-to-world mapping. One map unit is `WORLD_SCALE` (1.75) world units, so the islands, castles and boats keep their size while the sea between them grows; `toWorldDistance` and `toMapDistance` convert distances, and sizes of things in the scene stay in world units; the map's `(x, y)` becomes `(x, 0, -y)`, so the board is laid out as the 2D replay is.
 - `palette.ts`: the team palette, checked against `backend/services/replay.html` by a test.
 - `board.ts` and `camera.ts`: the board fits the castles with a minimum of 8 by 6 units; the camera is a 3/4 `ArcRotateCamera` with tilt, zoom and pan limits. Double-click a castle to focus it, `F` to refit.
 - `islands.ts`: island shapes are seeded by castle ID and never change; castles closer than 1.5 units share a landmass. An island's radius runs from 0.84 (`MIN_ISLAND_RADIUS`, 0.75 before #102) to 1.25 units.

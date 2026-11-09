@@ -1,14 +1,16 @@
 import type { components } from "../api/generated/game";
 import { CASTLE_RADIUS } from "./board";
-import type { MapPoint } from "./coordinates";
+import { type MapPoint, toMapDistance } from "./coordinates";
 
 type Castle = components["schemas"]["Castle"];
 type SoldierGroup = components["schemas"]["SoldierGroup"];
 
+// Sizes in `headingStyle` are world units, so lines keep their look whatever WORLD_SCALE is.
+// The computing below is in map coordinates, so each size goes through toMapDistance first.
 // Everything that decides how the heading lines look is here, so the owner's picks on #89
 // (casing or none, arrowhead style, lane offset, ...) are one-value changes.
 export const headingStyle = {
-  /** Width of a line, in map units. */
+  /** Width of a line, in world units. */
   lineWidth: 0.1,
   /** Extra width of the sea-coloured casing around a line, 2px (0.02) on each side as the owner picked 1B on #89; 0 draws none. */
   casingWidth: 0.04,
@@ -99,6 +101,11 @@ export function computeHeadings(
   style: HeadingStyle = headingStyle,
 ): HeadingSegment[] {
   const castleById = new Map(castles.map((castle) => [castle.id, castle]));
+  const castleReach = toMapDistance(CASTLE_RADIUS);
+  const startGap = toMapDistance(style.startGap);
+  const arrowLength = toMapDistance(style.arrowLength);
+  const laneOffset = toMapDistance(style.laneOffset);
+  const passUnderMargin = toMapDistance(style.passUnderMargin);
   interface Candidate {
     group: SoldierGroup;
     castle: Castle;
@@ -116,8 +123,8 @@ export function computeHeadings(
     const distance = Math.hypot(dx, dy);
     // A group about to arrive, or inside the castle's circle: no line, no stub, no backward head.
     const visibleLength =
-      distance - CASTLE_RADIUS - group.clash_radius - style.startGap;
-    if (visibleLength < style.arrowLength) continue;
+      distance - castleReach - group.clash_radius - startGap;
+    if (visibleLength < arrowLength) continue;
     candidates.push({
       group,
       castle,
@@ -151,7 +158,7 @@ export function computeHeadings(
   );
   for (const candidate of kept) {
     const reverse = `${candidate.group.destination_castle_id}>${candidate.group.origin_castle_id}`;
-    if (routes.has(reverse)) candidate.lane = style.laneOffset;
+    if (routes.has(reverse)) candidate.lane = laneOffset;
   }
 
   // Same-team lines arriving within sharedArrowDegrees of each other end at one point with one head.
@@ -220,15 +227,15 @@ export function computeHeadings(
       y: group.y + side.y * candidate.lane,
     };
     const start = {
-      x: shifted.x + direction.x * (group.clash_radius + style.startGap),
-      y: shifted.y + direction.y * (group.clash_radius + style.startGap),
+      x: shifted.x + direction.x * (group.clash_radius + startGap),
+      y: shifted.y + direction.y * (group.clash_radius + startGap),
     };
     const shared = sharedTip.get(group.id);
     let tip: MapPoint;
     if (shared) {
       tip = {
-        x: castle.x + Math.cos(shared.angle) * CASTLE_RADIUS,
-        y: castle.y + Math.sin(shared.angle) * CASTLE_RADIUS,
+        x: castle.x + Math.cos(shared.angle) * castleReach,
+        y: castle.y + Math.sin(shared.angle) * castleReach,
       };
     } else {
       // Where the (shifted) line first meets the castle's circle.
@@ -241,7 +248,7 @@ export function computeHeadings(
       const across =
         offsetFromCentre.x * -direction.y + offsetFromCentre.y * direction.x;
       const reach = Math.sqrt(
-        Math.max(0, CASTLE_RADIUS * CASTLE_RADIUS - across * across),
+        Math.max(0, castleReach * castleReach - across * across),
       );
       const distanceAlong = -along - reach;
       tip = {
@@ -253,8 +260,7 @@ export function computeHeadings(
       .filter(
         (other) =>
           other.id !== castle.id &&
-          distanceToSegment(other, start, tip) <
-            CASTLE_RADIUS + style.passUnderMargin,
+          distanceToSegment(other, start, tip) < castleReach + passUnderMargin,
       )
       .map((other) => other.id);
     return {
@@ -276,7 +282,8 @@ export interface RibbonGeometry {
 }
 
 /**
- * The shaft and arrowhead of a line as flat triangles in map space. `grow` widens it on both
+ * The shaft and arrowhead of a line as flat triangles in map space; the style's sizes are world
+ * units and are converted. `grow` (world units) widens it on both
  * sides and lengthens the head, which is how the casing is made.
  */
 export function ribbonGeometry(
@@ -289,8 +296,8 @@ export function ribbonGeometry(
   const length = Math.hypot(dx, dy);
   const direction = { x: dx / length, y: dy / length };
   const normal = { x: -direction.y, y: direction.x };
-  const half = style.lineWidth / 2 + grow / 2;
-  const headLength = segment.arrowhead ? style.arrowLength : 0;
+  const half = toMapDistance(style.lineWidth + grow) / 2;
+  const headLength = segment.arrowhead ? toMapDistance(style.arrowLength) : 0;
   const shaftEnd = {
     x: segment.tip.x - direction.x * headLength,
     y: segment.tip.y - direction.y * headLength,
@@ -307,12 +314,12 @@ export function ribbonGeometry(
   const d = corner(shaftEnd, -half);
   indices.push(a, b, c, a, c, d);
   if (segment.arrowhead) {
-    const wing = style.arrowWidth / 2 + grow / 2;
+    const wing = toMapDistance(style.arrowWidth + grow) / 2;
     const left = corner(shaftEnd, -wing);
     const right = corner(shaftEnd, wing);
     points.push(
-      segment.tip.x + direction.x * grow * 0.5,
-      segment.tip.y + direction.y * grow * 0.5,
+      segment.tip.x + direction.x * toMapDistance(grow) * 0.5,
+      segment.tip.y + direction.y * toMapDistance(grow) * 0.5,
     );
     indices.push(left, right, points.length / 2 - 1);
   }

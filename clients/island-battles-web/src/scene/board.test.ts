@@ -1,31 +1,30 @@
 import { describe, expect, test } from "bun:test";
 import { boardBounds } from "./board";
 import { CAMERA, fitRadius } from "./camera";
+import { WORLD_SCALE } from "./coordinates";
 
 describe("board fitting", () => {
-  test("keeps at least the generated map's 8 by 6 units", () => {
-    expect(boardBounds([])).toEqual({ halfWidth: 4, halfDepth: 3 });
+  test("keeps at least the generated map's 8 by 6 map units, in world units", () => {
+    const minimum = {
+      halfWidth: 4 * WORLD_SCALE,
+      halfDepth: 3 * WORLD_SCALE,
+    };
+    expect(boardBounds([])).toEqual(minimum);
     expect(
       boardBounds([
         { x: 2, y: 0 },
         { x: -2, y: 0 },
       ]),
-    ).toEqual({
-      halfWidth: 4,
-      halfDepth: 3,
-    });
+    ).toEqual(minimum);
   });
 
-  test("grows to give each castle a unit of room, as the replay does", () => {
-    expect(
-      boardBounds([
-        { x: -6.5, y: 1 },
-        { x: 3, y: -5 },
-      ]),
-    ).toEqual({
-      halfWidth: 7.5,
-      halfDepth: 6,
-    });
+  test("grows to give each castle a world unit of room", () => {
+    const bounds = boardBounds([
+      { x: -6.5, y: 1 },
+      { x: 3, y: -5 },
+    ]);
+    expect(bounds.halfWidth).toBeCloseTo(6.5 * WORLD_SCALE + 1, 9);
+    expect(bounds.halfDepth).toBeCloseTo(5 * WORLD_SCALE + 1, 9);
   });
 
   test("a bigger board needs a bigger camera distance", () => {

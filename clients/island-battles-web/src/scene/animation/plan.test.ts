@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import type { components } from "../../api/generated/game";
 import { CASTLE_RADIUS } from "../board";
 import { castleDisplayLevel } from "../castleLevel";
+import { toMapDistance } from "../coordinates";
 import {
   type MoveTrack,
   planTurn,
@@ -82,7 +83,7 @@ describe("planTurn on fixture pairs", () => {
       const first = move.keys[0];
       expect(first?.t).toBe(0);
       expect(distance(first as never, origin as never)).toBeCloseTo(
-        CASTLE_RADIUS,
+        toMapDistance(CASTLE_RADIUS),
         6,
       );
       expect(move.keys.at(-1)).toMatchObject({ t: 1, x: group.x, y: group.y });
@@ -120,7 +121,10 @@ describe("planTurn on fixture pairs", () => {
       expect(merge?.castleId).toBe(castle?.id);
       const edge = move.keys.find((key) => key.t === merge?.t0);
       expect(distance(edge as never, castle as never)).toBeCloseTo(
-        Math.min(CASTLE_RADIUS, distance(group, castle as never)),
+        Math.min(
+          toMapDistance(CASTLE_RADIUS),
+          distance(group, castle as never),
+        ),
         6,
       );
       expect(move.keys.at(-1)).toMatchObject({ x: castle?.x, y: castle?.y });
@@ -314,7 +318,7 @@ describe("planTurn on fixture pairs", () => {
     const move = moveOf(plan, survivor?.group_id as number);
     expect(move.keys.map((k) => k.t)).toEqual([0, clash?.time as number, 1]);
     expect(distance(move.keys[0] as never, origin as never)).toBeCloseTo(
-      CASTLE_RADIUS,
+      toMapDistance(CASTLE_RADIUS),
       6,
     );
     expect(move.keys[1]).toMatchObject({ x: survivor?.x, y: survivor?.y });
