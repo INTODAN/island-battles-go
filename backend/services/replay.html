@@ -432,7 +432,14 @@ window.addEventListener("message", (event) => {
   }
   render(animate);
   // The previous turn is over; a panel still showing it loads its final lines.
-  if (newer && shownLogs === previousLatest) requestLogs(previousLatest);
+  // While following live, the panel has moved on and asks for the new
+  // generation once it stays; only a panel that stayed asks for this one.
+  if (newer && shownLogs === previousLatest) logDebouncer.run(() => requestLogs(previousLatest));
+  // The final generation's logs are asked for at once, once.
+  if (state.outcome && shownLogs !== null && !logCache.has(shownLogs)) {
+    logDebouncer.cancel();
+    requestLogs(shownLogs);
+  }
 });
 // The bots' game logs. A demo holds them. A replay's frame has no credential,
 // so the lobby page fetches them for it: a game.request message names the
@@ -447,6 +454,39 @@ let shownLogs = null;
 // The generation whose lines the panel shows, rather than a note.
 let renderedLogs = null;
 const openTurnRefreshMilliseconds = 3000;
+// log-requests:begin
+// When and how often the panel asks for the shown generation's logs (#160).
+// It is cut out by backend/demoviewer/log-requests.test.mjs, so it needs no page.
+// A generation is requested only after it stayed on screen this long.
+const logShownMilliseconds = 300;
+// The page refuses a request while it relays too many (status 0). The frame
+// asks again after this long, at most this many times.
+const logRetryMilliseconds = 1000;
+const logRetryLimit = 5;
+// createDebouncer runs only the last action given to run, after the quiet time.
+function createDebouncer(setTimer, clearTimer, milliseconds) {
+  let handle = null;
+  return {
+    run(action) {
+      if (handle !== null) clearTimer(handle);
+      handle = setTimer(() => { handle = null; action(); }, milliseconds);
+    },
+    cancel() {
+      if (handle !== null) clearTimer(handle);
+      handle = null;
+    },
+  };
+}
+// nextLogRetry says how long to wait before asking again after the page refused
+// a request, given how many retries were made; null means give up.
+function nextLogRetry(status, retriesMade) {
+  if (status !== 0 || retriesMade >= logRetryLimit) return null;
+  return logRetryMilliseconds;
+}
+// log-requests:end
+const logDebouncer = createDebouncer(setTimeout, clearTimeout, logShownMilliseconds);
+// Counts resets, so a retry waiting from before one is dropped.
+let logEpoch = 0;
 const isOpenTurn = (generation) => !demoLogs && !replay.outcome && generation === latestGeneration;
 // A demo saved during the game ends with the turn that was open then.
 const isSavedOpenTurn = (generation) => demoLogs !== null && !replay.outcome && generation === latestGeneration;
@@ -456,7 +496,7 @@ function logNote(text) {
   note.textContent = text;
   return note;
 }
-function showLogs() {
+function showLogs(immediately = false) {
   const generation = replay.frames[turn].id;
   if (shownLogs === generation) return;
   shownLogs = generation;
@@ -474,13 +514,19 @@ function showLogs() {
     return;
   }
   logsBox.replaceChildren(logNote("Loading logs…"));
-  requestLogs(generation);
+  // Scrolling past generations, or following a fast game, asks for none of them.
+  if (immediately) {
+    logDebouncer.cancel();
+    requestLogs(generation);
+  } else {
+    logDebouncer.run(() => requestLogs(generation));
+  }
 }
-function requestLogs(generation) {
+function requestLogs(generation, retriesMade = 0) {
   const cacheable = !isOpenTurn(generation);
   if ([...logRequests.values()].some((request) => request.generation === generation && request.cacheable === cacheable)) return;
   const id = `logs-${++requestCount}`;
-  logRequests.set(id, { generation, cacheable });
+  logRequests.set(id, { generation, cacheable, retriesMade });
   const path = `/game/from-lobby/${encodeURIComponent(replay.lobby_id)}/logs?generation_id=${generation}`;
   window.parent.postMessage({ type: "game.request", id, path }, "*");
   // The page answers every request it accepts; stop waiting for a lost one.
@@ -500,6 +546,8 @@ setInterval(() => {
 function resetLogs() {
   logCache.clear();
   logRequests.clear();
+  logDebouncer.cancel();
+  logEpoch++;
   shownLogs = null;
   renderedLogs = null;
 }
@@ -509,7 +557,7 @@ function showLogFailure() {
   retry.textContent = "Retry";
   retry.addEventListener("click", () => {
     shownLogs = null;
-    showLogs();
+    showLogs(true);
   });
   logsBox.replaceChildren(logNote("The logs could not be loaded."), retry);
   renderedLogs = null;
@@ -588,7 +636,16 @@ window.addEventListener("message", (event) => {
   const logs = event.data.body;
   if (event.data.status !== 200 || !Array.isArray(logs?.players) || !Array.isArray(logs.hidden_team_colors) || logs.generation_id !== request.generation) {
     // A failed refresh keeps the lines already shown.
-    if (shownLogs === request.generation && renderedLogs !== request.generation) showLogFailure();
+    if (shownLogs !== request.generation || renderedLogs === request.generation) return;
+    const wait = nextLogRetry(event.data.status, request.retriesMade);
+    if (wait === null) {
+      showLogFailure();
+      return;
+    }
+    const epoch = logEpoch;
+    setTimeout(() => {
+      if (epoch === logEpoch && shownLogs === request.generation && renderedLogs !== request.generation) requestLogs(request.generation, request.retriesMade + 1);
+    }, wait);
     return;
   }
   // A read from while the turn was open may answer after its final lines.
