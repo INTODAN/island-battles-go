@@ -166,21 +166,36 @@ jobs:
       # made with GITHUB_TOKEN doesn't trigger `on: release`, so they belong
       # in this workflow, not in a workflow of their own.
 
-  # Publishes the Python clients (#117) at the release's version, after the
+  # Publishes the two Python distributions (#117) at the release's version, after the
   # tags and the GitHub release exist, so a PyPI version never lacks its tag.
   # It needs `release` rather than the deploy jobs: the deploy is done by then,
   # and a failure here fails only this job and the run, visibly. The deploy and
   # the tags and release stay. Fix the cause and re-run this job alone; the
   # `skip-existing` setting makes a re-run skip the files a partial run uploaded.
   # Trusted publishing: no PyPI token exists. The PyPI pending publishers name
-  # this workflow and the `pypi` environment (deploy/README.md, "Publishing the
+  # this workflow and its own environment, `pypi` or `pypi-island-battles` (deploy/README.md, "Publishing the
   # Python clients").
   publish-python:
     needs: [plan, release]
     if: ${{ !cancelled() && needs.release.result == 'success' }}
     runs-on: ubuntu-24.04
+    # One job per distribution, each in its own GitHub environment: PyPI refuses
+    # two pending publishers with identical settings (owner, repository,
+    # workflow and environment), so the two projects can't share `pypi`.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # `mpl-lobby-client` ships both `lobby_client` and the generated
+          # `lobby_api_client`; there is no separate API-client distribution.
+          - directory: lobby/clients/lobby-python
+            module: mpl_lobby_client
+            environment: pypi
+          - directory: clients/island-battles-python
+            module: island_battles_python
+            environment: pypi-island-battles
     environment:
-      name: pypi
+      name: ${{ matrix.environment }}
     permissions:
       contents: read
       # Only the publish step uses it; PyPI exchanges this token for an upload token.
@@ -194,27 +209,24 @@ jobs:
 
       # The version comes from the tag and is set in this run's working copy
       # only, never committed. PyPI wants PEP 440, so `v0.1.0` becomes `0.1.0`.
-      # The lobby client pins the generated package to the same version, so
-      # the two install together.
       - name: Set the release version
         run: |
           v="${VERSION#v}"
-          for dir in lobby/clients/lobby-python/generated lobby/clients/lobby-python clients/island-battles-python; do
-            (cd "$dir" && uv version --frozen "$v")
-          done
-          sed -i -E "s/^(    )\"mpl-lobby-api-client\",/\1\"mpl-lobby-api-client==$v\",/" lobby/clients/lobby-python/pyproject.toml
-          grep -qx "    \"mpl-lobby-api-client==$v\"," lobby/clients/lobby-python/pyproject.toml
+          (cd "${{ matrix.directory }}" && uv version --frozen "$v")
 
-      - name: Build the packages
+      - name: Build the package
         run: |
-          for dir in lobby/clients/lobby-python/generated lobby/clients/lobby-python clients/island-battles-python; do
-            uv build "$dir" --out-dir "$RUNNER_TEMP/dist"
-          done
           v="${VERSION#v}"
-          for name in mpl_lobby_api_client mpl_lobby_client island_battles_python; do
-            test -f "$RUNNER_TEMP/dist/${name}-${v}-py3-none-any.whl"
-            test -f "$RUNNER_TEMP/dist/${name}-${v}.tar.gz"
-          done
+          uv build "${{ matrix.directory }}" --out-dir "$RUNNER_TEMP/dist"
+          test -f "$RUNNER_TEMP/dist/${{ matrix.module }}-${v}-py3-none-any.whl"
+          test -f "$RUNNER_TEMP/dist/${{ matrix.module }}-${v}.tar.gz"
+          test "$(ls "$RUNNER_TEMP/dist" | wc -l)" -eq 2
+          if [ "${{ matrix.module }}" = mpl_lobby_client ]; then
+            contents="$(python3 -m zipfile -l "$RUNNER_TEMP/dist/mpl_lobby_client-${v}-py3-none-any.whl")"
+            for package in lobby_client lobby_api_client; do
+              grep -q "^${package}/__init__.py " <<<"$contents"
+            done
+          fi
           ls -l "$RUNNER_TEMP/dist"
 
       - name: Publish to PyPI

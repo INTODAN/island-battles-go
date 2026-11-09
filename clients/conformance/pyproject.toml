@@ -17,7 +17,6 @@ dev = ["ruff>=0.16.9"]
 
 [tool.uv.sources]
 mpl-lobby-client = { path = "../../lobby/clients/lobby-python", editable = true }
-mpl-lobby-api-client = { path = "../../lobby/clients/lobby-python/generated", editable = true }
 
 [tool.uv.build-backend]
 module-name = "island_conformance"
