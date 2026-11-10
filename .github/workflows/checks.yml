@@ -110,6 +110,7 @@ jobs:
             lobby/clients/lobby-python/uv.lock
             clients/conformance/uv.lock
             clients/island-battles-python/uv.lock
+            templates/python-bot/uv.lock
 
       - name: Lobby client unit tests
         run: uv run --project lobby/clients/lobby-python --locked pytest lobby/clients/lobby-python/tests
@@ -119,6 +120,25 @@ jobs:
 
       - name: Gameplay client conformance (offline)
         run: uv run --project clients/conformance --locked pytest clients/conformance/tests/test_models.py
+
+      # The bot template, as a player uses it: the locked SDK from PyPI.
+      - name: Python bot template (published SDK)
+        working-directory: templates/python-bot
+        run: |
+          uv sync --locked
+          scripts/check.sh
+
+      # The same checks against this repository's SDK, so a change to the SDK that
+      # breaks the template fails here. uv run would sync the environment back to
+      # the lock, so UV_NO_SYNC keeps the editable install.
+      - name: Python bot template (SDK from this repository)
+        working-directory: templates/python-bot
+        env:
+          UV_NO_SYNC: "1"
+        run: |
+          uv pip install --editable ../../clients/island-battles-python
+          uv run python -c "import island_battles_client as sdk; print(sdk.__file__); assert 'clients/island-battles-python' in sdk.__file__"
+          scripts/check.sh
 
   js:
     name: JS
