@@ -72,7 +72,8 @@ func (islandBattlesGames) GameIDs(transaction *gorm.DB, lobbyIDs []string) (map[
 		values[index] = lobbyID
 	}
 	var games []models.Game
-	if err := transaction.Select("ID", "LobbyID").Where(clause.IN{Column: lobbyIDColumn, Values: values}).Find(&games).Error; err != nil {
+	// Ordered by round, so each lobby maps to its newest game.
+	if err := transaction.Select("ID", "LobbyID").Where(clause.IN{Column: lobbyIDColumn, Values: values}).Order(clause.OrderByColumn{Column: clause.Column{Name: "lobby_round"}}).Find(&games).Error; err != nil {
 		return nil, err
 	}
 	gameIDs := make(map[string]any, len(games))
@@ -226,7 +227,7 @@ func addGameTools(server *mcp.Server, database *gorm.DB, gameRetentionPeriod tim
 	})
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "get_game",
-		Description: "Describes one Island Battles game, found by game_id or by the lobby_id it was started from. Returns everything list_games does, " +
+		Description: "Describes one Island Battles game, found by game_id or by the lobby_id it was started from (the lobby's newest game, since a lobby plays one game per round). Returns everything list_games does, " +
 			"plus the current generation: its turn, which roster players have completed it, and each team's castles, soldiers in castles, " +
 			"soldier groups and soldiers in groups. Use get_generation for commands and clashes.",
 		Annotations: adminmcp.ReadOnlyAnnotations("Get game"),
@@ -399,7 +400,7 @@ func teamName(teams []models.GameTeam, color uint) *string {
 	return nil
 }
 
-// findGame finds the game that a game ID or lobby ID names. A game that
+// findGame finds the game that a game ID names, or a lobby's newest game. A game that
 // retention has retired is found no more.
 func findGame(transaction *gorm.DB, gameID uint, lobbyID string) (models.Game, error) {
 	var games []models.Game
@@ -412,7 +413,7 @@ func findGame(transaction *gorm.DB, gameID uint, lobbyID string) (models.Game, e
 		if err := uuid.Validate(lobbyID); err != nil {
 			return models.Game{}, errors.New("lobby_id must be a UUID")
 		}
-		if err := transaction.Select(summaryFields).Where(&models.Game{LobbyID: &lobbyID}).Limit(1).Find(&games).Error; err != nil {
+		if err := transaction.Select(summaryFields).Where(&models.Game{LobbyID: &lobbyID}).Order(clause.OrderByColumn{Column: clause.Column{Name: "lobby_round"}, Desc: true}).Limit(1).Find(&games).Error; err != nil {
 			return models.Game{}, fmt.Errorf("read the game: %w", err)
 		}
 	default:

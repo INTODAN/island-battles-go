@@ -13,6 +13,8 @@ export type { LiveSource } from "./sources";
 
 export interface GameViewOptions {
   lobbyId: string;
+  /** The lobby round whose game to show; the lobby plays one game per round. */
+  round: number;
   realtime: Realtime;
   onBack: () => void;
 }
@@ -31,7 +33,7 @@ export interface DemoViewOptions {
 }
 
 /**
- * Shows the game of `lobbyId` in `container`: the whole history, then each turn live. The
+ * Shows the game of a lobby round in `container`: the whole history, then each turn live. The
  * caller signs in and the view follows the game on `realtime` until `dispose()`, which also
  * stops following it. Opening a demo file from the view shows the demo in its place, with a
  * button back to the game.
@@ -43,7 +45,7 @@ export function mountGameView(
   return mountSource(
     container,
     options.realtime,
-    playerSource(options.realtime, options.lobbyId),
+    playerSource(options.realtime, options.lobbyId, options.round),
     options.onBack,
   );
 }

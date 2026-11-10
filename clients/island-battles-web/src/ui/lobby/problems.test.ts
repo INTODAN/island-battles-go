@@ -32,6 +32,15 @@ describe("problem sentences", () => {
     });
   }
 
+  test("reopening explains a running game and a lobby that can't reopen", () => {
+    expect(describeProblem(lobby("game_running"), "reopen").message).toBe(
+      "The game is still running. Its lobby opens once it ends.",
+    );
+    expect(describeProblem(lobby("phase_conflict"), "reopen").message).toBe(
+      "This lobby can't be opened again.",
+    );
+  });
+
   test("empty_teams highlights the teams that need a player", () => {
     const shown = describeProblem(
       lobby("empty_teams", { teamIds: ["t2", "t3"] }),

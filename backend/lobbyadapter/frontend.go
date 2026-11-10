@@ -3,7 +3,7 @@ package lobbyadapter
 import "islandBattles/lobby/frontend"
 
 // FrontendGame lists Island Battles in the lobby frontend's game catalog. The
-// result URL is the lobby replay route, the data URL prefix admits the lobby
+// result URL is the lobby replay route of the lobby's round, the data URL prefix admits the lobby
 // game's reads such as its logs and its demo, the demo package serves the
 // example player, the map choice settings module and the bot choice room
 // module under /game/demo/, the room API prefix admits the lobby's bot
@@ -12,7 +12,7 @@ func FrontendGame() frontend.Game {
 	return frontend.Game{
 		Key:         "island-battles",
 		Name:        "Island Battles",
-		ResultURL:   "/game/from-lobby/" + frontend.LobbyIDPlaceholder + "/replay",
+		ResultURL:   "/game/from-lobby/" + frontend.LobbyIDPlaceholder + "/replay?lobby_round=" + frontend.RoundPlaceholder,
 		StartedHint: "A default bot is played by the backend; a localhost bot is played by its player, whose open lobby tab relays each turn to the bot on their machine. The board follows recorded generations live.",
 		// The replay reads each generation's game log and saves the demo
 		// through the page.

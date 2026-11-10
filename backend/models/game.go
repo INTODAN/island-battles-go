@@ -4,7 +4,10 @@ import "gorm.io/gorm"
 
 type Game struct {
 	gorm.Model
-	LobbyID *string `gorm:"type:uuid;uniqueIndex"`
+	// LobbyID and LobbyRound name the lobby round that the game plays: a
+	// lobby plays one game per round, and its newest game answers for it.
+	LobbyID    *string `gorm:"type:uuid;uniqueIndex:idx_games_lobby_round,priority:1"`
+	LobbyRound int64   `gorm:"not null;default:1;uniqueIndex:idx_games_lobby_round,priority:2"`
 	// Teams and Outcome are the replay's static metadata. Its frames are derived
 	// from the stored generations. The game keeps these itself because its
 	// lobby is deleted soon after the start. Teams is saved with the first

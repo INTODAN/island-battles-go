@@ -144,6 +144,7 @@ const state = (generationId: number, overrides: object = {}): GenerationState =>
     },
     generation_id: generationId,
     lobby_id: LOBBY_ID,
+    lobby_round: 1,
     log_lines_stored: 0,
     memory: null,
     player_id: PLAYER_ID,
@@ -261,7 +262,7 @@ async function followedGame() {
   const h = harness();
   h.routes.set(`GET ${generationPath}`, () => json(state(5)));
   await h.realtime.signIn("Ada");
-  h.realtime.followGame(LOBBY_ID);
+  h.realtime.followGame(LOBBY_ID, 1);
   await until(
     () => h.clients.length > 0 && (h.clients[0]?.subscriptions.length ?? 0) > 0,
   );
@@ -740,11 +741,38 @@ describe("game subscription", () => {
       });
     publish({ game_id: 8 });
     publish({ lobby_id: "44444444-4444-4444-8444-444444444444" });
+    // The lobby's game of another round, such as the previous one.
+    publish({ lobby_round: 2 });
     publish({ channel: "player:someone-else" });
     publish({ player_id: "someone-else" });
     expect(h.realtime.game.get()?.generation_id).toBe(5);
     publish({});
     expect(h.realtime.game.get()?.generation_id).toBe(20);
+  });
+
+  test("the previous round's game, which the read finds before the next is made, is dropped", async () => {
+    const h = harness();
+    h.routes.set(`GET ${generationPath}`, () =>
+      json(state(9, { game_id: 6, outcome })),
+    );
+    await h.realtime.signIn("Ada");
+    h.realtime.followGame(LOBBY_ID, 2);
+    await until(
+      () =>
+        h.clients.length > 0 && (h.clients[0]?.subscriptions.length ?? 0) > 0,
+    );
+    h.client().sub(CHANNEL).emit("subscribed");
+    await until(() => h.count("GET", generationPath) === 1);
+    await settle();
+    expect(h.realtime.game.get()).toBeNull();
+    h.client()
+      .sub(CHANNEL)
+      .publish({
+        schema_version: 1,
+        type: "game.next_generation",
+        state: state(10, { game_id: 8, lobby_round: 2 }),
+      });
+    expect(h.realtime.game.get()?.game_id).toBe(8);
   });
 
   test("ignores unknown schema versions and event types", async () => {
@@ -763,7 +791,7 @@ describe("game subscription", () => {
   test("a game not started yet (404) is waited for on the channel", async () => {
     const h = harness();
     await h.realtime.signIn("Ada");
-    h.realtime.followGame(LOBBY_ID);
+    h.realtime.followGame(LOBBY_ID, 1);
     await until(
       () =>
         h.clients.length > 0 && (h.clients[0]?.subscriptions.length ?? 0) > 0,
@@ -793,7 +821,7 @@ describe("game subscription", () => {
         }),
     );
     await h.realtime.signIn("Ada");
-    h.realtime.followGame(LOBBY_ID);
+    h.realtime.followGame(LOBBY_ID, 1);
     await until(
       () =>
         h.clients.length > 0 && (h.clients[0]?.subscriptions.length ?? 0) > 0,
@@ -822,6 +850,7 @@ const watchState = (generationId: number, overrides: object = {}) => ({
   },
   generation_id: generationId,
   lobby_id: LOBBY_ID,
+  lobby_round: 1,
   teams: [],
   turn_deadline_at: null,
   ...overrides,
@@ -872,6 +901,29 @@ describe("watching", () => {
     expect(h.count("GET", generationPath)).toBe(0);
   });
 
+  test("a watcher moves on to the lobby's next game, never back to an older one", async () => {
+    const h = await watchedGame();
+    const sub = h.client().sub(WATCH_CHANNEL);
+    sub.publish({
+      schema_version: 1,
+      type: "game.ended",
+      state: watchState(6, { outcome }),
+    });
+    sub.publish({
+      schema_version: 1,
+      type: "game.next_generation",
+      state: watchState(2, { game_id: 3, lobby_round: 0 }),
+    });
+    expect(h.realtime.watch.get()?.game_id).toBe(7);
+    sub.publish({
+      schema_version: 1,
+      type: "game.next_generation",
+      state: watchState(9, { game_id: 8, lobby_round: 2 }),
+    });
+    expect(h.realtime.watch.get()?.game_id).toBe(8);
+    expect(h.realtime.watch.get()?.generation_id).toBe(9);
+  });
+
   test("a kicked watcher is told so when the server unsubscribes them", async () => {
     const h = await watchedGame();
     h.routes.set(`GET ${watchPath}`, () =>
@@ -899,7 +951,7 @@ describe("recovery", () => {
   test("a disconnect and reconnect reconciles once per followed target", async () => {
     const h = await followedLobby(3);
     h.routes.set(`GET ${generationPath}`, () => json(state(5)));
-    h.realtime.followGame(LOBBY_ID);
+    h.realtime.followGame(LOBBY_ID, 1);
     await until(() => h.client().subscriptions.length === 2);
     h.client().sub(CHANNEL).emit("subscribed");
     await until(() => h.realtime.game.get() !== null);

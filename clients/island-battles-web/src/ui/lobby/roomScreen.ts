@@ -38,6 +38,18 @@ export interface RoomScreenOptions {
   onSignedOut(): void;
   /** The player is no longer in the lobby (they left, or it is gone). */
   onLeft(notice: string): void;
+  /**
+   * While the lobby's game runs, the room shows read-only, for a player who
+   * went back to it from the game; this button takes them back to the game.
+   */
+  onReturnToGame(): void;
+  /** A sentence to show when the room opens, such as why reopening failed. */
+  notice?: string;
+}
+
+export interface RoomScreen extends Screen {
+  /** Shows a sentence about the lobby, such as why reopening it failed. */
+  showNotice(message: string): void;
 }
 
 interface Problems {
@@ -66,8 +78,11 @@ const fallbackLevels: DefaultBot[] = [1, 2, 3].map((level) => ({
   description: "",
 }));
 
-/** Screen 3: the lobby room. Everything shown comes from the realtime stores and the server's answers. */
-export function mountRoomScreen(options: RoomScreenOptions): Screen {
+/**
+ * Screen 3: the lobby room. Everything shown comes from the realtime stores and the server's
+ * answers. While the lobby's game runs it is read-only, with "Return to game".
+ */
+export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
   const { realtime, actions } = options;
   let disposed = false;
   let busy = false;
@@ -115,6 +130,17 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
     "button",
     { type: "button", class: "secondary" },
     "Leave lobby",
+  );
+  const returnButton = h(
+    "button",
+    { type: "button", class: "primary", hidden: true },
+    "Return to game",
+  );
+  returnButton.addEventListener("click", () => options.onReturnToGame());
+  const notice = h(
+    "p",
+    { class: "field-error", attrs: { role: "alert" } },
+    options.notice ?? "",
   );
   const botError = h("p", { class: "field-error", attrs: { role: "alert" } });
 
@@ -477,7 +503,7 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
           {
             type: "button",
             class: "secondary small",
-            disabled: busy,
+            disabled: busy || model.phase !== "waiting",
             onclick: () => void joinTeam(null),
           },
           "Leave team",
@@ -487,7 +513,7 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
           {
             type: "button",
             class: "secondary small",
-            disabled: busy || !model.you || taken,
+            disabled: busy || !model.you || taken || model.phase !== "waiting",
             onclick: () => void joinTeam(team.id),
           },
           taken ? "Taken" : "Join team",
@@ -582,7 +608,9 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
     readyButton.textContent = model.you?.ready ? "Cancel ready" : "I'm ready";
     readyButton.classList.toggle("is-ready", model.you?.ready === true);
     readyButton.disabled = busy || started || !model.you;
-    startButton.hidden = !model.isHost;
+    readyButton.hidden = started;
+    returnButton.hidden = !started;
+    startButton.hidden = !model.isHost || started;
     startError.hidden = !model.isHost;
     const blocker = startBlocker(model, snapshot.start_rules);
     startButton.disabled = busy || started || blocker !== null;
@@ -591,8 +619,9 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
       ...model.teams.flatMap((team) => team.members),
       ...model.unassigned,
     ]);
+    // The room shows a started lobby only to a player who went back from its game.
     hint.textContent = started
-      ? "The game is starting…"
+      ? "A game is being played in this lobby. Return to it whenever you like; once it ends, Back to lobby opens the lobby for the next game."
       : model.isHost && blocker !== null
         ? blocker
         : members < 2
@@ -634,6 +663,7 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
       if (lastVersion !== -1) {
         problems.start = "";
         problems.highlight = [];
+        notice.textContent = "";
       }
       lastVersion = snapshot.lobby.version;
       const key = `${snapshot.lobby.version}:${(snapshot.members ?? []).map((m) => m.player_id).join(",")}`;
@@ -700,7 +730,15 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
           "section",
           { class: "card controls" },
           hint,
-          h("div", { class: "actions" }, readyButton, startButton, leaveButton),
+          h(
+            "div",
+            { class: "actions" },
+            returnButton,
+            readyButton,
+            startButton,
+            leaveButton,
+          ),
+          notice,
           readyError,
           startError,
         ),
@@ -711,6 +749,9 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
   onLobby(realtime.lobby.get());
   return {
     el,
+    showNotice(message) {
+      notice.textContent = message;
+    },
     dispose() {
       disposed = true;
       for (const unsubscribe of unsubscribers) unsubscribe();

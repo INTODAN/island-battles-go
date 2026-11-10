@@ -21,7 +21,8 @@ export type ProblemContext =
   | "seat"
   | "create"
   | "watch"
-  | "settings";
+  | "settings"
+  | "reopen";
 
 const isBotNotChosen = (error: ApiError) =>
   error.problemType?.endsWith(":bot-not-chosen") === true;
@@ -43,6 +44,7 @@ const sentences: Record<string, string> = {
   unavailable: "The lobby server is temporarily unavailable. Please try again.",
   idempotency_conflict:
     "That create request was already used for a different lobby. Try again.",
+  game_running: "The game is still running. Its lobby opens once it ends.",
 };
 
 /** The sentences for adding or removing a bot seat, which replace the lobby's where they differ. */
@@ -62,6 +64,11 @@ const settingsSentences: Record<string, string> = {
     "The game has already started, so the map can't change any more.",
   lobby_full:
     "That map has fewer teams than the lobby has players and bots. Remove a bot, or pick a map with more teams.",
+};
+
+/** The sentences for reopening the lobby after its game. */
+const reopenSentences: Record<string, string> = {
+  phase_conflict: "This lobby can't be opened again.",
 };
 
 const botNotChosen =
@@ -132,7 +139,9 @@ export function describeProblem(
         ? (seatSentences[code] ?? sentences[code])
         : context === "settings"
           ? (settingsSentences[code] ?? sentences[code])
-          : sentences[code];
+          : context === "reopen"
+            ? (reopenSentences[code] ?? sentences[code])
+            : sentences[code];
   if (known) {
     shown.message = known;
     return shown;

@@ -74,14 +74,18 @@ export function nextGeneration(
 /**
  * Decides which watch state to hold, by the rules of `nextGeneration`: another
  * game's state and older generations are dropped, nothing changes once the game
- * has an outcome, and a duplicate changes nothing.
+ * has an outcome, and a duplicate changes nothing. The one exception is the
+ * lobby's next game: a watcher follows the lobby, so a state of a later lobby
+ * round replaces the held game.
  */
 export function nextWatch(
   held: WatchState | null,
   incoming: WatchState,
 ): WatchState | null {
   if (held === null) return incoming;
-  if (incoming.game_id !== held.game_id) return null;
+  if (incoming.game_id !== held.game_id) {
+    return incoming.lobby_round > held.lobby_round ? incoming : null;
+  }
   if (incoming.generation_id < held.generation_id) return null;
   if (held.outcome) return null;
   return sameJson(incoming, held) ? null : incoming;

@@ -23,9 +23,12 @@ type GameReplay struct {
 	GameID uint `json:"game_id"`
 	// LobbyID names the game in the paths that the page asks the lobby page
 	// to fetch for it, such as the game log's and the demo's.
-	LobbyID string                  `json:"lobby_id"`
-	Teams   []models.GameTeam       `json:"teams"`
-	Frames  []models.GenerationView `json:"frames"`
+	LobbyID string `json:"lobby_id"`
+	// LobbyRound is the lobby round that the game plays, so the page can
+	// tell the lobby's games apart.
+	LobbyRound int64                   `json:"lobby_round"`
+	Teams      []models.GameTeam       `json:"teams"`
+	Frames     []models.GenerationView `json:"frames"`
 	// Outcome is nil while the game runs. Once it is set, the last frame is
 	// final.
 	Outcome *models.GameOutcomeView `json:"outcome"`
@@ -34,7 +37,7 @@ type GameReplay struct {
 // gameReplay builds the replay of a game from its generations in ID order,
 // as dal.LoadGameGenerations returns them.
 func gameReplay(game *models.Game, generations []models.Generation) GameReplay {
-	replay := GameReplay{GameID: game.ID, LobbyID: lobbyID(game), Teams: game.Teams, Frames: make([]models.GenerationView, 0, len(generations)), Outcome: outcomeView(game)}
+	replay := GameReplay{GameID: game.ID, LobbyID: lobbyID(game), LobbyRound: game.LobbyRound, Teams: game.Teams, Frames: make([]models.GenerationView, 0, len(generations)), Outcome: outcomeView(game)}
 	if replay.Teams == nil {
 		replay.Teams = []models.GameTeam{}
 	}

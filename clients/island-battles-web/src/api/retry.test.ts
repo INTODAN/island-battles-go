@@ -99,7 +99,7 @@ describe("throttled requests", () => {
     expect(await requests[1]?.text()).toBe('{"bot_id":"b"}');
   });
 
-  test("team, ready and heartbeat are retried", async () => {
+  test("team, ready, heartbeat and reopen are retried", async () => {
     const a = setup([throttled, ok]);
     await a.lobbyApi.PUT("/lobby/v1/games/{game_key}/lobbies/{lobby_id}/team", {
       params: { path: lobbyPath },
@@ -121,6 +121,12 @@ describe("throttled requests", () => {
       },
     );
     expect(c.requests).toHaveLength(2);
+    const d = setup([throttled, ok]);
+    await d.lobbyApi.POST(
+      "/lobby/v1/games/{game_key}/lobbies/{lobby_id}/reopen",
+      { params: { path: lobbyPath } },
+    );
+    expect(d.requests).toHaveLength(2);
   });
 
   test("create, join, start, seats and watcher kicks are not retried", async () => {

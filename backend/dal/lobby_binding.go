@@ -9,18 +9,20 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// BindLobbyGame persists a game and its simulation colors from a snapshot that
-// application.GameBinding has already authorized and validated. models.NeutralTeamColor is reserved.
+// BindLobbyGame persists the game of the snapshot's lobby round, and its
+// simulation colors, from a snapshot that application.GameBinding has already
+// authorized and validated. Each round of a lobby gets its own game.
+// models.NeutralTeamColor is reserved.
 func BindLobbyGame(database *gorm.DB, snapshot domain.Snapshot) (models.BindingResult, error) {
 	teams := make([]models.TeamBinding, len(snapshot.Teams))
 	for index, team := range snapshot.Teams {
 		teams[index] = models.TeamBinding{TeamID: team.ID, TeamOrder: team.Order, TeamColor: uint(team.Order)}
 	}
-	lobbyID := snapshot.Lobby.ID
-	return postgres.BindOnce(database, "idx_games_lobby_id", func(transaction *gorm.DB) (*models.BindingResult, error) {
-		return loadLobbyBinding(transaction, lobbyID, teams)
+	lobbyID, round := snapshot.Lobby.ID, snapshot.Lobby.Round
+	return postgres.BindOnce(database, "idx_games_lobby_round", func(transaction *gorm.DB) (*models.BindingResult, error) {
+		return loadLobbyBinding(transaction, lobbyID, round, teams)
 	}, func(transaction *gorm.DB) (models.BindingResult, error) {
-		game := models.Game{LobbyID: &lobbyID, Generations: []models.Generation{}}
+		game := models.Game{LobbyID: &lobbyID, LobbyRound: round, Generations: []models.Generation{}}
 		if err := transaction.Create(&game).Error; err != nil {
 			return models.BindingResult{}, err
 		}
@@ -35,9 +37,9 @@ func BindLobbyGame(database *gorm.DB, snapshot domain.Snapshot) (models.BindingR
 	})
 }
 
-func loadLobbyBinding(database *gorm.DB, lobbyID string, expected []models.TeamBinding) (*models.BindingResult, error) {
+func loadLobbyBinding(database *gorm.DB, lobbyID string, round int64, expected []models.TeamBinding) (*models.BindingResult, error) {
 	var games []models.Game
-	if err := database.Where(&models.Game{LobbyID: &lobbyID}).Limit(1).Find(&games).Error; err != nil {
+	if err := database.Where(&models.Game{LobbyID: &lobbyID, LobbyRound: round}).Limit(1).Find(&games).Error; err != nil {
 		return nil, err
 	}
 	if len(games) == 0 {

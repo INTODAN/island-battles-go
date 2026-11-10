@@ -121,6 +121,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/lobby/v1/games/{game_key}/lobbies/{lobby_id}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reopen a lobby after its game
+         * @description Brings a started lobby whose game has ended back to waiting, so its members can play another game in it, and returns the snapshot. Any active person in the lobby may reopen it; anyone else gets not_found. The lobby's round goes up by one, and the game binds the next game to the new round. Members, teams, seats, the game settings and the host stay; every person's ready is cleared, seats stay ready, and the start roster is emptied until the next start. The change publishes lobby.changed. A lobby that already waits is returned unchanged, so two members reopening it at once both succeed. A lobby whose game is still running fails with game_running; a closed lobby, or one of a game that doesn't let its lobbies play again, fails with phase_conflict. While the lobby waits, people can join it and the host can change its settings as before a first game.
+         */
+        post: operations["reopenLobby"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/lobby/v1/games/{game_key}/lobbies/{lobby_id}/seats": {
         parameters: {
             query?: never;
@@ -192,7 +212,7 @@ export interface paths {
         put?: never;
         /**
          * Start a lobby
-         * @description Starts an eligible lobby and freezes its roster. The host can start once at least two members are present and every member has chosen a team, is ready and is connected; otherwise it fails with not_ready. The snapshot's start_rules list the game's extra conditions: with every_team_needs_member, a lobby with an empty team fails with empty_teams, whose team_ids name the empty teams. A game that requires something of each member before they get ready checks the whole roster again, and fails with game_requirement for a member who doesn't meet it.
+         * @description Starts an eligible lobby and freezes its roster. The host can start once at least two members are present and every member has chosen a team, is ready and is connected; otherwise it fails with not_ready. The snapshot's start_rules list the game's extra conditions: with every_team_needs_member, a lobby with an empty team fails with empty_teams, whose team_ids name the empty teams. A game that requires something of each member before they get ready checks the whole roster again, and fails with game_requirement for a member who doesn't meet it. The roster stays frozen while the lobby is started; once the game has ended, a member can reopen the lobby for another game (reopenLobby), which empties the roster for the next start.
          */
         post: operations["startLobby"];
         delete?: never;
@@ -312,7 +332,7 @@ export interface paths {
         put?: never;
         /**
          * Join a lobby
-         * @description Joins by game key and join code; a lobby with as many members as teams is full (lobby_full). Started lobbies allow only frozen-roster rejoin.
+         * @description Joins by game key and join code; a lobby with as many members as teams is full (lobby_full). Started lobbies allow only frozen-roster rejoin; once a member reopens the lobby after its game, it waits and anyone with the code can join again.
          */
         post: operations["joinLobby"];
         delete?: never;
@@ -569,6 +589,11 @@ export interface components {
             join_code: string;
             name: string;
             phase: string;
+            /**
+             * Format: int64
+             * @description The lobby's round, from 1. Reopening the started lobby after its game ended (reopenLobby) raises it by one and makes the lobby wait again; a game tells the lobby's games apart by lobby and round.
+             */
+            round: number;
             /** Format: int64 */
             version: number;
         };
@@ -613,7 +638,7 @@ export interface components {
         };
         Problem: {
             /** @enum {string} */
-            code: "unauthenticated" | "not_found" | "not_host" | "lobby_full" | "team_full" | "phase_conflict" | "not_ready" | "empty_teams" | "stale_membership" | "idempotency_conflict" | "invalid_input" | "invalid_game_settings" | "invalid_seat_settings" | "game_requirement" | "watcher_kicked" | "watchers_full" | "unavailable" | "internal_error";
+            code: "unauthenticated" | "not_found" | "not_host" | "lobby_full" | "team_full" | "phase_conflict" | "not_ready" | "empty_teams" | "stale_membership" | "idempotency_conflict" | "invalid_input" | "invalid_game_settings" | "invalid_seat_settings" | "game_requirement" | "game_running" | "watcher_kicked" | "watchers_full" | "unavailable" | "internal_error";
             detail: string;
             /** Format: int64 */
             status: number;
@@ -1197,6 +1222,92 @@ export interface operations {
                 "application/json": components["schemas"]["ReadyBody"];
             };
         };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Snapshot"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    reopenLobby: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_key: string;
+                lobby_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description OK */
             200: {

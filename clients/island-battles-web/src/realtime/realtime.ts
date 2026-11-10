@@ -71,8 +71,11 @@ export interface Realtime {
   /** Installs a snapshot an HTTP call returned (create, join, start...) and follows its lobby. */
   adoptSnapshot(snapshot: Snapshot): void;
   leaveLobby(): void;
-  /** Follows the signed-in player's game of a lobby. */
-  followGame(lobbyId: string): void;
+  /**
+   * Follows the signed-in player's game of a lobby round. A lobby plays one game per round,
+   * and states of another round's game are dropped.
+   */
+  followGame(lobbyId: string, round: number): void;
   /** Reads the followed game again now, for a caller that learned the game exists. */
   refreshGame(): void;
   leaveGame(): void;
@@ -125,6 +128,7 @@ interface LobbyFollow {
 interface GameFollow {
   epoch: number;
   lobbyId: string;
+  round: number;
   playerId: string;
   channel: string;
   subscription: SubscriptionLike | undefined;
@@ -459,11 +463,12 @@ export function createRealtime(options: RealtimeOptions = {}): Realtime {
     );
   }
 
-  /** Installs a state only for this player's game of this lobby on its channel. */
+  /** Installs a state only for this player's game of this lobby round on its channel. */
   function installGame(follow: GameFollow, state: GenerationState): void {
     if (
       state.channel !== follow.channel ||
       state.lobby_id !== follow.lobbyId ||
+      state.lobby_round !== follow.round ||
       state.player_id !== follow.playerId
     ) {
       return;
@@ -626,15 +631,22 @@ export function createRealtime(options: RealtimeOptions = {}): Realtime {
 
     leaveLobby: leaveLobbyPublic,
 
-    followGame(lobbyId) {
+    followGame(lobbyId, round) {
       const current = session.get();
       if (!current) throw new Error("sign in before following a game");
-      if (gameFollow && gameFollow.lobbyId === lobbyId) return;
+      if (
+        gameFollow &&
+        gameFollow.lobbyId === lobbyId &&
+        gameFollow.round === round
+      ) {
+        return;
+      }
       leaveGame();
       const epoch = gameEpoch;
       const follow: GameFollow = {
         epoch,
         lobbyId,
+        round,
         playerId: current.playerId,
         channel: `player:${current.playerId}`,
         subscription: undefined,

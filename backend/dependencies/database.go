@@ -100,6 +100,13 @@ func MigrateSchema(ctx context.Context, db *gorm.DB) error {
 	if err := dal.MigrateMapTemplates(ctx, db); err != nil {
 		return fmt.Errorf("migrate map template schema: %w", err)
 	}
+	// A lobby plays one game per round, so the unique index on a game's
+	// lobby alone gives way to one on its lobby and round. AutoMigrate never
+	// drops an index, so it goes here, before AutoMigrate creates the new
+	// one. IF EXISTS lets every later run find nothing to do.
+	if err := db.WithContext(ctx).Exec(`DROP INDEX IF EXISTS idx_games_lobby_id`).Error; err != nil {
+		return fmt.Errorf("drop the games lobby index: %w", err)
+	}
 	err := db.WithContext(ctx).AutoMigrate(&models.Game{}, &models.Map{}, &models.Castle{},
 		&models.Generation{}, &models.SoldierGroup{}, &models.Command{}, &models.TeamBindingRecord{}, &models.FrozenGamePlayer{}, &models.GenerationInput{}, &models.GenerationRequest{}, &models.GenerationLog{}, &models.GamePlayerBotMemory{})
 	if err != nil {

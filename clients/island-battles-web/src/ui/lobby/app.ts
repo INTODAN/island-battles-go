@@ -1,4 +1,5 @@
 import { createApiClients } from "../../api/client";
+import { ApiError } from "../../api/errors";
 import { type BotRelay, startBotRelay } from "../../bots";
 import { tabStorage } from "../../platform";
 import type { Realtime } from "../../realtime";
@@ -12,6 +13,7 @@ import { type Ocean, startOcean } from "./ocean";
 import { describeProblem } from "./problems";
 import { mountRelayBanner } from "./relayBanner";
 import { mountRoomScreen } from "./roomScreen";
+import { backToLobby, routeRound } from "./rounds";
 import { watchForGame } from "./startRetry";
 import { mountWatchersPanel } from "./watchersPanel";
 
@@ -92,8 +94,9 @@ export interface LobbyApp {
 
 /**
  * The web client's own flow: name, create or join, lobby room, then the game
- * view. Which screen shows is decided by the realtime stores alone, never by
- * what a button press hopes will happen.
+ * view, and back to the room for the lobby's next game. Which screen shows is
+ * decided by the realtime stores and the round whose game view the player
+ * closed (`routeRound`), never by what a button press hopes will happen.
  */
 export function mountLobbyApp(options: {
   root: HTMLElement;
@@ -125,7 +128,25 @@ export function mountLobbyApp(options: {
   let disposed = false;
   let ocean: Ocean | undefined;
   let screen: { key: string; screen: Screen } | undefined;
-  let game: { lobbyId: string; stop(): void } | undefined;
+  let game:
+    | {
+        lobbyId: string;
+        round: number;
+        /** Shows or hides the note that the lobby is open again. */
+        setReopened(reopened: boolean): void;
+        /**
+         * Hides the game behind the read-only room, or shows it again. The game,
+         * the relay of a localhost bot and the view go on while it is hidden.
+         */
+        setHidden(hidden: boolean): void;
+        stop(): void;
+      }
+    | undefined;
+  /** The last round whose game view the player closed, in which lobby. */
+  let closed: { lobbyId: string; round: number } | undefined;
+  /** Shown in the room: why the game view closed, or why reopening failed. */
+  let roomNotice = "";
+  let room: ReturnType<typeof mountRoomScreen> | undefined;
   let watching: { lobbyId: string; stop(): void } | undefined;
   let heartbeat: { lobbyId: string; stop(): void } | undefined;
 
@@ -237,57 +258,114 @@ export function mountLobbyApp(options: {
 
   // --- Game ---
 
-  function enterGame(lobbyId: string): void {
+  /**
+   * Shows the game of a lobby round. The view mounts once the round's game is
+   * there: until the host's start has made it, the lobby's newest game is the
+   * previous round's, which this view must not show.
+   */
+  function enterGame(lobbyId: string, round: number): void {
     demo?.stop();
     demo = undefined;
     setOcean(false);
     stage.hidden = true;
     gameHost.hidden = false;
-    realtime.followGame(lobbyId);
+    realtime.followGame(lobbyId, round);
     const relay: BotRelay = startBotRelay({ realtime, lobbyId });
     const banner = mountRelayBanner(relay);
     const { gameApi } = createApiClients({
       getAccessToken: () => realtime.session.get()?.accessToken,
     });
+    const placeholderBack = h(
+      "button",
+      { type: "button", class: "secondary" },
+      "Back to lobby",
+    );
+    placeholderBack.addEventListener("click", () => closeGame(lobbyId, round));
+    const viewHost = h(
+      "div",
+      { class: "game-view" },
+      h(
+        "div",
+        { class: "game-placeholder", attrs: { role: "status" } },
+        h("p", {}, "Starting the game…"),
+        placeholderBack,
+      ),
+    );
+    let view: { dispose(): void } | undefined;
+    const showView = () => {
+      if (view) return;
+      viewHost.replaceChildren();
+      // The shell follows the game for the relay and ends it itself, so the view's own
+      // `leaveGame()` (on dispose, or when it swaps to a demo file) must not stop the relay.
+      view = mountGameView(viewHost, {
+        lobbyId,
+        round,
+        realtime: { ...realtime, leaveGame() {} },
+        onBack: () => closeGame(lobbyId, round),
+      });
+    };
     const watcher = watchForGame({
       async probe() {
         if (realtime.game.get()) return;
-        await gameApi.GET("/game/from-lobby/{lobby_id}/generation", {
-          params: { path: { lobby_id: lobbyId } },
-        });
+        const { data } = await gameApi.GET(
+          "/game/from-lobby/{lobby_id}/generation",
+          { params: { path: { lobby_id: lobbyId } } },
+        );
+        // The newest game is still the previous round's: wait for this round's.
+        if (data?.lobby_round !== round) {
+          throw new ApiError({
+            kind: "problem",
+            status: 404,
+            detail: "This round's game isn't there yet.",
+          });
+        }
       },
       onReady() {
         if (!realtime.game.get()) realtime.refreshGame();
+        showView();
       },
       onFatal(error) {
-        gameFailed(describeProblem(error, "start").message);
+        gameFailed(lobbyId, round, describeProblem(error, "start").message);
       },
       schedule(run, ms) {
         const timer = setTimeout(run, ms);
         return () => clearTimeout(timer);
       },
     });
-    const viewHost = h("div", { class: "game-view" });
+    // Over the result, once another player reopened the lobby.
+    const reopenedNote = h(
+      "p",
+      { class: "lobby-open-note", hidden: true, attrs: { role: "status" } },
+      "The lobby is open again. Back to lobby takes you to it.",
+    );
     // The people watching with the join code; the host can kick one.
     const watchers = mountWatchersPanel({ realtime, actions, overlay: true });
-    gameHost.replaceChildren(viewHost, banner.el, watchers.el);
-    // The shell follows the game for the relay and ends it itself, so the view's own
-    // `leaveGame()` (on dispose, or when it swaps to a demo file) must not stop the relay.
-    const view = mountGameView(viewHost, {
-      lobbyId,
-      realtime: { ...realtime, leaveGame() {} },
-      onBack: () => leaveGame(""),
-    });
+    gameHost.replaceChildren(viewHost, reopenedNote, banner.el, watchers.el);
     const stopOnGame = realtime.game.subscribe((state) => {
-      if (state) watcher.stop();
+      if (!state) return;
+      watcher.stop();
+      showView();
     });
     const stopOnProblem = realtime.problem.subscribe((problem) => {
       if (problem?.scope === "game") {
-        gameFailed(describeProblem(problem.error, "start").message);
+        gameFailed(
+          lobbyId,
+          round,
+          describeProblem(problem.error, "start").message,
+        );
       }
     });
     game = {
       lobbyId,
+      round,
+      setReopened(reopened) {
+        reopenedNote.hidden = !reopened;
+      },
+      setHidden(hidden) {
+        gameHost.hidden = hidden;
+        stage.hidden = !hidden;
+        if (!hidden) setOcean(false);
+      },
       stop() {
         stopOnGame();
         stopOnProblem();
@@ -295,7 +373,8 @@ export function mountLobbyApp(options: {
         relay.dispose();
         banner.dispose();
         watchers.dispose();
-        view.dispose();
+        view?.dispose();
+        realtime.leaveGame();
         gameHost.replaceChildren();
         gameHost.hidden = true;
         stage.hidden = false;
@@ -303,19 +382,52 @@ export function mountLobbyApp(options: {
     };
   }
 
-  function gameFailed(message: string): void {
-    leaveGame(message);
+  /**
+   * "Back to lobby" in the game view. The player stays in the lobby: once the
+   * game has ended, the lobby is reopened for the next game; while it runs, the
+   * room shows read-only with "Return to game", and the game goes on.
+   */
+  function closeGame(lobbyId: string, round: number): void {
+    const state = realtime.game.get();
+    closed = { lobbyId, round };
+    roomNotice = "";
+    if (
+      backToLobby(state ? (state.outcome ? "ended" : "running") : "unknown") ===
+      "reopen"
+    ) {
+      void actions.reopen().catch((cause) => {
+        const shown = describeProblem(cause, "reopen");
+        // Another player started the next game meanwhile: routing shows it.
+        if (cause instanceof ApiError && cause.code === "game_running") return;
+        if (shown.signedOut) {
+          realtime.signOut();
+          return;
+        }
+        if (shown.lostMembership) {
+          realtime.leaveLobby();
+          forgetRoom(shown.message);
+        } else {
+          roomNotice = shown.message;
+          room?.showNotice(shown.message);
+        }
+        route();
+      });
+    }
+    route();
   }
 
-  /** Leaves the finished (or failed) game and goes back to the menu. */
-  function leaveGame(message: string): void {
-    game?.stop();
-    game = undefined;
-    // Leave the membership before the lobby store is emptied: it names the lobby.
-    void actions.leave().catch(() => undefined);
-    realtime.leaveGame();
-    realtime.leaveLobby();
-    forgetRoom(message);
+  /** "Return to game" in the read-only room. */
+  function returnToGame(): void {
+    closed = undefined;
+    roomNotice = "";
+    route();
+  }
+
+  /** The game of a round can't be shown: back to the room, with the reason. */
+  function gameFailed(lobbyId: string, round: number, message: string): void {
+    closed = { lobbyId, round };
+    roomNotice = message;
+    room?.showNotice(message);
     route();
   }
 
@@ -355,15 +467,34 @@ export function mountLobbyApp(options: {
     const viewHost = h("div", { class: "game-view" });
     gameHost.replaceChildren(viewHost);
     // No lease, heartbeat, relay or deadline call: a watcher only reads.
-    const view = mountWatchView(viewHost, {
-      lobbyId,
-      channel,
-      realtime,
-      onBack: () => stopWatch(),
+    const mount = () =>
+      mountWatchView(viewHost, {
+        lobbyId,
+        channel,
+        realtime,
+        onBack: () => stopWatch(),
+      });
+    let view = mount();
+    // The lobby plays one game per round. A watcher follows the lobby, so once
+    // its next game starts, the view shows that game from its beginning.
+    let shownRound: number | undefined;
+    const stopOnRound = realtime.watch.subscribe((state) => {
+      if (!state) return;
+      if (shownRound === undefined || state.lobby_round <= shownRound) {
+        shownRound ??= state.lobby_round;
+        return;
+      }
+      shownRound = state.lobby_round;
+      queueMicrotask(() => {
+        if (watching?.lobbyId !== lobbyId) return;
+        view.dispose();
+        view = mount();
+      });
     });
     watching = {
       lobbyId,
       stop() {
+        stopOnRound();
         view.dispose();
         gameHost.replaceChildren();
         gameHost.hidden = true;
@@ -389,6 +520,7 @@ export function mountLobbyApp(options: {
   function show(key: string, make: () => Screen): void {
     if (screen?.key === key) return;
     screen?.screen.dispose();
+    room = undefined;
     const next = make();
     screen = { key, screen: next };
     demoLink.hidden = !(key === "name" || key === "menu");
@@ -435,17 +567,41 @@ export function mountLobbyApp(options: {
     }
     // A watcher stays on the watched game until they stop watching.
     if (watching) return;
-    if (demo && !(lobby && lobby.lobby.phase === "started")) return;
-    if (lobby && lobby.lobby.phase === "started") {
-      if (game?.lobbyId !== lobby.lobby.id) {
+    const lobbyId = lobby?.lobby.id;
+    const decision = lobby
+      ? routeRound({
+          phase: lobby.lobby.phase,
+          round: lobby.lobby.round,
+          closedRound:
+            closed && closed.lobbyId === lobbyId ? closed.round : null,
+          viewingRound: game && game.lobbyId === lobbyId ? game.round : null,
+        })
+      : undefined;
+    if (demo && decision?.view !== "game") return;
+    if (lobbyId && decision?.view === "game") {
+      if (game?.lobbyId !== lobbyId || game.round !== decision.round) {
+        game?.stop();
+        game = undefined;
         screen?.screen.dispose();
         screen = undefined;
+        room = undefined;
         stage.replaceChildren();
-        enterGame(lobby.lobby.id);
+        enterGame(lobbyId, decision.round);
       }
+      game?.setHidden(false);
+      game?.setReopened(decision.reopened);
       return;
     }
-    if (game) {
+    // The read-only room of a running game keeps the game going behind it.
+    if (
+      game &&
+      decision?.view === "room" &&
+      decision.readOnly &&
+      game.lobbyId === lobbyId &&
+      game.round === lobby?.lobby.round
+    ) {
+      game.setHidden(true);
+    } else if (game) {
       game.stop();
       game = undefined;
     }
@@ -473,17 +629,22 @@ export function mountLobbyApp(options: {
           joinCode: lobby.lobby.join_code,
         } satisfies SavedRoom),
       );
-      show(`room:${lobby.lobby.id}`, () =>
-        mountRoomScreen({
+      show(`room:${lobby.lobby.id}`, () => {
+        const message = roomNotice;
+        roomNotice = "";
+        room = mountRoomScreen({
           realtime,
           actions,
+          notice: message,
+          onReturnToGame: returnToGame,
           onSignedOut: () => realtime.signOut(),
-          onLeft(message) {
-            forgetRoom(message);
+          onLeft(left) {
+            forgetRoom(left);
             route();
           },
-        }),
-      );
+        });
+        return room;
+      });
       return;
     }
     if (problem?.scope === "lobby") {

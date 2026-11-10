@@ -16,6 +16,6 @@ func Register(api huma.API, binding *application.GameBinding[models.BindingResul
 		Path:        "/game/from-lobby",
 		Tags:        []string{"Island Battles"},
 		Summary:     "Initialize or return a playable Island Battles game from a started lobby",
-		Description: "An active host initializes generation one, or retries a failed initialization. Repeated requests return the same game and frozen team mapping; each frozen roster player must complete their turn to advance.",
+		Description: "An active host initializes generation one of the game of the lobby's current round, or retries a failed initialization. Repeated requests return the same game and frozen team mapping; each frozen roster player must complete their turn to advance. A lobby that a member reopened after its game and the host started again gets a new game for its new round.",
 	}, binding, authenticator)
 }

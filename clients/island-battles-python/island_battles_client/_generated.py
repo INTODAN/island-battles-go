@@ -434,6 +434,10 @@ class GenerationState(GameModel):
     generation: Generation
     generation_id: Annotated[StrictInt, Field(ge=1)]
     lobby_id: UUID
+    lobby_round: Annotated[StrictInt, Field(ge=1)]
+    """
+    The lobby round that the game plays. A lobby plays one game per round, and the /game/from-lobby/{lobby_id} routes serve its newest game: compare this with the lobby snapshot's lobby.round to tell whether the game is the one the lobby started last.
+    """
     log_lines_stored: Annotated[StrictInt, Field(ge=0)]
     """
     How many game log lines you have stored for this generation, out of the 100 a player may store per generation. 0 when there are none. A client that restarts during a turn continues counting from it.
@@ -640,6 +644,7 @@ class Problem(GameModel):
         "invalid_game_settings",
         "invalid_seat_settings",
         "game_requirement",
+        "game_running",
         "watcher_kicked",
         "watchers_full",
         "unavailable",
@@ -856,6 +861,10 @@ class WatchState(GameModel):
     generation: Generation
     generation_id: Annotated[StrictInt, Field(ge=1)]
     lobby_id: UUID
+    lobby_round: Annotated[StrictInt, Field(ge=1)]
+    """
+    The lobby round that the game plays. A lobby plays one game per round, and the /game/from-lobby/{lobby_id} routes serve its newest game: compare this with the lobby snapshot's lobby.round to tell whether the game is the one the lobby started last.
+    """
     outcome: GameOutcome | None = None
     """
     How the game ended. Absent while the game runs.

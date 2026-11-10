@@ -608,11 +608,37 @@ select:focus-visible {
   display: none;
 }
 
+/* Over the result, once another player reopened the lobby: under the view's top bar, above the
+   outcome, clear of the teams panel. */
+.lobby-open-note {
+  position: absolute;
+  top: 58px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  margin: 0;
+  max-width: min(420px, calc(100% - 20px));
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: #e3f4e6;
+  color: #1d5b2c;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+  font:
+    13px / 1.35 system-ui,
+    sans-serif;
+}
+
+.lobby-open-note[hidden] {
+  display: none;
+}
+
 .game-placeholder {
   position: absolute;
   inset: 0;
   display: grid;
-  place-items: center;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
   color: #fff;
   font:
     20px system-ui,
