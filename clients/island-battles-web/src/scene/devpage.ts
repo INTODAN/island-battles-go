@@ -3,7 +3,11 @@ import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Scene } from "@babylonjs/core/scene";
 import type { components } from "../api/generated/game";
 import { showBoardLoading } from "../ui/boardLoading";
-import { createScenePlayer, DEFAULT_TURN_MS } from "./animation";
+import {
+  createScenePlayer,
+  DEFAULT_MAX_FRAME_MS,
+  DEFAULT_TURN_MS,
+} from "./animation";
 import { type Battlefield, battlefieldOf } from "./battlefield";
 import { loadBoardAssets } from "./boardAssets";
 import { setCastleAnimation } from "./castles";
@@ -187,6 +191,8 @@ export async function startFixturePage(
       );
       if (index >= 0) show(index);
     },
+    // The next turn is queued as one ends, so the fixture plays on with no pause between turns.
+    onIdle: () => feed(),
   });
   const speed = Number(query.get("speed") ?? "1");
   player.setSpeed(Number.isFinite(speed) ? speed : 1);
@@ -221,7 +227,11 @@ export async function startFixturePage(
     play.textContent = playing ? "Pause" : "Play";
   };
   const advance = (ms: number) => {
-    player.tick(ms);
+    // The player takes at most DEFAULT_MAX_FRAME_MS a tick.
+    for (let left = ms; left > 0; left -= DEFAULT_MAX_FRAME_MS) {
+      if (playing && !player.busy) feed();
+      player.tick(Math.min(DEFAULT_MAX_FRAME_MS, left));
+    }
     if (playing && !player.busy) feed();
   };
   // Keep one turn queued ahead while playing, so a fixture plays on without a break.

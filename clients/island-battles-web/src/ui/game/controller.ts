@@ -12,6 +12,8 @@ export interface PlayerPort {
   seek(generation: Generation): void;
   /** True while a turn plays or waits. */
   readonly busy: boolean;
+  /** Following live: the pace adapts to how fast turns arrive. Off, turns take a fixed time. */
+  setFollowing(following: boolean): void;
 }
 
 export interface ViewState {
@@ -164,7 +166,10 @@ export class GameController {
     this.emit();
   }
 
-  /** Call once a frame: while playing, queues the next turn when the last one has finished. */
+  /**
+   * Call once a frame, and when the player has finished a turn: while playing, queues the next
+   * turn when the last one has finished.
+   */
   tick(): void {
     if (!this.playing || this.player.busy) return;
     if (!this.advance()) {
@@ -231,6 +236,7 @@ export class GameController {
   }
 
   private emit(): void {
+    this.player.setFollowing(this.follow);
     const state = this.state;
     for (const listener of [...this.listeners]) listener(state);
   }

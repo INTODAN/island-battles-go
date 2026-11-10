@@ -13,6 +13,7 @@ const outcome = {
 class FakePlayer implements PlayerPort {
   calls: string[] = [];
   pending = 0;
+  following = false;
   get busy() {
     return this.pending > 0;
   }
@@ -26,6 +27,9 @@ class FakePlayer implements PlayerPort {
   }
   finish() {
     this.pending = Math.max(0, this.pending - 1);
+  }
+  setFollowing(following: boolean) {
+    this.following = following;
   }
 }
 
@@ -175,6 +179,21 @@ describe("follow live", () => {
     const { controller } = live(1, 2);
     controller.togglePlay();
     expect(controller.state).toMatchObject({ follow: false, playing: false });
+  });
+
+  test("the player adapts its pace only while following live (#176)", () => {
+    const { player, controller } = live(1, 2, 3);
+    expect(player.following).toBe(true);
+    controller.scrubTo(0);
+    expect(player.following).toBe(false);
+    controller.togglePlay();
+    expect(player.following).toBe(false);
+    controller.setFollow(true);
+    expect(player.following).toBe(true);
+
+    const demo = new FakePlayer();
+    new GameController(demo, { live: false }).load(frames(1, 2), null);
+    expect(demo.following).toBe(false);
   });
 });
 

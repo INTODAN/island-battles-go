@@ -7,6 +7,7 @@ export {
   type TurnSample,
 } from "./plan";
 export {
+  DEFAULT_MAX_FRAME_MS,
   DEFAULT_TURN_MS,
   type PlayerOptions,
   type Stage,

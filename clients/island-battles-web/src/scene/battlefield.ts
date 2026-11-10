@@ -1,3 +1,4 @@
+import { VertexBuffer } from "@babylonjs/core/Buffers/buffer";
 import type { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { Mesh as MeshClass } from "@babylonjs/core/Meshes/mesh";
@@ -13,6 +14,7 @@ import {
   type TurnHeadings,
 } from "./animation/headings";
 import type { TurnPlan, TurnSample } from "./animation/plan";
+import { turnToward } from "./animation/rotation";
 import {
   type BoatParts,
   createBoat,
@@ -74,6 +76,8 @@ export interface CastleEntity {
 
 export interface GroupEntity {
   parts: BoatParts;
+  /** The heading the boat turns to, about y; unset until it is first placed. */
+  heading?: number;
 }
 
 interface ClashEntity {
@@ -111,6 +115,8 @@ export interface Battlefield {
   headingHeld: Map<number, ReadonlySet<number>>;
   /** The arrows of the turn playing, decided when it began. */
   turnHeadings: TurnHeadings | null;
+  /** Boats still turning to their heading. */
+  steering: Set<GroupEntity>;
 }
 
 const battlefields = new WeakMap<Scene, Battlefield>();
@@ -145,7 +151,15 @@ function createBattlefield(scene: Scene): Battlefield {
     headingSegments: [],
     headingHeld: new Map(),
     turnHeadings: null,
+    steering: new Set(),
   };
+  // Boats turn to a new heading over a few frames rather than at once.
+  scene.onBeforeRenderObservable.add(() =>
+    steerBoats(
+      battlefield,
+      Math.min(MAX_STEER_FRAME_MS, scene.getEngine().getDeltaTime()),
+    ),
+  );
   // The heading lines are drawn after everything else, tested against its depth but not
   // against each other: rendering group 1 keeps the scene's depth buffer (#168 case 15).
   scene.setRenderingAutoClearDepthStencil(HEADING_GROUP, false, false, false);
@@ -238,6 +252,53 @@ export function updateCastle(
   });
 }
 
+/** A frame turns boats by at most this much time, so a tab coming back does not snap them. */
+const MAX_STEER_FRAME_MS = 100;
+
+/**
+ * Points a boat at `world` (where it is drawn) towards its destination. A boat placed for the
+ * first time faces there at once; after that it turns there over about TURN_MS (`steerBoats`).
+ */
+export function aimGroup(
+  field: Battlefield,
+  entity: GroupEntity,
+  world: { x: number; z: number },
+  destination: Castle | undefined,
+): void {
+  if (!destination) return;
+  const target = toWorld(destination);
+  if (target.x === world.x && target.z === world.z) return;
+  const heading = Math.atan2(target.x - world.x, target.z - world.z);
+  const root = entity.parts.root;
+  if (entity.heading === undefined) root.rotation.y = heading;
+  entity.heading = heading;
+  if (root.rotation.y === heading) field.steering.delete(entity);
+  else field.steering.add(entity);
+}
+
+/** Turns every boat that is not yet on its heading a step towards it. */
+export function steerBoats(field: Battlefield, deltaMs: number): void {
+  for (const entity of field.steering) {
+    const root = entity.parts.root;
+    if (root.isDisposed() || entity.heading === undefined) {
+      field.steering.delete(entity);
+      continue;
+    }
+    root.rotation.y = turnToward(root.rotation.y, entity.heading, deltaMs);
+    if (root.rotation.y === entity.heading) field.steering.delete(entity);
+  }
+}
+
+/** Puts every boat on its heading at once, as a jump to a generation does. */
+export function snapBoats(field: Battlefield): void {
+  for (const entity of field.steering) {
+    if (entity.heading !== undefined) {
+      entity.parts.root.rotation.y = entity.heading;
+    }
+  }
+  field.steering.clear();
+}
+
 /** Boats grow gently with their soldiers: ~1.05 for 1, ~1.2 for 10, ~1.6 for 100. */
 export function boatScale(soldiers: number): number {
   return Math.min(1.7, 1 + 0.18 * Math.log2(1 + soldiers / 10));
@@ -255,10 +316,7 @@ export function updateGroup(
   // A boat near either island is drawn at its shore, not inside it (shore.ts).
   const world = toWorld(drawnPosition(group, origin, destination));
   root.position.set(world.x, 0, world.z);
-  if (destination) {
-    const target = toWorld(destination);
-    root.rotation.y = Math.atan2(target.x - world.x, target.z - world.z);
-  }
+  aimGroup(field, entity, world, destination);
   body.scaling.setAll(boatScale(group.soldiers));
   const color = teamColorHex(group.team_color);
   setBoatTeam(entity.parts, group.team_color, materials);
@@ -385,17 +443,34 @@ function updateClashes(field: Battlefield, generation: Generation): void {
   }
 }
 
+/**
+ * Sets a heading ribbon's shape. The arrows move every frame of a turn, so when the ribbon keeps
+ * its number of corners and its triangles, only the positions are written into the existing
+ * buffer; a new buffer is made only when the shape changes.
+ */
 function setRibbon(mesh: Mesh, points: number[], indices: number[]): void {
-  const positions: number[] = [];
-  const normals: number[] = [];
+  const positions = new Array<number>((points.length / 2) * 3);
   for (let index = 0; index < points.length; index += 2) {
     const world = toWorld({ x: points[index] ?? 0, y: points[index + 1] ?? 0 });
-    positions.push(world.x, 0, world.z);
-    normals.push(0, 1, 0);
+    const offset = (index / 2) * 3;
+    positions[offset] = world.x;
+    positions[offset + 1] = 0;
+    positions[offset + 2] = world.z;
+  }
+  const shown = mesh.getIndices();
+  if (
+    positions.length > 0 &&
+    mesh.getTotalVertices() === positions.length / 3 &&
+    shown !== null &&
+    shown.length === indices.length &&
+    indices.every((value, index) => shown[index] === value)
+  ) {
+    mesh.updateVerticesData(VertexBuffer.PositionKind, positions, true);
+    return;
   }
   const data = new VertexData();
   data.positions = positions;
-  data.normals = normals;
+  data.normals = positions.map((_, index) => (index % 3 === 1 ? 1 : 0));
   data.indices = indices;
   data.applyToMesh(mesh, true);
 }
@@ -594,6 +669,16 @@ export function popCastle(
   return popCastleView(view, fromLevel, toLevel);
 }
 
+export interface RenderOptions {
+  /**
+   * Groups that are not in the generation but keep their boats and labels: a turn that starts
+   * still shows the boats that land or sink during it.
+   */
+  keepGroups?: ReadonlySet<number>;
+  /** False leaves the heading arrows to the caller (a turn draws its own). */
+  headings?: boolean;
+}
+
 /**
  * Draws a generation. Meshes are found by castle and group ID and reused from one call to the
  * next, so a later call only moves, recolours and relabels them. `teams` names the teams for
@@ -603,7 +688,9 @@ export function renderGeneration(
   scene: Scene,
   generation: Generation,
   teams: readonly GameTeam[],
+  options: RenderOptions = {},
 ): Battlefield {
+  const keep = options.keepGroups ?? new Set<number>();
   const field = battlefields.get(scene) ?? createBattlefield(scene);
   field.generation = generation;
   field.teams = teams;
@@ -674,6 +761,7 @@ export function renderGeneration(
       entity,
     );
   }
+  for (const id of keep) groupIds.add(id);
   prune(field.groups, groupIds, (entity) => disposeBoat(entity.parts));
   for (const id of field.labels.ids()) {
     const match = /^group:(\d+):/.exec(id);
@@ -683,6 +771,6 @@ export function renderGeneration(
   }
 
   updateClashes(field, generation);
-  updateHeadings(field, generation);
+  if (options.headings !== false) updateHeadings(field, generation);
   return field;
 }

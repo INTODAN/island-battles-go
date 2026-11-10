@@ -5,8 +5,9 @@ import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { AbstractMesh } from "@babylonjs/core/Meshes/abstractMesh";
 import { CreateBox } from "@babylonjs/core/Meshes/Builders/boxBuilder";
 import { CreateCylinder } from "@babylonjs/core/Meshes/Builders/cylinderBuilder";
-import { CreateTorus } from "@babylonjs/core/Meshes/Builders/torusBuilder";
+import { CreateTorusVertexData } from "@babylonjs/core/Meshes/Builders/torusBuilder";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
+import type { VertexData } from "@babylonjs/core/Meshes/mesh.vertexData";
 import "@babylonjs/core/Meshes/thinInstanceMesh";
 import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
@@ -631,6 +632,9 @@ export function placeProps(
   }
 }
 
+/** The shapes of the rings made so far, by size: a turn's clashes reuse them (#176). */
+const ringShapes = new Map<string, VertexData>();
+
 /** A flat ring on the sea, lying in the XZ plane. */
 export function createFlatRing(
   scene: Scene,
@@ -638,11 +642,18 @@ export function createFlatRing(
   radius: number,
   thickness: number,
 ): Mesh {
-  const ring = CreateTorus(
-    name,
-    { diameter: radius * 2, thickness, tessellation: 48 },
-    scene,
-  );
+  const key = `${radius}:${thickness}`;
+  let shape = ringShapes.get(key);
+  if (!shape) {
+    shape = CreateTorusVertexData({
+      diameter: radius * 2,
+      thickness,
+      tessellation: 48,
+    });
+    ringShapes.set(key, shape);
+  }
+  const ring = new Mesh(name, scene);
+  shape.applyToMesh(ring);
   ring.isPickable = false;
   return ring;
 }
