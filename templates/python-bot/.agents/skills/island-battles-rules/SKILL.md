@@ -1,6 +1,6 @@
 ---
 name: island-battles-rules
-description: The rules of an Island Battles game: turns (generations), castles, soldiers, growth, movement, clashes, capturing, upgrades and their costs, and how a game is won, lost or drawn. Load it before deciding what a bot should do, or when a result of the bot surprises you.
+description: "The rules of an Island Battles game: turns (generations), castles, soldiers, growth, movement, clashes, capturing, upgrades and their costs, and how a game is won, lost or drawn. Load it before deciding what a bot should do, or when a result of the bot surprises you."
 ---
 
 # Island Battles rules
@@ -20,7 +20,7 @@ So a group you send moves in the same turn, and a castle grows before the arriva
 
 ## Castles and soldiers
 
-A **castle** has an `id`, a `team_color`, `soldiers`, a position (`x`, `y`) and `upgrades` (its levels). Each team starts with one castle holding 30 soldiers. Maps may also have neutral castles. Ids never change or get reused.
+A **castle** has an `id`, a `team_color`, `soldiers`, a position (`x`, `y`) and `upgrades` (its levels). On the generated map each team starts with one castle holding 30 soldiers. Other maps decide where the castles are, how many each team starts with and how many soldiers they hold, and may have neutral castles. Ids never change or get reused.
 
 `send_soldier_group(origin, destination, amount)` takes `amount` soldiers out of one of your castles (at least 1, at most what it has) and puts them in a **group** that walks in a straight line to the destination castle, which can be any other castle. The group copies the origin castle's upgrade levels at that moment and keeps them.
 

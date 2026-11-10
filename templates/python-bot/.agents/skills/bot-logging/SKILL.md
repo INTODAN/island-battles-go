@@ -1,6 +1,6 @@
 ---
 name: bot-logging
-description: How an Island Battles bot logs: the island_battles.player logger, log_line and the logs of a result, the limits (100 lines per turn, 500 characters per line) and where the lines show up. Load it when adding logging to bot.py or when log lines are missing, cut or counted.
+description: "How an Island Battles bot logs: the island_battles.player logger, log_line and the logs of a result, the limits (100 lines per turn, 500 characters per line) and where the lines show up. Load it when adding logging to bot.py or when log lines are missing, cut or counted."
 ---
 
 # Bot logging

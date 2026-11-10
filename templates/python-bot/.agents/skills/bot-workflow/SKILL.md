@@ -1,6 +1,6 @@
 ---
 name: bot-workflow
-description: The day-to-day loop for this bot project: the scripts and when to use each, playing a bot in a lobby against the default bots, reading a failed check, and debugging with a fixture turn or a saved demo. Load it before running, testing, building or debugging the bot.
+description: "The day-to-day loop for this bot project: the scripts and when to use each, playing a bot in a lobby against the default bots, reading a failed check, and debugging with a fixture turn or a saved demo. Load it before running, testing, building or debugging the bot."
 ---
 
 # Bot workflow

@@ -1,6 +1,6 @@
 ---
 name: writing-a-bot
-description: How to write or change the Island Battles bot in bot.py: the play function, what it receives and returns, every SDK helper, why the server rejects a result, and the rules for memory (statelessness, 64 KiB, determinism, speed). Load it before editing bot.py or its tests.
+description: "How to write or change the Island Battles bot in bot.py: the play function, what it receives and returns, every SDK helper, why the server rejects a result, and the rules for memory (statelessness, 64 KiB, determinism, speed). Load it before editing bot.py or its tests."
 ---
 
 # Writing a bot
