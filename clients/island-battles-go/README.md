@@ -2,13 +2,14 @@
 
 Write a bot for [Island Battles](../../README.md) in Go. Island Battles is a real-time strategy game for teams: every team starts with a castle on an island map, castles grow one soldier a turn, and you win by sending soldier groups to take every other castle. Each turn, every player's bot looks at the board and answers with orders.
 
-With this SDK, a bot is **one Go function**: it gets the turn (the board, your team, the upgrade cost table and what it remembered last turn) and returns its commands, a few game log lines and what it wants to remember. Your program's `main` hands that function to `islandbattles.Main`, which gives the program three subcommands:
+With this SDK, a bot is **one Go function**: it gets the turn (the board, your team, the upgrade cost table and what it remembered last turn) and returns its commands, a few game log lines and what it wants to remember. Your program's `main` hands that function to `islandbattles.Main`, which gives the program four subcommands:
 
 - `serve` runs the bot on your machine, at `http://127.0.0.1:41414`. The game in your browser sends it each turn and submits its answer.
 - `check` plays the bot once on a small fixture turn and tells you what is wrong with it.
 - `fixture` prints that fixture turn as JSON, to try `serve` with curl.
+- `run` plays your seat straight against the server, without a browser.
 
-The SDK uses only Go's standard library. It needs Go 1.25 or newer. There is a [Python SDK](../island-battles-python/README.md) too, with the same ideas and names; the [table below](#python-names-and-go-names) maps one to the other.
+The SDK needs Go 1.25 or newer. Besides the standard library it uses one module, [centrifuge-go](https://github.com/centrifugal/centrifuge-go), the realtime client `run` connects with. There is a [Python SDK](../island-battles-python/README.md) too, with the same ideas and names; the [table below](#python-names-and-go-names) maps one to the other.
 
 ## Install
 
@@ -72,6 +73,20 @@ go run . serve
 
 A turn has a deadline (30 seconds unless the lobby's host chose another): a bot that doesn't answer in time makes its whole team lose.
 
+### Play it without a browser: run
+
+```sh
+go run . run --base-url http://localhost:8888 --token <credential> --lobby-id <lobby ID> [--log-file bot.log] [--log-level info]
+```
+
+plays your seat of a lobby's game to its end, straight against the server, with no browser tab; build the program once (`go build -o mybot .`) to start it faster. `--token` is your player's guest credential, and `--lobby-id` the lobby whose game it plays. Choose **your localhost bot** in the lobby before you get ready, as for `serve`. `run` reads the game's state, hears of each new turn on your player's realtime channel, calls your bot once per turn and submits its answer, and prints `game ended at generation 300: …` when the game ends. A request that gets no response is sent again identically, and a turn missed while the connection was down is read again after it reconnects.
+
+While your bot waits for the other players on a turn with a deadline, `run` asks the server to apply the deadline a second after it, which ends the game when someone didn't answer. The bot's `ctx` is cancelled at the turn's deadline; `run` still sends what the bot then returns.
+
+`run` stops with `FAIL: …` and status 1 when your bot returns an error, panics or returns an invalid result, or when the server rejects the result, for example because a castle doesn't have the soldiers it sends. It sends the error and the turn's log lines first, and leaves the turn open: fix the bot and start `run` again for the same turn. Its log goes to stdout, and to `--log-file` when you give one.
+
+In your own program, `islandbattles.NewClient(baseURL, credential, lobbyID, play, options...)` is the same client: `Run(ctx)`, or `Start(ctx)`, `Wait(ctx)` and `Close(ctx)`, `Refresh(ctx)`, and `Generation()`, `TeamColor()` and `Outcome()`. `WithGameEnded` reports the end; `WithLogLevel`, `WithLogFile`, `WithLogOutput` and `WithHTTPClient` configure it. Its errors are `*islandbattles.GameError` values: test them with `errors.Is(err, islandbattles.ErrInsufficientSoldiers)` (also `ErrCastleNotFound`, `ErrCastleNotOwned`, `ErrUpgradeMaxLevel`, `ErrMemoryTooLarge`, `ErrGameEnded`, `ErrAuthentication`, `ErrTransport`, `ErrProtocol`, `ErrClientClosed` and `ErrRejected`), and read the HTTP status with `errors.As`.
+
 ## The turn
 
 `play` has the type `islandbattles.Play`:
@@ -85,7 +100,7 @@ type Play func(ctx context.Context, turn islandbattles.Turn) (islandbattles.Resu
 - `turn.Upgrades` is the upgrade cost table: every upgrade type with each level's `Value` and `SoldierCost`. It is the same for the whole game.
 - `turn.Memory` is what your bot remembered last turn ([memory](#memory)), and `turn.GameID` the game.
 - `turn.TurnDeadlineAt` is when the turn times out, or `nil` when there is no limit.
-- `ctx` is cancelled when `serve` or `check` stops waiting for the turn. A bot that may think for long should watch it.
+- `ctx` is cancelled when `serve` or `check` stops waiting for the turn, and under `run` at the turn's deadline. A bot that may think for long should watch it. `islandbattles.Logger(ctx)` is the bot's [logger](#logging).
 
 Return an `error` to pass the turn: `serve` answers it as an error, and the game shows it to you. A panic is reported the same way, with its stack.
 
@@ -147,13 +162,29 @@ func play(_ context.Context, turn islandbattles.Turn) (islandbattles.Result, err
 
 ## Logging
 
-The lines in `Result.Logs` are stored in the game log, which the replay in the lobby page shows with each turn: your team's lines while the game runs, and every team's once it has ended.
+The game log stores lines with each turn, and the replay in the lobby page shows them: your team's lines while the game runs, and every team's once it has ended. A bot writes lines in two ways.
+
+Log with `islandbattles.Logger(ctx)`, a standard `log/slog` logger named `island_battles.player`:
+
+```go
+func play(ctx context.Context, turn islandbattles.Turn) (islandbattles.Result, error) {
+	log := islandbattles.Logger(ctx)
+	log.Info("attacking", "castle", 4) // stored as "attacking castle=4"
+	...
+}
+```
+
+Under `serve` and `run`, every line it logs during the turn goes to the game log, and to the console (and `run`'s `--log-file`). `slog.LevelDebug`, `LevelInfo`, `LevelWarn` and `LevelError` are the game log's `debug`, `info`, `warning` and `error`; `run --log-level` sets the lowest level logged, and `serve` logs from `info`. Lines logged after the turn, for example from a goroutine that outlives it, reach the console only, and under `check` the logger is `slog.Default()`.
+
+Or return lines in `Result.Logs`; they follow the lines the bot logged:
 
 - `islandbattles.Log(message)` and `islandbattles.Logf(format, arguments...)` build an `info` line; `islandbattles.LogAt(level, message)` a line of `islandbattles.LogDebug`, `LogInfo`, `LogWarning` or `LogError`.
 - Their logger name is `islandbattles.PlayerLogger`, `island_battles.player`. Set the line's `Logger` field to name another, of at most 100 characters.
-- The server stores at most **100 lines per player per turn** (`islandbattles.MaxLogLines`), each of **1 to 500 characters** (`islandbattles.MaxLogMessageLength`). The helpers cut a longer message so that, ending in `… (cut at 500 characters)`, it is 500 characters, and replace a NUL character or invalid UTF-8 with `�`. A result with more than 100 lines, or an empty message, is invalid.
+- The server stores at most **100 lines per player per turn** (`islandbattles.MaxLogLines`), each of **1 to 500 characters** (`islandbattles.MaxLogMessageLength`). The helpers and the logger cut a longer message so that, ending in `… (cut at 500 characters)`, it is 500 characters, and replace a NUL character or invalid UTF-8 with `�`. A result with more than 100 lines, or an empty message, is invalid.
+- The logger never fails your bot over the limit: once a turn has 99 lines, the SDK holds the next one back, and when more come it stores, in its place, the error `game log limit reached for generation <id>: 100 lines per generation; <n> lines were not stored` from the logger `island_battles.sdk`. The console gets every line, and that error once, when the first line is dropped. Under `run` the count includes the lines an earlier run stored for the same turn.
+- When the bot fails, `run` stores the error, and for a panic its traceback, as an `error` line of `island_battles.sdk`.
 
-Anything your program prints, with `fmt` or `log`, goes to the terminal that runs `serve`, not to the game log.
+Anything your program prints with `fmt` or `log`, or logs with `slog.Default()`, goes to the terminal that runs `serve` or `run`, not to the game log.
 
 ## check
 
@@ -213,7 +244,8 @@ go run ./examples/level3 serve
 | `send_soldier_group(origin, destination, amount)` | `SendSoldierGroup(origin, destination, amount)` |
 | `upgrade_castle(castle_id, upgrade_type)` | `UpgradeCastle(castleID, upgradeType)` |
 | `next_upgrade_cost(turn, castle, upgrade_type)` (`None` at the maximum) | `NextUpgradeCost(turn, castle, upgradeType)` (`false` at the maximum) |
-| `log_line(message, level="info")`, `logger.info(...)` | `Log(message)`, `Logf(format, ...)`, `LogAt(level, message)` |
+| `log_line(message, level="info")` | `Log(message)`, `Logf(format, ...)`, `LogAt(level, message)` |
+| `logger.info(...)` | `islandbattles.Logger(ctx).Info(...)` |
 | `turn_result(commands, logs, memory)` | `Result{Commands: ..., Logs: ..., Memory: ...}` |
 | `turn.memory` (a dict), `memory={...}` | `turn.Memory.Decode(&state)`, `NewMemory(state)` |
 | `MEMORY_LIMIT_BYTES` | `MemoryLimitBytes` |
@@ -226,8 +258,20 @@ go run ./examples/level3 serve
 | `island-battles-bot serve mybot:play` | `go run . serve` |
 | `island-battles-bot check mybot:play` | `go run . check` |
 | `island-battles-bot fixture` | `go run . fixture` |
+| `island-battles-bot run mybot:play --base-url … --token … --lobby-id …` | `go run . run --base-url … --token … --lobby-id …` |
+| `IslandBattlesClient(base_url, credential, lobby_id, play=play)`: `start`, `refresh`, `wait`, `run`, `close` | `NewClient(baseURL, credential, lobbyID, play)`: `Start`, `Refresh`, `Wait`, `Run`, `Close`, each with a `ctx` |
+| `client.generation`, `client.team_color`, `client.outcome` | `client.Generation()`, `client.TeamColor()`, `client.Outcome()` |
+| `on_game_ended=`, `log_level=`, `log_file=`, `log_to_stdout=False` | `WithGameEnded(...)`, `WithLogLevel(...)`, `WithLogFile(...)`, `WithLogOutput(nil)` |
+| `CastleNotFoundError`, `CastleNotOwnedError`, `UpgradeMaxLevelError`, `InsufficientSoldiersError`, `GameEndedError` | `ErrCastleNotFound`, `ErrCastleNotOwned`, `ErrUpgradeMaxLevel`, `ErrInsufficientSoldiers`, `ErrGameEnded`, with `errors.Is` |
+| `GameAuthenticationError`, `GameTransportError`, `GameProtocolError`, `GameClientClosedError`, `GameError` | `ErrAuthentication`, `ErrTransport`, `ErrProtocol`, `ErrClientClosed`, `ErrRejected`; `*GameError` has `Status` and `Detail` |
 
-Two differences: Go has no hot reload, so restart `serve` after a change; and logging goes through `Result.Logs` only, while Python also stores what the bot logs with its `logger`.
+## Differences from the Python SDK
+
+- Go has no hot reload: restart `serve` after a change.
+- The bot's logger comes from its `ctx`, `islandbattles.Logger(ctx)`, and its lines are always named `island_battles.player`; a Python bot may also log with child loggers of its own names. Under `check`, logged lines aren't counted with the result's lines.
+- Errors are values to test with `errors.Is` and `errors.As`, not exception classes. Go's helpers take typed values and can't fail, so a command the contract doesn't allow, such as a `soldier_amount` of 0, is reported by `ValidateResult` (`ErrInvalidResult`) when the bot returns, still before any request.
+- A failed turn's game log line has a traceback only for a panic. An error the bot returns has no stack, so its text is stored alone.
+- The bot's `ctx` is cancelled at the turn's deadline, and when the client closes. A Python bot gets no such signal; both clients send what a late bot returns.
 
 ## Developing the SDK
 
@@ -239,4 +283,6 @@ golangci-lint run --timeout=5m ./clients/island-battles-go/...
 go test ./clients/island-battles-go/...
 ```
 
-The types are written by hand. Tests keep them equal to the contract the server publishes: [contract_test.go](contract_test.go) checks every property of `BotTurn`, `BotTurnResult` and the schemas they reference in the [player API document](../../backend/api/openapi.json) against the Go types' JSON names, both ways, with the enums and limits; the backend's [bots tests](../../backend/bots/bots_test.go) send a full turn and result of the server through these types and back, unchanged. The fixture turn, [fixture_turn.json](fixture_turn.json), is the Python SDK's, which a [Python test](../island-battles-python/tests/test_fixture.py) checks. The SDK never imports the backend or the lobby; the backend imports the SDK, to play the default bots.
+The client passes the [client conformance suite](../conformance/README.md) through its adapter, [conformance/main.go](conformance/main.go): offline with `ISLAND_BATTLES_CLIENT_COMMAND="go run ./clients/island-battles-go/conformance" uv run --project clients/conformance --locked pytest clients/conformance/tests/test_models.py`, and live, against the real backend, with `./scripts/test-client-conformance.sh "go -C $PWD run ./clients/island-battles-go/conformance"`. Its unit tests use a fake server and a fake realtime connection. After changing the SDK's dependencies, run `go mod tidy` both here and in the repository root, whose module requires the SDK.
+
+The types are written by hand. Tests keep them equal to the contract the server publishes: [contract_test.go](contract_test.go) checks every property of `BotTurn`, `BotTurnResult` and the schemas they reference, and of the messages the client sends and reads (`GenerationState`, `GenerationEvent`, `GameEndedEvent`, `RegisterGenerationCommands`, `ConnectionToken` and the upgrade table), in the [player API document](../../backend/api/openapi.json) against the Go types' JSON names, both ways, with the enums and limits; the backend's [bots tests](../../backend/bots/bots_test.go) send a full turn and result of the server through these types and back, unchanged. The fixture turn, [fixture_turn.json](fixture_turn.json), is the Python SDK's, which a [Python test](../island-battles-python/tests/test_fixture.py) checks. The SDK never imports the backend or the lobby; the backend imports the SDK, to play the default bots.

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"maps"
 	"mime"
 	"net"
@@ -104,6 +105,8 @@ type botServer struct {
 	// logMutex keeps request log lines whole.
 	logMutex sync.Mutex
 	log      io.Writer
+	// botLog is where the bot's Logger writes, besides the result's logs.
+	botLog *logOutputs
 }
 
 func newBotServer(name string, play Play, origins []string, turnTimeout time.Duration, log io.Writer) *botServer {
@@ -111,7 +114,7 @@ func newBotServer(name string, play Play, origins []string, turnTimeout time.Dur
 	for _, origin := range origins {
 		allowed[strings.TrimRight(origin, "/")] = true
 	}
-	return &botServer{name: name, play: play, origins: allowed, turnTimeout: turnTimeout, log: log}
+	return &botServer{name: name, play: play, origins: allowed, turnTimeout: turnTimeout, log: log, botLog: &logOutputs{level: slog.LevelInfo, writers: []io.Writer{log}}}
 }
 
 // statusWriter remembers the status, for the request log.
@@ -255,7 +258,10 @@ func (server *botServer) turn(writer http.ResponseWriter, request *http.Request)
 		server.text(writer, request, http.StatusUnprocessableEntity, fmt.Sprintf("the body is not a BotTurn:\n%v\n", err))
 		return
 	}
-	ctx, cancel := context.WithTimeout(request.Context(), server.turnTimeout)
+	// The lines the bot logs come first in the result's logs, within the
+	// game log's limits.
+	turnLog := newTurnLog(newGameLog(turn.Generation.ID, 0), server.botLog)
+	ctx, cancel := context.WithTimeout(turnLog.context(request.Context()), server.turnTimeout)
 	defer cancel()
 	type outcome struct {
 		result Result
@@ -266,6 +272,11 @@ func (server *botServer) turn(writer http.ResponseWriter, request *http.Request)
 	done := make(chan outcome, 1)
 	go func() {
 		result, err := callPlay(ctx, server.play, turn)
+		turnLog.close()
+		if err == nil {
+			turnLog.addResult(result)
+			result.Logs, _ = turnLog.gameLog.batch(true)
+		}
 		done <- outcome{result, err}
 	}()
 	var played outcome

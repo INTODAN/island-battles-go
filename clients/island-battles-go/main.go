@@ -24,6 +24,7 @@ import (
 //	serve    serve the bot on 127.0.0.1:41414 for a game client in the browser
 //	check    call the bot once on a fixture turn, and report what is wrong
 //	fixture  print the fixture turn as JSON, for curl
+//	run      play a seat of a lobby's game without a browser
 //
 // Run the program with -h, or a subcommand with -h, for their flags. Go
 // doesn't reload code: after changing the bot, stop serve and start it again.
@@ -41,6 +42,8 @@ type invocation struct {
 	play   Play
 	stdout io.Writer
 	stderr io.Writer
+	// clientOptions are added to run's Client options; tests set them.
+	clientOptions []ClientOption
 }
 
 // subcommand is one subcommand of Main. run gets the arguments after the
@@ -57,6 +60,7 @@ func subcommands() []subcommand {
 		{name: "serve", summary: fmt.Sprintf("serve the bot on %s:%d for a game client in the browser", serveHost, DefaultPort), run: serve},
 		{name: "check", summary: "call the bot once on a fixture turn, and report what is wrong", run: check},
 		{name: "fixture", summary: "print the fixture turn as JSON, for curl", run: printFixture},
+		{name: "run", summary: "play a seat of a lobby's game without a browser", run: runSeat},
 	}
 }
 

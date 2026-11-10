@@ -217,3 +217,89 @@ func TestLimitsMatchTheOpenAPIDocument(t *testing.T) {
 		t.Errorf("the document's limits %+v %+v differ from the SDK's", limits, line)
 	}
 }
+
+// clientSchemaTypes are the SDK's types for the messages a Client sends and
+// reads. Their properties are the schemas', and a property the schema
+// requires is never omitted.
+var clientSchemaTypes = map[string]reflect.Type{
+	"GenerationState":            reflect.TypeFor[generationState](),
+	"GameOutcome":                reflect.TypeFor[GameOutcome](),
+	"BotChoice":                  reflect.TypeFor[botChoice](),
+	"GenerationEvent":            reflect.TypeFor[generationEvent](),
+	"GameEndedEvent":             reflect.TypeFor[generationEvent](),
+	"RegisterGenerationCommands": reflect.TypeFor[registerCommands](),
+	"ConnectionToken":            reflect.TypeFor[connectionToken](),
+	"ListUpgradesResponseBody":   reflect.TypeFor[upgradeTable](),
+}
+
+func TestClientTypesMatchTheOpenAPIDocument(t *testing.T) {
+	schemas, rawSchemas := loadSchemas(t)
+	for name, goType := range clientSchemaTypes {
+		current, found := schemas[name]
+		if !found {
+			t.Errorf("the document has no schema %s", name)
+			continue
+		}
+		properties := slices.Sorted(maps.Keys(current.Properties))
+		if names := jsonNames(goType); !slices.Equal(names, properties) {
+			t.Errorf("schema %s has properties %v, but %s has %v", name, properties, goType.Name(), names)
+		}
+		for index := range goType.NumField() {
+			jsonName, options, _ := strings.Cut(goType.Field(index).Tag.Get("json"), ",")
+			if options == "omitempty" && slices.Contains(current.Required, jsonName) {
+				t.Errorf("%s.%s is required, but %s omits it when empty", name, jsonName, goType.Name())
+			}
+		}
+		// Every schema the messages reference has an SDK type.
+		for _, referenced := range references(rawSchemas[name]) {
+			_, turnType := schemaTypes[referenced]
+			_, clientType := clientSchemaTypes[referenced]
+			if len(schemas[referenced].Properties) > 0 && !turnType && !clientType {
+				t.Errorf("%s references %s, which has no SDK type", name, referenced)
+			}
+		}
+	}
+	// The events' types and versions are the client's constants.
+	for name, eventType := range map[string]string{"GenerationEvent": nextGenerationEvent, "GameEndedEvent": gameEndedEvent} {
+		var properties struct {
+			SchemaVersion struct {
+				Enum []int `json:"enum"`
+			} `json:"schema_version"`
+			Type struct {
+				Enum []string `json:"enum"`
+			} `json:"type"`
+		}
+		encoded, _ := json.Marshal(schemas[name].Properties)
+		if err := json.Unmarshal(encoded, &properties); err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(properties.SchemaVersion.Enum, []int{1}) || !slices.Equal(properties.Type.Enum, []string{eventType}) {
+			t.Errorf("%s is %+v in the document", name, properties)
+		}
+	}
+	var enums struct {
+		Reason struct {
+			Enum []string `json:"enum"`
+		} `json:"reason"`
+	}
+	encoded, _ := json.Marshal(schemas["GameOutcome"].Properties)
+	if err := json.Unmarshal(encoded, &enums); err != nil {
+		t.Fatal(err)
+	}
+	reasons := []string{string(LastTeamStanding), string(AllEliminated), string(GenerationCap), string(TurnTimeout)}
+	if !slices.Equal(enums.Reason.Enum, reasons) {
+		t.Errorf("GameOutcome.reason is %v in the document, %v in the SDK", enums.Reason.Enum, reasons)
+	}
+	var kinds struct {
+		Kind struct {
+			Enum []string `json:"enum"`
+		} `json:"kind"`
+	}
+	encoded, _ = json.Marshal(schemas["BotChoice"].Properties)
+	if err := json.Unmarshal(encoded, &kinds); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(kinds.Kind.Enum, []string{"localhost", "default"}) {
+		t.Errorf("BotChoice.kind is %v in the document", kinds.Kind.Enum)
+	}
+}

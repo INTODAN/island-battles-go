@@ -120,25 +120,96 @@ func DecodeTurn(data []byte) (Turn, error) {
 		return Turn{}, errors.New("game_id must be at least 1")
 	case turn.TeamColor < 1:
 		return Turn{}, errors.New("team_color must be at least 1")
-	case turn.Generation.ID < 1:
-		return Turn{}, errors.New("generation.id must be at least 1")
 	}
-	if compact, err := turn.Memory.compact(); err != nil {
+	if err := checkMemoryObject(turn.Memory); err != nil {
 		return Turn{}, err
-	} else if len(compact) > 0 && compact[0] != '{' {
-		return Turn{}, errors.New("memory must be a JSON object or null")
 	}
-	for _, group := range turn.Generation.SoldierGroups {
-		if _, found := group.DestinationCastle(turn.Generation); !found {
-			return Turn{}, fmt.Errorf("soldier group %d's destination castle %d is missing", group.ID, group.DestinationCastleID)
-		}
+	if err := validateGeneration(turn.Generation, "generation"); err != nil {
+		return Turn{}, err
 	}
 	return turn, nil
 }
 
+// DecodeGeneration reads a Generation from JSON, as the server sends it, and
+// checks it against the contract: every field must be there and none null,
+// numbers must be in range, upgrade types known, and every soldier group's
+// destination castle must be on the board. Unknown fields are ignored.
+func DecodeGeneration(data []byte) (Generation, error) {
+	var generation Generation
+	if err := json.Unmarshal(data, &generation); err != nil {
+		return Generation{}, err
+	}
+	if err := requireFields(data, reflect.TypeFor[Generation](), "generation"); err != nil {
+		return Generation{}, err
+	}
+	if err := validateGeneration(generation, "generation"); err != nil {
+		return Generation{}, err
+	}
+	return generation, nil
+}
+
+// validateGeneration checks the ranges of a decoded generation that its
+// types don't, and that every group's destination castle is on the board.
+func validateGeneration(generation Generation, path string) error {
+	if generation.ID < 1 {
+		return fmt.Errorf("%s.id must be at least 1", path)
+	}
+	for _, castle := range generation.Castles {
+		if err := validateUpgrades(castle.Upgrades); err != nil {
+			return fmt.Errorf("%s: castle %d: %w", path, castle.ID, err)
+		}
+	}
+	for _, group := range generation.SoldierGroups {
+		if !(group.ClashRadius > 0) {
+			return fmt.Errorf("%s: soldier group %d: clash_radius must be positive", path, group.ID)
+		}
+		if err := validateUpgrades(group.Upgrades); err != nil {
+			return fmt.Errorf("%s: soldier group %d: %w", path, group.ID, err)
+		}
+		if _, found := group.DestinationCastle(generation); !found {
+			return fmt.Errorf("%s: soldier group %d's destination castle %d is missing", path, group.ID, group.DestinationCastleID)
+		}
+	}
+	for _, clash := range generation.Clashes {
+		if clash.ID < 1 {
+			return fmt.Errorf("%s: a clash's id must be at least 1", path)
+		}
+		if !(clash.Time >= 0 && clash.Time <= 1) {
+			return fmt.Errorf("%s: clash %d: time must be from 0 to 1", path, clash.ID)
+		}
+		for _, participant := range clash.Participants {
+			if !(participant.ClashRadius > 0) {
+				return fmt.Errorf("%s: clash %d: clash_radius must be positive", path, clash.ID)
+			}
+		}
+	}
+	return nil
+}
+
+func validateUpgrades(upgrades Upgrades) error {
+	for upgradeType := range upgrades {
+		if !slices.Contains(UpgradeTypes(), upgradeType) {
+			return fmt.Errorf("unknown upgrade type %q", upgradeType)
+		}
+	}
+	return nil
+}
+
+// checkMemoryObject reports memory that is neither a JSON object nor null.
+func checkMemoryObject(memory Memory) error {
+	compact, err := memory.compact()
+	if err != nil {
+		return err
+	}
+	if len(compact) > 0 && compact[0] != '{' {
+		return errors.New("memory must be a JSON object or null")
+	}
+	return nil
+}
+
 // requireFields reports a JSON object, in data, that lacks a field of the
 // struct type it decodes into, at any depth. A field may be null only when it
-// is a pointer or Memory.
+// is a pointer or Memory, and may be absent only when its tag says omitempty.
 func requireFields(data []byte, structType reflect.Type, path string) error {
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal(data, &object); err != nil || object == nil {
@@ -146,13 +217,16 @@ func requireFields(data []byte, structType reflect.Type, path string) error {
 	}
 	for index := range structType.NumField() {
 		field := structType.Field(index)
-		name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+		name, options, _ := strings.Cut(field.Tag.Get("json"), ",")
 		if name == "" || name == "-" {
 			continue
 		}
 		value, found := object[name]
 		fieldPath := path + "." + name
 		if !found {
+			if options == "omitempty" {
+				continue
+			}
 			return fmt.Errorf("%s is missing", fieldPath)
 		}
 		if err := requireValue(value, field.Type, fieldPath); err != nil {
@@ -165,6 +239,8 @@ func requireFields(data []byte, structType reflect.Type, path string) error {
 func requireValue(value json.RawMessage, valueType reflect.Type, path string) error {
 	isNull := bytes.Equal(bytes.TrimSpace(value), []byte("null"))
 	switch {
+	case valueType.Kind() == reflect.Pointer && !isNull:
+		return requireValue(value, valueType.Elem(), path)
 	case valueType == reflect.TypeFor[Memory]() || valueType == reflect.TypeFor[json.RawMessage]() || valueType.Kind() == reflect.Pointer:
 		return nil
 	case isNull:
