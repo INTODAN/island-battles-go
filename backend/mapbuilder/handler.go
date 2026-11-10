@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"islandBattles/backend/models"
+	"islandBattles/lobby/frontend"
 )
 
 //go:embed index.html app.mjs builder.mjs style.css
@@ -31,9 +32,16 @@ func Handler() (http.Handler, error) {
 	}
 	files := http.FileServer(http.FS(assets))
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		// The page is rebuilt with the backend, so browsers must not keep an old copy.
-		response.Header().Set("Cache-Control", "no-store")
-		if strings.TrimPrefix(request.URL.Path, "/") == upgradesPath {
+		// The page and the upgrade list are rebuilt with the backend, so nothing
+		// may keep an old copy. The scripts and the style may be cached for a
+		// few minutes.
+		name := strings.TrimPrefix(request.URL.Path, "/")
+		if name == "" || name == "index.html" || name == upgradesPath {
+			response.Header().Set("Cache-Control", "no-store")
+		} else {
+			response.Header().Set("Cache-Control", frontend.StaticAssetCacheControl)
+		}
+		if name == upgradesPath {
 			response.Header().Set("Content-Type", "application/json")
 			http.ServeContent(response, request, upgradesPath, time.Time{}, bytes.NewReader(upgrades))
 			return

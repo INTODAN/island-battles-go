@@ -81,3 +81,17 @@ func TestTheViewerServesItsModulesAndNothingElse(t *testing.T) {
 		}
 	}
 }
+
+func TestTheViewerCachesOnlyItsModules(t *testing.T) {
+	for path, want := range map[string]string{
+		"/game/demo-viewer/": "no-store", "/game/demo-viewer/index.html": "no-store",
+		"/game/demo-viewer/viewer.mjs": "public, max-age=300", "/game/demo-viewer/demo-file.mjs": "public, max-age=300",
+		// Go's file server drops Cache-Control from an error answer, so a missing
+		// file's 404 is never kept.
+		"/game/demo-viewer/missing.mjs": "",
+	} {
+		if got := get(t, path).Header().Get("Cache-Control"); got != want {
+			t.Errorf("%s: Cache-Control %q, want %q", path, got, want)
+		}
+	}
+}

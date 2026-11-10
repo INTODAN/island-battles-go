@@ -36,6 +36,35 @@ data "aws_cloudfront_cache_policy" "caching_disabled" {
   name = "Managed-CachingDisabled"
 }
 
+# Caches an answer for as long as the origin's Cache-Control says, and not at
+# all without one or with no-store. The managed UseOriginCacheControlHeaders
+# policy does the same but puts the viewer's Host header and every cookie in
+# the cache key, and CloudFront sends cache-key headers to the origin: a
+# Function URL refuses a request whose Host isn't its own. So this policy
+# keys on the path alone (and the encoding CloudFront compresses to).
+resource "aws_cloudfront_cache_policy" "origin_cache_control" {
+  name        = "${var.name}-origin-cache-control"
+  comment     = "Follows the origin's Cache-Control; the cache key is the path."
+  min_ttl     = 0
+  default_ttl = 0
+  max_ttl     = 31536000
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    enable_accept_encoding_gzip   = true
+    enable_accept_encoding_brotli = true
+
+    cookies_config {
+      cookie_behavior = "none"
+    }
+    headers_config {
+      header_behavior = "none"
+    }
+    query_strings_config {
+      query_string_behavior = "none"
+    }
+  }
+}
+
 # Every header, cookie and query string except Host, which the Function URL
 # needs to be its own. CloudFront strips Authorization from GET and HEAD
 # requests unless the policy forwards all viewer headers, so the smoke test
@@ -44,8 +73,10 @@ data "aws_cloudfront_origin_request_policy" "all_viewer_except_host_header" {
   name = "Managed-AllViewerExceptHostHeader"
 }
 
-# Except for /play/ (the web client, from S3), nothing is cached: every
-# request reaches the Lambda as if it came straight to the Function URL. There's no origin access control. For a Function URL it
+# Except for /play/ (the web client, from S3) and the static files of the
+# Lambda's pages (below), nothing is cached: every request reaches the Lambda
+# as if it came straight to the Function URL. There's no origin access
+# control. For a Function URL it
 # would need clients to send a SHA-256 of every POST body, and the Function
 # URL is public anyway. Standard and real-time logs stay off.
 resource "aws_cloudfront_distribution" "game" {
@@ -100,6 +131,26 @@ resource "aws_cloudfront_distribution" "game" {
         event_type   = "viewer-request"
         function_arn = aws_cloudfront_function.web_client.arn
       }
+    }
+  }
+
+  # The pages the Lambda serves besides the API (#162): the lobby page, the
+  # game's modules, the demo viewer and the map builder. Their handlers say in
+  # Cache-Control what may be kept: scripts and styles for five minutes, the
+  # HTML and the game catalog not at all, so this policy obeys the origin.
+  # No API route lies under these prefixes, so API answers stay uncached.
+  dynamic "ordered_cache_behavior" {
+    for_each = ["/lobby/ui/*", "/game/demo/*", "/game/demo-viewer/*", "/map/builder/*"]
+
+    content {
+      path_pattern             = ordered_cache_behavior.value
+      target_origin_id         = "backend"
+      viewer_protocol_policy   = "redirect-to-https"
+      allowed_methods          = ["GET", "HEAD", "OPTIONS"]
+      cached_methods           = ["GET", "HEAD"]
+      cache_policy_id          = aws_cloudfront_cache_policy.origin_cache_control.id
+      origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host_header.id
+      compress                 = true
     }
   }
 
