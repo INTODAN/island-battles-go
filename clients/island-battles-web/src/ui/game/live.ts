@@ -12,6 +12,7 @@ import type { GameController } from "./controller";
 import { type Demo, DemoFileError, readDemoFile } from "./demoFile";
 import { mergeGenerations } from "./history";
 import { LogBook } from "./logs";
+import { saveTextFile } from "./saveDemo";
 import { GameScreen } from "./screen";
 import type { LiveSource, LiveTurn } from "./sources";
 
@@ -68,6 +69,7 @@ export function mountLive(
     onBack: options.onBack,
     ...(source.backLabel === undefined ? {} : { backLabel: source.backLabel }),
     onOpenFile: (file) => void openFile(file),
+    onSaveDemo: async () => saveTextFile(await source.saveDemo()),
     requestLogs: (generationId, ended) => void fetchLogs(generationId, ended),
   });
   screen.setTitle(source.title);

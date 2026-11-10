@@ -10,6 +10,10 @@ export interface BotPicker {
   dispose(): void;
 }
 
+/** The note for browsers that block a page from reaching localhost (the lobby page's `safariNote`). */
+export const safariNote =
+  "Safari does not let an https page reach a bot on localhost. Use Chrome, Edge or Firefox to play with your own bot, or open this page over http on localhost.";
+
 /** Used when `GET /bots/defaults` cannot be read. */
 const fallbackBots: DefaultBot[] = [1, 2, 3].map((level) => ({
   level,
@@ -79,6 +83,7 @@ export function mountBotPicker(options: {
     h("span", { class: "hint" }, "Run this in your bot's folder:"),
     command,
     copy,
+    h("span", { class: "hint" }, safariNote),
   );
   const defaults = h("div", { class: "bot-defaults" });
   const el = h(

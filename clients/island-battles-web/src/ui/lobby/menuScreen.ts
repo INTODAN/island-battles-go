@@ -19,6 +19,7 @@ import {
   validateCreateForm,
   validateJoinCode,
 } from "./form";
+import { createMapBuilderLink, mapBuilderAvailable } from "./mapBuilder";
 import type { Screen } from "./nameScreen";
 import { describeProblem } from "./problems";
 
@@ -180,6 +181,7 @@ export function mountMenuScreen(options: MenuScreenOptions): Screen {
     { id: "map-choice" },
     new Option("Generated map", "generated"),
     new Option("Load a map file…", "file"),
+    ...(mapBuilderAvailable ? [new Option("Build a map…", "builder")] : []),
   );
   const mapFile = h("input", {
     id: "map-file",
@@ -246,7 +248,7 @@ export function mountMenuScreen(options: MenuScreenOptions): Screen {
   );
 
   function mapChoice(): MapChoice {
-    if (mapSelect.value === "file") {
+    if (mapSelect.value === "file" || mapSelect.value === "builder") {
       return {
         kind: "file",
         map: file?.map ?? null,
@@ -278,7 +280,7 @@ export function mountMenuScreen(options: MenuScreenOptions): Screen {
   /** Keeps the team count field and the map's note in step with the map choice. */
   function refreshMap(): void {
     const choice = mapChoice();
-    mapFile.hidden = choice.kind !== "file";
+    mapFile.hidden = mapSelect.value !== "file";
     const fixed = fixedTeamCount(choice, templates);
     teamCount.disabled = fixed !== null;
     if (fixed !== null) teamCount.value = String(fixed);
@@ -295,14 +297,32 @@ export function mountMenuScreen(options: MenuScreenOptions): Screen {
         : file
           ? file.error ||
             `${file.name}: ${file.map?.map_name}. Teams: ${names}.`
-          : "Choose a map file made with the map builder.";
+          : mapSelect.value === "builder"
+            ? "Build a map in the new tab, then press Use in lobby there."
+            : "Choose a map file made with the map builder.";
     } else {
       mapStatus.textContent = names ? `Teams: ${names}.` : "";
     }
   }
 
+  // The map builder: its "Use in lobby" map is taken as if it had been loaded from a file.
+  const mapBuilder = createMapBuilderLink({
+    onMapText(text) {
+      mapSelect.value = "file";
+      mapFile.value = "";
+      errors.map.textContent = "";
+      checkMapFile("From the map builder", async () => text);
+    },
+    onProblem(message) {
+      file = { name: "", map: null, error: message, checking: null };
+      mapSelect.value = "file";
+      refreshMap();
+    },
+  });
+
   mapSelect.addEventListener("change", () => {
     errors.map.textContent = "";
+    if (mapSelect.value === "builder") mapBuilder.open();
     refreshMap();
   });
   teamCount.addEventListener("input", refreshMap);
@@ -314,16 +334,16 @@ export function mountMenuScreen(options: MenuScreenOptions): Screen {
       refreshMap();
       return;
     }
-    const state: FileState = {
-      name: chosen.name,
-      map: null,
-      error: "",
-      checking: null,
-    };
+    checkMapFile(chosen.name, () => chosen.text());
+  });
+
+  /** Has the server check a map's text; the checked map is what Create sends. */
+  function checkMapFile(name: string, text: () => Promise<string>): void {
+    const state: FileState = { name, map: null, error: "", checking: null };
     file = state;
     state.checking = (async () => {
       try {
-        const map = readMapFile(await chosen.text());
+        const map = readMapFile(await text());
         const verdict = await actions.validateMap(map);
         if (file !== state) return;
         if (verdict.valid) state.map = map;
@@ -352,7 +372,7 @@ export function mountMenuScreen(options: MenuScreenOptions): Screen {
       }
     })();
     refreshMap();
-  });
+  }
 
   void actions
     .mapTemplates()
@@ -457,6 +477,7 @@ export function mountMenuScreen(options: MenuScreenOptions): Screen {
     el,
     dispose() {
       disposed = true;
+      mapBuilder.dispose();
     },
   };
 }

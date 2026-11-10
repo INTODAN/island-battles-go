@@ -18,6 +18,7 @@ import {
 import { teamColorHex } from "../../scene/palette";
 import { installBoardControls } from "../../scene/picking";
 import { showBoardLoading } from "../boardLoading";
+import { clashSummary } from "./clashes";
 import { GameController, type ViewState } from "./controller";
 import "./game.css";
 import {
@@ -41,6 +42,8 @@ export interface ScreenOptions {
   backLabel?: string;
   /** Called with a file the player chose with Open demo file. */
   onOpenFile: (file: File) => void;
+  /** Saves the game so far as a demo file; rejects with the reason. Absent for an opened demo. */
+  onSaveDemo?: () => Promise<void>;
   /** Called when the shown turn's logs are not held or hide teams that have since been revealed. */
   requestLogs?: (generationId: number, ended: boolean) => void;
 }
@@ -98,6 +101,8 @@ export class GameScreen {
   private readonly turn = element("span", "gv-turn");
   private readonly notice = element("p", "gv-notice");
   private readonly summary = element("p", "gv-summary");
+  private readonly saveError = element("p", "gv-notice");
+  private readonly clashes = element("p", "gv-summary gv-clashes");
   private readonly overlay = element("div", "gv-overlay");
   private readonly overlayText = element("p");
   private readonly overlayAction = button("Try again", "Try again");
@@ -153,14 +158,21 @@ export class GameScreen {
       file.value = "";
       if (chosen) this.options.onOpenFile(chosen);
     });
+    const save = button("Save demo", "Save demo");
+    save.hidden = !this.options.onSaveDemo;
+    save.addEventListener("click", () => void this.saveDemo(save));
     this.connection.append(this.connectionDot, this.connectionLabel);
     this.connection.setAttribute("role", "status");
     this.turn.setAttribute("aria-live", "polite");
-    top.append(back, this.title, this.turn, this.connection, open, file);
+    top.append(back, this.title, this.turn, this.connection, open, save, file);
 
     this.notice.setAttribute("role", "alert");
     this.notice.hidden = true;
     this.summary.hidden = true;
+    this.saveError.setAttribute("role", "alert");
+    this.saveError.hidden = true;
+    this.clashes.setAttribute("role", "status");
+    this.clashes.hidden = true;
 
     this.banner.setAttribute("role", "status");
     this.banner.hidden = true;
@@ -210,7 +222,15 @@ export class GameScreen {
     this.logsBox.addEventListener("toggle", () => this.refreshLogs());
 
     const topStack = element("div", "gv-stack gv-stack-top");
-    topStack.append(top, this.notice, this.summary, this.teamsBox, this.banner);
+    topStack.append(
+      top,
+      this.notice,
+      this.saveError,
+      this.summary,
+      this.teamsBox,
+      this.banner,
+      this.clashes,
+    );
     const bottomStack = element("div", "gv-stack gv-stack-bottom");
     bottomStack.append(this.logsBox, timeline);
     root.append(this.canvas, topStack, bottomStack, this.overlay);
@@ -237,6 +257,19 @@ export class GameScreen {
   setNotice(text: string | null): void {
     this.notice.textContent = text ?? "";
     this.notice.hidden = !text;
+  }
+
+  private async saveDemo(save: HTMLButtonElement): Promise<void> {
+    save.disabled = true;
+    this.saveError.hidden = true;
+    try {
+      await this.options.onSaveDemo?.();
+    } catch (error) {
+      this.saveError.textContent = `The demo could not be saved: ${error instanceof Error ? error.message : "the request failed."}`;
+      this.saveError.hidden = false;
+    } finally {
+      save.disabled = false;
+    }
   }
 
   showLoading(text: string): void {
@@ -410,7 +443,14 @@ export class GameScreen {
     this.follow.disabled = !state.live || state.outcome !== null;
     this.renderStats(running, frame);
     this.renderOutcome(running, state.outcome);
+    this.renderClashes(frame);
     this.renderLogs(state);
+  }
+
+  private renderClashes(frame: Generation | undefined): void {
+    const text = frame ? clashSummary(frame) : "";
+    this.clashes.textContent = text;
+    this.clashes.hidden = text === "";
   }
 
   private renderStats(running: Running, frame: Generation | undefined): void {
