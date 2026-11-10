@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { components } from "../../api/generated/game";
+import { drawnPosition } from "../shore";
 import type { TurnPlan, TurnSample } from "./plan";
 import { type Stage, TurnPlayer } from "./player";
 
@@ -17,6 +18,19 @@ function load(name: string): Demo {
 }
 
 const FRAME_MS = 1000 / 60;
+
+/** Where the scene draws a group of `generation`: at its island's shore near a castle. */
+function drawnIn(
+  generation: Generation,
+  group: Generation["soldier_groups"][number],
+) {
+  const castle = (id: number) => generation.castles.find((c) => c.id === id);
+  return drawnPosition(
+    group,
+    castle(group.origin_castle_id),
+    castle(group.destination_castle_id),
+  );
+}
 
 /** A stage that remembers what it was told, and the poses it was shown. */
 class FakeStage implements Stage {
@@ -36,7 +50,7 @@ class FakeStage implements Stage {
     this.lastSample = null;
     this.lastPoses.clear();
     for (const group of generation.soldier_groups) {
-      this.lastPoses.set(group.id, { x: group.x, y: group.y });
+      this.lastPoses.set(group.id, drawnIn(generation, group));
     }
   }
   begin(plan: TurnPlan): void {
@@ -59,7 +73,7 @@ class FakeStage implements Stage {
     this.settled = plan.next;
     this.lastPoses.clear();
     for (const group of plan.next.soldier_groups) {
-      this.lastPoses.set(group.id, { x: group.x, y: group.y });
+      this.lastPoses.set(group.id, drawnIn(plan.next, group));
     }
   }
 }
