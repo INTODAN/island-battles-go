@@ -5,6 +5,7 @@ import { BOAT_FLOAT, type BoatParts, ISLAND_TOP } from "../art";
 import { type Battlefield, popCastle } from "../battlefield";
 import type { PopHandle } from "../castles";
 import { toWorld, toWorldDistance } from "../coordinates";
+import { graphicsOf } from "../graphics";
 import { teamColorHex, tint } from "../palette";
 import type { Bursts, Stream } from "../particles";
 import type { FlashPose } from "./plan";
@@ -20,6 +21,11 @@ export interface TurnEffects {
   clash(field: Battlefield, flashes: readonly FlashPose[]): void;
   /** Poses a boat that is going under: `progress` 0 afloat to 1 gone. */
   sink(boat: BoatParts, progress: number): void;
+  /**
+   * Rocks a boat that a clash holds, like one hit by a wave: `progress` 0 at the start of the
+   * rattle to 1 at its end. Poses the boat's body only. Does nothing with Effects off.
+   */
+  rattle(boat: BoatParts, progress: number): void;
   /**
    * A castle's display level changed at the start of the turn. Until now the castle showed its
    * old model; call `popCastle` to swap it and play the pop.
@@ -56,6 +62,24 @@ function colour(hex: string, alpha = 1): Color4 {
 
 const easeIn = (x: number) => x * x;
 
+/** Peak roll of a rattle, in radians (about 8 degrees). */
+export const RATTLE_ROLL = 0.14;
+/** Peak sideways shake of a rattle, in world units. */
+export const RATTLE_SHAKE = 0.025;
+
+/**
+ * The body pose of a rattle at `progress`: a roll that swings three times and a quicker, smaller
+ * shake, both fading out quickly, so the boat is hit hard first and then settles.
+ */
+export function rattlePose(progress: number): { roll: number; shake: number } {
+  const p = Math.min(1, Math.max(0, progress));
+  const fade = (1 - p) * (1 - p);
+  return {
+    roll: RATTLE_ROLL * fade * Math.sin(p * Math.PI * 6),
+    shake: RATTLE_SHAKE * fade * Math.sin(p * Math.PI * 11),
+  };
+}
+
 type ParticlesModule = typeof import("../particles");
 let particles: ParticlesModule | null = null;
 let loadingParticles: Promise<ParticlesModule> | null = null;
@@ -79,6 +103,8 @@ export function createTurnEffects(scene?: Scene): TurnEffects {
   const sunk = new Map<BoatParts, Stream | null>();
   /** Boats whose bubbles have stopped: they get no more. */
   const finished = new Set<BoatParts>();
+  /** Boats posed as rattled, to put back. */
+  const rattled = new Set<BoatParts>();
   const seenFlashes = new Set<string>();
   let bursts: Bursts | null = null;
   let burstScene: Scene | null = null;
@@ -228,6 +254,14 @@ export function createTurnEffects(scene?: Scene): TurnEffects {
       }
     },
 
+    rattle(boat, progress) {
+      if (graphicsOf(boat.root.getScene()) !== "high") return;
+      const { roll, shake } = rattlePose(progress);
+      boat.body.rotation.z = roll;
+      boat.body.position.x = shake;
+      rattled.add(boat);
+    },
+
     castleLevelUp(field, castleId, from, to) {
       pops.get(castleId)?.finish();
       const pop = popCastle(field.scene, castleId, from, to);
@@ -316,6 +350,11 @@ export function createTurnEffects(scene?: Scene): TurnEffects {
       }
       sunk.clear();
       finished.clear();
+      for (const boat of rattled) {
+        boat.body.rotation.z = 0;
+        boat.body.position.x = 0;
+      }
+      rattled.clear();
     },
   };
 }

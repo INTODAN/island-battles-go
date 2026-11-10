@@ -52,6 +52,11 @@ const effects = new WeakMap<
   { value: Graphics; postFx: PostFx | null }
 >();
 
+/** The setting `scene` is drawn with: what `applyGraphics` last set, else the saved choice. */
+export function graphicsOf(scene: Scene): Graphics {
+  return effects.get(scene)?.value ?? savedGraphics();
+}
+
 /**
  * Applies `value` to a scene drawn by `camera`: post-processing (loaded on first use), shadows
  * and the castle loops. Resolves once the pipeline is in place.

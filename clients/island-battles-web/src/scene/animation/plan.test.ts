@@ -9,10 +9,14 @@ import {
   shorePoint,
 } from "../shore";
 import {
+  clashStops,
+  HELD_RATTLE_SPAN,
+  isHeld,
   type MoveTrack,
   planTurn,
   sampleTurn,
   speedOf,
+  stoppedByClashAt,
   type Track,
   type TurnPlan,
 } from "./plan";
@@ -398,6 +402,113 @@ describe("planTurn on fixture pairs", () => {
       sampleTurn(plan, 0.01).castles.get(upgraded.castles[0]?.id as number)
         ?.level,
     ).toBe(2);
+  });
+});
+
+describe("rattle (#169)", () => {
+  const rattles = (plan: TurnPlan) => tracksOf(plan, "rattle");
+
+  test("the survivor of a balanced clash rattles from the clash to the end of the turn", () => {
+    // generated-map frame 4: 10 against 11, a balanced clash at t = 0.875.
+    const { next, plan } = pair("generated-map", 4);
+    const clash = next.clashes[0];
+    expect(clash && clashStops(clash)).toBe(true);
+    const survivor = clash?.participants.find((p) => p.soldiers_after > 0);
+    expect(rattles(plan)).toEqual([
+      {
+        kind: "rattle",
+        groupId: survivor?.group_id as number,
+        t0: clash?.time as number,
+        t1: 1,
+      },
+    ]);
+    const id = survivor?.group_id as number;
+    expect(
+      sampleTurn(plan, (clash?.time ?? 0) - 0.01).groups.get(id)?.rattle,
+    ).toBe(0);
+    expect(sampleTurn(plan, 0.9375).groups.get(id)?.rattle).toBeCloseTo(0.5, 6);
+    expect(sampleTurn(plan, 1).groups.get(id)?.rattle).toBe(1);
+  });
+
+  test("a boat that is still held rattles in a burst at the start of the turn", () => {
+    // generated-map frame 5: the same boat, no clash this turn.
+    const { previous, next, plan } = pair("generated-map", 5);
+    const held = next.soldier_groups.filter((g) =>
+      isHeld(previous, next, g.id),
+    );
+    expect(held).toHaveLength(1);
+    const id = held[0]?.id as number;
+    expect(rattles(plan)).toEqual([
+      { kind: "rattle", groupId: id, t0: 0, t1: HELD_RATTLE_SPAN },
+    ]);
+    expect(sampleTurn(plan, 0).groups.get(id)?.rattle).toBe(0);
+    expect(sampleTurn(plan, 0.15).groups.get(id)?.rattle).toBeCloseTo(0.5, 6);
+    expect(sampleTurn(plan, 0.5).groups.get(id)?.rattle).toBe(1);
+  });
+
+  test("a defeated group sinks and does not rattle", () => {
+    const { next, plan } = pair("generated-map", 4);
+    const lost = next.clashes[0]?.participants.find(
+      (p) => p.soldiers_after === 0,
+    );
+    expect(tracksOf(plan, "sink").map((t) => t.groupId)).toContain(
+      lost?.group_id as number,
+    );
+    expect(rattles(plan).map((t) => t.groupId)).not.toContain(lost?.group_id);
+    expect(stoppedByClashAt(next, lost?.group_id as number)).toBeUndefined();
+  });
+
+  test("a clash that is not balanced stops nobody: the bigger group sails on and does not rattle", () => {
+    // busy-turn frame 8, clash 2: 5 against 2.
+    const { next, plan } = pair("busy-turn", 8);
+    const clash = next.clashes.find((c) => !clashStops(c));
+    expect(clash).toBeDefined();
+    const winner = clash?.participants.find((p) => p.soldiers_after > 0);
+    expect(rattles(plan).map((t) => t.groupId)).not.toContain(winner?.group_id);
+    expect(stoppedByClashAt(next, winner?.group_id as number)).toBeUndefined();
+  });
+
+  test("only groups that a clash stopped or still holds rattle, in every fixture pair", () => {
+    for (const { previous, next, plan } of pairs.map((entry) => ({
+      ...entry,
+      plan: planTurn(entry.previous, entry.next),
+    }))) {
+      for (const track of rattles(plan)) {
+        const stopped = stoppedByClashAt(next, track.groupId);
+        if (stopped !== undefined) {
+          expect([track.t0, track.t1]).toEqual([stopped, 1]);
+        } else {
+          expect(isHeld(previous, next, track.groupId)).toBe(true);
+          expect([track.t0, track.t1]).toEqual([0, HELD_RATTLE_SPAN]);
+        }
+      }
+      // A group that moved from one position to another never rattles.
+      for (const group of next.soldier_groups) {
+        const before = previous.soldier_groups.find((g) => g.id === group.id);
+        const moved = before && (before.x !== group.x || before.y !== group.y);
+        if (moved && stoppedByClashAt(next, group.id) === undefined) {
+          expect(rattles(plan).map((t) => t.groupId)).not.toContain(group.id);
+        }
+      }
+    }
+  });
+
+  test("a group that has arrived at its castle is not held", () => {
+    const { previous, next } = pair("generated-map", 5);
+    const group = next.soldier_groups[0];
+    expect(group).toBeDefined();
+    const castle = next.castles.find(
+      (c) => c.id === group?.destination_castle_id,
+    );
+    const there = {
+      ...next,
+      soldier_groups: [{ ...(group as object), x: castle?.x, y: castle?.y }],
+    } as Generation;
+    const was = {
+      ...previous,
+      soldier_groups: [{ ...(group as object), x: castle?.x, y: castle?.y }],
+    } as Generation;
+    expect(isHeld(was, there, group?.id as number)).toBe(false);
   });
 });
 
