@@ -131,6 +131,49 @@ describe("turn effects (#102)", () => {
     expect(boat.root.rotation.z).toBe(0);
     disposeBoat(boat);
   });
+
+  test("a rattled boat rolls and shakes its body only, fades out, and is put back; with Effects off it stays still", () => {
+    const stored = new Map<string, string>([
+      ["island-battles-web.graphics", "high"],
+    ]);
+    const original = Object.getOwnPropertyDescriptor(
+      globalThis,
+      "localStorage",
+    );
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => stored.get(key) ?? null,
+        setItem: (key: string, value: string) => stored.set(key, value),
+      },
+    });
+    try {
+      const boat = createBoat(scene, 8, materials, 1);
+      boat.root.position.set(1, 0, 2);
+      const effects = createTurnEffects(scene);
+      effects.rattle(boat, 0.1);
+      expect(Math.abs(boat.body.rotation.z)).toBeGreaterThan(0.05);
+      expect(Math.abs(boat.body.position.x)).toBeGreaterThan(0);
+      // The boat's real position does not move.
+      expect(boat.root.position.x).toBe(1);
+      expect(boat.root.position.z).toBe(2);
+      effects.rattle(boat, 1);
+      expect(boat.body.rotation.z).toBeCloseTo(0, 9);
+      expect(boat.body.position.x).toBeCloseTo(0, 9);
+      effects.rattle(boat, 0.1);
+      effects.clear();
+      expect(boat.body.rotation.z).toBe(0);
+      expect(boat.body.position.x).toBe(0);
+      stored.set("island-battles-web.graphics", "low");
+      effects.rattle(boat, 0.1);
+      expect(boat.body.rotation.z).toBe(0);
+      expect(boat.body.position.x).toBe(0);
+      disposeBoat(boat);
+    } finally {
+      if (original) Object.defineProperty(globalThis, "localStorage", original);
+      else Reflect.deleteProperty(globalThis, "localStorage");
+    }
+  });
 });
 
 describe("particle bursts (#102)", () => {

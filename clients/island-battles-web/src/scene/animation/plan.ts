@@ -80,6 +80,17 @@ export interface SinkTrack {
   t1: number;
 }
 
+/**
+ * A boat that a clash has stopped is rattled, as `rattle` goes from 0 at `t0` to 1 at `t1`: from
+ * the clash to the end of the turn, or a short burst at the start of a turn it is still held.
+ */
+export interface RattleTrack {
+  kind: "rattle";
+  groupId: number;
+  t0: number;
+  t1: number;
+}
+
 /** A castle's team over the turn, as `team` from each key's `t` on; the first key is at 0. */
 export interface CastleTeamTrack {
   kind: "castleTeam";
@@ -121,6 +132,7 @@ export type Track =
   | SpawnTrack
   | MergeTrack
   | SinkTrack
+  | RattleTrack
   | CastleTeamTrack
   | CastleLevelTrack
   | ClashTrack;
@@ -147,6 +159,9 @@ export const SINK_SPAN = 0.4;
 export const SPAWN_SPAN = 0.15;
 /** How long a landed group takes to shrink and fade at the shore, at most. */
 export const MERGE_SPAN = 0.12;
+
+/** How much of the turn the rattle of a boat that is still held lasts, from the start. */
+export const HELD_RATTLE_SPAN = 0.3;
 
 const SPEED_BY_LEVEL = [0.5, 1, 1.5, 2];
 /** Soldier cost of reaching each level, from level 1; mirrors backend/models/upgrades.go. */
@@ -178,6 +193,91 @@ function upgradeCost(
     }
   }
   return cost;
+}
+
+/** Map units: positions closer than this are the same place. */
+const SAME_PLACE = 1e-6;
+
+function samePlace(
+  left: { x: number; y: number },
+  right: { x: number; y: number },
+): boolean {
+  return Math.hypot(left.x - right.x, left.y - right.y) <= SAME_PLACE;
+}
+
+type Clash = Generation["clashes"][number];
+
+/**
+ * Whether a clash stops its participants; mirrors `shouldStop` in
+ * backend/simulation/calculate_clash_positions.go. Some two opposing participants must be
+ * balanced: the smaller group, by its count before the clash, at least half of the larger. In an
+ * unbalanced clash the bigger group sails on.
+ */
+export function clashStops(clash: Clash): boolean {
+  const { participants } = clash;
+  return participants.some((participant, index) =>
+    participants.slice(index + 1).some((opponent) => {
+      if (participant.team_color === opponent.team_color) return false;
+      const smaller = Math.min(
+        participant.soldiers_before,
+        opponent.soldiers_before,
+      );
+      const larger = Math.max(
+        participant.soldiers_before,
+        opponent.soldiers_before,
+      );
+      return smaller >= larger - smaller;
+    }),
+  );
+}
+
+/**
+ * The time, as a fraction of the turn that ends in `next`, at which a clash stopped the group
+ * `groupId`, or `undefined` when none did. The group must have survived its last clash of the
+ * turn, that clash must stop its participants, and the group must be in `next` at the clash's
+ * midpoint (the mean of the participants' contact positions, where the server stops them), so a
+ * group that sailed on does not count. Compares true positions, not drawn ones.
+ */
+export function stoppedByClashAt(
+  next: Generation,
+  groupId: number,
+): number | undefined {
+  const group = next.soldier_groups.find((entry) => entry.id === groupId);
+  if (!group) return undefined;
+  let last: Clash | undefined;
+  for (const clash of next.clashes) {
+    if (!clash.participants.some((p) => p.group_id === groupId)) continue;
+    if (!last || clash.time >= last.time) last = clash;
+  }
+  if (!last || !clashStops(last)) return undefined;
+  const mine = last.participants.find((p) => p.group_id === groupId);
+  if (!mine || mine.soldiers_after <= 0) return undefined;
+  const count = last.participants.length;
+  const midpoint = {
+    x: last.participants.reduce((sum, p) => sum + p.x, 0) / count,
+    y: last.participants.reduce((sum, p) => sum + p.y, 0) / count,
+  };
+  return samePlace(group, midpoint) ? clamp01(last.time) : undefined;
+}
+
+/**
+ * Whether the group `groupId` is still held in the turn from `previous` to `next`: in both at
+ * the same position, and not at its destination castle. Compares true positions, not drawn ones.
+ * A group that a clash stopped this turn also stays in place; see `stoppedByClashAt`, which
+ * takes precedence for the rattle.
+ */
+export function isHeld(
+  previous: Generation,
+  next: Generation,
+  groupId: number,
+): boolean {
+  const before = previous.soldier_groups.find((entry) => entry.id === groupId);
+  const after = next.soldier_groups.find((entry) => entry.id === groupId);
+  if (!before || !after || !samePlace(before, after)) return false;
+  const destination = [...next.castles, ...previous.castles].find(
+    (castle) => castle.id === after.destination_castle_id,
+  );
+  return !destination || !samePlace(after, destination);
 }
 
 interface Participation {
@@ -318,6 +418,17 @@ export function planTurn(previous: Generation, next: Generation): TurnPlan {
     ];
     if (!before && keys[1]) keys[1].ease = "in";
     tracks.push({ kind: "move", groupId: group.id, keys });
+    const stoppedAt = stoppedByClashAt(next, group.id);
+    if (stoppedAt !== undefined) {
+      tracks.push({ kind: "rattle", groupId: group.id, t0: stoppedAt, t1: 1 });
+    } else if (isHeld(previous, next, group.id)) {
+      tracks.push({
+        kind: "rattle",
+        groupId: group.id,
+        t0: 0,
+        t1: HELD_RATTLE_SPAN,
+      });
+    }
     const initial = before
       ? before.soldiers
       : (list[0]?.point.soldiersBefore ?? group.soldiers);
@@ -584,6 +695,8 @@ export interface GroupPose {
   scale: number;
   /** 0 afloat to 1 gone under. */
   sink: number;
+  /** 0 before a boat that a clash holds is rattled, to 1 when its rattle is over. */
+  rattle: number;
   visible: boolean;
   count: number;
 }
@@ -716,7 +829,15 @@ export function sampleTurn(plan: TurnPlan, time: number): TurnSample {
   const group = (id: number): GroupPose => {
     let pose = groups.get(id);
     if (!pose) {
-      pose = { x: 0, y: 0, scale: 1, sink: 0, visible: true, count: 0 };
+      pose = {
+        x: 0,
+        y: 0,
+        scale: 1,
+        sink: 0,
+        rattle: 0,
+        visible: true,
+        count: 0,
+      };
       groups.set(id, pose);
     }
     return pose;
@@ -760,6 +881,9 @@ export function sampleTurn(plan: TurnPlan, time: number): TurnSample {
         if (t >= track.t1) pose.visible = false;
         break;
       }
+      case "rattle":
+        group(track.groupId).rattle = progress(t, track.t0, track.t1);
+        break;
       case "castleCount":
         castle(track.castleId).count = countAt(track.keys, t);
         break;

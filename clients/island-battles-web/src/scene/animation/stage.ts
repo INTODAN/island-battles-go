@@ -125,6 +125,7 @@ export class SceneStage implements Stage {
       root.position.set(world.x, 0, world.z);
       body.scaling.setAll(boatScale(pose.count) * pose.scale);
       if (pose.sink > 0) this.effects.sink(entity.parts, pose.sink);
+      else if (pose.rattle > 0) this.effects.rattle(entity.parts, pose.rattle);
       if (field.groups.has(id)) {
         moving.push({ ...group, x: pose.x, y: pose.y, soldiers: pose.count });
       }
