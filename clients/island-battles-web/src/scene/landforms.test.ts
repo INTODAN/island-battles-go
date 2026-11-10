@@ -155,16 +155,12 @@ describe("props (#102)", () => {
       expect(props.length).toBeGreaterThan(0);
     });
 
-    test(`${name}: no prop on any castle's plateau or in its label sectors`, () => {
+    test(`${name}: no prop on any castle's plateau or in its label sector`, () => {
       for (const prop of props) {
         for (const castle of castles) {
           const world = toWorld(castle);
           const distance = Math.hypot(prop.x - world.x, prop.z - world.z);
           expect(distance).toBeGreaterThanOrEqual(PROP_CLEARANCE);
-          // The name label hangs 0.8 in front of the castle.
-          expect(
-            Math.hypot(prop.x - world.x, prop.z - (world.z - 0.8)),
-          ).toBeGreaterThan(0.25);
         }
         const own = castles.find((castle) => castle.id === prop.castleId);
         if (!own) throw new Error("a prop with no castle");

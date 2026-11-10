@@ -34,7 +34,6 @@ import {
   setCastleView,
 } from "./castles";
 import { toWorld, toWorldDistance } from "./coordinates";
-import { castleTitle, hasUpgrades, upgradeLevels } from "./format";
 import {
   computeHeadings,
   type HeadingSegment,
@@ -161,7 +160,6 @@ export function setLabel(
     fontSize: 13,
     bold: false,
     priority: 10,
-    required: false,
     ...spec,
   });
 }
@@ -219,18 +217,6 @@ export function updateCastle(
     fontSize: 15,
     bold: true,
     priority: 100,
-    required: true,
-  });
-  // The levels show once a castle has an upgrade; every castle starts at level 1 of each.
-  const upgrades = hasUpgrades(castle.upgrades)
-    ? upgradeLevels(castle.upgrades)
-    : "";
-  setLabel(field, `castle:${castle.id}:info`, {
-    lines: upgrades ? [castleTitle(castle), upgrades] : [castleTitle(castle)],
-    fontSize: 11,
-    anchor: anchorFor(scene, `castle:${castle.id}:info`, root, 0.05, -0.8),
-    priority: 40,
-    maxShift: 60,
   });
 }
 
@@ -266,19 +252,7 @@ export function updateGroup(
     fontSize: 13,
     bold: true,
     priority: 80,
-    required: true,
   });
-  if (hasUpgrades(group.upgrades)) {
-    setLabel(field, `group:${group.id}:upgrades`, {
-      lines: [upgradeLevels(group.upgrades)],
-      anchor: anchorFor(scene, `group:${group.id}:upgrades`, root, 0.05, -0.4),
-      fontSize: 11,
-      priority: 20,
-      maxShift: 40,
-    });
-  } else {
-    field.labels.remove(`group:${group.id}:upgrades`);
-  }
 }
 
 function updateClashes(field: Battlefield, generation: Generation): void {

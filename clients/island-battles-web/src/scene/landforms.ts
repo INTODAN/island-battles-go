@@ -276,11 +276,10 @@ export interface PropPlacement {
 /**
  * Directions around a castle where props never go, as [centre, half width] in radians of the
  * local angle (x = cos, z = sin). Behind the castle (+z, up the screen) is under its soldier
- * count; in front (-z) is its name label.
+ * count.
  */
 export const PROP_FREE_SECTORS: readonly (readonly [number, number])[] = [
   [Math.PI / 2, (55 * Math.PI) / 180],
-  [-Math.PI / 2, (50 * Math.PI) / 180],
 ];
 /** Props keep this far from any castle's centre: outside the plateau and its footprint. */
 export const PROP_CLEARANCE = PLATEAU_RADIUS + 0.1;
@@ -310,7 +309,7 @@ function rimAt(castleId: number, angle: number): number {
 
 /**
  * The seeded trees on each island's grass and rocks on its beach. A prop stays outside every
- * castle's plateau, out of the label sectors and clear of other props, so an island with no
+ * castle's plateau, out of the label sector and clear of other props, so an island with no
  * room gets none. Positions are in world units.
  */
 export function islandProps(castles: readonly IslandCastle[]): PropPlacement[] {

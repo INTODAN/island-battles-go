@@ -1,7 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { type LabelRequest, placeLabels } from "./labels";
+import {
+  FADE_MILLISECONDS,
+  fadeAlpha,
+  type LabelRequest,
+  placeLabels,
+  RETURN_MARGIN,
+} from "./labels";
 
-const viewport = { width: 800, height: 600 };
 const label = (
   id: string,
   x: number,
@@ -14,59 +19,89 @@ const label = (
   width: 40,
   height: 20,
   priority: 10,
-  required: true,
   ...extra,
 });
 
-function boxes(requests: LabelRequest[]) {
-  const placements = placeLabels(requests, viewport);
-  return placements
-    .map((placement, index) => {
-      const request = requests[index] as LabelRequest;
-      return {
-        id: request.id,
-        visible: placement.visible,
-        x: request.x + placement.offsetX,
-        y: request.y + placement.offsetY,
-        width: request.width,
-        height: request.height,
-      };
-    })
-    .filter((box) => box.visible);
-}
-
-function countOverlaps(placed: ReturnType<typeof boxes>): number {
-  let overlaps = 0;
-  for (const [index, first] of placed.entries()) {
-    for (const second of placed.slice(index + 1)) {
-      if (
-        Math.abs(first.x - second.x) < (first.width + second.width) / 2 &&
-        Math.abs(first.y - second.y) < (first.height + second.height) / 2
-      ) {
-        overlaps++;
-      }
-    }
-  }
-  return overlaps;
-}
+const visibleIds = (requests: LabelRequest[]) =>
+  placeLabels(requests)
+    .filter((placement) => placement.visible)
+    .map((placement) => placement.id)
+    .sort();
 
 describe("label placement", () => {
-  test("a lone label stays on its anchor", () => {
-    expect(placeLabels([label("a", 100, 100)], viewport)).toEqual([
-      { id: "a", offsetX: 0, offsetY: 0, visible: true },
+  test("a lone label is shown", () => {
+    expect(placeLabels([label("a", 100, 100)])).toEqual([
+      { id: "a", visible: true },
     ]);
   });
 
-  test("labels on the same spot are spread so none covers another", () => {
-    const requests = Array.from({ length: 8 }, (_, index) =>
-      label(`group:${index}`, 300, 300),
-    );
-    const placed = boxes(requests);
-    expect(placed).toHaveLength(8);
-    expect(countOverlaps(placed)).toBe(0);
+  test("a placement carries no offset: a label is always drawn at its anchor", () => {
+    for (const placement of placeLabels([
+      label("a", 100, 100),
+      label("b", 105, 100),
+    ])) {
+      expect(Object.keys(placement).sort()).toEqual(["id", "visible"]);
+    }
   });
 
-  test("a busy turn of clustered anchors has no overlaps", () => {
+  test("of two overlapping labels the lower priority hides", () => {
+    const placements = placeLabels([
+      label("low", 100, 100, { priority: 30 }),
+      label("high", 110, 105, { priority: 100 }),
+    ]);
+    expect(placements).toEqual([
+      { id: "low", visible: false },
+      { id: "high", visible: true },
+    ]);
+  });
+
+  test("labels that do not overlap are all shown", () => {
+    expect(visibleIds([label("a", 100, 100), label("b", 141, 100)])).toEqual([
+      "a",
+      "b",
+    ]);
+  });
+
+  test("a hidden label does not cover the ones below it", () => {
+    // low overlaps high; lowest overlaps only low, so it is clear of every visible label.
+    expect(
+      visibleIds([
+        label("high", 100, 100, { priority: 100 }),
+        label("low", 130, 100, { priority: 50 }),
+        label("lowest", 165, 100, { priority: 10 }),
+      ]),
+    ).toEqual(["high", "lowest"]);
+  });
+
+  test("a hidden label returns only when clear by the margin", () => {
+    const blocker = label("blocker", 100, 100, { priority: 100 });
+    // Centres 40 apart: just touching (width 40), no overlap.
+    const gap = (extra: number) =>
+      label("back", 140 + extra, 100, { priority: 10, wasHidden: true });
+    expect(visibleIds([blocker, gap(RETURN_MARGIN - 1)])).toEqual(["blocker"]);
+    expect(visibleIds([blocker, gap(RETURN_MARGIN)])).toEqual([
+      "back",
+      "blocker",
+    ]);
+    // A label that is already shown does not need the margin.
+    expect(
+      visibleIds([blocker, label("back", 140, 100, { wasHidden: false })]),
+    ).toEqual(["back", "blocker"]);
+  });
+
+  test("the result does not depend on the order of the input", () => {
+    const requests = [
+      label("a", 100, 100, { priority: 100 }),
+      label("b", 105, 100),
+      label("c", 110, 100, { priority: 100 }),
+      label("d", 300, 300),
+    ];
+    const forward = placeLabels(requests);
+    const backward = placeLabels([...requests].reverse()).reverse();
+    expect(backward).toEqual(forward);
+  });
+
+  test("a busy cluster has no two shown labels overlapping", () => {
     const requests: LabelRequest[] = [];
     for (let index = 0; index < 30; index++) {
       requests.push(
@@ -74,72 +109,33 @@ describe("label placement", () => {
           `l${index}`,
           300 + (index % 6) * 14,
           250 + Math.floor(index / 6) * 9,
-          {
-            priority: index % 3 === 0 ? 100 : 50,
-          },
+          { priority: index % 3 === 0 ? 100 : 50 },
         ),
       );
     }
-    expect(countOverlaps(boxes(requests))).toBe(0);
-  });
-
-  test("the higher priority keeps its spot", () => {
-    const placements = placeLabels(
-      [
-        label("low", 100, 100, { priority: 1 }),
-        label("high", 100, 100, { priority: 9 }),
-      ],
-      viewport,
+    const shown = requests.filter((request) =>
+      visibleIds(requests).includes(request.id),
     );
-    expect(placements[1]).toMatchObject({ id: "high", offsetX: 0, offsetY: 0 });
-    expect(placements[0]?.offsetY).not.toBe(0);
-  });
-
-  test("placement does not depend on the request order", () => {
-    const requests = [
-      label("a", 100, 100),
-      label("b", 105, 100),
-      label("c", 110, 100),
-    ];
-    const forward = placeLabels(requests, viewport);
-    const backward = placeLabels([...requests].reverse(), viewport).reverse();
-    expect(backward).toEqual(forward);
-  });
-
-  test("a label that is not required hides when it has nowhere to go", () => {
-    const placements = placeLabels(
-      [
-        label("main", 100, 100, { priority: 9 }),
-        label("extra", 100, 100, { required: false, maxShift: 5, priority: 1 }),
-      ],
-      viewport,
-    );
-    expect(placements[1]?.visible).toBe(false);
-    expect(placements[0]?.visible).toBe(true);
-  });
-
-  test("a required label always shows", () => {
-    const placements = placeLabels(
-      [
-        label("a", 100, 100, { maxShift: 0 }),
-        label("b", 100, 100, { maxShift: 0 }),
-      ],
-      viewport,
-    );
-    expect(placements.every((placement) => placement.visible)).toBe(true);
-  });
-
-  test("labels stay inside the viewport", () => {
-    const placed = boxes([
-      label("edge", 5, 5),
-      label("edge2", 5, 5),
-      label("edge3", 795, 595),
-    ]);
-    for (const box of placed) {
-      expect(box.x - box.width / 2).toBeGreaterThanOrEqual(0);
-      expect(box.y - box.height / 2).toBeGreaterThanOrEqual(0);
-      expect(box.x + box.width / 2).toBeLessThanOrEqual(viewport.width);
-      expect(box.y + box.height / 2).toBeLessThanOrEqual(viewport.height);
+    for (const [index, first] of shown.entries()) {
+      for (const second of shown.slice(index + 1)) {
+        const apart =
+          Math.abs(first.x - second.x) >= 40 ||
+          Math.abs(first.y - second.y) >= 20;
+        expect(apart).toBe(true);
+      }
     }
+  });
+});
+
+describe("label fade", () => {
+  test("fades in and out over the fade time", () => {
+    expect(fadeAlpha(0, true, FADE_MILLISECONDS / 2)).toBeCloseTo(0.5);
+    expect(fadeAlpha(1, false, FADE_MILLISECONDS / 2)).toBeCloseTo(0.5);
+  });
+
+  test("never leaves 0 to 1", () => {
+    expect(fadeAlpha(0.9, true, 1000)).toBe(1);
+    expect(fadeAlpha(0.1, false, 1000)).toBe(0);
+    expect(fadeAlpha(0.5, true, -5)).toBe(0.5);
   });
 });
