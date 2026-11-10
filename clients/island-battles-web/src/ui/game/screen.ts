@@ -314,7 +314,11 @@ export class GameScreen {
         loading.failed();
       },
     );
-    const { player } = createScenePlayer(scene, sorted);
+    // A turn that ends asks for the next one at once, so playing on loses no time between turns.
+    let onIdle = () => {};
+    const { player } = createScenePlayer(scene, sorted, {
+      onIdle: () => onIdle(),
+    });
     const controller = new GameController(
       {
         play: (previous, next) => player.play(previous, next),
@@ -322,9 +326,11 @@ export class GameScreen {
         get busy() {
           return player.busy;
         },
+        setFollowing: (following) => player.setLive(following),
       },
       { live: this.options.live },
     );
+    onIdle = () => controller.tick();
     scene.onBeforeRenderObservable.add(() => controller.tick());
     let aspect =
       engine.getRenderWidth() / Math.max(1, engine.getRenderHeight());

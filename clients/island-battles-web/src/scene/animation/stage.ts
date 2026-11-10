@@ -2,12 +2,14 @@ import type { Scene } from "@babylonjs/core/scene";
 import type { components } from "../../api/generated/game";
 import { createBoat, disposeBoat } from "../art";
 import {
+  aimGroup,
   applyTurnHeadings,
   type Battlefield,
   beginTurnHeadings,
   boatScale,
   type GroupEntity,
   renderGeneration,
+  snapBoats,
   updateCastle,
   updateGroup,
   updateHeadings,
@@ -24,8 +26,10 @@ type Generation = components["schemas"]["Generation"];
 
 /**
  * Applies a turn's samples to the meshes `renderGeneration` built, found by castle and group
- * ID. Groups that the next generation no longer has (arriving or defeated) get meshes of their
- * own for the length of the turn.
+ * ID. Groups that the next generation no longer has (arriving or defeated) keep the boats they
+ * had for the length of the turn; a group that is in neither generation gets a boat of its own.
+ * A turn's start and end only update what exists: nothing that is in both generations is built
+ * again.
  */
 export class SceneStage implements Stage {
   private readonly transients = new Map<number, GroupEntity>();
@@ -45,12 +49,18 @@ export class SceneStage implements Stage {
   settle(generation: Generation): void {
     this.reset();
     this.field = renderGeneration(this.scene, generation, this.teams);
+    // A jump to a generation turns the boats at once too.
+    snapBoats(this.field);
     this.showClashes(this.field, true);
   }
 
   begin(plan: TurnPlan): void {
     this.reset();
-    const field = renderGeneration(this.scene, plan.next, this.teams);
+    // The boats that land or sink this turn are those of the previous generation: they stay.
+    const field = renderGeneration(this.scene, plan.next, this.teams, {
+      keepGroups: new Set(plan.transients.map((group) => group.id)),
+      headings: false,
+    });
     this.field = field;
     // The heading arrows of the whole turn are decided now, from its start and end.
     beginTurnHeadings(field, plan);
@@ -65,14 +75,18 @@ export class SceneStage implements Stage {
       [...plan.previous.castles, ...plan.next.castles].map((c) => [c.id, c]),
     );
     for (const group of plan.transients) {
-      const parts = createBoat(
-        this.scene,
-        group.id,
-        field.materials,
-        group.team_color,
-      );
-      const entity = { parts };
-      this.transients.set(group.id, entity);
+      let entity = field.groups.get(group.id);
+      if (!entity) {
+        entity = {
+          parts: createBoat(
+            this.scene,
+            group.id,
+            field.materials,
+            group.team_color,
+          ),
+        };
+        this.transients.set(group.id, entity);
+      }
       updateGroup(
         field,
         group,
@@ -127,6 +141,8 @@ export class SceneStage implements Stage {
       root.setEnabled(true);
       const world = toWorld(pose);
       root.position.set(world.x, 0, world.z);
+      // A boat whose heading changes (stopped off its line by a clash) turns smoothly.
+      aimGroup(field, entity, world, castles.get(group.destination_castle_id));
       body.scaling.setAll(boatScale(pose.count) * pose.scale);
       if (pose.sink > 0) this.effects.sink(entity.parts, pose.sink);
       else if (pose.rattle > 0) this.effects.rattle(entity.parts, pose.rattle);
@@ -172,7 +188,9 @@ export class SceneStage implements Stage {
       return shown !== undefined && shown !== castle.team_color;
     });
     this.reset();
-    const field = renderGeneration(this.scene, plan.next, this.teams);
+    const field = renderGeneration(this.scene, plan.next, this.teams, {
+      headings: false,
+    });
     this.field = field;
     // Groups that stayed put over the turn keep their dimmed arrows (#168 case 14).
     updateHeadings(field, plan.next, heldGroups(plan.previous, plan.next));
@@ -231,6 +249,7 @@ export function createScenePlayer(
   const stage = new SceneStage(scene, teams, effects);
   const player = new TurnPlayer(stage, options);
   scene.onBeforeRenderObservable.add(() => {
+    // The frame's real time; the player clamps a long one (a tab coming back to front).
     player.tick(scene.getEngine().getDeltaTime());
     effects.tick(performance.now());
   });
