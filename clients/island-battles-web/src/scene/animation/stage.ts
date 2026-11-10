@@ -2,7 +2,9 @@ import type { Scene } from "@babylonjs/core/scene";
 import type { components } from "../../api/generated/game";
 import { createBoat, disposeBoat } from "../art";
 import {
+  applyTurnHeadings,
   type Battlefield,
+  beginTurnHeadings,
   boatScale,
   type GroupEntity,
   renderGeneration,
@@ -13,6 +15,7 @@ import {
 import { castleDisplayLevel } from "../castleLevel";
 import { toWorld } from "../coordinates";
 import { createTurnEffects, type TurnEffects } from "./effects";
+import { heldGroups } from "./headings";
 import type { TurnPlan, TurnSample } from "./plan";
 import { type PlayerOptions, type Stage, TurnPlayer } from "./player";
 
@@ -49,6 +52,8 @@ export class SceneStage implements Stage {
     this.reset();
     const field = renderGeneration(this.scene, plan.next, this.teams);
     this.field = field;
+    // The heading arrows of the whole turn are decided now, from its start and end.
+    beginTurnHeadings(field, plan);
     // The next generation's clash rings, lost boats and loss labels appear as the turn plays.
     this.showClashes(field, false);
     for (const id of field.labels.ids()) {
@@ -91,7 +96,6 @@ export class SceneStage implements Stage {
     const groups = new Map(
       [...plan.transients, ...plan.next.soldier_groups].map((g) => [g.id, g]),
     );
-    const moving: Generation["soldier_groups"] = [];
     for (const [id, pose] of sample.groups) {
       const group = groups.get(id);
       const entity = field.groups.get(id) ?? this.transients.get(id);
@@ -126,9 +130,6 @@ export class SceneStage implements Stage {
       body.scaling.setAll(boatScale(pose.count) * pose.scale);
       if (pose.sink > 0) this.effects.sink(entity.parts, pose.sink);
       else if (pose.rattle > 0) this.effects.rattle(entity.parts, pose.rattle);
-      if (field.groups.has(id)) {
-        moving.push({ ...group, x: pose.x, y: pose.y, soldiers: pose.count });
-      }
     }
 
     for (const [id, pose] of sample.castles) {
@@ -161,11 +162,7 @@ export class SceneStage implements Stage {
 
     this.effects.clash(field, sample.flashes);
     // The heading lines follow the boats as they sail.
-    updateHeadings(field, {
-      ...plan.next,
-      castles: plan.next.castles,
-      soldier_groups: moving,
-    });
+    applyTurnHeadings(field, sample);
   }
 
   end(plan: TurnPlan): void {
@@ -177,6 +174,8 @@ export class SceneStage implements Stage {
     this.reset();
     const field = renderGeneration(this.scene, plan.next, this.teams);
     this.field = field;
+    // Groups that stayed put over the turn keep their dimmed arrows (#168 case 14).
+    updateHeadings(field, plan.next, heldGroups(plan.previous, plan.next));
     this.showClashes(field, true);
     for (const castle of captured) {
       this.effects.castleCaptured(field, castle.id, castle.team_color);

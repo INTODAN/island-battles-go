@@ -9,10 +9,11 @@ const directory = new URL("../../test/fixtures/", import.meta.url);
 const names = readdirSync(directory).filter((name) => name.endsWith(".json"));
 
 describe("fixtures", () => {
-  test("the three fixtures are there", () => {
+  test("the fixtures are there", () => {
     expect(names.sort()).toEqual([
       "busy-turn.json",
       "generated-map.json",
+      "heading-arrows.json",
       "six-teams.json",
     ]);
   });
