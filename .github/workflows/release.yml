@@ -137,15 +137,17 @@ jobs:
       - uses: actions/checkout@v5
 
       # Annotated tags on the commit that was checked and deployed. The lobby
-      # module is tagged with the same version, as Go modules in a
-      # subdirectory require.
+      # module and the Go SDK module are tagged with the same version, with
+      # their directory as the prefix, as Go modules in a subdirectory
+      # require; the SDK's tag is what `go get` of a version resolves.
       - name: Tag the release
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$VERSION" -m "Release $VERSION" "$GITHUB_SHA"
           git tag -a "lobby/$VERSION" -m "Lobby $VERSION" "$GITHUB_SHA"
-          git push --atomic origin "refs/tags/$VERSION" "refs/tags/lobby/$VERSION"
+          git tag -a "clients/island-battles-go/$VERSION" -m "Go SDK $VERSION" "$GITHUB_SHA"
+          git push --atomic origin "refs/tags/$VERSION" "refs/tags/lobby/$VERSION" "refs/tags/clients/island-battles-go/$VERSION"
 
       - name: Create the GitHub release
         run: |
@@ -159,7 +161,7 @@ jobs:
           gh release create "$VERSION" --verify-tag --title "$VERSION" --generate-notes \
             "${start[@]}" --notes "$note
 
-          The lobby module is tagged lobby/$VERSION."
+          The lobby module is tagged lobby/$VERSION, and the Go SDK clients/island-battles-go/$VERSION: go get github.com/INTODAN/island-battles-go/clients/island-battles-go@$VERSION"
 
       # Hook for #117 (publishing the Python clients to PyPI): add jobs here
       # with `needs: release`. A release

@@ -34,7 +34,7 @@ The host is the earliest active joiner. Team changes clear readiness. At least t
 
 Every member of an Island Battles lobby chooses a bot before getting ready:
 
-- **Their localhost bot**, `{"kind": "localhost"}`: their own bot, which `island-battles-bot serve` runs on their machine ([Python client](../clients/island-battles-python/README.md)). Their game client relays each turn to it and submits its answer, or `island-battles-bot run` plays the seat without a browser.
+- **Their localhost bot**, `{"kind": "localhost"}`: their own bot, which `island-battles-bot serve` ([Python client](../clients/island-battles-python/README.md)) or the `serve` subcommand of a [Go SDK](../clients/island-battles-go/README.md) program runs on their machine. Their game client relays each turn to it and submits its answer, or `island-battles-bot run` plays the seat without a browser.
 - **A default bot**, `{"kind": "default", "level": 2}`: one of the [default bots](#default-bots), with a level that `GET /bots/defaults` lists, which the backend plays itself.
 
 `PUT /game/lobbies/{lobby_id}/bot` saves the caller's choice, with their guest bearer credential, while the lobby is waiting; a member can change it as often as they like, also once ready. It returns, like `GET /game/lobbies/{lobby_id}/bots`, every active member in the lobby's member order with their `bot`, which is absent until they choose. An invalid choice is 422, a caller who isn't an active member gets 404, and once the lobby has started or closed choosing conflicts (409). A 409 stores nothing: the choice is saved in one statement that reads the lobby's phase under a row share lock, so a choice that races the host's start either lands before the start (and is copied, answered 200) or is refused and not stored. Choosing changes nothing in the lobby itself, so it publishes no `lobby.changed`; the lobby page reads the choices again when the lobby changes, which getting ready does.
@@ -198,7 +198,7 @@ Whoever runs the bot, a client relaying it or the backend itself, sends the resu
 
 The memory lives in the `game_player_bot_memory` table, one row per player who has memory, keyed by the game and the player, with the generation whose turn saved it. The memory column is `bytea`, the exact compact JSON the service validated, because `jsonb` would reorder keys, expand numbers like `1e131071` into every digit and reject `\u0000`. A turn that clears the memory deletes the row. The table is game data: AutoMigrate creates it, and [retention](#game-retention) deletes it with the game.
 
-Bots that the backend plays itself implement the Go interface `bots.Bot` in [`bots/`](bots/bots.go), `Play(ctx, BotTurn) (BotTurnResult, error)`, on the Go types `models.BotTurn` and `models.BotTurnResult` that the schemas are exported from.
+Bots that the backend plays itself implement the Go interface `bots.Bot` in [`bots/`](bots/bots.go), `Play(ctx, BotTurn) (BotTurnResult, error)`, on the Go types `models.BotTurn` and `models.BotTurnResult` that the schemas are exported from. To write a bot of your own in Go, use the [Go SDK](../clients/island-battles-go/README.md); in Python, the [Python SDK](../clients/island-battles-python/README.md).
 
 ### Default bots
 
@@ -211,6 +211,8 @@ The **default bots** are numbered levels that the backend plays itself, in Go, s
 | 3 | Level 2's forecasts, and it also keeps enough soldiers in each castle to hold against the groups heading for it and as a guard against the strongest enemy castle near it; sends help to a castle that would fall even keeping every soldier; combines attacks from several castles, the farthest sending first and the nearer ones later, so the groups land together; counts the enemy groups that its attack meets on the way; and buys speed levels 2 and 3 with soldiers it can spare from turn 15. Its memory keeps a turn counter and the launches its combined attacks have yet to send. |
 
 The bots are deterministic: the same `BotTurn` always gives the same result, and they use no randomness. Each writes one or two game log lines a turn that explain its choice, with the logger `island_battles.bots.level1` to `level3`.
+
+**Their code is the Go SDK's examples**, in [`clients/island-battles-go/examples/defaultbots`](../clients/island-battles-go/examples/defaultbots), so players can read, run and copy them (`go run ./examples/level3 serve` in the SDK's directory plays level 3 as a localhost bot). They are written against the SDK's types and read their speeds from the turn's upgrade table. [`bots/`](bots/bots.go) keeps the catalog, `Defaults()` and `ForLevel()`, and runs each level's example on the server's types, converting `models.BotTurn` and `models.BotTurnResult` to and from the SDK's `Turn` and `Result` through JSON; a test keeps the two sets of types carrying the same JSON. The root `go.mod` requires the SDK module and replaces it with `./clients/island-battles-go`, like the lobby module.
 
 **Which players they play.** The game's frozen roster (`frozen_game_players`) has a nullable `bot_level` column: the level the backend plays for that player, or null for a player whose client plays their localhost bot. The start sets it from the player's [bot choice](#choosing-a-bot), or from the level of a [bot seat](#bot-seats).
 

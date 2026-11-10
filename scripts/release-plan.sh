@@ -59,10 +59,14 @@ else
   esac
 fi
 
-if git rev-parse -q --verify "refs/tags/$version" >/dev/null || git rev-parse -q --verify "refs/tags/lobby/$version" >/dev/null; then
-  echo "The tag $version (or lobby/$version) already exists." >&2
-  exit 1
-fi
+# The release tags these three; the Go modules in subdirectories need their
+# directory as the tag's prefix.
+for tag in "$version" "lobby/$version" "clients/island-battles-go/$version"; do
+  if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+    echo "The tag $tag already exists." >&2
+    exit 1
+  fi
+done
 
 {
   echo "## Release $version"

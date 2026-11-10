@@ -8,18 +8,19 @@
 *   **API Framework:** [Huma v2](https://github.com/danielgtaylor/huma) with [Chi](https://github.com/go-chi/chi) router.
 *   **Real-time Messaging:** [Centrifugo](https://centrifugal.dev/) (v6).
 *   **Database:** PostgreSQL (v18-alpine) with [GORM](https://gorm.io/).
-*   **Clients:** Python lobby and gameplay SDKs generated from checked-in OpenAPI documents, with asyncio Centrifugo runtimes, a language-agnostic client conformance suite, and a Go connection example.
+*   **Clients:** A Go SDK for writing bots; Python lobby and gameplay SDKs generated from checked-in OpenAPI documents, with asyncio Centrifugo runtimes, a language-agnostic client conformance suite, and a Go connection example.
 
 ## Project Structure
 
 - `lobby/`: Independent generic lobby component: Go module, clients, API artifacts, transport configuration, docs, and shared test tooling. See [its README](lobby/README.md).
 - `backend/`: Island Battles game logic and wiring to the generic lobby module. `backend/api/openapi.json` is the player API that gameplay clients are generated from.
 - `clients/island-battles-python/`: The Python gameplay SDK and the `island-battles-bot` command (serve, check and run a bot function). Its models are generated; only the turn runtime, the bot helpers and model utilities are hand-written.
+- `clients/island-battles-go/`: The Go SDK for writing bots, its own Go module (`github.com/INTODAN/island-battles-go/clients/island-battles-go`): a bot is a function, and `islandbattles.Main` gives its program `serve`, `check` and `fixture`. Its `examples/` hold the three default bots, which the backend plays from there. See [its README](clients/island-battles-go/README.md).
 - `clients/island-battles-web/`: The 3D browser client (TypeScript, Babylon.js, Bun and Biome). Currently a scaffold. See [its README](clients/island-battles-web/README.md).
 - `clients/conformance/`: Language-agnostic tests that verify any gameplay client through a JSON Lines adapter.
 - `integration/island_battles/`: Host-specific lobby/game binding acceptance checks.
 - `scripts/test-lobby-acceptance.sh`: Runs the shared acceptance suite against the Island Battles host, including its game-specific checks.
-- `go.work`: Connects the host and lobby Go modules for local development.
+- `go.work`: Connects the host, lobby and Go SDK modules for local development.
 - `deploy/`: Deployment to AWS: the Terraform configuration for the AWS resources, the Ansible setup for the Postgres and Centrifugo VM, and the backend's Lambda deploy. See [deploy/README.md](deploy/README.md).
 
 ## Development Setup
@@ -36,7 +37,7 @@ PostgreSQL listens on port 5432, Centrifugo on 8000, and the backend on 8888. Th
 
 Ctrl+C stops the backend. Dependencies remain running for the next launch. Stop them with `docker compose stop` or, for native Podman, `podman stop island-battles-dev-db island-battles-dev-centrifugo`.
 
-Use the [Python lobby client walkthrough](lobby/clients/lobby-python/README.md) for two-player team selection, the [Island Battles Python client](clients/island-battles-python/README.md) for gameplay turns, or the [Go example](lobby/clients/README.md). Backend settings and the game endpoints are documented in [backend/README.md](backend/README.md). The implementation contract is recorded in the [Issue #6 task plan](docs/tasks/issue-6-player-generation-commands.md).
+Use the [Python lobby client walkthrough](lobby/clients/lobby-python/README.md) for two-player team selection, the [Island Battles Python client](clients/island-battles-python/README.md) or the [Go SDK](clients/island-battles-go/README.md) for writing a bot, or the [Go example](lobby/clients/README.md). Backend settings and the game endpoints are documented in [backend/README.md](backend/README.md). The implementation contract is recorded in the [Issue #6 task plan](docs/tasks/issue-6-player-generation-commands.md).
 
 ## Architecture Notes
 
@@ -46,9 +47,9 @@ Teams and readiness belong to the generic lobby. Starting freezes a roster. The 
 
 ## Commands
 
-*   **Lint/Verify (Go):** `go vet ./... ./lobby/...` and `golangci-lint run --timeout=5m ./... ./lobby/...`
-*   **Format:** `go fmt ./... && go -C lobby fmt ./...` (`go fmt` doesn't read `go.work`)
-*   **Test (disposable PostgreSQL containers):** `go test ./... ./lobby/...`. On rootless Podman, enable the Podman socket and disable Ryuk first; see [database tests on rootless Podman](backend/README.md#database-tests-on-rootless-podman).
+*   **Lint/Verify (Go):** `go vet ./... ./lobby/... ./clients/island-battles-go/...` and `golangci-lint run --timeout=5m ./... ./lobby/... ./clients/island-battles-go/...`
+*   **Format:** `go fmt ./... && go -C lobby fmt ./... && go -C clients/island-battles-go fmt ./...` (`go fmt` doesn't read `go.work`)
+*   **Test (disposable PostgreSQL containers):** `go test ./... ./lobby/... ./clients/island-battles-go/...`. On rootless Podman, enable the Podman socket and disable Ryuk first; see [database tests on rootless Podman](backend/README.md#database-tests-on-rootless-podman).
 *   **Check OpenAPI:** `go run ./lobby/cmd/export-lobby-openapi --output lobby/api/openapi.json --events-output lobby/api/events.json --check` and `go run ./backend/cmd/export-openapi --output backend/api/openapi.json --check`
 *   **Check generated gameplay models:** `uv run --project clients/island-battles-python/tools --locked python clients/island-battles-python/scripts/generate.py --check`
 *   **Regenerate the web client's API types:** `bun run generate` in `clients/island-battles-web/` (`bun run generate --check` verifies they are current; `web-client.yml` runs it on any change to `lobby/api/` or `backend/api/`)
@@ -65,7 +66,7 @@ Teams and readiness belong to the generic lobby. Starting freezes a roster. The 
 
 | Job | Runs |
 |---|---|
-| Go | `go vet`, `golangci-lint` (pinned to the version in the workflow), a `gofmt -l` check of both modules, and `go test` with Testcontainers on the runner's Docker |
+| Go | `go vet`, `golangci-lint` (pinned to the version in the workflow), a `gofmt -l` check of the three modules (the host, `lobby/` and the Go SDK in `clients/island-battles-go/`), and `go test` with Testcontainers on the runner's Docker |
 | API contract | both OpenAPI `--check` commands and the generated gameplay models' `--check` |
 | Python | the lobby client's unit tests, the bot client's tests and the offline gameplay client conformance tests, with `uv --locked` |
 | JS | `node --test` for the tests in `backend/demo`, `backend/demoviewer`, `backend/mapbuilder` and `lobby/frontend` |

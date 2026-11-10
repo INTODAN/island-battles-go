@@ -27,7 +27,9 @@ jobs:
       - uses: actions/checkout@v5
 
       # go.mod names the version. The host and lobby modules each have a
-      # go.sum, so the module cache is keyed on both.
+      # go.sum, so the module cache is keyed on both. The Go SDK module
+      # (clients/island-battles-go) uses only the standard library and has no
+      # go.sum; add its go.sum here if it ever gets dependencies.
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -36,7 +38,7 @@ jobs:
             lobby/go.sum
 
       - name: go vet
-        run: go vet ./... ./lobby/...
+        run: go vet ./... ./lobby/... ./clients/island-battles-go/...
 
       # Installs the binary only. The next step runs the README's command.
       # Keep this version in step with the one the README names.
@@ -46,16 +48,16 @@ jobs:
           install-only: true
 
       - name: golangci-lint
-        run: golangci-lint run --timeout=5m ./... ./lobby/...
+        run: golangci-lint run --timeout=5m ./... ./lobby/... ./clients/island-battles-go/...
 
       # `go fmt` rewrites files and doesn't read go.work. gofmt -l lists the
-      # files that need formatting, from both modules, and the step fails if
+      # files that need formatting, from all three modules, and the step fails if
       # there are any.
       - name: gofmt
         run: |
           unformatted="$(gofmt -l .)"
           if [ -n "$unformatted" ]; then
-            echo "These files need gofmt (run: go fmt ./... && go -C lobby fmt ./...):"
+            echo "These files need gofmt (run: go fmt ./... && go -C lobby fmt ./... && go -C clients/island-battles-go fmt ./...):"
             echo "$unformatted"
             exit 1
           fi
@@ -63,7 +65,7 @@ jobs:
       # The database tests start disposable PostgreSQL containers through
       # Testcontainers, with the Docker that the runner has.
       - name: go test
-        run: go test ./... ./lobby/...
+        run: go test ./... ./lobby/... ./clients/island-battles-go/...
 
   api-contract:
     name: API contract
