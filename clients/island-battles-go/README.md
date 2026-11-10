@@ -1,6 +1,8 @@
 # Island Battles Go SDK
 
-Write a bot for [Island Battles](../../README.md) in Go. Island Battles is a real-time strategy game for teams: every team starts with a castle on an island map, castles grow one soldier a turn, and you win by sending soldier groups to take every other castle. Each turn, every player's bot looks at the board and answers with orders.
+Write a bot for [Island Battles](../../README.md) in Go. Island Battles is a real-time strategy game for teams: every team starts with a castle on an island map, a castle that a team owns grows one soldier a turn (a neutral castle keeps its soldiers until a team captures it), and you win by sending soldier groups to take every other castle. Each turn, every player's bot looks at the board and answers with orders.
+
+**This is a rule change, and it breaks bots that count on neutral castles growing.** A neutral castle no longer gains a soldier each turn; it keeps its soldiers until a team captures it and grows from the next turn on, like any castle a team owns. The API is the same, but a bot that forecasts a neutral castle's defenders with growth overestimates them. What to do: count growth only for castles with a team (the default bots in `examples/defaultbots` show the forecast).
 
 With this SDK, a bot is **one Go function**: it gets the turn (the board, your team, the upgrade cost table and what it remembered last turn) and returns its commands, a few game log lines and what it wants to remember. Your program's `main` hands that function to `islandbattles.Main`, which gives the program four subcommands:
 

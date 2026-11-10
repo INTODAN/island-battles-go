@@ -599,10 +599,15 @@ interface Replay {
   teamKeys: { t: number; team: number }[];
 }
 
+/** The team colour of castles that belong to no team; they don't grow. */
+const NEUTRAL_TEAM = 0;
+
 /**
  * Replays the turn's arithmetic for a castle: its commands at t = 0 (soldiers sent, upgrades
  * paid), growth by one, then the landings in group ID order. The landing times are handed out
- * in time order.
+ * in time order. Only a castle that a team owns grows, and growth comes before the landings, as
+ * on the server: a neutral castle keeps its soldiers, and one captured this turn was still
+ * neutral at the growth step.
  */
 function replayCastle(
   before: Castle,
@@ -624,8 +629,10 @@ function replayCastle(
     before.soldiers - launched - upgradeCost(before.upgrades, after.upgrades);
   let team = before.team_color;
   pushStep(countKeys, 0, soldiers);
-  soldiers += 1;
-  pushStep(countKeys, growth, soldiers);
+  if (before.team_color !== NEUTRAL_TEAM) {
+    soldiers += 1;
+    pushStep(countKeys, growth, soldiers);
+  }
   landings.forEach((arrival, index) => {
     const time = times[index] ?? 1;
     if (arrival.group.team_color === team) {

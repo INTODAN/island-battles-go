@@ -126,9 +126,26 @@ describe("heading arrows during a turn", () => {
       // The turn starts as the previous generation was drawn and ends as the next one is.
       const atStart = sampleTurnHeadings(turn, sampleTurn(plan, 0), scale);
       const rest = restingHeadings(previous, held, scale);
-      expect(atStart.map((s) => [s.groupId, s.arrowhead])).toEqual(
-        rest.map((s) => [s.groupId, s.arrowhead]),
-      );
+      expect(atStart.map((s) => s.groupId)).toEqual(rest.map((s) => s.groupId));
+      // A head one end of the turn draws is drawn all turn (see `sampleTurnHeadings`), so a
+      // line that shares another group's head at rest may draw its own at t = 0. That is
+      // only allowed where nothing is seen to appear: the new head sits exactly on a head
+      // the resting view draws for the same team. A head the resting view draws is never lost.
+      atStart.forEach((segment, position) => {
+        const resting = rest[position];
+        if (resting?.arrowhead) expect(segment.arrowhead).toBe(true);
+        if (!resting || resting.arrowhead || !segment.arrowhead) return;
+        const covered = rest.some(
+          (other) =>
+            other.arrowhead &&
+            other.teamColor === segment.teamColor &&
+            Math.hypot(
+              other.tip.x - segment.tip.x,
+              other.tip.y - segment.tip.y,
+            ) < 1e-6,
+        );
+        expect(covered).toBe(true);
+      });
       atStart.forEach((segment, position) => {
         const resting = rest[position];
         if (!resting) return;

@@ -13,10 +13,10 @@ The game is a list of **generations**, numbered from 1. In each one, every playe
 
 1. **Your commands**, in the order you list them.
 2. **Movement**: every soldier group moves, and enemy groups that meet clash.
-3. **Growth**: every castle gains **1 soldier**. Neutral castles grow too; nothing is exempt.
+3. **Growth**: every castle that a team owns gains **1 soldier**. A **neutral** castle (`team_color` 0) does not grow: it keeps its soldiers until a team captures it.
 4. **Arrival**: groups that reached their destination castle land.
 
-So a group you send moves in the same turn, and a castle grows before the arrivals fight it.
+So a group you send moves in the same turn, and a castle grows before the arrivals fight it. A neutral castle captured this turn was still neutral at the growth step, so it does not grow this turn and grows from the next turn on.
 
 ## Castles and soldiers
 
