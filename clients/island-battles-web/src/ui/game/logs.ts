@@ -76,3 +76,73 @@ export function hiddenNotice(
   // A watcher belongs to no team, so every team is hidden until the end.
   return options.watching ? ALL_TEAMS_HIDDEN : OTHER_TEAMS_HIDDEN;
 }
+
+export interface LogFetchTimers {
+  set: (callback: () => void, delayMs: number) => unknown;
+  clear: (handle: unknown) => void;
+}
+
+const browserTimers: LogFetchTimers = {
+  set: (callback, delayMs) => setTimeout(callback, delayMs),
+  clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+};
+
+/** How long a turn must stay on screen before its logs are requested. */
+export const LOG_FETCH_DEBOUNCE_MS = 300;
+
+/**
+ * Decides when the logs of the turn on screen are requested. Nothing is requested while the
+ * panel is closed. Opening the panel requests the turn on screen at once. While it stays open,
+ * a turn is requested only after it has been shown for the debounce delay without changing, so
+ * turns that flash by during live play cost no request. Pure apart from the injected timers.
+ */
+export class LogFetchScheduler {
+  private wasOpen = false;
+  private pending: { generationId: number; ended: boolean } | undefined;
+  private handle: unknown;
+
+  constructor(
+    private readonly request: (generationId: number, ended: boolean) => void,
+    private readonly timers: LogFetchTimers = browserTimers,
+    private readonly delayMs: number = LOG_FETCH_DEBOUNCE_MS,
+  ) {}
+
+  /** Call on every view update and whenever the panel opens or closes. */
+  update(view: {
+    open: boolean;
+    generationId: number;
+    ended: boolean;
+    needsFetch: boolean;
+  }): void {
+    const justOpened = view.open && !this.wasOpen;
+    this.wasOpen = view.open;
+    if (!view.open || !view.needsFetch) {
+      this.cancel();
+      return;
+    }
+    if (justOpened) {
+      this.cancel();
+      this.request(view.generationId, view.ended);
+      return;
+    }
+    if (this.pending && this.pending.generationId === view.generationId) {
+      // The same turn is still on screen: keep the running timer, with the latest state.
+      this.pending.ended = view.ended;
+      return;
+    }
+    this.cancel();
+    this.pending = { generationId: view.generationId, ended: view.ended };
+    this.handle = this.timers.set(() => {
+      const due = this.pending;
+      this.pending = undefined;
+      this.handle = undefined;
+      if (due) this.request(due.generationId, due.ended);
+    }, this.delayMs);
+  }
+
+  cancel(): void {
+    if (this.handle !== undefined) this.timers.clear(this.handle);
+    this.handle = undefined;
+    this.pending = undefined;
+  }
+}
