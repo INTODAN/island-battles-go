@@ -5,7 +5,7 @@ import { AdvancedDynamicTexture } from "@babylonjs/gui/2D/advancedDynamicTexture
 import { Control } from "@babylonjs/gui/2D/controls/control";
 import { Rectangle } from "@babylonjs/gui/2D/controls/rectangle";
 import { TextBlock } from "@babylonjs/gui/2D/controls/textBlock";
-import { type LabelRequest, placeLabels } from "./labels";
+import { fadeAlpha, type LabelRequest, placeLabels } from "./labels";
 
 export interface LabelSpec {
   /** Lines of text; each line is drawn as given. */
@@ -18,10 +18,8 @@ export interface LabelSpec {
   textColor: string;
   fontSize: number;
   bold: boolean;
+  /** When two labels overlap, the one with the lower priority is hidden. */
   priority: number;
-  required: boolean;
-  /** The farthest, in pixels, the label may move away from its anchor to avoid others. */
-  maxShift?: number;
 }
 
 interface Label {
@@ -30,6 +28,10 @@ interface Label {
   text: TextBlock;
   width: number;
   height: number;
+  /** Whether the last placement showed it; the control fades towards this. */
+  shown: boolean;
+  /** Its current opacity, 0 to 1. */
+  alpha: number;
 }
 
 const FONT_FAMILY = "system-ui, -apple-system, Segoe UI, sans-serif";
@@ -46,7 +48,8 @@ function measureWidth(text: string, fontSize: number, bold: boolean): number {
 
 /**
  * Babylon GUI labels linked to nodes in the scene. They are drawn in screen pixels, so they keep
- * their size at every zoom; each frame they are spread so that none covers another.
+ * their size at every zoom; each frame the lower priority one of two overlapping labels fades out. A label never moves
+ * away from its anchor.
  */
 export class LabelLayer {
   private readonly texture: AdvancedDynamicTexture;
@@ -90,7 +93,8 @@ export class LabelLayer {
       text.isHitTestVisible = false;
       rectangle.addControl(text);
       this.texture.addControl(rectangle);
-      label = { spec, rectangle, text, width, height };
+      rectangle.alpha = 0;
+      label = { spec, rectangle, text, width, height, shown: false, alpha: 0 };
       this.labels.set(id, label);
     }
     label.spec = spec;
@@ -125,6 +129,7 @@ export class LabelLayer {
     id: string;
     text: string;
     visible: boolean;
+    alpha: number;
     x: number;
     y: number;
     width: number;
@@ -134,6 +139,7 @@ export class LabelLayer {
       id,
       text: label.spec.lines.join("\n"),
       visible: label.rectangle.isVisible,
+      alpha: label.alpha,
       x: label.rectangle.centerX,
       y: label.rectangle.centerY,
       width: label.width,
@@ -154,8 +160,8 @@ export class LabelLayer {
     const height = engine.getRenderHeight();
     const transform = this.scene.getTransformMatrix();
     const viewport = camera.viewport.toGlobal(width, height);
+    const elapsed = engine.getDeltaTime();
     const requests: LabelRequest[] = [];
-    const behind = new Set<string>();
     for (const [id, label] of this.labels) {
       const projected = Vector3.Project(
         label.spec.anchor.getAbsolutePosition(),
@@ -163,10 +169,7 @@ export class LabelLayer {
         transform,
         viewport,
       );
-      if (projected.z < 0 || projected.z > 1) {
-        behind.add(id);
-        continue;
-      }
+      if (projected.z < 0 || projected.z > 1) continue;
       requests.push({
         id,
         x: projected.x,
@@ -174,26 +177,22 @@ export class LabelLayer {
         width: label.width,
         height: label.height,
         priority: label.spec.priority,
-        required: label.spec.required,
-        ...(label.spec.maxShift === undefined
-          ? {}
-          : { maxShift: label.spec.maxShift }),
+        wasHidden: !label.shown,
       });
     }
-    const placements = new Map(
-      placeLabels(requests, { width, height }).map((placement) => [
-        placement.id,
-        placement,
-      ]),
+    const shown = new Set(
+      placeLabels(requests)
+        .filter((placement) => placement.visible)
+        .map((placement) => placement.id),
     );
     for (const [id, label] of this.labels) {
-      const placement = placements.get(id);
-      const visible = !behind.has(id) && placement?.visible === true;
-      label.rectangle.isVisible = visible;
-      if (placement) {
-        label.rectangle.linkOffsetXInPixels = placement.offsetX;
-        label.rectangle.linkOffsetYInPixels = placement.offsetY;
+      label.shown = shown.has(id);
+      const alpha = fadeAlpha(label.alpha, label.shown, elapsed);
+      if (alpha !== label.alpha) {
+        label.alpha = alpha;
+        label.rectangle.alpha = alpha;
       }
+      label.rectangle.isVisible = alpha > 0;
     }
   }
 }

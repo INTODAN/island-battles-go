@@ -38,7 +38,19 @@ export function describeTarget(
 }
 
 /**
- * Hover highlight and tooltip, double-click to focus a castle, and F to refit the board. Returns
+ * What a touch tap does to the tooltip: a tap on a castle or boat pins its tooltip, a tap
+ * elsewhere clears it, and anything that is not a touch (a mouse hovers instead) changes
+ * nothing, which is `undefined`.
+ */
+export function touchTapTarget(
+  pointerType: string,
+  picked: PickTarget | null,
+): PickTarget | null | undefined {
+  return pointerType === "touch" ? picked : undefined;
+}
+
+/**
+ * Hover highlight and tooltip (a tap on a touch screen), double-click to focus a castle, and F to refit the board. Returns
  * a function that removes the listeners.
  */
 export function installBoardControls(scene: Scene): () => void {
@@ -106,7 +118,18 @@ export function installBoardControls(scene: Scene): () => void {
   const pointerObserver = scene.onPointerObservable.add((info) => {
     const field = battlefieldOf(scene);
     if (!field) return;
-    if (info.type === PointerEventTypes.POINTERMOVE) {
+    if (info.type === PointerEventTypes.POINTERTAP) {
+      const tapped = touchTapTarget(
+        (info.event as PointerEvent).pointerType,
+        pickTargetAt(scene),
+      );
+      if (tapped === undefined) return;
+      hovered = tapped;
+      if (tapped) show(field, tapped);
+      else hide();
+    } else if (info.type === PointerEventTypes.POINTERMOVE) {
+      // A finger has no hover: its tooltip stays until the next tap.
+      if ((info.event as PointerEvent).pointerType === "touch") return;
       if (info.event.buttons !== 0) return hide();
       const target = pickTargetAt(scene);
       if (!target) return hide();
@@ -121,7 +144,9 @@ export function installBoardControls(scene: Scene): () => void {
       if (castle) focusCamera(scene, field.camera, castle);
     }
   });
-  const onLeave = () => hide();
+  const onLeave = (event: PointerEvent) => {
+    if (event.pointerType !== "touch") hide();
+  };
   canvas.addEventListener("pointerleave", onLeave);
   const onKey = (event: KeyboardEvent) => {
     if (

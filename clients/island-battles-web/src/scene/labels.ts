@@ -1,128 +1,67 @@
-// Label placement is pure, so it can be tested without a GPU: given where each label's anchor
-// is on the screen, it shifts labels so that none covers another.
+// Label placement is pure, so it can be tested without a GPU. Every label is pinned to its own
+// anchor and never moves; when two would overlap on the screen, the one with the lower priority
+// is hidden. It comes back only once it would be clear by a small margin, so a boat passing at
+// the edge of a label does not make it flicker.
 
 export interface LabelRequest {
   id: string;
-  /** The anchor's screen position in pixels. */
+  /** The anchor's screen position in pixels, which is the label's centre. */
   x: number;
   y: number;
   width: number;
   height: number;
-  /** Higher priorities are placed first and keep their spot. */
+  /** When two labels overlap, the one with the lower priority is hidden. */
   priority: number;
-  /** A label that is not required is hidden when it has no free spot. */
-  required: boolean;
-  /** The farthest, in pixels, the label may move from its anchor. */
-  maxShift?: number;
+  /** Whether the last call hid the label, so it needs the margin to come back. */
+  wasHidden?: boolean;
 }
 
 export interface LabelPlacement {
   id: string;
-  /** The offset from the anchor, in pixels, to the label's centre. */
-  offsetX: number;
-  offsetY: number;
   visible: boolean;
 }
 
-export interface Viewport {
-  width: number;
-  height: number;
-}
+/** A hidden label returns only when it is clear of the visible ones by this many pixels. */
+export const RETURN_MARGIN = 4;
+/** How long a label takes to fade out or in. */
+export const FADE_MILLISECONDS = 150;
 
-interface Box {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-const GAP = 3;
-
-function overlaps(left: Box, right: Box): boolean {
+function overlaps(left: LabelRequest, right: LabelRequest, margin: number) {
   return (
-    Math.abs(left.x - right.x) < (left.width + right.width) / 2 + GAP &&
-    Math.abs(left.y - right.y) < (left.height + right.height) / 2 + GAP
+    Math.abs(left.x - right.x) < (left.width + right.width) / 2 + margin &&
+    Math.abs(left.y - right.y) < (left.height + right.height) / 2 + margin
   );
 }
 
-/** Offsets to try, in order: in place, then above and below, then to the sides, then further out. */
-function candidates(width: number, height: number): [number, number][] {
-  const stepY = height + GAP;
-  const stepX = width + GAP;
-  const list: [number, number][] = [[0, 0]];
-  for (let ring = 1; ring <= 10; ring++) {
-    list.push([0, -ring * stepY], [0, ring * stepY]);
-    list.push(
-      [stepX * ring * 0.6, -ring * stepY * 0.5],
-      [-stepX * ring * 0.6, -ring * stepY * 0.5],
-    );
-    list.push(
-      [stepX * ring * 0.6, ring * stepY * 0.5],
-      [-stepX * ring * 0.6, ring * stepY * 0.5],
-    );
-    list.push([stepX * ring, 0], [-stepX * ring, 0]);
-  }
-  return list;
-}
-
+/** Which labels are shown. The result is in the order of `requests`. */
 export function placeLabels(
   requests: readonly LabelRequest[],
-  viewport: Viewport,
 ): LabelPlacement[] {
   const ordered = [...requests].sort(
     (left, right) =>
       right.priority - left.priority || left.id.localeCompare(right.id),
   );
-  const placed: Box[] = [];
-  const placements = new Map<string, LabelPlacement>();
+  const shown: LabelRequest[] = [];
+  const visibleIds = new Set<string>();
   for (const request of ordered) {
-    let chosen: LabelPlacement | null = null;
-    for (const [offsetX, offsetY] of candidates(
-      request.width,
-      request.height,
-    )) {
-      if (
-        Math.hypot(offsetX, offsetY) >
-        (request.maxShift ?? Number.POSITIVE_INFINITY)
-      ) {
-        continue;
-      }
-      const box = {
-        x: request.x + offsetX,
-        y: request.y + offsetY,
-        width: request.width,
-        height: request.height,
-      };
-      const inside =
-        box.x - box.width / 2 >= 0 &&
-        box.x + box.width / 2 <= viewport.width &&
-        box.y - box.height / 2 >= 0 &&
-        box.y + box.height / 2 <= viewport.height;
-      if (!inside || placed.some((other) => overlaps(box, other))) continue;
-      placed.push(box);
-      chosen = { id: request.id, offsetX, offsetY, visible: true };
-      break;
+    const margin = request.wasHidden ? RETURN_MARGIN : 0;
+    if (!shown.some((other) => overlaps(request, other, margin))) {
+      shown.push(request);
+      visibleIds.add(request.id);
     }
-    if (!chosen) {
-      // Nowhere free: a required label stays where it is, over the others; the rest hide.
-      chosen = {
-        id: request.id,
-        offsetX: 0,
-        offsetY: 0,
-        visible: request.required,
-      };
-      if (request.required) {
-        placed.push({
-          x: request.x,
-          y: request.y,
-          width: request.width,
-          height: request.height,
-        });
-      }
-    }
-    placements.set(request.id, chosen);
   }
-  return requests.map(
-    (request) => placements.get(request.id) as LabelPlacement,
-  );
+  return requests.map((request) => ({
+    id: request.id,
+    visible: visibleIds.has(request.id),
+  }));
+}
+
+/** The label's opacity after `elapsed` milliseconds of fading towards shown or hidden. */
+export function fadeAlpha(
+  alpha: number,
+  visible: boolean,
+  elapsed: number,
+): number {
+  const step = Math.max(0, elapsed) / FADE_MILLISECONDS;
+  return visible ? Math.min(1, alpha + step) : Math.max(0, alpha - step);
 }
