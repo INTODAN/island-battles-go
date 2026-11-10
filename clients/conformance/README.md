@@ -1,6 +1,6 @@
 # Player client conformance
 
-This suite verifies an Island Battles player client in any language. The client is driven through a small adapter process that speaks JSON Lines on stdin and stdout, so the tests never import client code. The [Python adapter](../island-battles-python/conformance/adapter.py) is the reference implementation.
+This suite verifies an Island Battles player client in any language. The client is driven through a small adapter process that speaks JSON Lines on stdin and stdout, so the tests never import client code. The [Python adapter](../island-battles-python/conformance/adapter.py) is the reference implementation. The [Go SDK's adapter](../island-battles-go/conformance/main.go) passes both tiers too.
 
 ## Writing a client
 
@@ -79,4 +79,6 @@ The live tier builds the backend and starts disposable PostgreSQL and Centrifugo
 ./scripts/test-client-conformance.sh "node my-adapter.mjs" # another client
 ```
 
-Set `ISLAND_BATTLES_CLIENT_COMMAND` to use another adapter with the offline command. The live tier needs Go, uv, Python 3.14 and Linux Docker or Podman, like the [lobby acceptance suite](../../lobby/integration/README.md).
+Set `ISLAND_BATTLES_CLIENT_COMMAND` to use another adapter with the offline command.
+
+The Go SDK runs with `ISLAND_BATTLES_CLIENT_COMMAND="go run ./clients/island-battles-go/conformance"` offline and `./scripts/test-client-conformance.sh "go -C $PWD run ./clients/island-battles-go/conformance"` live, from the repository root (the live runner starts the adapter in `lobby/`, so the command names the root with `-C`). A binary built once with `go build -o /tmp/adapter ./clients/island-battles-go/conformance` starts faster. Go's helpers take typed values, so its adapter reports an order whose values they can't take (a missing field, `1.5`, `"1"`, `true`, `-1`) as `invalid_argument` itself, and a command the SDK's `ValidateResult` rejects (`soldier_amount` 0, an unknown upgrade type) as `invalid_argument` too. `fail` panics: a Go panic is the raise that carries a traceback, which the client stores; an error a Go bot returns has none. The live tier needs Go, uv, Python 3.14 and Linux Docker or Podman, like the [lobby acceptance suite](../../lobby/integration/README.md).
