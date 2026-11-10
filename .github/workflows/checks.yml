@@ -129,10 +129,14 @@ jobs:
             lobby/go.sum
             clients/island-battles-go/go.sum
 
+      # Built first: the suite gives an adapter 20 seconds to answer, and
+      # `go run` on a cold cache spends longer than that downloading and
+      # compiling.
+      - name: Build the Go SDK's conformance adapter
+        run: go build -o "$RUNNER_TEMP/island-battles-go-conformance" ./clients/island-battles-go/conformance
+
       - name: Go SDK conformance (offline)
-        env:
-          ISLAND_BATTLES_CLIENT_COMMAND: go run ./clients/island-battles-go/conformance
-        run: uv run --project clients/conformance --locked pytest clients/conformance/tests/test_models.py
+        run: ISLAND_BATTLES_CLIENT_COMMAND="$RUNNER_TEMP/island-battles-go-conformance" uv run --project clients/conformance --locked pytest clients/conformance/tests/test_models.py
 
       # The bot template, as a player uses it: the locked SDK from PyPI.
       - name: Python bot template (published SDK)
