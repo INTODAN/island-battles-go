@@ -161,6 +161,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/lobby/v1/games/{game_key}/lobbies/{lobby_id}/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Change a lobby's settings
+         * @description Replaces the lobby's game_settings and teams, and returns the snapshot. Only the host can change them (otherwise not_host), and only while the lobby waits (otherwise phase_conflict). The body has the rules of a create request: from 2 to 16 teams with unique names (otherwise invalid_input), and an optional game_settings object that the game checks against the new teams (otherwise invalid_game_settings). The teams are rebuilt by position: the lobby's first team keeps its ID and takes the first name, and so on. New teams are added at the end. Teams beyond the new count are removed: a person on one stays in the lobby without a team, and a seat on one is removed, as removeLobbySeat removes it. Every person's ready is cleared, seats stay ready, and the lobby's capacity becomes the new number of teams. A change that would leave more members than teams, people and the seats that keep their team, fails with lobby_full and changes nothing. Settings and teams equal to the lobby's change nothing: the snapshot comes back with the same version and nobody's ready is cleared. Otherwise the change publishes lobby.changed.
+         */
+        put: operations["changeLobbySettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/lobby/v1/games/{game_key}/lobbies/{lobby_id}/start": {
         parameters: {
             query?: never;
@@ -272,7 +292,7 @@ export interface paths {
         put?: never;
         /**
          * Create a lobby
-         * @description Creates a lobby with its teams, from 2 to 16 with unique names. A team holds one member, a person or a seat, so the lobby holds as many members as it has teams; its capacity in the snapshot is that number. The optional game_settings object is checked by the game now; invalid settings fail with invalid_game_settings. The lobby stores the settings without reading them and returns them in every snapshot, including the started one. They can't change after creation. Repeating the same request_id and payload within the idempotency window, 24 hours by default, returns the committed snapshot. The lobby is deleted, in any phase, once nobody has been connected to it for an hour, and in any case a day after creation, unless its game sets other times.
+         * @description Creates a lobby with its teams, from 2 to 16 with unique names. A team holds one member, a person or a seat, so the lobby holds as many members as it has teams; its capacity in the snapshot is that number. The optional game_settings object is checked by the game now; invalid settings fail with invalid_game_settings. The lobby stores the settings without reading them and returns them in every snapshot, including the started one. The host can change them, with the teams, while the lobby waits (PUT …/settings). Repeating the same request_id and payload within the idempotency window, 24 hours by default, returns the committed snapshot. The lobby is deleted, in any phase, once nobody has been connected to it for an hour, and in any case a day after creation, unless its game sets other times.
          */
         post: operations["createLobby"];
         delete?: never;
@@ -367,6 +387,20 @@ export interface components {
              */
             team_id: string;
         };
+        ChangeSettingsBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/ChangeSettingsBody.json
+             */
+            readonly $schema?: string;
+            /** @description Settings for the game, as a JSON object that only the game reads. The game checks them when the lobby is created, and again when the host changes them while the lobby waits. The lobby returns them compacted with sorted keys, and omitted settings as an empty object. */
+            game_settings?: {
+                [key: string]: unknown;
+            };
+            /** @description The lobby's new teams, in order, with the rules of a create request. They replace the lobby's teams by position: the first keeps the lobby's first team and its ID and takes this name, and so on; teams beyond the lobby's are added, and the lobby's teams beyond these are removed. */
+            teams: components["schemas"]["TeamDefinition"][] | null;
+        };
         ConnectionToken: {
             /**
              * Format: uri
@@ -398,7 +432,7 @@ export interface components {
             /** Format: uuid */
             client_instance_id: string;
             game_key: string;
-            /** @description Settings for the game, as a JSON object that only the game reads. The game checks them when the lobby is created, and they can't change afterwards. The lobby returns them compacted with sorted keys, and omitted settings as an empty object. */
+            /** @description Settings for the game, as a JSON object that only the game reads. The game checks them when the lobby is created, and again when the host changes them while the lobby waits. The lobby returns them compacted with sorted keys, and omitted settings as an empty object. */
             game_settings?: {
                 [key: string]: unknown;
             };
@@ -526,7 +560,7 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             game_key: string;
-            /** @description Settings for the game, as a JSON object that only the game reads. The game checks them when the lobby is created, and they can't change afterwards. The lobby returns them compacted with sorted keys, and omitted settings as an empty object. */
+            /** @description Settings for the game, as a JSON object that only the game reads. The game checks them when the lobby is created, and again when the host changes them while the lobby waits. The lobby returns them compacted with sorted keys, and omitted settings as an empty object. */
             game_settings: {
                 [key: string]: unknown;
             };
@@ -1341,6 +1375,96 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Snapshot"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    changeLobbySettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_key: string;
+                lobby_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangeSettingsBody"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {

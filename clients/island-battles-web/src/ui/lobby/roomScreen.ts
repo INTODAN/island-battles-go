@@ -9,10 +9,17 @@ import {
   retryTransport,
 } from "./actions";
 import { mountBotPicker } from "./botPicker";
+import {
+  changeSettingsBody,
+  lobbyMapSettings,
+  validateMapSettings,
+} from "./form";
+import { type MapFields, mountMapFields } from "./mapFields";
 import type { Screen } from "./nameScreen";
 import { describeProblem, type ProblemContext } from "./problems";
 import {
   buildRoom,
+  canChangeSettings,
   countPeople,
   describeBot,
   describeSettings,
@@ -110,6 +117,97 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
     "Leave lobby",
   );
   const botError = h("p", { class: "field-error", attrs: { role: "alert" } });
+
+  // --- Change map: the host's map and turn limit, while the lobby waits ---
+  const changeButton = h(
+    "button",
+    { type: "button", class: "secondary small", hidden: true },
+    "Change map",
+  );
+  const changePanel = h("section", {
+    class: "card change-map",
+    hidden: true,
+    attrs: { "aria-label": "Change map" },
+  });
+  const changeError = h("p", {
+    class: "field-error",
+    attrs: { role: "alert" },
+  });
+  const saveChange = h("button", { type: "submit", class: "primary" }, "Save");
+  const cancelChange = h(
+    "button",
+    { type: "button", class: "secondary" },
+    "Cancel",
+  );
+  /** The open form's fields, which start from the lobby's settings when it opens. */
+  let changeFields: MapFields | null = null;
+
+  function openChange(): void {
+    const snapshot = realtime.lobby.get();
+    if (!snapshot || changeFields) return;
+    changeFields = mountMapFields({
+      actions,
+      idPrefix: "change-",
+      initial: lobbyMapSettings(
+        snapshot.lobby.game_settings,
+        snapshot.teams?.length ?? 2,
+      ),
+    });
+    changeError.textContent = "";
+    const form = h(
+      "form",
+      { noValidate: true },
+      h("h2", {}, "Change map"),
+      ...changeFields.nodes,
+      h(
+        "p",
+        { class: "hint" },
+        "Saving clears everyone's ready. With fewer teams, the players of the removed teams need a new team, and their bots are removed.",
+      ),
+      changeError,
+      h("div", { class: "actions" }, saveChange, cancelChange),
+    );
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      void save();
+    });
+    changePanel.replaceChildren(form);
+    changePanel.hidden = false;
+    render();
+  }
+
+  function closeChange(): void {
+    changeFields?.dispose();
+    changeFields = null;
+    changePanel.replaceChildren();
+    changePanel.hidden = true;
+  }
+
+  async function save(): Promise<void> {
+    const fields = changeFields;
+    if (!fields || busy) return;
+    changeError.textContent = "";
+    await fields.settled();
+    const result = validateMapSettings(fields.values(), fields.templates());
+    fields.showErrors(result.ok ? {} : result.errors);
+    if (!result.ok || changeFields !== fields) return;
+    busy = true;
+    render();
+    try {
+      await actions.changeSettings(changeSettingsBody(result));
+      if (changeFields === fields) closeChange();
+    } catch (cause) {
+      changeError.textContent = handleProblem(cause, "settings").message;
+    } finally {
+      busy = false;
+      if (!disposed) render();
+    }
+  }
+  changeButton.addEventListener("click", openChange);
+  cancelChange.addEventListener("click", () => {
+    closeChange();
+    render();
+  });
 
   const picker = mountBotPicker({
     actions,
@@ -446,6 +544,12 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
       snapshot.lobby.game_settings,
       templates,
     );
+    const changing = canChangeSettings(model);
+    if (!changing && changeFields) closeChange();
+    changeButton.hidden = !changing || changeFields !== null;
+    changeButton.disabled = busy;
+    saveChange.disabled = busy;
+    cancelChange.disabled = busy;
     codeText.textContent = snapshot.lobby.join_code;
     const state = realtime.connection.get();
     connection.textContent =
@@ -573,7 +677,7 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
     h(
       "header",
       { class: "room-head panel" },
-      h("div", { class: "room-title" }, title, settingsLine),
+      h("div", { class: "room-title" }, title, settingsLine, changeButton),
       h(
         "div",
         { class: "invite" },
@@ -586,7 +690,7 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
     h(
       "div",
       { class: "room-body" },
-      h("div", { class: "room-main" }, teamsEl, unassignedEl),
+      h("div", { class: "room-main" }, changePanel, teamsEl, unassignedEl),
       h(
         "div",
         { class: "room-side" },
@@ -613,6 +717,7 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
       window.removeEventListener("focus", onFocus);
       picker.dispose();
       watchersPanel.dispose();
+      closeChange();
     },
   };
 }

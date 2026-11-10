@@ -3,6 +3,7 @@ import type { Snapshot } from "../../realtime";
 import type { LobbyBots } from "./actions";
 import {
   buildRoom,
+  canChangeSettings,
   choiceFromValue,
   choiceValue,
   describeBot,
@@ -104,6 +105,56 @@ describe("the room model", () => {
     expect(room.isHost).toBe(true);
     expect(room.yourTeamId).toBe("t-blue");
     expect(buildRoom(snapshot, null, "p2").isHost).toBe(false);
+  });
+});
+
+describe("a change of the map", () => {
+  test("only the host of a waiting lobby can change it", () => {
+    expect(canChangeSettings(buildRoom(snapshot, bots, "p1"))).toBe(true);
+    expect(canChangeSettings(buildRoom(snapshot, bots, "p2"))).toBe(false);
+    const started = {
+      ...snapshot,
+      lobby: { ...snapshot.lobby, phase: "started" },
+    } as Snapshot;
+    expect(canChangeSettings(buildRoom(started, bots, "p1"))).toBe(false);
+  });
+
+  test("the teams, seats and bots follow the rebuilt teams", () => {
+    // A two-team map: Green is gone, so its seat was removed and the person
+    // who was on it has no team; the first two teams kept their IDs.
+    const changed = {
+      ...snapshot,
+      lobby: {
+        ...snapshot.lobby,
+        version: 4,
+        game_settings: { map_template_id: 4 },
+      },
+      teams: [
+        { id: "t-blue", name: "Blue", order: 1 },
+        { id: "t-red", name: "Red", order: 2 },
+      ],
+      members: [
+        member("p1", "t-blue"),
+        member("p2", null),
+        member("p5", null, {
+          active: false,
+          kind: "seat",
+          seat_settings: { bot_level: 2 },
+        }),
+      ],
+    } as unknown as Snapshot;
+    const room = buildRoom(changed, bots, "p1");
+    expect(room.teams.map((team) => [team.id, team.colour])).toEqual([
+      ["t-blue", 1],
+      ["t-red", 2],
+    ]);
+    expect(room.teams[1]?.members).toEqual([]);
+    expect(
+      room.unassigned.map((row) => [row.name, row.ready, row.bot?.kind]),
+    ).toEqual([["P2", false, "default"]]);
+    expect(startBlocker(room, { every_team_needs_member: true })).toBe(
+      "Everyone needs a team.",
+    );
   });
 });
 

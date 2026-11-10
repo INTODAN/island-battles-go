@@ -5,6 +5,8 @@ export type MapTemplateSummary =
   GameComponents["schemas"]["MapTemplateSummary"];
 export type MapTemplate = GameComponents["schemas"]["MapTemplate"];
 export type CreateLobbyBody = LobbyComponents["schemas"]["CreateLobbyBody"];
+export type ChangeSettingsBody =
+  LobbyComponents["schemas"]["ChangeSettingsBody"];
 
 export const gameKey = "island-battles";
 
@@ -49,12 +51,21 @@ export type MapChoice =
   /** A map file's parsed JSON once `POST /map/validate` accepted it, or null with the problem to show. */
   | { kind: "file"; map: MapTemplate | null; error?: string };
 
-export interface CreateFormValues {
-  lobbyName: string;
+/** The map and turn limit fields, which the create form and the room's Change map form share. */
+export interface MapSettingsValues {
   teamCount: number;
   map: MapChoice;
   /** Seconds, or null for no limit. */
   turnTimeoutSeconds: number | null;
+  /**
+   * The lobby's current turn limit when the form changes a lobby's settings:
+   * accepted even when the list lacks it, as one set through the API may be.
+   */
+  currentTurnTimeoutSeconds?: number | null;
+}
+
+export interface CreateFormValues extends MapSettingsValues {
+  lobbyName: string;
 }
 
 export type FormField = "lobbyName" | "teamCount" | "map" | "turnTimeout";
@@ -127,7 +138,51 @@ export function validateCreateForm(
   else if ([...lobbyName].length > maxNameLength) {
     errors.lobbyName = `Use at most ${maxNameLength} characters.`;
   }
+  const settings = validateMapSettings(values, templates);
+  if (!settings.ok)
+    return { ok: false, errors: { ...errors, ...settings.errors } };
+  if (Object.keys(errors).length > 0) return { ok: false, errors };
+  return settings;
+}
 
+/**
+ * The map and turn limit fields' values for a lobby's `game_settings` and
+ * number of teams, which the room's Change map form starts from.
+ */
+export function lobbyMapSettings(
+  settings: Record<string, unknown> | undefined,
+  teamCount: number,
+): MapSettingsValues {
+  const seconds =
+    settings && "turn_timeout_seconds" in settings
+      ? settings.turn_timeout_seconds
+      : defaultTurnTimeout;
+  const turnTimeoutSeconds =
+    seconds === null
+      ? null
+      : typeof seconds === "number"
+        ? seconds
+        : defaultTurnTimeout;
+  let map: MapChoice = { kind: "generated" };
+  if (typeof settings?.map === "object" && settings.map !== null) {
+    map = { kind: "file", map: settings.map as MapTemplate };
+  } else if (typeof settings?.map_template_id === "number") {
+    map = { kind: "template", templateId: settings.map_template_id };
+  }
+  return {
+    teamCount,
+    map,
+    turnTimeoutSeconds,
+    currentTurnTimeoutSeconds: turnTimeoutSeconds,
+  };
+}
+
+/** Checks the map and turn limit fields, and builds the teams and `game_settings` they choose. */
+export function validateMapSettings(
+  values: MapSettingsValues,
+  templates: MapTemplateSummary[],
+): FormResult {
+  const errors: FormErrors = {};
   const fixed = fixedTeamCount(values.map, templates);
   const teamCount = fixed ?? values.teamCount;
   const choice = values.map;
@@ -156,6 +211,7 @@ export function validateCreateForm(
   }
   if (
     values.turnTimeoutSeconds !== null &&
+    values.turnTimeoutSeconds !== values.currentTurnTimeoutSeconds &&
     !turnTimeouts.some((option) => option.seconds === values.turnTimeoutSeconds)
   ) {
     errors.turnTimeout = "Pick one of the listed turn limits.";
@@ -177,6 +233,13 @@ export function validateCreateForm(
     })),
     gameSettings,
   };
+}
+
+/** The body of `PUT …/settings` for the fields' checked choice. */
+export function changeSettingsBody(
+  result: Extract<FormResult, { ok: true }>,
+): ChangeSettingsBody {
+  return { teams: result.teams, game_settings: result.gameSettings };
 }
 
 /** The 8-character join code as the server reads it: trimmed and upper-cased. */

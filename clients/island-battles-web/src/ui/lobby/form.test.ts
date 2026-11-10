@@ -2,8 +2,10 @@ import { describe, expect, test } from "bun:test";
 import {
   type CreateFormValues,
   CreateRequests,
+  changeSettingsBody,
   describeTurnTimeout,
   fixedTeamCount,
+  lobbyMapSettings,
   type MapTemplate,
   type MapTemplateSummary,
   normalizeJoinCode,
@@ -12,6 +14,7 @@ import {
   validateCreateForm,
   validateDisplayName,
   validateJoinCode,
+  validateMapSettings,
 } from "./form";
 
 const templates: MapTemplateSummary[] = [
@@ -217,6 +220,79 @@ describe("the create form", () => {
       "Teal",
       "Team 7",
     ]);
+  });
+});
+
+describe("the room's Change map form", () => {
+  test("starts from the lobby's map, turn limit and teams", () => {
+    expect(lobbyMapSettings({}, 3)).toEqual({
+      teamCount: 3,
+      map: { kind: "generated" },
+      turnTimeoutSeconds: 30,
+      currentTurnTimeoutSeconds: 30,
+    });
+    expect(
+      lobbyMapSettings({ map_template_id: 4, turn_timeout_seconds: null }, 3),
+    ).toMatchObject({
+      map: { kind: "template", templateId: 4 },
+      turnTimeoutSeconds: null,
+    });
+    const map = { map_name: "Mine", player_amount: 4 };
+    expect(lobbyMapSettings({ map, turn_timeout_seconds: 120 }, 4)).toEqual({
+      teamCount: 4,
+      map: { kind: "file", map: map as unknown as MapTemplate },
+      turnTimeoutSeconds: 120,
+      currentTurnTimeoutSeconds: 120,
+    });
+  });
+
+  test("builds the request body: the map's teams and the settings", () => {
+    const result = validateMapSettings(
+      {
+        teamCount: 2,
+        map: { kind: "template", templateId: 4 },
+        turnTimeoutSeconds: 600,
+      },
+      templates,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(changeSettingsBody(result)).toEqual({
+        teams: [{ name: "Blue" }, { name: "Red" }, { name: "Green" }],
+        game_settings: { map_template_id: 4, turn_timeout_seconds: 600 },
+      });
+    }
+    const generated = validateMapSettings(
+      { teamCount: 2, map: { kind: "generated" }, turnTimeoutSeconds: null },
+      templates,
+    );
+    if (!generated.ok) throw new Error("the generated map was refused");
+    expect(changeSettingsBody(generated)).toEqual({
+      teams: [{ name: "Blue" }, { name: "Red" }],
+      game_settings: { turn_timeout_seconds: null },
+    });
+  });
+
+  test("keeps a turn limit the list lacks only when it is the lobby's own", () => {
+    const values = lobbyMapSettings({ turn_timeout_seconds: 45 }, 2);
+    expect(validateMapSettings(values, templates)).toMatchObject({
+      ok: true,
+      gameSettings: { turn_timeout_seconds: 45 },
+    });
+    expect(
+      validateMapSettings({ ...values, turnTimeoutSeconds: 46 }, templates),
+    ).toMatchObject({ ok: false, errors: { turnTimeout: expect.any(String) } });
+  });
+
+  test("refuses a lobby's default map that is no longer listed", () => {
+    const result = validateMapSettings(
+      lobbyMapSettings({ map_template_id: 77 }, 2),
+      templates,
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      errors: { map: expect.any(String) },
+    });
   });
 });
 

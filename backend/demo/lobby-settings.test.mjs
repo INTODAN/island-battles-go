@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { builderWindowAction, describeSettings, describeTurnTimeout, loadDefaultMaps, mapFromBuilderMessage, readMapFile, teamNames, turnTimeouts } from "./lobby-settings.mjs";
+import { builderWindowAction, changeSettingsLabel, describeSettings, describeTurnTimeout, loadDefaultMaps, mapFromBuilderMessage, readMapFile, settingsSelection, teamNames, turnTimeouts } from "./lobby-settings.mjs";
 
 test("a map's teams are named after the board's team colours", () => {
   assert.deepEqual(teamNames(2), ["Blue", "Red"]);
@@ -76,4 +76,15 @@ test("a builder window that is already open is kept, and anything else is sent t
   assert.equal(builderWindowAction(at("https://other.example", "/map/builder/"), origin), "navigate");
   const crossOrigin = { get location() { throw new DOMException("blocked", "SecurityError"); } };
   assert.equal(builderWindowAction(crossOrigin, origin), "navigate");
+});
+
+test("the room's form shows the lobby's current map and turn timeout", () => {
+  assert.deepEqual(settingsSelection({}), { map: "", file: null, timeout: "30" });
+  assert.deepEqual(settingsSelection(null), { map: "", file: null, timeout: "30" });
+  assert.deepEqual(settingsSelection({ map_template_id: 4, turn_timeout_seconds: null }), { map: "template:4", file: null, timeout: "none" });
+  const map = { map_name: "Loaded", player_amount: 3 };
+  assert.deepEqual(settingsSelection({ map, turn_timeout_seconds: 120 }), { map: "file", file: map, timeout: "120" });
+  // A timeout the form doesn't offer, set through the API, is still shown.
+  assert.equal(settingsSelection({ turn_timeout_seconds: 45 }).timeout, "45");
+  assert.equal(changeSettingsLabel, "Change map");
 });
