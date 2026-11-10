@@ -650,3 +650,17 @@ select:focus-visible {
 .demo-link[hidden] {
   display: none;
 }
+
+/* Change map: the host's map and turn limit in the room, while it waits */
+
+.room-title > button {
+  margin-top: 8px;
+}
+
+.change-map[hidden] {
+  display: none;
+}
+
+.change-map h2 {
+  margin: 0 0 4px;
+}

@@ -120,6 +120,24 @@ async function describeMapChoice(settings) {
   return "Map: generated for the players";
 }
 
+// The status line's start for a map file, by where it came from.
+const fileSourceLabels = { file: "", builder: "From the map builder: ", lobby: "The lobby’s map file: " };
+
+// The label of the room's control that opens this form for a waiting lobby.
+export const changeSettingsLabel = "Change map";
+
+// settingsSelection reads a lobby's game_settings as the form shows them: the
+// map select's value ("" for the generated map, "template:ID" or "file"), the
+// map file the settings carry, and the turn timeout select's value ("none" for
+// no limit).
+export function settingsSelection(settings) {
+  const seconds = settings && "turn_timeout_seconds" in settings ? settings.turn_timeout_seconds : defaultTurnTimeout;
+  let map = "";
+  if (settings?.map) map = "file";
+  else if (settings?.map_template_id) map = `template:${settings.map_template_id}`;
+  return { map, file: settings?.map || null, timeout: seconds === null ? "none" : String(seconds) };
+}
+
 function node(tag, properties = {}, ...children) {
   const element = Object.assign(document.createElement(tag), properties);
   element.append(...children);
@@ -128,34 +146,68 @@ function node(tag, properties = {}, ...children) {
 
 // The create form's map and turn timeout controls. The lobby page constructs
 // it with a container for its controls and an onChange callback, and calls
-// choice() when the host creates a lobby.
+// choice() when the host creates a lobby. The room's form for changing a
+// waiting lobby's settings is the same, constructed with current, the lobby's
+// game_settings, which it shows as chosen. destroy() stops a form that the
+// page removes from listening to the map builder.
 export class SettingsForm {
-  constructor({ container, onChange = () => {} }) {
+  constructor({ container, onChange = () => {}, current = null }) {
     this.onChange = onChange;
     this.maps = [];
     this.file = null;
     this.fileError = "";
-    this.fileFromBuilder = false;
+    // Where the loaded map file came from: "file", "builder", or "lobby" for
+    // the map file of the lobby's current settings.
+    this.fileSource = "file";
     this.builder = null;
     this.mapsError = "";
-    this.select = node("select", { id: "map-choice" },
+    // The default map of the lobby's current settings, as a select value,
+    // until the default maps load and the select can show it.
+    this.pendingTemplate = "";
+    this.listening = new AbortController();
+    this.select = node("select", {},
       new Option(`Generated map · ${generatedTeams} teams`, ""), new Option("Load a map file…", "file"));
     this.fileInput = node("input", { type: "file", accept: ".json,application/json", hidden: true });
     this.fileInput.setAttribute("aria-label", "Map file");
     this.status = node("p", { className: "hint" });
     this.status.setAttribute("role", "status");
     this.builderButton = node("button", { type: "button", className: "secondary" }, "Build a map…");
-    this.timeout = node("select", { id: "turn-timeout" },
+    this.timeout = node("select", {},
       ...turnTimeouts.map(({ seconds, label }) => new Option(label, seconds === null ? "none" : String(seconds), false, seconds === defaultTurnTimeout)));
     container.append(node("label", {}, "Map", this.select), this.fileInput, this.builderButton, this.status,
       node("label", {}, "Turn timeout", this.timeout),
       node("p", { className: "hint" }, "A team whose player doesn’t finish a turn in time loses the game."));
     this.builderButton.addEventListener("click", () => this.openBuilder());
-    window.addEventListener("message", (event) => this.receive(event));
-    this.select.addEventListener("change", () => this.update());
+    window.addEventListener("message", (event) => this.receive(event), { signal: this.listening.signal });
+    this.select.addEventListener("change", () => {
+      this.pendingTemplate = "";
+      this.update();
+    });
     this.fileInput.addEventListener("change", () => this.readFile());
+    if (current) this.showCurrent(current);
     this.update();
     this.loadMaps();
+  }
+
+  destroy() {
+    this.listening.abort();
+  }
+
+  // showCurrent selects the map and turn timeout of a lobby's settings. A
+  // default map is selected once the default maps load.
+  showCurrent(settings) {
+    const selection = settingsSelection(settings);
+    if (![...this.timeout.options].some((option) => option.value === selection.timeout)) {
+      this.timeout.append(new Option(`${selection.timeout} s`, selection.timeout));
+    }
+    this.timeout.value = selection.timeout;
+    if (selection.file) {
+      this.file = selection.file;
+      this.fileSource = "lobby";
+      this.select.value = "file";
+    } else {
+      this.pendingTemplate = selection.map;
+    }
   }
 
   async loadMaps() {
@@ -168,6 +220,11 @@ export class SettingsForm {
     }
     const options = this.maps.map((map) => new Option(describeMap(map.map_name, map.team_count, map.plane_size_x, map.plane_size_y), `template:${map.map_template_id}`));
     this.select.insertBefore(node("optgroup", { label: "Default maps" }, ...options), this.select.options[1]);
+    if (this.pendingTemplate) {
+      if (options.some((option) => option.value === this.pendingTemplate)) this.select.value = this.pendingTemplate;
+      else this.mapsError = "The lobby’s default map is no longer offered. Choose another map.";
+      this.pendingTemplate = "";
+    }
     this.update();
   }
 
@@ -202,16 +259,17 @@ export class SettingsForm {
     try {
       map = mapFromBuilderMessage(event, { origin: location.origin, builder: this.builder });
     } catch (error) {
-      this.chooseFile(null, error.message, false);
+      this.chooseFile(null, error.message, "file");
       return;
     }
-    if (map) this.chooseFile(map, "", true);
+    if (map) this.chooseFile(map, "", "builder");
   }
 
-  chooseFile(map, error, fromBuilder) {
+  chooseFile(map, error, source) {
     this.file = map;
     this.fileError = error;
-    this.fileFromBuilder = fromBuilder;
+    this.fileSource = source;
+    this.pendingTemplate = "";
     this.fileInput.value = "";
     this.select.value = "file";
     this.update();
@@ -221,7 +279,7 @@ export class SettingsForm {
     const [file] = this.fileInput.files;
     this.file = null;
     this.fileError = "";
-    this.fileFromBuilder = false;
+    this.fileSource = "file";
     if (file) {
       try { this.file = readMapFile(await file.text()); } catch (error) { this.fileError = error.message; }
     }
@@ -233,8 +291,10 @@ export class SettingsForm {
     this.fileInput.hidden = !loading;
     if (loading) {
       this.status.textContent = this.fileError || (this.file
-        ? `${this.fileFromBuilder ? "From the map builder: " : ""}${describeMap(this.file.map_name, this.file.player_amount, this.file.plane_size_x, this.file.plane_size_y)}. Teams: ${teamNames(this.file.player_amount).join(", ")}.`
+        ? `${fileSourceLabels[this.fileSource]}${describeMap(this.file.map_name, this.file.player_amount, this.file.plane_size_x, this.file.plane_size_y)}. Teams: ${teamNames(this.file.player_amount).join(", ")}.`
         : "Choose a map file made with the map builder.");
+    } else if (this.pendingTemplate) {
+      this.status.textContent = this.mapsError || "Loading the lobby’s default map…";
     } else {
       const map = this.select.value && this.chosenDefaultMap();
       const teams = `Teams: ${teamNames(map ? map.team_count : generatedTeams).join(", ")}.`;
@@ -252,6 +312,9 @@ export class SettingsForm {
   // the lobby's teams, so it keeps the two teams of a playground lobby.
   // Throws when the choice is not complete.
   choice() {
+    if (this.pendingTemplate) {
+      throw new Error(this.mapsError ? "Could not load the default maps. Pick another map, or reload the page." : "The default maps are still loading. Try again in a moment.");
+    }
     const timeout = { turn_timeout_seconds: this.timeout.value === "none" ? null : Number(this.timeout.value) };
     if (this.select.value === "file") {
       if (!this.file) throw new Error(this.fileError || "Choose a map file to load, or pick another map.");

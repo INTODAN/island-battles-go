@@ -20,7 +20,8 @@ export type ProblemContext =
   | "bot"
   | "seat"
   | "create"
-  | "watch";
+  | "watch"
+  | "settings";
 
 const isBotNotChosen = (error: ApiError) =>
   error.problemType?.endsWith(":bot-not-chosen") === true;
@@ -52,6 +53,15 @@ const seatSentences: Record<string, string> = {
   invalid_seat_settings: "That bot level was refused. Choose another level.",
   idempotency_conflict:
     "The lobby changed while that bot was being added. Try again.",
+};
+
+/** The sentences for the host's change of the map and turn limit. */
+const settingsSentences: Record<string, string> = {
+  not_host: "Only the host can change the map.",
+  phase_conflict:
+    "The game has already started, so the map can't change any more.",
+  lobby_full:
+    "That map has fewer teams than the lobby has players and bots. Remove a bot, or pick a map with more teams.",
 };
 
 const botNotChosen =
@@ -120,7 +130,9 @@ export function describeProblem(
       ? undefined
       : context === "seat"
         ? (seatSentences[code] ?? sentences[code])
-        : sentences[code];
+        : context === "settings"
+          ? (settingsSentences[code] ?? sentences[code])
+          : sentences[code];
   if (known) {
     shown.message = known;
     return shown;

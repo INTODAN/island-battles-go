@@ -158,6 +158,11 @@ export function buildRoom(
   };
 }
 
+/** Only the host changes the map and turn limit, and only while the lobby waits. */
+export function canChangeSettings(room: RoomModel): boolean {
+  return room.isHost && room.phase === "waiting";
+}
+
 /**
  * The first condition the server would refuse a start for, as one sentence,
  * or null when the lobby can start. Checked in the server's order of concern;

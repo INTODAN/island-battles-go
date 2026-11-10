@@ -1,25 +1,14 @@
 import { ApiError } from "../../api/errors";
 import { h } from "../dom";
-import type { LobbyActions, MapTemplateSummary } from "./actions";
+import type { LobbyActions } from "./actions";
 import {
-  type CreateFormValues,
   CreateRequests,
-  defaultTurnTimeout,
-  type FormErrors,
-  fixedTeamCount,
-  type MapChoice,
-  type MapTemplate,
   maxNameLength,
-  maxTeams,
-  minTeams,
   normalizeJoinCode,
-  readMapFile,
-  teamName,
-  turnTimeouts,
   validateCreateForm,
   validateJoinCode,
 } from "./form";
-import { createMapBuilderLink, mapBuilderAvailable } from "./mapBuilder";
+import { mountMapFields } from "./mapFields";
 import type { Screen } from "./nameScreen";
 import { describeProblem } from "./problems";
 
@@ -40,19 +29,10 @@ export interface MenuScreenOptions {
   newId(): string;
 }
 
-interface FileState {
-  name: string;
-  map: MapTemplate | null;
-  error: string;
-  checking: Promise<void> | null;
-}
-
 /** Screen 2: create a lobby or join one by its code. */
 export function mountMenuScreen(options: MenuScreenOptions): Screen {
   const { actions } = options;
   let disposed = false;
-  let templates: MapTemplateSummary[] = [];
-  let file: FileState | null = null;
   const requests = new CreateRequests(options.newId);
 
   // --- Join ---
@@ -169,52 +149,11 @@ export function mountMenuScreen(options: MenuScreenOptions): Screen {
     maxLength: maxNameLength,
     value: `${options.playerName}'s lobby`,
   });
-  const teamCount = h("input", {
-    id: "team-count",
-    type: "number",
-    min: String(minTeams),
-    max: String(maxTeams),
-    value: "2",
+  const mapFields = mountMapFields({ actions });
+  const lobbyNameError = h("p", {
+    class: "field-error",
+    attrs: { role: "alert", "data-field": "lobbyName" },
   });
-  const mapSelect = h(
-    "select",
-    { id: "map-choice" },
-    new Option("Generated map", "generated"),
-    new Option("Load a map file…", "file"),
-    ...(mapBuilderAvailable ? [new Option("Build a map…", "builder")] : []),
-  );
-  const mapFile = h("input", {
-    id: "map-file",
-    type: "file",
-    accept: ".json,application/json",
-    hidden: true,
-  });
-  mapFile.setAttribute("aria-label", "Map file");
-  const mapStatus = h("p", { class: "hint", attrs: { role: "status" } });
-  const timeoutSelect = h(
-    "select",
-    { id: "turn-timeout" },
-    ...turnTimeouts.map(
-      (option) =>
-        new Option(
-          option.label,
-          option.seconds === null ? "none" : String(option.seconds),
-          false,
-          option.seconds === defaultTurnTimeout,
-        ),
-    ),
-  );
-  const errorOf = (field: string) =>
-    h("p", {
-      class: "field-error",
-      attrs: { role: "alert", "data-field": field },
-    });
-  const errors = {
-    lobbyName: errorOf("lobbyName"),
-    teamCount: errorOf("teamCount"),
-    map: errorOf("map"),
-    turnTimeout: errorOf("turnTimeout"),
-  };
   const createError = h("p", {
     class: "field-error",
     attrs: { role: "alert" },
@@ -230,182 +169,23 @@ export function mountMenuScreen(options: MenuScreenOptions): Screen {
     h("h2", {}, "Create a lobby"),
     h("label", { htmlFor: "lobby-name" }, "Lobby name"),
     lobbyName,
-    errors.lobbyName,
-    h("label", { htmlFor: "team-count" }, "Teams"),
-    teamCount,
-    h("p", { class: "hint" }, "One player or bot per team."),
-    errors.teamCount,
-    h("label", { htmlFor: "map-choice" }, "Map"),
-    mapSelect,
-    mapFile,
-    mapStatus,
-    errors.map,
-    h("label", { htmlFor: "turn-timeout" }, "Turn limit"),
-    timeoutSelect,
-    errors.turnTimeout,
+    lobbyNameError,
+    ...mapFields.nodes,
     createError,
     h("div", { class: "actions" }, createButton),
   );
 
-  function mapChoice(): MapChoice {
-    if (mapSelect.value === "file" || mapSelect.value === "builder") {
-      return {
-        kind: "file",
-        map: file?.map ?? null,
-        ...(file?.error ? { error: file.error } : {}),
-      };
-    }
-    if (mapSelect.value.startsWith("template:")) {
-      return { kind: "template", templateId: Number(mapSelect.value.slice(9)) };
-    }
-    return { kind: "generated" };
-  }
-
-  function values(): CreateFormValues {
-    return {
-      lobbyName: lobbyName.value,
-      teamCount: Number(teamCount.value),
-      map: mapChoice(),
-      turnTimeoutSeconds:
-        timeoutSelect.value === "none" ? null : Number(timeoutSelect.value),
-    };
-  }
-
-  function showErrors(found: FormErrors): void {
-    for (const [field, node] of Object.entries(errors)) {
-      node.textContent = found[field as keyof FormErrors] ?? "";
-    }
-  }
-
-  /** Keeps the team count field and the map's note in step with the map choice. */
-  function refreshMap(): void {
-    const choice = mapChoice();
-    mapFile.hidden = mapSelect.value !== "file";
-    const fixed = fixedTeamCount(choice, templates);
-    teamCount.disabled = fixed !== null;
-    if (fixed !== null) teamCount.value = String(fixed);
-    const count = fixed ?? (Number(teamCount.value) || 0);
-    const names =
-      count >= minTeams && count <= maxTeams
-        ? Array.from({ length: count }, (_, index) => teamName(index + 1)).join(
-            ", ",
-          )
-        : "";
-    if (choice.kind === "file") {
-      mapStatus.textContent = file?.checking
-        ? "Checking the map file…"
-        : file
-          ? file.error ||
-            `${file.name}: ${file.map?.map_name}. Teams: ${names}.`
-          : mapSelect.value === "builder"
-            ? "Build a map in the new tab, then press Use in lobby there."
-            : "Choose a map file made with the map builder.";
-    } else {
-      mapStatus.textContent = names ? `Teams: ${names}.` : "";
-    }
-  }
-
-  // The map builder: its "Use in lobby" map is taken as if it had been loaded from a file.
-  const mapBuilder = createMapBuilderLink({
-    onMapText(text) {
-      mapSelect.value = "file";
-      mapFile.value = "";
-      errors.map.textContent = "";
-      checkMapFile("From the map builder", async () => text);
-    },
-    onProblem(message) {
-      file = { name: "", map: null, error: message, checking: null };
-      mapSelect.value = "file";
-      refreshMap();
-    },
-  });
-
-  mapSelect.addEventListener("change", () => {
-    errors.map.textContent = "";
-    if (mapSelect.value === "builder") mapBuilder.open();
-    refreshMap();
-  });
-  teamCount.addEventListener("input", refreshMap);
-  mapFile.addEventListener("change", () => {
-    const [chosen] = Array.from(mapFile.files ?? []);
-    file = null;
-    errors.map.textContent = "";
-    if (!chosen) {
-      refreshMap();
-      return;
-    }
-    checkMapFile(chosen.name, () => chosen.text());
-  });
-
-  /** Has the server check a map's text; the checked map is what Create sends. */
-  function checkMapFile(name: string, text: () => Promise<string>): void {
-    const state: FileState = { name, map: null, error: "", checking: null };
-    file = state;
-    state.checking = (async () => {
-      try {
-        const map = readMapFile(await text());
-        const verdict = await actions.validateMap(map);
-        if (file !== state) return;
-        if (verdict.valid) state.map = map;
-        else {
-          const first = verdict.errors
-            .slice(0, 3)
-            .map((item) =>
-              item.location
-                ? `${item.location}: ${item.message}`
-                : item.message,
-            )
-            .join(" ");
-          state.error =
-            `The server did not accept this map file. ${first}`.trim();
-        }
-      } catch (cause) {
-        if (file === state) {
-          state.error =
-            cause instanceof Error
-              ? cause.message
-              : "Could not check the map file.";
-        }
-      } finally {
-        state.checking = null;
-        if (!disposed && file === state) refreshMap();
-      }
-    })();
-    refreshMap();
-  }
-
-  void actions
-    .mapTemplates()
-    .then((maps) => {
-      if (disposed) return;
-      templates = maps;
-      const group = h(
-        "optgroup",
-        { label: "Default maps" },
-        ...maps.map(
-          (map) =>
-            new Option(
-              `${map.map_name} · ${map.team_count} teams · ${map.plane_size_x}×${map.plane_size_y}`,
-              `template:${map.map_template_id}`,
-            ),
-        ),
-      );
-      mapSelect.insertBefore(group, mapSelect.options[1] ?? null);
-      refreshMap();
-    })
-    .catch(() => {
-      if (!disposed) {
-        errors.map.textContent =
-          "Could not load the default maps. You can still use the generated map or a map file.";
-      }
-    });
-
   createForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     createError.textContent = "";
-    if (file?.checking) await file.checking;
-    const result = validateCreateForm(values(), templates);
-    showErrors(result.ok ? {} : result.errors);
+    await mapFields.settled();
+    const result = validateCreateForm(
+      { lobbyName: lobbyName.value, ...mapFields.values() },
+      mapFields.templates(),
+    );
+    const found = result.ok ? {} : result.errors;
+    lobbyNameError.textContent = found.lobbyName ?? "";
+    mapFields.showErrors(found);
     if (!result.ok) {
       const [first] = Object.keys(result.errors);
       createForm
@@ -457,7 +237,6 @@ export function mountMenuScreen(options: MenuScreenOptions): Screen {
       ),
     ),
   );
-  refreshMap();
   const el = h(
     "div",
     { class: "menu" },
@@ -477,7 +256,7 @@ export function mountMenuScreen(options: MenuScreenOptions): Screen {
     el,
     dispose() {
       disposed = true;
-      mapBuilder.dispose();
+      mapFields.dispose();
     },
   };
 }

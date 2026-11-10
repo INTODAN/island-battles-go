@@ -4,7 +4,12 @@ import type { components as GameComponents } from "../../api/generated/game";
 import type { components as LobbyComponents } from "../../api/generated/lobby";
 import { platformFetch } from "../../platform";
 import type { Realtime, Snapshot, WatchAccess } from "../../realtime";
-import { type CreateLobbyBody, gameKey, type MapTemplate } from "./form";
+import {
+  type ChangeSettingsBody,
+  type CreateLobbyBody,
+  gameKey,
+  type MapTemplate,
+} from "./form";
 
 export type BotChoice = GameComponents["schemas"]["BotChoice"];
 export type LobbyBots = GameComponents["schemas"]["LobbyBots"];
@@ -142,6 +147,16 @@ export function createLobbyActions(options: {
       const { data } = await lobbyApi.POST(
         "/lobby/v1/games/{game_key}/lobbies/{lobby_id}/start",
         { params: { path }, body: {} },
+      );
+      adopt(data);
+    },
+
+    /** The host replaces the waiting lobby's map, turn limit and teams. */
+    async changeSettings(body: ChangeSettingsBody) {
+      const { path } = room();
+      const { data } = await lobbyApi.PUT(
+        "/lobby/v1/games/{game_key}/lobbies/{lobby_id}/settings",
+        { params: { path }, body },
       );
       adopt(data);
     },
