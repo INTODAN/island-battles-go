@@ -6,7 +6,7 @@ import { createFlatRing, type PickTarget } from "./art";
 import { type Battlefield, battlefieldOf } from "./battlefield";
 import { CASTLE_RADIUS } from "./board";
 import { fitCamera, focusCamera } from "./camera";
-import { toWorld } from "./coordinates";
+import { toWorld, toWorldDistance } from "./coordinates";
 import { castleTooltip, groupTooltip } from "./format";
 import { CLASH_COLOR } from "./palette";
 
@@ -93,7 +93,7 @@ export function installBoardControls(scene: Scene): () => void {
     if (!subject) return;
     const radius = castle
       ? CASTLE_RADIUS + 0.12
-      : Math.max(0.3, (group?.clash_radius ?? 0.25) + 0.08);
+      : Math.max(0.3, toWorldDistance(group?.clash_radius ?? 0.25) + 0.08);
     highlight?.dispose();
     highlight = createFlatRing(scene, "hover-ring", radius, 0.05);
     highlight.material = field.materials.flat(

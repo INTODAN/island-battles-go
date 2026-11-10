@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { components } from "../api/generated/game";
 import { CASTLE_RADIUS } from "./board";
+import { toMapDistance, toWorldDistance } from "./coordinates";
 import { computeHeadings, headingStyle, ribbonGeometry } from "./headingLines";
 
 type Castle = components["schemas"]["Castle"];
@@ -33,6 +34,9 @@ const group = (
   upgrades: {},
 });
 
+// The style's sizes are world units; the lines are computed in map units.
+const reach = toMapDistance(CASTLE_RADIUS);
+
 const castles = [
   castle(0, -4, 0),
   castle(1, 4, 0, 2),
@@ -45,18 +49,18 @@ describe("heading lines", () => {
     const [line] = computeHeadings(castles, [group(1, -2, 0, 0, 1)]);
     expect(line).toBeDefined();
     expect(Math.hypot((line?.tip.x ?? 0) - 4, line?.tip.y ?? 0)).toBeCloseTo(
-      CASTLE_RADIUS,
+      reach,
       6,
     );
-    expect(line?.tip.x).toBeCloseTo(3.5, 6);
+    expect(line?.tip.x).toBeCloseTo(4 - reach, 6);
     expect(line?.start.x).toBeGreaterThan(-2);
     expect(line?.arrowhead).toBe(true);
   });
 
   test("a group about to arrive has no line, stub or backward head", () => {
-    const near = group(1, 4 - CASTLE_RADIUS - 0.25 - 0.1, 0, 0, 1);
+    const near = group(1, 4 - reach - 0.25 - 0.1, 0, 0, 1);
     expect(computeHeadings(castles, [near])).toEqual([]);
-    const far = group(2, 4 - CASTLE_RADIUS - 1, 0, 0, 1);
+    const far = group(2, 4 - reach - 1, 0, 0, 1);
     expect(computeHeadings(castles, [far])).toHaveLength(1);
   });
 
@@ -67,7 +71,10 @@ describe("heading lines", () => {
       group(3, 0.5, 0, 0, 1),
     ]);
     expect(lines.map((line) => line.groupId)).toEqual([2]);
-    expect(lines[0]?.start.x).toBeCloseTo(-3 + 0.25 + headingStyle.startGap, 6);
+    expect(lines[0]?.start.x).toBeCloseTo(
+      -3 + 0.25 + toMapDistance(headingStyle.startGap),
+      6,
+    );
   });
 
   test("another team's group on the same route keeps its own line", () => {
@@ -86,14 +93,20 @@ describe("heading lines", () => {
     expect(lines).toHaveLength(2);
     const [forward, back] = lines;
     // Each travels with its lane to its right: east-bound is south of the route, west-bound north.
-    expect(forward?.start.y).toBeCloseTo(headingStyle.laneOffset, 6);
-    expect(back?.start.y).toBeCloseTo(-headingStyle.laneOffset, 6);
+    expect(forward?.start.y).toBeCloseTo(
+      toMapDistance(headingStyle.laneOffset),
+      6,
+    );
+    expect(back?.start.y).toBeCloseTo(
+      -toMapDistance(headingStyle.laneOffset),
+      6,
+    );
     // Both arrowheads still sit on their castle's circle.
     expect(
       Math.hypot((forward?.tip.x ?? 0) - 4, forward?.tip.y ?? 0),
-    ).toBeCloseTo(CASTLE_RADIUS, 6);
+    ).toBeCloseTo(reach, 6);
     expect(Math.hypot((back?.tip.x ?? 0) + 4, back?.tip.y ?? 0)).toBeCloseTo(
-      CASTLE_RADIUS,
+      reach,
       6,
     );
   });
@@ -147,5 +160,32 @@ describe("heading lines", () => {
       headingStyle,
     );
     expect(headless.indices).toHaveLength(6);
+  });
+
+  test("a ribbon keeps its drawn width and head length in world units", () => {
+    const segment = {
+      groupId: 1,
+      teamColor: 1,
+      start: { x: 0, y: 0 },
+      tip: { x: 3, y: 0 },
+      arrowhead: true,
+      rank: 0,
+      passesUnder: [],
+    };
+    const { points } = ribbonGeometry(segment, headingStyle);
+    const world = (value: number) => toWorldDistance(value);
+    // The shaft's two start corners are lineWidth apart; the head's wings are arrowWidth apart.
+    expect(world((points[3] ?? 0) - (points[1] ?? 0))).toBeCloseTo(
+      headingStyle.lineWidth,
+      9,
+    );
+    expect(world((points[11] ?? 0) - (points[9] ?? 0))).toBeCloseTo(
+      headingStyle.arrowWidth,
+      9,
+    );
+    expect(world((points[12] ?? 0) - (points[4] ?? 0))).toBeCloseTo(
+      headingStyle.arrowLength,
+      9,
+    );
   });
 });

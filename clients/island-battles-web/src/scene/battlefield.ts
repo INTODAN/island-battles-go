@@ -33,7 +33,7 @@ import {
   popCastleView,
   setCastleView,
 } from "./castles";
-import { toWorld } from "./coordinates";
+import { toWorld, toWorldDistance } from "./coordinates";
 import { castleTitle, hasUpgrades, upgradeLevels } from "./format";
 import {
   computeHeadings,
@@ -298,7 +298,7 @@ function updateClashes(field: Battlefield, generation: Generation): void {
           ring: createFlatRing(
             scene,
             `clash-${key}`,
-            participant.clash_radius,
+            toWorldDistance(participant.clash_radius),
             defeated ? 0.025 : 0.04,
           ),
           ghost: null,
