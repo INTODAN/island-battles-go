@@ -94,8 +94,8 @@ function loadParticles(): Promise<ParticlesModule> {
 }
 
 /**
- * The art pass's turn effects for one scene. Given the scene, it compiles the particles'
- * shaders at once rather than at the first clash.
+ * The art pass's turn effects for one scene. Given the scene, it builds the particle pool and
+ * compiles the particles' shaders at once rather than at the first clash (#197).
  */
 export function createTurnEffects(scene?: Scene): TurnEffects {
   const pops = new Map<number, PopHandle>();
@@ -119,6 +119,8 @@ export function createTurnEffects(scene?: Scene): TurnEffects {
       bursts?.dispose();
       bursts = new particles.Bursts(scene);
       burstScene = scene;
+      // Builds the pool now if the GPU or CPU choice is made; a no-op when called again.
+      bursts.warmUp();
     }
     return bursts;
   };
