@@ -83,6 +83,9 @@ func TestHandlerCachesOnlyTheScriptsAndTheStyle(t *testing.T) {
 	for path, want := range map[string]string{
 		"/": "no-store", "/index.html": "no-store", "/upgrades.json": "no-store",
 		"/app.mjs": "public, max-age=300", "/builder.mjs": "public, max-age=300", "/style.css": "public, max-age=300",
+		// Go's file server drops Cache-Control from an error answer, so a missing
+		// file's 404 is never kept.
+		"/missing.mjs": "",
 	} {
 		if got := get(t, handler, path).Header.Get("Cache-Control"); got != want {
 			t.Errorf("%s: Cache-Control %q, want %q", path, got, want)

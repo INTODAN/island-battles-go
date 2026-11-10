@@ -37,9 +37,32 @@ data "aws_cloudfront_cache_policy" "caching_disabled" {
 }
 
 # Caches an answer for as long as the origin's Cache-Control says, and not at
-# all without one or with no-store.
-data "aws_cloudfront_cache_policy" "use_origin_cache_control_headers" {
-  name = "UseOriginCacheControlHeaders"
+# all without one or with no-store. The managed UseOriginCacheControlHeaders
+# policy does the same but puts the viewer's Host header and every cookie in
+# the cache key, and CloudFront sends cache-key headers to the origin: a
+# Function URL refuses a request whose Host isn't its own. So this policy
+# keys on the path alone (and the encoding CloudFront compresses to).
+resource "aws_cloudfront_cache_policy" "origin_cache_control" {
+  name        = "${var.name}-origin-cache-control"
+  comment     = "Follows the origin's Cache-Control; the cache key is the path."
+  min_ttl     = 0
+  default_ttl = 0
+  max_ttl     = 31536000
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    enable_accept_encoding_gzip   = true
+    enable_accept_encoding_brotli = true
+
+    cookies_config {
+      cookie_behavior = "none"
+    }
+    headers_config {
+      header_behavior = "none"
+    }
+    query_strings_config {
+      query_string_behavior = "none"
+    }
+  }
 }
 
 # Every header, cookie and query string except Host, which the Function URL
@@ -125,8 +148,9 @@ resource "aws_cloudfront_distribution" "game" {
       viewer_protocol_policy   = "redirect-to-https"
       allowed_methods          = ["GET", "HEAD", "OPTIONS"]
       cached_methods           = ["GET", "HEAD"]
-      cache_policy_id          = data.aws_cloudfront_cache_policy.use_origin_cache_control_headers.id
+      cache_policy_id          = aws_cloudfront_cache_policy.origin_cache_control.id
       origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host_header.id
+      compress                 = true
     }
   }
 

@@ -289,6 +289,14 @@ run "serves_the_web_client_from_a_private_bucket" {
   }
 
   override_resource {
+    target          = aws_cloudfront_cache_policy.origin_cache_control
+    override_during = plan
+    values = {
+      id = "11111111-2222-3333-4444-555555555555"
+    }
+  }
+
+  override_resource {
     target          = aws_cloudfront_distribution.game
     override_during = plan
     values = {
@@ -365,12 +373,26 @@ run "serves_the_web_client_from_a_private_bucket" {
       alltrue([for behavior in aws_cloudfront_distribution.game.ordered_cache_behavior : (
         behavior.viewer_protocol_policy == "redirect-to-https" &&
         toset(behavior.allowed_methods) == toset(["GET", "HEAD", "OPTIONS"]) &&
-        behavior.cache_policy_id == data.aws_cloudfront_cache_policy.use_origin_cache_control_headers.id &&
+        behavior.compress &&
+        behavior.cache_policy_id == aws_cloudfront_cache_policy.origin_cache_control.id &&
         behavior.origin_request_policy_id == data.aws_cloudfront_origin_request_policy.all_viewer_except_host_header.id
-      ) if behavior.target_origin_id == "backend"]) &&
-      data.aws_cloudfront_cache_policy.use_origin_cache_control_headers.name == "UseOriginCacheControlHeaders"
+      ) if behavior.target_origin_id == "backend"])
     )
-    error_message = "The Lambda's static pages must follow the origin's Cache-Control, with GET, HEAD and OPTIONS only, and the default behaviour's origin request policy."
+    error_message = "The Lambda's static pages must follow the origin's Cache-Control, compressed, with GET, HEAD and OPTIONS only, and the default behaviour's origin request policy."
+  }
+
+  # A header in the cache key is sent to the origin, and the Function URL
+  # refuses a Host that isn't its own. Cookies in the key would give every
+  # player their own copy.
+  assert {
+    condition = (
+      aws_cloudfront_cache_policy.origin_cache_control.min_ttl == 0 &&
+      aws_cloudfront_cache_policy.origin_cache_control.default_ttl == 0 &&
+      one(one(aws_cloudfront_cache_policy.origin_cache_control.parameters_in_cache_key_and_forwarded_to_origin).headers_config).header_behavior == "none" &&
+      one(one(aws_cloudfront_cache_policy.origin_cache_control.parameters_in_cache_key_and_forwarded_to_origin).cookies_config).cookie_behavior == "none" &&
+      one(one(aws_cloudfront_cache_policy.origin_cache_control.parameters_in_cache_key_and_forwarded_to_origin).query_strings_config).query_string_behavior == "none"
+    )
+    error_message = "The static pages' cache policy must cache only what the origin allows, and key on no header, cookie or query string."
   }
 
   assert {
