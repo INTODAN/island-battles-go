@@ -29,6 +29,32 @@ func TestReplayEscapesPlayerNames(t *testing.T) {
 	}
 }
 
+// The page asks for the watcher's demo route and shows no logs only when it is
+// rendered for a watcher.
+func TestWatchReplayPageReadsTheWatcherRoutes(t *testing.T) {
+	replay := services.GameReplay{GameID: 1, LobbyID: "6f1c2c9e-7d0a-4a43-9c55-6e3f0a1b2c3d", LobbyRound: 2, Teams: []models.GameTeam{}, Frames: []models.GenerationView{}}
+	player, err := services.RenderGameReplay(replay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	watcher, err := services.RenderWatchReplay(replay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(player, "const watcher = false;") || !strings.Contains(watcher, "const watcher = true;") {
+		t.Fatal("the page doesn't say who it is for")
+	}
+	if !strings.Contains(watcher, `id="logs" aria-labelledby="logs-title" hidden`) || strings.Contains(player, `id="logs" aria-labelledby="logs-title" hidden`) {
+		t.Fatal("only a watcher's page hides the logs")
+	}
+	// Both pages have the speed select.
+	for name, page := range map[string]string{"player": player, "watcher": watcher} {
+		if !strings.Contains(page, `<select id="speed"`) {
+			t.Errorf("%s's page has no speed select", name)
+		}
+	}
+}
+
 // countQueries counts the SELECT statements the database runs, including
 // each preload, until the test ends.
 func countQueries(t *testing.T, database *gorm.DB) *int {

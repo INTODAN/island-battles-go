@@ -17,6 +17,10 @@ func FrontendGame() frontend.Game {
 		// The replay reads each generation's game log and saves the demo
 		// through the page.
 		DataURLPrefix: "/game/from-lobby/" + frontend.LobbyIDPlaceholder + "/",
+		// A watcher outside the roster sees the replay of the game through the
+		// watcher routes, and its frame may read only those.
+		WatchResultURL:     "/game/from-lobby/" + frontend.LobbyIDPlaceholder + "/watch/replay",
+		WatchDataURLPrefix: "/game/from-lobby/" + frontend.LobbyIDPlaceholder + "/watch/",
 		// The host picks the generated map, a default map or a map file, and
 		// the map sets the lobby's teams.
 		SettingsModule: "/game/demo/lobby-settings.mjs",

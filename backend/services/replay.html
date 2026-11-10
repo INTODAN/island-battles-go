@@ -74,12 +74,13 @@ input { flex: 1; min-width: 100px; accent-color: #3464e0; }
 <button id="next" type="button" aria-label="Next generation">▶</button>
 <button id="result" type="button">{{if .Viewer}}Last generation{{else}}Latest generation{{end}}</button>
 <button id="live" type="button"{{if .Viewer}} hidden{{end}}>● Live</button>
+<label id="speed-label">Speed <select id="speed" aria-label="Playback speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select></label>
 <label id="turn" for="timeline"></label>
 <input id="timeline" type="range" min="0" value="0" aria-label="Replay turn">
 </div>
 <p id="outcome" role="status"></p>
 <p id="clashes" role="status"></p>
-<section id="logs" aria-labelledby="logs-title">
+<section id="logs" aria-labelledby="logs-title"{{if .Watcher}} hidden{{end}}>
 <h2 id="logs-title">Logs</h2>
 <div id="logs-box" tabindex="0"></div>
 </section>
@@ -95,6 +96,8 @@ input { flex: 1; min-width: 100px; accent-color: #3464e0; }
 // The replay that the server embedded. The demo viewer has none until it opens
 // a demo file, which has the same teams, frames and outcome.
 let replay = {{.Replay}};
+// A watcher outside the roster sees no game log, and saves the demo through the watcher's route.
+const watcher = {{if .Watcher}}true{{else}}false{{end}};
 const colors = ["#3464e0", "#d94d5b", "#288562", "#9560cb", "#b37914", "#24828f"];
 const field = document.getElementById("battlefield");
 const slider = document.getElementById("timeline");
@@ -124,6 +127,17 @@ const upgradeLevels = (castle) => Object.keys(castle.upgrades)
 const scoreLabels = new Map();
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 let renderedTurn = null;
+// playback-speed:begin
+// How long playback shows each generation at 1x. The speeds the select offers
+// multiply the pace: at 2x a generation lasts half as long.
+const playbackBaseMilliseconds = 500;
+const playbackSpeeds = [0.5, 1, 2, 4];
+// playbackInterval returns the milliseconds between generations at a speed, and
+// the 1x interval for a speed that is not one of playbackSpeeds.
+function playbackInterval(speed) {
+  return playbackSpeeds.includes(speed) ? playbackBaseMilliseconds / speed : playbackBaseMilliseconds;
+}
+// playback-speed:end
 // heading-lines:begin
 // Heading lines (#89, edge cases fixed in #168): the segment from each moving group to the castle it is heading for.
 // This block is pure geometry in board pixels, so backend/demoviewer/heading-lines.test.mjs runs it on its own. The
@@ -592,8 +606,23 @@ slider.addEventListener("input", () => { turn = Number(slider.value); playing = 
 document.getElementById("result").addEventListener("click", () => { turn = lastTurn; playing = false; followingLive = false; render(); });
 live.addEventListener("click", () => { followingLive = true; playing = false; turn = lastTurn; render(); });
 window.addEventListener("message", (event) => {
-  if (!replay || demoLogs || event.source !== window.parent || event.data?.type !== "lobby.game-state" || event.data.game_key !== "island-battles") return;
-  const state = event.data.state;
+  if (!replay || demoLogs || event.source !== window.parent || event.data?.game_key !== "island-battles") return;
+  if (event.data.type === "lobby.game-state") receiveLiveState(event.data.state);
+  // A watcher's page forwards what the lobby's watch channel publishes.
+  else if (watcher && event.data.type === "lobby.watch-event") receiveWatchEvent(event.data.event);
+});
+// A game of a later lobby round is another game: the page loads its replay anew.
+function receiveWatchEvent(published) {
+  const state = published?.state;
+  if (published?.type !== "game.next_generation" && published?.type !== "game.ended") return;
+  if (!Number.isInteger(state?.lobby_round) || !Number.isInteger(replay.lobby_round)) return;
+  if (state.lobby_round > replay.lobby_round) {
+    window.parent.postMessage({ type: "game.reload" }, "*");
+    return;
+  }
+  if (state.lobby_round === replay.lobby_round) receiveLiveState(state);
+}
+function receiveLiveState(state) {
   if (replay.outcome || state?.game_id !== replay.game_id || !state.generation) return;
   const newer = state.generation.id > latestGeneration;
   if (!newer && !state.outcome) return;
@@ -624,7 +653,7 @@ window.addEventListener("message", (event) => {
     logDebouncer.cancel();
     requestLogs(shownLogs);
   }
-});
+}
 // The bots' game logs. A demo holds them. A replay's frame has no credential,
 // so the lobby page fetches them for it: a game.request message names the
 // path, and a lobby.response message answers it. Lines of the open turn can
@@ -681,6 +710,7 @@ function logNote(text) {
   return note;
 }
 function showLogs(immediately = false) {
+  if (watcher) return;
   const generation = replay.frames[turn].id;
   if (shownLogs === generation) return;
   shownLogs = generation;
@@ -857,7 +887,7 @@ saveButton?.addEventListener("click", () => {
   saveButton.disabled = true;
   saveStatus.classList.remove("problem");
   saveStatus.textContent = "Collecting every generation and its logs…";
-  window.parent.postMessage({ type: "game.request", id, path: `/game/from-lobby/${encodeURIComponent(replay.lobby_id)}/demo`, timeout_seconds: saveTimeoutSeconds }, "*");
+  window.parent.postMessage({ type: "game.request", id, path: `/game/from-lobby/${encodeURIComponent(replay.lobby_id)}/${watcher ? "watch/demo" : "demo"}`, timeout_seconds: saveTimeoutSeconds }, "*");
 });
 // finishSave reports a saved file, or the reason the demo wasn't saved.
 function finishSave(error, fileName) {
@@ -894,12 +924,18 @@ function receiveDemo(answer) {
   setTimeout(() => URL.revokeObjectURL(url), 60000);
   finishSave(null, fileName);
 }
-setInterval(() => {
-  if (!playing) return;
-  if (turn < lastTurn) turn++;
-  if (turn === lastTurn) playing = false;
-  render(true);
-}, 500);
+// Playback advances one generation per interval; the speed select shortens or
+// lengthens it. Following live is not paced by it.
+const speedSelect = document.getElementById("speed");
+function playbackTick() {
+  if (playing) {
+    if (turn < lastTurn) turn++;
+    if (turn === lastTurn) playing = false;
+    render(true);
+  }
+  setTimeout(playbackTick, playbackInterval(Number(speedSelect.value)));
+}
+setTimeout(playbackTick, playbackInterval(1));
 {{if .Viewer -}}
 // The viewer's module opens a demo file, checks it and shows it with this.
 window.showDemo = (demo) => {

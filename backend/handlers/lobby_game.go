@@ -68,6 +68,36 @@ func (handler *LobbyGame) Replay(ctx context.Context, input *struct {
 	}}, nil
 }
 
+// WatchReplay serves the replay page to the lobby's watchers.
+func (handler *LobbyGame) WatchReplay(ctx context.Context, input *struct {
+	LobbyID       string `path:"lobby_id" format:"uuid"`
+	Authorization string `header:"Authorization"`
+}) (*huma.StreamResponse, error) {
+	defer handler.runRetention(ctx)
+	verified, err := handler.Authenticator.Authenticate(ctx, input.Authorization)
+	if err != nil {
+		return nil, huma.Error401Unauthorized("authentication required")
+	}
+	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher, Watchers: handler.Watchers}
+	replay, err := service.WatchReplay(ctx, verified.Principal, input.LobbyID)
+	if err != nil {
+		return nil, generationHTTPError(ctx, err)
+	}
+	if len(replay.Frames) == 0 {
+		return nil, huma.Error404NotFound("game result is not ready")
+	}
+	html, err := services.RenderWatchReplay(replay)
+	if err != nil {
+		observability.RecordError(ctx, fmt.Errorf("render watch replay: %w", err))
+		return nil, huma.Error500InternalServerError("game result could not be rendered")
+	}
+	return &huma.StreamResponse{Body: func(response huma.Context) {
+		response.SetHeader("Content-Type", "text/html; charset=utf-8")
+		response.SetHeader("Cache-Control", "no-store")
+		_, _ = response.BodyWriter().Write([]byte(html))
+	}}, nil
+}
+
 func (handler *LobbyGame) Demo(ctx context.Context, input *struct {
 	LobbyID       string `path:"lobby_id" format:"uuid"`
 	Authorization string `header:"Authorization"`

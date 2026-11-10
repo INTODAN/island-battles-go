@@ -57,6 +57,59 @@ func dropLobbyTables(t *testing.T, database *gorm.DB) {
 	}
 }
 
+// watchingPlayers stands in for the lobby's watcher rows.
+type watchingPlayers struct{ watching, kicked map[string]bool }
+
+func (watchers watchingPlayers) AuthorizeWatch(_ context.Context, principal domain.Principal, _ domain.Scope) error {
+	switch {
+	case watchers.watching[principal.PlayerID]:
+		return nil
+	case watchers.kicked[principal.PlayerID]:
+		return domain.ErrWatcherKicked
+	}
+	return domain.ErrNotFound
+}
+
+// A watcher gets the replay page built for watchers; a kicked one is refused,
+// and anyone else finds no game.
+func TestWatcherReplayIsServedToWatchersOnly(t *testing.T) {
+	database := testutils.InitTestDB(t)
+	alice, bob, lobbyID, red, blue := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	if _, err := services.RunLobbyGame(context.Background(), database, &testutils.RecordedPublisher{}, domain.Snapshot{
+		Lobby:       domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted},
+		Teams:       []domain.Team{{ID: red, Name: "Red", Order: 1}, {ID: blue, Name: "Blue", Order: 2}},
+		StartRoster: domain.StartRoster{{PlayerID: alice, TeamID: red, TeamOrder: 1}, {PlayerID: bob, TeamID: blue, TeamOrder: 2}},
+		Members:     []domain.Member{{PlayerID: alice, DisplayName: "Alice"}, {PlayerID: bob, DisplayName: "Bob"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	watcher, kicked := uuid.NewString(), uuid.NewString()
+	handler := handlers.LobbyGame{Database: database, Publisher: &testutils.RecordedPublisher{},
+		Watchers:      watchingPlayers{watching: map[string]bool{watcher: true}, kicked: map[string]bool{kicked: true}},
+		Authenticator: bearerPlayers{"Bearer alice": {PlayerID: alice}, "Bearer watcher": {PlayerID: watcher}, "Bearer kicked": {PlayerID: kicked}, "Bearer outsider": {PlayerID: uuid.NewString()}}}
+	_, api := humatest.New(t)
+	huma.Register(api, huma.Operation{OperationID: "watchReplay", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/watch/replay"}, handler.WatchReplay)
+	huma.Register(api, huma.Operation{OperationID: "replay", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/replay"}, handler.Replay)
+	path := "/game/from-lobby/" + lobbyID + "/watch/replay"
+
+	for credential, want := range map[string]int{"Bearer watcher": http.StatusOK, "Bearer alice": http.StatusOK, "Bearer kicked": http.StatusForbidden, "Bearer outsider": http.StatusNotFound, "Bearer stranger": http.StatusUnauthorized} {
+		if response := api.Get(path, "Authorization: "+credential); response.Code != want {
+			t.Fatalf("%s watch replay=%d %s", credential, response.Code, response.Body.String())
+		}
+	}
+	page := api.Get(path, "Authorization: Bearer watcher")
+	if !strings.Contains(page.Body.String(), "const watcher = true;") || !strings.HasPrefix(page.Header().Get("Content-Type"), "text/html") || page.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("watcher's page: %q %q", page.Header().Get("Content-Type"), page.Header().Get("Cache-Control"))
+	}
+	// A watcher never reads the players' replay.
+	if response := api.Get("/game/from-lobby/"+lobbyID+"/replay", "Authorization: Bearer watcher"); response.Code != http.StatusNotFound {
+		t.Fatalf("watcher's read of the players' replay=%d", response.Code)
+	}
+	if response := api.Get("/game/from-lobby/"+uuid.NewString()+"/watch/replay", "Authorization: Bearer watcher"); response.Code != http.StatusNotFound {
+		t.Fatalf("unknown lobby=%d", response.Code)
+	}
+}
+
 func TestStartedGameServesItsRosterWithoutTheLobby(t *testing.T) {
 	database := testutils.InitTestDB(t)
 	alice, bob, lobbyID, red, blue := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()

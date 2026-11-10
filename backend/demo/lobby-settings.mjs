@@ -16,8 +16,17 @@ export function teamNames(teamCount) {
   return Array.from({ length: teamCount }, (_, index) => teamName(index + 1));
 }
 
-// Teams of a lobby on the generated map, which fits any number of teams.
-const generatedTeams = 2;
+// The generated map fits any number of teams, so the host chooses how many
+// teams a lobby on it has, as in the 3D client's form.
+export const generatedTeamCounts = [2, 3, 4, 5, 6];
+export const defaultGeneratedTeams = 2;
+
+// generatedTeamSelection is the team count the form shows for a lobby that has
+// teamCount teams on the generated map: that count when the form offers it,
+// and the default otherwise.
+export function generatedTeamSelection(teamCount) {
+  return generatedTeamCounts.includes(teamCount) ? teamCount : defaultGeneratedTeams;
+}
 
 // The turn timeouts the form offers, as game_settings.turn_timeout_seconds:
 // seconds, or null for no limit. The server's default, when the settings
@@ -148,10 +157,11 @@ function node(tag, properties = {}, ...children) {
 // it with a container for its controls and an onChange callback, and calls
 // choice() when the host creates a lobby. The room's form for changing a
 // waiting lobby's settings is the same, constructed with current, the lobby's
-// game_settings, which it shows as chosen. destroy() stops a form that the
+// game_settings, and teamCount, how many teams the lobby has, which it shows as
+// chosen. destroy() stops a form that the
 // page removes from listening to the map builder.
 export class SettingsForm {
-  constructor({ container, onChange = () => {}, current = null }) {
+  constructor({ container, onChange = () => {}, current = null, teamCount = defaultGeneratedTeams }) {
     this.onChange = onChange;
     this.maps = [];
     this.file = null;
@@ -166,15 +176,18 @@ export class SettingsForm {
     this.pendingTemplate = "";
     this.listening = new AbortController();
     this.select = node("select", {},
-      new Option(`Generated map · ${generatedTeams} teams`, ""), new Option("Load a map file…", "file"));
+      new Option("Generated map", ""), new Option("Load a map file…", "file"));
     this.fileInput = node("input", { type: "file", accept: ".json,application/json", hidden: true });
     this.fileInput.setAttribute("aria-label", "Map file");
+    this.teams = node("select", {},
+      ...generatedTeamCounts.map((count) => new Option(String(count), String(count), false, count === defaultGeneratedTeams)));
+    this.teamsLabel = node("label", {}, "Teams", this.teams);
     this.status = node("p", { className: "hint" });
     this.status.setAttribute("role", "status");
     this.builderButton = node("button", { type: "button", className: "secondary" }, "Build a map…");
     this.timeout = node("select", {},
       ...turnTimeouts.map(({ seconds, label }) => new Option(label, seconds === null ? "none" : String(seconds), false, seconds === defaultTurnTimeout)));
-    container.append(node("label", {}, "Map", this.select), this.fileInput, this.builderButton, this.status,
+    container.append(node("label", {}, "Map", this.select), this.teamsLabel, this.fileInput, this.builderButton, this.status,
       node("label", {}, "Turn timeout", this.timeout),
       node("p", { className: "hint" }, "A team whose player doesn’t finish a turn in time loses the game."));
     this.builderButton.addEventListener("click", () => this.openBuilder());
@@ -183,8 +196,9 @@ export class SettingsForm {
       this.pendingTemplate = "";
       this.update();
     });
+    this.teams.addEventListener("change", () => this.update());
     this.fileInput.addEventListener("change", () => this.readFile());
-    if (current) this.showCurrent(current);
+    if (current) this.showCurrent(current, teamCount);
     this.update();
     this.loadMaps();
   }
@@ -195,7 +209,7 @@ export class SettingsForm {
 
   // showCurrent selects the map and turn timeout of a lobby's settings. A
   // default map is selected once the default maps load.
-  showCurrent(settings) {
+  showCurrent(settings, teamCount) {
     const selection = settingsSelection(settings);
     if (![...this.timeout.options].some((option) => option.value === selection.timeout)) {
       this.timeout.append(new Option(`${selection.timeout} s`, selection.timeout));
@@ -207,6 +221,8 @@ export class SettingsForm {
       this.select.value = "file";
     } else {
       this.pendingTemplate = selection.map;
+      // Only the generated map is made for the lobby's own number of teams.
+      if (!selection.map) this.teams.value = String(generatedTeamSelection(teamCount));
     }
   }
 
@@ -289,6 +305,7 @@ export class SettingsForm {
   update() {
     const loading = this.select.value === "file";
     this.fileInput.hidden = !loading;
+    this.teamsLabel.hidden = this.select.value !== "";
     if (loading) {
       this.status.textContent = this.fileError || (this.file
         ? `${fileSourceLabels[this.fileSource]}${describeMap(this.file.map_name, this.file.player_amount, this.file.plane_size_x, this.file.plane_size_y)}. Teams: ${teamNames(this.file.player_amount).join(", ")}.`
@@ -297,7 +314,7 @@ export class SettingsForm {
       this.status.textContent = this.mapsError || "Loading the lobby’s default map…";
     } else {
       const map = this.select.value && this.chosenDefaultMap();
-      const teams = `Teams: ${teamNames(map ? map.team_count : generatedTeams).join(", ")}.`;
+      const teams = `Teams: ${teamNames(map ? map.team_count : Number(this.teams.value)).join(", ")}.`;
       this.status.textContent = this.mapsError ? `${teams} ${this.mapsError}` : teams;
     }
     this.onChange();
@@ -309,7 +326,7 @@ export class SettingsForm {
   }
 
   // The lobby's game_settings and team names. The generated map is made for
-  // the lobby's teams, so it keeps the two teams of a playground lobby.
+  // the lobby's teams, as many as the host chose.
   // Throws when the choice is not complete.
   choice() {
     if (this.pendingTemplate) {
@@ -324,6 +341,6 @@ export class SettingsForm {
       const map = this.chosenDefaultMap();
       return { settings: { map_template_id: map.map_template_id, ...timeout }, teams: teamNames(map.team_count) };
     }
-    return { settings: timeout, teams: teamNames(generatedTeams) };
+    return { settings: timeout, teams: teamNames(Number(this.teams.value)) };
   }
 }

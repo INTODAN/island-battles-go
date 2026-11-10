@@ -128,6 +128,10 @@ func describeTimeoutOutcome(game *models.Game) string {
 type replayPage struct {
 	Replay *GameReplay
 	Viewer bool
+	// Watcher is a replay for someone outside the roster: it asks the lobby
+	// page for the watcher's demo route and shows no game log, since a
+	// watcher sees no logs while the game runs.
+	Watcher bool
 	// DemoFormat and DemoSchemaVersion are the demo files the viewer opens.
 	DemoFormat        string
 	DemoSchemaVersion int
@@ -137,6 +141,11 @@ type replayPage struct {
 // html/template escapes the JSON for script context, including player names.
 func RenderGameReplay(replay GameReplay) (string, error) {
 	return renderReplayPage(replayPage{Replay: &replay})
+}
+
+// RenderWatchReplay embeds the replay for a watcher outside the roster.
+func RenderWatchReplay(replay GameReplay) (string, error) {
+	return renderReplayPage(replayPage{Replay: &replay, Watcher: true})
 }
 
 // RenderDemoViewer renders the demo viewer, the replay page without a game.
