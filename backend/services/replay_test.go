@@ -113,7 +113,7 @@ func TestReplayFramesMatchLivePlayerStates(t *testing.T) {
 	if err := json.Unmarshal(raw, &page); err != nil {
 		t.Fatal(err)
 	}
-	if len(page) != 5 || page["game_id"] == nil || string(page["lobby_id"]) != `"`+fixture.state.LobbyID+`"` || page["teams"] == nil || page["frames"] == nil || string(page["outcome"]) != "null" {
+	if len(page) != 6 || page["game_id"] == nil || string(page["lobby_id"]) != `"`+fixture.state.LobbyID+`"` || string(page["lobby_round"]) != "1" || page["teams"] == nil || page["frames"] == nil || string(page["outcome"]) != "null" {
 		t.Fatalf("replay page data = %s", raw)
 	}
 	if len(replay.Teams) != 2 || replay.GameID != fixture.state.GameID {

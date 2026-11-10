@@ -54,6 +54,7 @@ type generationState struct {
 	Schema         string       `json:"$schema,omitempty"`
 	GameID         uint         `json:"game_id"`
 	LobbyID        string       `json:"lobby_id"`
+	LobbyRound     int64        `json:"lobby_round"`
 	GenerationID   uint         `json:"generation_id"`
 	PlayerID       string       `json:"player_id"`
 	TeamColor      uint         `json:"team_color"`

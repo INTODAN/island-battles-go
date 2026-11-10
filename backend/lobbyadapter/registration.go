@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
 	"islandBattles/lobby/domain"
@@ -22,6 +23,8 @@ const GameKey = models.LobbyGameKey
 // before getting ready, so the ready gate refuses a member without one with
 // services.BotNotChosenProblemType. The host can add bot seats, whose
 // seat_settings {"bot_level": N} name a default bot that the backend plays.
+// A lobby plays one game per round, and a member can reopen it for the next
+// round once the game of the current one has ended.
 func Registration(database *gorm.DB) domain.GameRegistration {
 	return domain.GameRegistration{
 		Key: GameKey,
@@ -35,6 +38,25 @@ func Registration(database *gorm.DB) domain.GameRegistration {
 		ValidateSeat: func(_ context.Context, settings json.RawMessage) (string, error) {
 			return services.ValidateBotSeat(settings)
 		},
+		GameOver: func(ctx context.Context, lobbyID string, round int64) (bool, error) {
+			return gameOver(ctx, database, lobbyID, round)
+		},
+	}
+}
+
+// gameOver reports whether the game of a lobby round has ended, so that a
+// member can reopen the lobby for another game. A round whose start bound no
+// game counts as over, so the lobby can't be stuck. A failed read is
+// reported as unavailable.
+func gameOver(ctx context.Context, database *gorm.DB, lobbyID string, round int64) (bool, error) {
+	over, err := dal.LobbyRoundEnded(database.WithContext(ctx), lobbyID, round)
+	switch {
+	case err == nil:
+		return over, nil
+	case ctx.Err() != nil:
+		return false, ctx.Err()
+	default:
+		return false, fmt.Errorf("%w: read the lobby's game: %w", domain.ErrUnavailable, err)
 	}
 }
 

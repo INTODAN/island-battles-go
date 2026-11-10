@@ -52,13 +52,22 @@ const gameApiOf = (realtime: Realtime) =>
     getAccessToken: () => realtime.session.get()?.accessToken,
   }).gameApi;
 
-/** A roster player's game: the player channel, `/demo` and `/logs`. */
-export function playerSource(realtime: Realtime, lobbyId: string): LiveSource {
+/**
+ * A roster player's game of a lobby round: the player channel, `/demo` and `/logs`. Those
+ * routes serve the lobby's newest game. The app mounts the view once this round's game exists
+ * and replaces it as soon as the next round starts, so they serve this round's game while it
+ * shows.
+ */
+export function playerSource(
+  realtime: Realtime,
+  lobbyId: string,
+  round: number,
+): LiveSource {
   const gameApi = gameApiOf(realtime);
   return {
     title: "Game",
     problemScope: "game",
-    follow: () => realtime.followGame(lobbyId),
+    follow: () => realtime.followGame(lobbyId, round),
     leave: () => realtime.leaveGame(),
     current: () => realtime.game.get(),
     subscribe: (listener) => realtime.game.subscribe(listener),

@@ -35,11 +35,16 @@ const BOT_RETRY_MS = 2000;
 // a player with a default bot level is only followed, since the backend plays
 // for them. In both, a player that isn't playing a turn asks the server to
 // apply its deadline.
+//
+// A lobby plays one game per round, and the lobby page makes a player for each
+// round, with lobbyRound. The player takes only the states of that round's
+// game: until the next game exists, the lobby's newest game is the previous
+// round's, whose states it drops. Without lobbyRound it takes any round's.
 export class ExamplePlayer {
-  constructor({ lobbyID, playerID, credential, subscription, enabled = true, demo = true, pending = null, savePending = () => {},
+  constructor({ lobbyID, lobbyRound = null, playerID, credential, subscription, enabled = true, demo = true, pending = null, savePending = () => {},
     onState = () => {}, onStatus = () => {}, retryDelay = 500, botRetryDelay = BOT_RETRY_MS, playBot = (turn) => playTurn(turn),
     fetcher = (...args) => globalThis.fetch(...args), now = () => Date.now() }) {
-    Object.assign(this, { lobbyID, playerID, credential, subscription, enabled, demo, pending, savePending, onState, onStatus, retryDelay,
+    Object.assign(this, { lobbyID, lobbyRound, playerID, credential, subscription, enabled, demo, pending, savePending, onState, onStatus, retryDelay,
       botRetryDelay, playBot, fetcher, now });
     // The upgrade cost table that the bot's turns carry, read once.
     this.upgrades = null;
@@ -100,6 +105,7 @@ export class ExamplePlayer {
 
   receive(state) {
     if (this.stopped || state.lobby_id !== this.lobbyID || state.player_id !== this.playerID ||
+        (this.lobbyRound !== null && state.lobby_round !== this.lobbyRound) ||
         (this.state && (state.game_id !== this.state.game_id || state.generation_id < this.state.generation_id))) return;
     // Late publications must not reopen a turn already completed over HTTP.
     if (this.state?.generation_id === state.generation_id && this.state.submitted) state = { ...state, submitted: true };

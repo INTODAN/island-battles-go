@@ -151,6 +151,19 @@ export function createLobbyActions(options: {
       adopt(data);
     },
 
+    /**
+     * Brings the lobby back to waiting once its game has ended, for the next
+     * game. Calling it again, or after another member did, changes nothing.
+     */
+    async reopen() {
+      const { path } = room();
+      const { data } = await lobbyApi.POST(
+        "/lobby/v1/games/{game_key}/lobbies/{lobby_id}/reopen",
+        { params: { path } },
+      );
+      adopt(data);
+    },
+
     /** The host replaces the waiting lobby's map, turn limit and teams. */
     async changeSettings(body: ChangeSettingsBody) {
       const { path } = room();

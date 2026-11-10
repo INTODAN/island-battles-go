@@ -17,7 +17,8 @@ function host(): HTMLElement {
   return element;
 }
 
-export function startGamePage(lobbyId: string): void {
+/** The game of a lobby round; the lobby's first game unless the page names another round. */
+export function startGamePage(lobbyId: string, round = 1): void {
   const container = host();
   const realtime = createRealtime();
   if (!realtime.session.get()) {
@@ -27,6 +28,7 @@ export function startGamePage(lobbyId: string): void {
   }
   const mounted = mountGameView(container, {
     lobbyId,
+    round,
     realtime,
     onBack: () => {
       mounted.dispose();

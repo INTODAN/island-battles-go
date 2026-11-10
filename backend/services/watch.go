@@ -30,7 +30,7 @@ func watchState(game *models.Game, generation *models.Generation) (models.WatchS
 	if teams == nil {
 		teams = []models.GameTeam{}
 	}
-	return models.WatchState{GameID: game.ID, LobbyID: lobbyID(game), GenerationID: generation.ID, Channel: channel, Teams: teams,
+	return models.WatchState{GameID: game.ID, LobbyID: lobbyID(game), LobbyRound: game.LobbyRound, GenerationID: generation.ID, Channel: channel, Teams: teams,
 		Generation: GenerationView(generation), Outcome: outcomeView(game), TurnDeadlineAt: turnDeadline(game, generation)}, nil
 }
 

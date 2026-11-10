@@ -7,15 +7,28 @@ import (
 	"islandBattles/lobby/domain"
 )
 
+// FindLobbyGame returns the lobby's newest game, the one of its highest
+// round. A lobby's older games can't be reached once the next one starts.
 func FindLobbyGame(database *gorm.DB, lobbyID string) (*models.Game, error) {
 	var games []models.Game
-	if err := database.Where(&models.Game{LobbyID: &lobbyID}).Limit(1).Find(&games).Error; err != nil {
+	if err := database.Where(&models.Game{LobbyID: &lobbyID}).Order(clause.OrderByColumn{Column: clause.Column{Name: "lobby_round"}, Desc: true}).Limit(1).Find(&games).Error; err != nil {
 		return nil, err
 	}
 	if len(games) == 0 {
 		return nil, domain.ErrNotFound
 	}
 	return &games[0], nil
+}
+
+// LobbyRoundEnded reports whether the game of a lobby round has an outcome.
+// A round without a game, whose start failed before it bound one, counts as
+// ended, so that its lobby can be reopened.
+func LobbyRoundEnded(database *gorm.DB, lobbyID string, round int64) (bool, error) {
+	var games []models.Game
+	if err := database.Select("ID", "Outcome").Where(&models.Game{LobbyID: &lobbyID, LobbyRound: round}).Limit(1).Find(&games).Error; err != nil {
+		return false, err
+	}
+	return len(games) == 0 || games[0].Outcome != nil, nil
 }
 
 // WithLockedGame is the serialization boundary for initialization, reads and turns.

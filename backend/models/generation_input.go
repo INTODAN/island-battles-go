@@ -93,6 +93,7 @@ type RegisterGenerationCommands struct {
 type GenerationState struct {
 	GameID       uint           `json:"game_id" minimum:"1"`
 	LobbyID      string         `json:"lobby_id" format:"uuid"`
+	LobbyRound   int64          `json:"lobby_round" minimum:"1" doc:"The lobby round that the game plays. A lobby plays one game per round, and the /game/from-lobby/{lobby_id} routes serve its newest game: compare this with the lobby snapshot's lobby.round to tell whether the game is the one the lobby started last."`
 	GenerationID uint           `json:"generation_id" minimum:"1"`
 	PlayerID     string         `json:"player_id" format:"uuid"`
 	TeamColor    uint           `json:"team_color" minimum:"1"`

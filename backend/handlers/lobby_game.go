@@ -38,7 +38,9 @@ func (handler *LobbyGame) runRetention(ctx context.Context) {
 }
 
 func (handler *LobbyGame) Replay(ctx context.Context, input *struct {
-	LobbyID       string `path:"lobby_id" format:"uuid"`
+	LobbyID string `path:"lobby_id" format:"uuid"`
+	// LobbyRound, when set, asks for the game of that lobby round only.
+	LobbyRound    int64  `query:"lobby_round" minimum:"1" doc:"Optional. The lobby round whose game you want, lobby.round of the lobby's snapshot. When the lobby's newest game is of another round, such as the previous one while the next game is being made, this returns 404 as for a game that isn't ready."`
 	Authorization string `header:"Authorization"`
 }) (*huma.StreamResponse, error) {
 	defer handler.runRetention(ctx)
@@ -51,7 +53,7 @@ func (handler *LobbyGame) Replay(ctx context.Context, input *struct {
 	if err != nil {
 		return nil, generationHTTPError(ctx, err)
 	}
-	if len(replay.Frames) == 0 {
+	if len(replay.Frames) == 0 || (input.LobbyRound != 0 && replay.LobbyRound != input.LobbyRound) {
 		return nil, huma.Error404NotFound("game result is not ready")
 	}
 	html, err := services.RenderGameReplay(replay)

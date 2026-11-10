@@ -37,6 +37,29 @@ test("one soldier from the first available owned castle to the first enemy", () 
   assert.deepEqual(singleSoldierCommands({ ...initial(), generation: { castles: [{ id: 0, team_color: 1, soldiers: 1 }] } }), []);
 });
 
+test("a player of a lobby round takes only that round's game", async (context) => {
+  const subscription = new Subscription();
+  const commands = [];
+  // The lobby's newest game is still the first round's, which has ended.
+  let state = { ...initial(), lobby_round: 1, game_id: 1, outcome: { reason: "all_eliminated" } };
+  const player = new ExamplePlayer({ lobbyID: "room", lobbyRound: 2, playerID: "player", credential: "test", subscription,
+    fetcher: async (url, options) => {
+      if (options.method !== "GET") { commands.push(JSON.parse(options.body)); state = { ...state, submitted: true }; }
+      return { ok: true, json: async () => state };
+    },
+  });
+  context.after(() => player.stop());
+  player.start();
+  await delay(30);
+  assert.equal(player.state, null);
+  // The second round's game starts, and its first turn is played.
+  state = { ...initial(), lobby_round: 2, game_id: 2 };
+  subscription.publish(state);
+  await until(() => commands.length === 1 && !player.inFlight);
+  assert.equal(player.state.game_id, 2);
+  assert.equal(commands[0].game_id, 2);
+});
+
 test("push-driven turns deduplicate events; paused idle players do not poll", async (context) => {
   const subscription = new Subscription();
   let reads = 0;

@@ -11,6 +11,7 @@ const LobbyGameKey = "island-battles"
 type WatchState struct {
 	GameID       uint           `json:"game_id" minimum:"1"`
 	LobbyID      string         `json:"lobby_id" format:"uuid"`
+	LobbyRound   int64          `json:"lobby_round" minimum:"1" doc:"The lobby round that the game plays. A lobby plays one game per round, and the /game/from-lobby/{lobby_id} routes serve its newest game: compare this with the lobby snapshot's lobby.round to tell whether the game is the one the lobby started last."`
 	GenerationID uint           `json:"generation_id" minimum:"1"`
 	Channel      string         `json:"channel" doc:"The lobby's watch channel, watch:island-battles:<lobby_id>, which receives WatchGenerationEvent after each turn and WatchGameEndedEvent after the last one."`
 	Teams        []GameTeam     `json:"teams" nullable:"false" doc:"The teams that play, with their lobby names and the display names their players had at the start."`

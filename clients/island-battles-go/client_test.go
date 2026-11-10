@@ -54,7 +54,7 @@ func (fake *fakeServer) stateOf(generationID uint, submitted bool, outcome map[s
 	turn := FixtureTurn()
 	turn.Generation.ID = generationID
 	state := map[string]any{
-		"game_id": 7, "lobby_id": testLobbyID, "generation_id": generationID, "player_id": testPlayerID,
+		"game_id": 7, "lobby_id": testLobbyID, "lobby_round": 1, "generation_id": generationID, "player_id": testPlayerID,
 		"team_color": 1, "channel": "player:" + testPlayerID, "submitted": submitted, "generation": turn.Generation,
 		"log_lines_stored": 0, "memory": nil, "bot": map[string]any{"kind": "localhost"}, "turn_deadline_at": nil,
 	}

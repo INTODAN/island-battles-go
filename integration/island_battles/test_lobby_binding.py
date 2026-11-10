@@ -221,6 +221,11 @@ async def test_island_schema_survives_restart():
         "game_player_bot_memory", "island_lobby_bot_choices",
     }
     columns = await sql("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='games' ORDER BY ordinal_position")
-    assert set(columns.splitlines()) == {"id", "created_at", "updated_at", "deleted_at", "lobby_id", "teams", "outcome", "next_soldier_group_id", "turn_timeout_seconds"}
+    assert set(columns.splitlines()) == {"id", "created_at", "updated_at", "deleted_at", "lobby_id", "lobby_round", "teams", "outcome", "next_soldier_group_id", "turn_timeout_seconds"}
+    # A lobby plays one game per round: the games are unique by lobby and
+    # round, and the old index on the lobby alone is gone.
+    indexes = await sql("SELECT indexname FROM pg_indexes WHERE schemaname='public' AND tablename='games' AND indexname LIKE 'idx_games_lobby%' ORDER BY indexname")
+    assert indexes.splitlines() == ["idx_games_lobby_round"]
+    assert "UNIQUE" in await sql("SELECT indexdef FROM pg_indexes WHERE indexname='idx_games_lobby_round'")
     await control_backend(signal.SIGUSR1)
     assert await sql("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename") == tables

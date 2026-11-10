@@ -10,8 +10,10 @@ export const maxRetryWaitMs = 5000;
 
 /**
  * Requests other than GET that are safe to send again: they set a value, so a
- * repeat changes nothing. Creating, joining, starting, adding or removing a
- * seat and kicking a watcher are not in this list and are never retried.
+ * repeat changes nothing. Reopening a lobby after its game is one too: a
+ * lobby that already waits comes back unchanged. Creating, joining, starting,
+ * adding or removing a seat and kicking a watcher are not in this list and are
+ * never retried.
  */
 const repeatableRequests: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "PUT", path: /\/game\/lobbies\/[^/]+\/bot$/ },
@@ -20,6 +22,10 @@ const repeatableRequests: ReadonlyArray<{ method: string; path: RegExp }> = [
   {
     method: "POST",
     path: /\/lobby\/v1\/games\/[^/]+\/lobbies\/[^/]+\/heartbeat$/,
+  },
+  {
+    method: "POST",
+    path: /\/lobby\/v1\/games\/[^/]+\/lobbies\/[^/]+\/reopen$/,
   },
 ];
 
