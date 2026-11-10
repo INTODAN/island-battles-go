@@ -7,6 +7,7 @@ import {
   choiceValue,
   describeBot,
   describeSettings,
+  startBlocker,
 } from "./roomModel";
 
 const member = (
@@ -135,5 +136,99 @@ describe("the settings line", () => {
     expect(describeSettings({ map: { map_name: "Mine" } }, maps)).toBe(
       "Map: Mine · Turn limit: 30 s",
     );
+  });
+});
+
+describe("what keeps the host from starting", () => {
+  const rules = { every_team_needs_member: false } as Snapshot["start_rules"];
+  const strict = { every_team_needs_member: true } as Snapshot["start_rules"];
+  const seat = (id: string, teamId: string) =>
+    member(id, teamId, {
+      kind: "seat",
+      ready: true,
+      seat_settings: { bot_level: 1 },
+    });
+  /** The room for these members, with the snapshot's teams (Blue and Red). */
+  const roomOf = (members: unknown[]) =>
+    buildRoom({ ...snapshot, members } as unknown as Snapshot, null, "p1");
+
+  test("fewer than two members, people and bot seats together", () => {
+    expect(
+      startBlocker(roomOf([member("p1", "t-blue", { ready: true })]), rules),
+    ).toBe("Waiting for another player or bot.");
+    expect(
+      startBlocker(
+        roomOf([member("p1", "t-blue", { ready: true }), seat("p2", "t-red")]),
+        rules,
+      ),
+    ).toBeNull();
+  });
+
+  test("a member without a team", () => {
+    expect(
+      startBlocker(
+        roomOf([
+          member("p1", "t-blue", { ready: true }),
+          member("p2", null, { ready: true }),
+        ]),
+        rules,
+      ),
+    ).toBe("Everyone needs a team.");
+  });
+
+  test("a person who is reconnecting", () => {
+    expect(
+      startBlocker(
+        roomOf([
+          member("p1", "t-blue", { ready: true }),
+          member("p2", "t-red", {
+            ready: true,
+            disconnected_until: "2026-11-01T00:01:00Z",
+          }),
+        ]),
+        rules,
+      ),
+    ).toBe("Waiting for P2 to reconnect.");
+  });
+
+  test("a person who is not ready; a bot seat is always ready", () => {
+    expect(
+      startBlocker(
+        roomOf([
+          member("p1", "t-blue", { ready: true }),
+          member("p2", "t-red", { ready: false }),
+        ]),
+        rules,
+      ),
+    ).toBe("Waiting for P2 to be ready.");
+    expect(
+      startBlocker(
+        roomOf([member("p1", "t-blue", { ready: true }), seat("p2", "t-red")]),
+        rules,
+      ),
+    ).toBeNull();
+  });
+
+  test("an empty team, only when the game requires a member in each", () => {
+    const members = [
+      member("p1", "t-blue", { ready: true }),
+      member("p2", "t-blue", { ready: true }),
+    ];
+    expect(startBlocker(roomOf(members), strict)).toBe(
+      "Every team needs a player or a bot.",
+    );
+    expect(startBlocker(roomOf(members), rules)).toBeNull();
+  });
+
+  test("null when every rule is met", () => {
+    expect(
+      startBlocker(
+        roomOf([
+          member("p1", "t-blue", { ready: true }),
+          member("p2", "t-red", { ready: true }),
+        ]),
+        strict,
+      ),
+    ).toBeNull();
   });
 });
