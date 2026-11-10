@@ -1,14 +1,13 @@
-package bots
+package defaultbots
 
 import (
 	"cmp"
 	"context"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
 
-	"islandBattles/backend/models"
+	islandbattles "github.com/INTODAN/island-battles-go/clients/island-battles-go"
 )
 
 // LevelThree plays like LevelTwo, and also:
@@ -20,7 +19,27 @@ import (
 //     ones later, so the groups land together. Its memory keeps these plans,
 //     and a turn counter, between turns;
 //   - buys speed upgrades with the soldiers it can spare.
-type LevelThree struct{}
+func LevelThree(_ context.Context, turn islandbattles.Turn) (islandbattles.Result, error) {
+	state := levelThreeTurn{board: newBoard(turn), budgets: map[uint]*castleBudget{}, speeds: map[uint]float64{}, planned: planned{}}
+	if err := turn.Memory.Decode(&state.memory); err != nil {
+		// A memory it can't read is forgotten, rather than passing turns.
+		state.memory = levelThreeMemory{}
+	}
+	state.turn = state.memory.Turn + 1
+	owned := state.board.owned()
+	if len(owned) == 0 {
+		return islandbattles.Result{Commands: []islandbattles.Command{}, Logs: []islandbattles.LogLine{logLine(3, "I have no castles left; passing.")}}, nil
+	}
+	for _, castle := range owned {
+		state.speeds[castle.ID] = state.board.speed(castle.Upgrades)
+	}
+	state.reserve(owned)
+	state.launchPlans()
+	state.defend(owned)
+	state.attack(owned)
+	state.upgrade(owned)
+	return state.result()
+}
 
 // levelThreeMemory is LevelThree's memory.
 type levelThreeMemory struct {
@@ -65,41 +84,15 @@ type levelThreeTurn struct {
 	budgets  map[uint]*castleBudget
 	speeds   map[uint]float64
 	planned  planned
-	upgrades []models.PublicGenerationCommand
-	// upgradeTable is the turn's upgrade cost table.
-	upgradeTable []models.UpgradeView
-	sends        []models.PublicGenerationCommand
-	actions      []string
-	notes        []string
-}
-
-func (LevelThree) Play(_ context.Context, turn models.BotTurn) (models.BotTurnResult, error) {
-	state := levelThreeTurn{board: newBoard(turn), budgets: map[uint]*castleBudget{}, speeds: map[uint]float64{}, planned: planned{}, upgradeTable: turn.Upgrades}
-	if len(turn.Memory) > 0 {
-		if err := json.Unmarshal(turn.Memory, &state.memory); err != nil {
-			// A memory it can't read is forgotten, rather than passing turns.
-			state.memory = levelThreeMemory{}
-		}
-	}
-	state.turn = state.memory.Turn + 1
-	owned := state.board.owned()
-	if len(owned) == 0 {
-		return models.BotTurnResult{Commands: []models.PublicGenerationCommand{}, Logs: []models.GenerationLogLine{logLine(3, "I have no castles left; passing.")}}, nil
-	}
-	for _, castle := range owned {
-		state.speeds[castle.ID] = speed(castle.Upgrades)
-	}
-	state.reserve(owned)
-	state.launchPlans()
-	state.defend(owned)
-	state.attack(owned)
-	state.upgrade(owned)
-	return state.result()
+	upgrades []islandbattles.Command
+	sends    []islandbattles.Command
+	actions  []string
+	notes    []string
 }
 
 // castleBudget is what one of the bot's castles must keep this turn.
 type castleBudget struct {
-	castle models.CastleView
+	castle islandbattles.Castle
 	// hold is what it keeps to hold against the groups heading for it.
 	hold int
 	// guard is what it keeps against the enemy castle guardAgainst, which
@@ -117,7 +110,7 @@ type castleBudget struct {
 
 // spare is how many soldiers the castle can send to target, or spend on
 // anything else for a nil target.
-func (budget *castleBudget) spare(target *models.CastleView) int {
+func (budget *castleBudget) spare(target *islandbattles.Castle) int {
 	if budget.doomed {
 		return 0
 	}
@@ -131,7 +124,7 @@ func (budget *castleBudget) spare(target *models.CastleView) int {
 // reserve sets what each castle must keep: enough to hold against the groups
 // heading for it, a guard against the enemy castle that could send it the
 // most, and the launches its plans have yet to send.
-func (state *levelThreeTurn) reserve(owned []models.CastleView) {
+func (state *levelThreeTurn) reserve(owned []islandbattles.Castle) {
 	for _, castle := range owned {
 		budget := &castleBudget{castle: castle, hold: int(garrisonToHold(state.board.arrivals(castle), state.board.team))}
 		budget.guard, budget.guardAgainst = state.guard(castle)
@@ -151,14 +144,14 @@ func (state *levelThreeTurn) reserve(owned []models.CastleView) {
 // needs the most: with the castle's growth while the enemy group travels,
 // and the margin an attacker adds, a garrison this large needs more soldiers
 // than the enemy castle holds.
-func (state *levelThreeTurn) guard(castle models.CastleView) (int, *uint) {
+func (state *levelThreeTurn) guard(castle islandbattles.Castle) (int, *uint) {
 	guard := 0
 	var against *uint
 	for _, enemy := range state.board.castles {
-		if enemy.TeamColor == models.NeutralTeamColor || enemy.TeamColor == state.board.team {
+		if enemy.TeamColor == islandbattles.NeutralTeamColor || enemy.TeamColor == state.board.team {
 			continue
 		}
-		turns := travelTurns(distance(enemy, castle), speed(enemy.Upgrades))
+		turns := travelTurns(enemy.Distance(castle), state.board.speed(enemy.Upgrades))
 		if needed := int(enemy.Soldiers) - turns - int(attackMargin(enemy.Soldiers)) - 1; needed > guard {
 			guard, against = needed, &enemy.ID
 		}
@@ -167,15 +160,15 @@ func (state *levelThreeTurn) guard(castle models.CastleView) (int, *uint) {
 }
 
 // send adds a send command, if the castle still has the soldiers.
-func (state *levelThreeTurn) send(origin, target models.CastleView, soldiers uint) bool {
+func (state *levelThreeTurn) send(origin, target islandbattles.Castle, soldiers uint) bool {
 	budget := state.budgets[origin.ID]
 	if soldiers == 0 || budget.used+int(soldiers) > int(origin.Soldiers) {
 		return false
 	}
 	budget.used += int(soldiers)
-	state.sends = append(state.sends, sendCommand(origin.ID, target.ID, soldiers))
+	state.sends = append(state.sends, islandbattles.SendSoldierGroup(origin.ID, target.ID, soldiers))
 	state.planned[target.ID] = append(state.planned[target.ID], arrival{
-		turn: travelTurns(distance(origin, target), state.speeds[origin.ID]), id: state.board.nextGroupID() + uint(len(state.sends)),
+		turn: travelTurns(origin.Distance(target), state.speeds[origin.ID]), id: state.board.nextGroupID() + uint(len(state.sends)),
 		team: state.board.team, soldiers: soldiers,
 	})
 	return true
@@ -229,7 +222,7 @@ func (state *levelThreeTurn) launchPlans() {
 // defend sends help to every castle that the groups heading for it would
 // take even if it kept all its soldiers, from the nearest castles whose help
 // lands in time.
-func (state *levelThreeTurn) defend(owned []models.CastleView) {
+func (state *levelThreeTurn) defend(owned []islandbattles.Castle) {
 	for _, castle := range owned {
 		budget := state.budgets[castle.ID]
 		arrivals := append(state.board.arrivals(castle), state.planned[castle.ID]...)
@@ -242,7 +235,7 @@ func (state *levelThreeTurn) defend(owned []models.CastleView) {
 		helped := uint(0)
 		for _, helper := range byDistance(castle, owned) {
 			spare := state.budgets[helper.ID].spare(nil)
-			if helper.ID == castle.ID || spare <= 0 || travelTurns(distance(helper, castle), state.speeds[helper.ID]) > falls {
+			if helper.ID == castle.ID || spare <= 0 || travelTurns(helper.Distance(castle), state.speeds[helper.ID]) > falls {
 				continue
 			}
 			soldiers := uint(min(spare, missing+1-int(helped)))
@@ -266,7 +259,7 @@ func (state *levelThreeTurn) defend(owned []models.CastleView) {
 
 // fallTurn is the first turn whose arrivals take a castle that keeps
 // soldiers, or a turn past every arrival when it holds.
-func fallTurn(castle models.CastleView, arrivals []arrival, soldiers, team uint) int {
+func fallTurn(castle islandbattles.Castle, arrivals []arrival, soldiers, team uint) int {
 	castle.Soldiers = soldiers
 	last := 0
 	for _, landing := range arrivals {
@@ -283,15 +276,15 @@ func fallTurn(castle models.CastleView, arrivals []arrival, soldiers, team uint)
 // combined is an attack on target from several castles, whose groups land
 // together after turns.
 type combined struct {
-	target  models.CastleView
-	origins []models.CastleView
+	target  islandbattles.Castle
+	origins []islandbattles.Castle
 	need    uint
 	turns   int
 	score   float64
 }
 
 // attack plans the best attacks the spare soldiers allow, one at a time.
-func (state *levelThreeTurn) attack(owned []models.CastleView) {
+func (state *levelThreeTurn) attack(owned []islandbattles.Castle) {
 	for range len(state.board.castles) {
 		best, found := state.bestAttack(owned)
 		if !found {
@@ -301,17 +294,17 @@ func (state *levelThreeTurn) attack(owned []models.CastleView) {
 	}
 }
 
-func (state *levelThreeTurn) bestAttack(owned []models.CastleView) (combined, bool) {
+func (state *levelThreeTurn) bestAttack(owned []islandbattles.Castle) (combined, bool) {
 	var best combined
 	found := false
 	for _, target := range state.board.others() {
-		origins := []models.CastleView{}
+		origins := []islandbattles.Castle{}
 		for _, origin := range owned {
 			if state.budgets[origin.ID].spare(&target) > 0 {
 				origins = append(origins, origin)
 			}
 		}
-		slices.SortStableFunc(origins, func(left, right models.CastleView) int {
+		slices.SortStableFunc(origins, func(left, right islandbattles.Castle) int {
 			return cmp.Or(cmp.Compare(state.travel(left, target), state.travel(right, target)), cmp.Compare(left.ID, right.ID))
 		})
 		total := 0
@@ -326,7 +319,7 @@ func (state *levelThreeTurn) bestAttack(owned []models.CastleView) (combined, bo
 			// castles meet the attack.
 			oncoming := uint(0)
 			for _, group := range state.board.groups {
-				if group.TeamColor != state.board.team && group.OriginCastleID == target.ID && slices.ContainsFunc(origins[:count+1], func(castle models.CastleView) bool { return castle.ID == group.DestinationCastleID }) {
+				if group.TeamColor != state.board.team && group.OriginCastleID == target.ID && slices.ContainsFunc(origins[:count+1], func(castle islandbattles.Castle) bool { return castle.ID == group.DestinationCastleID }) {
 					oncoming += group.Soldiers
 				}
 			}
@@ -335,7 +328,7 @@ func (state *levelThreeTurn) bestAttack(owned []models.CastleView) (combined, bo
 				continue
 			}
 			value := 1.0
-			if target.TeamColor != models.NeutralTeamColor {
+			if target.TeamColor != islandbattles.NeutralTeamColor {
 				value = 1.5
 			}
 			score := value / float64(int(need)+3*turns)
@@ -348,8 +341,8 @@ func (state *levelThreeTurn) bestAttack(owned []models.CastleView) (combined, bo
 	return best, found
 }
 
-func (state *levelThreeTurn) travel(origin, target models.CastleView) int {
-	return travelTurns(distance(origin, target), state.speeds[origin.ID])
+func (state *levelThreeTurn) travel(origin, target islandbattles.Castle) int {
+	return travelTurns(origin.Distance(target), state.speeds[origin.ID])
 }
 
 // launch sends a combined attack's groups from the castles whose groups need
@@ -385,16 +378,16 @@ func (state *levelThreeTurn) launch(attack combined) {
 }
 
 // upgrade buys the next speed level for castles that can spare its cost.
-func (state *levelThreeTurn) upgrade(owned []models.CastleView) {
+func (state *levelThreeTurn) upgrade(owned []islandbattles.Castle) {
 	if state.turn < upgradeFromTurn {
 		return
 	}
 	for _, castle := range owned {
-		level, err := castle.Upgrades.Level(models.SpeedUpgrade)
-		if err != nil || level >= maxSpeedLevel {
+		level := castle.Upgrades.Level(islandbattles.SpeedUpgrade)
+		if level < 1 || level >= maxSpeedLevel {
 			continue
 		}
-		cost, found := upgradeCost(state.upgradeTable, models.SpeedUpgrade, level+1)
+		cost, found := islandbattles.NextUpgradeCost(state.board.turn, castle, islandbattles.SpeedUpgrade)
 		if !found {
 			continue
 		}
@@ -403,24 +396,24 @@ func (state *levelThreeTurn) upgrade(owned []models.CastleView) {
 			continue
 		}
 		budget.used += int(cost)
-		state.upgrades = append(state.upgrades, upgradeCommand(castle.ID, models.SpeedUpgrade))
+		state.upgrades = append(state.upgrades, islandbattles.UpgradeCastle(castle.ID, islandbattles.SpeedUpgrade))
 		state.actions = append(state.actions, fmt.Sprintf("buying speed level %d at castle %d", level+1, castle.ID))
 	}
 }
 
-func (state *levelThreeTurn) result() (models.BotTurnResult, error) {
+func (state *levelThreeTurn) result() (islandbattles.Result, error) {
 	state.memory.Turn = state.turn
-	memory, err := json.Marshal(state.memory)
+	memory, err := islandbattles.NewMemory(state.memory)
 	if err != nil {
-		return models.BotTurnResult{}, err
+		return islandbattles.Result{}, err
 	}
 	// Sends go first: an upgrade bought in the same turn would change the
 	// speed of groups that were planned with the castle's current speed.
 	commands := append(slices.Clone(state.sends), state.upgrades...)
 	if commands == nil {
-		commands = []models.PublicGenerationCommand{}
+		commands = []islandbattles.Command{}
 	}
-	logs := []models.GenerationLogLine{}
+	logs := []islandbattles.LogLine{}
 	if len(state.actions) == 0 {
 		logs = append(logs, logLine(3, "Turn %d: holding; nothing worth attacking with the soldiers I can spare.", state.turn))
 	} else {
@@ -433,5 +426,5 @@ func (state *levelThreeTurn) result() (models.BotTurnResult, error) {
 		}
 		logs = append(logs, logLine(3, "Plans: %s.", strings.Join(notes, "; ")))
 	}
-	return models.BotTurnResult{Commands: commands, Logs: logs, Memory: memory}, nil
+	return islandbattles.Result{Commands: commands, Logs: logs, Memory: memory}, nil
 }

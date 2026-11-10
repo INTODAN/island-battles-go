@@ -1,48 +1,61 @@
-package bots
+// Package defaultbots holds the three default bots, levels 1 to 3, that the
+// Island Battles backend plays itself when a player picks a default bot in
+// the lobby. They are plain islandbattles.Play functions, so you can read,
+// copy and change them like any bot of your own; examples/level1 to level3
+// are their programs.
+//
+// Every bot is stateless: each turn it gets an islandbattles.Turn, with the
+// memory it returned last turn, and answers with an islandbattles.Result.
+// They are deterministic: the same turn always gives the same result, so
+// they use no randomness at all.
+//
+// This file holds what the levels share: a sorted view of the board, travel
+// times, and a forecast of how a castle's soldiers change as groups land.
+package defaultbots
 
 import (
 	"cmp"
-	"encoding/json"
 	"fmt"
 	"math"
 	"slices"
 	"unicode/utf8"
 
-	"islandBattles/backend/models"
+	islandbattles "github.com/INTODAN/island-battles-go/clients/island-battles-go"
 )
 
 // board is a bot's view of one generation: the castles and soldier groups
-// in ID order, and its own team.
+// in ID order, its own team, and the turn's upgrade table.
 type board struct {
 	team    uint
-	castles []models.CastleView
-	groups  []models.SoldierGroupView
+	castles []islandbattles.Castle
+	groups  []islandbattles.SoldierGroup
 	index   map[uint]int
+	turn    islandbattles.Turn
 }
 
-func newBoard(turn models.BotTurn) board {
+func newBoard(turn islandbattles.Turn) board {
 	castles := slices.Clone(turn.Generation.Castles)
-	slices.SortFunc(castles, func(left, right models.CastleView) int { return cmp.Compare(left.ID, right.ID) })
+	slices.SortFunc(castles, func(left, right islandbattles.Castle) int { return cmp.Compare(left.ID, right.ID) })
 	groups := slices.Clone(turn.Generation.SoldierGroups)
-	slices.SortFunc(groups, func(left, right models.SoldierGroupView) int { return cmp.Compare(left.ID, right.ID) })
+	slices.SortFunc(groups, func(left, right islandbattles.SoldierGroup) int { return cmp.Compare(left.ID, right.ID) })
 	index := make(map[uint]int, len(castles))
 	for position, castle := range castles {
 		index[castle.ID] = position
 	}
-	return board{team: turn.TeamColor, castles: castles, groups: groups, index: index}
+	return board{team: turn.TeamColor, castles: castles, groups: groups, index: index, turn: turn}
 }
 
-func (board board) castle(id uint) (models.CastleView, bool) {
+func (board board) castle(id uint) (islandbattles.Castle, bool) {
 	position, found := board.index[id]
 	if !found {
-		return models.CastleView{}, false
+		return islandbattles.Castle{}, false
 	}
 	return board.castles[position], true
 }
 
 // owned lists the bot's castles in ID order.
-func (board board) owned() []models.CastleView {
-	owned := []models.CastleView{}
+func (board board) owned() []islandbattles.Castle {
+	owned := []islandbattles.Castle{}
 	for _, castle := range board.castles {
 		if castle.TeamColor == board.team {
 			owned = append(owned, castle)
@@ -53,8 +66,8 @@ func (board board) owned() []models.CastleView {
 
 // others lists every castle the bot doesn't own, neutral ones included, in
 // ID order.
-func (board board) others() []models.CastleView {
-	others := []models.CastleView{}
+func (board board) others() []islandbattles.Castle {
+	others := []islandbattles.Castle{}
 	for _, castle := range board.castles {
 		if castle.TeamColor != board.team {
 			others = append(others, castle)
@@ -72,17 +85,22 @@ func (board board) nextGroupID() uint {
 	return board.groups[len(board.groups)-1].ID + 1
 }
 
-func distance(from, to models.CastleView) float64 {
-	return math.Hypot(to.X-from.X, to.Y-from.Y)
-}
+// fallbackSpeed is the speed of level 1, for a turn whose upgrade table
+// lacks it. The server always sends the full table.
+const fallbackSpeed = 0.5
 
-// speed is how far a group with these upgrades moves per turn.
-func speed(upgrades models.Upgrades) float64 {
-	value, err := upgrades.Value(models.SpeedUpgrade)
-	if err != nil || value <= 0 {
-		value, _ = models.Upgrades{}.Value(models.SpeedUpgrade)
+// speed is how far a group with these upgrades moves per turn, read from the
+// turn's upgrade table. A level the table doesn't have moves at level 1's
+// speed.
+func (board board) speed(upgrades islandbattles.Upgrades) float64 {
+	level, found := board.turn.UpgradeLevel(islandbattles.SpeedUpgrade, upgrades.Level(islandbattles.SpeedUpgrade))
+	if !found || level.Value <= 0 {
+		level, found = board.turn.UpgradeLevel(islandbattles.SpeedUpgrade, 1)
 	}
-	return value
+	if !found || level.Value <= 0 {
+		return fallbackSpeed
+	}
+	return level.Value
 }
 
 // travelTurns is the turn, counting this one as 1, at whose end a group that
@@ -108,13 +126,13 @@ func compareArrivals(left, right arrival) int {
 // arrivals lists the groups on the board that are heading for a castle, by
 // when they land. It leaves out clashes on the way and the pause after one,
 // which a bot can't see.
-func (board board) arrivals(castle models.CastleView) []arrival {
+func (board board) arrivals(castle islandbattles.Castle) []arrival {
 	arrivals := []arrival{}
 	for _, group := range board.groups {
 		if group.DestinationCastleID != castle.ID {
 			continue
 		}
-		turns := travelTurns(math.Hypot(castle.X-group.X, castle.Y-group.Y), speed(group.Upgrades))
+		turns := travelTurns(group.Distance(castle), board.speed(group.Upgrades))
 		arrivals = append(arrivals, arrival{turn: turns, id: group.ID, team: group.TeamColor, soldiers: group.Soldiers})
 	}
 	slices.SortFunc(arrivals, compareArrivals)
@@ -125,7 +143,7 @@ func (board board) arrivals(castle models.CastleView) []arrival {
 // the simulation plays it: every turn the castle grows by one soldier, then
 // the turn's arrivals land in order. A friendly group reinforces the castle,
 // and a hostile one takes it when it has more soldiers than the castle.
-func forecast(castle models.CastleView, arrivals []arrival, turns int) (owner, soldiers uint) {
+func forecast(castle islandbattles.Castle, arrivals []arrival, turns int) (owner, soldiers uint) {
 	owner, soldiers = castle.TeamColor, castle.Soldiers
 	arrivals = slices.SortedFunc(slices.Values(arrivals), compareArrivals)
 	next := 0
@@ -164,39 +182,13 @@ func garrisonToHold(arrivals []arrival, team uint) uint {
 	return uint(needed)
 }
 
-func sendCommand(origin, destination, soldiers uint) models.PublicGenerationCommand {
-	parameters, _ := json.Marshal(models.SendSoldierGroupParameters{OriginCastleID: &origin, DestinationCastleID: &destination, SoldierAmount: &soldiers})
-	return models.PublicGenerationCommand{CommandType: models.SendSoldierGroup, Parameters: parameters}
-}
-
-// upgradeCost is what reaching a level of an upgrade type costs in the turn's
-// table, and whether the table lists that level.
-func upgradeCost(table []models.UpgradeView, upgradeType models.UpgradeType, level int) (uint, bool) {
-	for _, upgrade := range table {
-		if upgrade.Type != upgradeType {
-			continue
-		}
-		for _, entry := range upgrade.Levels {
-			if entry.Level == level {
-				return entry.SoldierCost, true
-			}
-		}
-	}
-	return 0, false
-}
-
-func upgradeCommand(castle uint, upgradeType models.UpgradeType) models.PublicGenerationCommand {
-	parameters, _ := json.Marshal(models.UpgradeCastleParameters{CastleID: &castle, UpgradeType: &upgradeType})
-	return models.PublicGenerationCommand{CommandType: models.UpgradeCastle, Parameters: parameters}
-}
-
-// logLine is an info line of a default bot's game log, cut to the length a
-// line may have.
-func logLine(level uint, format string, arguments ...any) models.GenerationLogLine {
+// logLine is an info line of a default bot's game log, from the logger
+// island_battles.bots.level1 to level3, cut to the length a line may have.
+func logLine(level uint, format string, arguments ...any) islandbattles.LogLine {
 	message := fmt.Sprintf(format, arguments...)
-	if utf8.RuneCountInString(message) > models.MaxGenerationLogMessageLength {
+	if utf8.RuneCountInString(message) > islandbattles.MaxLogMessageLength {
 		runes := []rune(message)
-		message = string(runes[:models.MaxGenerationLogMessageLength-1]) + "…"
+		message = string(runes[:islandbattles.MaxLogMessageLength-1]) + "…"
 	}
-	return models.GenerationLogLine{Level: models.GenerationLogInfo, Logger: fmt.Sprintf("island_battles.bots.level%d", level), Message: message}
+	return islandbattles.LogLine{Level: islandbattles.LogInfo, Logger: fmt.Sprintf("island_battles.bots.level%d", level), Message: message}
 }

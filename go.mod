@@ -106,6 +106,7 @@ require (
 )
 
 require (
+	github.com/INTODAN/island-battles-go/clients/island-battles-go v0.0.0
 	github.com/aws/aws-lambda-go v1.54.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.70.0
@@ -118,4 +119,7 @@ require (
 	islandBattles/lobby v0.0.0
 )
 
-replace islandBattles/lobby => ./lobby
+replace (
+	github.com/INTODAN/island-battles-go/clients/island-battles-go => ./clients/island-battles-go
+	islandBattles/lobby => ./lobby
+)

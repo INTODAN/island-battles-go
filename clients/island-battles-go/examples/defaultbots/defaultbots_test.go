@@ -1,0 +1,258 @@
+package defaultbots_test
+
+import (
+	"context"
+	"encoding/json"
+	"reflect"
+	"testing"
+
+	islandbattles "github.com/INTODAN/island-battles-go/clients/island-battles-go"
+	"github.com/INTODAN/island-battles-go/clients/island-battles-go/examples/defaultbots"
+)
+
+// levels are the default bots by level.
+var levels = map[uint]islandbattles.Play{1: defaultbots.LevelOne, 2: defaultbots.LevelTwo, 3: defaultbots.LevelThree}
+
+// levelOneUpgrades are the upgrades of a castle or group at level 1 of every type.
+func levelOneUpgrades() islandbattles.Upgrades {
+	return islandbattles.Upgrades{islandbattles.SpeedUpgrade: 1, islandbattles.ClashStopGenerationsUpgrade: 1}
+}
+
+// castle is a castle of a fixture generation, with level 1 upgrades.
+func castle(id, team, soldiers uint, x, y float64) islandbattles.Castle {
+	return islandbattles.Castle{ID: id, TeamColor: team, Soldiers: soldiers, X: x, Y: y, Upgrades: levelOneUpgrades()}
+}
+
+// group is a soldier group of a fixture generation, with level 1 upgrades.
+func group(id, team, soldiers uint, x, y float64, origin, destination uint) islandbattles.SoldierGroup {
+	return islandbattles.SoldierGroup{ID: id, TeamColor: team, Soldiers: soldiers, X: x, Y: y, OriginCastleID: origin, DestinationCastleID: destination,
+		ClashRadius: 0.25, Upgrades: levelOneUpgrades()}
+}
+
+func turn(team uint, castles []islandbattles.Castle, groups []islandbattles.SoldierGroup, memory string) islandbattles.Turn {
+	if groups == nil {
+		groups = []islandbattles.SoldierGroup{}
+	}
+	// The fixture turn's upgrade table is the server's.
+	botTurn := islandbattles.Turn{GameID: 7, TeamColor: team, Upgrades: islandbattles.FixtureTurn().Upgrades,
+		Generation: islandbattles.Generation{ID: 41, Castles: castles, SoldierGroups: groups, Clashes: []islandbattles.Clash{}}}
+	if memory != "" {
+		botTurn.Memory = islandbattles.Memory(memory)
+	}
+	return botTurn
+}
+
+// sent is a send_soldier_group command's parameters.
+type sent struct {
+	Origin      uint `json:"origin_castle_id"`
+	Destination uint `json:"destination_castle_id"`
+	Soldiers    uint `json:"soldier_amount"`
+}
+
+// play plays a turn with the level's bot, checks what every default bot's
+// result must be, and returns it with its sends and upgrades.
+func play(t *testing.T, level uint, botTurn islandbattles.Turn) (islandbattles.Result, []sent, []islandbattles.UpgradeCastleParameters) {
+	t.Helper()
+	bot, found := levels[level]
+	if !found {
+		t.Fatalf("no bot of level %d", level)
+	}
+	result, err := bot(context.Background(), botTurn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := bot(context.Background(), botTurn)
+	if err != nil || !reflect.DeepEqual(result, again) {
+		t.Fatalf("the same turn gave different results:\n%+v\n%+v", result, again)
+	}
+	if err := islandbattles.ValidateResult(result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Commands == nil {
+		t.Fatal("commands are null")
+	}
+	if len(result.Logs) == 0 || len(result.Logs) > 2 {
+		t.Fatalf("got %d log lines, want 1 or 2: %+v", len(result.Logs), result.Logs)
+	}
+	for _, line := range result.Logs {
+		if line.Level != islandbattles.LogInfo || line.Message == "" {
+			t.Fatalf("unexpected log line %+v", line)
+		}
+	}
+	sends, upgrades := []sent{}, []islandbattles.UpgradeCastleParameters{}
+	for _, command := range result.Commands {
+		switch command.CommandType {
+		case islandbattles.SendSoldierGroupCommand:
+			var parameters sent
+			if err := json.Unmarshal(command.Parameters, &parameters); err != nil {
+				t.Fatal(err)
+			}
+			sends = append(sends, parameters)
+		case islandbattles.UpgradeCastleCommand:
+			var parameters islandbattles.UpgradeCastleParameters
+			if err := json.Unmarshal(command.Parameters, &parameters); err != nil {
+				t.Fatal(err)
+			}
+			upgrades = append(upgrades, parameters)
+		default:
+			t.Fatalf("unexpected command %s", command.CommandType)
+		}
+	}
+	return result, sends, upgrades
+}
+
+func TestLevelOneSendsOneSoldierToTheFirstEnemyCastle(t *testing.T) {
+	castles := []islandbattles.Castle{castle(0, 1, 0, 0, 0), castle(1, 1, 5, 1, 0), castle(2, 0, 3, 2, 0), castle(3, 2, 9, 3, 0), castle(4, 2, 9, 4, 0)}
+	result, sends, _ := play(t, 1, turn(1, castles, nil, ""))
+	if !reflect.DeepEqual(sends, []sent{{Origin: 1, Destination: 3, Soldiers: 1}}) || result.Memory != nil {
+		t.Fatalf("got sends %+v and memory %s", sends, result.Memory)
+	}
+	// Neutral castles are never its target.
+	_, sends, _ = play(t, 1, turn(1, castles[:3], nil, ""))
+	if len(sends) != 0 {
+		t.Fatalf("attacked without an enemy castle: %+v", sends)
+	}
+}
+
+func TestLevelTwoAttacksTheNearestCastleItCanTake(t *testing.T) {
+	// Castle 2 is nearest but too strong. Castle 1 lands after 2 turns with
+	// 12 defenders, so 12 + 1 + a margin of 3 takes it.
+	castles := []islandbattles.Castle{castle(0, 1, 20, 0, 0), castle(1, 0, 10, 1, 0), castle(2, 0, 30, 0, 0.5), castle(3, 2, 30, 6, 0)}
+	_, sends, _ := play(t, 2, turn(1, castles, nil, ""))
+	if !reflect.DeepEqual(sends, []sent{{Origin: 0, Destination: 1, Soldiers: 16}}) {
+		t.Fatalf("got sends %+v", sends)
+	}
+	// A group of its own already takes castle 1, so it waits rather than
+	// attack castle 3, which it can't beat.
+	groups := []islandbattles.SoldierGroup{group(5, 1, 20, 0.5, 0, 0, 1)}
+	_, sends, _ = play(t, 2, turn(1, castles, groups, ""))
+	if len(sends) != 0 {
+		t.Fatalf("got sends %+v", sends)
+	}
+	// An enemy group landing on castle 1 first leaves fewer defenders.
+	groups = []islandbattles.SoldierGroup{group(5, 2, 8, 1.5, 0, 3, 1)}
+	_, sends, _ = play(t, 2, turn(1, castles, groups, ""))
+	if !reflect.DeepEqual(sends, []sent{{Origin: 0, Destination: 1, Soldiers: 7}}) {
+		t.Fatalf("got sends %+v", sends)
+	}
+}
+
+func TestLevelThreeSendsHelpToAThreatenedCastle(t *testing.T) {
+	// 20 enemies land on castle 0 in 2 turns, when it has 7 of its own, and
+	// castle 1 is 2 turns away.
+	castles := []islandbattles.Castle{castle(0, 1, 5, 0, 0), castle(1, 1, 40, 1, 0), castle(2, 2, 10, 10, 0)}
+	groups := []islandbattles.SoldierGroup{group(3, 2, 20, -1, 0, 2, 0)}
+	_, sends, _ := play(t, 3, turn(1, castles, groups, ""))
+	if len(sends) == 0 || sends[0].Origin != 1 || sends[0].Destination != 0 || sends[0].Soldiers < 14 {
+		t.Fatalf("got sends %+v", sends)
+	}
+}
+
+func TestLevelThreeKeepsAGuardAgainstTheEnemy(t *testing.T) {
+	// Castle 1 would take 16 soldiers, but castle 0 keeps 34 against the
+	// enemy castle 4 turns away.
+	castles := []islandbattles.Castle{castle(0, 1, 40, 0, 0), castle(1, 0, 10, -1, 0), castle(2, 2, 45, 2, 0)}
+	_, sends, _ := play(t, 3, turn(1, castles, nil, ""))
+	if len(sends) != 0 {
+		t.Fatalf("got sends %+v", sends)
+	}
+	// Level 2 attacks anyway.
+	_, sends, _ = play(t, 2, turn(1, castles, nil, ""))
+	if len(sends) != 1 || sends[0].Destination != 1 {
+		t.Fatalf("got sends %+v", sends)
+	}
+}
+
+func TestLevelThreeCombinesAttacksAndRemembersTheLaterLaunch(t *testing.T) {
+	// Castle 2 lands from castle 1 in 4 turns and from castle 0 in 10.
+	// Neither can take it alone, but together they land 36 soldiers after
+	// 10 turns: castle 0 sends now, and castle 1 sends in turn 7.
+	castles := []islandbattles.Castle{castle(0, 1, 20, 0, 0), castle(1, 1, 20, 3, 0), castle(2, 0, 20, 5, 0)}
+	result, sends, _ := play(t, 3, turn(1, castles, nil, ""))
+	if !reflect.DeepEqual(sends, []sent{{Origin: 0, Destination: 2, Soldiers: 20}}) {
+		t.Fatalf("got sends %+v", sends)
+	}
+	var memory struct {
+		Turn  int `json:"turn"`
+		Plans []struct {
+			Target   uint `json:"target"`
+			Lands    int  `json:"lands"`
+			Launches []struct {
+				Origin   uint `json:"origin"`
+				Soldiers uint `json:"soldiers"`
+				At       int  `json:"at"`
+			} `json:"launches"`
+		} `json:"plans"`
+	}
+	if err := result.Memory.Decode(&memory); err != nil {
+		t.Fatal(err)
+	}
+	if memory.Turn != 1 || len(memory.Plans) != 1 || memory.Plans[0].Target != 2 || memory.Plans[0].Lands != 10 || len(memory.Plans[0].Launches) != 1 ||
+		memory.Plans[0].Launches[0].Origin != 1 || memory.Plans[0].Launches[0].Soldiers != 16 || memory.Plans[0].Launches[0].At != 7 {
+		t.Fatalf("unexpected memory %s", result.Memory)
+	}
+	// Castle 1 keeps the soldiers until turn 7, then sends them.
+	later := []islandbattles.Castle{castle(0, 1, 5, 0, 0), castle(1, 1, 26, 3, 0), castle(2, 0, 26, 5, 0)}
+	groups := []islandbattles.SoldierGroup{group(0, 1, 20, 3, 0, 0, 2)}
+	waiting := string(result.Memory)
+	waiting = waiting[:len(`{"turn":`)] + "5" + waiting[len(`{"turn":1`):]
+	_, sends, _ = play(t, 3, turn(1, later, groups, waiting))
+	if len(sends) != 0 {
+		t.Fatalf("sent before turn 7: %+v", sends)
+	}
+	due := waiting[:len(`{"turn":`)] + "6" + waiting[len(`{"turn":5`):]
+	result, sends, _ = play(t, 3, turn(1, later, groups, due))
+	if !reflect.DeepEqual(sends, []sent{{Origin: 1, Destination: 2, Soldiers: 16}}) || string(result.Memory) != `{"turn":7}` {
+		t.Fatalf("got sends %+v and memory %s", sends, result.Memory)
+	}
+}
+
+func TestLevelThreeBuysSpeedWithSpareSoldiers(t *testing.T) {
+	castles := []islandbattles.Castle{castle(0, 1, 40, 0, 0), castle(1, 2, 5, 20, 0)}
+	castles[1].Soldiers = 500
+	// Early on, and while a guard needs the soldiers, it buys nothing.
+	_, _, upgrades := play(t, 3, turn(1, castles, nil, `{"turn":30}`))
+	if len(upgrades) != 0 {
+		t.Fatalf("got upgrades %+v", upgrades)
+	}
+	castles[1].Soldiers = 5
+	_, _, upgrades = play(t, 3, turn(1, castles, nil, ""))
+	if len(upgrades) != 0 {
+		t.Fatalf("got upgrades %+v", upgrades)
+	}
+	_, sends, upgrades := play(t, 3, turn(1, castles, nil, `{"turn":30}`))
+	if len(upgrades) != 1 || upgrades[0].CastleID != 0 || upgrades[0].UpgradeType != islandbattles.SpeedUpgrade {
+		t.Fatalf("got upgrades %+v and sends %+v", upgrades, sends)
+	}
+}
+
+func TestDefaultBotsPassWithoutCastles(t *testing.T) {
+	castles := []islandbattles.Castle{castle(0, 2, 30, 0, 0)}
+	for level := range uint(3) {
+		_, sends, upgrades := play(t, level+1, turn(1, castles, nil, ""))
+		if len(sends)+len(upgrades) != 0 {
+			t.Fatalf("level %d sent commands without castles", level+1)
+		}
+	}
+}
+
+func TestLevelThreeForgetsMemoryItCannotRead(t *testing.T) {
+	castles := []islandbattles.Castle{castle(0, 1, 30, 0, 0), castle(1, 2, 30, 4, 0)}
+	result, _, _ := play(t, 3, turn(1, castles, nil, `{"turn":"soon"}`))
+	if string(result.Memory) != `{"turn":1}` {
+		t.Fatalf("got memory %s", result.Memory)
+	}
+}
+
+// Each level writes its game log lines with its own logger.
+func TestDefaultBotsLogAsTheirLevel(t *testing.T) {
+	castles := []islandbattles.Castle{castle(0, 1, 30, 0, 0), castle(1, 2, 30, 4, 0)}
+	for level := range uint(3) {
+		result, _, _ := play(t, level+1, turn(1, castles, nil, ""))
+		for _, line := range result.Logs {
+			if want := "island_battles.bots.level" + string(rune('1'+level)); line.Logger != want {
+				t.Fatalf("level %d logged as %q, want %q", level+1, line.Logger, want)
+			}
+		}
+	}
+}

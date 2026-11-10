@@ -1,0 +1,123 @@
+{
+  "game_id": 1,
+  "team_color": 1,
+  "upgrades": [
+    {
+      "type": "clash_stop_generations",
+      "description": "Generations a troop stays stopped after a clash",
+      "max_level": 3,
+      "levels": [
+        {
+          "level": 1,
+          "value": 3,
+          "soldier_cost": 0
+        },
+        {
+          "level": 2,
+          "value": 2,
+          "soldier_cost": 10
+        },
+        {
+          "level": 3,
+          "value": 1,
+          "soldier_cost": 20
+        }
+      ]
+    },
+    {
+      "type": "speed",
+      "description": "World units a troop moves per turn",
+      "max_level": 4,
+      "levels": [
+        {
+          "level": 1,
+          "value": 0.5,
+          "soldier_cost": 0
+        },
+        {
+          "level": 2,
+          "value": 1,
+          "soldier_cost": 10
+        },
+        {
+          "level": 3,
+          "value": 1.5,
+          "soldier_cost": 20
+        },
+        {
+          "level": 4,
+          "value": 2,
+          "soldier_cost": 30
+        }
+      ]
+    }
+  ],
+  "memory": null,
+  "turn_deadline_at": null,
+  "generation": {
+    "id": 12,
+    "castles": [
+      {
+        "id": 0,
+        "team_color": 1,
+        "soldiers": 30,
+        "x": -3.0,
+        "y": 0.0,
+        "upgrades": {
+          "speed": 1,
+          "clash_stop_generations": 1
+        }
+      },
+      {
+        "id": 1,
+        "team_color": 2,
+        "soldiers": 30,
+        "x": 3.0,
+        "y": 0.0,
+        "upgrades": {
+          "speed": 1,
+          "clash_stop_generations": 1
+        }
+      },
+      {
+        "id": 2,
+        "team_color": 0,
+        "soldiers": 10,
+        "x": 0.0,
+        "y": 2.0,
+        "upgrades": {
+          "speed": 1,
+          "clash_stop_generations": 1
+        }
+      },
+      {
+        "id": 3,
+        "team_color": 1,
+        "soldiers": 12,
+        "x": -2.0,
+        "y": -2.0,
+        "upgrades": {
+          "speed": 1,
+          "clash_stop_generations": 1
+        }
+      }
+    ],
+    "soldier_groups": [
+      {
+        "id": 0,
+        "team_color": 2,
+        "soldiers": 4,
+        "origin_castle_id": 1,
+        "destination_castle_id": 0,
+        "x": 1.0,
+        "y": 0.0,
+        "clash_radius": 0.5,
+        "upgrades": {
+          "speed": 1,
+          "clash_stop_generations": 1
+        }
+      }
+    ],
+    "clashes": []
+  }
+}
