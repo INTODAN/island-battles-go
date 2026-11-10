@@ -9,9 +9,8 @@
 // whole game.
 
 import type { components } from "../../api/generated/game";
-import { CASTLE_RADIUS } from "../board";
 import { castleDisplayLevel } from "../castleLevel";
-import { toMapDistance } from "../coordinates";
+import { drawnPosition, sharesLandmass, shorePoint } from "../shore";
 
 type Generation = components["schemas"]["Generation"];
 type Castle = components["schemas"]["Castle"];
@@ -64,7 +63,7 @@ export interface SpawnTrack {
   t1: number;
 }
 
-/** A group arrives at a castle: it shrinks into it from `t0` and is gone at `t1`. */
+/** A group has landed at its castle's shore: it shrinks and fades there from `t0`, gone at `t1`. */
 export interface MergeTrack {
   kind: "merge";
   groupId: number;
@@ -146,6 +145,8 @@ export const FLASH_SPAN = 0.25;
 export const SINK_SPAN = 0.4;
 /** How long a launched group takes to grow to full size. */
 export const SPAWN_SPAN = 0.15;
+/** How long a landed group takes to shrink and fade at the shore, at most. */
+export const MERGE_SPAN = 0.12;
 
 const SPEED_BY_LEVEL = [0.5, 1, 1.5, 2];
 /** Soldier cost of reaching each level, from level 1; mirrors backend/models/upgrades.go. */
@@ -226,21 +227,20 @@ interface Arrival {
   landing: number;
 }
 
-/** How far from a castle's centre a boat starts and ends its sail, in map units. */
-const CASTLE_REACH = toMapDistance(CASTLE_RADIUS);
-
-/** Where a group launched at `origin` starts: the castle's edge, toward where it first is. */
-function edgePoint(
-  origin: { x: number; y: number },
+/**
+ * Where a group launched at `origin` starts: the origin island's shore (shore.ts), on the line
+ * to its destination, or toward `toward` when the destination is not known. Map units.
+ */
+function launchPoint(
+  origin: Castle,
+  destination: Castle | undefined,
   toward: { x: number; y: number },
 ): { x: number; y: number } {
-  const distance = Math.hypot(toward.x - origin.x, toward.y - origin.y);
-  if (distance === 0) return { x: origin.x, y: origin.y };
-  const reach = Math.min(CASTLE_REACH, distance);
-  return {
-    x: origin.x + ((toward.x - origin.x) / distance) * reach,
-    y: origin.y + ((toward.y - origin.y) / distance) * reach,
-  };
+  return shorePoint(
+    origin,
+    destination ?? toward,
+    destination !== undefined && sharesLandmass(origin, destination),
+  );
 }
 
 /**
@@ -306,7 +306,9 @@ export function planTurn(previous: Generation, next: Generation): TurnPlan {
     } else {
       const origin = castleAt(group.origin_castle_id);
       const first = list[0]?.point ?? group;
-      start = origin ? edgePoint(origin, first) : first;
+      start = origin
+        ? launchPoint(origin, castleAt(group.destination_castle_id), first)
+        : first;
       tracks.push({ kind: "spawn", groupId: group.id, t0: 0, t1: SPAWN_SPAN });
     }
     const keys: PathKey[] = [
@@ -366,27 +368,30 @@ export function planTurn(previous: Generation, next: Generation): TurnPlan {
       });
       continue;
     }
-    // Sail on from the last contact to the castle's edge, then in to its centre where it lands.
+    // Sail on from the last contact to the castle's shore, slowing down, and stop there. The
+    // boat then shrinks and fades at the shore, ending at the time it would have reached the
+    // castle's centre: the moment the castle's count changes.
     const speed = speedOf(group.upgrades);
     const distance = Math.hypot(castle.x - last.x, castle.y - last.y);
     const landing = Math.min(1, last.t + distance / speed);
-    const reach = Math.min(distance, CASTLE_REACH);
-    const edgeTime = Math.max(last.t, landing - reach / speed);
-    const edge =
-      distance <= CASTLE_REACH
-        ? { x: last.x, y: last.y }
-        : {
-            x: castle.x + ((last.x - castle.x) / distance) * CASTLE_REACH,
-            y: castle.y + ((last.y - castle.y) / distance) * CASTLE_REACH,
-          };
-    keys.push({ t: edgeTime, ...edge });
-    keys.push({ t: landing, x: castle.x, y: castle.y, ease: "out" });
+    const origin = castleAt(group.origin_castle_id);
+    const shore = shorePoint(
+      castle,
+      origin ?? last,
+      origin !== undefined && sharesLandmass(origin, castle),
+    );
+    const reach = Math.hypot(shore.x - castle.x, shore.y - castle.y);
+    const shoreTime =
+      distance <= reach
+        ? last.t
+        : Math.min(landing, last.t + (distance - reach) / speed);
+    keys.push({ t: shoreTime, ...shore, ease: "out" });
     tracks.push({ kind: "move", groupId: group.id, keys });
     tracks.push({
       kind: "merge",
       groupId: group.id,
       castleId: group.destination_castle_id,
-      t0: edgeTime,
+      t0: Math.max(shoreTime, landing - MERGE_SPAN),
       t1: landing,
     });
     const landed = arrivals.get(group.destination_castle_id) ?? [];
@@ -438,7 +443,7 @@ export function planTurn(previous: Generation, next: Generation): TurnPlan {
     const keys = contactKeys(list);
     if (origin) {
       launched.set(origin.id, (launched.get(origin.id) ?? 0) + initial);
-      keys.unshift({ t: 0, ...edgePoint(origin, first.point) });
+      keys.unshift({ t: 0, ...launchPoint(origin, undefined, first.point) });
       if (keys[1]) keys[1].ease = "in";
       tracks.push({ kind: "spawn", groupId, t0: 0, t1: SPAWN_SPAN });
     } else {
@@ -654,9 +659,50 @@ function progress(t: number, t0: number, t1: number): number {
   return clamp01((t - t0) / (t1 - t0));
 }
 
+interface Route {
+  origin: Castle | undefined;
+  destination: Castle | undefined;
+}
+
+const routes = new WeakMap<TurnPlan, Map<number, Route>>();
+
+/**
+ * The castles each group of a plan sails between, found once per plan. A group in neither
+ * generation has the origin its transient was guessed to have; a castle that is not known (ID
+ * -1) is `undefined`.
+ */
+function routesOf(plan: TurnPlan): Map<number, Route> {
+  const known = routes.get(plan);
+  if (known) return known;
+  const castles = new Map(
+    [...plan.previous.castles, ...plan.next.castles].map((c) => [c.id, c]),
+  );
+  const found = new Map<number, Route>(
+    [
+      ...plan.previous.soldier_groups,
+      ...plan.transients,
+      ...plan.next.soldier_groups,
+    ].map((group) => [
+      group.id,
+      {
+        origin: castles.get(group.origin_castle_id),
+        destination: castles.get(group.destination_castle_id),
+      },
+    ]),
+  );
+  routes.set(plan, found);
+  return found;
+}
+
 /** The state of every animated thing at `time` in [0, 1] of the turn. */
 export function sampleTurn(plan: TurnPlan, time: number): TurnSample {
   const t = clamp01(time);
+  const draw = (groupId: number, position: { x: number; y: number }) => {
+    const route = routesOf(plan).get(groupId);
+    return route
+      ? drawnPosition(position, route.origin, route.destination)
+      : position;
+  };
   const groups = new Map<number, GroupPose>();
   const castles = new Map<number, CastlePose>();
   for (const castle of plan.next.castles) {
@@ -686,7 +732,10 @@ export function sampleTurn(plan: TurnPlan, time: number): TurnSample {
   for (const track of plan.tracks) {
     switch (track.kind) {
       case "move":
-        Object.assign(group(track.groupId), pathAt(track.keys, t));
+        Object.assign(
+          group(track.groupId),
+          draw(track.groupId, pathAt(track.keys, t)),
+        );
         break;
       case "groupCount":
         group(track.groupId).count = countAt(track.keys, t);
@@ -727,12 +776,14 @@ export function sampleTurn(plan: TurnPlan, time: number): TurnSample {
         const age = (t - track.t) / FLASH_SPAN;
         if (age < 0 || age > 1) break;
         for (const point of track.points) {
+          // A clash close to a castle is drawn where the boats are drawn, so they stay together.
+          const drawn = draw(point.groupId, point);
           flashes.push({
             clashId: track.clashId,
             groupId: point.groupId,
             teamColor: point.teamColor,
-            x: point.x,
-            y: point.y,
+            x: drawn.x,
+            y: drawn.y,
             radius: point.radius,
             age,
           });

@@ -72,6 +72,7 @@ export class SceneStage implements Stage {
         field,
         group,
         castles.get(group.destination_castle_id),
+        castles.get(group.origin_castle_id),
         entity,
       );
     }
@@ -115,6 +116,7 @@ export class SceneStage implements Stage {
           field,
           { ...group, x: pose.x, y: pose.y, soldiers: pose.count },
           castles.get(group.destination_castle_id),
+          castles.get(group.origin_castle_id),
           entity,
         );
       }

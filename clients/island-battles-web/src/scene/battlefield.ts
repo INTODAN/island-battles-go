@@ -51,6 +51,7 @@ import {
 } from "./landforms";
 import { createBoardLook } from "./look";
 import { CLASH_COLOR, LOSS_COLOR, teamColorHex, tint } from "./palette";
+import { drawnPosition } from "./shore";
 
 type Generation = components["schemas"]["Generation"];
 type GameTeam = components["schemas"]["GameTeam"];
@@ -229,11 +230,13 @@ export function updateGroup(
   field: Battlefield,
   group: SoldierGroup,
   destination: Castle | undefined,
+  origin: Castle | undefined,
   entity: GroupEntity,
 ): void {
   const { scene, materials } = field;
   const { root, body } = entity.parts;
-  const world = toWorld(group);
+  // A boat near either island is drawn at its shore, not inside it (shore.ts).
+  const world = toWorld(drawnPosition(group, origin, destination));
   root.position.set(world.x, 0, world.z);
   if (destination) {
     const target = toWorld(destination);
@@ -260,6 +263,8 @@ function updateClashes(field: Battlefield, generation: Generation): void {
   const seen = new Set<string>();
   const losses = new Map<number, number>();
   const groupIds = new Set(generation.soldier_groups.map((group) => group.id));
+  const castlesById = new Map(generation.castles.map((c) => [c.id, c]));
+  const groupsById = new Map(generation.soldier_groups.map((g) => [g.id, g]));
   for (const clash of generation.clashes) {
     for (const participant of clash.participants) {
       const key = `${clash.id}:${participant.group_id}`;
@@ -279,7 +284,17 @@ function updateClashes(field: Battlefield, generation: Generation): void {
         };
         field.clashes.set(key, entity);
       }
-      const world = toWorld(participant);
+      // The ring of a boat that is still afloat goes where the boat is drawn (shore.ts).
+      const boat = groupsById.get(participant.group_id);
+      const world = toWorld(
+        boat
+          ? drawnPosition(
+              participant,
+              castlesById.get(boat.origin_castle_id),
+              castlesById.get(boat.destination_castle_id),
+            )
+          : participant,
+      );
       entity.ring.position.set(world.x, 0.07, world.z);
       entity.ring.material = defeated
         ? materials.flat(tint(color, 0.35), 0.55)
@@ -592,6 +607,7 @@ export function renderGeneration(
       field,
       group,
       castleById.get(group.destination_castle_id),
+      castleById.get(group.origin_castle_id),
       entity,
     );
   }
