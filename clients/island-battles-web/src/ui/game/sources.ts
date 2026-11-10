@@ -7,6 +7,7 @@ import type { Realtime, RealtimeProblem } from "../../realtime";
 import type { Demo } from "./demoFile";
 import type { GameOutcome, Generation } from "./history";
 import type { GenerationLogs } from "./logs";
+import { type DemoDownload, downloadDemo } from "./saveDemo";
 
 /** One turn as it arrives live, from a player's or a watcher's state. */
 export interface LiveTurn {
@@ -30,6 +31,8 @@ export interface LiveSource {
   subscribe(listener: (turn: LiveTurn | null) => void): () => void;
   /** The history so far, in the demo format. */
   readHistory(): Promise<Demo>;
+  /** The demo file of the game so far, ready to save. */
+  saveDemo(): Promise<DemoDownload>;
   /**
    * Reads one turn's logs. Absent for a watcher, who sees no logs until the game ends and
    * then gets every turn's logs with the history.
@@ -65,6 +68,7 @@ export function playerSource(realtime: Realtime, lobbyId: string): LiveSource {
       });
       return required(data);
     },
+    saveDemo: () => downloadDemo(gameApi, lobbyId, false),
     async readLogs(generationId) {
       const { data } = await gameApi.GET("/game/from-lobby/{lobby_id}/logs", {
         params: {
@@ -101,5 +105,6 @@ export function watchSource(
       );
       return required(data);
     },
+    saveDemo: () => downloadDemo(gameApi, target.lobbyId, true),
   };
 }
