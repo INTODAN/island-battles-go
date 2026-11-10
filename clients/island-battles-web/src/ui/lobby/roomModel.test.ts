@@ -159,7 +159,7 @@ describe("what keeps the host from starting", () => {
       ready: true,
       seat_settings: { bot_level: 1 },
     });
-  /** The room for these members, with the snapshot's teams (Blue and Red). */
+  /** The room for these members, with the snapshot's teams (Blue, Red and Green). */
   const roomOf = (members: unknown[]) =>
     buildRoom({ ...snapshot, members } as unknown as Snapshot, null, "p1");
 
@@ -237,6 +237,7 @@ describe("what keeps the host from starting", () => {
         roomOf([
           member("p1", "t-blue", { ready: true }),
           member("p2", "t-red", { ready: true }),
+          seat("p3", "t-green"),
         ]),
         strict,
       ),
