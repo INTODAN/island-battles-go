@@ -3,6 +3,7 @@ import { apiBaseUrl, platformFetch } from "../platform";
 import { ApiError, errorFromResponse } from "./errors";
 import type { paths as GamePaths } from "./generated/game";
 import type { paths as LobbyPaths } from "./generated/lobby";
+import { retryThrottled } from "./retry";
 
 export interface ApiOptions {
   /** Server origin. Defaults to the page's own origin, or the game server in the desktop build. */
@@ -11,6 +12,10 @@ export interface ApiOptions {
   getAccessToken?: () => string | undefined;
   /** Replaces `fetch`; tests use it. */
   fetch?: typeof fetch;
+  /** Replaces the wait between retries of throttled (429) requests; tests use it. */
+  sleep?: (milliseconds: number) => Promise<void>;
+  /** Replaces the retry jitter source, a number in [0, 1); tests use it. */
+  random?: () => number;
 }
 
 let accessToken: string | undefined;
@@ -76,7 +81,10 @@ export function createApiClients(options: ApiOptions = {}) {
     // Look fetch up per call so a later global replacement (and tests) is honoured.
     const client = createClient<P>({
       baseUrl,
-      fetch: transportFetch(inner ?? platformFetch),
+      fetch: retryThrottled(transportFetch(inner ?? platformFetch), {
+        sleep: options.sleep,
+        random: options.random,
+      }),
     });
     client.use(authMiddleware(getAccessToken), errorMiddleware);
     return client;

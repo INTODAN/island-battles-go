@@ -1,3 +1,5 @@
+import { serverBusyMessage } from "./retry";
+
 export type ApiErrorKind =
   /** The server answered with an `application/problem+json` error body. */
   | "problem"
@@ -57,6 +59,14 @@ const text = (value: unknown): string | undefined =>
  * ignored, and a body that is not JSON still yields an error with the status.
  */
 export async function errorFromResponse(response: Response): Promise<ApiError> {
+  if (response.status === 429) {
+    // The platform's throttle answer has no useful body; never show "Too Many Requests".
+    return new ApiError({
+      kind: "http",
+      status: 429,
+      detail: serverBusyMessage,
+    });
+  }
   let body: unknown;
   try {
     body = JSON.parse(await response.text());
