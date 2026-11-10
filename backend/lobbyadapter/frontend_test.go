@@ -48,6 +48,25 @@ func TestFrontendGameLinksTheDemoViewer(t *testing.T) {
 	}
 }
 
+// A watcher's frame reads only the watcher routes: the catalog gives it a
+// prefix of their own, which names none of a player's reads.
+func TestFrontendGameWatchersReadOnlyTheWatchRoutes(t *testing.T) {
+	game := lobbyadapter.FrontendGame()
+	if game.WatchResultURL != "/game/from-lobby/{lobby_id}/watch/replay" || game.WatchDataURLPrefix != "/game/from-lobby/{lobby_id}/watch/" {
+		t.Fatalf("watch URLs = %q, %q", game.WatchResultURL, game.WatchDataURLPrefix)
+	}
+	for _, playerRead := range []string{"/game/from-lobby/{lobby_id}/demo", "/game/from-lobby/{lobby_id}/logs", "/game/from-lobby/{lobby_id}/generation", "/game/from-lobby/{lobby_id}/replay"} {
+		if strings.HasPrefix(playerRead, game.WatchDataURLPrefix) {
+			t.Errorf("%s is under the watch prefix", playerRead)
+		}
+	}
+	for _, watchRead := range []string{"/game/from-lobby/{lobby_id}/watch/demo", game.WatchResultURL} {
+		if !strings.HasPrefix(watchRead, game.WatchDataURLPrefix) {
+			t.Errorf("%s is not under the watch prefix", watchRead)
+		}
+	}
+}
+
 // The web client is served at /play/ by CloudFront, not the backend
 // (deploy/README.md, "The web client").
 func TestFrontendGameLinksThe3DClient(t *testing.T) {

@@ -136,6 +136,13 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
 	}, game.WatchGeneration)
 	huma.Register(api, huma.Operation{
+		OperationID: "watchIslandLobbyReplay", Path: "/game/from-lobby/{lobby_id}/watch/replay", Method: http.MethodGet,
+		Summary: "View the Island Battles replay of a lobby's game as a watcher",
+		Description: "The replay page of GET /game/from-lobby/{lobby_id}/replay for the people who may read GET /game/from-lobby/{lobby_id}/watch: every stored generation, the teams and the outcome once the game has ended, drawn by the same code as the roster's replay. " +
+			"The page reads its history for Save demo through /game/from-lobby/{lobby_id}/watch/demo, and shows no game log lines, since a watcher sees none while the game runs. A kicked watcher gets 403; anyone else, and a lobby whose game hasn't started, get 404." + newestGame,
+		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
+	}, game.WatchReplay)
+	huma.Register(api, huma.Operation{
 		OperationID: "watchIslandLobbyDemo", Path: "/game/from-lobby/{lobby_id}/watch/demo", Method: http.MethodGet,
 		Summary: "Read a lobby game's history for a watcher",
 		Description: "For the people who may read GET /game/from-lobby/{lobby_id}/watch. Returns the game so far as a demo file, the Demo schema, as GET /game/from-lobby/{lobby_id}/demo does, for scrubbing back through it. " +

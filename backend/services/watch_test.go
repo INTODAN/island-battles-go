@@ -173,6 +173,43 @@ func TestWatchersGetEveryTurnInThePlayersPushAndNoPlayerFields(t *testing.T) {
 	}
 }
 
+// The watcher's replay is the roster's replay for whoever may watch: a watcher
+// the host hasn't kicked, and a roster player.
+func TestWatchersGetTheReplayOfTheGame(t *testing.T) {
+	fixture := newLogFixture(t)
+	ctx := context.Background()
+	watcher, kicked, stranger := domain.Principal{PlayerID: uuid.NewString()}, domain.Principal{PlayerID: uuid.NewString()}, domain.Principal{PlayerID: uuid.NewString()}
+	service := &services.GenerationService{Database: fixture.database, Publisher: &batchPublisher{},
+		Watchers: lobbyWatchers{watching: map[string]bool{watcher.PlayerID: true}, kicked: map[string]bool{kicked.PlayerID: true}}}
+	lobbyID := fixture.state.LobbyID
+
+	want, err := service.Replay(ctx, fixture.players[0], lobbyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, principal := range map[string]domain.Principal{"watcher": watcher, "roster player": fixture.players[1]} {
+		got, err := service.WatchReplay(ctx, principal, lobbyID)
+		if err != nil || !reflect.DeepEqual(got, want) || len(got.Frames) == 0 {
+			t.Fatalf("%s's replay = %+v, %v; want %+v", name, got, err, want)
+		}
+	}
+	if _, err := service.WatchReplay(ctx, kicked, lobbyID); err == nil {
+		t.Fatal("a kicked watcher read the replay")
+	} else {
+		assertTurnStatus(t, err, 403)
+	}
+	if _, err := service.WatchReplay(ctx, stranger, lobbyID); err == nil {
+		t.Fatal("a stranger read the replay")
+	} else {
+		assertTurnStatus(t, err, 404)
+	}
+	// Without the lobby's watcher rows only the roster reads it.
+	rosterOnly := &services.GenerationService{Database: fixture.database, Publisher: &batchPublisher{}}
+	if _, err := rosterOnly.WatchReplay(ctx, watcher, lobbyID); err == nil {
+		t.Fatal("a watcher read the replay without the watcher rows")
+	}
+}
+
 func TestWatchersGetEveryTurnThatGoBotsPlay(t *testing.T) {
 	game := startGoBotGame(t, lopsidedSettings, 3, 1)
 	generations := game.generations(t)

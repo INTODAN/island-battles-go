@@ -120,3 +120,21 @@ func (service *GenerationService) WatchDemo(ctx context.Context, principal domai
 	// team's.
 	return service.demo(ctx, game, models.FrozenGamePlayer{})
 }
+
+// WatchReplay derives the replay of a lobby's game for watchers, as Replay
+// does for roster players. It is the page a watcher sees in the lobby page's
+// frame; the watcher's frame reads the history through WatchDemo.
+func (service *GenerationService) WatchReplay(ctx context.Context, principal domain.Principal, lobbyID string) (GameReplay, error) {
+	game, err := service.authorizeWatcher(ctx, principal, lobbyID)
+	if err != nil {
+		return GameReplay{}, err
+	}
+	if game, err = service.applyOverdueDeadline(ctx, game); err != nil {
+		return GameReplay{}, err
+	}
+	generations, err := dal.LoadGameGenerations(service.Database.WithContext(ctx), game.ID)
+	if err != nil {
+		return GameReplay{}, err
+	}
+	return gameReplay(game, generations), nil
+}
