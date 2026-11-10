@@ -13,6 +13,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/jackc/pgx/v5/pgtype"
+	"islandBattles/lobby/domain"
 	"islandBattles/lobby/httpapi"
 )
 
@@ -117,8 +118,9 @@ func DecodeMapTemplate(data []byte) (MapTemplateView, error) {
 const MaxMapTemplateProblems = httpapi.MaxErrorDetails - 1
 
 // ValidateMapTemplate checks a map file without storing it: its name and
-// sizes, that every castle lies inside the plane, the castles' team colours and
-// their upgrades. It returns nil or a *MapTemplateError listing every invalid
+// sizes, that player_amount is a team count a lobby can have, that every castle
+// lies inside the plane, the castles' team colours, that every team colour from
+// 1 to player_amount owns a castle, and the castles' upgrades. It returns nil or a *MapTemplateError listing every invalid
 // field. Name uniqueness depends on storage and is checked when storing.
 func ValidateMapTemplate(template MapTemplateView) error {
 	var details []*huma.ErrorDetail
@@ -128,8 +130,8 @@ func ValidateMapTemplate(template MapTemplateView) error {
 	if strings.TrimSpace(template.MapName) == "" {
 		reject("map_name", template.MapName, "must not be blank")
 	}
-	if template.PlayerAmount < 1 {
-		reject("player_amount", template.PlayerAmount, "must be at least 1")
+	if template.PlayerAmount < domain.MinTeams || template.PlayerAmount > domain.MaxTeams {
+		reject("player_amount", template.PlayerAmount, fmt.Sprintf("must be from %d to %d, the number of teams a lobby can have", domain.MinTeams, domain.MaxTeams))
 	}
 	if template.PlaneSizeX < 1 {
 		reject("plane_size_x", template.PlaneSizeX, "must be at least 1")
@@ -142,7 +144,9 @@ func ValidateMapTemplate(template MapTemplateView) error {
 	}
 	halfWidth := float64(template.PlaneSizeX) / 2
 	halfHeight := float64(template.PlaneSizeY) / 2
+	ownedColours := map[uint]bool{}
 	for index, castle := range template.Castles {
+		ownedColours[castle.TeamColor] = true
 		location := fmt.Sprintf("castles[%d].", index)
 		if castle.TeamColor > template.PlayerAmount {
 			reject(location+"team_color", castle.TeamColor, fmt.Sprintf("must be %d for a neutral castle or a team colour from 1 to player_amount (%d)", NeutralTeamColor, template.PlayerAmount))
@@ -157,6 +161,16 @@ func ValidateMapTemplate(template MapTemplateView) error {
 		for _, upgradeType := range slices.Sorted(maps.Keys(castle.Upgrades)) {
 			if _, err := castle.Upgrades.Level(upgradeType); err != nil {
 				reject(location+"upgrades."+string(upgradeType), castle.Upgrades[upgradeType], err.Error())
+			}
+		}
+	}
+	// Every lobby team is a team colour, so a colour without a castle would
+	// leave a team without one. Checked only for a player_amount a lobby can
+	// have, so a huge value can't produce a problem per colour.
+	if template.PlayerAmount <= domain.MaxTeams {
+		for colour := uint(1); colour <= template.PlayerAmount; colour++ {
+			if !ownedColours[colour] {
+				reject("castles", colour, fmt.Sprintf("team colour %d of player_amount %d owns no castle; every team colour from 1 to player_amount needs at least one", colour, template.PlayerAmount))
 			}
 		}
 	}

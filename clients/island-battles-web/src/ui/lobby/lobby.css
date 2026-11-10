@@ -424,11 +424,6 @@ select:focus-visible {
   background: var(--team);
 }
 
-.count {
-  font-size: 13px;
-  color: var(--ink-soft);
-}
-
 .members {
   list-style: none;
   margin: 8px 0;

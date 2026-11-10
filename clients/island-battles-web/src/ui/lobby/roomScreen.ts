@@ -21,6 +21,7 @@ import {
   seatBody,
   startBlocker,
   type TeamRow,
+  teamTaken,
 } from "./roomModel";
 import { mountWatchersPanel } from "./watchersPanel";
 
@@ -323,7 +324,7 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
 
   function teamCard(team: TeamRow, model: RoomModel): HTMLElement {
     const mine = model.yourTeamId === team.id;
-    const full = team.members.length >= team.capacity;
+    const taken = teamTaken(team);
     const needsPlayer = problems.highlight.includes(team.id);
     const colour = `var(--team-${((team.colour - 1) % 6) + 1})`;
     const error =
@@ -332,44 +333,46 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
       problems.seat?.teamId === team.id ? problems.seat.message : "";
     // Bots are added and removed by the host, while the lobby waits.
     const editSeats = model.isHost && model.phase === "waiting";
+    // A team holds one member, so a bot goes only on an empty team.
     const level = chosenLevel.get(team.id) ?? levels[0]?.level ?? 1;
-    const addSeat = editSeats
-      ? h(
-          "div",
-          { class: "seat-add" },
-          h(
-            "select",
-            {
-              attrs: { "aria-label": `Bot level for ${team.name}` },
-              onchange: (event: Event) =>
-                chosenLevel.set(
-                  team.id,
-                  Number((event.target as HTMLSelectElement).value),
+    const addSeat =
+      editSeats && !taken
+        ? h(
+            "div",
+            { class: "seat-add" },
+            h(
+              "select",
+              {
+                attrs: { "aria-label": `Bot level for ${team.name}` },
+                onchange: (event: Event) =>
+                  chosenLevel.set(
+                    team.id,
+                    Number((event.target as HTMLSelectElement).value),
+                  ),
+              },
+              ...levels.map((bot) =>
+                h(
+                  "option",
+                  {
+                    attrs: { value: String(bot.level) },
+                    selected: bot.level === level,
+                  },
+                  `Bot level ${bot.level}`,
                 ),
-            },
-            ...levels.map((bot) =>
-              h(
-                "option",
-                {
-                  attrs: { value: String(bot.level) },
-                  selected: bot.level === level,
-                },
-                `Bot level ${bot.level}`,
               ),
             ),
-          ),
-          h(
-            "button",
-            {
-              type: "button",
-              class: "secondary small",
-              disabled: busy,
-              onclick: () => void addBot(team.id),
-            },
-            "Add bot",
-          ),
-        )
-      : null;
+            h(
+              "button",
+              {
+                type: "button",
+                class: "secondary small",
+                disabled: busy,
+                onclick: () => void addBot(team.id),
+              },
+              "Add bot",
+            ),
+          )
+        : null;
     const action = mine
       ? h(
           "button",
@@ -386,10 +389,10 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
           {
             type: "button",
             class: "secondary small",
-            disabled: busy || !model.you,
+            disabled: busy || !model.you || taken,
             onclick: () => void joinTeam(team.id),
           },
-          full ? "Team full" : "Join team",
+          taken ? "Taken" : "Join team",
         );
     return h(
       "article",
@@ -397,17 +400,7 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
         class: `card team${mine ? " mine" : ""}${needsPlayer ? " needs-player" : ""}`,
         attrs: { "data-team-id": team.id, style: `--team:${colour}` },
       },
-      h(
-        "header",
-        {},
-        h("span", { class: "swatch" }),
-        h("h3", {}, team.name),
-        h(
-          "span",
-          { class: "count" },
-          `${team.members.length}/${team.capacity}`,
-        ),
-      ),
+      h("header", {}, h("span", { class: "swatch" }), h("h3", {}, team.name)),
       team.members.length > 0
         ? h(
             "ul",
@@ -424,7 +417,7 @@ export function mountRoomScreen(options: RoomScreenOptions): Screen {
         : h(
             "p",
             { class: "hint empty" },
-            needsPlayer ? "This team needs a player." : "No players yet",
+            needsPlayer ? "This team needs a player." : "Empty",
           ),
       needsPlayer && team.members.length > 0
         ? h("p", { class: "field-error" }, "This team needs a player.")

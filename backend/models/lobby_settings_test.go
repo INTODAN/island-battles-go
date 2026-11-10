@@ -78,7 +78,7 @@ func TestParseLobbySettingsLocatesEveryRejection(t *testing.T) {
 }
 
 func TestLobbySettingsErrorNamesTheField(t *testing.T) {
-	_, err := ParseLobbySettings(json.RawMessage(`{"map":{"map_name":"a","player_amount":2,"plane_size_x":4,"plane_size_y":4,"neutral_starting_soldier_amount":1,"castles":[{"team_color":1,"x":3,"y":0}]}}`))
+	_, err := ParseLobbySettings(json.RawMessage(`{"map":{"map_name":"a","player_amount":2,"plane_size_x":4,"plane_size_y":4,"neutral_starting_soldier_amount":1,"castles":[{"team_color":1,"x":3,"y":0},{"team_color":2,"x":0,"y":0}]}}`))
 	if err == nil || err.Error() != "game_settings.map.castles[0].x: must be inside the plane, from -2 to 2" {
 		t.Fatalf("message = %v", err)
 	}

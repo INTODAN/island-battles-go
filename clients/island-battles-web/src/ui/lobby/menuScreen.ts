@@ -10,7 +10,6 @@ import {
   type MapChoice,
   type MapTemplate,
   maxNameLength,
-  maxTeamCapacity,
   maxTeams,
   minTeams,
   normalizeJoinCode,
@@ -176,13 +175,6 @@ export function mountMenuScreen(options: MenuScreenOptions): Screen {
     max: String(maxTeams),
     value: "2",
   });
-  const teamCapacity = h("input", {
-    id: "team-capacity",
-    type: "number",
-    min: "1",
-    max: String(maxTeamCapacity),
-    value: "1",
-  });
   const mapSelect = h(
     "select",
     { id: "map-choice" },
@@ -218,7 +210,6 @@ export function mountMenuScreen(options: MenuScreenOptions): Screen {
   const errors = {
     lobbyName: errorOf("lobbyName"),
     teamCount: errorOf("teamCount"),
-    teamCapacity: errorOf("teamCapacity"),
     map: errorOf("map"),
     turnTimeout: errorOf("turnTimeout"),
   };
@@ -238,24 +229,10 @@ export function mountMenuScreen(options: MenuScreenOptions): Screen {
     h("label", { htmlFor: "lobby-name" }, "Lobby name"),
     lobbyName,
     errors.lobbyName,
-    h(
-      "div",
-      { class: "row" },
-      h(
-        "div",
-        {},
-        h("label", { htmlFor: "team-count" }, "Teams"),
-        teamCount,
-        errors.teamCount,
-      ),
-      h(
-        "div",
-        {},
-        h("label", { htmlFor: "team-capacity" }, "Players per team"),
-        teamCapacity,
-        errors.teamCapacity,
-      ),
-    ),
+    h("label", { htmlFor: "team-count" }, "Teams"),
+    teamCount,
+    h("p", { class: "hint" }, "One player or bot per team."),
+    errors.teamCount,
     h("label", { htmlFor: "map-choice" }, "Map"),
     mapSelect,
     mapFile,
@@ -286,7 +263,6 @@ export function mountMenuScreen(options: MenuScreenOptions): Screen {
     return {
       lobbyName: lobbyName.value,
       teamCount: Number(teamCount.value),
-      teamCapacity: Number(teamCapacity.value),
       map: mapChoice(),
       turnTimeoutSeconds:
         timeoutSelect.value === "none" ? null : Number(timeoutSelect.value),
@@ -420,7 +396,6 @@ export function mountMenuScreen(options: MenuScreenOptions): Screen {
     createButton.disabled = true;
     const body = {
       name: lobbyName.value.trim(),
-      capacity: result.capacity,
       teams: result.teams,
       game_settings: result.gameSettings,
     };

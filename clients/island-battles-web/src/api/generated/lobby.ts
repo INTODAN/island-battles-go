@@ -132,7 +132,7 @@ export interface paths {
         put?: never;
         /**
          * Add a seat
-         * @description Adds a seat that no person plays, such as the game's bot, to a team, and returns the snapshot, where the seat is a member of kind seat. Only the host can add one (otherwise not_host), and only while the lobby waits (otherwise phase_conflict). The game checks seat_settings and names the seat; settings it doesn't understand fail with invalid_seat_settings, and a game without seats refuses every one. The seat counts toward the lobby's and the team's capacity (lobby_full, team_full) and toward the members a start needs, is always ready, never disconnects, and joins the start roster with its own player_id. A start still needs the host, a person. A team_id that isn't one of the lobby's teams is invalid_input. The optional request_id makes a retry after a lost response safe: repeating it with the same team_id and seat_settings returns the current snapshot without a second seat, and with another team or settings fails with idempotency_conflict. Without one, each call adds a seat.
+         * @description Adds a seat that no person plays, such as the game's bot, to a team, and returns the snapshot, where the seat is a member of kind seat. Only the host can add one (otherwise not_host), and only while the lobby waits (otherwise phase_conflict). The game checks seat_settings and names the seat; settings it doesn't understand fail with invalid_seat_settings, and a game without seats refuses every one. The seat takes its team, which then holds no other member, and counts toward the lobby's capacity: a team that already has a person or a seat is team_full, and a lobby with as many members as teams is lobby_full. It counts toward the members a start needs, is always ready, never disconnects, and joins the start roster with its own player_id. A start still needs the host, a person. A team_id that isn't one of the lobby's teams is invalid_input. The optional request_id makes a retry after a lost response safe: repeating it with the same team_id and seat_settings returns the current snapshot without a second seat, and with another team or settings fails with idempotency_conflict. Without one, each call adds a seat.
          */
         post: operations["addLobbySeat"];
         delete?: never;
@@ -191,7 +191,7 @@ export interface paths {
         get?: never;
         /**
          * Select a team
-         * @description team_id is required and may be null to clear the selection.
+         * @description team_id is required and may be null to clear the selection. A team holds one member: a team that already has a person or a seat is team_full.
          */
         put: operations["selectLobbyTeam"];
         post?: never;
@@ -272,7 +272,7 @@ export interface paths {
         put?: never;
         /**
          * Create a lobby
-         * @description Creates a lobby. The optional game_settings object is checked by the game now; invalid settings fail with invalid_game_settings. The lobby stores the settings without reading them and returns them in every snapshot, including the started one. They can't change after creation. Repeating the same request_id and payload within the idempotency window, 24 hours by default, returns the committed snapshot. The lobby is deleted, in any phase, once nobody has been connected to it for an hour, and in any case a day after creation, unless its game sets other times.
+         * @description Creates a lobby with its teams, from 2 to 16 with unique names. A team holds one member, a person or a seat, so the lobby holds as many members as it has teams; its capacity in the snapshot is that number. The optional game_settings object is checked by the game now; invalid settings fail with invalid_game_settings. The lobby stores the settings without reading them and returns them in every snapshot, including the started one. They can't change after creation. Repeating the same request_id and payload within the idempotency window, 24 hours by default, returns the committed snapshot. The lobby is deleted, in any phase, once nobody has been connected to it for an hour, and in any case a day after creation, unless its game sets other times.
          */
         post: operations["createLobby"];
         delete?: never;
@@ -292,7 +292,7 @@ export interface paths {
         put?: never;
         /**
          * Join a lobby
-         * @description Joins by game key and join code; started lobbies allow only frozen-roster rejoin.
+         * @description Joins by game key and join code; a lobby with as many members as teams is full (lobby_full). Started lobbies allow only frozen-roster rejoin.
          */
         post: operations["joinLobby"];
         delete?: never;
@@ -395,8 +395,6 @@ export interface components {
              * @example https://example.com/CreateLobbyBody.json
              */
             readonly $schema?: string;
-            /** Format: int64 */
-            capacity: number;
             /** Format: uuid */
             client_instance_id: string;
             game_key: string;
@@ -407,6 +405,7 @@ export interface components {
             name: string;
             /** Format: uuid */
             request_id: string;
+            /** @description The lobby's teams, in order. Each holds one member, a person or a seat, so the lobby holds as many members as it has teams. */
             teams: components["schemas"]["TeamDefinition"][] | null;
         };
         CreateSessionBody: {
@@ -519,7 +518,10 @@ export interface components {
             join_code: string;
         };
         Lobby: {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The number of members the lobby holds, which is its number of teams, since each team holds one member.
+             */
             capacity: number;
             /** Format: date-time */
             created_at: string;
@@ -647,16 +649,12 @@ export interface components {
             every_team_needs_member: boolean;
         };
         Team: {
-            /** Format: int64 */
-            capacity: number;
             id: string;
             name: string;
             /** Format: int64 */
             order: number;
         };
         TeamDefinition: {
-            /** Format: int64 */
-            capacity: number;
             name: string;
         };
         WatchAccess: {

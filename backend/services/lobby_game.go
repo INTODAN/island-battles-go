@@ -134,7 +134,7 @@ func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 // never reads again, and places one castle per team.
 func prepareLobbyGame(binding models.BindingResult, snapshot domain.Snapshot) ([]models.GameTeam, models.Map) {
 	teams := []models.GameTeam{}
-	gameMap := models.Map{MapFields: models.MapFields{MapName: "Lobby battle", PlayerAmount: uint(len(snapshot.StartRoster)), PlaneSizeX: 8, PlaneSizeY: 6}}
+	gameMap := models.Map{MapFields: models.MapFields{MapName: "Lobby battle", PlayerAmount: uint(len(snapshot.Teams)), PlaneSizeX: 8, PlaneSizeY: 6}}
 	for _, team := range binding.Teams {
 		players := []string{}
 		for index, entry := range snapshot.StartRoster {

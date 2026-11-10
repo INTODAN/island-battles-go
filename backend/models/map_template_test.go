@@ -76,7 +76,8 @@ func TestValidateMapTemplateReportsEveryInvalidField(t *testing.T) {
 	for _, detail := range invalidTemplate.Details {
 		locations = append(locations, detail.Location)
 	}
-	expected := []string{"map_name", "plane_size_y", "castles[0].team_color", "castles[0].x", "castles[0].y", "castles[1].y", "castles[1].upgrades.armour", "castles[1].upgrades.speed"}
+	// Colour 2 owns no castle: castles[0] has colour 3, which is out of range.
+	expected := []string{"map_name", "plane_size_y", "castles[0].team_color", "castles[0].x", "castles[0].y", "castles[1].y", "castles[1].upgrades.armour", "castles[1].upgrades.speed", "castles"}
 	if !reflect.DeepEqual(locations, expected) {
 		t.Fatalf("locations=%v, want %v", locations, expected)
 	}
@@ -95,6 +96,48 @@ func TestValidateMapTemplateNeedsCastles(t *testing.T) {
 	var invalidTemplate *MapTemplateError
 	if !errors.As(err, &invalidTemplate) || len(invalidTemplate.Details) != 2 || invalidTemplate.Details[0].Location != "player_amount" || invalidTemplate.Details[1].Location != "castles" {
 		t.Fatalf("expected player_amount and castles to be rejected, got %v", err)
+	}
+}
+
+// A map is made for a number of teams a lobby can have, one player each, and
+// gives every team at least one castle, so every map can start a lobby's game.
+func TestValidateMapTemplateNeedsALobbyTeamCountWithACastleEach(t *testing.T) {
+	castles := func(colours ...uint) []CastleTemplateView {
+		result := []CastleTemplateView{}
+		for _, colour := range colours {
+			result = append(result, CastleTemplateView{TeamColor: colour})
+		}
+		return result
+	}
+	valid := []MapTemplateView{
+		{MapFields: MapFields{MapName: "two", PlayerAmount: 2, PlaneSizeX: 4, PlaneSizeY: 4}, Castles: castles(1, 2, 0)},
+		{MapFields: MapFields{MapName: "sixteen", PlayerAmount: 16, PlaneSizeX: 4, PlaneSizeY: 4}, Castles: castles(16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 1)},
+	}
+	for _, template := range valid {
+		if err := ValidateMapTemplate(template); err != nil {
+			t.Errorf("%s: %v", template.MapName, err)
+		}
+	}
+	tests := []struct {
+		name     string
+		template MapTemplateView
+		location string
+		message  string
+	}{
+		{"one team", MapTemplateView{MapFields: MapFields{MapName: "one", PlayerAmount: 1, PlaneSizeX: 4, PlaneSizeY: 4}, Castles: castles(1, 0)}, "player_amount", "must be from 2 to 16, the number of teams a lobby can have"},
+		{"seventeen teams", MapTemplateView{MapFields: MapFields{MapName: "seventeen", PlayerAmount: 17, PlaneSizeX: 4, PlaneSizeY: 4}, Castles: castles(1)}, "player_amount", "must be from 2 to 16, the number of teams a lobby can have"},
+		{"a team without a castle", MapTemplateView{MapFields: MapFields{MapName: "three", PlayerAmount: 3, PlaneSizeX: 4, PlaneSizeY: 4}, Castles: castles(1, 3, 0)}, "castles", "team colour 2 of player_amount 3 owns no castle; every team colour from 1 to player_amount needs at least one"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var invalidTemplate *MapTemplateError
+			if err := ValidateMapTemplate(test.template); !errors.As(err, &invalidTemplate) {
+				t.Fatalf("expected a MapTemplateError, got %v", err)
+			}
+			if len(invalidTemplate.Details) != 1 || invalidTemplate.Details[0].Location != test.location || invalidTemplate.Details[0].Message != test.message {
+				t.Fatalf("got %v, want %q at %q", invalidTemplate, test.message, test.location)
+			}
+		})
 	}
 }
 
@@ -131,7 +174,7 @@ func TestDecodeMapTemplateRejectsWhatEncodingJSONAccepts(t *testing.T) {
 		{"unknown map key", `{"map_name":"a","player_amount":2,"plane_size_x":4,"plane_size_y":4,"neutral_starting_soldier_amount":1,"castles":[{"team_color":1,"x":0,"y":0}],"plane_size_z":4}`, "plane_size_z", "unexpected property"},
 		{"unknown castle key", `{"map_name":"a","player_amount":2,"plane_size_x":4,"plane_size_y":4,"neutral_starting_soldier_amount":1,"castles":[{"team_color":1,"x":0,"y":0,"position":"(0,0)"}]}`, "castles[0].position", "unexpected property"},
 		{"wrong type", `{"map_name":"a","player_amount":2,"plane_size_x":4,"plane_size_y":4,"neutral_starting_soldier_amount":1,"castles":[{"team_color":1,"x":"0","y":0}]}`, "castles[0].x", "expected number"},
-		{"outside the plane", `{"map_name":"a","player_amount":2,"plane_size_x":4,"plane_size_y":4,"neutral_starting_soldier_amount":1,"castles":[{"team_color":1,"x":3,"y":0}]}`, "castles[0].x", "must be inside the plane, from -2 to 2"},
+		{"outside the plane", `{"map_name":"a","player_amount":2,"plane_size_x":4,"plane_size_y":4,"neutral_starting_soldier_amount":1,"castles":[{"team_color":1,"x":3,"y":0},{"team_color":2,"x":0,"y":0}]}`, "castles[0].x", "must be inside the plane, from -2 to 2"},
 		{"malformed", `{"map_name":"a",`, "", "must be valid JSON: unexpected end of JSON input"},
 	}
 	for _, test := range tests {

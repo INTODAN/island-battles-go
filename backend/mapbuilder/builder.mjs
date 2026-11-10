@@ -20,7 +20,7 @@ const castleKeys = ["team_color", "x", "y", "starting_soldier_amount", "upgrades
 
 const fieldLabels = {
   map_name: "Map name",
-  player_amount: "Players",
+  player_amount: "Teams",
   plane_size_x: "Plane width",
   plane_size_y: "Plane height",
   neutral_starting_soldier_amount: "Default soldiers",
@@ -165,8 +165,9 @@ export function describeProblems(errors) {
 }
 
 // missingTeams lists the team colours from 1 to player_amount that own no
-// castle. Lobbies are expected to need a castle for every team, so the page
-// hints at them without blocking the download.
+// castle. A lobby gives each of its teams the castles of its colour, so the
+// server refuses a map until every team owns one; the page names the teams
+// that don't yet, next to the team count.
 export function missingTeams(map) {
   const players = map.player_amount;
   if (!Number.isInteger(players) || players < 1) return [];
@@ -276,16 +277,11 @@ export function lobbyPageFromMessage(event, origin, self) {
 }
 
 // lobbyGate decides whether text can be sent to the lobby. It needs what
-// downloadGate needs, and a castle for every team, because the lobby rejects
-// any other map. Download stays allowed when a team owns no castle.
-export function lobbyGate(map, text, check) {
+// downloadGate needs: the server accepts only a map that a lobby can use, with
+// a castle for every team.
+export function lobbyGate(text, check) {
   if (!check || check.text !== text || check.state === "pending") return { ready: false, reason: "Checking the map…" };
   if (check.state === "failed") return { ready: false, reason: `The map can't be sent to the lobby until the server has checked it. ${check.message}` };
   if (check.state === "invalid") return { ready: false, reason: `Fix ${plural(check.errors.length, "problem")} before sending the map to the lobby.` };
-  const missing = missingTeams(map);
-  if (missing.length) {
-    const one = missing.length === 1;
-    return { ready: false, reason: `A lobby needs a castle for every team. ${one ? "Team" : "Teams"} ${missing.join(", ")} ${one ? "owns" : "own"} none.` };
-  }
   return { ready: true, reason: "" };
 }

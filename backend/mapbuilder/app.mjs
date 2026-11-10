@@ -127,7 +127,7 @@ function renderLobby() {
   const opener = lobbyPageState();
   if (opener === "closed") lobbyPageClosed = true;
   const text = serialize(map);
-  const gate = lobbyGate(map, text, check);
+  const gate = lobbyGate(text, check);
   lobbyButton.hidden = opener !== "ready";
   lobbyButton.disabled = !gate.ready;
   // The download's reason already covers a map that isn't checked or valid.
@@ -139,7 +139,7 @@ function renderLobby() {
 
 lobbyButton.addEventListener("click", () => {
   const text = serialize(map);
-  if (!lobbyGate(map, text, check).ready) return;
+  if (!lobbyGate(text, check).ready) return;
   if (lobbyPageState() === "ready") {
     lobbyPage.postMessage(lobbyMessage(text), location.origin);
     sentText = text;
@@ -291,7 +291,7 @@ function renderTeamHint() {
   if (missing.length === 0) return;
   const shown = missing.length > 8 ? [...missing.slice(0, 8).map(String), "more"] : missing.map(String);
   hint.textContent = `${missing.length === 1 ? "Team" : "Teams"} ${listWords(shown)} ${missing.length === 1 ? "owns" : "own"} no castle. ` +
-    "Lobbies are expected to load a map for N teams only when its castles' team colours are exactly 1 to N, so give every team a castle.";
+    "A map for N teams, from 2 to 16 with one player each, needs a castle of every team colour from 1 to N, so give every team a castle.";
 }
 
 mapFields.addEventListener("input", (event) => {

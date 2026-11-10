@@ -18,7 +18,6 @@ export function teamName(colour: number): string {
 export const minTeams = 2;
 /** The replay palette's size. */
 export const maxTeams = 6;
-export const maxTeamCapacity = 8;
 export const maxNameLength = 40;
 
 /** The turn timeouts the form offers: seconds, or null for no limit. */
@@ -53,26 +52,20 @@ export type MapChoice =
 export interface CreateFormValues {
   lobbyName: string;
   teamCount: number;
-  teamCapacity: number;
   map: MapChoice;
   /** Seconds, or null for no limit. */
   turnTimeoutSeconds: number | null;
 }
 
-export type FormField =
-  | "lobbyName"
-  | "teamCount"
-  | "teamCapacity"
-  | "map"
-  | "turnTimeout";
+export type FormField = "lobbyName" | "teamCount" | "map" | "turnTimeout";
 
 export type FormErrors = Partial<Record<FormField, string>>;
 
 export type FormResult =
   | {
       ok: true;
-      teams: { name: string; capacity: number }[];
-      capacity: number;
+      /** One player per team, so the lobby holds as many players as teams. */
+      teams: { name: string }[];
       gameSettings: Record<string, unknown>;
     }
   | { ok: false; errors: FormErrors };
@@ -162,13 +155,6 @@ export function validateCreateForm(
     }
   }
   if (
-    !Number.isInteger(values.teamCapacity) ||
-    values.teamCapacity < 1 ||
-    values.teamCapacity > maxTeamCapacity
-  ) {
-    errors.teamCapacity = `Choose from 1 to ${maxTeamCapacity} players per team.`;
-  }
-  if (
     values.turnTimeoutSeconds !== null &&
     !turnTimeouts.some((option) => option.seconds === values.turnTimeoutSeconds)
   ) {
@@ -188,9 +174,7 @@ export function validateCreateForm(
     ok: true,
     teams: Array.from({ length: teamCount }, (_, index) => ({
       name: teamName(index + 1),
-      capacity: values.teamCapacity,
     })),
-    capacity: teamCount * values.teamCapacity,
     gameSettings,
   };
 }

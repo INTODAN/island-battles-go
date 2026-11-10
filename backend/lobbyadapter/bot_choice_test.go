@@ -100,8 +100,8 @@ func (stack *lobbyStack) room(gameKey string, host, other guest) domain.Snapshot
 	stack.t.Helper()
 	var snapshot domain.Snapshot
 	stack.expect(stack.api.Post("/lobby/v1/lobbies", host.header, map[string]any{
-		"request_id": uuid.NewString(), "game_key": gameKey, "name": "Bots", "capacity": 2,
-		"teams": []map[string]any{{"name": "Red", "capacity": 1}, {"name": "Blue", "capacity": 1}}, "client_instance_id": host.client,
+		"request_id": uuid.NewString(), "game_key": gameKey, "name": "Bots",
+		"teams": []map[string]any{{"name": "Red"}, {"name": "Blue"}}, "client_instance_id": host.client,
 	}), http.StatusCreated, &snapshot)
 	stack.expect(stack.api.Post("/lobby/v1/memberships", other.header, map[string]any{"game_key": gameKey, "join_code": snapshot.Lobby.JoinCode, "client_instance_id": other.client}), http.StatusOK, nil)
 	for index, member := range []guest{host, other} {

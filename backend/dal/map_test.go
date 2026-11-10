@@ -116,7 +116,7 @@ func TestCreateMapTemplateStoresNothingForAnInvalidMap(t *testing.T) {
 	db := testutils.InitTestDB(t)
 	template := models.MapTemplateView{
 		MapFields: models.MapFields{MapName: "outside", PlayerAmount: 2, PlaneSizeX: 4, PlaneSizeY: 4},
-		Castles:   []models.CastleTemplateView{{TeamColor: 1, X: 3, Y: 0}},
+		Castles:   []models.CastleTemplateView{{TeamColor: 1, X: 3, Y: 0}, {TeamColor: 2, X: 0, Y: 0}},
 	}
 	_, err := dal.CreateMapTemplate(db, template)
 	var invalidTemplate *models.MapTemplateError

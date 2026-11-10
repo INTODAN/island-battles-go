@@ -41,8 +41,8 @@ func TestRegistrationValidatesTheMapChoice(t *testing.T) {
 	database := testutils.InitTestDB(t)
 	templateID := storeTemplate(t, database, twoTeamMapFile)
 	policy := domain.DefaultPolicy(lobbyadapter.Registration(database))
-	twoTeams := []domain.TeamDefinition{{Name: "Blue", Capacity: 1}, {Name: "Red", Capacity: 1}}
-	threeTeams := slices.Concat(twoTeams, []domain.TeamDefinition{{Name: "Green", Capacity: 1}})
+	twoTeams := []domain.TeamDefinition{{Name: "Blue"}, {Name: "Red"}}
+	threeTeams := slices.Concat(twoTeams, []domain.TeamDefinition{{Name: "Green"}})
 	ctx := context.Background()
 	for _, settings := range []string{``, `{}`, fmt.Sprintf(`{"map_template_id":%d}`, templateID), `{"map":` + twoTeamMapFile + `}`, `{"turn_timeout_seconds":null}`, fmt.Sprintf(`{"map_template_id":%d,"turn_timeout_seconds":600}`, templateID)} {
 		if _, err := policy.ValidateGameSettings(ctx, lobbyadapter.GameKey, json.RawMessage(settings), twoTeams); err != nil {
@@ -139,7 +139,7 @@ func TestRegistrationReportsAnUnreachableDatabaseAsUnavailable(t *testing.T) {
 		t.Fatal(err)
 	}
 	policy := domain.DefaultPolicy(lobbyadapter.Registration(unreachable))
-	teams := []domain.TeamDefinition{{Name: "Blue", Capacity: 1}, {Name: "Red", Capacity: 1}}
+	teams := []domain.TeamDefinition{{Name: "Blue"}, {Name: "Red"}}
 	_, err = policy.ValidateGameSettings(context.Background(), lobbyadapter.GameKey, json.RawMessage(`{"map_template_id":1}`), teams)
 	if !errors.Is(err, domain.ErrUnavailable) || domain.ErrorCodeOf(err) == domain.CodeInvalidGameSettings {
 		t.Fatalf("unreachable database = %v", err)

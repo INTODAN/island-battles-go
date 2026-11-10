@@ -47,13 +47,14 @@ const snapshot = {
     game_settings: {},
   },
   teams: [
-    { id: "t-red", name: "Red", order: 2, capacity: 2 },
-    { id: "t-blue", name: "Blue", order: 1, capacity: 2 },
+    { id: "t-red", name: "Red", order: 2 },
+    { id: "t-blue", name: "Blue", order: 1 },
+    { id: "t-green", name: "Green", order: 3 },
   ],
   members: [
     member("p1", "t-blue", { ready: true }),
     seat("seat-1", "t-red", 2, { id: "s-1" }),
-    member("p2", "t-red", {
+    member("p2", "t-green", {
       disconnected_until: "2026-11-01T00:01:00Z",
     }),
   ],
@@ -63,10 +64,9 @@ describe("seats in the room model", () => {
   const room = buildRoom(snapshot, null, "p1");
   const red = room.teams.find((team) => team.name === "Red");
 
-  test("a seat is a member of its team, shown as a bot", () => {
+  test("a seat is the member of its team, shown as a bot", () => {
     expect(red?.members.map((m) => [m.name, m.kind])).toEqual([
       ["Bot (level 2)", "seat"],
-      ["P2", "human"],
     ]);
     expect(red?.members[0]).toMatchObject({
       memberId: "s-1",
@@ -136,7 +136,7 @@ describe("seat problems", () => {
       "Only the host can add or remove bots.",
     );
     expect(describeProblem(seatError("team_full"), "seat").message).toBe(
-      "That team is full.",
+      "That team already has a player or a bot.",
     );
     expect(describeProblem(seatError("phase_conflict"), "seat").message).toBe(
       "The lobby has already started, so its bots can't change.",

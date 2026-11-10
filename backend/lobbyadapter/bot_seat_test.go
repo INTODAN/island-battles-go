@@ -18,8 +18,8 @@ func (stack *lobbyStack) soloRoom(gameKey string, host guest) domain.Snapshot {
 	stack.t.Helper()
 	var snapshot domain.Snapshot
 	stack.expect(stack.api.Post("/lobby/v1/lobbies", host.header, map[string]any{
-		"request_id": uuid.NewString(), "game_key": gameKey, "name": "Solo", "capacity": 2,
-		"teams": []map[string]any{{"name": "Red", "capacity": 1}, {"name": "Blue", "capacity": 1}}, "client_instance_id": host.client,
+		"request_id": uuid.NewString(), "game_key": gameKey, "name": "Solo",
+		"teams": []map[string]any{{"name": "Red"}, {"name": "Blue"}}, "client_instance_id": host.client,
 	}), http.StatusCreated, &snapshot)
 	stack.expect(stack.api.Put(stack.lobbyPath(snapshot)+"/team", host.header, map[string]any{"team_id": snapshot.Teams[0].ID}), http.StatusOK, nil)
 	return snapshot
