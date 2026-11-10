@@ -13,6 +13,7 @@ import { loadBoardAssets } from "./boardAssets";
 import { setCastleAnimation } from "./castles";
 import { toWorld } from "./coordinates";
 import { applyGraphics, type Graphics, savedGraphics } from "./graphics";
+import type { Bursts } from "./particles";
 import { installBoardControls } from "./picking";
 
 type Demo = components["schemas"]["Demo"];
@@ -68,6 +69,8 @@ declare global {
         meshes: number;
         particleSystems: number;
       };
+      /** The particle pool's counters, or null before it exists. */
+      particlePool: () => ReturnType<Bursts["stats"]> | null;
       /**
        * Stops the render loop and makes every later `renderFrame` advance time by `ms`, so a
        * recording is steady however slowly frames render.
@@ -244,6 +247,12 @@ export async function startFixturePage(
     playTurn(queued + 1);
   };
 
+  // The particle code is a chunk of its own: the counters read it once it has loaded.
+  let particles: typeof import("./particles") | null = null;
+  void import("./particles").then((module) => {
+    particles = module;
+  });
+
   window.battlefieldDebug = {
     get field() {
       const found = battlefieldOf(scene);
@@ -287,6 +296,9 @@ export async function startFixturePage(
         meshes: scene.meshes.length,
         particleSystems: scene.particleSystems.length,
       };
+    },
+    particlePool: () => {
+      return particles?.burstsOf(scene)?.stats() ?? null;
     },
     fixedTime: (ms) => {
       engine.stopRenderLoop();

@@ -3,14 +3,24 @@ import { RawTexture } from "@babylonjs/core/Materials/Textures/rawTexture";
 import { Texture } from "@babylonjs/core/Materials/Textures/texture";
 import { Color4 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
+import type { BoxParticleEmitter } from "@babylonjs/core/Particles/EmitterTypes/boxParticleEmitter";
+import type { PointParticleEmitter } from "@babylonjs/core/Particles/EmitterTypes/pointParticleEmitter";
 import type { IParticleSystem } from "@babylonjs/core/Particles/IParticleSystem";
 import { ParticleSystem } from "@babylonjs/core/Particles/particleSystem";
 import type { Scene } from "@babylonjs/core/scene";
+import { type Lease, type PoolKind, SystemPool } from "./particlePool";
 
 // Short particle bursts for the turn's effects (issue #102): smoke, splashes, flashes, bubbles
 // and sparkles. Their two textures are drawn in code, so there is nothing to download. Where the
 // browser supports them (WebGL 2), bursts run as GPU particles, loaded on first use; elsewhere
 // they are CPU particles.
+//
+// Every system is built once, by `warmUp`, and reused (issue #197): a burst takes a free one of
+// its kind, sets its position, colours, sizes and speeds (plain fields, which a GPU system sends
+// to its shader on every frame, so nothing is compiled again), starts it, and gives it back once
+// the last particle has died. What cannot change on a running system (the emitter's shape, the
+// blend mode, the size curve and the capacity) is what makes a kind. When every system of a kind
+// is busy the new burst is dropped and the ones playing carry on.
 
 export type ParticleShape = "soft" | "spark";
 
@@ -46,6 +56,81 @@ export interface Stream {
   stop(): void;
 }
 
+/** A kind of system: what a running system cannot change, and how many exist. */
+export interface BurstKind extends PoolKind {
+  shape: ParticleShape;
+  additive: boolean;
+  /** A box emitter (the burst has a `spread`) rather than a point. */
+  box: boolean;
+  /** The size curve's end, as `BurstOptions.grow`. */
+  grow: number;
+  /** The most particles one use can have alive at once. */
+  capacity: number;
+}
+
+function kindKeyOf(
+  shape: ParticleShape,
+  additive: boolean,
+  box: boolean,
+  grow: number,
+): string {
+  return `${shape}-${additive ? "add" : "std"}-${box ? "box" : "point"}-${grow}`;
+}
+
+/** The kind that serves `options`. */
+export function kindKey(options: BurstOptions): string {
+  const grow = options.grow && options.grow !== 1 ? options.grow : 1;
+  return kindKeyOf(
+    options.shape,
+    options.additive ?? false,
+    (options.spread ?? 0) > 0,
+    grow,
+  );
+}
+
+function kind(
+  shape: ParticleShape,
+  additive: boolean,
+  box: boolean,
+  grow: number,
+  capacity: number,
+  systems: number,
+): BurstKind {
+  return {
+    key: kindKeyOf(shape, additive, box, grow),
+    shape,
+    additive,
+    box,
+    grow,
+    capacity,
+    systems,
+  };
+}
+
+/**
+ * Every kind of burst `animation/effects.ts` asks for, with its pool size (see the web client's
+ * README for how the sizes were chosen): the clash's flash, smoke and spray, the bubbles under a
+ * sinking boat (they share the spray's kind), the level-up sparkle, and the capture's burst and
+ * sparks. A kind's capacity is its biggest burst.
+ */
+export const BURST_KINDS: readonly BurstKind[] = [
+  kind("soft", true, false, 1.6, 4, 8),
+  kind("soft", false, true, 2.1, 14, 10),
+  kind("soft", false, true, 1, 36, 16),
+  kind("spark", true, true, 1, 64, 6),
+  kind("soft", false, true, 0.3, 80, 4),
+  kind("spark", false, true, 1, 18, 4),
+];
+
+/** A pooled system with the parts a use changes. */
+interface Slot {
+  system: IParticleSystem;
+  /** The emitter's position, which the system points at while it plays. */
+  anchor: Vector3;
+  box: BoxParticleEmitter | null;
+  point: PointParticleEmitter | null;
+}
+
 type GpuModule = typeof import("./gpuParticles");
 
 function shapePixels(shape: ParticleShape, size = 64): Uint8Array {
@@ -75,67 +160,141 @@ function shapePixels(shape: ParticleShape, size = 64): Uint8Array {
   return pixels;
 }
 
+/** Frames a system must have been ready for before it counts as warm. */
+const WARM_UP_FRAMES = 3;
+/** The longest a system is held for warming up, in seconds. */
+const WARM_UP_LIMIT = 10;
+
+const burstsByScene = new WeakMap<Scene, Bursts>();
+
+/** The scene's bursts, if it has them yet (the dev page's counters read them). */
+export function burstsOf(scene: Scene): Bursts | undefined {
+  return burstsByScene.get(scene);
+}
+
 export class Bursts {
   private readonly textures = new Map<ParticleShape, Texture>();
-  private readonly live = new Set<{ system: IParticleSystem; until: number }>();
+  private pool: SystemPool<Slot> | null = null;
+  private readonly kinds = new Map<string, BurstKind>();
   private elapsed = 0;
   private gpu: GpuModule | null = null;
+  /** False until the choice between GPU and CPU particles is made. */
+  private decided: boolean;
+  /** Set by `warmUp` when it had to wait for the GPU code to load. */
+  private wanted = false;
+  private disposed = false;
+  /** Systems still warming up, with the frames each has been ready for. */
+  private warming: { lease: Lease<Slot>; ready: number }[] = [];
 
   constructor(
     private readonly scene: Scene,
     /** False keeps every burst on the CPU. */
     useGpu = true,
+    kinds: readonly BurstKind[] = BURST_KINDS,
   ) {
+    for (const entry of kinds) this.kinds.set(entry.key, entry);
+    burstsByScene.set(scene, this);
     const observer = scene.onBeforeRenderObservable.add(() => {
       this.elapsed += scene.getEngine().getDeltaTime() / 1000;
-      for (const entry of this.live) {
-        if (entry.until > this.elapsed) continue;
-        // The textures are shared by every burst, so they stay.
-        entry.system.dispose(false);
-        this.live.delete(entry);
-      }
+      this.finishWarmUp();
+      this.pool?.update(this.elapsed);
     });
     scene.onDisposeObservable.addOnce(() => {
       scene.onBeforeRenderObservable.remove(observer);
+      // The scene disposes its particle systems and textures itself.
+      this.pool = null;
+      this.textures.clear();
+      this.disposed = true;
     });
-    if (useGpu && scene.getEngine().getCaps().supportTransformFeedbacks) {
-      import("./gpuParticles").then(
-        (module) => {
-          if (!module.gpuParticlesSupported() || scene.isDisposed) return;
+    this.decided = !(
+      useGpu && scene.getEngine().getCaps().supportTransformFeedbacks
+    );
+    if (!this.decided) {
+      const decide = (module: GpuModule | null) => {
+        if (module?.gpuParticlesSupported() && !scene.isDisposed) {
           this.gpu = module;
-          this.warmUp();
-        },
-        // Bursts stay on the CPU.
-        () => {},
-      );
+        }
+        this.decided = true;
+        if (this.wanted) this.warmUp();
+      };
+      // Bursts stay on the CPU if the GPU code does not load.
+      import("./gpuParticles").then(decide, () => decide(null));
     }
   }
 
   /**
-   * Emits one invisible particle of every kind, far below the sea, so their shaders compile
-   * while the board loads rather than at the first clash.
+   * Builds every system and plays one invisible particle on each, far below the sea, so that
+   * their shaders compile and their buffers fill while the board loads rather than at the first
+   * clash. It does nothing a second time, and waits until the GPU code has loaded or failed.
    */
   warmUp(): void {
-    for (const shape of ["soft", "spark"] as const) {
-      for (const additive of [false, true]) {
-        this.emit({
-          name: `warm-up-${shape}-${additive}`,
-          position: new Vector3(0, -50, 0),
-          count: 1,
-          life: [0.05, 0.05],
-          size: [0.01, 0.01],
-          grow: 0.5,
-          speed: [0, 0],
-          direction1: Vector3.Up(),
-          direction2: Vector3.Up(),
-          color1: new Color4(1, 1, 1, 0),
-          color2: new Color4(1, 1, 1, 0),
-          colorDead: new Color4(1, 1, 1, 0),
-          shape,
-          additive,
-        });
+    if (this.pool || this.disposed) return;
+    if (!this.decided) {
+      this.wanted = true;
+      return;
+    }
+    this.pool = new SystemPool<Slot>(
+      [...this.kinds.values()],
+      (entry) => this.create(this.kinds.get(entry.key) as BurstKind),
+      (slot) => this.rest(slot),
+    );
+    for (const slot of this.pool.systems) this.rest(slot);
+    // One use on every system, so each is played once.
+    for (const entry of this.kinds.values()) {
+      for (let index = 0; index < entry.systems; index++) {
+        const lease = this.play(
+          entry.key,
+          {
+            name: "warm-up",
+            position: new Vector3(0, -50, 0),
+            count: 1,
+            life: [0.05, 0.05],
+            size: [0.01, 0.01],
+            speed: [0, 0],
+            direction1: Vector3.Up(),
+            direction2: Vector3.Up(),
+            color1: new Color4(1, 1, 1, 0),
+            color2: new Color4(1, 1, 1, 0),
+            colorDead: new Color4(1, 1, 1, 0),
+            shape: entry.shape,
+          },
+          undefined,
+          true,
+        );
+        // Held until the system has compiled and drawn a few frames, whatever that takes (but
+        // not for ever): a system that is only used for the first time in a turn builds its
+        // buffers and size curve then, in the middle of a frame.
+        if (lease) {
+          lease.until = this.elapsed + WARM_UP_LIMIT;
+          this.warming.push({ lease, ready: 0 });
+        }
       }
     }
+  }
+
+  /** Gives back each warming system once it has drawn a few frames ready. */
+  private finishWarmUp(): void {
+    if (this.warming.length === 0) return;
+    this.warming = this.warming.filter((entry) => {
+      if (!entry.lease.active) return false;
+      if (entry.lease.system.system.isReady()) entry.ready++;
+      if (entry.ready < WARM_UP_FRAMES) return true;
+      entry.lease.until = this.elapsed;
+      return false;
+    });
+  }
+
+  /** How many uses were turned away, and the most systems busy at once for each kind. */
+  stats(): {
+    systems: number;
+    dropped: number;
+    highWater: Record<string, number>;
+  } {
+    return {
+      systems: this.pool?.systems.length ?? 0,
+      dropped: this.pool?.dropped ?? 0,
+      highWater: Object.fromEntries(this.pool?.highWater ?? []),
+    };
   }
 
   private texture(shape: ParticleShape): Texture {
@@ -158,22 +317,69 @@ export class Bursts {
     return texture;
   }
 
-  private create(options: BurstOptions, capacity: number): IParticleSystem {
+  /** Builds one system of `entry`'s kind: the parts that never change. */
+  private create(entry: BurstKind): Slot {
+    const name = `burst-${entry.key}`;
     const system: IParticleSystem =
-      this.gpu?.createGpuParticles(options.name, capacity, this.scene) ??
-      new ParticleSystem(options.name, capacity, this.scene);
-    system.particleTexture = this.texture(options.shape);
-    system.emitter = options.position.clone();
-    const spread = options.spread ?? 0;
-    if (spread > 0) {
-      system.createBoxEmitter(
-        options.direction1,
-        options.direction2,
-        new Vector3(-spread, 0, -spread),
-        new Vector3(spread, spread * 0.4, spread),
-      );
+      this.gpu?.createGpuParticles(name, entry.capacity, this.scene) ??
+      new ParticleSystem(name, entry.capacity, this.scene);
+    system.particleTexture = this.texture(entry.shape);
+    const anchor = Vector3.Zero();
+    system.emitter = anchor;
+    let box: BoxParticleEmitter | null = null;
+    let point: PointParticleEmitter | null = null;
+    if (entry.box) {
+      box = system.createBoxEmitter(
+        Vector3.Up(),
+        Vector3.Up(),
+        Vector3.Zero(),
+        Vector3.Zero(),
+      ) as BoxParticleEmitter;
     } else {
-      system.createPointEmitter(options.direction1, options.direction2);
+      point = system.createPointEmitter(
+        Vector3.Up(),
+        Vector3.Up(),
+      ) as PointParticleEmitter;
+    }
+    system.minAngularSpeed = -1.5;
+    system.maxAngularSpeed = 1.5;
+    system.minInitialRotation = 0;
+    system.maxInitialRotation = Math.PI * 2;
+    system.blendMode = entry.additive
+      ? ParticleSystem.BLENDMODE_ADD
+      : ParticleSystem.BLENDMODE_STANDARD;
+    if (entry.grow !== 1) {
+      system.addSizeGradient(0, 1);
+      system.addSizeGradient(1, entry.grow);
+    }
+    system.updateSpeed = 1 / 60;
+    return { system, anchor, box, point };
+  }
+
+  /** Puts a finished system to rest: stopped, and out of the scene's frame loop. */
+  private rest(slot: Slot): void {
+    slot.system.stop();
+    slot.system.emitter = null;
+  }
+
+  /** Sets a pooled system up for `options` and starts it. */
+  private configure(
+    slot: Slot,
+    options: BurstOptions,
+    emitRate: number,
+    stopAfter: number,
+  ): void {
+    const { system } = slot;
+    slot.anchor.copyFrom(options.position);
+    if (slot.box) {
+      const spread = options.spread ?? 0;
+      slot.box.direction1.copyFrom(options.direction1);
+      slot.box.direction2.copyFrom(options.direction2);
+      slot.box.minEmitBox.set(-spread, 0, -spread);
+      slot.box.maxEmitBox.set(spread, spread * 0.4, spread);
+    } else if (slot.point) {
+      slot.point.direction1.copyFrom(options.direction1);
+      slot.point.direction2.copyFrom(options.direction2);
     }
     system.minLifeTime = options.life[0];
     system.maxLifeTime = options.life[1];
@@ -181,65 +387,79 @@ export class Bursts {
     system.maxSize = options.size[1];
     system.minEmitPower = options.speed[0];
     system.maxEmitPower = options.speed[1];
-    system.minAngularSpeed = -1.5;
-    system.maxAngularSpeed = 1.5;
-    system.minInitialRotation = 0;
-    system.maxInitialRotation = Math.PI * 2;
     system.gravity = options.gravity ?? Vector3.Zero();
     system.color1 = options.color1;
     system.color2 = options.color2;
     system.colorDead = options.colorDead;
-    system.blendMode = options.additive
-      ? ParticleSystem.BLENDMODE_ADD
-      : ParticleSystem.BLENDMODE_STANDARD;
-    if (options.grow && options.grow !== 1) {
-      system.addSizeGradient(0, 1);
-      system.addSizeGradient(1, options.grow);
-    }
-    system.updateSpeed = 1 / 60;
-    return system;
+    system.emitRate = emitRate;
+    system.targetStopDuration = stopAfter;
+    system.emitter = slot.anchor;
+    system.start();
   }
 
-  /** Emits `count` particles over `duration` seconds, then cleans up after the last one dies. */
-  emit(options: BurstOptions): void {
+  /** Takes a free system of `key` and starts it, or returns null when none is free. */
+  private play(
+    key: string,
+    options: BurstOptions,
+    rate?: number,
+    warm = false,
+  ): Lease<Slot> | null {
+    if (!this.pool) return null;
     const duration = options.duration ?? 0.06;
-    const system = this.create(options, options.count);
-    system.emitRate = options.count / duration;
-    system.targetStopDuration = duration;
-    system.start();
-    this.live.add({
-      system,
-      until: this.elapsed + duration + options.life[1] + 0.2,
-    });
+    const lease = this.pool.take(
+      key,
+      rate === undefined
+        ? this.elapsed + duration + options.life[1] + 0.2
+        : Number.POSITIVE_INFINITY,
+      !warm,
+    );
+    const entry = this.kinds.get(key);
+    if (!lease || !entry) return null;
+    if (rate === undefined) {
+      const count = Math.min(options.count, entry.capacity);
+      this.configure(lease.system, options, count / duration, duration);
+    } else {
+      this.configure(lease.system, options, rate, 0);
+    }
+    return lease;
   }
 
-  /** Emits `rate` particles a second until stopped. */
+  /**
+   * Emits `count` particles over `duration` seconds on a pooled system, which goes back to the
+   * pool after the last one dies. Dropped when none is free.
+   */
+  emit(options: BurstOptions): void {
+    this.play(kindKey(options), options);
+  }
+
+  /** Emits `rate` particles a second until stopped; a stream that does nothing when none is free. */
   stream(options: BurstOptions, rate: number): Stream {
-    const system = this.create(options, Math.ceil(rate * options.life[1]) + 4);
-    system.emitRate = rate;
-    system.start();
-    const entry = { system, until: Number.POSITIVE_INFINITY };
-    this.live.add(entry);
+    const lease = this.play(kindKey(options), options, rate);
     return {
       move: (position) => {
-        (system.emitter as Vector3).copyFrom(position);
+        if (lease?.active) lease.system.anchor.copyFrom(position);
       },
       stop: () => {
-        if (entry.until !== Number.POSITIVE_INFINITY) return;
-        system.stop();
-        entry.until = this.elapsed + options.life[1] + 0.2;
+        if (!lease?.active || lease.until !== Number.POSITIVE_INFINITY) return;
+        lease.system.system.stop();
+        lease.until = this.elapsed + options.life[1] + 0.2;
       },
     };
   }
 
-  /** Removes every burst at once. */
+  /** Stops every burst at once and gives the systems back. */
   clear(): void {
-    for (const entry of this.live) entry.system.dispose(false);
-    this.live.clear();
+    this.warming = [];
+    this.pool?.releaseAll();
   }
 
   dispose(): void {
-    this.clear();
+    if (this.disposed) return;
+    this.disposed = true;
+    this.pool?.releaseAll();
+    // The textures are shared by every system, so they go last.
+    for (const slot of this.pool?.systems ?? []) slot.system.dispose(false);
+    this.pool = null;
     for (const texture of this.textures.values()) texture.dispose();
     this.textures.clear();
   }
