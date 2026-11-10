@@ -125,8 +125,17 @@ const scoreLabels = new Map();
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 let renderedTurn = null;
 // heading-lines:begin
-// Heading lines (#89): the segment from each moving group to the castle it is heading for. This block is pure
-// geometry in board pixels, so backend/demoviewer/heading-lines.test.mjs runs it on its own.
+// Heading lines (#89, edge cases fixed in #168): the segment from each moving group to the castle it is heading for.
+// This block is pure geometry in board pixels, so backend/demoviewer/heading-lines.test.mjs runs it on its own. The
+// 3D client's clients/island-battles-web/src/scene/headingLines.ts follows the same rules in the same steps:
+// - a line runs from the group to its destination castle's edge; one too short for its head and a little shaft is
+//   not drawn;
+// - groups of one team on one route are one line, the rearmost group's;
+// - visible lines that are nearly parallel and closer than a lane over a shared stretch get parallel lanes,
+//   whatever their teams and castles (cases 3, 4 and 5);
+// - at each castle, one team's lines arriving within 15 degrees in total share one arrowhead (cases 2, 7 and 8) and
+//   end at its base (case 6); then every head there is spread round the castle so that none touches another (case 1);
+// - the line of a group that is not moving is dashed (case 14).
 const fieldColor = "#edf5fb";
 const headingStyle = {
   width: 5,          // Line width.
@@ -134,15 +143,22 @@ const headingStyle = {
   casing: 2,         // Field-colour casing on each side of a line (1B).
   headLength: 20,
   headWidth: 17,
-  sharedHeadDegrees: 15, // Same-team lines arriving within this angle share one arrowhead (2B).
+  sharedHeadDegrees: 15, // Same-team lines arriving within this angle in total share one arrowhead (2B).
   samePathDegrees: 1.5,  // Same-team groups this close to one route are one route, drawn once (3B).
-  lane: 7,           // Opposite directions on one path keep this far to the right of their travel (4B).
+  parallelDegrees: 4,    // Lines this close to parallel (or opposite) can share a corridor and get lanes.
+  laneGap: 3,        // The empty space between two lanes' casings, heads included.
+  headGap: 3,        // The least space between two arrowheads at one castle, casings included.
+  minShaft: 3,       // The least shaft a line must show besides its head, or it is not drawn.
   castleGap: 1.5,    // The arrowhead's tip sits this far outside the castle's circle.
   groupHalo: 4,      // The field-colour halo round a group reaches this far past its circle (6B).
   castleHalo: 6,     // The gap ring round a castle that a line passes under (5B).
+  heldDash: "9 6",   // The dashes of the line of a group that is not moving.
 };
+// Lanes are this far apart: half a head, half a line (casings included) and a gap.
+const laneSpacing = (headingStyle.headWidth + 2 * headingStyle.casing) / 2 + (headingStyle.width + 2 * headingStyle.casing) / 2 + headingStyle.laneGap;
 const toRadians = (degrees) => degrees * Math.PI / 180;
 const unitVector = (x, y) => { const length = Math.hypot(x, y) || 1; return [x / length, y / length]; };
+const along = (from, to, direction) => (to[0] - from[0]) * direction[0] + (to[1] - from[1]) * direction[1];
 const rgb = (hex) => [1, 3, 5].map((index) => parseInt(hex.slice(index, index + 2), 16));
 // An opaque lighter tint: the team colour blended into the field colour.
 function tintOf(hex) {
@@ -160,79 +176,244 @@ function distanceToSegment(point, start, end) {
   const along = squared === 0 ? 0 : Math.max(0, Math.min(1, ((point.x - start[0]) * dx + (point.y - start[1]) * dy) / squared));
   return Math.hypot(point.x - (start[0] + dx * along), point.y - (start[1] + dy * along));
 }
+// heldGroupIds names the groups of frame that are not moving: at the same position in the frame before, or stopped by
+// one of this frame's clashes, which leaves a group at the mean of the participants' contact positions.
+function heldGroupIds(previous, frame) {
+  const held = new Set();
+  const same = (left, right) => Math.hypot(left.x - right.x, left.y - right.y) < 1e-6;
+  const before = new Map((previous ? previous.soldier_groups : []).map((group) => [group.id, group]));
+  for (const group of frame.soldier_groups) if (before.has(group.id) && same(before.get(group.id), group)) held.add(group.id);
+  const groups = new Map(frame.soldier_groups.map((group) => [group.id, group]));
+  for (const clash of frame.clashes) {
+    if (!clash.participants.length) continue;
+    const middle = { x: 0, y: 0 };
+    for (const participant of clash.participants) {
+      middle.x += participant.x / clash.participants.length;
+      middle.y += participant.y / clash.participants.length;
+    }
+    for (const participant of clash.participants) {
+      const group = groups.get(participant.group_id);
+      if (group && same(group, middle)) held.add(group.id);
+    }
+  }
+  return held;
+}
+// conflicting says whether two lines share a corridor: nearly parallel or opposite, overlapping over more than a head
+// and closer than a lane somewhere on that stretch (case 4).
+function conflicting(first, second) {
+  const a = unitVector(first.tip[0] - first.start[0], first.tip[1] - first.start[1]);
+  const b = unitVector(second.tip[0] - second.start[0], second.tip[1] - second.start[1]);
+  if (Math.abs(a[0] * b[0] + a[1] * b[1]) < Math.cos(toRadians(headingStyle.parallelDegrees))) return false;
+  const p = along(first.start, second.start, a);
+  const q = along(first.start, second.tip, a);
+  const low = Math.max(0, Math.min(p, q));
+  const high = Math.min(along(first.start, first.tip, a), Math.max(p, q));
+  if (high - low < headingStyle.headLength) return false;
+  const gapAt = (distance) => Math.abs((first.start[0] + a[0] * distance - second.start[0]) * b[1] - (first.start[1] + a[1] * distance - second.start[1]) * b[0]);
+  return Math.min(gapAt(low), gapAt(high)) < laneSpacing;
+}
+// laneOffsets spreads lines sharing a corridor across it: along one corridor, lines going one way keep to the right of
+// their travel and lines going the other way to theirs (4B); lines all going one way are centred on it. Lower group IDs
+// are nearer the middle. It returns each line's offset as a vector.
+function laneOffsets(lines) {
+  const parent = lines.map((_, index) => index);
+  const root = (index) => { while (parent[index] !== index) index = parent[index]; return index; };
+  for (let left = 0; left < lines.length; left++) {
+    for (let right = left + 1; right < lines.length; right++) if (conflicting(lines[left], lines[right])) parent[root(right)] = root(left);
+  }
+  const components = new Map();
+  lines.forEach((line, index) => components.set(root(index), [...(components.get(root(index)) || []), line]));
+  const offsets = new Map();
+  for (const members of components.values()) {
+    const byId = [...members].sort((left, right) => left.id - right.id);
+    const reference = byId[0];
+    const direction = unitVector(reference.tip[0] - reference.start[0], reference.tip[1] - reference.start[1]);
+    // To the right of travel on a screen whose y points down.
+    const side = [-direction[1], direction[0]];
+    const forward = byId.filter((line) => line === reference || along(line.start, line.tip, direction) >= 0);
+    const backward = byId.filter((line) => !forward.includes(line));
+    const place = (line, slot) => { offsets.set(line.id, [side[0] * slot * laneSpacing, side[1] * slot * laneSpacing]); };
+    if (byId.length === 1) place(reference, 0);
+    else if (!backward.length) forward.forEach((line, index) => { place(line, index - (forward.length - 1) / 2); });
+    else {
+      forward.forEach((line, index) => { place(line, index + .5); });
+      backward.forEach((line, index) => { place(line, -(index + .5)); });
+    }
+  }
+  return offsets;
+}
+// clusterAngles groups angles into clusters whose span is at most span, going round the circle, so angles either side
+// of 180 degrees are neighbours (case 8) and no cluster grows past span in total (case 7). It returns indices.
+function clusterAngles(angles, span) {
+  if (!angles.length) return [];
+  const order = angles.map((angle, index) => ({ angle: ((angle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI), index }))
+    .sort((left, right) => left.angle - right.angle || left.index - right.index);
+  let widest = 0;
+  let cut = 0;
+  order.forEach((entry, position) => {
+    const next = order[(position + 1) % order.length];
+    const gap = position === order.length - 1 ? next.angle + 2 * Math.PI - entry.angle : next.angle - entry.angle;
+    if (gap > widest) { widest = gap; cut = (position + 1) % order.length; }
+  });
+  const rotated = [...order.slice(cut), ...order.slice(0, cut)];
+  const clusters = [];
+  let first = -Infinity;
+  for (const entry of rotated) {
+    const angle = entry.angle < rotated[0].angle ? entry.angle + 2 * Math.PI : entry.angle;
+    if (clusters.length && angle - first <= span + 1e-12) clusters[clusters.length - 1].push(entry.index);
+    else { clusters.push([entry.index]); first = angle; }
+  }
+  return clusters;
+}
+const meanAngle = (angles) => Math.atan2(angles.reduce((total, angle) => total + Math.sin(angle), 0), angles.reduce((total, angle) => total + Math.cos(angle), 0));
+// spreadAngles moves angles round the circle as little as needed so that neighbours are at least step apart (case 1).
+// Angles already far enough apart keep their value.
+function spreadAngles(angles, step) {
+  const count = angles.length;
+  if (count < 2) return [...angles];
+  const order = angles.map((angle, index) => ({ angle: Math.atan2(Math.sin(angle), Math.cos(angle)), index }))
+    .sort((left, right) => left.angle - right.angle || left.index - right.index);
+  const result = new Array(count);
+  if (count * step >= 2 * Math.PI) {
+    order.forEach((entry, position) => { result[entry.index] = order[0].angle + position * 2 * Math.PI / count; });
+    return result;
+  }
+  // Cut the circle in its widest gap; blocks of touching angles are centred on where their members want to be.
+  let widest = -1;
+  let cut = 0;
+  order.forEach((entry, position) => {
+    const next = order[(position + 1) % count];
+    const gap = position === count - 1 ? next.angle + 2 * Math.PI - entry.angle : next.angle - entry.angle;
+    if (gap > widest) { widest = gap; cut = (position + 1) % count; }
+  });
+  const rotated = [...order.slice(cut), ...order.slice(0, cut)];
+  const wanted = rotated.map((entry) => entry.angle < rotated[0].angle ? entry.angle + 2 * Math.PI : entry.angle);
+  const blocks = [];
+  wanted.forEach((angle, position) => {
+    blocks.push({ first: position, count: 1, start: angle });
+    for (;;) {
+      const last = blocks[blocks.length - 1];
+      const before = blocks[blocks.length - 2];
+      if (!before || before.start + before.count * step <= last.start + 1e-12) break;
+      const merged = { first: before.first, count: before.count + last.count, start: 0 };
+      for (let offset = 0; offset < merged.count; offset++) merged.start += (wanted[merged.first + offset] - offset * step) / merged.count;
+      blocks.splice(blocks.length - 2, 2, merged);
+    }
+  });
+  for (const block of blocks) {
+    for (let offset = 0; offset < block.count; offset++) {
+      const index = rotated[block.first + offset].index;
+      result[index] = block.count === 1 ? angles[index] : angles[index] + (block.start + offset * step - wanted[block.first + offset]);
+    }
+  }
+  return result;
+}
 // planHeadings works out every line to draw, in group ID order, which is the stacking order.
-// castles: {id, x, y, radius}; groups: {id, team, x, y, radius, origin, destination}, all in board pixels.
-// A line is {id, team, start, tip, direction, head, passes}: it runs from the group's center to the arrowhead's tip
-// on the destination castle's circle; head says whether it draws an arrowhead (lines sharing one let only the first
-// draw it); passes lists the castles, other than its destination, that it runs under.
-function planHeadings(castles, groups) {
+// castles: {id, x, y, radius}; groups: {id, team, x, y, radius, origin, destination}, all in board pixels; held: the
+// IDs of groups that are not moving. A line is {id, team, start, tip, base, direction, head, held, passes}: it runs
+// from the group's center to base, where its arrowhead (or the one it shares) starts, whose tip is just outside the
+// destination castle's circle and which points along direction; head says whether it draws that arrowhead (lines
+// sharing one let only the first draw it); passes lists the castles, other than its destination, that it runs under.
+function planHeadings(castles, groups, held = new Set()) {
   const style = headingStyle;
   const castleById = new Map(castles.map((castle) => [castle.id, castle]));
+  const reach = (castle) => castle.radius + style.castleGap;
   const candidates = [];
-  for (const group of groups) {
+  for (const group of [...groups].sort((left, right) => left.id - right.id)) {
     const castle = castleById.get(group.destination);
-    if (castle) candidates.push({ group, castle, distance: Math.hypot(group.x - castle.x, group.y - castle.y), angle: Math.atan2(group.y - castle.y, group.x - castle.x) });
+    if (!castle) continue;
+    const distance = Math.hypot(group.x - castle.x, group.y - castle.y);
+    if (!(distance > 0)) continue;
+    const direction = unitVector(castle.x - group.x, castle.y - group.y);
+    const angle = Math.atan2(group.y - castle.y, group.x - castle.x);
+    const position = [group.x, group.y];
+    const tip = [castle.x + Math.cos(angle) * reach(castle), castle.y + Math.sin(angle) * reach(castle)];
+    // A group close to its castle has no room for an arrowhead: no line, no stub, no backward head (7B). The length
+    // is measured along the way to the castle from the group's edge, so a group on top of it has none.
+    if (along(position, tip, direction) - group.radius < style.headLength + style.minShaft) continue;
+    candidates.push({ group, castle, distance, direction, angle, position, tip });
   }
   // Groups of one team on one route lie on one line: keep the rearmost (3B).
-  const kept = candidates.filter((candidate) => !candidates.some((other) => other !== candidate
+  let active = candidates.filter((candidate) => !candidates.some((other) => other !== candidate
     && other.castle === candidate.castle && other.group.team === candidate.group.team
     && angleApart(other.angle, candidate.angle) < toRadians(style.samePathDegrees)
     && (other.distance > candidate.distance || (other.distance === candidate.distance && other.group.id < candidate.group.id))));
-  // A route that someone walks the other way too is split into lanes (4B).
-  const routes = new Set(groups.map((group) => `${group.origin}>${group.destination}`));
-  const lines = [];
-  for (const { group, castle, angle } of kept) {
-    const [ux, uy] = unitVector(castle.x - group.x, castle.y - group.y);
-    const opposed = group.origin !== group.destination && routes.has(`${group.destination}>${group.origin}`);
-    const lane = opposed ? style.lane : 0;
-    // To the right of travel on a screen whose y points down.
-    const side = [-uy, ux];
-    const start = [group.x + side[0] * lane, group.y + side[1] * lane];
-    let tip;
-    if (opposed) {
+  // A line found too short once lanes and shared heads moved it is dropped, and the rest are laid out again without it.
+  for (let round = 0; round <= candidates.length; round++) {
+    const lines = arrangeHeadings(active, held);
+    const short = new Set(lines.filter((line) => {
+      const candidate = active.find((entry) => entry.group.id === line.id);
+      return !(along(line.position, line.base, candidate.direction) - candidate.group.radius >= style.minShaft);
+    }).map((line) => line.id));
+    if (!short.size) {
+      return lines.map((line) => ({
+        id: line.id, team: line.team, start: line.position, tip: line.tip, base: line.base, direction: line.direction,
+        head: line.head, held: line.held,
+        passes: castles.filter((other) => other.id !== line.castle.id
+          && distanceToSegment(other, line.position, line.base) < other.radius + style.castleHalo + 4).map((other) => other.id),
+      }));
+    }
+    active = active.filter((candidate) => !short.has(candidate.group.id));
+  }
+  return [];
+}
+function arrangeHeadings(candidates, held) {
+  const style = headingStyle;
+  const offsets = laneOffsets(candidates.map((candidate) => ({ id: candidate.group.id, start: candidate.position, tip: candidate.tip })));
+  const placed = candidates.map((candidate) => {
+    const { group, castle, direction } = candidate;
+    const lane = offsets.get(group.id) || [0, 0];
+    const position = [group.x + lane[0], group.y + lane[1]];
+    let tip = candidate.tip;
+    if (lane[0] || lane[1]) {
       // Meet the circle where the shifted line does.
-      const reach = Math.sqrt(Math.max(0, castle.radius * castle.radius - lane * lane));
-      tip = [castle.x + side[0] * lane - ux * reach, castle.y + side[1] * lane - uy * reach];
-    } else {
-      tip = [castle.x + Math.cos(angle) * (castle.radius + style.castleGap), castle.y + Math.sin(angle) * (castle.radius + style.castleGap)];
+      const ahead = (castle.x - position[0]) * direction[0] + (castle.y - position[1]) * direction[1];
+      const across = (castle.x - position[0]) * direction[1] - (castle.y - position[1]) * direction[0];
+      const radius = castle.radius + style.castleGap;
+      const distance = ahead - Math.sqrt(Math.max(0, radius * radius - across * across));
+      tip = [position[0] + direction[0] * distance, position[1] + direction[1] * distance];
     }
-    // A group close to its castle has no room for an arrowhead: no line, no stub, no backward head (7B).
-    // The length is measured along the way to the castle, so a group on top of it has none.
-    if ((tip[0] - group.x) * ux + (tip[1] - group.y) * uy - group.radius < style.headLength + 3) continue;
-    lines.push({ id: group.id, team: group.team, start, tip, head: true, castle, angle, lane });
-  }
-  // Same-team lines arriving from nearly one direction share the first one's arrowhead (2B).
-  const byCastleAndTeam = new Map();
-  for (const line of lines) {
-    if (line.lane) continue;
-    const key = `${line.castle.id}/${line.team}`;
-    byCastleAndTeam.set(key, [...(byCastleAndTeam.get(key) || []), line]);
-  }
-  for (const same of byCastleAndTeam.values()) {
-    same.sort((left, right) => left.angle - right.angle);
-    const clusters = [];
-    for (const line of same) {
-      const cluster = clusters[clusters.length - 1];
-      if (cluster && angleApart(cluster[cluster.length - 1].angle, line.angle) < toRadians(style.sharedHeadDegrees)) cluster.push(line);
-      else clusters.push([line]);
-    }
-    for (const cluster of clusters) {
-      if (cluster.length < 2) continue;
-      // The circular mean, so a cluster across the seam averages correctly.
-      const mean = Math.atan2(cluster.reduce((total, line) => total + Math.sin(line.angle), 0), cluster.reduce((total, line) => total + Math.cos(line.angle), 0));
-      const leader = Math.min(...cluster.map((line) => line.id));
-      for (const line of cluster) {
-        line.tip = [line.castle.x + Math.cos(mean) * (line.castle.radius + style.castleGap), line.castle.y + Math.sin(mean) * (line.castle.radius + style.castleGap)];
-        line.head = line.id === leader;
+    return { candidate, position, tip, tipAngle: Math.atan2(tip[1] - castle.y, tip[0] - castle.x) };
+  });
+  const lines = [];
+  const byCastle = new Map();
+  for (const entry of placed) byCastle.set(entry.candidate.castle.id, [...(byCastle.get(entry.candidate.castle.id) || []), entry]);
+  for (const arriving of byCastle.values()) {
+    const castle = arriving[0].candidate.castle;
+    // Shared heads: one team's lines within sharedHeadDegrees in total.
+    const heads = [];
+    const teams = new Map();
+    for (const entry of arriving) teams.set(entry.candidate.group.team, [...(teams.get(entry.candidate.group.team) || []), entry]);
+    for (const team of [...teams.keys()].sort((left, right) => left - right)) {
+      const members = teams.get(team);
+      for (const cluster of clusterAngles(members.map((entry) => entry.tipAngle), toRadians(style.sharedHeadDegrees))) {
+        const clustered = cluster.map((index) => members[index]);
+        heads.push({ members: clustered, angle: clustered.length === 1 ? clustered[0].tipAngle : meanAngle(clustered.map((entry) => entry.tipAngle)) });
       }
     }
+    // Spread every head at this castle so that none touches another, casings included.
+    const radius = castle.radius + style.castleGap;
+    const width = style.headWidth + 2 * style.casing;
+    // Measured at the tips, so heads that stay pointing along their (parallel) lines are as far apart as heads turned
+    // to the castle are at their bases.
+    const step = (width + style.headGap) / radius;
+    const spread = spreadAngles(heads.map((head) => head.angle), step);
+    heads.forEach((head, index) => {
+      const angle = spread[index];
+      const leader = head.members.reduce((lowest, entry) => entry.candidate.group.id < lowest.candidate.group.id ? entry : lowest);
+      const shared = head.members.length > 1;
+      const moved = angleApart(angle, head.angle) > 1e-12;
+      const tip = !shared && !moved ? leader.tip : [castle.x + Math.cos(angle) * radius, castle.y + Math.sin(angle) * radius];
+      // A head of its own points along its line; a shared or moved one points at the castle.
+      const direction = shared || moved ? unitVector(castle.x - tip[0], castle.y - tip[1]) : unitVector(tip[0] - leader.position[0], tip[1] - leader.position[1]);
+      const base = [tip[0] - direction[0] * style.headLength, tip[1] - direction[1] * style.headLength];
+      for (const entry of head.members) {
+        const { group } = entry.candidate;
+        lines.push({ id: group.id, team: group.team, castle, position: entry.position, tip, base, direction, head: entry === leader, held: held.has(group.id) });
+      }
+    });
   }
-  return lines.sort((left, right) => left.id - right.id).map((line) => {
-    const [ux, uy] = unitVector(line.tip[0] - line.start[0], line.tip[1] - line.start[1]);
-    const passes = castles.filter((other) => other.id !== line.castle.id
-      && distanceToSegment(other, line.start, line.tip) < other.radius + style.castleHalo + 4).map((other) => other.id);
-    return { id: line.id, team: line.team, start: line.start, tip: line.tip, direction: [ux, uy], head: line.head, passes };
-  });
+  return lines.sort((left, right) => left.id - right.id);
 }
 // heading-lines:end
 // show starts the view over with a replay, or with a demo and its logs by
@@ -329,17 +510,20 @@ const textHalo = { stroke: fieldColor, "stroke-width": 5, "paint-order": "stroke
 // renderHeadings draws the heading lines, then the halos that keep them off groups and castles. The caller draws
 // castles, groups, labels and the clash overlay over them. Shafts come first, in group ID order, so the stacking
 // never flips between generations; arrowheads follow the castles' gap rings so a ring never cuts the head that
-// arrives at that castle.
-function renderHeadings(frame) {
+// arrives at that castle. previous is the frame before, to tell which groups did not move (dashed).
+function renderHeadings(frame, previous) {
   const castles = frame.castles.map((castle) => { const [x, y] = point(castle); return { id: castle.id, x, y, radius: castleRadius * worldScale }; });
   const groups = frame.soldier_groups.map((group) => { const [x, y] = point(group); return { id: group.id, team: group.team_color, x, y, radius: group.clash_radius * worldScale, origin: group.origin_castle_id, destination: group.destination_castle_id }; });
-  const lines = planHeadings(castles, groups);
+  const lines = planHeadings(castles, groups, heldGroupIds(previous, frame));
   const { width, casing, headLength, headWidth, castleHalo, groupHalo } = headingStyle;
-  const shaftEnd = (line) => line.tip.map((value, axis) => value - line.direction[axis] * (line.head ? headLength * .8 : 2));
+  // A shaft runs into its own straight head a little, so no seam shows; one that meets a head at an angle stops at its base.
+  const straight = (line) => line.head && Math.abs(along(line.start, line.base, unitVector(line.direction[1], -line.direction[0]))) < 1e-6;
+  const shaftEnd = (line) => straight(line) ? line.tip.map((value, axis) => value - line.direction[axis] * headLength * .8) : line.base;
   for (const line of lines) {
     const [x2, y2] = shaftEnd(line);
+    const dash = line.held ? { "stroke-dasharray": headingStyle.heldDash } : {};
     svg("line", { x1: line.start[0], y1: line.start[1], x2, y2, stroke: fieldColor, "stroke-width": width + 2 * casing, "stroke-linecap": "round", "data-kind": "heading-casing", "pointer-events": "none" });
-    svg("line", { x1: line.start[0], y1: line.start[1], x2, y2, stroke: tintOf(color(line.team)), "stroke-width": width, "data-kind": "heading-line", "data-group-id": line.id, "pointer-events": "none" });
+    svg("line", { x1: line.start[0], y1: line.start[1], x2, y2, stroke: tintOf(color(line.team)), "stroke-width": width, ...dash, "data-kind": "heading-line", "data-group-id": line.id, "pointer-events": "none" });
   }
   for (const id of new Set(lines.flatMap((line) => line.passes))) {
     const castle = castles.find((candidate) => candidate.id === id);
@@ -364,7 +548,7 @@ function render(animateClashes = false) {
   const animate = animateClashes && renderedTurn !== turn;
   renderedTurn = turn;
   field.replaceChildren();
-  renderHeadings(frame);
+  renderHeadings(frame, replay.frames[turn - 1]);
   for (const castle of frame.castles) {
     const [x, y] = point(castle);
     svg("circle", { cx: x, cy: y, r: castleRadius * worldScale, fill: "#fff", stroke: color(castle.team_color), "stroke-width": 3, "data-kind": "castle" });

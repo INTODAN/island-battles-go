@@ -1,3 +1,4 @@
+import { Material } from "@babylonjs/core/Materials/material";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
@@ -15,6 +16,7 @@ import {
   onAtlasPixels,
   teamAtlas,
 } from "./castleAtlas";
+import { BOAT_BOW } from "./headingLines";
 import { hashSeed, seededRandom } from "./islands";
 import {
   BRIDGE_TOP,
@@ -72,6 +74,19 @@ export class MaterialCache {
       material.disableLighting = true;
       material.emissiveColor = color;
       material.alpha = alpha;
+    });
+  }
+
+  /**
+   * A flat colour drawn over the scene in a fixed order: alpha-blended, so meshes using it are
+   * sorted by `alphaIndex`, and writing no depth, so they never hide one another by depth.
+   */
+  overlay(hex: string): StandardMaterial {
+    return this.get(`overlay:${hex}`, hex, (material, color) => {
+      material.disableLighting = true;
+      material.emissiveColor = color;
+      material.transparencyMode = Material.MATERIAL_ALPHABLEND;
+      material.disableDepthWrite = true;
     });
   }
 
@@ -260,7 +275,7 @@ const HULL_SECTIONS: readonly [number, number, number][] = [
   [-0.17, 0.085, 0.05],
   [-0.03, 0.105, 0.062],
   [0.1, 0.082, 0.042],
-  [0.215, 0.0, 0.0],
+  [BOAT_BOW, 0.0, 0.0],
 ];
 /**
  * How far along the team's stone swatch the sails sample, at their top and bottom: close to its

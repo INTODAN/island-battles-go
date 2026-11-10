@@ -1,0 +1,1196 @@
+{
+  "format": "island-battles-demo",
+  "schema_version": 1,
+  "saved_at": "2026-11-10T12:00:00Z",
+  "game_id": 168,
+  "teams": [
+    {
+      "color": 1,
+      "name": "Blue",
+      "players": ["Blue"]
+    },
+    {
+      "color": 2,
+      "name": "Red",
+      "players": ["Red"]
+    }
+  ],
+  "outcome": null,
+  "frames": [
+    {
+      "id": 1,
+      "castles": [
+        {
+          "id": 0,
+          "team_color": 1,
+          "soldiers": 10,
+          "x": -5,
+          "y": 0,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 1,
+          "team_color": 2,
+          "soldiers": 10,
+          "x": 5,
+          "y": 0,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 2,
+          "team_color": 0,
+          "soldiers": 10,
+          "x": 0,
+          "y": 0,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 3,
+          "team_color": 0,
+          "soldiers": 10,
+          "x": 0,
+          "y": -3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 4,
+          "team_color": 1,
+          "soldiers": 10,
+          "x": -2.5,
+          "y": 1,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 5,
+          "team_color": 1,
+          "soldiers": 10,
+          "x": -5,
+          "y": 3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 6,
+          "team_color": 2,
+          "soldiers": 10,
+          "x": 5,
+          "y": 3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 7,
+          "team_color": 2,
+          "soldiers": 10,
+          "x": 2.5,
+          "y": -3,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 8,
+          "team_color": 0,
+          "soldiers": 10,
+          "x": 0,
+          "y": 3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        }
+      ],
+      "soldier_groups": [
+        {
+          "id": 1,
+          "team_color": 1,
+          "soldiers": 120,
+          "x": -2.75,
+          "y": -1.575,
+          "origin_castle_id": 0,
+          "destination_castle_id": 3,
+          "clash_radius": 0.25,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 2,
+          "team_color": 2,
+          "soldiers": 8,
+          "x": -1.625,
+          "y": -0.575,
+          "origin_castle_id": 4,
+          "destination_castle_id": 3,
+          "clash_radius": 0.25,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        }
+      ],
+      "clashes": []
+    },
+    {
+      "id": 2,
+      "castles": [
+        {
+          "id": 0,
+          "team_color": 1,
+          "soldiers": 10,
+          "x": -5,
+          "y": 0,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 1,
+          "team_color": 2,
+          "soldiers": 10,
+          "x": 5,
+          "y": 0,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 2,
+          "team_color": 0,
+          "soldiers": 10,
+          "x": 0,
+          "y": 0,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 3,
+          "team_color": 0,
+          "soldiers": 10,
+          "x": 0,
+          "y": -3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 4,
+          "team_color": 1,
+          "soldiers": 10,
+          "x": -2.5,
+          "y": 1,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 5,
+          "team_color": 1,
+          "soldiers": 10,
+          "x": -5,
+          "y": 3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 6,
+          "team_color": 2,
+          "soldiers": 10,
+          "x": 5,
+          "y": 3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 7,
+          "team_color": 2,
+          "soldiers": 10,
+          "x": 2.5,
+          "y": -3,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 8,
+          "team_color": 0,
+          "soldiers": 10,
+          "x": 0,
+          "y": 3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        }
+      ],
+      "soldier_groups": [
+        {
+          "id": 1,
+          "team_color": 1,
+          "soldiers": 8,
+          "x": -3.5,
+          "y": 0.0,
+          "origin_castle_id": 0,
+          "destination_castle_id": 2,
+          "clash_radius": 0.25,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 2,
+          "team_color": 2,
+          "soldiers": 8,
+          "x": -1.75,
+          "y": 0.0,
+          "origin_castle_id": 2,
+          "destination_castle_id": 0,
+          "clash_radius": 0.25,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        }
+      ],
+      "clashes": []
+    },
+    {
+      "id": 3,
+      "castles": [
+        {
+          "id": 0,
+          "team_color": 1,
+          "soldiers": 10,
+          "x": -5,
+          "y": 0,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 1,
+          "team_color": 2,
+          "soldiers": 10,
+          "x": 5,
+          "y": 0,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 2,
+          "team_color": 0,
+          "soldiers": 10,
+          "x": 0,
+          "y": 0,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 3,
+          "team_color": 0,
+          "soldiers": 10,
+          "x": 0,
+          "y": -3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 4,
+          "team_color": 1,
+          "soldiers": 10,
+          "x": -2.5,
+          "y": 1,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 5,
+          "team_color": 1,
+          "soldiers": 10,
+          "x": -5,
+          "y": 3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 6,
+          "team_color": 2,
+          "soldiers": 10,
+          "x": 5,
+          "y": 3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 7,
+          "team_color": 2,
+          "soldiers": 10,
+          "x": 2.5,
+          "y": -3,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 8,
+          "team_color": 0,
+          "soldiers": 10,
+          "x": 0,
+          "y": 3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        }
+      ],
+      "soldier_groups": [
+        {
+          "id": 1,
+          "team_color": 1,
+          "soldiers": 8,
+          "x": -3.75,
+          "y": 3.5,
+          "origin_castle_id": 5,
+          "destination_castle_id": 8,
+          "clash_radius": 0.25,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 2,
+          "team_color": 2,
+          "soldiers": 8,
+          "x": -2.25,
+          "y": 3.5,
+          "origin_castle_id": 5,
+          "destination_castle_id": 8,
+          "clash_radius": 0.25,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        }
+      ],
+      "clashes": []
+    },
+    {
+      "id": 4,
+      "castles": [
+        {
+          "id": 0,
+          "team_color": 1,
+          "soldiers": 10,
+          "x": -5,
+          "y": 0,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 1,
+          "team_color": 2,
+          "soldiers": 10,
+          "x": 5,
+          "y": 0,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 2,
+          "team_color": 0,
+          "soldiers": 10,
+          "x": 0,
+          "y": 0,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 3,
+          "team_color": 0,
+          "soldiers": 10,
+          "x": 0,
+          "y": -3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 4,
+          "team_color": 1,
+          "soldiers": 10,
+          "x": -2.5,
+          "y": 1,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 5,
+          "team_color": 1,
+          "soldiers": 10,
+          "x": -5,
+          "y": 3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 6,
+          "team_color": 2,
+          "soldiers": 10,
+          "x": 5,
+          "y": 3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 7,
+          "team_color": 2,
+          "soldiers": 10,
+          "x": 2.5,
+          "y": -3,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 8,
+          "team_color": 0,
+          "soldiers": 10,
+          "x": 0,
+          "y": 3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        }
+      ],
+      "soldier_groups": [
+        {
+          "id": 1,
+          "team_color": 1,
+          "soldiers": 8,
+          "x": -3.5,
+          "y": 3.5,
+          "origin_castle_id": 5,
+          "destination_castle_id": 6,
+          "clash_radius": 0.25,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 2,
+          "team_color": 2,
+          "soldiers": 8,
+          "x": 3.0,
+          "y": 0.0,
+          "origin_castle_id": 1,
+          "destination_castle_id": 0,
+          "clash_radius": 0.25,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        }
+      ],
+      "clashes": []
+    },
+    {
+      "id": 5,
+      "castles": [
+        {
+          "id": 0,
+          "team_color": 1,
+          "soldiers": 10,
+          "x": -5,
+          "y": 0,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 1,
+          "team_color": 2,
+          "soldiers": 10,
+          "x": 5,
+          "y": 0,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 2,
+          "team_color": 0,
+          "soldiers": 10,
+          "x": 0,
+          "y": 0,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 3,
+          "team_color": 0,
+          "soldiers": 10,
+          "x": 0,
+          "y": -3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 4,
+          "team_color": 1,
+          "soldiers": 10,
+          "x": -2.5,
+          "y": 1,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 5,
+          "team_color": 1,
+          "soldiers": 10,
+          "x": -5,
+          "y": 3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 6,
+          "team_color": 2,
+          "soldiers": 10,
+          "x": 5,
+          "y": 3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 7,
+          "team_color": 2,
+          "soldiers": 10,
+          "x": 2.5,
+          "y": -3,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 8,
+          "team_color": 0,
+          "soldiers": 10,
+          "x": 0,
+          "y": 3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        }
+      ],
+      "soldier_groups": [
+        {
+          "id": 1,
+          "team_color": 1,
+          "soldiers": 8,
+          "x": -3.0,
+          "y": -1.4,
+          "origin_castle_id": 0,
+          "destination_castle_id": 3,
+          "clash_radius": 0.25,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 2,
+          "team_color": 2,
+          "soldiers": 8,
+          "x": 4.25,
+          "y": -0.9,
+          "origin_castle_id": 1,
+          "destination_castle_id": 7,
+          "clash_radius": 0.25,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        }
+      ],
+      "clashes": []
+    },
+    {
+      "id": 6,
+      "castles": [
+        {
+          "id": 0,
+          "team_color": 1,
+          "soldiers": 10,
+          "x": -5,
+          "y": 0,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 1,
+          "team_color": 2,
+          "soldiers": 10,
+          "x": 5,
+          "y": 0,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 2,
+          "team_color": 0,
+          "soldiers": 10,
+          "x": 0,
+          "y": 0,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 3,
+          "team_color": 0,
+          "soldiers": 10,
+          "x": 0,
+          "y": -3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 4,
+          "team_color": 1,
+          "soldiers": 10,
+          "x": -2.5,
+          "y": 1,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 5,
+          "team_color": 1,
+          "soldiers": 10,
+          "x": -5,
+          "y": 3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 6,
+          "team_color": 2,
+          "soldiers": 10,
+          "x": 5,
+          "y": 3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 7,
+          "team_color": 2,
+          "soldiers": 10,
+          "x": 2.5,
+          "y": -3,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 8,
+          "team_color": 0,
+          "soldiers": 10,
+          "x": 0,
+          "y": 3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        }
+      ],
+      "soldier_groups": [
+        {
+          "id": 1,
+          "team_color": 1,
+          "soldiers": 8,
+          "x": -3.0,
+          "y": -1.4,
+          "origin_castle_id": 0,
+          "destination_castle_id": 3,
+          "clash_radius": 0.25,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 2,
+          "team_color": 2,
+          "soldiers": 8,
+          "x": 3.875,
+          "y": -1.35,
+          "origin_castle_id": 1,
+          "destination_castle_id": 7,
+          "clash_radius": 0.25,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        }
+      ],
+      "clashes": []
+    },
+    {
+      "id": 7,
+      "castles": [
+        {
+          "id": 0,
+          "team_color": 1,
+          "soldiers": 10,
+          "x": -5,
+          "y": 0,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 1,
+          "team_color": 2,
+          "soldiers": 10,
+          "x": 5,
+          "y": 0,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 2,
+          "team_color": 0,
+          "soldiers": 10,
+          "x": 0,
+          "y": 0,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 3,
+          "team_color": 0,
+          "soldiers": 10,
+          "x": 0,
+          "y": -3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 4,
+          "team_color": 1,
+          "soldiers": 10,
+          "x": -2.5,
+          "y": 1,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 5,
+          "team_color": 1,
+          "soldiers": 10,
+          "x": -5,
+          "y": 3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 6,
+          "team_color": 2,
+          "soldiers": 10,
+          "x": 5,
+          "y": 3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 7,
+          "team_color": 2,
+          "soldiers": 10,
+          "x": 2.5,
+          "y": -3,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 8,
+          "team_color": 0,
+          "soldiers": 10,
+          "x": 0,
+          "y": 3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        }
+      ],
+      "soldier_groups": [
+        {
+          "id": 1,
+          "team_color": 1,
+          "soldiers": 8,
+          "x": -2.75,
+          "y": 0.0,
+          "origin_castle_id": 0,
+          "destination_castle_id": 2,
+          "clash_radius": 0.25,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 2,
+          "team_color": 1,
+          "soldiers": 8,
+          "x": -1.75,
+          "y": 0.7,
+          "origin_castle_id": 4,
+          "destination_castle_id": 2,
+          "clash_radius": 0.25,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 3,
+          "team_color": 1,
+          "soldiers": 8,
+          "x": -3.5,
+          "y": 2.45,
+          "origin_castle_id": 5,
+          "destination_castle_id": 2,
+          "clash_radius": 0.25,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 4,
+          "team_color": 2,
+          "soldiers": 8,
+          "x": -1.5,
+          "y": 0.0,
+          "origin_castle_id": 2,
+          "destination_castle_id": 0,
+          "clash_radius": 0.25,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        }
+      ],
+      "clashes": []
+    },
+    {
+      "id": 8,
+      "castles": [
+        {
+          "id": 0,
+          "team_color": 1,
+          "soldiers": 10,
+          "x": -5,
+          "y": 0,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 1,
+          "team_color": 2,
+          "soldiers": 10,
+          "x": 5,
+          "y": 0,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 2,
+          "team_color": 0,
+          "soldiers": 10,
+          "x": 0,
+          "y": 0,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 3,
+          "team_color": 0,
+          "soldiers": 10,
+          "x": 0,
+          "y": -3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 4,
+          "team_color": 1,
+          "soldiers": 10,
+          "x": -2.5,
+          "y": 1,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 5,
+          "team_color": 1,
+          "soldiers": 10,
+          "x": -5,
+          "y": 3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 6,
+          "team_color": 2,
+          "soldiers": 10,
+          "x": 5,
+          "y": 3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 7,
+          "team_color": 2,
+          "soldiers": 10,
+          "x": 2.5,
+          "y": -3,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 8,
+          "team_color": 0,
+          "soldiers": 10,
+          "x": 0,
+          "y": 3.5,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        }
+      ],
+      "soldier_groups": [
+        {
+          "id": 1,
+          "team_color": 1,
+          "soldiers": 4,
+          "x": -2.5,
+          "y": -1.75,
+          "origin_castle_id": 0,
+          "destination_castle_id": 3,
+          "clash_radius": 0.25,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        },
+        {
+          "id": 2,
+          "team_color": 2,
+          "soldiers": 8,
+          "x": 3.75,
+          "y": -1.5,
+          "origin_castle_id": 1,
+          "destination_castle_id": 7,
+          "clash_radius": 0.25,
+          "upgrades": {
+            "clash_stop_generations": 1,
+            "speed": 1
+          }
+        }
+      ],
+      "clashes": [
+        {
+          "id": 1,
+          "time": 0.5,
+          "participants": [
+            {
+              "group_id": 1,
+              "team_color": 1,
+              "x": -2.6,
+              "y": -1.75,
+              "clash_radius": 0.25,
+              "soldiers_before": 10,
+              "soldiers_after": 4
+            },
+            {
+              "group_id": 9,
+              "team_color": 2,
+              "x": -2.4,
+              "y": -1.75,
+              "clash_radius": 0.25,
+              "soldiers_before": 6,
+              "soldiers_after": 0
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "logs": [
+    {
+      "generation_id": 1,
+      "players": [],
+      "hidden_team_colors": []
+    },
+    {
+      "generation_id": 2,
+      "players": [],
+      "hidden_team_colors": []
+    },
+    {
+      "generation_id": 3,
+      "players": [],
+      "hidden_team_colors": []
+    },
+    {
+      "generation_id": 4,
+      "players": [],
+      "hidden_team_colors": []
+    },
+    {
+      "generation_id": 5,
+      "players": [],
+      "hidden_team_colors": []
+    },
+    {
+      "generation_id": 6,
+      "players": [],
+      "hidden_team_colors": []
+    },
+    {
+      "generation_id": 7,
+      "players": [],
+      "hidden_team_colors": []
+    },
+    {
+      "generation_id": 8,
+      "players": [],
+      "hidden_team_colors": []
+    }
+  ]
+}

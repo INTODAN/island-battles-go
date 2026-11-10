@@ -6,6 +6,14 @@ import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import type { Scene } from "@babylonjs/core/scene";
 import type { components } from "../api/generated/game";
 import {
+  clashHeld,
+  planTurnHeadings,
+  restingHeadings,
+  sampleTurnHeadings,
+  type TurnHeadings,
+} from "./animation/headings";
+import type { TurnPlan, TurnSample } from "./animation/plan";
+import {
   type BoatParts,
   createBoat,
   createBridge,
@@ -35,8 +43,8 @@ import {
 } from "./castles";
 import { toWorld, toWorldDistance } from "./coordinates";
 import {
-  computeHeadings,
   type HeadingSegment,
+  headingDrawOrder,
   headingStyle,
   ribbonGeometry,
 } from "./headingLines";
@@ -99,6 +107,10 @@ export interface Battlefield {
   headings: Map<number, HeadingEntity>;
   /** The headings of the last render, for tests. */
   headingSegments: HeadingSegment[];
+  /** The groups drawn as not moving, by the generation they were drawn for (case 14 of #168). */
+  headingHeld: Map<number, ReadonlySet<number>>;
+  /** The arrows of the turn playing, decided when it began. */
+  turnHeadings: TurnHeadings | null;
 }
 
 const battlefields = new WeakMap<Scene, Battlefield>();
@@ -131,7 +143,12 @@ function createBattlefield(scene: Scene): Battlefield {
     clashes: new Map(),
     headings: new Map(),
     headingSegments: [],
+    headingHeld: new Map(),
+    turnHeadings: null,
   };
+  // The heading lines are drawn after everything else, tested against its depth but not
+  // against each other: rendering group 1 keeps the scene's depth buffer (#168 case 15).
+  scene.setRenderingAutoClearDepthStencil(HEADING_GROUP, false, false, false);
   battlefields.set(scene, battlefield);
   return battlefield;
 }
@@ -383,37 +400,82 @@ function setRibbon(mesh: Mesh, points: number[], indices: number[]): void {
   data.applyToMesh(mesh, true);
 }
 
+/** The rendering group of the heading lines; it keeps the depth of group 0. */
+const HEADING_GROUP = 1;
+
+/**
+ * Draws the heading lines of a generation at rest. `held` are the groups that are not moving;
+ * by default those a clash of this generation stopped. The turn animation passes the groups that
+ * stayed put over the turn too.
+ */
 export function updateHeadings(
   field: Battlefield,
   generation: Generation,
+  held?: ReadonlySet<number>,
 ): void {
-  const { scene, materials } = field;
-  const segments = computeHeadings(
-    generation.castles,
-    generation.soldier_groups,
+  const known = field.headingHeld.get(generation.id);
+  const shown = held ?? known ?? clashHeld(generation);
+  if (held || !known) {
+    field.headingHeld.delete(generation.id);
+    field.headingHeld.set(generation.id, shown);
+    // Only the last few generations are ever asked for.
+    for (const id of field.headingHeld.keys()) {
+      if (field.headingHeld.size <= 4) break;
+      field.headingHeld.delete(id);
+    }
+  }
+  field.turnHeadings = null;
+  drawHeadings(field, restingHeadings(generation, shown, boatScale));
+}
+
+/** Decides the arrows of the turn `plan` plays (#168 case 13); call before `applyTurnHeadings`. */
+export function beginTurnHeadings(field: Battlefield, plan: TurnPlan): void {
+  field.turnHeadings = planTurnHeadings(
+    plan,
+    field.headingHeld.get(plan.previous.id) ?? clashHeld(plan.previous),
+    boatScale,
   );
+}
+
+/** Draws the turn's arrows at `sample`, moving them with the boats. */
+export function applyTurnHeadings(
+  field: Battlefield,
+  sample: TurnSample,
+): void {
+  if (!field.turnHeadings) return;
+  drawHeadings(
+    field,
+    sampleTurnHeadings(field.turnHeadings, sample, boatScale),
+  );
+}
+
+function drawHeadings(field: Battlefield, segments: HeadingSegment[]): void {
+  const { scene, materials } = field;
   field.headingSegments = segments;
   const seen = new Set<number>();
+  const height = ISLAND_TOP + headingStyle.height;
   for (const segment of segments) {
     seen.add(segment.groupId);
     let entity = field.headings.get(segment.groupId);
     if (!entity) {
       const line = new MeshClass(`heading-${segment.groupId}`, scene);
       const casing = new MeshClass(`heading-${segment.groupId}-casing`, scene);
-      line.isPickable = false;
-      casing.isPickable = false;
+      for (const mesh of [line, casing]) {
+        mesh.isPickable = false;
+        mesh.renderingGroupId = HEADING_GROUP;
+        mesh.position.y = height;
+      }
       entity = { line, casing };
       field.headings.set(segment.groupId, entity);
     }
+    const order = headingDrawOrder(segment.rank);
     const shaft = ribbonGeometry(segment, headingStyle);
     setRibbon(entity.line, shaft.points, shaft.indices);
-    entity.line.material = materials.flat(
+    entity.line.material = materials.overlay(
       tint(teamColorHex(segment.teamColor), headingStyle.tint),
     );
-    // Stable stacking: a later group ID is higher, so it reads as passing over an earlier one.
-    const height =
-      ISLAND_TOP + headingStyle.height + segment.rank * headingStyle.stackStep;
-    entity.line.position.y = height;
+    entity.line.alphaIndex = order.line;
+    entity.line.visibility = segment.opacity;
     entity.casing.setEnabled(headingStyle.casingWidth > 0);
     if (headingStyle.casingWidth > 0) {
       const casing = ribbonGeometry(
@@ -422,8 +484,9 @@ export function updateHeadings(
         headingStyle.casingWidth,
       );
       setRibbon(entity.casing, casing.points, casing.indices);
-      entity.casing.material = materials.flat(SEA_COLOR);
-      entity.casing.position.y = height - headingStyle.stackStep * 0.5;
+      entity.casing.material = materials.overlay(SEA_COLOR);
+      entity.casing.alphaIndex = order.casing;
+      entity.casing.visibility = segment.opacity;
     }
   }
   prune(field.headings, seen, (entity) => {
