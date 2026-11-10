@@ -193,8 +193,8 @@ describe("a castle on the board", () => {
 
   test("a capture between two fixture frames changes only the team material", () => {
     const demo = fixture("busy-turn.json");
-    const before = castleIn(demo, 1, 0);
-    const after = castleIn(demo, 2, 0);
+    const before = castleIn(demo, 6, 0);
+    const after = castleIn(demo, 7, 0);
     expect(before.team_color).not.toBe(after.team_color);
     const level = castleDisplayLevel(before.upgrades);
     expect(castleDisplayLevel(after.upgrades)).toBe(level);

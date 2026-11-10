@@ -126,9 +126,13 @@ describe("heading arrows during a turn", () => {
       // The turn starts as the previous generation was drawn and ends as the next one is.
       const atStart = sampleTurnHeadings(turn, sampleTurn(plan, 0), scale);
       const rest = restingHeadings(previous, held, scale);
-      expect(atStart.map((s) => [s.groupId, s.arrowhead])).toEqual(
-        rest.map((s) => [s.groupId, s.arrowhead]),
-      );
+      expect(atStart.map((s) => s.groupId)).toEqual(rest.map((s) => s.groupId));
+      // A head one end of the turn draws is drawn all turn (see `sampleTurnHeadings`), so a
+      // head the resting view leaves out, because another group of the team shares it or the
+      // group was held, may be drawn at t = 0 too; one the resting view draws is never lost.
+      atStart.forEach((segment, position) => {
+        if (rest[position]?.arrowhead) expect(segment.arrowhead).toBe(true);
+      });
       atStart.forEach((segment, position) => {
         const resting = rest[position];
         if (!resting) return;

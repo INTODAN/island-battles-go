@@ -261,11 +261,41 @@ func TestUpgradeCostAndAffordability(t *testing.T) {
 	}
 }
 
-func TestEveryCastleGrowsEachTurn(t *testing.T) {
+func TestATeamsCastleGrowsAndANeutralCastleKeepsItsSoldiers(t *testing.T) {
 	state := newState(15, simulation.Castle{TeamColor: 1}, simulation.Castle{TeamColor: models.NeutralTeamColor, Position: point(1, 0)})
 	state, _ = simulate(t, state, simulation.IncreaseSoldierAmountParams{})
-	if state.Castles[0].Soldiers != 16 || state.Castles[1].Soldiers != 16 {
-		t.Fatalf("castles did not grow: %+v %+v", state.Castles[0], state.Castles[1])
+	if state.Castles[0].Soldiers != 16 || state.Castles[1].Soldiers != 15 {
+		t.Fatalf("the team's castle should grow and the neutral one stay: %+v %+v", state.Castles[0], state.Castles[1])
+	}
+}
+
+// A castle never becomes neutral again: capture sets the capturer's team, and
+// nothing else changes a castle's team. So there is no case of a castle that
+// stops growing after it was owned.
+
+func TestANeutralCastleCapturedThisTurnDoesNotGrowUntilTheNext(t *testing.T) {
+	state := newState(100, simulation.Castle{TeamColor: 1, Position: point(0, 1)}, simulation.Castle{TeamColor: models.NeutralTeamColor, Position: point(3, 1)})
+	placeGroup(&state, 1, 130, 3)
+	state = playTurn(t, state)
+	if castle := state.Castles[1]; castle.TeamColor != 1 || castle.Soldiers != 30 {
+		t.Fatalf("the capture leaves exactly the surplus, without this turn's growth: %+v", castle)
+	}
+	if state.Castles[0].Soldiers != 101 {
+		t.Fatalf("the capturing team's other castle grows: %+v", state.Castles[0])
+	}
+	state = playTurn(t, state)
+	if castle := state.Castles[1]; castle.Soldiers != 31 {
+		t.Fatalf("the captured castle grows from the next turn: %+v", castle)
+	}
+}
+
+func TestANeutralCastleKeepsItsSoldiersOverManyTurns(t *testing.T) {
+	state := newState(7, simulation.Castle{TeamColor: 1, Position: point(0, 1)}, simulation.Castle{TeamColor: models.NeutralTeamColor, Position: point(3, 1)})
+	for range 5 {
+		state = playTurn(t, state)
+	}
+	if state.Castles[1].Soldiers != 7 || state.Castles[0].Soldiers != 12 {
+		t.Fatalf("castles: %+v %+v", state.Castles[0], state.Castles[1])
 	}
 }
 

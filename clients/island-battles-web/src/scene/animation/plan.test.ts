@@ -92,8 +92,8 @@ const distance = (
 
 describe("planTurn on fixture pairs", () => {
   test("a launch starts at the origin castle's edge and ends where the group now is", () => {
-    // busy-turn frame 1: four groups leave their castles.
-    const { previous, next, plan } = pair("busy-turn", 1);
+    // busy-turn frame 4: a group leaves its castle and nothing clashes.
+    const { previous, next, plan } = pair("busy-turn", 4);
     const launched = next.soldier_groups.filter(
       (group) => !previous.soldier_groups.some((old) => old.id === group.id),
     );
@@ -139,12 +139,12 @@ describe("planTurn on fixture pairs", () => {
   });
 
   test("an arrival sails to the castle's edge, then into it, and the castle counts it", () => {
-    // busy-turn frame 3: two groups arrive and nothing clashes.
-    const { previous, next, plan } = pair("busy-turn", 3);
+    // busy-turn frame 2: a group arrives and nothing clashes.
+    const { previous, next, plan } = pair("busy-turn", 2);
     const arriving = previous.soldier_groups.filter(
       (group) => !next.soldier_groups.some((now) => now.id === group.id),
     );
-    expect(arriving).toHaveLength(2);
+    expect(arriving).toHaveLength(1);
     for (const group of arriving) {
       const castle = next.castles.find(
         (c) => c.id === group.destination_castle_id,
@@ -278,8 +278,8 @@ describe("planTurn on fixture pairs", () => {
   });
 
   test("a capture flips the castle's team when the capturing group lands", () => {
-    // busy-turn frame 2: a group arrives and takes a castle.
-    const { previous, next, plan } = pair("busy-turn", 2);
+    // busy-turn frame 7: a group arrives and takes a castle.
+    const { previous, next, plan } = pair("busy-turn", 7);
     const captured = next.castles.find(
       (castle) =>
         castle.team_color !==
@@ -459,8 +459,8 @@ describe("rattle (#169)", () => {
   });
 
   test("a clash that is not balanced stops nobody: the bigger group sails on and does not rattle", () => {
-    // busy-turn frame 8, clash 2: 5 against 2.
-    const { next, plan } = pair("busy-turn", 8);
+    // busy-turn frame 1, clash 1: 10 against 4.
+    const { next, plan } = pair("busy-turn", 1);
     const clash = next.clashes.find((c) => !clashStops(c));
     expect(clash).toBeDefined();
     const winner = clash?.participants.find((p) => p.soldiers_after > 0);
@@ -657,6 +657,104 @@ describe("planTurn on every fixture pair", () => {
     );
     expect(count?.keys.map((k) => k.t).slice(0, 2)).toEqual([0, 0.06]);
     expect(count?.keys[1]?.value).toBeLessThan(count?.keys[0]?.value as number);
+  });
+});
+
+describe("castle counts and growth", () => {
+  const castle = (
+    id: number,
+    team: number,
+    soldiers: number,
+    x: number,
+  ): Generation["castles"][number] => ({
+    id,
+    team_color: team,
+    soldiers,
+    x,
+    y: 0,
+    upgrades: { speed: 1, clash_stop_generations: 1 },
+  });
+  const group = (): Generation["soldier_groups"][number] => ({
+    id: 5,
+    team_color: 1,
+    soldiers: 26,
+    x: 3.9,
+    y: 0,
+    origin_castle_id: 0,
+    destination_castle_id: 1,
+    clash_radius: 0.25,
+    upgrades: { speed: 1, clash_stop_generations: 1 },
+  });
+  const countOf = (plan: TurnPlan, castleId: number) => {
+    const track = tracksOf(plan, "castleCount").find(
+      (t) => t.castleId === castleId,
+    );
+    if (!track) throw new Error(`no count track for castle ${castleId}`);
+    return track;
+  };
+
+  test("a team's castle grows, a neutral one keeps its soldiers, and both replay exactly", () => {
+    const previous: Generation = {
+      id: 1,
+      castles: [castle(0, 1, 30, 0), castle(1, 0, 20, 4)],
+      soldier_groups: [],
+      clashes: [],
+    };
+    const next: Generation = {
+      id: 2,
+      castles: [castle(0, 1, 31, 0), castle(1, 0, 20, 4)],
+      soldier_groups: [],
+      clashes: [],
+    };
+    const plan = planTurn(previous, next);
+    expect(countOf(plan, 0).replayed).toBe(true);
+    expect(countOf(plan, 0).keys.map((key) => key.value)).toContain(31);
+    expect(countOf(plan, 1).replayed).toBe(true);
+    expect(new Set(countOf(plan, 1).keys.map((key) => key.value))).toEqual(
+      new Set([20]),
+    );
+    // A server that still grew the neutral castle would not match the replay.
+    const grown = planTurn(previous, {
+      ...next,
+      castles: [castle(0, 1, 31, 0), castle(1, 0, 21, 4)],
+    });
+    expect(countOf(grown, 1).replayed).toBe(false);
+  });
+
+  test("a neutral castle captured this turn has the surplus without growth, then grows next turn", () => {
+    const previous: Generation = {
+      id: 1,
+      castles: [castle(0, 1, 30, 0), castle(1, 0, 20, 4)],
+      soldier_groups: [group()],
+      clashes: [],
+    };
+    const captured: Generation = {
+      id: 2,
+      castles: [castle(0, 1, 31, 0), castle(1, 1, 6, 4)],
+      soldier_groups: [],
+      clashes: [],
+    };
+    const plan = planTurn(previous, captured);
+    expect(countOf(plan, 1).replayed).toBe(true);
+    expect(sampleTurn(plan, 1).castles.get(1)).toMatchObject({
+      team: 1,
+      count: 6,
+    });
+    // One soldier more would mean the neutral castle grew before the landing.
+    const grew = planTurn(previous, {
+      ...captured,
+      castles: [castle(0, 1, 31, 0), castle(1, 1, 7, 4)],
+    });
+    expect(countOf(grew, 1).replayed).toBe(false);
+    // The next turn it grows like any castle a team owns.
+    const later = planTurn(captured, {
+      id: 3,
+      castles: [castle(0, 1, 32, 0), castle(1, 1, 7, 4)],
+      soldier_groups: [],
+      clashes: [],
+    });
+    expect(countOf(later, 1).replayed).toBe(true);
+    expect(countOf(later, 1).keys.map((key) => key.value)).toContain(7);
   });
 });
 

@@ -10,6 +10,8 @@ pip install island-battles-python==X.Y.Z   # or: uv add island-battles-python==X
 
 It needs Python 3.14 or newer. To obtain the guest credential and the lobby ID, install the lobby client too, `mpl-lobby-client`, with the same version. The rest of this README describes the repository checkout.
 
+**This is a rule change, and it breaks bots that count on neutral castles growing.** A neutral castle no longer gains a soldier each turn; it keeps its soldiers until a team captures it and grows from the next turn on, like any castle a team owns. The API is the same, but a bot that forecasts a neutral castle's defenders with growth overestimates them. What to do: count growth only for castles with a team.
+
 A bot is a **function**: it gets a `BotTurn` (the board, your team and the `memory` it returned last turn) and returns a `BotTurnResult` (commands, game log lines and its new memory). The function keeps nothing between turns; whatever it needs next turn goes into its memory, which the server stores. This package runs your function three ways:
 
 - `island-battles-bot serve` serves it on your machine, and a game client in your browser relays each turn to it,

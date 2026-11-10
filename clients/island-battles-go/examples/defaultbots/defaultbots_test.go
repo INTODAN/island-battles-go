@@ -115,11 +115,12 @@ func TestLevelOneSendsOneSoldierToTheFirstEnemyCastle(t *testing.T) {
 }
 
 func TestLevelTwoAttacksTheNearestCastleItCanTake(t *testing.T) {
-	// Castle 2 is nearest but too strong. Castle 1 lands after 2 turns with
-	// 12 defenders, so 12 + 1 + a margin of 3 takes it.
+	// Castle 2 is nearest but too strong. Castle 1 is neutral, so it keeps its
+	// 10 defenders until the group lands after 2 turns: 10 + 1 + a margin of 3
+	// takes it.
 	castles := []islandbattles.Castle{castle(0, 1, 20, 0, 0), castle(1, 0, 10, 1, 0), castle(2, 0, 30, 0, 0.5), castle(3, 2, 30, 6, 0)}
 	_, sends, _ := play(t, 2, turn(1, castles, nil, ""))
-	if !reflect.DeepEqual(sends, []sent{{Origin: 0, Destination: 1, Soldiers: 16}}) {
+	if !reflect.DeepEqual(sends, []sent{{Origin: 0, Destination: 1, Soldiers: 14}}) {
 		t.Fatalf("got sends %+v", sends)
 	}
 	// A group of its own already takes castle 1, so it waits rather than
@@ -129,10 +130,11 @@ func TestLevelTwoAttacksTheNearestCastleItCanTake(t *testing.T) {
 	if len(sends) != 0 {
 		t.Fatalf("got sends %+v", sends)
 	}
-	// An enemy group landing on castle 1 first leaves fewer defenders.
+	// An enemy group landing on castle 1 first leaves fewer defenders: 10 - 8 = 2,
+	// and the neutral castle doesn't grow back.
 	groups = []islandbattles.SoldierGroup{group(5, 2, 8, 1.5, 0, 3, 1)}
 	_, sends, _ = play(t, 2, turn(1, castles, groups, ""))
-	if !reflect.DeepEqual(sends, []sent{{Origin: 0, Destination: 1, Soldiers: 7}}) {
+	if !reflect.DeepEqual(sends, []sent{{Origin: 0, Destination: 1, Soldiers: 5}}) {
 		t.Fatalf("got sends %+v", sends)
 	}
 }
@@ -164,9 +166,10 @@ func TestLevelThreeKeepsAGuardAgainstTheEnemy(t *testing.T) {
 }
 
 func TestLevelThreeCombinesAttacksAndRemembersTheLaterLaunch(t *testing.T) {
-	// Castle 2 lands from castle 1 in 4 turns and from castle 0 in 10.
-	// Neither can take it alone, but together they land 36 soldiers after
-	// 10 turns: castle 0 sends now, and castle 1 sends in turn 7.
+	// Castle 2 is neutral and keeps its 20 defenders. It lands from castle 1 in
+	// 4 turns and from castle 0 in 10. Neither can take it alone (20 + 1 + a
+	// margin of 4 is 25), but together they land 25 soldiers after 10 turns:
+	// castle 0 sends now, and castle 1 sends in turn 7.
 	castles := []islandbattles.Castle{castle(0, 1, 20, 0, 0), castle(1, 1, 20, 3, 0), castle(2, 0, 20, 5, 0)}
 	result, sends, _ := play(t, 3, turn(1, castles, nil, ""))
 	if !reflect.DeepEqual(sends, []sent{{Origin: 0, Destination: 2, Soldiers: 20}}) {
@@ -188,11 +191,13 @@ func TestLevelThreeCombinesAttacksAndRemembersTheLaterLaunch(t *testing.T) {
 		t.Fatal(err)
 	}
 	if memory.Turn != 1 || len(memory.Plans) != 1 || memory.Plans[0].Target != 2 || memory.Plans[0].Lands != 10 || len(memory.Plans[0].Launches) != 1 ||
-		memory.Plans[0].Launches[0].Origin != 1 || memory.Plans[0].Launches[0].Soldiers != 16 || memory.Plans[0].Launches[0].At != 7 {
+		memory.Plans[0].Launches[0].Origin != 1 || memory.Plans[0].Launches[0].Soldiers != 5 || memory.Plans[0].Launches[0].At != 7 {
 		t.Fatalf("unexpected memory %s", result.Memory)
 	}
-	// Castle 1 keeps the soldiers until turn 7, then sends them.
-	later := []islandbattles.Castle{castle(0, 1, 5, 0, 0), castle(1, 1, 26, 3, 0), castle(2, 0, 26, 5, 0)}
+	// Castle 1 keeps the soldiers until turn 7, then sends them. It holds 7: the
+	// 5 for the plan and 2 spare, too few to take castle 2 on its own, which the
+	// group on its way leaves with no defenders.
+	later := []islandbattles.Castle{castle(0, 1, 5, 0, 0), castle(1, 1, 7, 3, 0), castle(2, 0, 20, 5, 0)}
 	groups := []islandbattles.SoldierGroup{group(0, 1, 20, 3, 0, 0, 2)}
 	waiting := string(result.Memory)
 	waiting = waiting[:len(`{"turn":`)] + "5" + waiting[len(`{"turn":1`):]
@@ -202,7 +207,7 @@ func TestLevelThreeCombinesAttacksAndRemembersTheLaterLaunch(t *testing.T) {
 	}
 	due := waiting[:len(`{"turn":`)] + "6" + waiting[len(`{"turn":5`):]
 	result, sends, _ = play(t, 3, turn(1, later, groups, due))
-	if !reflect.DeepEqual(sends, []sent{{Origin: 1, Destination: 2, Soldiers: 16}}) || string(result.Memory) != `{"turn":7}` {
+	if !reflect.DeepEqual(sends, []sent{{Origin: 1, Destination: 2, Soldiers: 5}}) || string(result.Memory) != `{"turn":7}` {
 		t.Fatalf("got sends %+v and memory %s", sends, result.Memory)
 	}
 }

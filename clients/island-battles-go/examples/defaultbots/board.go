@@ -140,15 +140,19 @@ func (board board) arrivals(castle islandbattles.Castle) []arrival {
 }
 
 // forecast follows a castle to the end of a turn, counting this one as 1, as
-// the simulation plays it: every turn the castle grows by one soldier, then
-// the turn's arrivals land in order. A friendly group reinforces the castle,
-// and a hostile one takes it when it has more soldiers than the castle.
+// the simulation plays it: every turn a castle that a team owns grows by one
+// soldier, a neutral one doesn't, then the turn's arrivals land in order. A
+// castle captured by an arrival grows from the next turn on. A friendly group
+// reinforces the castle, and a hostile one takes it when it has more soldiers
+// than the castle.
 func forecast(castle islandbattles.Castle, arrivals []arrival, turns int) (owner, soldiers uint) {
 	owner, soldiers = castle.TeamColor, castle.Soldiers
 	arrivals = slices.SortedFunc(slices.Values(arrivals), compareArrivals)
 	next := 0
 	for turn := 1; turn <= turns; turn++ {
-		soldiers++
+		if owner != islandbattles.NeutralTeamColor {
+			soldiers++
+		}
 		for ; next < len(arrivals) && arrivals[next].turn <= turn; next++ {
 			landing := arrivals[next]
 			switch {
@@ -166,7 +170,7 @@ func forecast(castle islandbattles.Castle, arrivals []arrival, turns int) (owner
 
 // garrisonToHold is how many of its soldiers a castle of team must keep this
 // turn so that none of the arrivals takes it, counting the soldiers it grows
-// and the friendly groups that land before each hostile one. It is 0 when the
+// (it is a castle a team owns, so it grows every turn) and the friendly groups that land before each hostile one. It is 0 when the
 // castle holds even with none.
 func garrisonToHold(arrivals []arrival, team uint) uint {
 	balance, needed := 0, 0

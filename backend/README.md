@@ -207,7 +207,7 @@ The **default bots** are numbered levels that the backend plays itself, in Go, s
 | Level | Plays |
 |---|---|
 | 1 | The example player's strategy: each turn one soldier from its first castle with soldiers to the first enemy castle, in ID order. It never attacks neutral castles. |
-| 2 | Each of its castles attacks the nearest castle, enemy or neutral, that it can take: it forecasts the defenders when its group lands, as the turn rules play it (every castle grows by one soldier a turn, then the groups heading there land in ID order), and sends one more soldier plus a margin of 2 and a tenth. Otherwise it waits and grows. It doesn't defend. |
+| 2 | Each of its castles attacks the nearest castle, enemy or neutral, that it can take: it forecasts the defenders when its group lands, as the turn rules play it (a castle that a team owns grows by one soldier a turn and a neutral castle keeps its soldiers until it is captured, then the groups heading there land in ID order; a castle captured in a turn grows from the next turn on), and sends one more soldier plus a margin of 2 and a tenth. Otherwise it waits. It doesn't defend. |
 | 3 | Level 2's forecasts, and it also keeps enough soldiers in each castle to hold against the groups heading for it and as a guard against the strongest enemy castle near it; sends help to a castle that would fall even keeping every soldier; combines attacks from several castles, the farthest sending first and the nearer ones later, so the groups land together; counts the enemy groups that its attack meets on the way; and buys speed levels 2 and 3 with soldiers it can spare from turn 15. Its memory keeps a turn counter and the launches its combined attacks have yet to send. |
 
 The bots are deterministic: the same `BotTurn` always gives the same result, and they use no randomness. Each writes one or two game log lines a turn that explain its choice, with the logger `island_battles.bots.level1` to `level3`.
@@ -291,7 +291,7 @@ The active host receives `game_id`, `lobby_id` and a stable team UUID/order/colo
 
 ## Turn simulation
 
-`services.MigrateGeneration` plays a turn in three steps. `dal.LoadGameState` locks the game and reads its latest generation once. `simulation.Simulate` applies the turn's commands, then the end-of-turn steps (movement and clashes, castle growth, arrivals), to the in-memory `simulation.GameState` and returns the clashes as events. `dal.SaveGeneration` stores the result as the next generation with one batched insert per table. The game rules live only in `backend/simulation`, which never touches the database, so its tests run without Postgres.
+`services.MigrateGeneration` plays a turn in three steps. `dal.LoadGameState` locks the game and reads its latest generation once. `simulation.Simulate` applies the turn's commands, then the end-of-turn steps (movement and clashes, castle growth, arrivals; only castles that a team owns grow, and a neutral castle keeps its soldiers until a team captures it, so a castle captured in a turn grows from the next turn on), to the in-memory `simulation.GameState` and returns the clashes as events. `dal.SaveGeneration` stores the result as the next generation with one batched insert per table. The game rules live only in `backend/simulation`, which never touches the database, so its tests run without Postgres.
 
 ## Castle upgrades
 
