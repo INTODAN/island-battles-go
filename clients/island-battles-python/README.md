@@ -22,6 +22,8 @@ A bot is a **function**: it gets a `BotTurn` (the board, your team and the `memo
 
 Install with `uv sync --locked` (Python 3.14 or later).
 
+To start a bot project, copy the [Python bot template](../../templates/python-bot/README.md): a working bot, tests, scripts and skills for coding agents, on top of this package.
+
 ## Writing a bot
 
 ```python
