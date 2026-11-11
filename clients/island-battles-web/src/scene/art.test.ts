@@ -1,10 +1,19 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  test,
+} from "bun:test";
 import { readFileSync } from "node:fs";
 import { NullEngine } from "@babylonjs/core/Engines/nullEngine";
 import { Color4 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Scene } from "@babylonjs/core/scene";
 import { createTurnEffects } from "./animation/effects";
+import type { FlashPose } from "./animation/plan";
 import {
   BOAT_FLOAT,
   boatGeometry,
@@ -18,6 +27,7 @@ import {
   setBoatTeam,
 } from "./art";
 import { ATLAS_SWATCHES } from "./atlasUv";
+import type { Battlefield } from "./battlefield";
 import { CASTLE_ATLAS_URL } from "./castleAssets";
 import {
   ATLAS_SIZE,
@@ -26,7 +36,8 @@ import {
   teamAtlas,
 } from "./castleAtlas";
 import { islandProps } from "./landforms";
-import { Bursts } from "./particles";
+import { Bursts, burstsOf } from "./particles";
+import { stubGraphics } from "./testing/graphics";
 import { decodePng } from "./testing/png";
 
 let engine: NullEngine;
@@ -110,6 +121,7 @@ describe("boats and props on the castle atlas (#102)", () => {
 
 describe("turn effects (#102)", () => {
   test("a sinking boat tilts, slides under and is put back when the turn is cleared", async () => {
+    const graphics = stubGraphics("high");
     const boat = createBoat(scene, 7, materials, 1);
     const effects = createTurnEffects(scene);
     // The particle code loads on its own.
@@ -130,6 +142,7 @@ describe("turn effects (#102)", () => {
     expect(boat.body.rotation.x).toBe(0);
     expect(boat.root.rotation.z).toBe(0);
     disposeBoat(boat);
+    graphics.restore();
   });
 
   test("a rattled boat rolls and shakes its body only, fades out, and is put back; with Effects off it stays still", () => {
@@ -173,6 +186,80 @@ describe("turn effects (#102)", () => {
       if (original) Object.defineProperty(globalThis, "localStorage", original);
       else Reflect.deleteProperty(globalThis, "localStorage");
     }
+  });
+});
+
+describe("Effects off plays no particles (#201)", () => {
+  let own: Scene;
+  let field: Battlefield;
+  let ownMaterials: MaterialCache;
+  beforeEach(() => {
+    own = new Scene(engine);
+    ownMaterials = new MaterialCache(own);
+    field = {
+      scene: own,
+      castles: new Map(),
+      generation: null,
+    } as unknown as Battlefield;
+  });
+  afterEach(() => own.dispose());
+
+  function playAll(effects: ReturnType<typeof createTurnEffects>, id: number) {
+    const boat = createBoat(own, 100 + id, ownMaterials, 1);
+    const flash = {
+      clashId: id,
+      groupId: 1,
+      teamColor: 1,
+      x: 0,
+      y: 0,
+      radius: 1,
+      age: 0.1,
+    } as FlashPose;
+    effects.clash(field, [flash]);
+    effects.sink(boat, 0.5);
+    effects.castleLevelUp(field, id, 1, 2);
+    effects.castleCaptured(field, id, 2);
+    effects.tick(0);
+    return boat;
+  }
+
+  test("with Effects off no particle system and no pool is made, and boats still sink", async () => {
+    const graphics = stubGraphics("low");
+    const before = own.particleSystems.length;
+    const effects = createTurnEffects(own);
+    await import("./particles");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const boat = playAll(effects, 1);
+    expect(boat.body.position.y).toBeLessThan(BOAT_FLOAT);
+    expect(own.particleSystems.length).toBe(before);
+    expect(burstsOf(own)).toBeUndefined();
+    effects.clear();
+    disposeBoat(boat);
+    graphics.restore();
+  });
+
+  test("low to high builds the pool at the next frame; high to low starts no new burst", async () => {
+    const graphics = stubGraphics("low");
+    const before = own.particleSystems.length;
+    const effects = createTurnEffects(own);
+    await import("./particles");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    effects.tick(0);
+    expect(own.particleSystems.length).toBe(before);
+    graphics.set("high");
+    effects.tick(1);
+    expect(burstsOf(own)).toBeDefined();
+    const pooled = own.particleSystems.length;
+    expect(pooled).toBeGreaterThan(before);
+    graphics.set("low");
+    const quiet = JSON.stringify(burstsOf(own)?.stats());
+    const boat = playAll(effects, 2);
+    // No burst leased a system, so the pool's busiest moments did not change.
+    expect(JSON.stringify(burstsOf(own)?.stats())).toBe(quiet);
+    expect(own.particleSystems.length).toBe(pooled);
+    effects.clear();
+    disposeBoat(boat);
+    graphics.restore();
   });
 });
 

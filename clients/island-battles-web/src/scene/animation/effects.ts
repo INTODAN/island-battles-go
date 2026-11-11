@@ -109,8 +109,13 @@ export function createTurnEffects(scene?: Scene): TurnEffects {
   let bursts: Bursts | null = null;
   let burstScene: Scene | null = null;
 
-  /** The scene's bursts, or null while the particle code loads. */
+  /**
+   * The scene's bursts, or null while the particle code loads and whenever Effects is off: with
+   * Effects off no particle code is loaded, no pool is built and no burst plays. Asked again on
+   * every effect and every frame (`tick`), so switching Effects on builds the pool at once.
+   */
   const burstsFor = (scene: Scene): Bursts | null => {
+    if (graphicsOf(scene) !== "high") return null;
     if (!particles) {
       void loadParticles();
       return null;
@@ -125,7 +130,7 @@ export function createTurnEffects(scene?: Scene): TurnEffects {
     return bursts;
   };
 
-  if (scene) {
+  if (scene && graphicsOf(scene) === "high") {
     loadParticles().then(
       () => {
         if (!scene.isDisposed) burstsFor(scene)?.warmUp();
@@ -334,7 +339,10 @@ export function createTurnEffects(scene?: Scene): TurnEffects {
       });
     },
 
-    tick() {},
+    tick() {
+      // Effects switched on during a game: the pool is built here, before the first burst.
+      if (scene && !scene.isDisposed) burstsFor(scene);
+    },
 
     clear() {
       // Bursts of smoke, spray and sparkle play out on their own, across the turn's end; only
