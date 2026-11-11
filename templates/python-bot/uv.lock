@@ -112,16 +112,16 @@ wheels = [
 
 [[package]]
 name = "island-battles-python"
-version = "0.1.0"
+version = "0.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "centrifuge-python" },
     { name = "httpx" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/60/aa/c541f69b1ae6228ce5cfcfc720885af4cbf68f142d8d1000243f9cf65c04/island_battles_python-0.1.0.tar.gz", hash = "sha256:e41c12b5d75fca018b5b2a25fbc9de07ab1cdeef4355dc1b668b7993cbc5cf92", size = 29810, upload-time = "2026-11-09T20:52:30.71Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/11/a1/a961bdf776f0d451ec4bdb95348c2ec366b9f2b1c9c412245eda56c96658/island_battles_python-0.2.0.tar.gz", hash = "sha256:536e264eb5d98b2ec18c486b43fd3a93caefb8af86da6b1a477fa7b9d7d3e680", size = 30162, upload-time = "2026-11-11T22:32:28.003Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/11/94/65d1b189d5b470a3f89f78b2841621b057974e94f7248146aabd64954191/island_battles_python-0.1.0-py3-none-any.whl", hash = "sha256:1925fdc19ebfcc189b64138af7563e28fbe86dc3ff0cd15a54de292f5a5c2cc7", size = 34091, upload-time = "2026-11-09T20:52:29.597Z" },
+    { url = "https://files.pythonhosted.org/packages/56/ca/de7f82c5545762d8a97e02a5dd20eb9a20074dcc7a8215179dfd8eb6a7b5/island_battles_python-0.2.0-py3-none-any.whl", hash = "sha256:4ab455e348e062d735f4859c6918e741c2853eac48c0df2834d60b106607bf9a", size = 34451, upload-time = "2026-11-11T22:32:26.917Z" },
 ]
 
 [[package]]
@@ -140,7 +140,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "island-battles-python", specifier = ">=0.1.0" }]
+requires-dist = [{ name = "island-battles-python", specifier = ">=0.2.0" }]
 
 [package.metadata.requires-dev]
 dev = [
