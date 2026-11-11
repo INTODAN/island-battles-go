@@ -50,4 +50,4 @@ An exception in `play` is answered as an error with its traceback, and shown in 
 
 ## Check your logging
 
-`scripts/check.sh` ends with `ok: N commands, M log lines, ...`, where M counts only the lines in the result's `logs`. In a test, run `play(fixture_turn())` and look at `result.logs`; lines written with `logger` are not in `result.logs`, so use `caplog` (the `island_battles.player` logger) to assert on them.
+`scripts/check.sh` ends with `ok: N commands, M log lines, ...`, where M counts the lines the game log would store for the turn: the lines written with `logger` while `play` ran, plus the lines in the result's `logs`. In a test, run `play(fixture_turn())` and look at `result.logs`; that holds only the lines returned in `logs`, not the ones written with `logger`, so use `caplog` (the `island_battles.player` logger) to assert on those.
