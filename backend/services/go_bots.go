@@ -96,9 +96,10 @@ func runGoBot(ctx context.Context, level uint, turn models.BotTurn, generation *
 // generation, where each of its team's castles shows the soldiers that the
 // commands already accepted this turn, inputs, leave unreserved, and the
 // upgrade levels with those the commands bought. Those are the commands its
-// own player stored before the backend took over, and the validator counts them the same way, so a plan that fits the castles the
-// bot sees is accepted. Other teams' castles show the generation's values, as
-// every player sees them.
+// own player stored before the backend took over, and the validator counts
+// them the same way, so a plan that fits the castles the bot sees is accepted.
+// Other teams' castles show the generation's values, as every player sees
+// them.
 func goBotGeneration(generation *models.Generation, teamColor uint, inputs []models.GenerationInput) (models.GenerationView, error) {
 	reservations, err := reservedTurn(generation, inputs)
 	if err != nil {
@@ -141,10 +142,10 @@ func standingTeams(generation *models.Generation, teams []models.GameTeam) []uin
 // transaction, and returns the turn's inputs with theirs. inputs are the
 // turn's inputs so far. Each bot gets the memory it returned last turn, and
 // the generation as goBotGeneration has it: its team's castles show only the
-// soldiers left after the commands accepted so far this turn. Its commands, log lines and
-// memory are stored as a completing batch would store them. A bot that fails
-// passes the turn: it sends no commands, keeps its memory, and its game log
-// gets one error line.
+// soldiers left after the commands accepted so far this turn. Its commands,
+// log lines and memory are stored as a completing batch would store them. A
+// bot that fails passes the turn: it sends no commands, keeps its memory, and
+// its game log gets one error line.
 func playGoBots(ctx context.Context, transaction *gorm.DB, game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer, inputs []models.GenerationInput) ([]models.GenerationInput, error) {
 	completed := map[string]bool{}
 	for _, input := range inputs {
