@@ -26,7 +26,7 @@ import (
 func playLoggedTurns(t *testing.T, fixture turnFixture, turns int) {
 	t.Helper()
 	ctx := context.Background()
-	names := []string{"alice", "bob", "ada"}
+	names := []string{"alice", "bob"}
 	state, err := fixture.service.Current(ctx, fixture.players[0], fixture.state.LobbyID)
 	if err != nil {
 		t.Fatal(err)
@@ -107,7 +107,7 @@ func TestADemoHoldsEveryFrameWithTheLogsItsSaverMaySee(t *testing.T) {
 	if len(alice.Frames) != 3 || alice.Outcome != nil {
 		t.Fatalf("running game's demo has %d frames and outcome %+v", len(alice.Frames), alice.Outcome)
 	}
-	if want := []string{"ada in turn 1", "alice in turn 1", "ada in turn 2", "alice in turn 2"}; !reflect.DeepEqual(demoMessages(alice), want) {
+	if want := []string{"alice in turn 1", "alice in turn 2"}; !reflect.DeepEqual(demoMessages(alice), want) {
 		t.Fatalf("Alice's demo lines = %q, want %q", demoMessages(alice), want)
 	}
 	for _, logs := range alice.Logs {
@@ -116,7 +116,7 @@ func TestADemoHoldsEveryFrameWithTheLogsItsSaverMaySee(t *testing.T) {
 		}
 	}
 	// The open turn has no lines yet, and still lists Blue's players.
-	if open := alice.Logs[2]; len(open.Players) != 2 || len(open.Players[0].Lines) != 0 {
+	if open := alice.Logs[2]; len(open.Players) != 1 || len(open.Players[0].Lines) != 0 {
 		t.Fatalf("open turn = %+v", open)
 	}
 	bob := saveDemo(t, fixture, 1)
@@ -139,11 +139,11 @@ func TestADemoHoldsEveryFrameWithTheLogsItsSaverMaySee(t *testing.T) {
 	if ended.Outcome == nil || ended.Outcome.Summary != "Blue wins as the last team standing" {
 		t.Fatalf("ended demo outcome = %+v", ended.Outcome)
 	}
-	if want := []string{"ada in turn 1", "alice in turn 1", "bob in turn 1", "ada in turn 2", "alice in turn 2", "bob in turn 2"}; !reflect.DeepEqual(demoMessages(ended), want) {
+	if want := []string{"alice in turn 1", "bob in turn 1", "alice in turn 2", "bob in turn 2"}; !reflect.DeepEqual(demoMessages(ended), want) {
 		t.Fatalf("ended demo lines = %q, want %q", demoMessages(ended), want)
 	}
 	for _, logs := range ended.Logs {
-		if len(logs.HiddenTeamColors) != 0 || len(logs.Players) != 3 {
+		if len(logs.HiddenTeamColors) != 0 || len(logs.Players) != 2 {
 			t.Fatalf("ended demo logs = %+v", logs)
 		}
 	}

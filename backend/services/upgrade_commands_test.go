@@ -30,7 +30,7 @@ func assertProblem(t *testing.T, err error, status int, problemType, detail stri
 // Castle 0 belongs to the first player's team and castle 1 to the other team;
 // each starts with 30 soldiers.
 func TestCommandRejectionsCarryProblemTypes(t *testing.T) {
-	fixture := newTurnFixture(t, false)
+	fixture := newTurnFixture(t)
 	ctx := context.Background()
 	raw := func(parameters string) models.PublicGenerationCommand {
 		return models.PublicGenerationCommand{CommandType: models.UpgradeCastle, Parameters: json.RawMessage(parameters)}
@@ -70,78 +70,70 @@ func TestCommandRejectionsCarryProblemTypes(t *testing.T) {
 	assertTurnCounts(t, fixture, 1, 0, 0, 2)
 }
 
-// Every command that Register accepts, from either teammate, must still apply
-// when the turn runs, whichever teammate's commands Simulate runs first. A
-// failing command there would roll back the whole turn.
-func TestTeammatesAcceptedSendsAndUpgradesAlwaysApply(t *testing.T) {
-	for _, upgradeFirst := range []bool{true, false} {
-		fixture := newTurnFixture(t, true)
-		ctx := context.Background()
-		// Simulate runs each player's commands in player ID order.
-		upgrader, sender := fixture.players[0], fixture.players[2]
-		if (upgrader.PlayerID < sender.PlayerID) != upgradeFirst {
-			upgrader, sender = sender, upgrader
+// Every command that Register accepts, in any of a player's batches this turn,
+// must still apply when the turn runs. A failing command there would roll back
+// the whole turn.
+func TestAcceptedSendsAndUpgradesInEarlierBatchesAlwaysApply(t *testing.T) {
+	fixture := newTurnFixture(t)
+	ctx := context.Background()
+	player := fixture.players[0]
+	register := func(player domain.Principal, complete bool, commands ...models.PublicGenerationCommand) (models.GenerationState, error) {
+		return fixture.service.Register(ctx, player, batch(fixture.state, complete, commands...))
+	}
+	// Castle 0 has 30 soldiers: 10 + 5 in the first batch, 5 + 10 in the second.
+	if _, err := register(player, false, upgrade(0, models.SpeedUpgrade), send(0, 1, 5)); err != nil {
+		t.Fatal(err)
+	}
+	_, err := register(player, false, send(0, 1, 5), upgrade(0, models.SpeedUpgrade))
+	assertProblem(t, err, 409, services.InsufficientSoldiersProblemType, "castle 0 has 10 unreserved soldiers; speed level 3 costs 20")
+	if _, err := register(player, false, send(0, 1, 5), upgrade(0, models.ClashStopGenerationsUpgrade)); err != nil {
+		t.Fatal(err)
+	}
+	// The castle's balance is spent exactly, so nothing more fits.
+	_, err = register(player, false, upgrade(0, models.ClashStopGenerationsUpgrade))
+	assertProblem(t, err, 409, services.InsufficientSoldiersProblemType, "castle 0 has 0 unreserved soldiers; clash_stop_generations level 3 costs 20")
+	_, err = register(player, false, send(0, 1, 1))
+	assertProblem(t, err, 409, services.InsufficientSoldiersProblemType, "castle 0 has 0 unreserved soldiers")
+	if _, err := register(player, true); err != nil {
+		t.Fatal(err)
+	}
+	next, err := register(fixture.players[1], true, upgrade(1, models.SpeedUpgrade), send(1, 0, 20))
+	if err != nil {
+		t.Fatalf("the turn failed after accepting every command: %v", err)
+	}
+	if next.GenerationID == fixture.state.GenerationID {
+		t.Fatal("the turn did not advance")
+	}
+	// Every castle paid exactly its balance, then grew by one soldier.
+	want := []models.Upgrades{{models.SpeedUpgrade: 2, models.ClashStopGenerationsUpgrade: 2}, {models.SpeedUpgrade: 2, models.ClashStopGenerationsUpgrade: 1}}
+	for index, castle := range next.Generation.Castles {
+		if castle.Soldiers != 1 || castle.Upgrades[models.SpeedUpgrade] != want[index][models.SpeedUpgrade] || castle.Upgrades[models.ClashStopGenerationsUpgrade] != want[index][models.ClashStopGenerationsUpgrade] {
+			t.Fatalf("castle %d = %+v, want 1 soldier and %v", castle.ID, castle, want[index])
 		}
-		register := func(player domain.Principal, complete bool, commands ...models.PublicGenerationCommand) (models.GenerationState, error) {
-			return fixture.service.Register(ctx, player, batch(fixture.state, complete, commands...))
+	}
+	sent := uint(0)
+	for _, group := range next.Generation.SoldierGroups {
+		sent += group.Soldiers
+		if len(group.Upgrades) != 2 {
+			t.Fatalf("group %d does not list every upgrade type: %v", group.ID, group.Upgrades)
 		}
-		// Castle 0 has 30 soldiers: 10 + 5 by one teammate, 5 + 10 by the other.
-		if _, err := register(upgrader, false, upgrade(0, models.SpeedUpgrade), send(0, 1, 5)); err != nil {
-			t.Fatal(err)
-		}
-		_, err := register(sender, false, send(0, 1, 5), upgrade(0, models.SpeedUpgrade))
-		assertProblem(t, err, 409, services.InsufficientSoldiersProblemType, "castle 0 has 10 unreserved soldiers; speed level 3 costs 20")
-		if _, err := register(sender, false, send(0, 1, 5), upgrade(0, models.ClashStopGenerationsUpgrade)); err != nil {
-			t.Fatal(err)
-		}
-		// The castle's balance is spent exactly, so nothing more fits.
-		_, err = register(upgrader, true, upgrade(0, models.ClashStopGenerationsUpgrade))
-		assertProblem(t, err, 409, services.InsufficientSoldiersProblemType, "castle 0 has 0 unreserved soldiers; clash_stop_generations level 3 costs 20")
-		_, err = register(sender, true, send(0, 1, 1))
-		assertProblem(t, err, 409, services.InsufficientSoldiersProblemType, "castle 0 has 0 unreserved soldiers")
-		for _, player := range []domain.Principal{upgrader, sender} {
-			if _, err := register(player, true); err != nil {
-				t.Fatal(err)
-			}
-		}
-		next, err := register(fixture.players[1], true, upgrade(1, models.SpeedUpgrade), send(1, 0, 20))
-		if err != nil {
-			t.Fatalf("the turn failed after accepting every command: %v", err)
-		}
-		if next.GenerationID == fixture.state.GenerationID {
-			t.Fatal("the turn did not advance")
-		}
-		// Every castle paid exactly its balance, then grew by one soldier.
-		want := []models.Upgrades{{models.SpeedUpgrade: 2, models.ClashStopGenerationsUpgrade: 2}, {models.SpeedUpgrade: 2, models.ClashStopGenerationsUpgrade: 1}}
-		for index, castle := range next.Generation.Castles {
-			if castle.Soldiers != 1 || castle.Upgrades[models.SpeedUpgrade] != want[index][models.SpeedUpgrade] || castle.Upgrades[models.ClashStopGenerationsUpgrade] != want[index][models.ClashStopGenerationsUpgrade] {
-				t.Fatalf("upgrade first=%v: castle %d = %+v, want 1 soldier and %v", upgradeFirst, castle.ID, castle, want[index])
-			}
-		}
-		sent := uint(0)
-		for _, group := range next.Generation.SoldierGroups {
-			sent += group.Soldiers
-			if len(group.Upgrades) != 2 {
-				t.Fatalf("group %d does not list every upgrade type: %v", group.ID, group.Upgrades)
-			}
-		}
-		if len(next.Generation.SoldierGroups) != 3 || sent != 30 {
-			t.Fatalf("upgrade first=%v: groups = %+v", upgradeFirst, next.Generation.SoldierGroups)
-		}
+	}
+	if len(next.Generation.SoldierGroups) != 3 || sent != 30 {
+		t.Fatalf("groups = %+v", next.Generation.SoldierGroups)
 	}
 }
 
-// A teammate's upgrades count toward the level limit, and spending a castle's
-// exact balance on them succeeds when the turn runs.
-func TestTeammatesUpgradesCountTowardTheMaximumLevel(t *testing.T) {
-	fixture := newTurnFixture(t, true)
+// Upgrades in a player's earlier batch count toward the level limit, and
+// spending a castle's exact balance on them succeeds when the turn runs.
+func TestUpgradesInEarlierBatchesCountTowardTheMaximumLevel(t *testing.T) {
+	fixture := newTurnFixture(t)
 	ctx := context.Background()
-	if _, err := fixture.service.Register(ctx, fixture.players[0], batch(fixture.state, true, upgrade(0, models.ClashStopGenerationsUpgrade), upgrade(0, models.ClashStopGenerationsUpgrade))); err != nil {
+	if _, err := fixture.service.Register(ctx, fixture.players[0], batch(fixture.state, false, upgrade(0, models.ClashStopGenerationsUpgrade), upgrade(0, models.ClashStopGenerationsUpgrade))); err != nil {
 		t.Fatal(err)
 	}
-	_, err := fixture.service.Register(ctx, fixture.players[2], batch(fixture.state, true, upgrade(0, models.ClashStopGenerationsUpgrade)))
+	_, err := fixture.service.Register(ctx, fixture.players[0], batch(fixture.state, false, upgrade(0, models.ClashStopGenerationsUpgrade)))
 	assertProblem(t, err, 409, services.UpgradeMaxLevelProblemType, "castle 0 already reaches clash_stop_generations level 3, the maximum")
-	for _, player := range fixture.players[1:] {
+	for _, player := range fixture.players {
 		if _, err := fixture.service.Register(ctx, player, batch(fixture.state, true)); err != nil {
 			t.Fatal(err)
 		}
@@ -154,6 +146,6 @@ func TestTeammatesUpgradesCountTowardTheMaximumLevel(t *testing.T) {
 	if next.GenerationID == fixture.state.GenerationID || castle.Soldiers != 1 || castle.Upgrades[models.ClashStopGenerationsUpgrade] != 3 {
 		t.Fatalf("castle after spending its balance = %+v", castle)
 	}
-	_, err = fixture.service.Register(ctx, fixture.players[2], batch(next, true, upgrade(0, models.ClashStopGenerationsUpgrade)))
+	_, err = fixture.service.Register(ctx, fixture.players[0], batch(next, true, upgrade(0, models.ClashStopGenerationsUpgrade)))
 	assertProblem(t, err, 409, services.UpgradeMaxLevelProblemType, "clash_stop_generations level 3")
 }

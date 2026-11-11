@@ -69,7 +69,7 @@ func countQueries(t *testing.T, database *gorm.DB) *int {
 }
 
 func TestReplayFramesMatchLivePlayerStates(t *testing.T) {
-	fixture := newTurnFixture(t, false)
+	fixture := newTurnFixture(t)
 	ctx := context.Background()
 	queries := countQueries(t, fixture.database)
 	replayQueries := func() int {
@@ -148,7 +148,7 @@ func TestReplayFramesMatchLivePlayerStates(t *testing.T) {
 }
 
 func TestReplayShowsTheRecordedOutcome(t *testing.T) {
-	fixture := newTurnFixture(t, false)
+	fixture := newTurnFixture(t)
 	ctx := context.Background()
 	game, err := dal.FindLobbyGame(fixture.database, fixture.state.LobbyID)
 	if err != nil {

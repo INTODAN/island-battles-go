@@ -307,18 +307,6 @@ func TestTheMostCastlesWinAmongTheTeamsThatAnswered(t *testing.T) {
 	}
 }
 
-func TestATeamLosesForEachPlayerWhoDidNotAnswer(t *testing.T) {
-	fixture := newDeadlineFixture(t, `{"turn_timeout_seconds":5}`, []string{"Kim", "Alex", "Lee"}, []string{"Sam"})
-	// Kim and Sam answer; Alex and Lee don't, so Blue loses.
-	fixture.complete(t, fixture.players[0][0])
-	fixture.complete(t, fixture.players[1][0])
-	*fixture.clock = fixture.deadline(t).Add(time.Minute)
-	state := fixture.applyDeadline(t, fixture.players[1][0])
-	if state.Outcome == nil || state.Outcome.Summary != "Blue lost: Alex's and Lee's bots didn't answer within 5 s; Red wins" {
-		t.Fatalf("outcome = %+v", state.Outcome)
-	}
-}
-
 func TestApplyingTheDeadlineTwiceEndsTheGameOnce(t *testing.T) {
 	fixture := newDeadlineFixture(t, `{"turn_timeout_seconds":5}`, []string{"Alex"}, []string{"Sam"})
 	*fixture.clock = fixture.deadline(t).Add(time.Second)

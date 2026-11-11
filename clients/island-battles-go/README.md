@@ -98,7 +98,7 @@ type Play func(ctx context.Context, turn islandbattles.Turn) (islandbattles.Resu
 ```
 
 - `turn.Generation` is the board: `Castles`, `SoldierGroups` and the `Clashes` of the last turn, and its `ID`, which grows by one every turn.
-- `turn.TeamColor` is your team; `islandbattles.NeutralTeamColor` (0) is no team. Teammates share castles.
+- `turn.TeamColor` is your team; `islandbattles.NeutralTeamColor` (0) is no team.
 - `turn.Upgrades` is the upgrade cost table: every upgrade type with each level's `Value` and `SoldierCost`. It is the same for the whole game.
 - `turn.Memory` is what your bot remembered last turn ([memory](#memory)), and `turn.GameID` the game.
 - `turn.TurnDeadlineAt` is when the turn times out, or `nil` when there is no limit.
@@ -137,7 +137,7 @@ result.Memory, err = islandbattles.NewMemory(state)
 
 - `SendSoldierGroup(originCastleID, destinationCastleID, soldierAmount)` sends soldiers from a castle your team owns to any other castle. `soldierAmount` must be at least 1.
 - `UpgradeCastle(castleID, upgradeType)` buys a castle the next level of `islandbattles.SpeedUpgrade` (how far its groups move per turn) or `islandbattles.ClashStopGenerationsUpgrade` (how many turns its groups stay stopped after a clash). The castle pays the level's cost in soldiers.
-- **Commands run in order, and the server checks them against the board**, counting what your teammates already sent this turn. If any command is invalid, such as sending more soldiers than a castle has, the server rejects the **whole result**. Count what your commands spend, upgrades included. At most `islandbattles.MaxCommands` (1,000) commands.
+- **Commands run in order, and the server checks them against the board**, counting what your earlier batches already sent this turn. If any command is invalid, such as sending more soldiers than a castle has, the server rejects the **whole result**. Count what your commands spend, upgrades included. At most `islandbattles.MaxCommands` (1,000) commands.
 
 ## Memory
 
