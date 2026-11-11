@@ -2,6 +2,7 @@
 name = "island-battles-python"
 version = "0.0.0.dev0"
 description = "Async player client for Island Battles generation turns"
+license = "MIT"
 requires-python = ">=3.14"
 dependencies = [
     "centrifuge-python==0.6.0",
