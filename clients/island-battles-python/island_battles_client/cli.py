@@ -28,7 +28,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from ._generated import BotTurn, GameOutcome, Generation
-from .bot import MEMORY_LIMIT_BYTES, Play, call_play, run_turn
+from .bot import MEMORY_LIMIT_BYTES, Play, run_turn
 from .client import IslandBattlesClient
 from .errors import BotMemoryTooLargeError, GameError, InvalidBotResultError
 from .fixture import fixture_turn, fixture_turn_data
@@ -48,7 +48,9 @@ DEFAULT_ORIGINS = (
     "http://tauri.localhost",
 )
 CHECK_SECONDS = 2.0
-# The lobby's shortest turn timeout is 10 s; answer before the game moves on.
+# The lobby's default turn timeout is 30 s and its shortest is 5 s. Answer before
+# the lobby's timeout: 8 s suits the default, and a shorter one needs a smaller
+# --turn-timeout.
 DEFAULT_TURN_TIMEOUT = 8.0
 # A BotTurn of a busy 6-team generation with 64 KiB of memory is a few hundred
 # KiB; 2 MiB leaves headroom.
@@ -416,9 +418,15 @@ def check(args: argparse.Namespace) -> int:
         play = load_play(args.bot)
     except Exception:  # noqa: BLE001
         return fail(f"could not load {args.bot}:\n{traceback.format_exc()}")
+    # The same log scope that serve gives a turn, so the lines counted are the
+    # ones the game log would store: logged lines and the result's logs.
+    client_logging = ClientLogging(object(), logging.INFO, False, None)
+    client_logging.attach()
     started = time.monotonic()
     try:
-        result = run_with_timeout(lambda: call_play(play, turn), CHECK_SECONDS)
+        result = run_with_timeout(
+            lambda: run_turn(play, turn, client_logging), CHECK_SECONDS
+        )
     except TimeoutError:
         # The bot's thread can't be stopped, and a daemon thread would still
         # be joined by a normal exit path in some cases; leave at once.
@@ -433,6 +441,8 @@ def check(args: argparse.Namespace) -> int:
         return fail(f"the bot returned an invalid result: {error.detail}")
     except Exception:  # noqa: BLE001
         return fail(f"the bot raised an exception:\n{traceback.format_exc()}")
+    finally:
+        client_logging.detach()
     elapsed = time.monotonic() - started
     memory_size = len(
         json.dumps(result.memory, separators=(",", ":"), ensure_ascii=False).encode(
@@ -502,7 +512,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_TURN_TIMEOUT,
         metavar="SECONDS",
         help="answer 504 when a turn takes longer than this (default "
-        f"{DEFAULT_TURN_TIMEOUT:g}, under the lobby's shortest turn timeout of 10)",
+        f"{DEFAULT_TURN_TIMEOUT:g}). A lobby's turn timeout is 30 s by default, "
+        "and its host can set it from 5 to 600 s or to none; this must be below "
+        "the lobby's, so for a lobby with a shorter timeout pass a smaller value",
     )
     serving.set_defaults(handler=serve)
 

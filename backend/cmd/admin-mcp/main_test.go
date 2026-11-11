@@ -56,7 +56,7 @@ func seed(t *testing.T, database *gorm.DB) fixture {
 		&lobbypostgres.SessionRecord{ID: uuid.NewString(), PlayerID: ids.alice, BearerHash: bearerHash, CreatedAt: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour)},
 		&lobbypostgres.RoomRecord{
 			ID: ids.lobbyID, GameKey: "island-battles", Name: "Battle", JoinCode: "ABCD2345", Capacity: 2, Phase: "started", Version: 4,
-			HostPlayerID: &alice, CreatedAt: now.Add(-time.Hour), NextJoinSequence: 3, GameSettings: []byte(`{}`), LastConnectedAt: now,
+			HostPlayerID: &alice, CreatedAt: now.Add(-time.Hour), RoundStartedAt: now.Add(-time.Hour), NextJoinSequence: 3, GameSettings: []byte(`{}`), LastConnectedAt: now,
 		},
 		&lobbypostgres.TeamRecord{ID: blue, LobbyID: ids.lobbyID, Name: "Blue", NormalizedName: "blue", TeamOrder: 1},
 		&lobbypostgres.TeamRecord{ID: red, LobbyID: ids.lobbyID, Name: "Red", NormalizedName: "red", TeamOrder: 2},

@@ -49,6 +49,43 @@ def test_check_passes_for_the_example_bot() -> None:
     assert result.stdout.startswith("ok: ")
 
 
+def test_check_counts_logger_lines_with_the_lines_the_bot_returns(
+    tmp_path: Path,
+) -> None:
+    source = (
+        "import logging\n"
+        "from island_battles_client import turn_result, log_line\n"
+        "logger = logging.getLogger('island_battles.player')\n"
+        "def play(turn):\n"
+        "    logger.info('first')\n"
+        "    logger.warning('second')\n"
+        "    return turn_result(logs=[log_line('returned')])\n"
+    )
+    result = check(tmp_path, source)
+    assert result.returncode == 0, result.stderr
+    assert ", 3 log lines, " in result.stdout
+
+
+def test_check_counts_no_log_lines_for_a_silent_bot(tmp_path: Path) -> None:
+    result = check(
+        tmp_path,
+        "from island_battles_client import turn_result\n"
+        "def play(turn):\n    return turn_result()\n",
+    )
+    assert result.returncode == 0, result.stderr
+    assert ", 0 log lines, " in result.stdout
+
+
+def test_the_help_gives_the_lobbys_timeouts() -> None:
+    result = run_cli("serve", "--help")
+    assert result.returncode == 0, result.stderr
+    text = " ".join(result.stdout.split())
+    assert "shortest turn timeout" not in text
+    assert "of 10" not in text
+    assert "30 s by default" in text
+    assert "from 5 to 600 s" in text
+
+
 def test_check_passes_for_a_bot_and_an_async_bot(tmp_path: Path) -> None:
     assert check(tmp_path, GOOD_BOT.format(answer=1)).returncode == 0
     asynchronous = GOOD_BOT.replace("def play", "async def play").format(answer=1)
