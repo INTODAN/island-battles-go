@@ -270,7 +270,7 @@ describe("Effects off plays no particles (#201)", () => {
     expect(own.particleSystems.length).toBe(before);
     graphics.set("high");
     effects.tick(1);
-    expect(burstsOf(own)).not.toBeNull();
+    expect(burstsOf(own)).toBeDefined();
     const pooled = own.particleSystems.length;
     expect(pooled).toBeGreaterThan(before);
     graphics.set("low");
