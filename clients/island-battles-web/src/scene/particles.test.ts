@@ -14,6 +14,7 @@ import {
   burstsOf,
   kindKey,
 } from "./particles";
+import { stubGraphics } from "./testing/graphics";
 
 // The particle pool of #197: every system is built by `warmUp` and reused, and nothing is built
 // while a turn plays. These run on CPU particles and the null engine, so no GPU is needed.
@@ -221,6 +222,8 @@ describe("pooled bursts (#197)", () => {
 
 describe("the turn's effects use the pool (#197)", () => {
   test("clashes, captures, level-ups and sinking boats build nothing and drop nothing", async () => {
+    // Particles play only with Effects on, whatever the machine the test runs on.
+    const graphics = stubGraphics("high");
     const materials = new MaterialCache(scene);
     const boat = createBoat(scene, 3, materials, 1);
     await import("./particles");
@@ -251,5 +254,6 @@ describe("the turn's effects use the pool (#197)", () => {
     expect(counts()).toEqual(before);
     disposeBoat(boat);
     bursts.dispose();
+    graphics.restore();
   });
 });
