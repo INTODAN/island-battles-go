@@ -24,17 +24,13 @@ type turnFixture struct {
 	state     models.GenerationState
 }
 
-func newTurnFixture(t *testing.T, teammates bool) turnFixture {
+func newTurnFixture(t *testing.T) turnFixture {
 	t.Helper()
 	database := testutils.InitTestDB(t)
 	lobbyID := uuid.NewString()
 	teamOne, teamTwo := uuid.NewString(), uuid.NewString()
 	players := []domain.Principal{{PlayerID: uuid.NewString()}, {PlayerID: uuid.NewString()}}
 	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted}, Teams: []domain.Team{{ID: teamOne, Order: 1, Name: "Blue"}, {ID: teamTwo, Order: 2, Name: "Red"}}, StartRoster: domain.StartRoster{{PlayerID: players[0].PlayerID, TeamID: teamOne}, {PlayerID: players[1].PlayerID, TeamID: teamTwo}}}
-	if teammates {
-		players = append(players, domain.Principal{PlayerID: uuid.NewString()})
-		snapshot.StartRoster = append(snapshot.StartRoster, domain.StartRosterEntry{PlayerID: players[2].PlayerID, TeamID: teamOne})
-	}
 	publisher := &testutils.RecordedPublisher{}
 	if _, err := services.RunLobbyGame(context.Background(), database, publisher, snapshot); err != nil {
 		t.Fatal(err)
@@ -86,7 +82,7 @@ func assertTurnCounts(t *testing.T, fixture turnFixture, generations, inputs, re
 }
 
 func TestGenerationTurnsAtomicReservationsRetriesAndRestart(t *testing.T) {
-	fixture := newTurnFixture(t, true)
+	fixture := newTurnFixture(t)
 	ctx := context.Background()
 	first := batch(fixture.state, false, send(0, 1, 20))
 	accepted, err := fixture.service.Register(ctx, fixture.players[0], first)
@@ -96,17 +92,17 @@ func TestGenerationTurnsAtomicReservationsRetriesAndRestart(t *testing.T) {
 	if accepted.Submitted || accepted.GenerationID != fixture.state.GenerationID {
 		t.Fatal("incremental request sealed or advanced")
 	}
-	// A reconstructed service must reserve persisted teammate commands.
+	// A reconstructed service must reserve the player's persisted earlier batch.
 	fixture.service = &services.GenerationService{Database: fixture.database, Publisher: fixture.publisher}
-	if _, err := fixture.service.Register(ctx, fixture.players[2], batch(fixture.state, true, send(0, 1, 11))); err == nil {
-		t.Fatal("accepted teammate overbooking")
+	if _, err := fixture.service.Register(ctx, fixture.players[0], batch(fixture.state, false, send(0, 1, 11))); err == nil {
+		t.Fatal("accepted overbooking across batches")
 	} else {
 		assertTurnStatus(t, err, 409)
 	}
-	invalid := batch(fixture.state, true, send(0, 1, 5), send(0, 1, 6))
-	_, err = fixture.service.Register(ctx, fixture.players[2], invalid)
+	invalid := batch(fixture.state, false, send(0, 1, 5), send(0, 1, 6))
+	_, err = fixture.service.Register(ctx, fixture.players[0], invalid)
 	assertTurnStatus(t, err, 409)
-	assertTurnCounts(t, fixture, 1, 1, 1, 3)
+	assertTurnCounts(t, fixture, 1, 1, 1, 2)
 	if _, err = fixture.service.Register(ctx, fixture.players[0], first); err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +110,7 @@ func TestGenerationTurnsAtomicReservationsRetriesAndRestart(t *testing.T) {
 	changed.Commands = []models.PublicGenerationCommand{send(0, 1, 19)}
 	_, err = fixture.service.Register(ctx, fixture.players[0], changed)
 	assertTurnStatus(t, err, 409)
-	if _, err = fixture.service.Register(ctx, fixture.players[2], batch(fixture.state, true, send(0, 1, 10))); err != nil {
+	if _, err = fixture.service.Register(ctx, fixture.players[0], batch(fixture.state, false, send(0, 1, 10))); err != nil {
 		t.Fatal(err)
 	}
 	seal := batch(fixture.state, true)
@@ -142,7 +138,7 @@ func TestGenerationTurnsAtomicReservationsRetriesAndRestart(t *testing.T) {
 	}
 	_, err = fixture.service.Register(ctx, fixture.players[0], batch(fixture.state, true))
 	assertTurnStatus(t, err, 409)
-	assertTurnCounts(t, fixture, 2, 3, 4, 6)
+	assertTurnCounts(t, fixture, 2, 2, 4, 4)
 	// Each roster player was pushed the initial generation, then the next one.
 	recipients := map[uint]map[string]bool{}
 	for _, event := range fixture.publisher.GenerationEvents(t) {
@@ -164,7 +160,7 @@ func TestGenerationTurnsAtomicReservationsRetriesAndRestart(t *testing.T) {
 }
 
 func TestGenerationCommandValidationAndAuthorization(t *testing.T) {
-	fixture := newTurnFixture(t, false)
+	fixture := newTurnFixture(t)
 	ctx := context.Background()
 	cases := []struct {
 		name    string
@@ -208,7 +204,7 @@ func TestGenerationCommandValidationAndAuthorization(t *testing.T) {
 
 // A player on another game's roster is still an outsider to this game.
 func TestGenerationRejectsAnotherGamesRoster(t *testing.T) {
-	fixture := newTurnFixture(t, false)
+	fixture := newTurnFixture(t)
 	ctx := context.Background()
 	otherLobby, teamOne, teamTwo := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	elsewhere := domain.Principal{PlayerID: uuid.NewString()}
@@ -233,7 +229,7 @@ func TestGenerationRejectsAnotherGamesRoster(t *testing.T) {
 }
 
 func TestGenerationConcurrentCompletionsAdvanceOnce(t *testing.T) {
-	fixture := newTurnFixture(t, false)
+	fixture := newTurnFixture(t)
 	start := make(chan struct{})
 	failures := make(chan error, 4)
 	var group sync.WaitGroup
@@ -262,7 +258,7 @@ func TestGenerationConcurrentCompletionsAdvanceOnce(t *testing.T) {
 }
 
 func TestGenerationMigrationFailureRollsBackFinalRequest(t *testing.T) {
-	fixture := newTurnFixture(t, false)
+	fixture := newTurnFixture(t)
 	ctx := context.Background()
 	if _, err := fixture.service.Register(ctx, fixture.players[0], batch(fixture.state, true, send(0, 1, 5))); err != nil {
 		t.Fatal(err)
@@ -297,7 +293,7 @@ func TestGenerationMigrationFailureRollsBackFinalRequest(t *testing.T) {
 }
 
 func TestGenerationPushFailureKeepsCommittedTurn(t *testing.T) {
-	fixture := newTurnFixture(t, false)
+	fixture := newTurnFixture(t)
 	ctx := context.Background()
 	if _, err := fixture.service.Register(ctx, fixture.players[0], batch(fixture.state, true)); err != nil {
 		t.Fatal(err)
@@ -319,7 +315,7 @@ func TestGenerationPushFailureKeepsCommittedTurn(t *testing.T) {
 // The turn that creates the last generation ends the game, and with equal
 // castle counts the game is a draw.
 func TestGenerationCapEndsTheGame(t *testing.T) {
-	fixture := newTurnFixture(t, false)
+	fixture := newTurnFixture(t)
 	ctx := context.Background()
 	initial, err := dal.GetGeneration(fixture.database, fixture.state.GenerationID)
 	if err != nil {
@@ -364,5 +360,27 @@ func TestGenerationCapEndsTheGame(t *testing.T) {
 	}
 	if current, err := fixture.service.Current(ctx, fixture.players[1], fixture.state.LobbyID); err != nil || current.GenerationID != last.GenerationID || current.Submitted {
 		t.Fatalf("capped game cannot be read: %+v %v", current, err)
+	}
+}
+
+func TestStartingARosterWithTwoPlayersOnOneTeamFails(t *testing.T) {
+	database := testutils.InitTestDB(t)
+	team := uuid.NewString()
+	snapshot := domain.Snapshot{
+		Lobby:       domain.Lobby{ID: uuid.NewString(), GameKey: "island-battles", Phase: domain.PhaseStarted},
+		Teams:       []domain.Team{{ID: team, Order: 1, Name: "Blue"}},
+		StartRoster: domain.StartRoster{{PlayerID: uuid.NewString(), TeamID: team}, {PlayerID: uuid.NewString(), TeamID: team}},
+	}
+	if _, err := services.RunLobbyGame(context.Background(), database, &testutils.RecordedPublisher{}, snapshot); err == nil {
+		t.Fatal("started a game with two players on one team")
+	}
+	for _, model := range []any{&models.Game{}, &models.Generation{}, &models.FrozenGamePlayer{}} {
+		var count int64
+		if err := database.Model(model).Count(&count).Error; err != nil {
+			t.Fatal(err)
+		}
+		if count != 0 {
+			t.Fatalf("%T count=%d, want no game created", model, count)
+		}
 	}
 }

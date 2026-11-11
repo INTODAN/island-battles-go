@@ -73,7 +73,7 @@ func TestWatchersGetEveryTurnInThePlayersPushAndNoPlayerFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	if watched.GameID != state.GameID || watched.GenerationID != state.GenerationID || watched.Channel != "watch:island-battles:"+state.LobbyID ||
-		len(watched.Teams) != 2 || watched.Teams[0].Name != "Blue" || !reflect.DeepEqual(watched.Teams[0].Players, []string{"Alice", "Ada"}) ||
+		len(watched.Teams) != 2 || watched.Teams[0].Name != "Blue" || !reflect.DeepEqual(watched.Teams[0].Players, []string{"Alice"}) ||
 		!reflect.DeepEqual(watched.Generation, state.Generation) || watched.Outcome != nil {
 		t.Fatalf("watch state = %+v", watched)
 	}
@@ -140,7 +140,7 @@ func TestWatchersGetEveryTurnInThePlayersPushAndNoPlayerFields(t *testing.T) {
 		t.Fatalf("roster player's watch read = %+v, %v", read, err)
 	}
 
-	// Watchers never count toward the turn barrier: the roster's three
+	// Watchers never count toward the turn barrier: the roster's two
 	// completions play the turn, and its push carries the watch channel's
 	// event with the players'.
 	for _, player := range fixture.players {
@@ -148,7 +148,7 @@ func TestWatchersGetEveryTurnInThePlayersPushAndNoPlayerFields(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if len(publisher.batches) != 1 || len(publisher.batches[0]) != 4 {
+	if len(publisher.batches) != 1 || len(publisher.batches[0]) != 3 {
 		t.Fatalf("pushes = %+v", publisher.batches)
 	}
 	var watchEvent models.WatchGenerationEvent
@@ -161,7 +161,7 @@ func TestWatchersGetEveryTurnInThePlayersPushAndNoPlayerFields(t *testing.T) {
 			}
 		}
 	}
-	if len(channels) != 4 || !channels[watched.Channel] || watchEvent.Type != "game.next_generation" || watchEvent.SchemaVersion != 1 ||
+	if len(channels) != 3 || !channels[watched.Channel] || watchEvent.Type != "game.next_generation" || watchEvent.SchemaVersion != 1 ||
 		watchEvent.State.Channel != watched.Channel || watchEvent.State.GenerationID == state.GenerationID || len(watchEvent.State.Teams) != 2 {
 		t.Fatalf("watch event = %+v on %v", watchEvent, channels)
 	}
@@ -255,7 +255,7 @@ func TestWatchersSeeTheGameLogOnlyAfterTheEnd(t *testing.T) {
 		t.Fatalf("running game's watch demo = %+v", running.Logs)
 	}
 	// Alice still sees her own team's lines in her own demo.
-	if own, err := fixture.service.Demo(ctx, alice, state.LobbyID); err != nil || len(own.Logs[0].Players) != 2 || !reflect.DeepEqual(own.Logs[0].HiddenTeamColors, []uint{2}) {
+	if own, err := fixture.service.Demo(ctx, alice, state.LobbyID); err != nil || len(own.Logs[0].Players) != 1 || !reflect.DeepEqual(own.Logs[0].HiddenTeamColors, []uint{2}) {
 		t.Fatalf("Alice's demo logs = %+v, %v", own.Logs, err)
 	}
 
@@ -271,7 +271,7 @@ func TestWatchersSeeTheGameLogOnlyAfterTheEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	logs := ended.Logs[0]
-	if ended.Outcome == nil || len(logs.HiddenTeamColors) != 0 || len(logs.Players) != 3 {
+	if ended.Outcome == nil || len(logs.HiddenTeamColors) != 0 || len(logs.Players) != 2 {
 		t.Fatalf("ended game's watch demo = %+v", logs)
 	}
 	var messages []string

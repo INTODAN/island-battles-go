@@ -29,7 +29,7 @@ type modelRejection struct {
 // missingCastleID is never on the board.
 const missingCastleID = 99
 
-// Random batches of sends and upgrades, from three players on two teams, must
+// Random batches of sends and upgrades, from two players on two teams, must
 // be accepted or rejected exactly as an independent model of the rules says,
 // and every turn of accepted batches must apply, retries included.
 func TestRandomTurnsFollowTheRulesAndAlwaysApply(t *testing.T) {
@@ -39,7 +39,7 @@ func TestRandomTurnsFollowTheRulesAndAlwaysApply(t *testing.T) {
 }
 
 func playRandomTurns(t *testing.T, seed int64) {
-	fixture := newTurnFixture(t, true)
+	fixture := newTurnFixture(t)
 	ctx := context.Background()
 	random := rand.New(rand.NewSource(seed))
 	costs := map[models.UpgradeType][]uint{}

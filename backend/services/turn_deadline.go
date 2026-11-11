@@ -174,22 +174,15 @@ func describeTimeout(seconds uint) string {
 	return fmt.Sprintf("%d s", seconds)
 }
 
-// describeTimedOutTeam names a team that timed out and its players who didn't
-// answer, such as "Red lost: Sam's bot didn't answer within 30 s".
+// describeTimedOutTeam names a team that timed out and the player who didn't
+// answer, such as "Red lost: Sam's bot didn't answer within 30 s". A team has
+// one player.
 func describeTimedOutTeam(game *models.Game, team models.TimedOutTeam) string {
-	bots := make([]string, 0, len(team.Players))
-	for _, player := range team.Players {
-		bots = append(bots, player+"'s")
-	}
-	subject := "bot"
-	if len(bots) > 1 {
-		subject = "bots"
-	}
 	within := ""
 	if game.TurnTimeoutSeconds != nil {
 		within = " within " + describeTimeout(*game.TurnTimeoutSeconds)
 	}
-	return fmt.Sprintf("%s lost: %s %s didn't answer%s", teamName(game, team.Color), joinNames(bots), subject, within)
+	return fmt.Sprintf("%s lost: %s's bot didn't answer%s", teamName(game, team.Color), strings.Join(team.Players, ""), within)
 }
 
 // joinNames lists names in prose: "A", "A and B", "A, B and C".

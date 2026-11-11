@@ -37,6 +37,14 @@ func RunLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 // lobby's bot seats and the levels that the players chose.
 func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, snapshot domain.Snapshot, botLevels map[string]uint) (models.BindingResult, error) {
 	database = database.WithContext(ctx)
+	// A team has one player. The check comes before the binding, which creates the game.
+	teamsWithPlayers := map[string]bool{}
+	for _, entry := range snapshot.StartRoster {
+		if teamsWithPlayers[entry.TeamID] {
+			return models.BindingResult{}, fmt.Errorf("cannot initialize a roster with several players on one team")
+		}
+		teamsWithPlayers[entry.TeamID] = true
+	}
 	binding, err := dal.BindLobbyGame(database, snapshot)
 	if err != nil {
 		return models.BindingResult{}, err

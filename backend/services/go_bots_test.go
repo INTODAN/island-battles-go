@@ -29,24 +29,13 @@ type goBotGame struct {
 	blue, red domain.Principal
 }
 
+// goBotPlayerNames are the display names of Blue's and Red's players.
+var goBotPlayerNames = []string{"Alex", "Sam"}
+
 // startGoBotGame starts a game with the lobby settings, where the backend
 // plays Blue and Red with the default bots of blueLevel and redLevel, and 0
 // leaves the player to their client.
 func startGoBotGame(t *testing.T, settings string, blueLevel, redLevel uint) goBotGame {
-	t.Helper()
-	game, _ := startGoBotTeams(t, settings, []uint{blueLevel}, []uint{redLevel})
-	return game
-}
-
-// goBotPlayerNames are the display names of each team's players.
-var goBotPlayerNames = [][]string{{"Alex", "Lee"}, {"Sam", "Kim"}, {"Jo", "Max"}}
-
-// startGoBotTeams starts a game with the lobby settings and a team for each
-// list of levels, Blue first, with a player for each level, whom the backend
-// plays with the default bot of that level, or 0 for a player left to their
-// client. It returns each team's players; the game's blue and red are the
-// first players of the first two teams.
-func startGoBotTeams(t *testing.T, settings string, teams ...[]uint) (goBotGame, [][]domain.Principal) {
 	t.Helper()
 	database := testutils.InitTestDB(t)
 	clock := time.Now()
@@ -54,27 +43,25 @@ func startGoBotTeams(t *testing.T, settings string, teams ...[]uint) (goBotGame,
 	game.service = &services.GenerationService{Database: database, Publisher: game.publisher, Now: func() time.Time { return *game.clock }}
 	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: game.lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted, GameSettings: json.RawMessage(settings)}}
 	levels := map[string]uint{}
-	players := make([][]domain.Principal, len(teams))
-	for index, teamLevels := range teams {
+	players := make([]domain.Principal, 0, 2)
+	for index, level := range []uint{blueLevel, redLevel} {
 		team := domain.Team{ID: uuid.NewString(), Order: index + 1, Name: deadlineTeamNames[index]}
 		snapshot.Teams = append(snapshot.Teams, team)
-		for seat, level := range teamLevels {
-			player := domain.Principal{PlayerID: uuid.NewString()}
-			players[index] = append(players[index], player)
-			snapshot.StartRoster = append(snapshot.StartRoster, domain.StartRosterEntry{PlayerID: player.PlayerID, TeamID: team.ID})
-			snapshot.Members = append(snapshot.Members, domain.Member{PlayerID: player.PlayerID, DisplayName: goBotPlayerNames[index][seat]})
-			if level != 0 {
-				levels[player.PlayerID] = level
-			}
+		player := domain.Principal{PlayerID: uuid.NewString()}
+		players = append(players, player)
+		snapshot.StartRoster = append(snapshot.StartRoster, domain.StartRosterEntry{PlayerID: player.PlayerID, TeamID: team.ID})
+		snapshot.Members = append(snapshot.Members, domain.Member{PlayerID: player.PlayerID, DisplayName: goBotPlayerNames[index]})
+		if level != 0 {
+			levels[player.PlayerID] = level
 		}
 	}
-	game.blue, game.red = players[0][0], players[1][0]
+	game.blue, game.red = players[0], players[1]
 	binding, err := services.RunLobbyGameWithGoBots(context.Background(), database, game.publisher, snapshot, levels)
 	if err != nil {
 		t.Fatal(err)
 	}
 	game.gameID = binding.GameID
-	return game, players
+	return game
 }
 
 func (game goBotGame) current(t *testing.T, player domain.Principal) models.GenerationState {
@@ -254,66 +241,6 @@ func TestAGoBotAssignedDuringATurnPlaysBeforeTheDeadline(t *testing.T) {
 	}
 	if state.Outcome != nil || state.GenerationID == alex.GenerationID {
 		t.Fatalf("the bot didn't play in time: %+v", state)
-	}
-}
-
-// islandsSettings is the tournament's "islands" map: Blue's and Red's castles
-// of 30 soldiers, at (-4, 0) and (4, 0), and three pairs of mirrored neutral
-// castles between them.
-const islandsSettings = `{"turn_timeout_seconds":30,"map":{"map_name":"Islands","player_amount":2,"plane_size_x":10,"plane_size_y":8,"neutral_starting_soldier_amount":10,` +
-	`"castles":[{"team_color":1,"x":-4,"y":0,"starting_soldier_amount":30},{"team_color":2,"x":4,"y":0,"starting_soldier_amount":30},` +
-	`{"team_color":0,"x":-2.5,"y":2,"starting_soldier_amount":10},{"team_color":0,"x":2.5,"y":-2,"starting_soldier_amount":10},` +
-	`{"team_color":0,"x":-1,"y":1.5,"starting_soldier_amount":15},{"team_color":0,"x":1,"y":-1.5,"starting_soldier_amount":15},` +
-	`{"team_color":0,"x":-2.5,"y":-2.5,"starting_soldier_amount":20},{"team_color":0,"x":2.5,"y":2.5,"starting_soldier_amount":20}]}}`
-
-func TestTeammatesGoBotsSendOnlyWhatTheOthersLeft(t *testing.T) {
-	// Each team's bots used to see the same castles, so the second planned
-	// with the soldiers the first had already sent, and its whole turn
-	// failed. The game plays to its end.
-	game, players := startGoBotTeams(t, islandsSettings, []uint{2, 2}, []uint{3, 3})
-	for state := game.current(t, game.blue); state.Outcome == nil; {
-		var err error
-		if state, err = game.service.ApplyDeadline(context.Background(), game.blue, game.lobbyID); err != nil {
-			t.Fatal(err)
-		}
-	}
-	generations, err := dal.LoadGameGenerations(game.database, game.gameID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// No bot failed a turn, and each team's bots sent commands in the same
-	// turn.
-	together := map[int]bool{}
-	for _, generation := range generations {
-		lines, err := dal.LoadGenerationLogs(game.database, generation.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, line := range lines {
-			if line.Level == models.GenerationLogError {
-				t.Errorf("a bot failed generation %d: %s", generation.ID, line.Message)
-			}
-		}
-		inputs, err := dal.LoadGenerationInputs(game.database, generation.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		sent := map[string]int{}
-		for _, input := range inputs {
-			var commands []models.CommandFields
-			if err := json.Unmarshal(input.Commands, &commands); err != nil {
-				t.Fatal(err)
-			}
-			sent[input.PlayerID] = len(commands)
-		}
-		for index, team := range players {
-			if sent[team[0].PlayerID] > 0 && sent[team[1].PlayerID] > 0 {
-				together[index] = true
-			}
-		}
-	}
-	if !together[0] || !together[1] {
-		t.Fatalf("not every team's bots sent commands in the same turn: %v", together)
 	}
 }
 

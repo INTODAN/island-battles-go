@@ -95,9 +95,8 @@ func runGoBot(ctx context.Context, level uint, turn models.BotTurn, generation *
 // goBotGeneration is the generation that a Go bot of team teamColor plays: the
 // generation, where each of its team's castles shows the soldiers that the
 // commands already accepted this turn, inputs, leave unreserved, and the
-// upgrade levels with those the commands bought. Those are its teammates'
-// commands and any its own player stored before the backend took over, and
-// the validator counts them the same way, so a plan that fits the castles the
+// upgrade levels with those the commands bought. Those are the commands its
+// own player stored before the backend took over, and the validator counts them the same way, so a plan that fits the castles the
 // bot sees is accepted. Other teams' castles show the generation's values, as
 // every player sees them.
 func goBotGeneration(generation *models.Generation, teamColor uint, inputs []models.GenerationInput) (models.GenerationView, error) {
@@ -142,8 +141,7 @@ func standingTeams(generation *models.Generation, teams []models.GameTeam) []uin
 // transaction, and returns the turn's inputs with theirs. inputs are the
 // turn's inputs so far. Each bot gets the memory it returned last turn, and
 // the generation as goBotGeneration has it: its team's castles show only the
-// soldiers left after the commands accepted so far this turn, including those
-// of the teammates' bots that played before it. Its commands, log lines and
+// soldiers left after the commands accepted so far this turn. Its commands, log lines and
 // memory are stored as a completing batch would store them. A bot that fails
 // passes the turn: it sends no commands, keeps its memory, and its game log
 // gets one error line.
@@ -158,7 +156,7 @@ func playGoBots(ctx context.Context, transaction *gorm.DB, game *models.Game, ge
 	if len(waiting) == 0 || game.Outcome != nil {
 		return inputs, nil
 	}
-	// Teammates' bots play in a fixed order, as the stored roster is read.
+	// Go bots play in a fixed order, so that a game plays the same each time.
 	slices.SortFunc(waiting, func(left, right models.FrozenGamePlayer) int { return strings.Compare(left.PlayerID, right.PlayerID) })
 	standing := standingTeams(generation, game.Teams)
 	memories, err := dal.LoadBotMemories(transaction, game.ID)

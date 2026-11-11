@@ -18,22 +18,20 @@ import (
 	"islandBattles/lobby/domain"
 )
 
-// newLogFixture starts a game with Ada and Alice on Blue and Bob on Red.
+// newLogFixture starts a game with Alice on Blue and Bob on Red.
 // Members are listed, so the game copies their display names. The state is
 // Alice's.
 func newLogFixture(t *testing.T) turnFixture {
 	t.Helper()
 	database := testutils.InitTestDB(t)
 	lobbyID, blue, red := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	alice, bob, ada := domain.Principal{PlayerID: uuid.NewString()}, domain.Principal{PlayerID: uuid.NewString()}, domain.Principal{PlayerID: uuid.NewString()}
+	alice, bob := domain.Principal{PlayerID: uuid.NewString()}, domain.Principal{PlayerID: uuid.NewString()}
 	publisher := &testutils.RecordedPublisher{}
 	if _, err := services.RunLobbyGame(context.Background(), database, publisher, domain.Snapshot{
-		Lobby: domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted},
-		Teams: []domain.Team{{ID: blue, Order: 1, Name: "Blue"}, {ID: red, Order: 2, Name: "Red"}},
-		StartRoster: domain.StartRoster{{PlayerID: alice.PlayerID, TeamID: blue}, {PlayerID: bob.PlayerID, TeamID: red},
-			{PlayerID: ada.PlayerID, TeamID: blue}},
-		Members: []domain.Member{{PlayerID: alice.PlayerID, DisplayName: "Alice"}, {PlayerID: bob.PlayerID, DisplayName: "Bob"},
-			{PlayerID: ada.PlayerID, DisplayName: "Ada"}},
+		Lobby:       domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted},
+		Teams:       []domain.Team{{ID: blue, Order: 1, Name: "Blue"}, {ID: red, Order: 2, Name: "Red"}},
+		StartRoster: domain.StartRoster{{PlayerID: alice.PlayerID, TeamID: blue}, {PlayerID: bob.PlayerID, TeamID: red}},
+		Members:     []domain.Member{{PlayerID: alice.PlayerID, DisplayName: "Alice"}, {PlayerID: bob.PlayerID, DisplayName: "Bob"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +40,7 @@ func newLogFixture(t *testing.T) turnFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return turnFixture{database, publisher, service, []domain.Principal{alice, bob, ada}, state}
+	return turnFixture{database, publisher, service, []domain.Principal{alice, bob}, state}
 }
 
 func logLine(level models.GenerationLogLevel, message string) models.GenerationLogLine {
@@ -91,7 +89,7 @@ func countLogRows(t *testing.T, fixture turnFixture) int64 {
 func TestGameLogLinesAreStoredInOrderWithTheirGeneration(t *testing.T) {
 	fixture := newLogFixture(t)
 	ctx := context.Background()
-	alice, bob, ada := fixture.players[0], fixture.players[1], fixture.players[2]
+	alice, bob := fixture.players[0], fixture.players[1]
 	state := fixture.state
 	var origin, target uint
 	for _, castle := range state.Generation.Castles {
@@ -126,9 +124,6 @@ func TestGameLogLinesAreStoredInOrderWithTheirGeneration(t *testing.T) {
 		_, err := fixture.service.Register(ctx, alice, withLogs(batch(state, false), logLine(models.GenerationLogInfo, "late")))
 		return err
 	}(), 409)
-	if _, err := fixture.service.Register(ctx, ada, withLogs(batch(state, true), logLine(models.GenerationLogInfo, "ada here"))); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := fixture.service.Register(ctx, bob, withLogs(batch(state, true), logLine(models.GenerationLogInfo, "bob's secret plan"))); err != nil {
 		t.Fatal(err)
 	}
@@ -141,15 +136,11 @@ func TestGameLogLinesAreStoredInOrderWithTheirGeneration(t *testing.T) {
 	aliceLines := []models.GenerationLogLine{logLine(models.GenerationLogDebug, "planning"), logLine(models.GenerationLogInfo, "attacking castle 1"),
 		logLine(models.GenerationLogWarning, "low on soldiers"), logLine(models.GenerationLogError, "done")}
 	want := models.GenerationLogs{GenerationID: state.GenerationID, HiddenTeamColors: []uint{2}, Players: []models.PlayerGenerationLogs{
-		{DisplayName: "Ada", TeamColor: 1, Lines: []models.GenerationLogLine{logLine(models.GenerationLogInfo, "ada here")}},
 		{DisplayName: "Alice", TeamColor: 1, Lines: aliceLines},
 	}}
 	// While the game runs, each team sees only its own lines.
 	if logs := readLogs(t, fixture, 0, state.GenerationID); !reflect.DeepEqual(logs, want) {
 		t.Fatalf("Alice's view = %+v, want %+v", logs, want)
-	}
-	if logs := readLogs(t, fixture, 2, state.GenerationID); !reflect.DeepEqual(logs, want) {
-		t.Fatalf("Ada's view = %+v, want %+v", logs, want)
 	}
 	bobView := models.GenerationLogs{GenerationID: state.GenerationID, HiddenTeamColors: []uint{1}, Players: []models.PlayerGenerationLogs{
 		{DisplayName: "Bob", TeamColor: 2, Lines: []models.GenerationLogLine{logLine(models.GenerationLogInfo, "bob's secret plan")}},
@@ -163,7 +154,7 @@ func TestGameLogLinesAreStoredInOrderWithTheirGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	empty := readLogs(t, fixture, 0, next.GenerationID)
-	if len(empty.Players) != 2 || len(empty.Players[0].Lines) != 0 || len(empty.Players[1].Lines) != 0 || !reflect.DeepEqual(empty.HiddenTeamColors, []uint{2}) {
+	if len(empty.Players) != 1 || len(empty.Players[0].Lines) != 0 || !reflect.DeepEqual(empty.HiddenTeamColors, []uint{2}) {
 		t.Fatalf("next generation = %+v", empty)
 	}
 
@@ -222,7 +213,7 @@ func TestGameLogLimitsRejectTheWholeBatch(t *testing.T) {
 	if err := register(alice, withLogs(batch(state, true), logLines(40, "second")...)); err != nil {
 		t.Fatal(err)
 	}
-	if lines := readLogs(t, fixture, 0, state.GenerationID).Players[1].Lines; len(lines) != 100 || lines[60].Message != "second x" {
+	if lines := readLogs(t, fixture, 0, state.GenerationID).Players[0].Lines; len(lines) != 100 || lines[60].Message != "second x" {
 		t.Fatalf("Alice stored %d lines", len(lines))
 	}
 
@@ -314,7 +305,7 @@ func TestGameLogsNeedTheRosterAndAGenerationOfTheGame(t *testing.T) {
 func TestStatesCountTheCallersStoredLogLines(t *testing.T) {
 	fixture := newLogFixture(t)
 	ctx := context.Background()
-	alice, bob, ada := fixture.players[0], fixture.players[1], fixture.players[2]
+	alice, bob := fixture.players[0], fixture.players[1]
 	state := fixture.state
 	if state.LogLinesStored != 0 {
 		t.Fatalf("a fresh generation has %d stored lines", state.LogLinesStored)
@@ -336,10 +327,10 @@ func TestStatesCountTheCallersStoredLogLines(t *testing.T) {
 		t.Fatalf("read: %d stored lines, %v", read.LogLinesStored, err)
 	}
 	// Each player counts only their own lines.
-	if read, err := fixture.service.Current(ctx, ada, state.LobbyID); err != nil || read.LogLinesStored != 0 {
-		t.Fatalf("Ada's read: %d stored lines, %v", read.LogLinesStored, err)
+	if read, err := fixture.service.Current(ctx, bob, state.LobbyID); err != nil || read.LogLinesStored != 0 {
+		t.Fatalf("Bob's read: %d stored lines, %v", read.LogLinesStored, err)
 	}
-	for _, player := range []domain.Principal{alice, ada, bob} {
+	for _, player := range []domain.Principal{alice, bob} {
 		if _, err := fixture.service.Register(ctx, player, batch(state, true)); err != nil {
 			t.Fatal(err)
 		}

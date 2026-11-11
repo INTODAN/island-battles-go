@@ -22,7 +22,7 @@ func assertGameEnded(t *testing.T, err error) {
 }
 
 func TestGameEndsWithTheLastTeamStanding(t *testing.T) {
-	fixture := newTurnFixture(t, false)
+	fixture := newTurnFixture(t)
 	ctx := context.Background()
 	var attacker, defender models.CastleView
 	for _, castle := range fixture.state.Generation.Castles {

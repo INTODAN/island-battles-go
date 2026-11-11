@@ -89,7 +89,7 @@ func register(t *testing.T, fixture turnFixture, player int, request models.Regi
 }
 
 func TestBotMemoryRoundTripsAcrossTurns(t *testing.T) {
-	fixture := newTurnFixture(t, false)
+	fixture := newTurnFixture(t)
 	assertMemory(t, fixture.state.Memory, "")
 	// A number past float64 precision and nested values come back unchanged.
 	first := `{"turn": 1, "big": 9007199254740993, "plans": [{"target": 3, "note": "<attack> & hold"}]}`
@@ -138,7 +138,7 @@ func TestBotMemoryRoundTripsAcrossTurns(t *testing.T) {
 }
 
 func TestBotMemoryIsSavedOnlyByTheCompletingBatch(t *testing.T) {
-	fixture := newTurnFixture(t, false)
+	fixture := newTurnFixture(t)
 	open := register(t, fixture, 0, withMemory(batch(fixture.state, false, send(0, 1, 1)), `{"draft":1}`))
 	assertMemory(t, open.Memory, "")
 	assertMemory(t, currentMemory(t, fixture, 0).Memory, "")
@@ -158,7 +158,7 @@ func TestBotMemoryIsSavedOnlyByTheCompletingBatch(t *testing.T) {
 }
 
 func TestBotMemoryRetryStoresItOnce(t *testing.T) {
-	fixture := newTurnFixture(t, false)
+	fixture := newTurnFixture(t)
 	ctx := context.Background()
 	first := withMemory(batch(fixture.state, true), `{"turn":1}`)
 	register(t, fixture, 0, first)
@@ -196,7 +196,7 @@ func TestBotMemoryRetryStoresItOnce(t *testing.T) {
 }
 
 func TestTooLargeBotMemoryIsRejectedAndStoresNothing(t *testing.T) {
-	fixture := newTurnFixture(t, false)
+	fixture := newTurnFixture(t)
 	ctx := context.Background()
 	// {"x":"…"} with its string filling the limit exactly.
 	padding := models.MaxBotMemoryBytes - len(`{"x":""}`)
@@ -242,7 +242,7 @@ func TestTooLargeBotMemoryIsRejectedAndStoresNothing(t *testing.T) {
 }
 
 func TestBotMemoryIsStoredAsSent(t *testing.T) {
-	fixture := newTurnFixture(t, false)
+	fixture := newTurnFixture(t)
 	// Numbers a database JSON type would expand to 131072 digits, and escapes
 	// it would reject, stay byte for byte as the compact input.
 	sent := `{ "a": 1e131071, "b": [1E2, 2.50], "z": 1, "a": 2, "s": "\u0000 \ud800" }`

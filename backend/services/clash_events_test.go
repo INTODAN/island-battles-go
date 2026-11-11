@@ -71,7 +71,7 @@ func TestClashEventsPersistPerContactAndDoNotCarryForward(t *testing.T) {
 func TestClashEventsReachSnapshotsReplayAndNotifications(t *testing.T) {
 	for _, enemyAmount := range []uint{10, 20} {
 		t.Run(map[uint]string{10: "survivor", 20: "mutual defeat"}[enemyAmount], func(t *testing.T) {
-			fixture := newTurnFixture(t, false)
+			fixture := newTurnFixture(t)
 			ctx := context.Background()
 			state := fixture.state
 			var finalRequest models.RegisterGenerationCommands
