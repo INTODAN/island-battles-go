@@ -19,7 +19,12 @@ import {
 type Demo = components["schemas"]["Demo"];
 type Generation = components["schemas"]["Generation"];
 
-const FIXTURES = ["busy-turn.json", "generated-map.json", "six-teams.json"];
+const FIXTURES = [
+  "bot-clashes.json",
+  "busy-turn.json",
+  "generated-map.json",
+  "six-teams.json",
+];
 
 function fixture(name: string): Demo {
   return JSON.parse(

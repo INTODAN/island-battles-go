@@ -145,18 +145,19 @@ export class SceneStage implements Stage {
       root.position.set(world.x, 0, world.z);
       // A boat whose heading changes (stopped off its line by a clash) turns smoothly.
       aimGroup(field, entity, world, castles.get(group.destination_castle_id));
-      // The boat being built or docking, and the squad on land; a squad sinks with its group.
-      const squad =
-        pose.squad && pose.sink > 0
-          ? { ...pose.squad, scale: pose.squad.scale * (1 - pose.sink) }
-          : pose.squad;
+      // The boat being built or docking, and the squad on land (#211). A group on land fights
+      // there (#213): its squad scuffles while a clash holds it and falls when it is defeated;
+      // its boat at the shore neither rattles nor sinks, and one left half built fades away.
+      const onLand = pose.squad !== null;
       poseGroup(
         field,
         entity,
         { ...group, soldiers: pose.count },
-        { build: pose.build, squad },
-        pose.scale,
+        pose,
+        onLand ? pose.scale * (1 - pose.sink) : pose.scale,
+        { fall: pose.sink, facing: pose.fighting, scuffle: pose.rattle },
       );
+      if (onLand) continue;
       if (pose.sink > 0) this.effects.sink(entity.parts, pose.sink);
       else if (pose.rattle > 0) this.effects.rattle(entity.parts, pose.rattle);
     }

@@ -13,7 +13,12 @@ import {
   sampleTurnHeadings,
   type TurnHeadings,
 } from "./animation/headings";
-import type { TurnPlan, TurnSample } from "./animation/plan";
+import {
+  facingOf,
+  stoppedByClashAt,
+  type TurnPlan,
+  type TurnSample,
+} from "./animation/plan";
 import { turnToward } from "./animation/rotation";
 import {
   type BoatParts,
@@ -67,7 +72,7 @@ import {
 } from "./landforms";
 import { createBoardLook } from "./look";
 import { CLASH_COLOR, LOSS_COLOR, teamColorHex, tint } from "./palette";
-import { drawnPosition, type GroupLook, groupLook } from "./shore";
+import { type GroupLook, groupLook, insideWaterline } from "./shore";
 
 type Generation = components["schemas"]["Generation"];
 type GameTeam = components["schemas"]["GameTeam"];
@@ -350,6 +355,20 @@ function groupLabelAnchor(
   );
 }
 
+/** What a squad on land is doing besides walking (#213). */
+export interface SquadAction {
+  /** 0 to 1: it falls and fades, defeated on land. */
+  fall?: number;
+  /** The direction of the opponents it faces (map units), held by a clash. */
+  facing?: { x: number; y: number } | null;
+  /** 0 to 1 while it scuffles with them, from the clash or the start of a held turn. */
+  scuffle?: number;
+}
+
+/** How far a scuffling squad lunges at its opponents, in world units, and how many times. */
+const SCUFFLE_LUNGE = 0.035;
+const SCUFFLE_LUNGES = 5;
+
 /**
  * Poses a group's boat and squad from its look (shore.ts `groupLook`, or a turn's pose): how
  * much of the boat is built, its size (`boatSize`, which multiplies the size its soldiers give
@@ -361,6 +380,7 @@ export function poseGroup(
   group: Pick<SoldierGroup, "id" | "team_color" | "soldiers">,
   look: Pick<GroupLook, "build" | "squad">,
   boatSize: number,
+  action: SquadAction = {},
 ): void {
   const { scene, materials } = field;
   const parts = entity.parts;
@@ -406,15 +426,39 @@ export function poseGroup(
   setSquadTeam(squadParts, group.team_color, materials);
   squadParts.root.setEnabled(parts.root.isEnabled(false));
   const world = toWorld(squad);
-  const bob = Math.abs(Math.sin(squad.walked * SQUAD_STEPS_PER_UNIT));
+  const facing = action.facing ?? { x: squad.facingX, y: squad.facingY };
+  const { body } = squadParts;
   squadParts.root.position.set(world.x, squad.height, world.z);
-  squadParts.root.rotation.y = Math.atan2(squad.facingX, -squad.facingY);
-  squadParts.body.position.y = SQUAD_BOB * bob;
-  squadParts.body.rotation.z =
-    0.06 * Math.sin(squad.walked * SQUAD_STEPS_PER_UNIT * 0.5);
-  squadParts.body.scaling.setAll(
-    SQUAD_DRAWN_SCALE * Math.max(0.001, squad.scale),
-  );
+  squadParts.root.rotation.y = Math.atan2(facing.x, -facing.y);
+  const fall = action.fall ?? 0;
+  const scuffle = action.scuffle ?? 0;
+  let drawnSize = squad.scale;
+  if (fall > 0) {
+    // Defeated on land: it topples over and fades where it fought.
+    const toppled = Math.min(1, fall * 2.5);
+    body.position.set(0, 0, 0);
+    body.rotation.set(-(Math.PI / 2) * toppled * toppled, 0, 0);
+    drawnSize *= 1 - Math.max(0, Math.min(1, (fall - 0.4) / 0.6));
+  } else if (scuffle > 0 && scuffle < 1) {
+    // Held by a clash: it lunges at its opponents and bobs, dying down as the scuffle ends.
+    const wave = Math.abs(Math.sin(scuffle * Math.PI * SCUFFLE_LUNGES));
+    const strength = 1 - scuffle;
+    body.position.set(
+      0,
+      SQUAD_BOB * 1.4 * wave * strength,
+      SCUFFLE_LUNGE * wave * strength,
+    );
+    body.rotation.set(0.25 * wave * strength, 0, 0);
+  } else {
+    const bob = Math.abs(Math.sin(squad.walked * SQUAD_STEPS_PER_UNIT));
+    body.position.set(0, SQUAD_BOB * bob, 0);
+    body.rotation.set(
+      0,
+      0,
+      0.06 * Math.sin(squad.walked * SQUAD_STEPS_PER_UNIT * 0.5),
+    );
+  }
+  body.scaling.setAll(SQUAD_DRAWN_SCALE * Math.max(0.001, drawnSize));
   if (anchor.parent !== squadParts.root) {
     anchor.parent = squadParts.root;
     anchor.position.set(0, SQUAD_LABEL_HEIGHT, 0);
@@ -427,6 +471,7 @@ export function updateGroup(
   destination: Castle | undefined,
   origin: Castle | undefined,
   entity: GroupEntity,
+  facing?: { x: number; y: number },
 ): void {
   const { scene, materials } = field;
   const { root } = entity.parts;
@@ -436,7 +481,9 @@ export function updateGroup(
   const world = toWorld(look);
   root.position.set(world.x, 0, world.z);
   aimGroup(field, entity, world, destination);
-  poseGroup(field, entity, group, look, look.boatScale);
+  poseGroup(field, entity, group, look, look.boatScale, {
+    facing: facing ?? null,
+  });
   const color = teamColorHex(group.team_color);
   setBoatTeam(entity.parts, group.team_color, materials);
 
@@ -480,22 +527,45 @@ function updateClashes(field: Battlefield, generation: Generation): void {
         };
         field.clashes.set(key, entity);
       }
-      // The ring of a boat that is still afloat goes where the boat is drawn (shore.ts).
-      const boat = groupsById.get(participant.group_id);
-      const world = toWorld(
-        boat
-          ? drawnPosition(
-              participant,
-              castlesById.get(boat.origin_castle_id),
-              castlesById.get(boat.destination_castle_id),
-            )
-          : participant,
+      // The ring of a group that is still there goes where it is drawn (shore.ts): at its squad
+      // on land (#213), else at its boat. A defeated group's castles are not known: it was lost
+      // on land when its contact is on an island.
+      const survivor = groupsById.get(participant.group_id);
+      const look = survivor
+        ? groupLook(
+            participant,
+            castlesById.get(survivor.origin_castle_id),
+            castlesById.get(survivor.destination_castle_id),
+          )
+        : null;
+      const onLand = look
+        ? look.squad !== null
+        : generation.castles.some((castle) =>
+            insideWaterline(castle, participant),
+          );
+      const world = toWorld(look ? (look.squad ?? look) : participant);
+      entity.ring.position.set(
+        world.x,
+        onLand ? ISLAND_TOP + 0.02 : 0.07,
+        world.z,
       );
-      entity.ring.position.set(world.x, 0.07, world.z);
       entity.ring.material = defeated
         ? materials.flat(tint(color, 0.35), 0.55)
         : materials.flat(CLASH_COLOR);
-      if (defeated) {
+      if (defeated && onLand) {
+        // Lost on land: no sunk boat on the grass, only its ring and what it lost (#213).
+        if (entity.ghost) disposeBoat(entity.ghost);
+        entity.ghost = null;
+        setLabel(field, `clash:${key}:lost`, {
+          lines: [`× ${participant.soldiers_before}`],
+          anchor: anchorFor(scene, `clash:${key}:lost`, entity.ring, 0.33),
+          accent: color,
+          textColor: color,
+          fontSize: 12,
+          bold: true,
+          priority: 30,
+        });
+      } else if (defeated) {
         // The group is gone: its boat sinks, drawn faded where it was lost.
         if (!entity.ghost) {
           entity.ghost = createBoat(
@@ -554,7 +624,10 @@ function updateClashes(field: Battlefield, generation: Generation): void {
     }
     setLabel(field, id, {
       lines: [`−${lost}`],
-      anchor: anchorFor(scene, id, entity.parts.root, 0.95),
+      // Above the squad while the group is on land (#213), else above the boat.
+      anchor: entity.squad?.root.isEnabled(false)
+        ? anchorFor(scene, id, entity.squad.root, 0.6)
+        : anchorFor(scene, id, entity.parts.root, 0.95),
       accent: LOSS_COLOR,
       textColor: LOSS_COLOR,
       fontSize: 13,
@@ -874,12 +947,16 @@ export function renderGeneration(
       entity = { parts };
       field.groups.set(group.id, entity);
     }
+    // A group a clash stopped this turn faces its opponents (#213).
     updateGroup(
       field,
       group,
       castleById.get(group.destination_castle_id),
       castleById.get(group.origin_castle_id),
       entity,
+      stoppedByClashAt(generation, group.id) !== undefined
+        ? facingOf(generation, group.id).facing
+        : undefined,
     );
   }
   for (const id of keep) groupIds.add(id);

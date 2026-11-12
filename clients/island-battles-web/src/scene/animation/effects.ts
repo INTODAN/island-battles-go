@@ -52,6 +52,9 @@ const SMOKE_DARK = Color4.FromHexString("#b9b6aecc");
 const FLASH = Color4.FromHexString("#ffd27aff");
 const FLASH_HOT = Color4.FromHexString("#fff6dcff");
 const SPRAY = Color4.FromHexString("#f4f1e6ff");
+/** Dust kicked up by a fight on land (#213): the sand and dry grass of the islands. */
+const DUST = Color4.FromHexString("#c9b48ae6");
+const DUST_DARK = Color4.FromHexString("#9c8a64cc");
 const GOLD = Color4.FromHexString("#ffe08aff");
 const CLEAR = new Color4(1, 1, 1, 0);
 
@@ -160,7 +163,8 @@ export function createTurnEffects(scene?: Scene): TurnEffects {
         const key = `${flash.clashId}:${flash.groupId}`;
         if (seenFlashes.has(key)) continue;
         seenFlashes.add(key);
-        const world = toWorld(flash, 0.14);
+        // A fight on land is on the grass top, 0.2 above the sea.
+        const world = toWorld(flash, flash.onLand ? 0.34 : 0.14);
         const at = new Vector3(world.x, world.y, world.z);
         const scale = Math.max(
           0.6,
@@ -202,6 +206,27 @@ export function createTurnEffects(scene?: Scene): TurnEffects {
           colorDead: new Color4(0.85, 0.84, 0.8, 0),
           shape: "soft",
         });
+        if (flash.onLand) {
+          // A fight on land kicks up dust that drifts low and settles (the spray's kind).
+          emitter.emit({
+            name: `clash-dust-${key}`,
+            position: new Vector3(world.x, 0.22, world.z),
+            count: 16,
+            duration: 0.25,
+            life: [0.6, 1.1],
+            size: [0.06, 0.12],
+            speed: [0.2, 0.5],
+            direction1: new Vector3(-1, 0.3, -1),
+            direction2: new Vector3(1, 0.7, 1),
+            spread: 0.1 * scale,
+            gravity: new Vector3(0, -0.3, 0),
+            color1: DUST,
+            color2: DUST_DARK,
+            colorDead: new Color4(0.8, 0.72, 0.55, 0),
+            shape: "soft",
+          });
+          continue;
+        }
         // Splashes of spray that fall back into the sea.
         emitter.emit({
           name: `clash-spray-${key}`,
