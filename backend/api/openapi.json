@@ -907,57 +907,6 @@
         ],
         "type": "object"
       },
-      "LobbyBots": {
-        "additionalProperties": false,
-        "properties": {
-          "$schema": {
-            "description": "A URL to the JSON Schema for this object.",
-            "examples": [
-              "https://example.com/LobbyBots.json"
-            ],
-            "format": "uri",
-            "readOnly": true,
-            "type": "string"
-          },
-          "lobby_id": {
-            "format": "uuid",
-            "type": "string"
-          },
-          "members": {
-            "description": "Every member of the lobby, in the lobby's member order, bot seats included.",
-            "items": {
-              "$ref": "#/components/schemas/LobbyMemberBot"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "lobby_id",
-          "members"
-        ],
-        "type": "object"
-      },
-      "LobbyMemberBot": {
-        "additionalProperties": false,
-        "properties": {
-          "bot": {
-            "$ref": "#/components/schemas/BotChoice",
-            "description": "The member's bot. Absent until they choose one, and a member can't get ready without one. A bot seat that the host added has the default bot of its level."
-          },
-          "display_name": {
-            "type": "string"
-          },
-          "player_id": {
-            "format": "uuid",
-            "type": "string"
-          }
-        },
-        "required": [
-          "player_id",
-          "display_name"
-        ],
-        "type": "object"
-      },
       "LobbySettings": {
         "additionalProperties": false,
         "description": "Island Battles game_settings for a lobby create request. Choose at most one map: map_template_id or map. The map must be made for exactly the lobby's teams: player_amount equal to the team count, and castle team colours exactly 1 to that count, in team order, with 0 for neutral castles. Without a map the game starts on a generated map. turn_timeout_seconds sets how long each turn lasts, from 5 to 600 seconds, 30 when left out, or null for no limit. An invalid choice fails lobby creation with invalid_game_settings, and its detail names each invalid field, such as game_settings.map.castles[0].x.",
@@ -1124,6 +1073,7 @@
               "invalid_input",
               "invalid_game_settings",
               "invalid_seat_settings",
+              "invalid_member_settings",
               "game_requirement",
               "game_running",
               "watcher_kicked",
@@ -1668,7 +1618,7 @@
     }
   },
   "info": {
-    "description": "Operations a player client calls during a started game. After every turn, each roster player's Centrifugo channel `player:{player_id}` receives a `GenerationEvent`, except after the turn that ends the game, which pushes a `GameEndedEvent` with the final generation and its outcome instead. Clients reconcile with the generation read after subscribing or reconnecting; HTTP state is authoritative, and its `outcome` is set once the game has ended. A turn times out at its `turn_deadline_at`; the server runs no timers, so a client waiting for other players calls `POST /game/from-lobby/{lobby_id}/deadline` about a second after it. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the `game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose. `GET /game/upgrades` lists what each castle upgrade level costs, and `GET /bots/defaults` the default bots that the backend plays. Before getting ready in a lobby, every member chooses their bot with `PUT /game/lobbies/{lobby_id}/bot`: their localhost bot, whose turns their client relays, or a default bot level; `GenerationState.bot` reports it during the game. `Demo` is the demo file format, which `GET /game/from-lobby/{lobby_id}/demo` returns and the demo viewer at `/game/demo-viewer/` opens. People outside the roster watch a game with its lobby's join code (`POST /lobby/v1/watches`): the lobby's watch channel `watch:island-battles:{lobby_id}` receives a `WatchGenerationEvent` after every turn and a `WatchGameEndedEvent` after the last, in the same push as the players' events, and `GET /game/from-lobby/{lobby_id}/watch` and `/watch/demo` are their reads. `BotTurn` and `BotTurnResult` are the stateless bot contract: a bot gets a `BotTurn` each turn and answers with a `BotTurnResult`, which is sent as one completing batch. A localhost bot gets its turns as a `TurnDelivery` from `GET /game/from-lobby/{lobby_id}/turn-delivery`, which its player's client posts to it, and submits its answer itself with the delivery's one-turn submit token.",
+    "description": "Operations a player client calls during a started game. After every turn, each roster player's Centrifugo channel `player:{player_id}` receives a `GenerationEvent`, except after the turn that ends the game, which pushes a `GameEndedEvent` with the final generation and its outcome instead. Clients reconcile with the generation read after subscribing or reconnecting; HTTP state is authoritative, and its `outcome` is set once the game has ended. A turn times out at its `turn_deadline_at`; the server runs no timers, so a client waiting for other players calls `POST /game/from-lobby/{lobby_id}/deadline` about a second after it. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the `game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose. `GET /game/upgrades` lists what each castle upgrade level costs, and `GET /bots/defaults` the default bots that the backend plays. Before getting ready in a lobby, every member chooses their bot in their lobby member settings with the lobby's `setLobbyMemberSettings`: `{\"bot\": {\"kind\": \"localhost\"}}`, their own bot, whose turns their client relays, or `{\"bot\": {\"kind\": \"default\", \"level\": N}}`, a default bot level; `GenerationState.bot` reports it during the game. `Demo` is the demo file format, which `GET /game/from-lobby/{lobby_id}/demo` returns and the demo viewer at `/game/demo-viewer/` opens. People outside the roster watch a game with its lobby's join code (`POST /lobby/v1/watches`): the lobby's watch channel `watch:island-battles:{lobby_id}` receives a `WatchGenerationEvent` after every turn and a `WatchGameEndedEvent` after the last, in the same push as the players' events, and `GET /game/from-lobby/{lobby_id}/watch` and `/watch/demo` are their reads. `BotTurn` and `BotTurnResult` are the stateless bot contract: a bot gets a `BotTurn` each turn and answers with a `BotTurnResult`, which is sent as one completing batch. A localhost bot gets its turns as a `TurnDelivery` from `GET /game/from-lobby/{lobby_id}/turn-delivery`, which its player's client posts to it, and submits its answer itself with the delivery's one-turn submit token.",
     "title": "Island Battles Player API",
     "version": "1.0.0"
   },
@@ -2124,126 +2074,6 @@
           }
         ],
         "summary": "Read a lobby game's history for a watcher",
-        "tags": [
-          "Island Battles"
-        ]
-      }
-    },
-    "/game/lobbies/{lobby_id}/bot": {
-      "put": {
-        "description": "Requires an active membership of the Island Battles lobby, while it is waiting. Every member chooses a bot before getting ready: kind localhost is the member's own bot, which island-battles-bot serve runs on their machine and their game client relays each turn to; kind default, with a level that GET /bots/defaults lists, is a default bot that the backend plays itself. Getting ready without a choice fails with the lobby's 409 problem game_requirement of type urn:island-battles:problem:bot-not-chosen. A member can change their choice while the lobby waits, also once ready. When the lobby starts, the game copies each roster player's choice, which GenerationState.bot reports from then on, and choosing conflicts (409). A 409 stores nothing: the choice is saved only while the lobby is still waiting, so the one a start copies is always the last that was answered 200. An invalid choice is 422, and a caller who isn't a member of the lobby gets 404. Choosing changes nothing in the lobby itself, so it publishes no lobby.changed; clients re-read the choices when the lobby changes, as it does when a member gets ready. Returns every member's choice, as GET /game/lobbies/{lobby_id}/bots does.",
-        "operationId": "chooseIslandLobbyBot",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "lobby_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/BotChoice"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LobbyBots"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorModel"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "security": [
-          {
-            "LobbyBearer": []
-          }
-        ],
-        "summary": "Choose your bot for a waiting lobby",
-        "tags": [
-          "Island Battles"
-        ]
-      }
-    },
-    "/game/lobbies/{lobby_id}/bots": {
-      "get": {
-        "description": "Requires an active membership of the Island Battles lobby, in any phase. Lists every member in the lobby's member order with the bot they chose with PUT /game/lobbies/{lobby_id}/bot, which is absent until they choose one, so a lobby can show who plays with which bot. The choices are deleted with the lobby, and a member who leaves keeps their choice for when they rejoin. A started game keeps its own copy of each roster player's choice, which GenerationState.bot reports.",
-        "operationId": "listIslandLobbyBots",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "lobby_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Authorization",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LobbyBots"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorModel"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "security": [
-          {
-            "LobbyBearer": []
-          }
-        ],
-        "summary": "List the bots that a lobby's members chose",
         "tags": [
           "Island Battles"
         ]

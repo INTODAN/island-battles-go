@@ -15,14 +15,14 @@ MAX_GENERATIONS = 300
 async def choose_localhost_bots(
     base_url: str, lobby_id: str, *credentials: str
 ) -> None:
-    """Choose each player's localhost bot, which every Island Battles lobby
-    member needs before getting ready: the client under test and the runner
-    play these seats themselves."""
+    """Choose each player's localhost bot in their lobby member settings, which
+    every Island Battles lobby member needs before getting ready: the client
+    under test and the runner play these seats themselves."""
     async with httpx.AsyncClient(base_url=base_url, timeout=10) as http:
         for credential in credentials:
             response = await http.put(
-                f"/game/lobbies/{lobby_id}/bot",
-                json={"kind": "localhost"},
+                f"/lobby/v1/games/island-battles/lobbies/{lobby_id}/member-settings",
+                json={"member_settings": {"bot": {"kind": "localhost"}}},
                 headers={"Authorization": f"Bearer {credential}"},
             )
             assert response.status_code == 200, response.text

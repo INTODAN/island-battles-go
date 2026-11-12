@@ -1,10 +1,5 @@
 import type { Snapshot } from "../../realtime";
-import type {
-  AddSeatBody,
-  BotChoice,
-  LobbyBots,
-  MapTemplateSummary,
-} from "./actions";
+import type { AddSeatBody, BotChoice, MapTemplateSummary } from "./actions";
 import { describeTurnTimeout } from "./form";
 
 export interface MemberRow {
@@ -37,6 +32,21 @@ function seatChoice(
 ): BotChoice | undefined {
   const level = seatLevel(settings);
   return level === undefined ? undefined : { kind: "default", level };
+}
+
+/**
+ * A person's bot, from their lobby member settings, `{"bot": ...}`, or none
+ * until they choose one.
+ */
+export function memberSettingsBot(
+  settings: Record<string, unknown> | null | undefined,
+): BotChoice | undefined {
+  const bot = settings?.bot;
+  if (typeof bot !== "object" || bot === null) return undefined;
+  const { kind, level } = bot as Record<string, unknown>;
+  if (kind === "localhost") return { kind };
+  if (kind === "default" && typeof level === "number") return { kind, level };
+  return undefined;
 }
 
 /** The body that adds a bot seat of `level` to a team; the request ID makes a retry safe. */
@@ -106,15 +116,8 @@ export function choiceFromValue(value: string): BotChoice | null {
   return level ? { kind: "default", level: Number(level[1]) } : null;
 }
 
-/** Arranges a lobby snapshot and the members' bot choices for the room screen. */
-export function buildRoom(
-  snapshot: Snapshot,
-  bots: LobbyBots | null,
-  playerId: string,
-): RoomModel {
-  const botOf = new Map(
-    (bots?.members ?? []).map((member) => [member.player_id, member.bot]),
-  );
+/** Arranges a lobby snapshot, with the members' bots, for the room screen. */
+export function buildRoom(snapshot: Snapshot, playerId: string): RoomModel {
   const rows = (snapshot.members ?? [])
     .filter((member) => member.active)
     .sort((left, right) => left.join_sequence - right.join_sequence)
@@ -131,7 +134,7 @@ export function buildRoom(
         isHost: member.player_id === snapshot.lobby.host_player_id,
         bot: seat
           ? seatChoice(member.seat_settings)
-          : botOf.get(member.player_id),
+          : memberSettingsBot(member.member_settings),
         teamId: member.team_id,
       };
     });

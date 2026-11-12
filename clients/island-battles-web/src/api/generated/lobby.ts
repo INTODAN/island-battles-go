@@ -81,6 +81,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/lobby/v1/games/{game_key}/lobbies/{lobby_id}/member-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set your member settings
+         * @description Sets your own settings for the lobby's game, a JSON object of at most 4 KiB that only the game reads, such as what plays for you, and returns the snapshot, which shows every member's member_settings. You can set only your own, as an active member (otherwise not_found), and only while the lobby waits (otherwise phase_conflict). The game checks member_settings: settings it doesn't accept fail with invalid_member_settings, whose detail says why, and a game that takes none refuses every value. New settings clear your ready, so the start sees what you confirmed by getting ready again, and publish lobby.changed. Settings equal to yours change nothing: the snapshot comes back with the same version and you stay ready. Your settings stay when you leave and rejoin and when the lobby is reopened for its next round.
+         */
+        put: operations["setLobbyMemberSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/lobby/v1/games/{game_key}/lobbies/{lobby_id}/membership": {
         parameters: {
             query?: never;
@@ -111,7 +131,7 @@ export interface paths {
         get?: never;
         /**
          * Set readiness
-         * @description ready is required; false explicitly clears readiness. A member needs a team to get ready, or it fails with not_ready. A game can also require something of its own first, such as a choice made in the game's API: then getting ready fails with 409 game_requirement, whose type is the game's problem type and whose detail says what to do.
+         * @description ready is required; false explicitly clears readiness. A member needs a team to get ready, or it fails with not_ready. A game can also require something of its own first, such as member_settings set with setLobbyMemberSettings: then getting ready fails with 409 game_requirement, whose type is the game's problem type and whose detail says what to do.
          */
         put: operations["setLobbyReady"];
         post?: never;
@@ -132,7 +152,7 @@ export interface paths {
         put?: never;
         /**
          * Reopen a lobby after its game
-         * @description Brings a started lobby whose game has ended back to waiting, so its members can play another game in it, and returns the snapshot. Any active person in the lobby may reopen it; anyone else gets not_found. The lobby's round goes up by one, and the game binds the next game to the new round. Members, teams, seats, the game settings and the host stay; every person's ready is cleared, seats stay ready, and the start roster is emptied until the next start. The change publishes lobby.changed. A lobby that already waits is returned unchanged, so two members reopening it at once both succeed. A lobby whose game is still running fails with game_running; a closed lobby, or one of a game that doesn't let its lobbies play again, fails with phase_conflict. While the lobby waits, people can join it and the host can change its settings as before a first game.
+         * @description Brings a started lobby whose game has ended back to waiting, so its members can play another game in it, and returns the snapshot. Any active person in the lobby may reopen it; anyone else gets not_found. The lobby's round goes up by one, and the game binds the next game to the new round. Members, teams, seats, the game settings, every member's member_settings and the host stay; every person's ready is cleared, seats stay ready, and the start roster is emptied until the next start. The change publishes lobby.changed. A lobby that already waits is returned unchanged, so two members reopening it at once both succeed. A lobby whose game is still running fails with game_running; a closed lobby, or one of a game that doesn't let its lobbies play again, fails with phase_conflict. While the lobby waits, people can join it and the host can change its settings as before a first game.
          */
         post: operations["reopenLobby"];
         delete?: never;
@@ -628,6 +648,10 @@ export interface components {
              * @enum {string}
              */
             kind: "human" | "seat";
+            /** @description The settings this person set for the game with setLobbyMemberSettings, compacted with sorted keys, which only the game reads. Null until they set some, and always null for a seat. Every member sees every member's settings. */
+            member_settings: {
+                [key: string]: unknown;
+            } | null;
             player_id: string;
             ready: boolean;
             /** @description For a seat, the settings the host added it with, compacted with sorted keys, which only the game reads. Null for a person. */
@@ -636,9 +660,21 @@ export interface components {
             } | null;
             team_id: string | null;
         };
+        MemberSettingsBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/MemberSettingsBody.json
+             */
+            readonly $schema?: string;
+            /** @description Your own settings for the lobby's game, as a JSON object of at most 4 KiB that only the game reads, such as what plays for you. The game checks them; settings it doesn't accept fail with invalid_member_settings, and a game that takes none refuses every value. */
+            member_settings: {
+                [key: string]: unknown;
+            };
+        };
         Problem: {
             /** @enum {string} */
-            code: "unauthenticated" | "not_found" | "not_host" | "lobby_full" | "team_full" | "phase_conflict" | "not_ready" | "empty_teams" | "stale_membership" | "idempotency_conflict" | "invalid_input" | "invalid_game_settings" | "invalid_seat_settings" | "game_requirement" | "game_running" | "watcher_kicked" | "watchers_full" | "unavailable" | "internal_error";
+            code: "unauthenticated" | "not_found" | "not_host" | "lobby_full" | "team_full" | "phase_conflict" | "not_ready" | "empty_teams" | "stale_membership" | "idempotency_conflict" | "invalid_input" | "invalid_game_settings" | "invalid_seat_settings" | "invalid_member_settings" | "game_requirement" | "game_running" | "watcher_kicked" | "watchers_full" | "unavailable" | "internal_error";
             detail: string;
             /** Format: int64 */
             status: number;
@@ -1057,6 +1093,96 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    setLobbyMemberSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                game_key: string;
+                lobby_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemberSettingsBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Snapshot"];
+                };
             };
             /** @description Unauthorized */
             401: {

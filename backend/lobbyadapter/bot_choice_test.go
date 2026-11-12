@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"islandBattles/backend/dal"
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/lobbyadapter"
@@ -118,8 +117,40 @@ func (stack *lobbyStack) ready(snapshot domain.Snapshot, member guest) *httptest
 	return stack.api.Put(stack.lobbyPath(snapshot)+"/ready", member.header, map[string]any{"ready": true})
 }
 
-func (stack *lobbyStack) choose(snapshot domain.Snapshot, member guest, choice string) *httptest.ResponseRecorder {
-	return stack.api.Put("/game/lobbies/"+snapshot.Lobby.ID+"/bot", member.header, strings.NewReader(choice))
+// choose sets member's bot, a JSON object, in their member settings.
+func (stack *lobbyStack) choose(snapshot domain.Snapshot, member guest, bot string) *httptest.ResponseRecorder {
+	return stack.setMemberSettings(snapshot, member, `{"bot":`+bot+`}`)
+}
+
+func (stack *lobbyStack) setMemberSettings(snapshot domain.Snapshot, member guest, settings string) *httptest.ResponseRecorder {
+	return stack.api.Put(stack.lobbyPath(snapshot)+"/member-settings", member.header, strings.NewReader(`{"member_settings":`+settings+`}`))
+}
+
+// snapshot is the lobby as member reads it.
+func (stack *lobbyStack) snapshot(room domain.Snapshot, member guest) domain.Snapshot {
+	stack.t.Helper()
+	var snapshot domain.Snapshot
+	stack.expect(stack.api.Get(stack.lobbyPath(room), member.header), http.StatusOK, &snapshot)
+	return snapshot
+}
+
+// bots are the bots in the members' member settings, by player ID; a member
+// without one is absent.
+func (stack *lobbyStack) bots(snapshot domain.Snapshot) map[string]*models.BotChoiceView {
+	stack.t.Helper()
+	bots := map[string]*models.BotChoiceView{}
+	for _, member := range snapshot.Members {
+		// A JSON null decodes into the raw bytes null.
+		if member.MemberSettings == nil || string(member.MemberSettings) == "null" {
+			continue
+		}
+		bot, err := services.MemberBot(member.MemberSettings)
+		if err != nil {
+			stack.t.Fatalf("%s's member settings %s: %v", member.DisplayName, member.MemberSettings, err)
+		}
+		bots[member.PlayerID] = &bot
+	}
+	return bots
 }
 
 func (stack *lobbyStack) state(snapshot domain.Snapshot, member guest) models.GenerationState {
@@ -158,37 +189,63 @@ func TestEveryMemberChoosesABotBeforeGettingReady(t *testing.T) {
 	if refusal.Code != "game_requirement" || refusal.Type != services.BotNotChosenProblemType || !strings.Contains(refusal.Detail, "Choose your bot") {
 		t.Fatalf("ready without a bot = %+v", refusal)
 	}
-	var listed models.LobbyBotsView
-	stack.expect(stack.api.Get("/game/lobbies/"+room.Lobby.ID+"/bots", bob.header), http.StatusOK, &listed)
-	if len(listed.Members) != 2 || listed.Members[0].PlayerID != alice.playerID || listed.Members[0].DisplayName != "Alice" || listed.Members[0].Bot != nil || listed.Members[1].Bot != nil {
-		t.Fatalf("choices before anyone chose = %+v", listed)
+	if bots := stack.bots(stack.snapshot(room, bob)); len(bots) != 0 {
+		t.Fatalf("bots before anyone chose = %+v", bots)
 	}
 
-	// Invalid choices, outsiders and missing credentials are refused.
-	for _, invalid := range []string{`{"kind":"default"}`, `{"kind":"default","level":4}`, `{"kind":"default","level":0}`, `{"kind":"localhost","level":1}`, `{"kind":"uploaded"}`, `{}`} {
-		if response := stack.choose(room, alice, invalid); response.Code != http.StatusUnprocessableEntity {
-			t.Errorf("choice %s = %d %s", invalid, response.Code, response.Body.String())
+	// The game checks the settings: invalid bots, other keys and settings
+	// without a bot are invalid_member_settings with the game's detail.
+	invalid := map[string]string{
+		`{"bot":{"kind":"default"}}`:             "kind default needs a level that GET /bots/defaults lists: 1, 2, 3",
+		`{"bot":{"kind":"default","level":4}}`:   "kind default needs a level that GET /bots/defaults lists: 1, 2, 3",
+		`{"bot":{"kind":"default","level":0}}`:   "kind default needs a level that GET /bots/defaults lists: 1, 2, 3",
+		`{"bot":{"kind":"localhost","level":1}}`: "level is only for kind default",
+		`{"bot":{"kind":"uploaded"}}`:            "kind must be localhost or default",
+		`{"bot":{"kind":"localhost","x":1}}`:     `member_settings must be {"bot": {"kind": "localhost"}} or {"bot": {"kind": "default", "level": N}} with a level that GET /bots/defaults lists`,
+		`{"bot":{"kind":"localhost"},"x":1}`:     `member_settings must be {"bot": {"kind": "localhost"}} or {"bot": {"kind": "default", "level": N}} with a level that GET /bots/defaults lists`,
+		`{}`:                                     `member_settings must be {"bot": {"kind": "localhost"}} or {"bot": {"kind": "default", "level": N}} with a level that GET /bots/defaults lists`,
+	}
+	for settings, detail := range invalid {
+		var problem struct {
+			Code   string `json:"code"`
+			Detail string `json:"detail"`
+		}
+		stack.expect(stack.setMemberSettings(room, alice, settings), http.StatusUnprocessableEntity, &problem)
+		if problem.Code != "invalid_member_settings" || problem.Detail != detail {
+			t.Errorf("member settings %s = %+v", settings, problem)
 		}
 	}
 	stack.expect(stack.choose(room, outsider, `{"kind":"localhost"}`), http.StatusNotFound, nil)
-	stack.expect(stack.api.Put("/game/lobbies/"+room.Lobby.ID+"/bot", strings.NewReader(`{"kind":"localhost"}`)), http.StatusUnauthorized, nil)
-	stack.expect(stack.api.Get("/game/lobbies/"+room.Lobby.ID+"/bots", outsider.header), http.StatusNotFound, nil)
+	stack.expect(stack.api.Put(stack.lobbyPath(room)+"/member-settings", strings.NewReader(`{"member_settings":{"bot":{"kind":"localhost"}}}`)), http.StatusUnauthorized, nil)
 
-	// Each kind of choice is accepted, and a choice can change while the
-	// lobby waits, also once ready.
-	stack.expect(stack.choose(room, alice, `{"kind":"localhost"}`), http.StatusOK, &listed)
-	if !sameBot(listed.Members[0].Bot, botChoice(models.LocalhostBot, 0)) || listed.Members[1].Bot != nil {
-		t.Fatalf("choices after Alice chose = %+v", listed)
+	// Each kind of bot is accepted, every member sees every member's bot, and
+	// a bot can change while the lobby waits.
+	var chosen domain.Snapshot
+	stack.expect(stack.choose(room, alice, `{"kind":"localhost"}`), http.StatusOK, &chosen)
+	if bots := stack.bots(chosen); len(bots) != 1 || !sameBot(bots[alice.playerID], botChoice(models.LocalhostBot, 0)) {
+		t.Fatalf("bots after Alice chose = %+v", bots)
 	}
 	stack.expect(stack.ready(room, alice), http.StatusOK, nil)
 	for level := uint(1); level <= 3; level++ {
-		stack.expect(stack.choose(room, bob, fmt.Sprintf(`{"kind":"default","level":%d}`, level)), http.StatusOK, &listed)
-		if !sameBot(listed.Members[1].Bot, botChoice(models.DefaultBot, level)) {
-			t.Fatalf("Bob's choice of level %d = %+v", level, listed.Members[1].Bot)
+		stack.expect(stack.choose(room, bob, fmt.Sprintf(`{"kind":"default","level":%d}`, level)), http.StatusOK, nil)
+		if bots := stack.bots(stack.snapshot(room, alice)); !sameBot(bots[bob.playerID], botChoice(models.DefaultBot, level)) {
+			t.Fatalf("Bob's choice of level %d as Alice sees it = %+v", level, bots[bob.playerID])
 		}
 	}
 	stack.expect(stack.ready(room, bob), http.StatusOK, nil)
-	stack.expect(stack.choose(room, bob, `{"kind":"default","level":2}`), http.StatusOK, nil)
+
+	// Choosing the same bot again keeps Bob ready; another bot clears his
+	// ready, so the start sees the bot he confirmed.
+	var same, changed domain.Snapshot
+	stack.expect(stack.choose(room, bob, `{"level":3,"kind":"default"}`), http.StatusOK, &same)
+	if !memberOf(t, same, bob.playerID).Ready {
+		t.Fatal("choosing the same bot again cleared Bob's ready")
+	}
+	stack.expect(stack.choose(room, bob, `{"kind":"default","level":2}`), http.StatusOK, &changed)
+	if memberOf(t, changed, bob.playerID).Ready || !memberOf(t, changed, alice.playerID).Ready || changed.Lobby.Version != same.Lobby.Version+1 {
+		t.Fatalf("after Bob changed his bot: Bob ready %v, Alice ready %v, version %d after %d", memberOf(t, changed, bob.playerID).Ready, memberOf(t, changed, alice.playerID).Ready, changed.Lobby.Version, same.Lobby.Version)
+	}
+	stack.expect(stack.ready(room, bob), http.StatusOK, nil)
 
 	var started domain.Snapshot
 	stack.expect(stack.api.Post(stack.lobbyPath(room)+"/start", alice.header, map[string]any{}), http.StatusOK, &started)
@@ -199,9 +256,8 @@ func TestEveryMemberChoosesABotBeforeGettingReady(t *testing.T) {
 	stack.expect(stack.choose(room, bob, `{"kind":"default","level":3}`), http.StatusConflict, nil)
 	stack.expect(stack.choose(room, alice, `{"kind":"default","level":1}`), http.StatusConflict, nil)
 	// A refused choice is not stored.
-	stored, err := dal.LoadBotChoices(stack.database, room.Lobby.ID)
-	if err != nil || stored[bob.playerID].Level == nil || *stored[bob.playerID].Level != 2 || stored[alice.playerID].Kind != models.LocalhostBot {
-		t.Fatalf("stored choices after refused choices = %+v, %v", stored, err)
+	if bots := stack.bots(stack.snapshot(room, alice)); !sameBot(bots[bob.playerID], botChoice(models.DefaultBot, 2)) || !sameBot(bots[alice.playerID], botChoice(models.LocalhostBot, 0)) {
+		t.Fatalf("bots after refused choices = %+v", bots)
 	}
 	assertFrozenBots := func() {
 		t.Helper()
@@ -216,16 +272,25 @@ func TestEveryMemberChoosesABotBeforeGettingReady(t *testing.T) {
 	}
 	assertFrozenBots()
 
-	// Deleting the lobby, as lobby retention does, deletes its choices, and
-	// the game keeps its copy.
+	// Deleting the lobby, as lobby retention does, deletes the member
+	// settings with it, and the game keeps its copy.
 	deleteLobby(t, stack.database, room.Lobby.ID)
-	var remaining int64
-	if err := stack.database.Model(&models.LobbyBotChoice{}).Where(&models.LobbyBotChoice{LobbyID: room.Lobby.ID}).Count(&remaining).Error; err != nil || remaining != 0 {
-		t.Fatalf("choices left after the lobby was deleted: %d, %v", remaining, err)
-	}
 	assertFrozenBots()
 }
 
+func memberOf(t *testing.T, snapshot domain.Snapshot, playerID string) domain.Member {
+	t.Helper()
+	for _, member := range snapshot.Members {
+		if member.PlayerID == playerID {
+			return member
+		}
+	}
+	t.Fatalf("no member %s", playerID)
+	return domain.Member{}
+}
+
+// The lobby checks the start roster's bots again at the start, from the
+// members' settings, and names the members without one.
 func TestStartRefusalNamesTheMembersWithoutABot(t *testing.T) {
 	stack := newLobbyStack(t)
 	alice, bob := stack.guest("Alice"), stack.guest("Bob")
@@ -234,9 +299,9 @@ func TestStartRefusalNamesTheMembersWithoutABot(t *testing.T) {
 	stack.expect(stack.choose(room, bob, `{"kind":"localhost"}`), http.StatusOK, nil)
 	stack.expect(stack.ready(room, alice), http.StatusOK, nil)
 	stack.expect(stack.ready(room, bob), http.StatusOK, nil)
-	// Bob got ready before choices were required, which the API can't
-	// reproduce, so remove his choice directly.
-	if err := stack.database.Where(&models.LobbyBotChoice{LobbyID: room.Lobby.ID, PlayerID: bob.playerID}).Delete(&models.LobbyBotChoice{}).Error; err != nil {
+	// Bob got ready before bots were required, which the API can't
+	// reproduce, so remove his settings directly.
+	if err := stack.database.Model(&lobbypostgres.MembershipRecord{}).Where(&lobbypostgres.MembershipRecord{LobbyID: room.Lobby.ID, PlayerID: bob.playerID}).Update("member_settings", nil).Error; err != nil {
 		t.Fatal(err)
 	}
 	var refusal struct {

@@ -17,8 +17,8 @@ type FrozenGamePlayer struct {
 	// this player, one of bots.Defaults, or nil when the player's own client
 	// plays, relaying their localhost bot. The backend plays it as soon as
 	// each generation is created, so it never times out. The start copies it
-	// from the player's LobbyBotChoice, or from the level of a bot seat that
-	// the host added.
+	// from the bot in the player's lobby member settings, or from the level
+	// of a bot seat that the host added.
 	BotLevel  *uint
 	CreatedAt time.Time
 }

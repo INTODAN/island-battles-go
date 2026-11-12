@@ -20,11 +20,13 @@ const GameKey = models.LobbyGameKey
 // Registration declares Island Battles to the lobby policy. Its settings
 // validator reads default maps from database. Every team owns castles on the
 // map, so a game can't start with an empty team. Every member chooses a bot
-// before getting ready, so the ready gate refuses a member without one with
-// services.BotNotChosenProblemType. The host can add bot seats, whose
-// seat_settings {"bot_level": N} name a default bot that the backend plays.
-// A lobby plays one game per round, and a member can reopen it for the next
-// round once the game of the current one has ended.
+// in their member settings, {"bot": {...}}, before getting ready, so the
+// ready gate refuses a member without one with
+// services.BotNotChosenProblemType; it reads only the members' settings. The
+// host can add bot seats, whose seat_settings {"bot_level": N} name a default
+// bot that the backend plays. A lobby plays one game per round, and a member
+// can reopen it for the next round once the game of the current one has
+// ended.
 func Registration(database *gorm.DB) domain.GameRegistration {
 	return domain.GameRegistration{
 		Key: GameKey,
@@ -32,11 +34,14 @@ func Registration(database *gorm.DB) domain.GameRegistration {
 			return validateSettings(ctx, database, settings, teams)
 		},
 		StartRules: domain.StartRules{EveryTeamNeedsMember: true},
-		ReadyGate: func(ctx context.Context, lobbyID string) (domain.ReadyCheck, error) {
-			return services.BotReadyCheck(database.WithContext(ctx), lobbyID)
+		ReadyGate: func(context.Context, string) (domain.ReadyCheck, error) {
+			return services.BotReadyCheck, nil
 		},
 		ValidateSeat: func(_ context.Context, settings json.RawMessage) (string, error) {
 			return services.ValidateBotSeat(settings)
+		},
+		ValidateMemberSettings: func(_ context.Context, _ string, settings json.RawMessage) error {
+			return services.ValidateMemberSettings(settings)
 		},
 		GameOver: func(ctx context.Context, lobbyID string, round int64) (bool, error) {
 			return gameOver(ctx, database, lobbyID, round)

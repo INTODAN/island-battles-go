@@ -1,11 +1,12 @@
 // Island Battles' bot choice for the lobby frontend's waiting room. Every
-// member chooses their bot before getting ready, with
-// PUT /game/lobbies/{lobby_id}/bot: their localhost bot, which
-// island-battles-bot serve runs on their machine and their game client relays
-// turns to, or a default bot level that the backend plays itself. The room
-// lists every member's choice from GET /game/lobbies/{lobby_id}/bots. The
-// host can also seat a default bot on a team, through the lobby page's seat
-// controls, which seatOptions fills.
+// member chooses their bot before getting ready, in their lobby member
+// settings, {"bot": ...}, which the page saves with the lobby's
+// PUT …/member-settings: their localhost bot, which island-battles-bot serve
+// runs on their machine and their game client relays turns to, or a default
+// bot level that the backend plays itself. The room lists every member's
+// choice from the snapshot's member_settings, and each bot seat's level from
+// its seat_settings. The host can also seat a default bot on a team, through
+// the lobby page's seat controls, which seatOptions fills.
 
 import { checkBotHealth, serveCommand } from "./localhost-bot.mjs";
 
@@ -36,10 +37,21 @@ export function describeBot(bot) {
   return bot.kind === "localhost" ? "own bot (localhost)" : `level ${bot.level} bot`;
 }
 
+// A snapshot member's bot: a person's from their member settings, a bot
+// seat's default bot of its level, or null for a person who hasn't chosen.
+export function memberBot(member) {
+  if (member.kind === "seat") {
+    const level = member.seat_settings?.bot_level;
+    return Number.isInteger(level) ? { kind: "default", level } : null;
+  }
+  const bot = member.member_settings?.bot;
+  return bot && typeof bot.kind === "string" ? bot : null;
+}
+
 // One line listing every member's bot, such as "Alex: own bot (localhost) ·
-// Sam (you): level 2 bot".
+// Sam (you): level 2 bot", from the snapshot's members.
 export function describeChoices(members, playerID) {
-  return members.map((member) => `${member.display_name}${member.player_id === playerID ? " (you)" : ""}: ${describeBot(member.bot)}`).join(" · ");
+  return members.map((member) => `${member.display_name}${member.player_id === playerID ? " (you)" : ""}: ${describeBot(memberBot(member))}`).join(" · ");
 }
 
 let defaultBots = null;
@@ -67,11 +79,6 @@ export async function seatOptions({ levels = loadLevels } = {}) {
   };
 }
 
-// botsPath is the path of the lobby's bot endpoints.
-function botsPath(lobbyID, last) {
-  return `/game/lobbies/${encodeURIComponent(lobbyID)}/${last}`;
-}
-
 // What the localhost bot's indicator says.
 export function describeHealth(running) {
   return running ? "Connected: your bot is running on 127.0.0.1:41414." : "Not running: start your bot with the command below.";
@@ -81,18 +88,19 @@ export function describeHealth(running) {
 export const safariNote = "Safari does not let an https page reach a bot on localhost. Use Chrome, Edge or Firefox to play with your own bot, or open this page over http on localhost.";
 
 // The player's bot select and every member's choice, shown while the lobby
-// waits. request(method, path, body) calls the game's API through the page.
-// With the localhost bot chosen, it also shows whether that bot is running.
+// waits. saveMemberSettings(settings) saves the player's member settings
+// through the page and resolves to the snapshot. With the localhost bot
+// chosen, it also shows whether that bot is running.
 export class RoomPanel {
-  constructor({ container, lobbyID, playerID, request, checkHealth = checkBotHealth, copy = (text) => navigator.clipboard.writeText(text) }) {
+  constructor({ container, lobbyID, playerID, saveMemberSettings, checkHealth = checkBotHealth, copy = (text) => navigator.clipboard.writeText(text) }) {
     this.container = container;
     this.checkHealth = checkHealth;
     this.copy = copy;
     this.polling = null;
     this.lobbyID = lobbyID;
     this.playerID = playerID;
-    this.request = request;
-    this.seen = null;
+    this.saveMemberSettings = saveMemberSettings;
+    this.chosen = null;
     this.saving = false;
     this.select = document.createElement("select");
     this.select.append(new Option("Choose your bot", ""), new Option("My localhost bot", "localhost"));
@@ -179,25 +187,13 @@ export class RoomPanel {
     this.polling = setTimeout(tick, 0);
   }
 
-  // Each new lobby version may bring new members, so the list is read again.
+  // Every snapshot carries every member's member settings, so the choices
+  // follow the lobby without a request of their own.
   update(snapshot) {
     // The page hides the panel once the lobby starts, and the bot is then
     // the page's concern; it asks again if the panel is shown.
+    this.show(snapshot);
     if (this.container.closest("[hidden]")) this.stopPolling();
-    else this.showLocal();
-    const seen = `${snapshot.lobby.version}:${snapshot.members.map((member) => member.player_id).join(",")}`;
-    if (seen === this.seen) return;
-    this.seen = seen;
-    void this.refresh();
-  }
-
-  async refresh() {
-    try {
-      const response = await this.request("GET", botsPath(this.lobbyID, "bots"));
-      if (response.status === 200) this.show(response.body);
-    } catch (error) {
-      this.summary.textContent = error.message;
-    }
   }
 
   async save(value) {
@@ -212,11 +208,9 @@ export class RoomPanel {
     this.saving = true;
     this.select.disabled = true;
     try {
-      const response = await this.request("PUT", botsPath(this.lobbyID, "bot"), choice);
-      if (response.status === 200) this.show(response.body);
-      else this.summary.textContent = response.body?.detail || "Could not save your bot. Try again.";
+      this.show(await this.saveMemberSettings({ bot: choice }));
     } catch (error) {
-      this.summary.textContent = error.message;
+      this.summary.textContent = error.message || "Could not save your bot. Try again.";
     } finally {
       this.saving = false;
       this.select.disabled = false;
@@ -230,17 +224,18 @@ export class RoomPanel {
     this.showLocal();
   }
 
-  show(bots) {
-    this.chosen = bots.members.find((member) => member.player_id === this.playerID)?.bot || null;
+  // Shows the player's saved choice and every member's, from a snapshot.
+  show(snapshot) {
+    const you = snapshot.members.find((member) => member.player_id === this.playerID);
+    this.chosen = you ? memberBot(you) : null;
     this.restore();
-    this.summary.textContent = describeChoices(bots.members, this.playerID);
+    this.summary.textContent = describeChoices(snapshot.members, this.playerID);
   }
 }
 
 // The demo's example players submit their turns from the page, so each demo
 // player plays as their own bot, which the backend leaves to the page, rather
 // than as a default bot that the backend would play for them.
-export async function prepareDemo({ lobbyID, request }) {
-  const response = await request("PUT", botsPath(lobbyID, "bot"), { kind: "localhost" });
-  if (response.status !== 200) throw new Error(response.body?.detail || "Could not choose the demo player's bot.");
+export async function prepareDemo({ saveMemberSettings }) {
+  await saveMemberSettings({ bot: { kind: "localhost" } });
 }

@@ -517,36 +517,6 @@ class ListUpgradesResponseBody(GameModel):
     upgrades: Sequence[Upgrade]
 
 
-class LobbyBots(GameModel):
-    model_config = ConfigDict(
-        extra="ignore",
-    )
-    field_schema: Annotated[
-        AnyUrl | None,
-        Field(alias="$schema", examples=["https://example.com/LobbyBots.json"]),
-    ] = None
-    """
-    A URL to the JSON Schema for this object.
-    """
-    lobby_id: UUID
-    members: Sequence[LobbyMemberBot]
-    """
-    Every member of the lobby, in the lobby's member order, bot seats included.
-    """
-
-
-class LobbyMemberBot(GameModel):
-    model_config = ConfigDict(
-        extra="ignore",
-    )
-    bot: BotChoice | None = None
-    """
-    The member's bot. Absent until they choose one, and a member can't get ready without one. A bot seat that the host added has the default bot of its level.
-    """
-    display_name: StrictStr
-    player_id: UUID
-
-
 class LobbySettings(GameModel):
     model_config = ConfigDict(
         extra="ignore",
@@ -643,6 +613,7 @@ class Problem(GameModel):
         "invalid_input",
         "invalid_game_settings",
         "invalid_seat_settings",
+        "invalid_member_settings",
         "game_requirement",
         "game_running",
         "watcher_kicked",

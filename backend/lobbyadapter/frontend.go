@@ -6,8 +6,9 @@ import "islandBattles/lobby/frontend"
 // result URL is the lobby replay route of the lobby's round, the data URL prefix admits the lobby
 // game's reads such as its logs and its demo, the demo package serves the
 // example player, the map choice settings module and the bot choice room
-// module under /game/demo/, the room API prefix admits the lobby's bot
-// endpoints, and the link opens the demo viewer under /game/demo-viewer/.
+// module under /game/demo/, and the link opens the demo viewer under
+// /game/demo-viewer/. The room module calls no game endpoint, so it has no
+// room API prefix.
 func FrontendGame() frontend.Game {
 	return frontend.Game{
 		Key:         "island-battles",
@@ -25,9 +26,8 @@ func FrontendGame() frontend.Game {
 		// the map sets the lobby's teams.
 		SettingsModule: "/game/demo/lobby-settings.mjs",
 		// Every member chooses a bot in the waiting room before getting
-		// ready, through the lobby's bot endpoints.
-		RoomModule:    "/game/demo/bot-choice.mjs",
-		RoomAPIPrefix: "/game/lobbies/" + frontend.LobbyIDPlaceholder + "/",
+		// ready, in their lobby member settings, which the page saves.
+		RoomModule: "/game/demo/bot-choice.mjs",
 		// A saved demo opens without the lobby, so the viewer stays
 		// reachable after it closes. The 3D web client is served at /play/ by
 		// the deployment (deploy/README.md, "The web client"), not by the backend.

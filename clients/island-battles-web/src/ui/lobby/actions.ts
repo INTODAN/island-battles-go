@@ -12,7 +12,6 @@ import {
 } from "./form";
 
 export type BotChoice = GameComponents["schemas"]["BotChoice"];
-export type LobbyBots = GameComponents["schemas"]["LobbyBots"];
 export type DefaultBot = GameComponents["schemas"]["DefaultBot"];
 export type AddSeatBody = LobbyComponents["schemas"]["AddSeatBody"];
 export type Watcher = LobbyComponents["schemas"]["Watcher"];
@@ -251,20 +250,18 @@ export function createLobbyActions(options: {
       );
     },
 
-    async chooseBot(choice: BotChoice): Promise<LobbyBots> {
+    /**
+     * Saves your bot in your lobby member settings, `{"bot": ...}`, while the
+     * lobby waits. A new bot clears your ready; every member sees it in the
+     * snapshot.
+     */
+    async chooseBot(choice: BotChoice) {
       const { path } = room();
-      const { data } = await gameApi.PUT("/game/lobbies/{lobby_id}/bot", {
-        params: { path: { lobby_id: path.lobby_id } },
-        body: choice,
-      });
-      return required(data);
-    },
-
-    async listBots(lobbyId: string): Promise<LobbyBots> {
-      const { data } = await gameApi.GET("/game/lobbies/{lobby_id}/bots", {
-        params: { path: { lobby_id: lobbyId } },
-      });
-      return required(data);
+      const { data } = await lobbyApi.PUT(
+        "/lobby/v1/games/{game_key}/lobbies/{lobby_id}/member-settings",
+        { params: { path }, body: { member_settings: { bot: choice } } },
+      );
+      adopt(data);
     },
 
     async defaultBots(): Promise<DefaultBot[]> {

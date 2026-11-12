@@ -11,7 +11,7 @@ import pytest
 from integration.test_live import BASE, create
 from integration.test_live import guests as guests_fixture
 from lobby_client import LobbyError, Scope
-from test_lobby_binding import choose_bot
+from test_lobby_binding import choose_bot, member_settings_path
 
 guests = guests_fixture
 pytestmark = pytest.mark.asyncio
@@ -50,8 +50,13 @@ async def test_a_localhost_bot_plays_a_default_level_to_the_end(guests):
 
     await choose_bot(alice, scope.lobby_id, {"kind": "localhost"})
     chosen = await choose_bot(bob, scope.lobby_id, {"kind": "default", "level": 2})
-    assert [(member["display_name"], member["bot"]) for member in chosen["members"]] == [
-        ("Alice", {"kind": "localhost"}), ("Bob", {"kind": "default", "level": 2})]
+    # Every member sees every member's bot in the lobby snapshot.
+    assert [(member["display_name"], member["member_settings"]) for member in chosen["members"]] == [
+        ("Alice", {"bot": {"kind": "localhost"}}), ("Bob", {"bot": {"kind": "default", "level": 2}})]
+    with pytest.raises(LobbyError) as invalid:
+        await bob.set_member_settings(scope, {"bot": {"kind": "default", "level": 9}})
+    assert (invalid.value.code, invalid.value.status, invalid.value.detail) == (
+        "invalid_member_settings", 422, "kind default needs a level that GET /bots/defaults lists: 1, 2, 3")
     await alice.set_ready(scope, True)
     await bob.set_ready(scope, True)
     await alice.start(scope)
@@ -75,9 +80,9 @@ async def test_a_localhost_bot_plays_a_default_level_to_the_end(guests):
             states.append(response.json())
         # Choosing conflicts once the lobby has started.
         late = await http.put(
-            f"/game/lobbies/{scope.lobby_id}/bot", json={"kind": "localhost"},
+            member_settings_path(scope.lobby_id), json={"member_settings": {"bot": {"kind": "localhost"}}},
             headers={"Authorization": f"Bearer {bob.credential}"},
         )
-        assert late.status_code == 409, late.text
+        assert (late.status_code, late.json()["code"]) == (409, "phase_conflict"), late.text
     assert [state["bot"] for state in states] == [{"kind": "localhost"}, {"kind": "default", "level": 2}]
     assert all(state["outcome"] is not None for state in states)

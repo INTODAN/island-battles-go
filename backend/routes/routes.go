@@ -46,32 +46,11 @@ type LobbyAuthentication interface {
 func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authentication LobbyAuthentication, gameBinding *application.GameBinding[models.BindingResult], retention domain.RetentionRunner, game *handlers.LobbyGame) {
 	httpapi.Register(api, lobbyadapter.WithGameStart(lobbyApplication, gameBinding), authentication, authentication, retention)
 	lobbyadapter.Register(api, gameBinding, authentication)
-	api.OpenAPI().Paths["/lobby/v1/games/{game_key}/lobbies/{lobby_id}/start"].Post.Description += " Island Battles initializes one playable generation and waits for every frozen roster player to complete their turn. Retrying resumes a failed initialization. Each roster player keeps the bot they chose with PUT /game/lobbies/{lobby_id}/bot; a roster player without one fails the start with game_requirement of type " + services.BotNotChosenProblemType + "."
-	api.OpenAPI().Paths["/lobby/v1/games/{game_key}/lobbies/{lobby_id}/seats"].Post.Description += ` Island Battles seats a default bot: seat_settings is {"bot_level": N} with a level that GET /bots/defaults lists, the seat is named "Bot (level N)", and the backend plays it with that default bot once the lobby starts. A bot seat makes no bot choice.`
-	api.OpenAPI().Paths["/lobby/v1/games/{game_key}/lobbies/{lobby_id}/settings"].Put.Description += " Island Battles checks game_settings as on create, as its LobbySettings: a default map that exists, or a map file, whose player_amount equals the number of teams sent, and a turn_timeout_seconds from 5 to 600 or null. Send one team per colour of the new map. Each member keeps the bot they chose with PUT /game/lobbies/{lobby_id}/bot, and the start uses the map and turn timeout set last."
-	api.OpenAPI().Paths["/lobby/v1/games/{game_key}/lobbies/{lobby_id}/ready"].Put.Description += " Island Battles requires a bot choice first, made with PUT /game/lobbies/{lobby_id}/bot, and refuses to set a member without one ready with game_requirement of type " + services.BotNotChosenProblemType + "."
-	lobbyBots := &handlers.LobbyBots{Authenticator: authentication, Service: services.LobbyBots{Database: game.Database, Lobbies: lobbyApplication, GameKey: lobbyadapter.GameKey}}
-	huma.Register(api, huma.Operation{
-		OperationID: "chooseIslandLobbyBot", Path: "/game/lobbies/{lobby_id}/bot", Method: http.MethodPut,
-		Summary: "Choose your bot for a waiting lobby",
-		Description: "Requires an active membership of the Island Battles lobby, while it is waiting. Every member chooses a bot before getting ready: kind localhost is the member's own bot, which island-battles-bot serve runs on their machine and their game client relays each turn to; kind default, with a level that GET /bots/defaults lists, is a default bot that the backend plays itself. " +
-			"Getting ready without a choice fails with the lobby's 409 problem game_requirement of type " + services.BotNotChosenProblemType + ". A member can change their choice while the lobby waits, also once ready. " +
-			"When the lobby starts, the game copies each roster player's choice, which GenerationState.bot reports from then on, and choosing conflicts (409). A 409 stores nothing: the choice is saved only while the lobby is still waiting, so the one a start copies is always the last that was answered 200. " +
-			"An invalid choice is 422, and a caller who isn't a member of the lobby gets 404. Choosing changes nothing in the lobby itself, so it publishes no lobby.changed; clients re-read the choices when the lobby changes, as it does when a member gets ready. Returns every member's choice, as GET /game/lobbies/{lobby_id}/bots does.",
-		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
-		// The service checks the choice itself, after authenticating the
-		// caller, so a request without credentials is refused first.
-		SkipValidateBody: true,
-	}, lobbyBots.Choose)
-	// GenerationState carries the same schema, so it describes only a bot.
-	dropSchemaLink(api, reflect.TypeFor[models.BotChoiceView]())
-	huma.Register(api, huma.Operation{
-		OperationID: "listIslandLobbyBots", Path: "/game/lobbies/{lobby_id}/bots", Method: http.MethodGet,
-		Summary: "List the bots that a lobby's members chose",
-		Description: "Requires an active membership of the Island Battles lobby, in any phase. Lists every member in the lobby's member order with the bot they chose with PUT /game/lobbies/{lobby_id}/bot, which is absent until they choose one, so a lobby can show who plays with which bot. " +
-			"The choices are deleted with the lobby, and a member who leaves keeps their choice for when they rejoin. A started game keeps its own copy of each roster player's choice, which GenerationState.bot reports.",
-		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
-	}, lobbyBots.List)
+	api.OpenAPI().Paths["/lobby/v1/games/{game_key}/lobbies/{lobby_id}/start"].Post.Description += " Island Battles initializes one playable generation and waits for every frozen roster player to complete their turn. Retrying resumes a failed initialization. Each roster player plays with the bot in their member_settings, which the game copies at the start and GenerationState.bot reports; a roster player without one fails the start with game_requirement of type " + services.BotNotChosenProblemType + "."
+	api.OpenAPI().Paths["/lobby/v1/games/{game_key}/lobbies/{lobby_id}/seats"].Post.Description += ` Island Battles seats a default bot: seat_settings is {"bot_level": N} with a level that GET /bots/defaults lists, the seat is named "Bot (level N)", and the backend plays it with that default bot once the lobby starts.`
+	api.OpenAPI().Paths["/lobby/v1/games/{game_key}/lobbies/{lobby_id}/settings"].Put.Description += " Island Battles checks game_settings as on create, as its LobbySettings: a default map that exists, or a map file, whose player_amount equals the number of teams sent, and a turn_timeout_seconds from 5 to 600 or null. Send one team per colour of the new map. The start uses the map and turn timeout set last."
+	api.OpenAPI().Paths["/lobby/v1/games/{game_key}/lobbies/{lobby_id}/ready"].Put.Description += " Island Battles requires a bot in your member_settings first, set with setLobbyMemberSettings, and refuses to set a member without one ready with game_requirement of type " + services.BotNotChosenProblemType + "."
+	api.OpenAPI().Paths["/lobby/v1/games/{game_key}/lobbies/{lobby_id}/member-settings"].Put.Description += ` Island Battles' member_settings name your bot: {"bot": {"kind": "localhost"}} for your own bot, which island-battles-bot serve runs on your machine and your game client relays each turn to, or {"bot": {"kind": "default", "level": N}} with a level that GET /bots/defaults lists, for a default bot that the backend plays itself. Anything else is invalid_member_settings. You choose a bot before getting ready, and can change it while the lobby waits. When the lobby starts, the game copies each roster player's bot, which GenerationState.bot reports from then on.`
 	// newestGame is said of every route that finds a game by its lobby.
 	const newestGame = " A lobby can play several games, one per round (lobby.round, raised by POST /lobby/v1/games/island-battles/lobbies/{lobby_id}/reopen once a game has ended); this route serves the lobby's newest game and its frozen roster, and an older game can't be reached once the next one starts."
 	huma.Register(api, huma.Operation{

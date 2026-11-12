@@ -61,6 +61,27 @@ func TestMigrateSchemaDropsTheGenerationNotificationQueue(t *testing.T) {
 	}
 }
 
+// Each person's bot is in their lobby member settings, so migrating drops the
+// table of bot choices, with its foreign key to the lobby's memberships, and
+// its choices, in databases created before.
+func TestMigrateSchemaDropsTheBotChoiceTable(t *testing.T) {
+	db := testutils.InitTestDB(t)
+	err := db.Exec(`CREATE TABLE island_lobby_bot_choices (lobby_id uuid, player_id uuid, kind text NOT NULL, level bigint, created_at timestamptz, updated_at timestamptz, PRIMARY KEY (lobby_id, player_id),
+CONSTRAINT fk_island_lobby_bot_choices_membership FOREIGN KEY (lobby_id, player_id) REFERENCES lobby_memberships (lobby_id, player_id) ON DELETE CASCADE)`).Error
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dependencies.MigrateSchema(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	if db.Migrator().HasTable("island_lobby_bot_choices") {
+		t.Fatal("island_lobby_bot_choices survived migrating")
+	}
+	if !db.Migrator().HasColumn("lobby_memberships", "member_settings") {
+		t.Fatal("lobby_memberships has no member_settings")
+	}
+}
+
 // gameWithReplay is the games table from before replays were derived from
 // generations.
 type gameWithReplay struct {

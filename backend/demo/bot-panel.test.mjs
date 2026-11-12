@@ -40,24 +40,25 @@ globalThis.fetch = async () => new Response(JSON.stringify({ bots: [{ level: 1 }
 const { RoomPanel, describeHealth, healthPollMilliseconds, safariNote } = await import("./bot-choice.mjs");
 const { serveCommand } = await import("./localhost-bot.mjs");
 
-const lobbyBots = (bot) => ({ members: [{ player_id: "me", display_name: "Alex", bot }] });
+// A lobby snapshot whose one member, the player, has settings.
+const snapshotWith = (settings) => ({ members: [{ player_id: "me", display_name: "Alex", kind: "human", seat_settings: null, member_settings: settings }] });
 
-function panel({ bot = null, health = async () => true } = {}) {
+function panel({ health = async () => true, refuse = null } = {}) {
   const container = new FakeElement("div");
-  const requests = [];
+  const saved = [];
   const copied = [];
   const checks = { count: 0 };
   const instance = new RoomPanel({
     container, lobbyID: "lobby", playerID: "me",
-    request: async (method, path, body) => {
-      requests.push({ method, path, body });
-      if (method === "PUT") return { status: 200, body: lobbyBots(body) };
-      return { status: 200, body: lobbyBots(bot) };
+    saveMemberSettings: async (settings) => {
+      saved.push(settings);
+      if (refuse) throw new Error(refuse);
+      return snapshotWith(settings);
     },
     checkHealth: async () => { checks.count++; return health(); },
     copy: async (text) => { copied.push(text); },
   });
-  return { instance, container, requests, copied, checks };
+  return { instance, container, saved, copied, checks };
 }
 
 test("the select offers the localhost bot and every default level", async () => {
@@ -70,9 +71,12 @@ test("the select offers the localhost bot and every default level", async () => 
 });
 
 test("choosing the localhost bot saves it and shows the indicator, the command and the Safari note", async () => {
-  const { instance, requests, copied } = panel({ health: async () => false });
+  const { instance, saved, copied } = panel({ health: async () => false });
   await instance.save("localhost");
-  assert.deepEqual(requests, [{ method: "PUT", path: "/game/lobbies/lobby/bot", body: { kind: "localhost" } }]);
+  assert.deepEqual(saved, [{ bot: { kind: "localhost" } }]);
+  // Choosing the same bot again sends nothing.
+  await instance.save("localhost");
+  assert.equal(saved.length, 1);
   assert.equal(instance.local.hidden, false);
   await delay(10);
   assert.equal(instance.health.dataset.state, "stopped");
@@ -87,8 +91,8 @@ test("choosing the localhost bot saves it and shows the indicator, the command a
 
 test("the indicator follows the bot while the panel is shown and stops when it is hidden", async () => {
   let running = false;
-  const { instance, container, checks } = panel({ bot: { kind: "localhost" }, health: async () => running });
-  await instance.refresh();
+  const { instance, container, checks } = panel({ health: async () => running });
+  instance.update(snapshotWith({ bot: { kind: "localhost" } }));
   await delay(10);
   assert.equal(instance.health.dataset.state, "stopped");
   running = true;
@@ -104,11 +108,21 @@ test("the indicator follows the bot while the panel is shown and stops when it i
 });
 
 test("a default level shows no localhost help and asks nothing of the bot", async () => {
-  const { instance, checks } = panel({ bot: { kind: "default", level: 2 } });
-  await instance.refresh();
+  const { instance, checks } = panel();
+  instance.update(snapshotWith({ bot: { kind: "default", level: 2 } }));
   await delay(20);
   assert.equal(instance.local.hidden, true);
   assert.equal(checks.count, 0);
   assert.equal(instance.select.value, "level-2");
   assert.match(instance.summary.textContent, /Alex \(you\): level 2 bot/);
+});
+
+test("a refused choice shows the lobby's detail and keeps the saved choice", async () => {
+  const { instance, saved } = panel({ refuse: "kind default needs a level that GET /bots/defaults lists: 1, 2, 3" });
+  instance.update(snapshotWith(null));
+  await instance.save("level-2");
+  assert.deepEqual(saved, [{ bot: { kind: "default", level: 2 } }]);
+  assert.equal(instance.summary.textContent, "kind default needs a level that GET /bots/defaults lists: 1, 2, 3");
+  assert.equal(instance.select.value, "");
+  assert.equal(instance.select.disabled, false);
 });

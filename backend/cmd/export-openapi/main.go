@@ -34,8 +34,8 @@ const (
 		"players calls `POST /game/from-lobby/{lobby_id}/deadline` about a second after it. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the " +
 		"`game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose. " +
 		"`GET /game/upgrades` lists what each castle upgrade level costs, and `GET /bots/defaults` the default bots that the backend plays. Before getting ready in a lobby, every member chooses " +
-		"their bot with `PUT /game/lobbies/{lobby_id}/bot`: their localhost bot, whose turns their client relays, or a default bot level; `GenerationState.bot` " +
-		"reports it during the game. `Demo` is the demo file format, which " +
+		"their bot in their lobby member settings with the lobby's `setLobbyMemberSettings`: `{\"bot\": {\"kind\": \"localhost\"}}`, their own bot, whose turns their client relays, " +
+		"or `{\"bot\": {\"kind\": \"default\", \"level\": N}}`, a default bot level; `GenerationState.bot` reports it during the game. `Demo` is the demo file format, which " +
 		"`GET /game/from-lobby/{lobby_id}/demo` returns and the demo viewer at `/game/demo-viewer/` opens. " +
 		"People outside the roster watch a game with its lobby's join code (`POST /lobby/v1/watches`): the lobby's watch channel `watch:island-battles:{lobby_id}` receives a `WatchGenerationEvent` after every turn and a `WatchGameEndedEvent` after the last, " +
 		"in the same push as the players' events, and `GET /game/from-lobby/{lobby_id}/watch` and `/watch/demo` are their reads. " +
@@ -45,10 +45,10 @@ const (
 )
 
 // PlayerOperations are the endpoints a gameplay client uses, including the
-// bot choice that every lobby member makes before getting ready, the turn delivery that a client relays to its localhost bot, the turn deadline that waiting clients apply, the upgrade cost table, the default bot list, the game log read that the replay also shows, the demo
-// download, and the default map list for choosing a lobby's map. Lobby setup has its own
-// generated SDK in lobby/api/openapi.json.
-var PlayerOperations = []string{"createLobbyConnectionToken", "chooseIslandLobbyBot", "listIslandLobbyBots", "getIslandLobbyGeneration", "getIslandLobbyTurnDelivery", "applyIslandLobbyTurnDeadline", "registerGenerationCommand", "getIslandLobbyGenerationLogs", "getIslandLobbyDemo", "watchIslandLobbyGeneration", "watchIslandLobbyDemo", "listUpgrades", "listMapTemplates", "listDefaultBots"}
+// turn delivery that a client relays to its localhost bot, the turn deadline that waiting clients apply, the upgrade cost table, the default bot list, the game log read that the replay also shows, the demo
+// download, and the default map list for choosing a lobby's map. Lobby setup, including each member's
+// bot in their member settings, has its own generated SDK in lobby/api/openapi.json.
+var PlayerOperations = []string{"createLobbyConnectionToken", "getIslandLobbyGeneration", "getIslandLobbyTurnDelivery", "applyIslandLobbyTurnDeadline", "registerGenerationCommand", "getIslandLobbyGenerationLogs", "getIslandLobbyDemo", "watchIslandLobbyGeneration", "watchIslandLobbyDemo", "listUpgrades", "listMapTemplates", "listDefaultBots"}
 
 // PlayerEventSchemas are delivered by Centrifugo rather than HTTP responses.
 var PlayerEventSchemas = []string{"GenerationEvent", "GameEndedEvent", "WatchGenerationEvent", "WatchGameEndedEvent"}
