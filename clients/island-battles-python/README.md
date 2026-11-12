@@ -87,6 +87,32 @@ uv run island-battles-bot check mybot:play
 
 calls the bot once on a fixture turn (or on your own `BotTurn` file with `--turn`) and exits with status 1, and its own message, if the bot raises (with the traceback), returns something that isn't a valid `BotTurnResult`, returns memory over 64 KiB, or takes longer than 2 seconds. On success it prints `ok: N commands, M log lines, memory B of 65536 bytes, T s`, where M counts the lines the game log would store for the turn: the lines the bot logged with the logger while it played, plus the lines in its result's `logs`.
 
+### Package your bot
+
+```sh
+uv run island-battles-bot package [--entry bot:play] [--output dist/island-battles-bot.zip]
+```
+
+run in the bot's project, builds **one zip that the server's runners can run** without installing anything (server-run bots, #112). It needs [uv](https://docs.astral.sh/uv/) and a `uv.lock` (`uv lock`), and it checks first that the entry's module and function are in the project.
+
+- **Target:** AWS Lambda, Linux arm64, the `python3.14` runtime. uv installs the locked dependencies for that platform (`--python-platform aarch64-manylinux_2_28 --python-version 3.14`) **from wheels only**, so it works from any machine. A dependency with no arm64 wheel stops the command with an error that names it. The bot project itself is built as a wheel and must be pure Python; the module of `--entry` must be in the wheel (the template's `only-include = ["bot.py"]` is).
+- **Layout:** `island-battles-bot.json` at the root, `{"format": 1, "language": "python", "python": "3.14", "entry": "bot:play"}`, and `site/`, the project and its dependencies as for `PYTHONPATH=site`. The locked `island-battles-python` must be a version with the worker (`island_battles_client/worker.py`); the command says so if it isn't.
+- **Size limits:** the zip at most 250 MiB, unpacked at most 1 GiB. Over either, the command fails and names the largest files.
+
+**Worker mode.** The runner starts `python -m island_battles_client.worker bot:play` with `PYTHONPATH=<unpacked>/site` (not with `-I`, which ignores `PYTHONPATH`) and talks to it in JSON Lines over stdin and stdout, UTF-8:
+
+1. The worker loads the bot and writes `{"ready": true}`. A bot that doesn't load gets one `{"error": "..."}` line and exit status 1.
+2. For each turn the runner writes one line `{"turn": <BotTurn>}`; the worker answers one line, `{"result": <BotTurnResult>}` or `{"error": "<message>"}`. The result is checked as `check` checks it (memory size, commands), and the lines the bot logged come first in `logs`, as under `serve`.
+3. The bot's own stdout goes to stderr, so prints never corrupt the protocol. Stderr is free text.
+4. The worker exits when stdin closes.
+
+Try it on the fixture turn after unzipping (on Linux arm64; elsewhere use a build for your platform):
+
+```sh
+uv run island-battles-bot fixture | python -c 'import json,sys; print(json.dumps({"turn": json.load(sys.stdin)}))' > request.jsonl
+PYTHONPATH=unpacked/site python -m island_battles_client.worker bot:play < request.jsonl
+```
+
 ### Run a seat without a browser
 
 ```sh

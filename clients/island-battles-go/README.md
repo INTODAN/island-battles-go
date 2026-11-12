@@ -4,12 +4,13 @@ Write a bot for [Island Battles](../../README.md) in Go. Island Battles is a rea
 
 **This is a rule change, and it breaks bots that count on neutral castles growing.** A neutral castle no longer gains a soldier each turn; it keeps its soldiers until a team captures it and grows from the next turn on, like any castle a team owns. The API is the same, but a bot that forecasts a neutral castle's defenders with growth overestimates them. What to do: count growth only for castles with a team (the default bots in `examples/defaultbots` show the forecast).
 
-With this SDK, a bot is **one Go function**: it gets the turn (the board, your team, the upgrade cost table and what it remembered last turn) and returns its commands, a few game log lines and what it wants to remember. Your program's `main` hands that function to `islandbattles.Main`, which gives the program four subcommands:
+With this SDK, a bot is **one Go function**: it gets the turn (the board, your team, the upgrade cost table and what it remembered last turn) and returns its commands, a few game log lines and what it wants to remember. Your program's `main` hands that function to `islandbattles.Main`, which gives the program five subcommands:
 
 - `serve` runs the bot on your machine, at `http://127.0.0.1:41414`. The game in your browser sends it each turn and submits its answer.
 - `check` plays the bot once on a small fixture turn and tells you what is wrong with it.
 - `fixture` prints that fixture turn as JSON, to try `serve` with curl.
 - `run` plays your seat straight against the server, without a browser.
+- `worker` plays turns for the server's runners over stdin and stdout; [`island-battles-package`](#package-your-bot) zips the program for them.
 
 The SDK needs Go 1.25 or newer. Besides the standard library it uses one module, [centrifuge-go](https://github.com/centrifugal/centrifuge-go), the realtime client `run` connects with. There is a [Python SDK](../island-battles-python/README.md) too, with the same ideas and names; the [table below](#python-names-and-go-names) maps one to the other.
 
@@ -215,6 +216,34 @@ Try it with curl:
 go run . fixture > turn.json
 curl -X POST localhost:41414/turn -H 'Content-Type: application/json' -d @turn.json
 curl localhost:41414/health
+```
+
+## Package your bot
+
+```sh
+go run github.com/INTODAN/island-battles-go/clients/island-battles-go/cmd/island-battles-package [--output dist/island-battles-bot.zip] [package path]
+```
+
+run in your bot's module, builds **one zip that the server's runners can run** (server-run bots, #112). The package is your bot's `main` package (`.` by default), and its `main` must call `islandbattles.Main`, which the command checks. It builds with `GOOS=linux GOARCH=arm64 CGO_ENABLED=0`, so you can package from any machine, and writes:
+
+- `island-battles-bot.json`: `{"format": 1, "language": "native", "command": ["./bot", "worker"]}`,
+- `bot`: the static executable.
+
+The zip may be at most 250 MiB and 1 GiB unpacked; over either, the command names the largest files.
+
+### worker
+
+`./bot worker` is the mode the runner starts. It talks JSON Lines over stdin and stdout, UTF-8:
+
+1. It writes `{"ready": true}`.
+2. For each turn the runner writes one line `{"turn": <BotTurn>}`; the worker answers one line, `{"result": <BotTurnResult>}` or `{"error": "<message>"}` (for an error, a panic with its stack, an invalid result or memory over 64 KiB). The result is checked like `check` checks it, and the lines the bot logged with `Logger(ctx)` come first in `logs`, as under `serve`.
+3. The bot's own stdout goes to stderr, so prints never corrupt the protocol. Stderr is free text.
+4. It exits when stdin closes.
+
+Try it, after `go build -o mybot .`:
+
+```sh
+./mybot fixture | tr -d '\n' | sed 's/^/{"turn": /; s/$/}/' | ./mybot worker
 ```
 
 ## Examples

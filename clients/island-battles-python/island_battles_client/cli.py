@@ -1,8 +1,8 @@
 """``island-battles-bot``: serve, check and run a bot function.
 
 ``serve`` is the bot's local HTTP server for a game client in the browser,
-``check`` calls the bot once on a fixture turn, and ``run`` plays a seat
-without a browser.
+``check`` calls the bot once on a fixture turn, ``package`` zips the bot for
+the server's runners, and ``run`` plays a seat without a browser.
 """
 
 from __future__ import annotations
@@ -29,6 +29,8 @@ from pydantic import ValidationError
 
 from ._generated import BotTurn, GameOutcome, Generation
 from .bot import MEMORY_LIMIT_BYTES, Play, run_turn
+from .bundle import DEFAULT_ENTRY, DEFAULT_OUTPUT
+from .bundle import run as package
 from .client import IslandBattlesClient
 from .errors import BotMemoryTooLargeError, GameError, InvalidBotResultError
 from .fixture import fixture_turn, fixture_turn_data
@@ -527,6 +529,25 @@ def build_parser() -> argparse.ArgumentParser:
         "fixture", help="print the fixture BotTurn as JSON, for curl"
     )
     fixture.set_defaults(handler=print_fixture)
+
+    packaging = commands.add_parser(
+        "package",
+        help="zip the bot and its locked dependencies for Linux arm64, "
+        "for the server's runners",
+    )
+    packaging.add_argument(
+        "--entry",
+        default=DEFAULT_ENTRY,
+        metavar="MODULE:FUNCTION",
+        help=f"the bot function (default {DEFAULT_ENTRY})",
+    )
+    packaging.add_argument(
+        "--output",
+        default=DEFAULT_OUTPUT,
+        metavar="FILE",
+        help=f"the zip to write (default {DEFAULT_OUTPUT})",
+    )
+    packaging.set_defaults(handler=package)
 
     running = commands.add_parser("run", help="play a seat without a browser")
     running.add_argument("bot", help="module:function")
