@@ -257,19 +257,20 @@ The first deploy generates these into `deploy/local/secrets/`. Every later deplo
 - The Postgres passwords: the superuser's, the backend's role's, and the admin MCP server's read-only role's, `postgres_admin_password`.
 - Centrifugo's API key, the connection token secret and the lobby proxy secret. Reusing them keeps issued tokens valid when you move to a new VM.
 - The backend's admin API key, `admin_api_key`. Only the Lambda reads it, from `lambda.env`. Send it in the `X-Admin-API-Key` header to create default maps with `POST /map/create` (see [map files](../backend/README.md#map-files)). Without it, the Lambda refuses every map creation.
+- The secret of the bots' one-turn submit tokens, `submit_token_secret` (#215). Only the Lambda reads it, from `lambda.env`. A new one only invalidates the tokens of turns being played at that moment.
 - Postgres's TLS key and its self-signed certificate.
 
 The scripts keep them in the [deploy bucket](#the-deploy-bucket), so every machine and worktree gets them with its first pull.
 
 A deploy stops if any of these files is missing, because new secrets would replace the live VM's password and keys. Pass `-e app_generate_secrets=true` only for a first deploy, or if the secrets are lost for good. In that case the deploy resets the backend's password and Centrifugo's keys, and you redeploy the backend with the new `lambda.env`: `scripts/aws.sh deploy`. Players then need new connection tokens, which clients fetch on their own.
 
-`admin_api_key` (#37) and `postgres_admin_password` (#79) were added after the first secrets, so an existing `deploy/local/secrets/` without them fails this check. Run one deploy with `-e app_generate_secrets=true`: it generates only the missing files and reads the others unchanged, so no password or key on the VM changes. A new `admin_api_key` also needs the Lambda redeployed with the new `lambda.env`.
+`admin_api_key` (#37), `postgres_admin_password` (#79) and `submit_token_secret` (#215) were added after the first secrets, so an existing `deploy/local/secrets/` without them fails this check. Run one deploy with `-e app_generate_secrets=true`: it generates only the missing files and reads the others unchanged, so no password or key on the VM changes. A new `admin_api_key` or `submit_token_secret` also needs the Lambda redeployed with the new `lambda.env`; the backend doesn't start without `ISLAND_BATTLES_SUBMIT_TOKEN_SECRET`.
 
 Nothing secret is committed. Never copy anything from `deploy/local/` into the repo.
 
 ### The Lambda's settings
 
-`deploy/local/lambda.env` holds the seven settings the backend reads from the VM deploy, including the admin API key (see `backend/dependencies/config.go`). [`scripts/aws.sh deploy`](#deploying-the-backend) passes every line of it to the Lambda:
+`deploy/local/lambda.env` holds the nine settings the backend reads from the VM deploy, including the admin API key (see `backend/dependencies/config.go`). [`scripts/aws.sh deploy`](#deploying-the-backend) passes every line of it to the Lambda:
 
 | Variable | Value |
 |---|---|
@@ -280,6 +281,8 @@ Nothing secret is committed. Never copy anything from `deploy/local/` into the r
 | `ISLAND_BATTLES_CONNECTION_TOKEN_HMAC_SECRET` | The connection token secret |
 | `ISLAND_BATTLES_LOBBY_PROXY_SECRET` | The secret Centrifugo sends to the subscribe proxy |
 | `ISLAND_BATTLES_ADMIN_API_KEY` | The admin API key that `POST /map/create` requires |
+| `ISLAND_BATTLES_SUBMIT_TOKEN_SECRET` | The secret that signs the bots' one-turn submit tokens |
+| `ISLAND_BATTLES_PUBLIC_URL` | `game_url` from `vm.yml`, where turn deliveries tell bots to submit their commands |
 
 The URLs use the hostname, not an IP, so they stay the same when you move to a new VM.
 

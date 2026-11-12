@@ -1,4 +1,4 @@
-"""A small board for ``island-battles-bot check`` and for trying ``serve`` with curl."""
+"""A small board for ``island-battles-bot check``."""
 
 from __future__ import annotations
 

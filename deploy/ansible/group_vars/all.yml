@@ -59,3 +59,8 @@ lobby_proxy_secret: >-
 admin_api_key: >-
   {{ lookup('ansible.builtin.password', deploy_secrets_dir ~ '/admin_api_key',
      length=48, chars=['ascii_letters', 'digits']) }}
+# Signs the one-turn submit tokens that bots submit their commands with
+# (#215). Only the Lambda reads it.
+submit_token_secret: >-
+  {{ lookup('ansible.builtin.password', deploy_secrets_dir ~ '/submit_token_secret',
+     length=64, chars=['ascii_letters', 'digits']) }}

@@ -20,7 +20,7 @@ All scripts are in `scripts/`, run from any directory, and use `uv`. Install fir
 
 1. `scripts/serve.sh` and leave it running. Saving a `.py` file reloads the bot.
 2. Open the lobby page (`https://island-battles.elidan.org`, or `http://localhost:8888/lobby/ui/` for a local backend). Create a lobby, pick a team, add a **bot seat** (default bot level 1 is the easiest) to the other team, and pick **localhost bot** as your bot.
-3. Get ready and start. The page relays each turn to your bot, so keep the tab open. Failed turns show their error in the game log.
+3. Get ready and start. The page delivers each turn to your bot, which submits its answer itself, so keep the tab open. A turn where `play` raises or runs out of time is passed, with an `error` line from `island_battles.bots` in the game log; the terminal shows the traceback.
 4. `curl http://127.0.0.1:41414/health` answers `{"name": "bot:play", "ok": true}` when the bot is up.
 
 Without a browser: `scripts/run.sh BASE_URL TOKEN LOBBY_ID` (the guest token and lobby id come from the lobby flow). The player must have picked the localhost bot before getting ready.
@@ -40,7 +40,7 @@ Without a browser: `scripts/run.sh BASE_URL TOKEN LOBBY_ID` (the guest token and
 
 - **Fixture turn:** `scripts/fixture.sh` writes `turn.json`. Edit it (move a castle, set `memory`, add a group), then `uv run island-battles-bot check bot:play --turn turn.json`. In tests, `from island_battles_client.fixture import fixture_turn, fixture_turn_data` gives the same turn as a model or as a dict to change before `BotTurn.model_validate`.
 - **A saved demo:** the lobby page's replay has **Save demo**, which downloads the game as a JSON file. Its `frames` list is every generation's board (`castles`, `soldier_groups`, `clashes`). Pick a frame and wrap it in a `BotTurn` (`game_id`, `team_color`, the `upgrades` table from `fixture.sh`, `memory`, `turn_deadline_at: null`, `generation`), then run it with `--turn`.
-- **POST a turn by hand:** `curl -X POST localhost:41414/turn -H 'Content-Type: application/json' -d @turn.json` while `serve.sh` runs.
+- **Deliver a turn by hand:** `/turn` takes a turn delivery from the game, not a bare `BotTurn`, and submits the answer itself. With a local backend, your guest credential and a started lobby: `curl -s -H "Authorization: Bearer $TOKEN" localhost:8888/game/from-lobby/$LOBBY_ID/turn-delivery | curl -X POST localhost:41414/turn -H 'Content-Type: application/json' -d @-` while `serve.sh` runs. For a bare `BotTurn`, use `island-battles-bot check bot:play --turn turn.json`.
 
 ## Building
 

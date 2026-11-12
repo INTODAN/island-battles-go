@@ -1,22 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { ApiError } from "../api/errors";
 import { createStore } from "../realtime/store";
-import {
-  BotError,
-  type BotTurn,
-  type BotTurnResult,
-  type GenerationState,
-  type Upgrade,
-} from "./localhost";
+import { BotError, type GenerationState, type TurnDelivery } from "./localhost";
 import {
   createBotRelay,
   deadlineRetryDelay,
   type RelayDeps,
-  submitRetryDelay,
-  type TurnSubmission,
+  readRetryDelay,
 } from "./relay";
-
-const upgrades = [{ type: "speed" }] as unknown as Upgrade[];
 
 function state(
   generationId: number,
@@ -42,6 +33,25 @@ function state(
     turn_deadline_at: null,
     ...extra,
   } as GenerationState;
+}
+
+/** The server's delivery of the game's current generation. */
+function deliveryOf(current: GenerationState): TurnDelivery {
+  return {
+    turn: {
+      game_id: current.game_id,
+      generation: current.generation,
+      team_color: current.team_color,
+      memory: current.memory,
+      upgrades: [],
+      turn_deadline_at: current.turn_deadline_at,
+    },
+    submit: {
+      url: "http://localhost:8888/generation/commands",
+      token: `ibst1.${current.generation_id}`,
+      deadline_at: current.turn_deadline_at,
+    },
+  } as TurnDelivery;
 }
 
 /** A fake clock whose timers run only when the test advances it. */
@@ -84,111 +94,116 @@ function setup(overrides: Partial<RelayDeps> = {}) {
   const game = createStore<GenerationState | null>(null);
   const time = clock();
   const log = {
-    turns: [] as BotTurn[],
-    submissions: [] as TurnSubmission[],
+    reads: 0,
+    deliveries: [] as TurnDelivery[],
     deadlines: 0,
-    upgradeReads: 0,
   };
-  let ids = 0;
   const relay = createBotRelay({
     game,
-    async loadUpgrades() {
-      log.upgradeReads++;
-      return upgrades;
+    async loadDelivery() {
+      log.reads++;
+      const current = game.get();
+      if (!current) throw new Error("no game");
+      return deliveryOf(current);
     },
-    async playBot(turn): Promise<BotTurnResult> {
-      log.turns.push(turn);
-      return {
-        commands: [],
-        logs: [
-          {
-            level: "info",
-            logger: "bot",
-            message: `turn ${turn.generation.id}`,
-          },
-        ],
-        memory: { seen: turn.generation.id },
-      };
-    },
-    async submit(submission) {
-      log.submissions.push(submission);
+    async deliver(delivery) {
+      log.deliveries.push(delivery);
     },
     async applyDeadline() {
       log.deadlines++;
     },
     now: time.now,
-    newRequestId: () => `request-${++ids}`,
     schedule: time.schedule,
     ...overrides,
   });
   return { game, relay, time, log };
 }
 
+const conflict = (problemType?: string) =>
+  new ApiError({
+    kind: "problem",
+    status: 409,
+    problemType,
+    detail: "player turn is already complete",
+  });
+
 describe("the bot relay", () => {
-  test("plays a new generation: builds the BotTurn, submits the result complete with the memory", async () => {
+  test("delivers a new generation's turn, as the server built it, to the bot", async () => {
     const { game, relay, log } = setup();
     const deadline = new Date(1_000_000 + 30_000).toISOString();
     game.set(state(3, { turn_deadline_at: deadline }));
     await flush();
 
-    expect(log.turns).toHaveLength(1);
-    const turn = log.turns[0];
-    expect(turn?.game_id).toBe(7);
-    expect(turn?.team_color).toBe(2);
-    expect(turn?.memory).toEqual({ seen: 2 });
-    expect(turn?.turn_deadline_at).toBe(deadline);
-    expect(turn?.upgrades).toBe(upgrades);
-    expect(log.submissions).toEqual([
-      {
-        game_id: 7,
-        generation_id: 3,
-        request_id: "request-1",
-        commands: [],
-        logs: [{ level: "info", logger: "bot", message: "turn 3" }],
-        memory: { seen: 3 },
-        complete: true,
-      },
+    expect(log.reads).toBe(1);
+    expect(log.deliveries).toEqual([
+      deliveryOf(state(3, { turn_deadline_at: deadline })),
     ]);
-    expect(relay.status.get()).toEqual({ kind: "submitted", generationId: 3 });
+    expect(relay.status.get()).toEqual({ kind: "delivered", generationId: 3 });
   });
 
-  test("reads the upgrade table once for the whole game", async () => {
-    const { game, log } = setup();
-    game.set(state(1));
-    await flush();
-    game.set(state(2));
-    await flush();
-    game.set(state(3));
-    await flush();
-    expect(log.turns).toHaveLength(3);
-    expect(log.upgradeReads).toBe(1);
-  });
-
-  test("ignores a repeated state of the same generation and plays each generation once", async () => {
+  test("ignores a repeated state of the same generation and delivers each generation once", async () => {
     const { game, log } = setup();
     game.set(state(1));
     await flush();
     game.set(state(1, { log_lines_stored: 4 }));
     await flush();
-    expect(log.turns).toHaveLength(1);
-    expect(log.submissions).toHaveLength(1);
+    expect(log.deliveries).toHaveLength(1);
+    game.set(state(2));
+    await flush();
+    expect(log.deliveries.map((item) => item.turn.generation.id)).toEqual([
+      1, 2,
+    ]);
   });
 
-  test("submits nothing for a default bot", async () => {
+  test("delivers nothing for a default bot", async () => {
     const { game, relay, log } = setup();
     game.set(state(1, { bot: { kind: "default", level: 2 } }));
     await flush();
-    expect(log.turns).toHaveLength(0);
-    expect(log.submissions).toHaveLength(0);
+    expect(log.reads).toBe(0);
+    expect(log.deliveries).toHaveLength(0);
     expect(relay.status.get()).toEqual({ kind: "idle" });
   });
 
-  test("does not play a turn the player already completed", async () => {
+  test("does not deliver a turn the player already completed", async () => {
     const { game, relay, log } = setup();
     game.set(state(4, { submitted: true }));
     await flush();
-    expect(log.turns).toHaveLength(0);
-    expect(relay.status.get()).toEqual({ kind: "submitted", generationId: 4 });
+    expect(log.reads).toBe(0);
+    expect(relay.status.get()).toEqual({ kind: "delivered", generationId: 4 });
+  });
+
+  test("a turn with nothing to play waits for the others", async () => {
+    const { game, relay, log } = setup({
+      async loadDelivery() {
+        throw conflict();
+      },
+    });
+    game.set(state(1));
+    await flush();
+    expect(log.deliveries).toHaveLength(0);
+    expect(relay.status.get()).toEqual({ kind: "delivered", generationId: 1 });
+  });
+
+  test("a game that ended while reading the delivery is no error", async () => {
+    const { game, relay } = setup({
+      async loadDelivery() {
+        throw conflict("urn:island-battles:problem:game-ended");
+      },
+    });
+    game.set(state(1));
+    await flush();
+    expect(relay.status.get()).toEqual({ kind: "idle" });
+  });
+
+  test("does not deliver another generation's turn", async () => {
+    const { game, log } = setup({
+      async loadDelivery() {
+        return deliveryOf(state(2));
+      },
+    });
+    game.set(state(1));
+    await flush();
+    expect(log.deliveries).toHaveLength(0);
   });
 
   test("stops at the outcome", async () => {
@@ -205,17 +220,20 @@ describe("the bot relay", () => {
       }),
     );
     await flush();
-    expect(log.turns).toHaveLength(1);
+    expect(log.deliveries).toHaveLength(1);
     expect(relay.status.get()).toEqual({ kind: "idle" });
   });
 
-  test("shows a bot that crashed and plays again on retry, with a fresh request", async () => {
-    let fail = true;
-    const { game, relay, log } = setup({
-      async playBot() {
-        if (fail)
-          throw new BotError("crashed", "Your bot failed: ZeroDivisionError");
-        return { commands: [], logs: [], memory: null };
+  test("shows a bot that refused the turn and delivers again on retry", async () => {
+    let refuse = true;
+    const { game, relay, log, time } = setup({
+      async deliver(delivery) {
+        log.deliveries.push(delivery);
+        if (refuse)
+          throw new BotError(
+            "refused",
+            "Your bot refused the turn (HTTP 400). submit.url is not an allowed host",
+          );
       },
     });
     game.set(state(1));
@@ -223,44 +241,46 @@ describe("the bot relay", () => {
     expect(relay.status.get()).toEqual({
       kind: "error",
       generationId: 1,
-      message: "Your bot failed: ZeroDivisionError",
+      message:
+        "Your bot refused the turn (HTTP 400). submit.url is not an allowed host",
       retrying: false,
     });
-    expect(log.submissions).toHaveLength(0);
+    expect(time.pending()).toBe(0);
 
-    fail = false;
+    refuse = false;
     relay.retry();
     await flush();
-    expect(log.submissions).toHaveLength(1);
-    expect(log.submissions[0]?.memory).toBeNull();
-    expect(relay.status.get().kind).toBe("submitted");
+    expect(log.deliveries).toHaveLength(2);
+    expect(log.reads).toBe(2);
+    expect(relay.status.get().kind).toBe("delivered");
   });
 
   test("keeps asking a bot that is not running yet", async () => {
     let up = false;
     const { game, relay, time, log } = setup({
-      async playBot() {
+      async deliver(delivery) {
         if (!up)
           throw new BotError("unreachable", "Your bot is not reachable.");
-        return { commands: [], logs: [], memory: null };
+        log.deliveries.push(delivery);
       },
     });
     game.set(state(1));
     await flush();
     expect(relay.status.get()).toMatchObject({ kind: "error", retrying: true });
+    await time.advance(1999);
+    expect(log.deliveries).toHaveLength(0);
 
     up = true;
-    await time.advance(2000);
-    expect(log.submissions).toHaveLength(1);
-    expect(relay.status.get().kind).toBe("submitted");
+    await time.advance(1);
+    expect(log.deliveries).toHaveLength(1);
+    expect(relay.status.get().kind).toBe("delivered");
   });
 
-  test("resends a submission lost to the network with the same request id", async () => {
+  test("reads the delivery again after a server failure", async () => {
     let failures = 2;
-    const attempts: string[] = [];
-    const { game, relay, time } = setup({
-      async submit(submission) {
-        attempts.push(submission.request_id);
+    const { game, relay, time, log } = setup({
+      async loadDelivery() {
+        log.reads++;
         if (failures-- > 0) {
           throw new ApiError({
             kind: "transport",
@@ -268,60 +288,28 @@ describe("the bot relay", () => {
             detail: "offline",
           });
         }
+        return deliveryOf(state(1));
       },
     });
     game.set(state(1));
     await flush();
     expect(relay.status.get()).toMatchObject({ kind: "error", retrying: true });
-    await time.advance(submitRetryDelay(0));
-    await time.advance(submitRetryDelay(1));
-    expect(attempts).toEqual(["request-1", "request-1", "request-1"]);
-    expect(relay.status.get().kind).toBe("submitted");
-  });
-
-  test("shows a rejected result and does not resend it", async () => {
-    const { game, relay, time } = setup({
-      async submit() {
-        throw new ApiError({
-          kind: "problem",
-          status: 409,
-          problemType: "urn:island-battles:problem:insufficient-soldiers",
-          detail: "castle 3 has 12 unreserved soldiers; speed level 3 costs 20",
-        });
-      },
-    });
-    game.set(state(1));
-    await flush();
-    expect(relay.status.get()).toEqual({
-      kind: "error",
-      generationId: 1,
-      message: "castle 3 has 12 unreserved soldiers; speed level 3 costs 20",
-      retrying: false,
-    });
-    expect(time.pending()).toBe(0);
-  });
-
-  test("treats a submission after the game ended as no error", async () => {
-    const { game, relay } = setup({
-      async submit() {
-        throw new ApiError({
-          kind: "problem",
-          status: 409,
-          problemType: "urn:island-battles:problem:game-ended",
-        });
-      },
-    });
-    game.set(state(1));
-    await flush();
-    expect(relay.status.get()).toEqual({ kind: "idle" });
+    await time.advance(readRetryDelay(0));
+    await time.advance(readRetryDelay(1));
+    expect(log.reads).toBe(3);
+    expect(log.deliveries).toHaveLength(1);
+    expect(relay.status.get().kind).toBe("delivered");
+    expect([0, 1, 2, 3, 4].map(readRetryDelay)).toEqual([
+      1000, 2000, 4000, 8000, 8000,
+    ]);
   });
 
   test("a new generation drops the previous turn's retries", async () => {
     let up = false;
     const { game, time, log } = setup({
-      async playBot(turn) {
+      async deliver(delivery) {
         if (!up) throw new BotError("unreachable", "down");
-        return { commands: [], logs: [], memory: { seen: turn.generation.id } };
+        log.deliveries.push(delivery);
       },
     });
     game.set(state(1));
@@ -330,7 +318,7 @@ describe("the bot relay", () => {
     game.set(state(2));
     await flush();
     await time.advance(10_000);
-    expect(log.submissions.map((item) => item.generation_id)).toEqual([2]);
+    expect(log.deliveries.map((item) => item.turn.generation.id)).toEqual([2]);
   });
 
   describe("turn deadlines", () => {
@@ -379,10 +367,10 @@ describe("the bot relay", () => {
       expect(log.deadlines).toBe(0);
     });
 
-    test("does not call the deadline before this player has submitted", async () => {
+    test("does not call the deadline while the bot refuses the turn", async () => {
       const { game, time, log } = setup({
-        async playBot() {
-          throw new BotError("crashed", "boom");
+        async deliver() {
+          throw new BotError("refused", "no");
         },
       });
       game.set(
@@ -419,7 +407,7 @@ describe("the bot relay", () => {
     game.set(state(2));
     await flush();
     await time.advance(60_000);
-    expect(log.turns).toHaveLength(1);
+    expect(log.deliveries).toHaveLength(1);
     expect(log.deadlines).toBe(0);
   });
 });

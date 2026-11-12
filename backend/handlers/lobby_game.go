@@ -6,6 +6,7 @@ import (
 	"islandBattles/backend/models"
 	"islandBattles/backend/observability"
 	"islandBattles/backend/services"
+	"islandBattles/backend/submittoken"
 	"islandBattles/lobby/domain"
 	"strconv"
 	"strings"
@@ -27,6 +28,15 @@ type LobbyGame struct {
 	// Watchers lets the watcher reads admit the lobby's watchers. Nil admits
 	// only roster players.
 	Watchers domain.WatchAuthorizer
+	// SubmitTokens issues the submit tokens of turn deliveries and verifies
+	// them on POST /generation/commands. Nil refuses every turn delivery and
+	// every submit token.
+	SubmitTokens *submittoken.Signer
+	// PublicURL is the game's public URL, such as
+	// https://island-battles.example.org, which a turn delivery's submit URL
+	// starts with. Empty uses the request's own scheme and Host, which suits
+	// a server that players reach directly.
+	PublicURL string
 }
 
 // runRetention runs after the handler has its response, and after a turn has

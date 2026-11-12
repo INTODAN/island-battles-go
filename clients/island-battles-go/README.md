@@ -4,11 +4,13 @@ Write a bot for [Island Battles](../../README.md) in Go. Island Battles is a rea
 
 **This is a rule change, and it breaks bots that count on neutral castles growing.** A neutral castle no longer gains a soldier each turn; it keeps its soldiers until a team captures it and grows from the next turn on, like any castle a team owns. The API is the same, but a bot that forecasts a neutral castle's defenders with growth overestimates them. What to do: count growth only for castles with a team (the default bots in `examples/defaultbots` show the forecast).
 
+**Turn deliveries are a breaking change for `serve`; upgrade the SDK.** `POST /turn` now takes a `TurnDelivery` (the turn plus a one-turn submit token), answers `202` at once, and submits the bot's answer to the game itself; it no longer answers a `BotTurnResult`. The 3D web client and the lobby page deliver turns this way, so an older SDK's `serve` doesn't work with them, and this one's doesn't work with older game clients. A bot that returns an error or runs out of time now passes its turn instead of leaving it open. What to do: upgrade the module and rebuild your bot; your `Play` function doesn't change.
+
 With this SDK, a bot is **one Go function**: it gets the turn (the board, your team, the upgrade cost table and what it remembered last turn) and returns its commands, a few game log lines and what it wants to remember. Your program's `main` hands that function to `islandbattles.Main`, which gives the program five subcommands:
 
-- `serve` runs the bot on your machine, at `http://127.0.0.1:41414`. The game in your browser sends it each turn and submits its answer.
+- `serve` runs the bot on your machine, at `http://127.0.0.1:41414`. The game in your browser delivers it each turn, and it submits its answer to the game itself.
 - `check` plays the bot once on a small fixture turn and tells you what is wrong with it.
-- `fixture` prints that fixture turn as JSON, to try `serve` with curl.
+- `fixture` prints that fixture turn as JSON, for `check --turn`.
 - `run` plays your seat straight against the server, without a browser.
 - `worker` plays turns for the server's runners over stdin and stdout; [`island-battles-package`](#package-your-bot) zips the program for them.
 
@@ -72,7 +74,7 @@ go run . serve
 
 1. Start `go run . serve` and leave it running.
 2. Open the game's lobby page in Chrome, Edge or Firefox (Safari can't reach a bot on `127.0.0.1` from an HTTPS page), join a lobby and, in the bot picker, choose **your localhost bot** before you get ready. The [backend README](../../backend/README.md#choosing-a-bot) explains the choice; a player who picks a default level is played by the server instead.
-3. When the game starts, your browser tab sends each turn to your bot and submits its answer. Keep the tab open: it relays the turns. If your bot fails, the tab shows the error.
+3. When the game starts, your browser tab delivers each turn to your bot, which submits its answer to the game itself. Keep the tab open: it delivers the turns. If your bot fails, it passes the turn, and the game's **Bot logs** show the error.
 
 A turn has a deadline (30 seconds unless the lobby's host chose another): a bot that doesn't answer in time makes its whole team lose.
 
@@ -103,9 +105,9 @@ type Play func(ctx context.Context, turn islandbattles.Turn) (islandbattles.Resu
 - `turn.Upgrades` is the upgrade cost table: every upgrade type with each level's `Value` and `SoldierCost`. It is the same for the whole game.
 - `turn.Memory` is what your bot remembered last turn ([memory](#memory)), and `turn.GameID` the game.
 - `turn.TurnDeadlineAt` is when the turn times out, or `nil` when there is no limit.
-- `ctx` is cancelled when `serve` or `check` stops waiting for the turn, and under `run` at the turn's deadline. A bot that may think for long should watch it. `islandbattles.Logger(ctx)` is the bot's [logger](#logging).
+- `ctx` is cancelled when `serve` or `check` stops waiting for the turn (under `serve`, at `--turn-timeout` or a second before the turn's deadline, whichever comes first), and under `run` at the turn's deadline. A bot that may think for long should watch it. `islandbattles.Logger(ctx)` is the bot's [logger](#logging).
 
-Return an `error` to pass the turn: `serve` answers it as an error, and the game shows it to you. A panic is reported the same way, with its stack.
+Return an `error` to pass the turn: `serve` submits no commands, keeps the memory the bot was given, and the game log gets one `error` line from the logger `island_battles.bots` with the error, which the game's **Bot logs** show you. A panic passes the turn the same way, and `serve` prints its stack.
 
 A **castle** has an `ID` that never changes, its `TeamColor`, `Soldiers`, a position `X`, `Y` in map units, and `Upgrades`, the level of every upgrade type (`castle.Upgrades.Level(islandbattles.SpeedUpgrade)` is 1 for a type the map doesn't list). A **soldier group** has the same, plus `OriginCastleID`, `DestinationCastleID` and `ClashRadius`; its upgrades are its origin castle's levels when it left. Every turn each castle grows one soldier, then the groups move (a group of speed level 1 moves 0.5 map units a turn) and land in ID order: a friendly group reinforces the castle, and a hostile one takes it when it has more soldiers than the castle.
 
@@ -201,22 +203,27 @@ plays the bot once on the fixture turn (or on a `BotTurn` JSON file of your own)
 ## serve
 
 ```sh
-go run . serve [--port 41414] [--turn-timeout 8s] [--allow-origin https://game.example.org]
+go run . serve [--port 41414] [--turn-timeout 8s] [--allow-origin https://game.example.org] [--allow-submit-host game.example.org]
 ```
 
-serves the bot on `http://127.0.0.1:41414`, the port the game looks for a localhost bot on. Build the program once (`go build -o mybot .`) to start it faster.
+serves the bot on `http://127.0.0.1:41414`, the port the game looks for a localhost bot on. Build the program once (`go build -o mybot .`) to start it faster. The game delivers each turn to it, and the bot submits its answer to the game itself; nobody waits on the bot:
 
-- `POST /turn` takes a `BotTurn` as JSON (`Content-Type: application/json`, at most 2 MiB) and answers a `BotTurnResult`. A body that isn't a turn answers `422`, a body over 2 MiB `413`, one without a length `411`, and a POST that isn't JSON `415`. A bot that returns an error, panics or returns an invalid result answers `500` with the error in the body, so the game can show it. A turn that takes longer than `--turn-timeout` (default 8 s, under the lobby's shortest turn timeout of 10 s) answers `504`, and the server keeps serving; a bot stuck in a loop keeps its goroutine until you stop the server.
+- `POST /turn` takes a `TurnDelivery` as JSON (`Content-Type: application/json`, at most 2 MiB): `{"turn": <BotTurn>, "submit": {"url", "token", "deadline_at"}}`, which the game client reads from `GET /game/from-lobby/{lobby_id}/turn-delivery` ([turn deliveries](../../backend/README.md#turn-deliveries)). It answers `202 {"accepted":true}` at once, plays the turn in the background, and submits `{game_id, generation_id, request_id, commands, logs, memory, complete: true}` to `submit.url` with `Authorization: Bearer <submit.token>`, a token that submits this one turn and nothing else. A turn delivered again while it is being played is played once. A body that isn't a delivery answers `422`, a body over 2 MiB `413`, one without a length `411`, and a POST that isn't JSON `415`.
+- **The bot has `--turn-timeout` (default 8 s)**, or less: its `ctx` ends a second before `deadline_at`, so the answer arrives in time. A lobby's turn timeout is 30 seconds by default, and its host can set it from 5 to 600 seconds or to none.
+- **A bot that returns an error, panics, returns an invalid result or runs out of time passes its turn**: the server submits a completing batch with no commands, the memory it was given and one `error` line from the logger `island_battles.bots` that says what happened, such as `The bot failed on generation 12, so it passes this turn: no plan`. The terminal shows a panic's stack. A bot stuck in a loop keeps its goroutine until you stop the server. When the game rejects the answer (an invalid command, too much memory or too many log lines), the bot passes the turn the same way, with the game's reason. Without an answer from the game, or after a server error, the same request is sent up to four times.
+- **Where it submits:** only to `https://island-battles.elidan.org`, the official game, and to `http://localhost` and `http://127.0.0.1` on any port, for a local backend. `--allow-submit-host game.example.org` (repeatable; a name, or `name:port`) adds an `https` host, such as your own deployment. A delivery for any other `submit.url` answers `400` with the reason, and nothing is played or sent.
 - `GET /health` answers `{"name": "mybot", "ok": true}`, with your program's name, so the game can show that your bot is connected.
 - **Browsers:** the server answers CORS preflights, with `Access-Control-Allow-Private-Network: true` for Chrome's Private Network Access, only for the game's origins: `http://localhost:8888` (a local backend), `http://localhost:3000` (the web client's dev server), `https://island-battles.elidan.org` (the deployed game), and `tauri://localhost` and `http://tauri.localhost` (the desktop app). Add another with `--allow-origin` (repeatable). A request from another origin, or with a `Host` other than `127.0.0.1:<port>` or `localhost:<port>` (against DNS rebinding), gets `403`, and the bot doesn't run. The server closes the connection after every answer.
 
-Try it with curl:
+Deliver a turn by hand with curl, with your guest credential and a started lobby against a local backend:
 
 ```sh
-go run . fixture > turn.json
-curl -X POST localhost:41414/turn -H 'Content-Type: application/json' -d @turn.json
+curl -s -H "Authorization: Bearer $TOKEN" localhost:8888/game/from-lobby/$LOBBY_ID/turn-delivery \
+  | curl -X POST localhost:41414/turn -H 'Content-Type: application/json' -d @-
 curl localhost:41414/health
 ```
+
+**Hosting the same server publicly.** A localhost bot speaks the same protocol as a hosted bot: whoever delivers the turn POSTs a `TurnDelivery`, and the bot answers `202` and submits with the token. The game will deliver turns to bots at a URL itself once hosted bots arrive (#112). To run `serve` on a machine of your own, keep it bound to `127.0.0.1` and put a reverse proxy in front of it that terminates TLS and forwards `POST /turn` and `GET /health` with `Host: 127.0.0.1:41414` (server-to-server requests carry no `Origin`, so the origin list doesn't apply to them). The bot only submits to the allowed hosts above, so a delivery can't send your token or your bot's answer anywhere else.
 
 ## Package your bot
 

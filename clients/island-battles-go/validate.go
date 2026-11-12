@@ -130,6 +130,40 @@ func DecodeTurn(data []byte) (Turn, error) {
 	return turn, nil
 }
 
+// DecodeTurnDelivery reads a TurnDelivery from JSON, as a game client posts
+// it to serve, and checks its turn as DecodeTurn does. The submit URL and
+// token must be there; deadline_at may be null. Unknown fields are ignored.
+func DecodeTurnDelivery(data []byte) (TurnDelivery, error) {
+	var parts struct {
+		Turn   json.RawMessage `json:"turn"`
+		Submit json.RawMessage `json:"submit"`
+	}
+	if err := json.Unmarshal(data, &parts); err != nil {
+		return TurnDelivery{}, err
+	}
+	if parts.Turn == nil {
+		return TurnDelivery{}, errors.New("turn is missing")
+	}
+	if parts.Submit == nil {
+		return TurnDelivery{}, errors.New("submit is missing")
+	}
+	turn, err := DecodeTurn(parts.Turn)
+	if err != nil {
+		return TurnDelivery{}, err
+	}
+	var submit TurnSubmit
+	if err := decodeStrict(parts.Submit, &submit, "submit"); err != nil {
+		return TurnDelivery{}, err
+	}
+	switch {
+	case submit.URL == "":
+		return TurnDelivery{}, errors.New("submit.url is empty")
+	case submit.Token == "":
+		return TurnDelivery{}, errors.New("submit.token is empty")
+	}
+	return TurnDelivery{Turn: turn, Submit: submit}, nil
+}
+
 // DecodeGeneration reads a Generation from JSON, as the server sends it, and
 // checks it against the contract: every field must be there and none null,
 // numbers must be in range, upgrade types known, and every soldier group's

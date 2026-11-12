@@ -1,8 +1,10 @@
 // The player's own bot, which `island-battles-bot serve` runs on their machine.
-// The page relays each turn to it (the example player does, for a player whose
-// bot is the localhost bot) and the bot choice shows whether it is running.
-// This is the same protocol as the 3D web client's relay: BotTurn in,
-// BotTurnResult out.
+// The page delivers each turn to it (the example player does, for a player
+// whose bot is the localhost bot) and the bot choice shows whether it is
+// running. This is the same protocol as the 3D web client's relay: the page
+// reads the player's TurnDelivery from the server and POSTs it to the bot,
+// which answers 202 and submits its commands itself with the delivery's
+// one-turn submit token. The page never submits the bot's commands.
 
 // Where `island-battles-bot serve` listens: the Island Battles bot port.
 export const localhostBotOrigin = "http://127.0.0.1:41414";
@@ -11,15 +13,14 @@ export const localhostBotOrigin = "http://127.0.0.1:41414";
 // and function.
 export const serveCommand = "uv run island-battles-bot serve mybot:play";
 
-// How many lines of a failed bot's answer the page shows, the last ones, where
-// a Python traceback names the error.
+// How many lines of a bot's refusal the page shows, the last ones.
 const maxErrorLines = 8;
 
-// How a call to the localhost bot failed: "unreachable" (nothing answered: the
-// bot is not running, or the browser blocked the request), "crashed" (the bot
-// raised: 500 with its traceback), "too-slow" (the bot took longer than its
-// own limit: 504, or the page gave up) or "invalid" (the answer is not a
-// BotTurnResult).
+// How a delivery to the localhost bot failed: "unreachable" (nothing answered:
+// the bot is not running, or the browser blocked the request), "too-slow" (the
+// bot did not accept the turn in time) or "refused" (the bot answered with
+// something other than 202, such as a submit host it doesn't allow, or an old
+// SDK that doesn't know turn deliveries).
 export class BotError extends Error {
   constructor(kind, message) {
     super(message);
@@ -38,57 +39,28 @@ export async function checkBotHealth({ fetch = globalThis.fetch, timeoutMs = 200
   }
 }
 
-// buildBotTurn is the BotTurn for a player's state: the board, their team,
-// their memory, the deadline and the upgrade cost table.
-export function buildBotTurn(state, upgrades) {
-  return {
-    game_id: state.game_id,
-    generation: state.generation,
-    memory: state.memory ?? null,
-    team_color: state.team_color,
-    turn_deadline_at: state.turn_deadline_at ?? null,
-    upgrades,
-  };
-}
-
-const isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
-
-// parseBotResult checks that a bot's answer is a BotTurnResult and fills its
-// optional parts.
-export function parseBotResult(value) {
-  if (!isRecord(value) || !Array.isArray(value.commands)) throw new BotError("invalid", "The bot's answer has no commands list.");
-  const memory = value.memory ?? null;
-  if (memory !== null && !isRecord(memory)) throw new BotError("invalid", "The bot's memory must be a JSON object.");
-  const logs = value.logs ?? [];
-  if (!Array.isArray(logs)) throw new BotError("invalid", "The bot's logs must be a list.");
-  return { commands: value.commands, logs, memory };
-}
-
-// playTurn posts one turn to the player's localhost bot and resolves to its
-// BotTurnResult. It rejects with a BotError.
-export async function playTurn(turn, { fetch = globalThis.fetch, timeoutMs = 20000 } = {}) {
+// deliverTurn posts a TurnDelivery, as GET /game/from-lobby/{lobby_id}/turn-delivery
+// returned it, to the player's localhost bot, and resolves once the bot has
+// accepted it with 202. The bot then plays and submits the turn itself. It
+// rejects with a BotError.
+export async function deliverTurn(delivery, { fetch = globalThis.fetch, timeoutMs = 5000 } = {}) {
   let response;
   try {
     response = await fetch(`${localhostBotOrigin}/turn`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(turn),
+      body: JSON.stringify(delivery),
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
-    if (error?.name === "TimeoutError") throw new BotError("too-slow", "Your bot did not answer in time.");
+    if (error?.name === "TimeoutError") throw new BotError("too-slow", "Your bot did not accept the turn in time.");
     throw new BotError("unreachable", "Your bot is not reachable on 127.0.0.1:41414. Start it with island-battles-bot serve.");
   }
-  if (response.status === 504) throw new BotError("too-slow", "Your bot took too long to answer.");
-  if (!response.ok) {
-    const body = (await response.text().catch(() => "")).trim();
-    throw new BotError("crashed", body === "" ? `Your bot answered HTTP ${response.status}.` : `Your bot failed:\n${body.split("\n").slice(-maxErrorLines).join("\n")}`);
+  if (response.status === 202) return;
+  const body = (await response.text().catch(() => "")).trim();
+  const said = body === "" ? "" : `\n${body.split("\n").slice(-maxErrorLines).join("\n")}`;
+  if (response.status === 422) {
+    throw new BotError("refused", `Your bot did not understand the turn. Upgrade its SDK (island-battles-python, or the Go SDK) to one that takes turn deliveries.${said}`);
   }
-  let body;
-  try {
-    body = await response.json();
-  } catch {
-    throw new BotError("invalid", "The bot's answer is not JSON.");
-  }
-  return parseBotResult(body);
+  throw new BotError("refused", `Your bot refused the turn (HTTP ${response.status}).${said}`);
 }

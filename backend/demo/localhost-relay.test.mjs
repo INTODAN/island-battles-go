@@ -1,9 +1,10 @@
-// A player outside a demo relays the turns of a localhost bot to it.
+// A player outside a demo delivers the turns of a localhost bot to it, and
+// the bot submits them itself.
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
-import { ExamplePlayer } from "./example-player.mjs";
+import { ExamplePlayer, GAME_ENDED_PROBLEM } from "./example-player.mjs";
 import { BotError } from "./localhost-bot.mjs";
 
 const DEADLINE = "2030-01-01T00:00:00Z";
@@ -13,6 +14,12 @@ const stateOf = (overrides = {}) => ({
   bot: { kind: "localhost" }, memory: null, turn_deadline_at: null,
   generation: { castles: [{ id: 0, team_color: 1, soldiers: 1 }, { id: 1, team_color: 2, soldiers: 30 }], soldier_groups: [] },
   ...overrides,
+});
+
+// The server's turn delivery for a state.
+const deliveryOf = (state) => ({
+  turn: { game_id: state.game_id, generation: { id: state.generation_id }, team_color: state.team_color, memory: state.memory, upgrades: [], turn_deadline_at: state.turn_deadline_at },
+  submit: { url: "http://localhost:8888/generation/commands", token: `ibst1.${state.generation_id}`, deadline_at: state.turn_deadline_at },
 });
 
 class Subscription extends EventEmitter {
@@ -29,83 +36,73 @@ async function until(predicate) {
   assert.fail("expected event did not arrive");
 }
 
-function relay(context, { bot = async () => ({ commands: [], logs: [], memory: null }), state = stateOf(), ...options } = {}) {
+function relay(context, { bot = async () => {}, state = stateOf(), delivery = null, ...options } = {}) {
   const subscription = new Subscription();
   const requests = [];
-  const turns = [];
+  const deliveries = [];
   const statuses = [];
+  let current = state;
   const player = new ExamplePlayer({
-    lobbyID: "room", playerID: "player", credential: "test", subscription, demo: false, botRetryDelay: 20,
+    lobbyID: "room", playerID: "player", credential: "test", subscription, demo: false, botRetryDelay: 20, retryDelay: 20,
     onStatus: (title, detail) => statuses.push({ title, detail }),
-    playBot: async (turn) => { turns.push(turn); return bot(turn); },
+    deliver: async (sent) => { deliveries.push(sent); return bot(sent); },
     fetcher: async (url, init) => {
-      requests.push({ url, method: init.method, body: init.body && JSON.parse(init.body) });
-      if (url === "/game/upgrades") return { ok: true, json: async () => ({ upgrades: [{ level: 1, soldier_cost: 10 }] }) };
-      if (init.method === "POST" && !url.endsWith("/deadline")) {
-        return { ok: true, json: async () => ({ ...state, generation_id: JSON.parse(init.body).generation_id, submitted: true }) };
+      requests.push({ url, method: init.method, headers: init.headers, body: init.body && JSON.parse(init.body) });
+      if (url.endsWith("/turn-delivery")) {
+        const answer = delivery ? delivery(player.state) : { status: 200, body: deliveryOf(player.state) };
+        return { ok: answer.status === 200, status: answer.status, json: async () => answer.body };
       }
-      return { ok: true, json: async () => state };
+      return { ok: true, status: 200, json: async () => current };
     },
     ...options,
   });
   context.after(() => player.stop());
+  const reads = () => requests.filter((request) => request.url.endsWith("/turn-delivery"));
   const submissions = () => requests.filter((request) => request.url === "/generation/commands");
   const deadlines = () => requests.filter((request) => request.url.endsWith("/deadline"));
-  return { player, subscription, requests, turns, statuses, submissions, deadlines };
+  return { player, subscription, requests, deliveries, statuses, reads, submissions, deadlines, setState: (next) => { current = next; } };
 }
 
-test("a localhost bot gets a BotTurn, and its answer completes the turn with its memory", async (context) => {
-  const { player, turns, submissions, requests } = relay(context, {
-    bot: async () => ({ commands: [{ command_type: "noop" }], logs: [{ message: "hi" }], memory: { seen: 1 } }),
-  });
+test("a localhost bot gets the server's turn delivery, and the page submits nothing", async (context) => {
+  const { player, deliveries, reads, submissions, statuses } = relay(context);
   player.receive(stateOf({ memory: { seen: 0 }, turn_deadline_at: DEADLINE }));
-  await until(() => submissions().length === 1);
-  assert.deepEqual(turns[0], {
-    game_id: 1, generation: stateOf().generation, memory: { seen: 0 }, team_color: 1,
-    turn_deadline_at: DEADLINE, upgrades: [{ level: 1, soldier_cost: 10 }],
-  });
-  const body = submissions()[0].body;
-  assert.equal(body.complete, true);
-  assert.equal(body.game_id, 1);
-  assert.equal(body.generation_id, 1);
-  assert.match(body.request_id, /^[0-9a-f-]{36}$/);
-  assert.deepEqual(body.commands, [{ command_type: "noop" }]);
-  assert.deepEqual(body.logs, [{ message: "hi" }]);
-  assert.deepEqual(body.memory, { seen: 1 });
-  assert.equal(requests.filter((request) => request.url === "/game/upgrades").length, 1);
+  await until(() => deliveries.length === 1 && !player.inFlight);
+  assert.equal(reads()[0].url, "/game/from-lobby/room/turn-delivery");
+  assert.equal(reads()[0].method, "GET");
+  assert.equal(reads()[0].headers.Authorization, "Bearer test");
+  assert.deepEqual(deliveries[0], deliveryOf(stateOf({ memory: { seen: 0 }, turn_deadline_at: DEADLINE })));
+  await delay(30);
+  assert.equal(submissions().length, 0, "the bot submits, not the page");
+  assert.equal(statuses.at(-1).title, "Your bot is playing");
+  assert.match(statuses.at(-1).detail, /submits it itself/);
 });
 
-test("memory carries over: the next BotTurn holds what the server stored; upgrades are read once", async (context) => {
-  const { player, turns, requests, submissions } = relay(context, {
-    bot: async (turn) => ({ commands: [], logs: [], memory: { count: (turn.memory?.count || 0) + 1 } }),
-  });
-  player.receive(stateOf());
-  await until(() => submissions().length === 1 && !player.inFlight);
-  // The server returns the stored memory with the next generation.
-  player.receive(stateOf({ generation_id: 2, memory: submissions()[0].body.memory }));
-  await until(() => submissions().length === 2);
-  assert.deepEqual(turns.map((turn) => turn.memory), [null, { count: 1 }]);
-  assert.deepEqual(submissions()[1].body.memory, { count: 2 });
-  assert.equal(requests.filter((request) => request.url === "/game/upgrades").length, 1);
-});
-
-test("a generation is relayed once, even when its state arrives again", async (context) => {
-  const { player, subscription, turns, submissions } = relay(context);
+test("each generation is delivered once, even when its state arrives again", async (context) => {
+  const { player, subscription, deliveries } = relay(context);
   player.receive(stateOf());
   subscription.publish(stateOf());
-  await until(() => submissions().length === 1 && !player.inFlight);
+  await until(() => deliveries.length === 1 && !player.inFlight);
   subscription.publish(stateOf());
   player.receive(stateOf());
   await delay(30);
-  assert.equal(turns.length, 1);
-  assert.equal(submissions().length, 1);
+  assert.equal(deliveries.length, 1);
+  player.receive(stateOf({ generation_id: 2 }));
+  await until(() => deliveries.length === 2);
+  assert.equal(deliveries[1].turn.generation.id, 2);
 });
 
-test("a default bot's player relays and reports nothing", async (context) => {
-  const { player, turns, requests, statuses } = relay(context);
+test("a delivered turn waits for the others and asks for the deadline", async (context) => {
+  const { player, deliveries, deadlines } = relay(context, { now: () => Date.parse(DEADLINE) + 5000 });
+  player.receive(stateOf({ turn_deadline_at: DEADLINE }));
+  await until(() => deliveries.length === 1);
+  await until(() => deadlines().length >= 1);
+});
+
+test("a default bot's player delivers and reports nothing", async (context) => {
+  const { player, deliveries, requests, statuses } = relay(context);
   player.receive(stateOf({ bot: { kind: "default", level: 2 } }));
   await delay(30);
-  assert.equal(turns.length, 0);
+  assert.equal(deliveries.length, 0);
   assert.deepEqual(requests, []);
   assert.deepEqual(statuses, []);
 });
@@ -116,52 +113,64 @@ test("a default bot's player still asks for the deadline", async (context) => {
   await until(() => deadlines().length === 1);
 });
 
-test("a bot that crashed shows its traceback and submits nothing; the player asks for the deadline", async (context) => {
-  const { player, turns, statuses, submissions, deadlines } = relay(context, {
-    bot: async () => { throw new BotError("crashed", "Your bot failed:\nTraceback...\nValueError: boom"); },
+test("a bot that is not running is asked again, and then gets the turn", async (context) => {
+  let calls = 0;
+  const { player, statuses, deliveries } = relay(context, {
+    bot: async () => {
+      if (++calls < 3) throw new BotError("unreachable", "Your bot is not reachable on 127.0.0.1:41414.");
+    },
+  });
+  player.receive(stateOf());
+  await until(() => calls === 3 && !player.inFlight);
+  assert.equal(deliveries.length, 3);
+  assert.ok(statuses.some((status) => status.title === "Your bot is not running"));
+  assert.equal(statuses.at(-1).title, "Your bot is playing");
+});
+
+test("a bot that refuses the turn shows why and is not asked again; the player asks for the deadline", async (context) => {
+  const { player, deliveries, statuses, submissions, deadlines } = relay(context, {
+    bot: async () => { throw new BotError("refused", "Your bot refused the turn (HTTP 400).\nsubmit.url is not an allowed host"); },
     now: () => Date.parse(DEADLINE) + 5000,
   });
   player.receive(stateOf({ turn_deadline_at: DEADLINE }));
   await until(() => deadlines().length === 1);
+  assert.equal(deliveries.length, 1);
   assert.equal(submissions().length, 0);
-  assert.equal(turns.length, 1, "a crashed bot is not asked again for the same turn");
-  assert.equal(statuses.at(-1).title, "Your bot failed");
-  assert.match(statuses.at(-1).detail, /ValueError: boom/);
-  assert.equal(player.pending, null);
+  assert.equal(statuses.at(-1).title, "Your bot refused the turn");
+  assert.match(statuses.at(-1).detail, /not an allowed host/);
+  // The next generation is delivered again.
+  player.receive(stateOf({ generation_id: 2, turn_deadline_at: DEADLINE }));
+  await until(() => deliveries.length === 2);
 });
 
-test("a crashed bot is asked again for the next generation", async (context) => {
-  let calls = 0;
-  const { player, submissions } = relay(context, {
-    bot: async () => {
-      if (++calls === 1) throw new BotError("crashed", "Your bot failed:\nboom");
-      return { commands: [], logs: [], memory: null };
-    },
+test("a turn with nothing to play is not delivered: the state is read again", async (context) => {
+  const { player, deliveries, requests, setState } = relay(context, {
+    delivery: () => ({ status: 409, body: { detail: "player turn is already complete" } }),
+  });
+  setState(stateOf({ submitted: true }));
+  player.receive(stateOf());
+  await until(() => player.state.submitted);
+  await delay(30);
+  assert.equal(deliveries.length, 0);
+  assert.equal(requests.filter((request) => request.url === "/game/from-lobby/room/turn-delivery").length, 1);
+});
+
+test("a game that ended while reading the delivery stops the player", async (context) => {
+  const { player, deliveries, statuses, setState } = relay(context, {
+    delivery: () => ({ status: 409, body: { type: GAME_ENDED_PROBLEM, detail: "the game has ended" } }),
+  });
+  setState(stateOf({ outcome: { summary: "Blue wins" } }));
+  player.receive(stateOf());
+  await until(() => statuses.some((status) => status.title === "Game over"));
+  assert.equal(deliveries.length, 0);
+});
+
+test("a server that doesn't answer the delivery read is asked again", async (context) => {
+  let reads = 0;
+  const { player, deliveries } = relay(context, {
+    delivery: (state) => (++reads < 2 ? { status: 503, body: { detail: "unavailable" } } : { status: 200, body: deliveryOf(state) }),
   });
   player.receive(stateOf());
-  await until(() => calls === 1 && !player.inFlight);
-  player.receive(stateOf({ generation_id: 2 }));
-  await until(() => submissions().length === 1);
-  assert.equal(submissions()[0].body.generation_id, 2);
-});
-
-test("a bot that is not running is asked again, and its turn is then submitted", async (context) => {
-  let calls = 0;
-  const { player, statuses, submissions } = relay(context, {
-    bot: async () => {
-      if (++calls < 3) throw new BotError("unreachable", "Your bot is not reachable on 127.0.0.1:41414.");
-      return { commands: [], logs: [], memory: null };
-    },
-  });
-  player.receive(stateOf());
-  await until(() => submissions().length === 1);
-  assert.equal(calls, 3);
-  assert.ok(statuses.some((status) => status.title === "Your bot is not running"));
-});
-
-test("a player that submitted asks for the deadline like any other waiting player", async (context) => {
-  const { player, submissions, deadlines } = relay(context, { state: stateOf({ turn_deadline_at: DEADLINE }), now: () => Date.parse(DEADLINE) + 5000 });
-  player.receive(stateOf({ turn_deadline_at: DEADLINE }));
-  await until(() => submissions().length === 1);
-  await until(() => deadlines().length >= 1);
+  await until(() => deliveries.length === 1);
+  assert.equal(reads, 2);
 });

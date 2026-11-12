@@ -150,6 +150,27 @@ func TestTypesMatchTheOpenAPIDocument(t *testing.T) {
 	}
 }
 
+// A TurnDelivery, which serve reads, has exactly the properties of the
+// document's, besides the $schema link the server adds, and every one is
+// required.
+func TestTurnDeliveryMatchesTheOpenAPIDocument(t *testing.T) {
+	schemas, _ := loadSchemas(t)
+	for name, goType := range map[string]reflect.Type{"TurnDelivery": reflect.TypeFor[TurnDelivery](), "TurnSubmit": reflect.TypeFor[TurnSubmit]()} {
+		current, found := schemas[name]
+		if !found {
+			t.Fatalf("the document has no schema %s", name)
+		}
+		properties := slices.Sorted(maps.Keys(current.Properties))
+		properties = slices.DeleteFunc(properties, func(property string) bool { return property == "$schema" })
+		if names := jsonNames(goType); !slices.Equal(names, properties) {
+			t.Errorf("schema %s has properties %v, but %s has %v", name, properties, goType.Name(), names)
+		}
+		if required := slices.Sorted(slices.Values(current.Required)); !slices.Equal(required, properties) {
+			t.Errorf("schema %s requires %v of %v", name, required, properties)
+		}
+	}
+}
+
 // The enums of the contract are the SDK's constants.
 func TestEnumsMatchTheOpenAPIDocument(t *testing.T) {
 	schemas, _ := loadSchemas(t)

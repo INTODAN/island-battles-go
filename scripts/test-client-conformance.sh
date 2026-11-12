@@ -7,6 +7,9 @@ set -euo pipefail
 repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 export GOCACHE="${GOCACHE:-/tmp/lobby-go-cache}"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/lobby-uv-cache}"
+# The backend requires it, though the clients under test submit with their
+# player's session.
+export ISLAND_BATTLES_SUBMIT_TOKEN_SECRET=conformance-submit-token-secret
 if [[ $# -gt 0 ]]; then
   export ISLAND_BATTLES_CLIENT_COMMAND="$1"
 fi

@@ -175,7 +175,7 @@ def add_result_lines(game_log: GameLog, result: BotTurnResult) -> None:
 async def run_turn(
     play: Play, turn: BotTurn, client_logging: ClientLogging, stored: int = 0
 ) -> BotTurnResult:
-    """Play one turn for a relaying caller, and return the result with its logs.
+    """Play one turn for ``serve`` or ``check``, and return the result with its logs.
 
     The bot's logged lines and the lines it returned become the result's
     ``logs``, within the server's limits, counting ``stored`` lines already

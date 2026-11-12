@@ -21,6 +21,7 @@ import (
 	"islandBattles/backend/observability"
 	"islandBattles/backend/retention"
 	"islandBattles/backend/routes"
+	"islandBattles/backend/submittoken"
 	"islandBattles/lobby/application"
 	"islandBattles/lobby/auth"
 	"islandBattles/lobby/domain"
@@ -119,6 +120,11 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 		return nil, err
 	}
 
+	submitTokens, err := submittoken.New([]byte(config.SubmitTokenSecret))
+	if err != nil {
+		return nil, err
+	}
+
 	// The authenticated player goes on a failed request's error line.
 	authenticated := annotatingAuthentication{authentication}
 
@@ -135,7 +141,8 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	if selected.gameGraph {
 		routes.SetupGameGraphRoute(api, &environment)
 	}
-	routes.SetupLobbyRoutes(api, lobbyService, authenticated, gameBinding, lobbyRetention, &handlers.LobbyGame{Database: database, Authenticator: authenticated, Publisher: publisher, Retention: gameRetention, Watchers: lobbyService})
+	routes.SetupLobbyRoutes(api, lobbyService, authenticated, gameBinding, lobbyRetention, &handlers.LobbyGame{Database: database, Authenticator: authenticated, Publisher: publisher, Retention: gameRetention, Watchers: lobbyService,
+		SubmitTokens: submitTokens, PublicURL: config.PublicURL})
 	proxy.Register(router)
 	if err := registerPages(router); err != nil {
 		return nil, err

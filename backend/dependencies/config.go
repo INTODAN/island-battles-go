@@ -24,6 +24,8 @@ const (
 	CentrifugoAPIKeyEnv              = "ISLAND_BATTLES_CENTRIFUGO_API_KEY"
 	ConnectionTokenHMACSecretEnv     = "ISLAND_BATTLES_CONNECTION_TOKEN_HMAC_SECRET"
 	LobbyProxySecretEnv              = "ISLAND_BATTLES_LOBBY_PROXY_SECRET"
+	SubmitTokenSecretEnv             = "ISLAND_BATTLES_SUBMIT_TOKEN_SECRET"
+	PublicURLEnv                     = "ISLAND_BATTLES_PUBLIC_URL"
 	AdminAPIKeyEnv                   = "ISLAND_BATTLES_ADMIN_API_KEY"
 	GameRetentionPeriodEnv           = "ISLAND_BATTLES_GAME_RETENTION_PERIOD"
 )
@@ -56,8 +58,9 @@ func DefaultDatabaseConfig(url string) DatabaseConfig {
 
 // Config contains the settings every host of the HTTP API needs. They must be
 // supplied explicitly by the deployment, except for the pool limits and the
-// game retention period, which have defaults, and the admin API key, without
-// which admin operations refuse every request. Values are loaded only by
+// game retention period, which have defaults, the admin API key, without
+// which admin operations refuse every request, and the public URL, which
+// defaults to each request's own. Values are loaded only by
 // executables, never by package init.
 // The listen address belongs to the HTTP server host alone; see LoadHTTPAddr.
 type Config struct {
@@ -67,6 +70,13 @@ type Config struct {
 	CentrifugoAPIKey          string
 	ConnectionTokenHMACSecret string
 	LobbyProxySecret          string
+	// SubmitTokenSecret signs the submit tokens of turn deliveries.
+	SubmitTokenSecret string
+	// PublicURL is where players open the game, such as
+	// https://island-battles.example.org. Turn deliveries tell bots to submit
+	// to it. Empty means the scheme and Host of each request, which suits a
+	// server that players reach directly, such as a local one.
+	PublicURL string
 	// AdminAPIKey authorizes admin operations such as POST /map/create. Empty
 	// disables them.
 	AdminAPIKey string
@@ -83,7 +93,7 @@ func LoadConfig() (Config, error) {
 // LoadConfigFromLookup makes configuration validation deterministic in tests.
 func LoadConfigFromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if err := requireEnvironment(lookup, DatabaseURLEnv, CentrifugoPublicURLEnv, CentrifugoAPIURLEnv,
-		CentrifugoAPIKeyEnv, ConnectionTokenHMACSecretEnv, LobbyProxySecretEnv); err != nil {
+		CentrifugoAPIKeyEnv, ConnectionTokenHMACSecretEnv, LobbyProxySecretEnv, SubmitTokenSecretEnv); err != nil {
 		return Config{}, err
 	}
 	database, err := LoadDatabaseConfigFromLookup(lookup)
@@ -101,6 +111,8 @@ func LoadConfigFromLookup(lookup func(string) (string, bool)) (Config, error) {
 		CentrifugoAPIKey:          readEnvironment(lookup, CentrifugoAPIKeyEnv),
 		ConnectionTokenHMACSecret: readEnvironment(lookup, ConnectionTokenHMACSecretEnv),
 		LobbyProxySecret:          readEnvironment(lookup, LobbyProxySecretEnv),
+		SubmitTokenSecret:         readEnvironment(lookup, SubmitTokenSecretEnv),
+		PublicURL:                 strings.TrimRight(readEnvironment(lookup, PublicURLEnv), "/"),
 		AdminAPIKey:               readEnvironment(lookup, AdminAPIKeyEnv),
 		GameRetentionPeriod:       gameRetentionPeriod,
 	}
@@ -109,6 +121,14 @@ func LoadConfigFromLookup(lookup func(string) (string, bool)) (Config, error) {
 	}
 	if err := validateURL(CentrifugoAPIURLEnv, config.CentrifugoAPIURL, "http", "https"); err != nil {
 		return Config{}, err
+	}
+	if config.PublicURL != "" {
+		if err := validateURL(PublicURLEnv, config.PublicURL, "http", "https"); err != nil {
+			return Config{}, err
+		}
+		if parsed, _ := url.Parse(config.PublicURL); parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return Config{}, fmt.Errorf("%s must be an origin, such as https://island-battles.example.org, without a path", PublicURLEnv)
+		}
 	}
 	return config, nil
 }

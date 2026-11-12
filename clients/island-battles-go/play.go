@@ -29,8 +29,8 @@ import (
 
 // Play is a bot: it plays one turn. ctx is cancelled when the turn's time is
 // up: when serve or check stops waiting, and under run at the turn's
-// deadline. An error passes the turn: the game client that relays the bot
-// shows it, and sends nothing; run stops. Logger(ctx) is the bot's logger.
+// deadline. An error passes the turn: serve submits no commands and the
+// error as a game log line; run stops. Logger(ctx) is the bot's logger.
 type Play func(ctx context.Context, turn Turn) (Result, error)
 
 // botFailure is an error the bot returned, or a panic in it.
