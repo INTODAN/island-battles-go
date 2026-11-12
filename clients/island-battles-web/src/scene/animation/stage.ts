@@ -1,14 +1,16 @@
 import type { Scene } from "@babylonjs/core/scene";
 import type { components } from "../../api/generated/game";
-import { createBoat, disposeBoat } from "../art";
+import { createBoat } from "../art";
 import {
   aimGroup,
   applyTurnHeadings,
   type Battlefield,
   beginTurnHeadings,
-  boatScale,
+  disposeGroup,
   type GroupEntity,
+  poseGroup,
   renderGeneration,
+  setGroupEnabled,
   snapBoats,
   updateCastle,
   updateGroup,
@@ -114,10 +116,10 @@ export class SceneStage implements Stage {
       const group = groups.get(id);
       const entity = field.groups.get(id) ?? this.transients.get(id);
       if (!group || !entity) continue;
-      const { root, body } = entity.parts;
+      const { root } = entity.parts;
       if (!pose.visible) {
         // A boat that is gone takes its labels with it; they would hang in the air.
-        root.setEnabled(false);
+        setGroupEnabled(entity, false);
         if (!this.hidden.has(id)) {
           this.hidden.add(id);
           for (const label of field.labels.ids()) {
@@ -143,7 +145,18 @@ export class SceneStage implements Stage {
       root.position.set(world.x, 0, world.z);
       // A boat whose heading changes (stopped off its line by a clash) turns smoothly.
       aimGroup(field, entity, world, castles.get(group.destination_castle_id));
-      body.scaling.setAll(boatScale(pose.count) * pose.scale);
+      // The boat being built or docking, and the squad on land; a squad sinks with its group.
+      const squad =
+        pose.squad && pose.sink > 0
+          ? { ...pose.squad, scale: pose.squad.scale * (1 - pose.sink) }
+          : pose.squad;
+      poseGroup(
+        field,
+        entity,
+        { ...group, soldiers: pose.count },
+        { build: pose.build, squad },
+        pose.scale,
+      );
       if (pose.sink > 0) this.effects.sink(entity.parts, pose.sink);
       else if (pose.rattle > 0) this.effects.rattle(entity.parts, pose.rattle);
     }
@@ -207,7 +220,7 @@ export class SceneStage implements Stage {
       for (const label of this.field?.labels.ids() ?? []) {
         if (label.startsWith(`group:${id}:`)) this.field?.labels.remove(label);
       }
-      disposeBoat(entity.parts);
+      disposeGroup(entity);
     }
     this.transients.clear();
     this.hidden.clear();
