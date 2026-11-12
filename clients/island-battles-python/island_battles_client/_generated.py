@@ -56,7 +56,7 @@ class BotTurn(GameModel):
     """
     upgrades: Sequence[Upgrade]
     """
-    The upgrade cost table, the same list GET /game/upgrades returns as its upgrades. It is the same for the whole game, so a client reads it once and reuses it in every turn. Reaching a level costs its soldier_cost.
+    The upgrade cost table, the same list GET /game/upgrades returns as its upgrades. It is the same for the whole game. Reaching a level costs its soldier_cost.
     """
 
 
@@ -749,6 +749,39 @@ class SoldierGroup(SoldierGroupBase):
     """
     x: StrictFloat
     y: StrictFloat
+
+
+class TurnDelivery(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    field_schema: Annotated[
+        AnyUrl | None,
+        Field(alias="$schema", examples=["https://example.com/TurnDelivery.json"]),
+    ] = None
+    """
+    A URL to the JSON Schema for this object.
+    """
+    submit: TurnSubmit
+    turn: BotTurn
+
+
+class TurnSubmit(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    deadline_at: AwareDatetime | None
+    """
+    When the turn times out, the BotTurn's turn_deadline_at, or null when turns have no time limit. An answer must be submitted before it.
+    """
+    token: StrictStr
+    """
+    The submit token, sent as Authorization: Bearer <token>. It lets the bearer submit this player's turn of this generation and nothing else, and expires at the turn's deadline plus 30 seconds, or 24 hours after the generation when turns have no time limit. Keep it secret until the turn is over.
+    """
+    url: AnyUrl
+    """
+    Where to submit the answer: POST /generation/commands on the game's server, as an absolute URL.
+    """
 
 
 class Upgrade(GameModel):

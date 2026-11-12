@@ -7,7 +7,7 @@ A starter project for a bot in the strategy game Island Battles: a working bot, 
 1. Copy this directory (it needs nothing outside itself) and rename the project in `pyproject.toml`.
 2. Install [uv](https://docs.astral.sh/uv/), then `uv sync` (it installs Python 3.14 if needed).
 3. `scripts/check.sh` formats, lints, type-checks, tests and runs the bot once on a sample turn.
-4. `scripts/serve.sh` serves the bot on `http://127.0.0.1:41414`. Open the game at `https://island-battles.elidan.org` (or a local lobby page), create a lobby, add a bot seat for the other team, pick **localhost bot** as your bot, get ready and start. The page relays each turn to your bot. Saving `bot.py` reloads it.
+4. `scripts/serve.sh` serves the bot on `http://127.0.0.1:41414`. Open the game at `https://island-battles.elidan.org` (or a local lobby page), create a lobby, add a bot seat for the other team, pick **localhost bot** as your bot, get ready and start. The page delivers each turn to your bot, which submits its answer to the game itself ([how](#how-your-bot-gets-its-turns)). Saving `bot.py` reloads it.
 
 The bot is in `bot.py`. It buys speed upgrades, attacks the nearest castle that is not its own and keeps a counter in its memory. Replace the strategy; keep the shape.
 
@@ -26,6 +26,17 @@ All run from any directory.
 | `scripts/package.sh` | `island-battles-bot package`: `dist/island-battles-bot.zip`, the bot and its dependencies for the server's runners (Linux arm64). Needs a network. |
 
 `scripts/build.sh` makes the standard Python package of the bot. `scripts/package.sh` makes the zip the game server's runners will run: your bot and its locked dependencies for Linux arm64 (`dist/island-battles-bot.zip`; see "Package your bot" in the SDK's README). Packaging exists; uploading a package to the game server comes with #112, and until then bots run on your machine. Packaging needs an `island-battles-python` release that has the worker mode, so raise the minimum in `pyproject.toml` and run `uv lock --upgrade-package island-battles-python` when it is out.
+
+## How your bot gets its turns
+
+`scripts/serve.sh` runs `island-battles-bot serve`, the same protocol a bot hosted at a URL speaks:
+
+1. Each turn, your game tab reads a **turn delivery** from the game: the turn (`BotTurn`: the board, your team, the upgrade table, your memory, the deadline) and a **submit token** that can submit exactly this turn of yours and nothing else.
+2. The tab POSTs the delivery to `http://127.0.0.1:41414/turn`. The bot server answers `202` at once, so nobody waits on your bot.
+3. The bot server calls `play(turn)`, for at most `--turn-timeout` seconds (8 by default) and never past the turn's deadline, and submits your commands, log lines and memory to the game with the token.
+4. If `play` raises or runs out of time, the bot **passes the turn**: no commands, your old memory, and one `error` line from `island_battles.bots` that says what happened, which you see in the game's **Bot logs**. The terminal shows the traceback. The game rejecting your commands passes the turn the same way, with its reason.
+
+The bot server submits only to the official game, `https://island-battles.elidan.org`, and to `http://localhost` or `http://127.0.0.1` for a local backend; `scripts/serve.sh --allow-submit-host game.example.org` adds an `https` host, such as your own deployment of the game. To host the same server publicly, keep it on `127.0.0.1` behind a reverse proxy that terminates TLS and forwards `POST /turn` and `GET /health` with `Host: 127.0.0.1:41414`; the [SDK's README](https://pypi.org/project/island-battles-python/) has the details.
 
 ## Coding agents
 

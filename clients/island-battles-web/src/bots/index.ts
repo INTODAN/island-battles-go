@@ -1,24 +1,21 @@
 import { createApiClients } from "../api/client";
 import type { Realtime } from "../realtime";
-import { playTurn } from "./localhost";
+import { deliverTurn } from "./localhost";
 import { type BotRelay, createBotRelay } from "./relay";
 
 export {
   BotError,
-  type BotTurn,
-  type BotTurnResult,
-  buildBotTurn,
   checkBotHealth,
+  deliverTurn,
   localhostBotOrigin,
-  playTurn,
   serveCommand,
+  type TurnDelivery,
 } from "./localhost";
 export {
   type BotRelay,
   createBotRelay,
   type RelayDeps,
   type RelayStatus,
-  type TurnSubmission,
 } from "./relay";
 
 /**
@@ -38,21 +35,21 @@ export function startBotRelay(options: {
   });
   return createBotRelay({
     game: realtime.game,
-    async loadUpgrades() {
-      const { data } = await gameApi.GET("/game/upgrades");
-      return data?.upgrades ?? [];
+    async loadDelivery() {
+      const { data } = await gameApi.GET(
+        "/game/from-lobby/{lobby_id}/turn-delivery",
+        { params: { path: { lobby_id: lobbyId } } },
+      );
+      if (!data) throw new Error("The server sent no turn delivery.");
+      return data;
     },
-    playBot: (turn) => playTurn(turn),
-    async submit(submission) {
-      await gameApi.POST("/generation/commands", { body: submission });
-    },
+    deliver: (delivery) => deliverTurn(delivery),
     async applyDeadline() {
       await gameApi.POST("/game/from-lobby/{lobby_id}/deadline", {
         params: { path: { lobby_id: lobbyId } },
       });
     },
     now: () => Date.now(),
-    newRequestId: () => crypto.randomUUID(),
     schedule(run, ms) {
       const timer = setTimeout(run, ms);
       return () => clearTimeout(timer);

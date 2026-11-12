@@ -1,8 +1,9 @@
 """``island-battles-bot``: serve, check and run a bot function.
 
-``serve`` is the bot's local HTTP server for a game client in the browser,
-``check`` calls the bot once on a fixture turn, ``package`` zips the bot for
-the server's runners, and ``run`` plays a seat without a browser.
+``serve`` is the bot's HTTP server, which takes turn deliveries and submits
+its answers itself, ``check`` calls the bot once on a fixture turn,
+``package`` zips the bot for the server's runners, and ``run`` plays a seat
+without a browser.
 """
 
 from __future__ import annotations
@@ -20,15 +21,19 @@ import sysconfig
 import threading
 import time
 import traceback
+import uuid
 from collections.abc import Callable, Coroutine, Sequence
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
+import httpx
 from pydantic import ValidationError
 
-from ._generated import BotTurn, GameOutcome, Generation
-from .bot import MEMORY_LIMIT_BYTES, Play, run_turn
+from ._generated import BotTurn, BotTurnResult, GameOutcome, Generation, TurnDelivery
+from .bot import MEMORY_LIMIT_BYTES, Play, log_line, run_turn, turn_result
 from .bundle import DEFAULT_ENTRY, DEFAULT_OUTPUT
 from .bundle import run as package
 from .client import IslandBattlesClient
@@ -49,13 +54,33 @@ DEFAULT_ORIGINS = (
     "tauri://localhost",
     "http://tauri.localhost",
 )
+# The game host that a turn delivery may name as where to submit, over https.
+# http://localhost and http://127.0.0.1 are allowed on any port, for a local
+# backend; add more with --allow-submit-host.
+OFFICIAL_SUBMIT_HOST = "island-battles.elidan.org"
+LOCAL_SUBMIT_HOSTS = ("localhost", "127.0.0.1")
 CHECK_SECONDS = 2.0
-# The lobby's default turn timeout is 30 s and its shortest is 5 s. Answer before
-# the lobby's timeout: 8 s suits the default, and a shorter one needs a smaller
-# --turn-timeout.
+# The lobby's default turn timeout is 30 s and its shortest is 5 s. A turn also
+# ends at its deadline: 8 s suits the default, and the deadline cuts it shorter.
 DEFAULT_TURN_TIMEOUT = 8.0
-# A BotTurn of a busy 6-team generation with 64 KiB of memory is a few hundred
-# KiB; 2 MiB leaves headroom.
+# How long before the turn's deadline the bot stops playing, so its answer
+# reaches the server in time.
+SUBMIT_MARGIN_SECONDS = 1.0
+# How often, and for how long each time, the answer is sent again when no
+# answer or a server error comes back.
+SUBMIT_ATTEMPTS = 4
+SUBMIT_TIMEOUT_SECONDS = 10.0
+# The logger of the line that says why a bot passed its turn, as the backend
+# writes it for its own bots.
+BOTS_LOGGER = "island_battles.bots"
+# The server's command rejections, after which the bot passes the turn rather
+# than leave it open.
+REJECTION_TYPES = frozenset(
+    f"urn:island-battles:problem:{name}"
+    for name in ("upgrade-max-level", "insufficient-soldiers")
+)
+# A TurnDelivery of a busy 6-team generation with 64 KiB of memory is a few
+# hundred KiB; 2 MiB leaves headroom.
 MAX_BODY_BYTES = 2 * 1024 * 1024
 # A refused request's body is read (up to this much) so closing the socket
 # doesn't reset the connection before the client reads the refusal.
@@ -197,8 +222,55 @@ class ReloadingPlay:
         return self._play
 
 
+def submit_refusal(url: str, extra_hosts: frozenset[str] = frozenset()) -> str | None:
+    """Why the bot may not submit to ``url``, or None when it may.
+
+    Allowed: https on the official game host or a host added with
+    ``--allow-submit-host`` (a name, or name:port), and http on localhost or
+    127.0.0.1, any port.
+    """
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname or ""
+        port = parts.port
+    except ValueError:
+        return f"submit.url {url!r} is not a URL"
+    allowed = (
+        parts.username is None
+        and parts.password is None
+        and (
+            (parts.scheme == "http" and host in LOCAL_SUBMIT_HOSTS)
+            or (
+                parts.scheme == "https"
+                and (
+                    host == OFFICIAL_SUBMIT_HOST
+                    or host in extra_hosts
+                    or (port is not None and f"{host}:{port}" in extra_hosts)
+                )
+            )
+        )
+    )
+    if allowed:
+        return None
+    return (
+        f"submit.url {url} is not an allowed host, so the bot doesn't play this "
+        f"turn: it submits only to https://{OFFICIAL_SUBMIT_HOST} and to "
+        "http://localhost or http://127.0.0.1 on any port. Start the server with "
+        "--allow-submit-host <host> to add an https host."
+    )
+
+
+def pass_result(turn: BotTurn, message: str) -> BotTurnResult:
+    """The answer of a bot that passes its turn: no commands, the old memory
+    and one error line that says why."""
+    return turn_result(
+        logs=[log_line(message, "error", BOTS_LOGGER)], memory=turn.memory
+    )
+
+
 class BotServer(ThreadingHTTPServer):
-    """The bot's HTTP server, with its bot and the origins it answers."""
+    """The bot's HTTP server, with its bot, the origins it answers and the
+    hosts it submits to."""
 
     daemon_threads = True
 
@@ -208,17 +280,154 @@ class BotServer(ThreadingHTTPServer):
         bot: ReloadingPlay,
         origins: Sequence[str],
         turn_timeout: float = DEFAULT_TURN_TIMEOUT,
+        submit_hosts: Sequence[str] = (),
     ) -> None:
         super().__init__(address, BotRequestHandler)
         self.bot = bot
         self.turn_timeout = turn_timeout
         self.origins = frozenset(origin.rstrip("/") for origin in origins)
+        self.submit_hosts = frozenset(host.strip().lower() for host in submit_hosts)
         self.client_logging = ClientLogging(self, logging.INFO, True, None)
         self.client_logging.attach()
+        # The turns being played, so a turn delivered again isn't played twice.
+        self._playing: set[tuple[str, int, int, int]] = set()
+        self._playing_lock = threading.Lock()
 
     def server_close(self) -> None:
         super().server_close()
         self.client_logging.detach()
+
+    def accept_turn(self, delivery: TurnDelivery) -> None:
+        """Play and submit a delivered turn in the background."""
+        turn = delivery.turn
+        key = (
+            str(delivery.submit.url),
+            turn.game_id,
+            turn.generation.id,
+            turn.team_color,
+        )
+        with self._playing_lock:
+            if key in self._playing:
+                return
+            self._playing.add(key)
+
+        def play_and_submit() -> None:
+            try:
+                self.submit(delivery, self.play(delivery))
+            except Exception:  # noqa: BLE001 - the terminal shows what went wrong
+                print(
+                    f"generation {turn.generation.id}: could not submit the turn\n"
+                    f"{traceback.format_exc()}",
+                    flush=True,
+                )
+            finally:
+                with self._playing_lock:
+                    self._playing.discard(key)
+
+        threading.Thread(target=play_and_submit, daemon=True, name="bot-turn").start()
+
+    def play(self, delivery: TurnDelivery) -> BotTurnResult:
+        """Play the turn, within --turn-timeout and before the deadline; a bot
+        that fails or runs out of time passes the turn."""
+        turn = delivery.turn
+        seconds = self.turn_timeout
+        if delivery.submit.deadline_at is not None:
+            left = (delivery.submit.deadline_at - datetime.now(UTC)).total_seconds()
+            seconds = max(0.0, min(seconds, left - SUBMIT_MARGIN_SECONDS))
+        generation = turn.generation.id
+        try:
+            play = self.bot.get()
+            return run_with_timeout(
+                lambda: run_turn(play, turn, self.client_logging), seconds
+            )
+        except TimeoutError:
+            message = (
+                f"The bot took longer than {round(seconds, 2):g} s on generation "
+                f"{generation}, "
+                "so it passes this turn. It may be in an endless loop."
+            )
+        except Exception as error:  # noqa: BLE001 - the bot passes its turn
+            print(traceback.format_exc(), end="", flush=True)
+            message = (
+                f"The bot failed on generation {generation}, so it passes this "
+                f"turn: {type(error).__name__}: {error}"
+            )
+        print(f"generation {generation}: {message}", flush=True)
+        return pass_result(turn, message)
+
+    def submit(self, delivery: TurnDelivery, result: BotTurnResult) -> None:
+        """Send the answer as the turn's completing batch, with the token.
+
+        A server rejection of the answer's commands, logs or memory passes the
+        turn instead. Without an answer, or after a server error, the same
+        request is sent again a few times.
+        """
+        turn = delivery.turn
+        generation = turn.generation.id
+        status, detail, problem = self._post(delivery, result)
+        if (
+            status == 403
+            or status == 422
+            or (status == 409 and problem in REJECTION_TYPES)
+        ):
+            message = (
+                f"The server rejected the bot's answer on generation {generation}, "
+                f"so it passes this turn: {detail}"
+            )
+            print(f"generation {generation}: {message}", flush=True)
+            status, detail, _ = self._post(delivery, pass_result(turn, message))
+        if status is not None and 200 <= status < 300:
+            count = len(result.commands)
+            print(
+                f"generation {generation}: submitted {count} "
+                f"{'command' if count == 1 else 'commands'}",
+                flush=True,
+            )
+        else:
+            print(
+                f"generation {generation}: the server did not take the turn: "
+                f"{status or 'no answer'} {detail}",
+                flush=True,
+            )
+
+    def _post(
+        self, delivery: TurnDelivery, result: BotTurnResult
+    ) -> tuple[int | None, str, str | None]:
+        """POST one batch; returns the status, the problem's detail and type."""
+        turn = delivery.turn
+        body = {
+            "game_id": turn.game_id,
+            "generation_id": turn.generation.id,
+            "request_id": str(uuid.uuid4()),
+            **result.model_dump(mode="json", by_alias=True),
+            "complete": True,
+        }
+        headers = {"Authorization": f"Bearer {delivery.submit.token}"}
+        status: int | None = None
+        detail = ""
+        problem: str | None = None
+        with httpx.Client(timeout=SUBMIT_TIMEOUT_SECONDS) as client:
+            for attempt in range(SUBMIT_ATTEMPTS):
+                if attempt:
+                    time.sleep(min(0.5 * 2**attempt, 4.0))
+                try:
+                    response = client.post(
+                        str(delivery.submit.url), json=body, headers=headers
+                    )
+                except httpx.HTTPError as error:
+                    status, detail = None, str(error)
+                    continue
+                status = response.status_code
+                try:
+                    answer = response.json()
+                except ValueError:
+                    answer = {}
+                answer = answer if isinstance(answer, dict) else {}
+                detail = str(answer.get("detail") or response.reason_phrase)
+                problem = answer.get("type")
+                if status < 500 and status != 429:
+                    break
+        return status, detail, problem
 
 
 class BotRequestHandler(BaseHTTPRequestHandler):
@@ -331,7 +540,8 @@ class BotRequestHandler(BaseHTTPRequestHandler):
         self._send(200, body, "application/json")
 
     def do_POST(self) -> None:
-        """``/turn`` plays a ``BotTurn`` and answers its ``BotTurnResult``."""
+        """``/turn`` accepts a ``TurnDelivery`` with ``202``, then plays it and
+        submits the answer itself."""
         if self._refuse():
             return
         if self.path != "/turn":
@@ -352,29 +562,16 @@ class BotRequestHandler(BaseHTTPRequestHandler):
         raw = self.rfile.read(length)
         self._body_read = True
         try:
-            turn = BotTurn.model_validate_json(raw)
+            delivery = TurnDelivery.model_validate_json(raw)
         except ValidationError as error:
-            self._text(422, f"the body is not a BotTurn:\n{error}\n")
+            self._text(422, f"the body is not a TurnDelivery:\n{error}\n")
             return
-        try:
-            play = self.server.bot.get()
-            result = run_with_timeout(
-                lambda: run_turn(play, turn, self.server.client_logging),
-                self.server.turn_timeout,
-            )
-        except TimeoutError:
-            self._text(
-                504,
-                f"the bot took longer than {self.server.turn_timeout:g} s on this "
-                "turn; it may be in an endless loop. Fix it and save; the "
-                "server keeps serving.\n",
-            )
+        refusal = submit_refusal(str(delivery.submit.url), self.server.submit_hosts)
+        if refusal is not None:
+            self._text(400, refusal + "\n")
             return
-        except Exception:  # noqa: BLE001 - the relaying client shows the traceback
-            self._text(500, traceback.format_exc())
-            return
-        body = result.model_dump_json(by_alias=True).encode()
-        self._send(200, body, "application/json")
+        self._send(202, b'{"accepted": true}', "application/json")
+        self.server.accept_turn(delivery)
 
 
 def serve(args: argparse.Namespace) -> int:
@@ -388,10 +585,16 @@ def serve(args: argparse.Namespace) -> int:
         bot,
         [*DEFAULT_ORIGINS, *args.allow_origin],
         args.turn_timeout,
+        args.allow_submit_host,
     )
+    submit_hosts = [
+        f"https://{host}"
+        for host in sorted({OFFICIAL_SUBMIT_HOST, *server.submit_hosts})
+    ]
     print(
         f"serving {args.bot} on http://{HOST}:{args.port} "
-        f"for {', '.join(sorted(server.origins))}",
+        f"for {', '.join(sorted(server.origins))}; submitting to "
+        f"{', '.join(submit_hosts)} and http://localhost",
         flush=True,
     )
     try:
@@ -485,7 +688,7 @@ def run(args: argparse.Namespace) -> int:
 
 
 def print_fixture(_: argparse.Namespace) -> int:
-    """Print the fixture turn that ``check`` uses, for ``curl -d @file``."""
+    """Print the fixture turn that ``check`` uses, for ``check --turn``."""
     print(json.dumps(fixture_turn_data(), indent=2))
     return 0
 
@@ -496,7 +699,9 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
 
     serving = commands.add_parser(
-        "serve", help=f"serve the bot on {HOST}:{DEFAULT_PORT} for a game client"
+        "serve",
+        help=f"serve the bot on {HOST}:{DEFAULT_PORT}: it takes turn deliveries "
+        "and submits its answers itself",
     )
     serving.add_argument("bot", help="module:function, for example mybot:play")
     serving.add_argument("--port", type=int, default=DEFAULT_PORT)
@@ -509,14 +714,23 @@ def build_parser() -> argparse.ArgumentParser:
         f"(repeatable; always allowed: {', '.join(DEFAULT_ORIGINS)})",
     )
     serving.add_argument(
+        "--allow-submit-host",
+        action="append",
+        default=[],
+        metavar="HOST",
+        help="also submit turns to https://HOST, such as a self-hosted game "
+        f"server (repeatable; always allowed: https://{OFFICIAL_SUBMIT_HOST}, "
+        "and http://localhost and http://127.0.0.1 on any port)",
+    )
+    serving.add_argument(
         "--turn-timeout",
         type=float,
         default=DEFAULT_TURN_TIMEOUT,
         metavar="SECONDS",
-        help="answer 504 when a turn takes longer than this (default "
-        f"{DEFAULT_TURN_TIMEOUT:g}). A lobby's turn timeout is 30 s by default, "
-        "and its host can set it from 5 to 600 s or to none; this must be below "
-        "the lobby's, so for a lobby with a shorter timeout pass a smaller value",
+        help="pass the turn when the bot takes longer than this (default "
+        f"{DEFAULT_TURN_TIMEOUT:g}), or than the time left before the turn's "
+        f"deadline less {SUBMIT_MARGIN_SECONDS:g} s. A lobby's turn timeout is "
+        "30 s by default, and its host can set it from 5 to 600 s or to none",
     )
     serving.set_defaults(handler=serve)
 
@@ -526,7 +740,7 @@ def build_parser() -> argparse.ArgumentParser:
     checking.set_defaults(handler=check)
 
     fixture = commands.add_parser(
-        "fixture", help="print the fixture BotTurn as JSON, for curl"
+        "fixture", help="print the fixture BotTurn as JSON, for check --turn"
     )
     fixture.set_defaults(handler=print_fixture)
 

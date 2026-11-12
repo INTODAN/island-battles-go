@@ -21,9 +21,9 @@ import (
 //
 // The program then has these subcommands:
 //
-//	serve    serve the bot on 127.0.0.1:41414 for a game client in the browser
+//	serve    serve the bot on 127.0.0.1:41414: it takes turn deliveries and submits its answers
 //	check    call the bot once on a fixture turn, and report what is wrong
-//	fixture  print the fixture turn as JSON, for curl
+//	fixture  print the fixture turn as JSON, for check --turn
 //	run      play a seat of a lobby's game without a browser
 //	worker   play turns for the server's runners, as JSON Lines on stdin and stdout
 //
@@ -60,9 +60,9 @@ type subcommand struct {
 // subcommands are Main's subcommands, in the order the usage lists them.
 func subcommands() []subcommand {
 	return []subcommand{
-		{name: "serve", summary: fmt.Sprintf("serve the bot on %s:%d for a game client in the browser", serveHost, DefaultPort), run: serve},
+		{name: "serve", summary: fmt.Sprintf("serve the bot on %s:%d: it takes turn deliveries and submits its answers", serveHost, DefaultPort), run: serve},
 		{name: "check", summary: "call the bot once on a fixture turn, and report what is wrong", run: check},
-		{name: "fixture", summary: "print the fixture turn as JSON, for curl", run: printFixture},
+		{name: "fixture", summary: "print the fixture turn as JSON, for check --turn", run: printFixture},
 		{name: "run", summary: "play a seat of a lobby's game without a browser", run: runSeat},
 		{name: "worker", summary: "play turns for the server's runners, as JSON Lines on stdin and stdout", run: worker},
 	}
@@ -127,7 +127,7 @@ func parseFlags(flags *flag.FlagSet, arguments []string) (int, bool) {
 }
 
 func printFixture(_ context.Context, program invocation, arguments []string) int {
-	flags := newFlags(program, "fixture", "Prints the fixture turn that check plays, as JSON, for curl -d @turn.json.")
+	flags := newFlags(program, "fixture", "Prints the fixture turn that check plays, as JSON, for check --turn.")
 	if status, ok := parseFlags(flags, arguments); !ok {
 		return status
 	}

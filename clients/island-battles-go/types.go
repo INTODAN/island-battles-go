@@ -31,6 +31,27 @@ type Turn struct {
 	TurnDeadlineAt *time.Time `json:"turn_deadline_at"`
 }
 
+// TurnDelivery is one turn as it is delivered to a bot server, such as serve:
+// the turn to play, and where and with what to submit the answer. It is the
+// contract's TurnDelivery.
+type TurnDelivery struct {
+	Turn   Turn       `json:"turn"`
+	Submit TurnSubmit `json:"submit"`
+}
+
+// TurnSubmit says where a delivered turn's answer goes. It is the contract's
+// TurnSubmit.
+type TurnSubmit struct {
+	// URL is POST /generation/commands on the game's server.
+	URL string `json:"url"`
+	// Token is the submit token, sent as Authorization: Bearer <token>. It
+	// submits this one turn and nothing else.
+	Token string `json:"token"`
+	// DeadlineAt is when the turn times out, or nil when turns have no time
+	// limit.
+	DeadlineAt *time.Time `json:"deadline_at"`
+}
+
 // Generation is the board of one turn. It is the contract's Generation.
 type Generation struct {
 	// ID increases with every turn.

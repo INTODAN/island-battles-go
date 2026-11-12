@@ -95,6 +95,14 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
 	}, game.ApplyTurnDeadline)
 	huma.Register(api, huma.Operation{
+		OperationID: "getIslandLobbyTurnDelivery", Path: "/game/from-lobby/{lobby_id}/turn-delivery", Method: http.MethodGet,
+		Summary: "Read your turn as a delivery for your bot, with a one-turn submit token",
+		Description: "Requires a place on the game's frozen roster; the lobby is not consulted. Returns the caller's turn of the current generation as a TurnDelivery: the BotTurn the server builds for their bot (the board, their team, the upgrade cost table, the memory their latest completed turn sent and the deadline), and how to submit the answer: submit.url, POST /generation/commands on the game's public URL, and submit.token, a submit token that submits exactly this player's turn of this generation. " +
+			"A game client relays it to the player's bot server, island-battles-bot serve, which answers 202 at once, plays the turn and submits its commands, logs and memory itself, with complete true and Authorization: Bearer <token>; the client submits nothing. Each call issues a new token for the same turn. " +
+			"Like every game request, it first applies the turn's deadline once it has passed. When the caller has nothing to play it returns 409: the game has ended (problem type " + services.GameEndedProblemType + "), their team has been eliminated, or they have already completed the turn." + newestGame,
+		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
+	}, game.TurnDelivery)
+	huma.Register(api, huma.Operation{
 		OperationID: "getIslandLobbyGenerationLogs", Path: "/game/from-lobby/{lobby_id}/logs", Method: http.MethodGet,
 		Summary: "Read a generation's game log lines for a roster player",
 		Description: "Requires a place on the game's frozen roster; the lobby is not consulted. Returns the game log lines that players' bots sent with their batches for the generation, grouped by player, each named by the display name they had at the start, never by ID. " +
@@ -172,9 +180,11 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 			parameter.Schema = &documented
 		}
 	}
+	api.OpenAPI().Components.SecuritySchemes[SubmitTokenScheme] = &huma.SecurityScheme{Type: "http", Scheme: "bearer", BearerFormat: "ibst1",
+		Description: "A submit token from a TurnDelivery, submit.token, which starts with ibst1. It authorizes POST /generation/commands for one player's turn of one generation of one game, until the turn's deadline plus 30 seconds, or 24 hours after the generation when turns have no time limit."}
 	huma.Register(api, huma.Operation{
 		OperationID: "registerGenerationCommand", Path: "/generation/commands", Method: http.MethodPost,
-		Summary: "Register an atomic player command batch and optionally complete the turn", Description: "Requires a place on the game's frozen roster; the lobby is not consulted. Players send send_soldier_group and upgrade_castle commands for castles their team owns; other command types are forbidden (403). " +
+		Summary: "Register an atomic player command batch and optionally complete the turn", Description: "Requires a place on the game's frozen roster, or a submit token: Authorization: Bearer ibst1.… from GET /game/from-lobby/{lobby_id}/turn-delivery stands for its player for the batch of its game and generation only, and anything else (another game or generation, an expired or altered token, a player no longer on the roster) is 401. Either way the lobby is not consulted, and the rules below are the same. Players send send_soldier_group and upgrade_castle commands for castles their team owns; other command types are forbidden (403). " +
 			"upgrade_castle buys the next level of one upgrade type and pays that level's soldier_cost, listed by GET /game/upgrades, from the castle's soldiers. A castle may be upgraded several times in one turn, and each upgrade buys the next level. " +
 			"Every command is checked against the generation and every command already accepted this turn, including your own earlier batches, so an accepted command cannot fail when the turn runs. An invalid command rejects the whole batch, and nothing of it is stored. " +
 			"Malformed parameters are 422. Rejections that clients tell apart carry a problem type: a castle that is not in the generation is 422 " + services.CastleNotFoundProblemType + ", an unknown upgrade_type is 422 " + services.UnknownUpgradeTypeProblemType + ", a castle your team does not own is 403 " + services.CastleNotOwnedProblemType + ", " +
@@ -187,7 +197,7 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 			"A batch may also carry game log lines, which are stored in order with the generation and read with GET /game/from-lobby/{lobby_id}/logs. A player has at most 100 lines per generation, each of at most 500 characters; a batch over either limit is rejected whole (422) with problem type " + services.GameLogLimitProblemType + ". " +
 			"A batch may also carry the memory of the player's bot, any JSON object of at most 64 KiB as compact JSON. The batch with complete true saves it, replacing the player's previous memory, and an absent or null memory clears it; other batches ignore it. " +
 			"GenerationState.memory returns the memory sent with the player's latest completed turn, and the retry hash covers it. Larger memory is rejected whole (422) with problem type " + services.BotMemoryTooLargeProblemType + ".",
-		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
+		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}, {SubmitTokenScheme: {}}},
 		// The service validates the body itself so forbidden command types and
 		// unowned castles keep their 403 status instead of a schema 422.
 		SkipValidateBody: true,
@@ -213,11 +223,17 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 	botTurn.Description = "What a bot is given to play one turn. A bot is a stateless function: whatever it needs to keep between turns goes in the memory it returns, which the server stores per player and game."
 	botTurnResult := registry.SchemaFromRef(registry.Schema(reflect.TypeOf(models.BotTurnResult{}), true, "").Ref)
 	botTurnResult.Description = "A bot's answer to a BotTurn. Its commands, logs and memory are sent as one completing batch of POST /generation/commands."
+	turnDelivery := registry.SchemaFromRef(registry.Schema(reflect.TypeOf(models.TurnDelivery{}), true, "").Ref)
+	turnDelivery.Description = "One turn delivered to a bot that runs outside the backend, such as the player's own bot server: the BotTurn to play, and where and with which submit token to submit the answer. A bot server answers the delivery with 202 at once and submits its BotTurnResult itself as one completing batch."
 	// Sent inside the generic lobby create request as its game_settings.
 	settings := registry.SchemaFromRef(registry.Schema(reflect.TypeOf(models.LobbySettings{}), true, "").Ref)
 	settings.Description = "Island Battles game_settings for a lobby create request. Choose at most one map: map_template_id or map. The map must be made for exactly the lobby's teams: player_amount equal to the team count, and castle team colours exactly 1 to that count, in team order, with 0 for neutral castles. Without a map the game starts on a generated map. turn_timeout_seconds sets how long each turn lasts, from 5 to 600 seconds, 30 when left out, or null for no limit. An invalid choice fails lobby creation with invalid_game_settings, and its detail names each invalid field, such as game_settings.map.castles[0].x."
 	api.OpenAPI().Paths["/lobby/v1/lobbies"].Post.Description += " Island Battles reads game_settings as the LobbySettings schema."
 }
+
+// SubmitTokenScheme names the security scheme of the submit tokens that turn
+// deliveries carry.
+const SubmitTokenScheme = "SubmitToken"
 
 // SetupRoutes registers the game routes every host serves. adminAPIKey
 // authorizes POST /map/create; an empty key refuses every request.

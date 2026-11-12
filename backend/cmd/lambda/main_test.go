@@ -91,6 +91,7 @@ func testConfig(t *testing.T, database *gorm.DB) dependencies.Config {
 		CentrifugoAPIKey:          "test-centrifugo-api-key",
 		ConnectionTokenHMACSecret: "test-connection-token-secret-of-sufficient-length",
 		LobbyProxySecret:          "test-lobby-proxy-secret",
+		SubmitTokenSecret:         "test-submit-token-secret",
 		GameRetentionPeriod:       retention.DefaultPeriod,
 	}
 }

@@ -40,14 +40,15 @@ const (
 		"People outside the roster watch a game with its lobby's join code (`POST /lobby/v1/watches`): the lobby's watch channel `watch:island-battles:{lobby_id}` receives a `WatchGenerationEvent` after every turn and a `WatchGameEndedEvent` after the last, " +
 		"in the same push as the players' events, and `GET /game/from-lobby/{lobby_id}/watch` and `/watch/demo` are their reads. " +
 		"`BotTurn` and `BotTurnResult` are the stateless bot contract: a bot gets a `BotTurn` each turn and answers with a " +
-		"`BotTurnResult`, which a client sends as one completing batch."
+		"`BotTurnResult`, which is sent as one completing batch. A localhost bot gets its turns as a `TurnDelivery` from " +
+		"`GET /game/from-lobby/{lobby_id}/turn-delivery`, which its player's client posts to it, and submits its answer itself with the delivery's one-turn submit token."
 )
 
 // PlayerOperations are the endpoints a gameplay client uses, including the
-// bot choice that every lobby member makes before getting ready, the turn deadline that waiting clients apply, the upgrade cost table, the default bot list, the game log read that the replay also shows, the demo
+// bot choice that every lobby member makes before getting ready, the turn delivery that a client relays to its localhost bot, the turn deadline that waiting clients apply, the upgrade cost table, the default bot list, the game log read that the replay also shows, the demo
 // download, and the default map list for choosing a lobby's map. Lobby setup has its own
 // generated SDK in lobby/api/openapi.json.
-var PlayerOperations = []string{"createLobbyConnectionToken", "chooseIslandLobbyBot", "listIslandLobbyBots", "getIslandLobbyGeneration", "applyIslandLobbyTurnDeadline", "registerGenerationCommand", "getIslandLobbyGenerationLogs", "getIslandLobbyDemo", "watchIslandLobbyGeneration", "watchIslandLobbyDemo", "listUpgrades", "listMapTemplates", "listDefaultBots"}
+var PlayerOperations = []string{"createLobbyConnectionToken", "chooseIslandLobbyBot", "listIslandLobbyBots", "getIslandLobbyGeneration", "getIslandLobbyTurnDelivery", "applyIslandLobbyTurnDeadline", "registerGenerationCommand", "getIslandLobbyGenerationLogs", "getIslandLobbyDemo", "watchIslandLobbyGeneration", "watchIslandLobbyDemo", "listUpgrades", "listMapTemplates", "listDefaultBots"}
 
 // PlayerEventSchemas are delivered by Centrifugo rather than HTTP responses.
 var PlayerEventSchemas = []string{"GenerationEvent", "GameEndedEvent", "WatchGenerationEvent", "WatchGameEndedEvent"}

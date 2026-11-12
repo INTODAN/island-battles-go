@@ -12,13 +12,14 @@ func TestLoadConfigRejectsMissingSecretsWithoutEchoingValues(t *testing.T) {
 	values := validConfigurationEnvironment()
 	delete(values, ConnectionTokenHMACSecretEnv)
 	delete(values, LobbyProxySecretEnv)
+	delete(values, SubmitTokenSecretEnv)
 	values[CentrifugoAPIKeyEnv] = "do-not-print-api-key"
 
 	_, err := LoadConfigFromLookup(mapLookup(values))
 	if err == nil {
 		t.Fatal("LoadConfigFromLookup() error = nil, want missing configuration error")
 	}
-	if !strings.Contains(err.Error(), ConnectionTokenHMACSecretEnv) || !strings.Contains(err.Error(), LobbyProxySecretEnv) {
+	if !strings.Contains(err.Error(), ConnectionTokenHMACSecretEnv) || !strings.Contains(err.Error(), LobbyProxySecretEnv) || !strings.Contains(err.Error(), SubmitTokenSecretEnv) {
 		t.Fatalf("LoadConfigFromLookup() error = %q, want missing secret variable names", err)
 	}
 	if strings.Contains(err.Error(), values[CentrifugoAPIKeyEnv]) {
@@ -39,10 +40,29 @@ func TestLoadConfigAcceptsExplicitValidConfiguration(t *testing.T) {
 	if config.AdminAPIKey != "" {
 		t.Fatalf("AdminAPIKey = %q without %s", config.AdminAPIKey, AdminAPIKeyEnv)
 	}
+	if config.SubmitTokenSecret != "submit-token-secret" || config.PublicURL != "" {
+		t.Fatalf("SubmitTokenSecret = %q, PublicURL = %q", config.SubmitTokenSecret, config.PublicURL)
+	}
 	environment := validConfigurationEnvironment()
 	environment[AdminAPIKeyEnv] = " admin-key "
 	if config, err := LoadConfigFromLookup(mapLookup(environment)); err != nil || config.AdminAPIKey != "admin-key" {
 		t.Fatalf("AdminAPIKey = %q, error = %v", config.AdminAPIKey, err)
+	}
+}
+
+func TestLoadConfigReadsThePublicURL(t *testing.T) {
+	t.Parallel()
+
+	values := validConfigurationEnvironment()
+	values[PublicURLEnv] = "https://island-battles.example.org/"
+	if config, err := LoadConfigFromLookup(mapLookup(values)); err != nil || config.PublicURL != "https://island-battles.example.org" {
+		t.Fatalf("PublicURL = %q, error = %v", config.PublicURL, err)
+	}
+	for _, invalid := range []string{"island-battles.example.org", "ws://island-battles.example.org", "https://island-battles.example.org/play"} {
+		values[PublicURLEnv] = invalid
+		if _, err := LoadConfigFromLookup(mapLookup(values)); err == nil || !strings.Contains(err.Error(), PublicURLEnv) {
+			t.Errorf("%q: error = %v, want %s validation error", invalid, err, PublicURLEnv)
+		}
 	}
 }
 
@@ -161,6 +181,7 @@ func validConfigurationEnvironment() map[string]string {
 		CentrifugoAPIKeyEnv:          "api-key",
 		ConnectionTokenHMACSecretEnv: "connection-token-secret",
 		LobbyProxySecretEnv:          "proxy-secret",
+		SubmitTokenSecretEnv:         "submit-token-secret",
 	}
 }
 

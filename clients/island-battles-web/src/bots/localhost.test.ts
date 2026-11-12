@@ -1,102 +1,95 @@
 import { describe, expect, test } from "bun:test";
 import {
   BotError,
-  buildBotTurn,
   checkBotHealth,
-  type GenerationState,
-  parseBotResult,
-  playTurn,
-  type Upgrade,
+  deliverTurn,
+  type TurnDelivery,
 } from "./localhost";
 
-const turn = buildBotTurn(
-  {
+const delivery = {
+  turn: {
     game_id: 5,
     generation: { id: 2, castles: [], soldier_groups: [], clashes: [] },
     memory: { a: 1 },
     team_color: 1,
     turn_deadline_at: null,
-    bot: { kind: "localhost" },
-  } as unknown as GenerationState,
-  [] as Upgrade[],
-);
+    upgrades: [],
+  },
+  submit: {
+    url: "http://localhost:8888/generation/commands",
+    token: "ibst1.x",
+    deadline_at: null,
+  },
+} as unknown as TurnDelivery;
 
 const reply = (body: BodyInit, status = 200) =>
   (async () => new Response(body, { status })) as unknown as typeof fetch;
 
-describe("the localhost bot", () => {
-  test("builds the turn from the player's state", () => {
-    expect(turn).toEqual({
-      game_id: 5,
-      generation: { id: 2, castles: [], soldier_groups: [], clashes: [] },
-      memory: { a: 1 },
-      team_color: 1,
-      turn_deadline_at: null,
-      upgrades: [],
-    });
-  });
+async function failure(doFetch: typeof fetch): Promise<BotError> {
+  try {
+    await deliverTurn(delivery, { fetch: doFetch });
+  } catch (error) {
+    if (error instanceof BotError) return error;
+    throw error;
+  }
+  throw new Error("the delivery did not fail");
+}
 
-  test("posts JSON to 127.0.0.1:41414/turn", async () => {
+describe("the localhost bot", () => {
+  test("posts the delivery as JSON to 127.0.0.1:41414/turn and takes 202", async () => {
     let seen: { url: string; init: RequestInit | undefined } | undefined;
-    const result = await playTurn(turn, {
+    await deliverTurn(delivery, {
       fetch: (async (url: string, init?: RequestInit) => {
         seen = { url, init };
-        return new Response(
-          JSON.stringify({ commands: [], logs: [], memory: { b: 2 } }),
-        );
+        return new Response('{"accepted": true}', { status: 202 });
       }) as unknown as typeof fetch,
     });
     expect(seen?.url).toBe("http://127.0.0.1:41414/turn");
     expect(seen?.init?.method).toBe("POST");
+    expect(JSON.parse(String(seen?.init?.body))).toEqual(delivery);
     expect(seen?.init?.headers).toEqual({ "Content-Type": "application/json" });
-    expect(JSON.parse(String(seen?.init?.body))).toEqual(turn);
-    expect(result).toEqual({ commands: [], logs: [], memory: { b: 2 } });
   });
 
-  test("tells apart a bot that is not running, one that crashed and one that is too slow", async () => {
-    const down = (async () => {
+  test("a bot that is not running is unreachable", async () => {
+    const error = await failure((async () => {
       throw new TypeError("Failed to fetch");
-    }) as unknown as typeof fetch;
-    await expect(playTurn(turn, { fetch: down })).rejects.toMatchObject({
-      kind: "unreachable",
-    });
-    await expect(
-      playTurn(turn, {
-        fetch: reply("Traceback...\nZeroDivisionError: boom", 500),
-      }),
-    ).rejects.toMatchObject({
-      kind: "crashed",
-      message: expect.stringContaining("ZeroDivisionError"),
-    });
-    await expect(
-      playTurn(turn, { fetch: reply("slow", 504) }),
-    ).rejects.toMatchObject({
-      kind: "too-slow",
-    });
-    await expect(
-      playTurn(turn, { fetch: reply("not json") }),
-    ).rejects.toBeInstanceOf(BotError);
+    }) as unknown as typeof fetch);
+    expect(error.kind).toBe("unreachable");
+    expect(error.message).toContain("127.0.0.1:41414");
   });
 
-  test("checks a bot's answer", () => {
-    expect(parseBotResult({ commands: [] })).toEqual({
-      commands: [],
-      logs: [],
-      memory: null,
-    });
-    expect(() => parseBotResult({})).toThrow(BotError);
-    expect(() => parseBotResult({ commands: [], memory: [] })).toThrow(
-      BotError,
+  test("a bot that doesn't accept in time is too slow", async () => {
+    const error = await failure((async () => {
+      throw new DOMException("timed out", "TimeoutError");
+    }) as unknown as typeof fetch);
+    expect(error.kind).toBe("too-slow");
+  });
+
+  test("a refusal shows the bot's reason, its last lines only", async () => {
+    const lines = `${Array.from({ length: 20 }, (_, index) => `line ${index}`).join("\n")}\nsubmit.url is not an allowed host`;
+    const error = await failure(reply(lines, 400));
+    expect(error.kind).toBe("refused");
+    expect(error.message).toStartWith("Your bot refused the turn (HTTP 400).");
+    expect(error.message).toContain("not an allowed host");
+    expect(error.message).not.toContain("line 3\n");
+    expect((await failure(reply("", 500))).message).toBe(
+      "Your bot refused the turn (HTTP 500).",
     );
   });
 
-  test("health is true only when the bot answers", async () => {
-    expect(await checkBotHealth({ fetch: reply("ok") })).toBe(true);
-    expect(await checkBotHealth({ fetch: reply("no", 500) })).toBe(false);
+  test("an old SDK's answer asks for an upgrade", async () => {
+    expect((await failure(reply("{}", 200))).kind).toBe("refused");
+    const old = await failure(reply("the body is not a BotTurn", 422));
+    expect(old.message).toContain("Upgrade its SDK");
+  });
+
+  test("health is true only for an OK answer", async () => {
+    expect(await checkBotHealth({ fetch: reply("{}") })).toBe(true);
+    expect(await checkBotHealth({ fetch: reply("", 500) })).toBe(false);
     expect(
       await checkBotHealth({
         fetch: (async () => {
-          throw new TypeError("refused");
+          throw new TypeError("Failed to fetch");
         }) as unknown as typeof fetch,
       }),
     ).toBe(false);

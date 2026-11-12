@@ -61,9 +61,8 @@ type BotTurn struct {
 	GameID     uint           `json:"game_id" minimum:"1"`
 	Generation GenerationView `json:"generation"`
 	TeamColor  uint           `json:"team_color" minimum:"1"`
-	// Upgrades is required: relayed turns are built by clients, which read it once per game.
-	Upgrades []UpgradeView `json:"upgrades" nullable:"false" doc:"The upgrade cost table, the same list GET /game/upgrades returns as its upgrades. It is the same for the whole game, so a client reads it once and reuses it in every turn. Reaching a level costs its soldier_cost."`
-	Memory   BotMemory     `json:"memory" doc:"The memory the bot returned with its previous turn in this game, or null on its first turn and after a turn that returned null."`
+	Upgrades   []UpgradeView  `json:"upgrades" nullable:"false" doc:"The upgrade cost table, the same list GET /game/upgrades returns as its upgrades. It is the same for the whole game. Reaching a level costs its soldier_cost."`
+	Memory     BotMemory      `json:"memory" doc:"The memory the bot returned with its previous turn in this game, or null on its first turn and after a turn that returned null."`
 	// TurnDeadlineAt is GenerationState.TurnDeadlineAt.
 	TurnDeadlineAt *time.Time `json:"turn_deadline_at" nullable:"true" doc:"When the turn times out, GenerationState.turn_deadline_at, or null when turns have no time limit. A bot that hasn't answered by then makes its whole team lose."`
 }
@@ -75,6 +74,21 @@ type BotTurnResult struct {
 	Commands []PublicGenerationCommand `json:"commands" maxItems:"1000" nullable:"false"`
 	Memory   BotMemory                 `json:"memory" doc:"Any JSON object of at most 64 KiB as compact JSON, given back as BotTurn.memory next turn, or null for none."`
 	Logs     []GenerationLogLine       `json:"logs" maxItems:"100" nullable:"false" doc:"Game log lines for this turn, of at most 500 characters each."`
+}
+
+// TurnDelivery is one turn as it is delivered to a bot that runs outside the
+// backend: the BotTurn to play, and how to submit the answer.
+type TurnDelivery struct {
+	Turn   BotTurn    `json:"turn"`
+	Submit TurnSubmit `json:"submit"`
+}
+
+// TurnSubmit says where and with what a bot submits its answer to a
+// TurnDelivery.
+type TurnSubmit struct {
+	URL        string     `json:"url" format:"uri" doc:"Where to submit the answer: POST /generation/commands on the game's server, as an absolute URL."`
+	Token      string     `json:"token" doc:"The submit token, sent as Authorization: Bearer <token>. It lets the bearer submit this player's turn of this generation and nothing else, and expires at the turn's deadline plus 30 seconds, or 24 hours after the generation when turns have no time limit. Keep it secret until the turn is over."`
+	DeadlineAt *time.Time `json:"deadline_at" nullable:"true" doc:"When the turn times out, the BotTurn's turn_deadline_at, or null when turns have no time limit. An answer must be submitted before it."`
 }
 
 // GamePlayerBotMemory is the memory a player sent with their latest completed
