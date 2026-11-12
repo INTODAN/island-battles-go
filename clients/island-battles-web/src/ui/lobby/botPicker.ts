@@ -1,6 +1,6 @@
 import { checkBotHealth, serveCommand } from "../../bots";
 import { copyText, h } from "../dom";
-import type { BotChoice, DefaultBot, LobbyActions, LobbyBots } from "./actions";
+import type { BotChoice, DefaultBot, LobbyActions } from "./actions";
 import { choiceFromValue, choiceValue } from "./roomModel";
 
 export interface BotPicker {
@@ -22,9 +22,8 @@ const fallbackBots: DefaultBot[] = [1, 2, 3].map((level) => ({
 }));
 
 export function mountBotPicker(options: {
+  /** Saves a choice; the lobby snapshot it answers with reaches `update`. */
   actions: LobbyActions;
-  /** Gets the list the server answered with after a choice was saved. */
-  onSaved(bots: LobbyBots): void;
   /** Gets the sentence for a refused or failed save; empty clears it. */
   onError(message: string): void;
   describeError(cause: unknown): string;
@@ -123,7 +122,7 @@ export function mountBotPicker(options: {
     options.onError("");
     sync();
     try {
-      options.onSaved(await actions.chooseBot(choice));
+      await actions.chooseBot(choice);
     } catch (cause) {
       options.onError(options.describeError(cause));
     } finally {

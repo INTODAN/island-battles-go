@@ -4,7 +4,6 @@ import { copyText, h } from "../dom";
 import {
   type DefaultBot,
   type LobbyActions,
-  type LobbyBots,
   type MapTemplateSummary,
   retryTransport,
 } from "./actions";
@@ -91,10 +90,6 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
   let levels: DefaultBot[] = fallbackLevels;
   /** The level each team's Add bot select shows, by team ID. */
   const chosenLevel = new Map<string, number>();
-  let bots: LobbyBots | null = null;
-  let botsKey = "";
-  let botsReading = false;
-  let botsDirty = false;
   let lastVersion = -1;
 
   const title = h("h1", {});
@@ -235,12 +230,9 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     render();
   });
 
+  // A saved bot comes back in the snapshot, which the session shows.
   const picker = mountBotPicker({
     actions,
-    onSaved(next) {
-      bots = next;
-      render();
-    },
     onError(message) {
       problems.bot = message;
       renderProblems();
@@ -389,7 +381,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
   });
 
   const room = (snapshot: Snapshot): RoomModel =>
-    buildRoom(snapshot, bots, realtime.session.get()?.playerId ?? "");
+    buildRoom(snapshot, realtime.session.get()?.playerId ?? "");
 
   // --- Rendering ---
 
@@ -600,9 +592,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     );
 
     picker.update(
-      model.you
-        ? bots?.members.find((m) => m.player_id === model.you?.playerId)?.bot
-        : undefined,
+      model.you?.kind === "human" ? model.you.bot : undefined,
       started,
     );
     readyButton.textContent = model.you?.ready ? "Cancel ready" : "I'm ready";
@@ -632,30 +622,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     renderProblems();
   }
 
-  // --- Bots of all members: read again whenever the lobby changes ---
-
-  async function refreshBots(snapshot: Snapshot): Promise<void> {
-    if (botsReading) {
-      botsDirty = true;
-      return;
-    }
-    botsReading = true;
-    try {
-      bots = await actions.listBots(snapshot.lobby.id);
-    } catch (cause) {
-      handleProblem(cause, "bot");
-    } finally {
-      botsReading = false;
-    }
-    if (disposed) return;
-    render();
-    const latest = realtime.lobby.get();
-    if (botsDirty && latest) {
-      botsDirty = false;
-      void refreshBots(latest);
-    }
-  }
-
+  // Every snapshot carries every member's bot, in their member settings.
   function onLobby(snapshot: Snapshot | null): void {
     if (!snapshot || disposed) return;
     if (snapshot.lobby.version !== lastVersion) {
@@ -666,11 +633,6 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
         notice.textContent = "";
       }
       lastVersion = snapshot.lobby.version;
-      const key = `${snapshot.lobby.version}:${(snapshot.members ?? []).map((m) => m.player_id).join(",")}`;
-      if (key !== botsKey) {
-        botsKey = key;
-        void refreshBots(snapshot);
-      }
     }
     render();
   }
@@ -679,11 +641,6 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     realtime.lobby.subscribe(onLobby),
     realtime.connection.subscribe(() => render()),
   ];
-  const onFocus = () => {
-    const snapshot = realtime.lobby.get();
-    if (snapshot) void refreshBots(snapshot);
-  };
-  window.addEventListener("focus", onFocus);
 
   void actions
     .mapTemplates()
@@ -755,7 +712,6 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     dispose() {
       disposed = true;
       for (const unsubscribe of unsubscribers) unsubscribe();
-      window.removeEventListener("focus", onFocus);
       picker.dispose();
       watchersPanel.dispose();
       closeChange();

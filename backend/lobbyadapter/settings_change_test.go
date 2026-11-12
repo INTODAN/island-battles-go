@@ -71,12 +71,11 @@ func TestTheHostChangesToAMapWithMoreTeamsAndStartsOnIt(t *testing.T) {
 			t.Fatalf("member after the change = %+v", member)
 		}
 	}
-	// Bot choices belong to the memberships, so they survive the change.
-	var listed models.LobbyBotsView
-	stack.expect(stack.api.Get("/game/lobbies/"+room.Lobby.ID+"/bots", alice.header), http.StatusOK, &listed)
-	for _, member := range listed.Members {
-		if !sameBot(member.Bot, botChoice(models.DefaultBot, 1)) {
-			t.Fatalf("bots after the change = %+v", listed)
+	// Bots are in the members' member settings, so they survive the change.
+	bots := stack.bots(changed)
+	for _, member := range changed.Members {
+		if !sameBot(bots[member.PlayerID], botChoice(models.DefaultBot, 1)) {
+			t.Fatalf("bots after the change = %+v", bots)
 		}
 	}
 

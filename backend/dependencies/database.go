@@ -112,10 +112,11 @@ func MigrateSchema(ctx context.Context, db *gorm.DB) error {
 	if err != nil {
 		return fmt.Errorf("initialize game schema: %w", err)
 	}
-	// Bot choices belong to lobby memberships, so they come after the lobby
-	// migrations.
-	if err := dal.MigrateBotChoices(ctx, db); err != nil {
-		return fmt.Errorf("initialize bot choices: %w", err)
+	// Each person's bot is in their lobby member settings now, so the table
+	// of bot choices, with its foreign key to the lobby's memberships, is
+	// gone. Its choices are dropped: players choose again.
+	if err := db.WithContext(ctx).Exec(`DROP TABLE IF EXISTS island_lobby_bot_choices`).Error; err != nil {
+		return fmt.Errorf("drop island_lobby_bot_choices: %w", err)
 	}
 	// Generation events are pushed after their turn commits, so the table that
 	// queued them is gone. It held only game data.

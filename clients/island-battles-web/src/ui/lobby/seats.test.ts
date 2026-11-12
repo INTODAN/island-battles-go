@@ -61,7 +61,7 @@ const snapshot = {
 } as unknown as Snapshot;
 
 describe("seats in the room model", () => {
-  const room = buildRoom(snapshot, null, "p1");
+  const room = buildRoom(snapshot, "p1");
   const red = room.teams.find((team) => team.name === "Red");
 
   test("a seat is the member of its team, shown as a bot", () => {
@@ -88,7 +88,6 @@ describe("seats in the room model", () => {
           }),
         ],
       } as unknown as Snapshot,
-      null,
       "p1",
     ).teams.find((team) => team.name === "Red")?.members[0];
     expect(seatRow?.connected).toBe(true);
@@ -103,7 +102,6 @@ describe("seats in the room model", () => {
             ...snapshot,
             members: [seat("seat-1", "t-red", 1)],
           } as unknown as Snapshot,
-          null,
           "p1",
         ).teams.flatMap((team) => team.members),
       ),

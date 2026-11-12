@@ -37,8 +37,9 @@ async def test_one_person_plays_a_whole_game_against_a_level_two_bot_seat(guests
         "Bot (level 2)", {"bot_level": 2}, True, str(blue))
     await alice.select_team(scope, str(red))
     chosen = await choose_bot(alice, scope.lobby_id, {"kind": "localhost"})
-    assert [(member["display_name"], member["bot"]) for member in chosen["members"]] == [
-        ("Alice", {"kind": "localhost"}), ("Bot (level 2)", {"kind": "default", "level": 2})]
+    # A seat's bot is in its seat settings; it has no member settings.
+    assert [(member["display_name"], member["member_settings"]) for member in chosen["members"]] == [
+        ("Alice", {"bot": {"kind": "localhost"}}), ("Bot (level 2)", None)]
     await alice.set_ready(scope, True)
     started = await alice.start(scope)
     # The seat is on the frozen roster with its own player ID.

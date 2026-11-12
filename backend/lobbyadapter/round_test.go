@@ -82,14 +82,12 @@ func TestALobbyPlaysASecondGameAfterTheFirstEnds(t *testing.T) {
 		t.Fatalf("Carol's state between games = %+v", state)
 	}
 
-	// Carol leaves, and the host seats a bot on her team. Bot choices
-	// survive the reopen, so the people only get ready again.
+	// Carol leaves, and the host seats a bot on her team. The bots in the
+	// member settings survive the reopen, so the people only get ready again.
 	stack.expect(stack.api.Delete(stack.lobbyPath(room)+"/membership", carol.header), http.StatusNoContent, nil)
 	stack.expect(stack.api.Post(stack.lobbyPath(room)+"/seats", alice.header, map[string]any{"team_id": room.Teams[2].ID, "seat_settings": map[string]any{"bot_level": 1}}), http.StatusOK, nil)
-	var listed models.LobbyBotsView
-	stack.expect(stack.api.Get("/game/lobbies/"+room.Lobby.ID+"/bots", alice.header), http.StatusOK, &listed)
-	if !sameBot(listed.Members[0].Bot, botChoice(models.LocalhostBot, 0)) || !sameBot(listed.Members[1].Bot, botChoice(models.LocalhostBot, 0)) {
-		t.Fatalf("bots after the reopen = %+v", listed)
+	if bots := stack.bots(stack.snapshot(room, alice)); len(bots) != 2 || !sameBot(bots[alice.playerID], botChoice(models.LocalhostBot, 0)) || !sameBot(bots[bob.playerID], botChoice(models.LocalhostBot, 0)) {
+		t.Fatalf("bots after the reopen = %+v", bots)
 	}
 	stack.expect(stack.api.Post(stack.lobbyPath(room)+"/start", alice.header, map[string]any{}), http.StatusConflict, nil)
 	for _, member := range []guest{alice, bob} {

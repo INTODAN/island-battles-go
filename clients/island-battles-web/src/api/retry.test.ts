@@ -90,13 +90,18 @@ describe("throttled requests", () => {
   });
 
   test("a repeatable PUT keeps its body across retries", async () => {
-    const { gameApi, requests } = setup([throttled, ok]);
-    await gameApi.PUT("/game/lobbies/{lobby_id}/bot", {
-      params: { path: { lobby_id: "l" } },
-      body: { bot_id: "b" } as never,
-    });
+    const { lobbyApi, requests } = setup([throttled, ok]);
+    await lobbyApi.PUT(
+      "/lobby/v1/games/{game_key}/lobbies/{lobby_id}/member-settings",
+      {
+        params: { path: lobbyPath },
+        body: { member_settings: { bot: { kind: "localhost" } } },
+      },
+    );
     expect(requests).toHaveLength(2);
-    expect(await requests[1]?.text()).toBe('{"bot_id":"b"}');
+    expect(await requests[1]?.text()).toBe(
+      '{"member_settings":{"bot":{"kind":"localhost"}}}',
+    );
   });
 
   test("team, ready, heartbeat and reopen are retried", async () => {

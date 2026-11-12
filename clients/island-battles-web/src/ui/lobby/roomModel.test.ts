@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { Snapshot } from "../../realtime";
-import type { LobbyBots } from "./actions";
+
 import {
   buildRoom,
   canChangeSettings,
@@ -8,6 +8,7 @@ import {
   choiceValue,
   describeBot,
   describeSettings,
+  memberSettingsBot,
   startBlocker,
   teamTaken,
 } from "./roomModel";
@@ -30,6 +31,10 @@ const member = (
   ...extra,
 });
 
+// Each person's bot is in their member settings.
+const localhost = { member_settings: { bot: { kind: "localhost" } } };
+const levelTwo = { member_settings: { bot: { kind: "default", level: 2 } } };
+
 const snapshot = {
   channel: "lobby:island-battles:L",
   membership_generation: 1,
@@ -47,23 +52,40 @@ const snapshot = {
     { id: "t-green", name: "Green", order: 3 },
   ],
   members: [
-    member("p2", "t-red", { ready: true }),
-    member("p1", "t-blue"),
-    member("p3", null, { disconnected_until: "2026-11-01T00:01:00Z" }),
+    member("p2", "t-red", { ready: true, ...levelTwo }),
+    member("p1", "t-blue", localhost),
+    member("p3", null, {
+      disconnected_until: "2026-11-01T00:01:00Z",
+      member_settings: null,
+    }),
     member("p4", "t-blue", { active: false }),
   ],
 } as unknown as Snapshot;
 
-const bots: LobbyBots = {
-  lobby_id: "L",
-  members: [
-    { player_id: "p1", display_name: "P1", bot: { kind: "localhost" } },
-    { player_id: "p2", display_name: "P2", bot: { kind: "default", level: 2 } },
-  ],
-};
+describe("a bot in the member settings", () => {
+  test("is read from {bot: ...}, and anything else is no bot", () => {
+    expect(memberSettingsBot(localhost.member_settings)).toEqual({
+      kind: "localhost",
+    });
+    expect(memberSettingsBot(levelTwo.member_settings)).toEqual({
+      kind: "default",
+      level: 2,
+    });
+    for (const settings of [
+      null,
+      undefined,
+      {},
+      { bot: null },
+      { bot: { kind: "default" } },
+      { bot: { kind: "uploaded" } },
+    ]) {
+      expect(memberSettingsBot(settings)).toBeUndefined();
+    }
+  });
+});
 
 describe("the room model", () => {
-  const room = buildRoom(snapshot, bots, "p1");
+  const room = buildRoom(snapshot, "p1");
 
   test("teams in order with their colour, members and bots", () => {
     expect(room.teams.map((team) => [team.name, team.colour])).toEqual([
@@ -104,19 +126,19 @@ describe("the room model", () => {
     expect(room.you?.name).toBe("P1");
     expect(room.isHost).toBe(true);
     expect(room.yourTeamId).toBe("t-blue");
-    expect(buildRoom(snapshot, null, "p2").isHost).toBe(false);
+    expect(buildRoom(snapshot, "p2").isHost).toBe(false);
   });
 });
 
 describe("a change of the map", () => {
   test("only the host of a waiting lobby can change it", () => {
-    expect(canChangeSettings(buildRoom(snapshot, bots, "p1"))).toBe(true);
-    expect(canChangeSettings(buildRoom(snapshot, bots, "p2"))).toBe(false);
+    expect(canChangeSettings(buildRoom(snapshot, "p1"))).toBe(true);
+    expect(canChangeSettings(buildRoom(snapshot, "p2"))).toBe(false);
     const started = {
       ...snapshot,
       lobby: { ...snapshot.lobby, phase: "started" },
     } as Snapshot;
-    expect(canChangeSettings(buildRoom(started, bots, "p1"))).toBe(false);
+    expect(canChangeSettings(buildRoom(started, "p1"))).toBe(false);
   });
 
   test("the teams, seats and bots follow the rebuilt teams", () => {
@@ -134,8 +156,8 @@ describe("a change of the map", () => {
         { id: "t-red", name: "Red", order: 2 },
       ],
       members: [
-        member("p1", "t-blue"),
-        member("p2", null),
+        member("p1", "t-blue", localhost),
+        member("p2", null, levelTwo),
         member("p5", null, {
           active: false,
           kind: "seat",
@@ -143,7 +165,7 @@ describe("a change of the map", () => {
         }),
       ],
     } as unknown as Snapshot;
-    const room = buildRoom(changed, bots, "p1");
+    const room = buildRoom(changed, "p1");
     expect(room.teams.map((team) => [team.id, team.colour])).toEqual([
       ["t-blue", 1],
       ["t-red", 2],
@@ -212,7 +234,7 @@ describe("what keeps the host from starting", () => {
     });
   /** The room for these members, with the snapshot's teams (Blue, Red and Green). */
   const roomOf = (members: unknown[]) =>
-    buildRoom({ ...snapshot, members } as unknown as Snapshot, null, "p1");
+    buildRoom({ ...snapshot, members } as unknown as Snapshot, "p1");
 
   test("fewer than two members, people and bot seats together", () => {
     expect(

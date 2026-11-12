@@ -182,9 +182,7 @@ func assertNoGameData(t *testing.T, database *gorm.DB) {
 	}
 	checked := 0
 	for _, table := range tables {
-		// Bot choices belong to lobby memberships and go with the lobby.
-		if strings.HasPrefix(table, "lobby_") || strings.HasSuffix(table, "_schema_migrations") || table == "map_templates" || table == "castle_templates" ||
-			table == (models.LobbyBotChoice{}).TableName() {
+		if strings.HasPrefix(table, "lobby_") || strings.HasSuffix(table, "_schema_migrations") || table == "map_templates" || table == "castle_templates" {
 			continue
 		}
 		checked++

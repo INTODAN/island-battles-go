@@ -16,7 +16,10 @@ export const maxRetryWaitMs = 5000;
  * never retried.
  */
 const repeatableRequests: ReadonlyArray<{ method: string; path: RegExp }> = [
-  { method: "PUT", path: /\/game\/lobbies\/[^/]+\/bot$/ },
+  {
+    method: "PUT",
+    path: /\/lobby\/v1\/games\/[^/]+\/lobbies\/[^/]+\/member-settings$/,
+  },
   { method: "PUT", path: /\/lobby\/v1\/games\/[^/]+\/lobbies\/[^/]+\/team$/ },
   { method: "PUT", path: /\/lobby\/v1\/games\/[^/]+\/lobbies\/[^/]+\/ready$/ },
   {

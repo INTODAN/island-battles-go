@@ -53,12 +53,10 @@ func TestTheHostPlaysAloneAgainstABotSeat(t *testing.T) {
 	// The lobby is full, so nobody else can join or be seated.
 	stack.expect(stack.api.Post("/lobby/v1/memberships", bob.header, map[string]any{"game_key": lobbyadapter.GameKey, "join_code": room.Lobby.JoinCode, "client_instance_id": bob.client}), http.StatusConflict, nil)
 
-	// The bots list shows the seat's default bot, and the host still chooses
-	// their own.
-	var listed models.LobbyBotsView
-	stack.expect(stack.api.Get("/game/lobbies/"+room.Lobby.ID+"/bots", alice.header), http.StatusOK, &listed)
-	if len(listed.Members) != 2 || listed.Members[0].Bot != nil || listed.Members[1].DisplayName != "Bot (level 2)" || !sameBot(listed.Members[1].Bot, botChoice(models.DefaultBot, 2)) {
-		t.Fatalf("bots = %+v", listed)
+	// The seat's bot is in its seat settings, not in member settings, and
+	// the host still chooses their own.
+	if bots := stack.bots(seated); len(bots) != 0 {
+		t.Fatalf("bots = %+v", bots)
 	}
 	stack.expect(stack.ready(room, alice), http.StatusConflict, nil)
 	stack.expect(stack.choose(room, alice, `{"kind":"localhost"}`), http.StatusOK, nil)
