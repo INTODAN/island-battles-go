@@ -657,3 +657,229 @@ export function createFlatRing(
   ring.isPickable = false;
   return ring;
 }
+
+// ---- squads (#211) ---------------------------------------------------------------------------
+
+/** A group on land: a few small soldiers, drawn while it walks between its castle and boat. */
+export interface SquadParts {
+  /** Placed on the island and turned to face where the squad walks. */
+  root: TransformNode;
+  /** Scaled as the squad comes out of a gate or steps into a boat, and bobbed as it walks. */
+  body: TransformNode;
+  /** Legs, faces and spears, on `castle-base`. */
+  base: Mesh;
+  /** Tunics and helmet plumes, on the team's `castle-team`. */
+  team: Mesh;
+  /** How many soldiers it shows. */
+  size: number;
+}
+
+/** The most soldiers a squad shows. */
+export const MAX_SQUAD_SIZE = 5;
+
+/** How many soldiers a squad of `soldiers` shows: 1 for 1–4, one more per doubling, 5 at most. */
+export function squadSize(soldiers: number): number {
+  let size = 1;
+  for (let threshold = 5; soldiers >= threshold; threshold *= 2) size++;
+  return Math.min(MAX_SQUAD_SIZE, size);
+}
+
+/** Where each soldier of a squad of `size` stands, in a small column facing +z. */
+export function squadFormation(size: number): readonly [number, number][] {
+  const step = 0.05;
+  const layouts: Record<number, [number, number][]> = {
+    1: [[0, 0]],
+    2: [
+      [-step / 2, 0],
+      [step / 2, 0],
+    ],
+    3: [
+      [0, step * 0.6],
+      [-step / 2, -step * 0.4],
+      [step / 2, -step * 0.4],
+    ],
+    4: [
+      [-step / 2, step / 2],
+      [step / 2, step / 2],
+      [-step / 2, -step / 2],
+      [step / 2, -step / 2],
+    ],
+    5: [
+      [0, step * 1.1],
+      [-step / 2, 0.1 * step],
+      [step / 2, 0.1 * step],
+      [-step / 2, -step * 0.9],
+      [step / 2, -step * 0.9],
+    ],
+  };
+  return layouts[Math.min(MAX_SQUAD_SIZE, Math.max(1, size))] ?? [[0, 0]];
+}
+
+/** An axis-aligned box from `low` to `high`, every face one atlas colour. */
+function box(
+  geometry: FlatGeometry,
+  low: Point3,
+  high: Point3,
+  colour: SwatchPoint,
+): void {
+  const [x0, y0, z0] = low;
+  const [x1, y1, z1] = high;
+  const c = [colour, colour, colour, colour] as const;
+  geometry.quad(
+    [x0, y1, z0],
+    [x1, y1, z0],
+    [x1, y1, z1],
+    [x0, y1, z1],
+    c,
+    [0, 1, 0],
+  );
+  geometry.quad(
+    [x0, y0, z0],
+    [x1, y0, z0],
+    [x1, y0, z1],
+    [x0, y0, z1],
+    c,
+    [0, -1, 0],
+  );
+  geometry.quad(
+    [x0, y0, z1],
+    [x1, y0, z1],
+    [x1, y1, z1],
+    [x0, y1, z1],
+    c,
+    [0, 0, 1],
+  );
+  geometry.quad(
+    [x0, y0, z0],
+    [x1, y0, z0],
+    [x1, y1, z0],
+    [x0, y1, z0],
+    c,
+    [0, 0, -1],
+  );
+  geometry.quad(
+    [x1, y0, z0],
+    [x1, y1, z0],
+    [x1, y1, z1],
+    [x1, y0, z1],
+    c,
+    [1, 0, 0],
+  );
+  geometry.quad(
+    [x0, y0, z0],
+    [x0, y1, z0],
+    [x0, y1, z1],
+    [x0, y0, z1],
+    c,
+    [-1, 0, 0],
+  );
+}
+
+const squadGeometries = new Map<
+  number,
+  { base: FlatGeometry; team: FlatGeometry }
+>();
+
+/**
+ * The soldiers of a squad of `size`, built once per size: on `castle-base` the legs, the face
+ * and a spear held upright; on the team's `castle-team` the tunic and a plume on the helmet.
+ * A soldier is about 0.12 world units tall, a third of a boat's length.
+ */
+export function squadGeometry(size: number): {
+  base: FlatGeometry;
+  team: FlatGeometry;
+} {
+  const cached = squadGeometries.get(size);
+  if (cached) return cached;
+  const base = new FlatGeometry();
+  const team = new FlatGeometry();
+  const legs = { swatch: "wood", along: 0.85 } as const;
+  const face = { swatch: "cliff", along: 0.92 } as const;
+  const spear = { swatch: "wood", along: 0.45 } as const;
+  const helmet = { swatch: "cliff", along: 0.35 } as const;
+  const tunic = { swatch: "stone", along: SAIL_ALONG[0] } as const;
+  const plume = { swatch: "flags", along: 0.1 } as const;
+  for (const [x, z] of squadFormation(size)) {
+    box(base, [x - 0.013, 0, z - 0.009], [x - 0.002, 0.042, z + 0.009], legs);
+    box(base, [x + 0.002, 0, z - 0.009], [x + 0.013, 0.042, z + 0.009], legs);
+    box(
+      team,
+      [x - 0.019, 0.04, z - 0.012],
+      [x + 0.019, 0.083, z + 0.012],
+      tunic,
+    );
+    box(
+      base,
+      [x - 0.011, 0.083, z - 0.011],
+      [x + 0.011, 0.103, z + 0.011],
+      face,
+    );
+    box(
+      base,
+      [x - 0.013, 0.101, z - 0.013],
+      [x + 0.013, 0.112, z + 0.013],
+      helmet,
+    );
+    box(
+      team,
+      [x - 0.003, 0.112, z - 0.012],
+      [x + 0.003, 0.126, z + 0.006],
+      plume,
+    );
+    box(
+      base,
+      [x + 0.022, 0.02, z + 0.004],
+      [x + 0.027, 0.16, z + 0.009],
+      spear,
+    );
+  }
+  const built = { base, team };
+  squadGeometries.set(size, built);
+  return built;
+}
+
+/** A squad of soldiers for group `id`, in the team's colours; hidden until it is placed. */
+export function createSquad(
+  scene: Scene,
+  id: number,
+  materials: MaterialCache,
+  team: number,
+  size: number,
+): SquadParts {
+  const root = new TransformNode(`squad-${id}`, scene);
+  const body = new TransformNode(`squad-${id}-body`, scene);
+  body.parent = root;
+  const geometry = squadGeometry(size);
+  const base = meshOf(scene, `squad-${id}-base`, geometry.base);
+  const teamMesh = meshOf(scene, `squad-${id}-team`, geometry.team);
+  base.parent = body;
+  teamMesh.parent = body;
+  materials.useBase(base, WOOD_COLOR);
+  materials.useTeam(teamMesh, team);
+  root.setEnabled(false);
+  return { root, body, base, team: teamMesh, size };
+}
+
+/** Shows `size` soldiers: the squad's meshes take that size's geometry. */
+export function setSquadSize(parts: SquadParts, size: number): void {
+  if (parts.size === size) return;
+  const geometry = squadGeometry(size);
+  geometry.base.toVertexData().applyToMesh(parts.base);
+  geometry.team.toVertexData().applyToMesh(parts.team);
+  parts.size = size;
+}
+
+export function setSquadTeam(
+  parts: SquadParts,
+  team: number,
+  materials: MaterialCache,
+): void {
+  materials.useTeam(parts.team, team);
+}
+
+export function disposeSquad(parts: SquadParts): void {
+  parts.base.dispose();
+  parts.team.dispose();
+  parts.body.dispose();
+  parts.root.dispose();
+}

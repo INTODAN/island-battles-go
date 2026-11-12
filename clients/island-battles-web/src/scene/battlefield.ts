@@ -22,14 +22,20 @@ import {
   createFlatRing,
   createIsland,
   createPropMeshes,
+  createSquad,
   disposeBoat,
+  disposeSquad,
   ISLAND_TOP,
   MaterialCache,
   markPickable,
   type PropMeshes,
   placeProps,
   SEA_COLOR,
+  type SquadParts,
   setBoatTeam,
+  setSquadSize,
+  setSquadTeam,
+  squadSize,
 } from "./art";
 import { type BoardBounds, boardBounds } from "./board";
 import { createBoardCamera, fitCamera } from "./camera";
@@ -61,7 +67,7 @@ import {
 } from "./landforms";
 import { createBoardLook } from "./look";
 import { CLASH_COLOR, LOSS_COLOR, teamColorHex, tint } from "./palette";
-import { drawnPosition } from "./shore";
+import { drawnPosition, type GroupLook, groupLook } from "./shore";
 
 type Generation = components["schemas"]["Generation"];
 type GameTeam = components["schemas"]["GameTeam"];
@@ -78,6 +84,21 @@ export interface GroupEntity {
   parts: BoatParts;
   /** The heading the boat turns to, about y; unset until it is first placed. */
   heading?: number;
+  /** The soldiers walking on land (#211), made the first time the group is on land. */
+  squad?: SquadParts;
+}
+
+/** Disposes a group's boat and its squad. */
+export function disposeGroup(entity: GroupEntity): void {
+  disposeBoat(entity.parts);
+  if (entity.squad) disposeSquad(entity.squad);
+  delete entity.squad;
+}
+
+/** Shows or hides a group's boat and squad together. */
+export function setGroupEnabled(entity: GroupEntity, enabled: boolean): void {
+  entity.parts.root.setEnabled(enabled);
+  if (!enabled) entity.squad?.root.setEnabled(false);
 }
 
 interface ClashEntity {
@@ -304,6 +325,102 @@ export function boatScale(soldiers: number): number {
   return Math.min(1.7, 1 + 0.18 * Math.log2(1 + soldiers / 10));
 }
 
+/** How far a squad's walk bobs, in world units, and how often, per world unit walked. */
+const SQUAD_BOB = 0.012;
+const SQUAD_STEPS_PER_UNIT = 28;
+/** Squads are drawn larger than life, so they read beside the boats and castles. */
+const SQUAD_DRAWN_SCALE = 1.5;
+/** Height of a squad's label above its feet. */
+const SQUAD_LABEL_HEIGHT = 0.3;
+/** Height of a boat's label above the sea. */
+const BOAT_LABEL_HEIGHT = 0.62;
+
+/** The node a group's count label links to: above its boat, or above its squad on land. */
+function groupLabelAnchor(
+  scene: Scene,
+  groupId: number,
+  entity: GroupEntity,
+): TransformNode {
+  const name = `group:${groupId}:soldiers`;
+  return (
+    entity.squad?.root
+      .getChildren((node) => node.name === name, true)
+      .find((node): node is TransformNode => node instanceof TransformNode) ??
+    anchorFor(scene, name, entity.parts.root, BOAT_LABEL_HEIGHT)
+  );
+}
+
+/**
+ * Poses a group's boat and squad from its look (shore.ts `groupLook`, or a turn's pose): how
+ * much of the boat is built, its size (`boatSize`, which multiplies the size its soldiers give
+ * it), and the squad walking on land. The boat's root is placed and turned by the caller.
+ */
+export function poseGroup(
+  field: Battlefield,
+  entity: GroupEntity,
+  group: Pick<SoldierGroup, "id" | "team_color" | "soldiers">,
+  look: Pick<GroupLook, "build" | "squad">,
+  boatSize: number,
+): void {
+  const { scene, materials } = field;
+  const parts = entity.parts;
+  const shown = look.build > 0 && boatSize > 0;
+  parts.body.setEnabled(shown);
+  // A walked trip moves the hidden boat over the bridge: it leaves no wake.
+  parts.wake.scaling.setAll(shown ? 1 : 0);
+  parts.body.scaling.setAll(boatScale(group.soldiers) * boatSize);
+  // A boat being built rises from its keel, then hoists its sail.
+  const hull = Math.min(1, look.build / 0.6);
+  const sail = Math.max(0, Math.min(1, (look.build - 0.6) / 0.4));
+  for (const mesh of parts.hull) {
+    mesh.scaling.set(0.55 + 0.45 * hull, Math.max(0.02, hull), 1);
+  }
+  for (const mesh of parts.sail) mesh.scaling.set(1, Math.max(0.02, sail), 1);
+
+  const anchor = groupLabelAnchor(scene, group.id, entity);
+  const squad = look.squad;
+  if (!squad || squad.scale <= 0) {
+    entity.squad?.root.setEnabled(false);
+    if (anchor.parent !== parts.root) {
+      anchor.parent = parts.root;
+      anchor.position.set(0, BOAT_LABEL_HEIGHT, 0);
+    }
+    return;
+  }
+  const size = squadSize(group.soldiers);
+  if (!entity.squad) {
+    entity.squad = createSquad(
+      scene,
+      group.id,
+      materials,
+      group.team_color,
+      size,
+    );
+    markPickable([entity.squad.base, entity.squad.team], {
+      kind: "group",
+      id: group.id,
+    });
+  }
+  const squadParts = entity.squad;
+  setSquadSize(squadParts, size);
+  setSquadTeam(squadParts, group.team_color, materials);
+  squadParts.root.setEnabled(parts.root.isEnabled(false));
+  const world = toWorld(squad);
+  const bob = Math.abs(Math.sin(squad.walked * SQUAD_STEPS_PER_UNIT));
+  squadParts.root.position.set(world.x, squad.height, world.z);
+  squadParts.root.rotation.y = Math.atan2(squad.facingX, -squad.facingY);
+  squadParts.body.position.y = SQUAD_BOB * bob;
+  squadParts.body.rotation.z =
+    0.06 * Math.sin(squad.walked * SQUAD_STEPS_PER_UNIT * 0.5);
+  squadParts.body.scaling.setAll(
+    SQUAD_DRAWN_SCALE * Math.max(0.001, squad.scale),
+  );
+  if (anchor.parent !== squadParts.root) {
+    anchor.parent = squadParts.root;
+    anchor.position.set(0, SQUAD_LABEL_HEIGHT, 0);
+  }
+}
+
 export function updateGroup(
   field: Battlefield,
   group: SoldierGroup,
@@ -312,18 +429,20 @@ export function updateGroup(
   entity: GroupEntity,
 ): void {
   const { scene, materials } = field;
-  const { root, body } = entity.parts;
-  // A boat near either island is drawn at its shore, not inside it (shore.ts).
-  const world = toWorld(drawnPosition(group, origin, destination));
+  const { root } = entity.parts;
+  // A boat near either island is drawn at its shore, not inside it, and its soldiers walk on
+  // the island (shore.ts).
+  const look = groupLook(group, origin, destination);
+  const world = toWorld(look);
   root.position.set(world.x, 0, world.z);
   aimGroup(field, entity, world, destination);
-  body.scaling.setAll(boatScale(group.soldiers));
+  poseGroup(field, entity, group, look, look.boatScale);
   const color = teamColorHex(group.team_color);
   setBoatTeam(entity.parts, group.team_color, materials);
 
   setLabel(field, `group:${group.id}:soldiers`, {
     lines: [String(group.soldiers)],
-    anchor: anchorFor(scene, `group:${group.id}:soldiers`, root, 0.62),
+    anchor: groupLabelAnchor(scene, group.id, entity),
     accent: color,
     fill: color,
     textColor: "#ffffff",
@@ -762,7 +881,7 @@ export function renderGeneration(
     );
   }
   for (const id of keep) groupIds.add(id);
-  prune(field.groups, groupIds, (entity) => disposeBoat(entity.parts));
+  prune(field.groups, groupIds, disposeGroup);
   for (const id of field.labels.ids()) {
     const match = /^group:(\d+):/.exec(id);
     if (match && !groupIds.has(Number(match[1]))) {

@@ -10,7 +10,7 @@
 
 import type { components } from "../../api/generated/game";
 import { castleDisplayLevel } from "../castleLevel";
-import { drawnPosition, sharesLandmass, shorePoint } from "../shore";
+import { groupLook, type SquadLook } from "../shore";
 
 type Generation = components["schemas"]["Generation"];
 type Castle = components["schemas"]["Castle"];
@@ -55,7 +55,11 @@ export interface CastleCountTrack {
   keys: CountKey[];
 }
 
-/** A group is hidden before `t0` and grows to full size by `t1`: it has just left a castle. */
+/**
+ * A group is hidden before `t0` and grows to full size by `t1`: a group whose origin castle is
+ * not known, which appears at its first contact. A group launched from a known castle needs
+ * none: its squad walks out of the gate as its boat is built (shore.ts `groupLook`).
+ */
 export interface SpawnTrack {
   kind: "spawn";
   groupId: number;
@@ -63,7 +67,11 @@ export interface SpawnTrack {
   t1: number;
 }
 
-/** A group has landed at its castle's shore: it shrinks and fades there from `t0`, gone at `t1`. */
+/**
+ * A group lands at its castle: it shrinks from `t0` and is gone at `t1`. With a known castle
+ * both are the landing time, when its squad reaches the castle's centre (the squad has already
+ * faded into the gate, shore.ts `groupLook`).
+ */
 export interface MergeTrack {
   kind: "merge";
   groupId: number;
@@ -155,10 +163,8 @@ export const TICK_SPAN = 0.06;
 export const FLASH_SPAN = 0.25;
 /** How long a defeated group takes to sink, at most. */
 export const SINK_SPAN = 0.4;
-/** How long a launched group takes to grow to full size. */
+/** How long a group that appears at its first contact takes to grow to full size. */
 export const SPAWN_SPAN = 0.15;
-/** How long a landed group takes to shrink and fade at the shore, at most. */
-export const MERGE_SPAN = 0.12;
 
 /** How much of the turn the rattle of a boat that is still held lasts, from the start. */
 export const HELD_RATTLE_SPAN = 0.3;
@@ -328,22 +334,6 @@ interface Arrival {
 }
 
 /**
- * Where a group launched at `origin` starts: the origin island's shore (shore.ts), on the line
- * to its destination, or toward `toward` when the destination is not known. Map units.
- */
-function launchPoint(
-  origin: Castle,
-  destination: Castle | undefined,
-  toward: { x: number; y: number },
-): { x: number; y: number } {
-  return shorePoint(
-    origin,
-    destination ?? toward,
-    destination !== undefined && sharesLandmass(origin, destination),
-  );
-}
-
-/**
  * Plans the turn between two consecutive generations as tracks over t in [0, 1]. At t = 1 every
  * position, count and team equals `next` exactly.
  */
@@ -404,19 +394,25 @@ export function planTurn(previous: Generation, next: Generation): TurnPlan {
     if (before) {
       start = { x: before.x, y: before.y };
     } else {
+      // The server sends a group from its castle's centre: its squad walks out from there.
       const origin = castleAt(group.origin_castle_id);
-      const first = list[0]?.point ?? group;
-      start = origin
-        ? launchPoint(origin, castleAt(group.destination_castle_id), first)
-        : first;
-      tracks.push({ kind: "spawn", groupId: group.id, t0: 0, t1: SPAWN_SPAN });
+      if (origin) {
+        start = { x: origin.x, y: origin.y };
+      } else {
+        start = list[0]?.point ?? group;
+        tracks.push({
+          kind: "spawn",
+          groupId: group.id,
+          t0: 0,
+          t1: SPAWN_SPAN,
+        });
+      }
     }
     const keys: PathKey[] = [
       { t: 0, ...start },
       ...contactKeys(list),
       { t: 1, x: group.x, y: group.y },
     ];
-    if (!before && keys[1]) keys[1].ease = "in";
     tracks.push({ kind: "move", groupId: group.id, keys });
     const stoppedAt = stoppedByClashAt(next, group.id);
     if (stoppedAt !== undefined) {
@@ -479,30 +475,20 @@ export function planTurn(previous: Generation, next: Generation): TurnPlan {
       });
       continue;
     }
-    // Sail on from the last contact to the castle's shore, slowing down, and stop there. The
-    // boat then shrinks and fades at the shore, ending at the time it would have reached the
-    // castle's centre: the moment the castle's count changes.
+    // Move on from the last contact to the castle's centre at the group's speed, as the
+    // server does, and land there: the moment the castle's count changes. The boat docks at
+    // the shore on the way and the squad walks on (shore.ts `groupLook`).
     const speed = speedOf(group.upgrades);
     const distance = Math.hypot(castle.x - last.x, castle.y - last.y);
     const landing = Math.min(1, last.t + distance / speed);
-    const origin = castleAt(group.origin_castle_id);
-    const shore = shorePoint(
-      castle,
-      origin ?? last,
-      origin !== undefined && sharesLandmass(origin, castle),
-    );
-    const reach = Math.hypot(shore.x - castle.x, shore.y - castle.y);
-    const shoreTime =
-      distance <= reach
-        ? last.t
-        : Math.min(landing, last.t + (distance - reach) / speed);
-    keys.push({ t: shoreTime, ...shore, ease: "out" });
+    if (landing > last.t) keys.push({ t: landing, x: castle.x, y: castle.y });
+    else keys[keys.length - 1] = { ...last, x: castle.x, y: castle.y };
     tracks.push({ kind: "move", groupId: group.id, keys });
     tracks.push({
       kind: "merge",
       groupId: group.id,
       castleId: group.destination_castle_id,
-      t0: Math.max(shoreTime, landing - MERGE_SPAN),
+      t0: landing,
       t1: landing,
     });
     const landed = arrivals.get(group.destination_castle_id) ?? [];
@@ -554,9 +540,7 @@ export function planTurn(previous: Generation, next: Generation): TurnPlan {
     const keys = contactKeys(list);
     if (origin) {
       launched.set(origin.id, (launched.get(origin.id) ?? 0) + initial);
-      keys.unshift({ t: 0, ...launchPoint(origin, undefined, first.point) });
-      if (keys[1]) keys[1].ease = "in";
-      tracks.push({ kind: "spawn", groupId, t0: 0, t1: SPAWN_SPAN });
+      keys.unshift({ t: 0, x: origin.x, y: origin.y });
     } else {
       tracks.push({ kind: "spawn", groupId, t0: first.t, t1: first.t });
     }
@@ -696,10 +680,15 @@ function planCastle(
 // Sampling
 
 export interface GroupPose {
+  /** Where the boat is drawn (map units): at a shore while the group is on land. */
   x: number;
   y: number;
-  /** 1 at full size; less while launching or merging into a castle. */
+  /** The boat's size factor: 1 at full size; less while it appears or docks and shrinks away. */
   scale: number;
+  /** How much of the boat is built at its origin's shore: 0 none, 1 complete. */
+  build: number;
+  /** The squad walking on land, or null while the group is afloat (shore.ts `groupLook`). */
+  squad: SquadLook | null;
   /** 0 afloat to 1 gone under. */
   sink: number;
   /** 0 before a boat that a clash holds is rattled, to 1 when its rattle is over. */
@@ -782,6 +771,8 @@ function progress(t: number, t0: number, t1: number): number {
 interface Route {
   origin: Castle | undefined;
   destination: Castle | undefined;
+  /** Where a group with no known destination heads: its first contact. */
+  heading?: { x: number; y: number };
 }
 
 const routes = new WeakMap<TurnPlan, Map<number, Route>>();
@@ -802,13 +793,20 @@ function routesOf(plan: TurnPlan): Map<number, Route> {
       ...plan.previous.soldier_groups,
       ...plan.transients,
       ...plan.next.soldier_groups,
-    ].map((group) => [
-      group.id,
-      {
-        origin: castles.get(group.origin_castle_id),
-        destination: castles.get(group.destination_castle_id),
-      },
-    ]),
+    ].map((group): [number, Route] => {
+      const destination = castles.get(group.destination_castle_id);
+      return [
+        group.id,
+        destination
+          ? { origin: castles.get(group.origin_castle_id), destination }
+          : {
+              origin: castles.get(group.origin_castle_id),
+              destination,
+              // A transient sent and defeated within the turn is built at its first contact.
+              heading: { x: group.x, y: group.y },
+            },
+      ];
+    }),
   );
   routes.set(plan, found);
   return found;
@@ -817,11 +815,14 @@ function routesOf(plan: TurnPlan): Map<number, Route> {
 /** The state of every animated thing at `time` in [0, 1] of the turn. */
 export function sampleTurn(plan: TurnPlan, time: number): TurnSample {
   const t = clamp01(time);
-  const draw = (groupId: number, position: { x: number; y: number }) => {
+  const look = (groupId: number, position: { x: number; y: number }) => {
     const route = routesOf(plan).get(groupId);
-    return route
-      ? drawnPosition(position, route.origin, route.destination)
-      : position;
+    return groupLook(
+      position,
+      route?.origin,
+      route?.destination,
+      route?.heading,
+    );
   };
   const groups = new Map<number, GroupPose>();
   const castles = new Map<number, CastlePose>();
@@ -840,6 +841,8 @@ export function sampleTurn(plan: TurnPlan, time: number): TurnSample {
         x: 0,
         y: 0,
         scale: 1,
+        build: 1,
+        squad: null,
         sink: 0,
         rattle: 0,
         visible: true,
@@ -859,12 +862,16 @@ export function sampleTurn(plan: TurnPlan, time: number): TurnSample {
   };
   for (const track of plan.tracks) {
     switch (track.kind) {
-      case "move":
-        Object.assign(
-          group(track.groupId),
-          draw(track.groupId, pathAt(track.keys, t)),
-        );
+      case "move": {
+        const pose = group(track.groupId);
+        const drawn = look(track.groupId, pathAt(track.keys, t));
+        pose.x = drawn.x;
+        pose.y = drawn.y;
+        pose.scale *= drawn.boatScale;
+        pose.build = drawn.build;
+        pose.squad = drawn.squad;
         break;
+      }
       case "groupCount":
         group(track.groupId).count = countAt(track.keys, t);
         break;
@@ -908,7 +915,7 @@ export function sampleTurn(plan: TurnPlan, time: number): TurnSample {
         if (age < 0 || age > 1) break;
         for (const point of track.points) {
           // A clash close to a castle is drawn where the boats are drawn, so they stay together.
-          const drawn = draw(point.groupId, point);
+          const drawn = look(point.groupId, point);
           flashes.push({
             clashId: track.clashId,
             groupId: point.groupId,

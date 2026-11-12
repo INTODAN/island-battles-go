@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs";
 import type { components } from "../../api/generated/game";
 import { castleDisplayLevel } from "../castleLevel";
 import {
-  drawnPosition,
+  groupLook,
+  insideOutline,
   insideWaterline,
   sharesLandmass,
   shorePoint,
@@ -72,13 +73,13 @@ function moveOf(plan: TurnPlan, groupId: number): MoveTrack {
   return track;
 }
 
-/** Where a group of `frame` is drawn: its true position, or its island's shore (shore.ts). */
+/** How a group of `frame` is drawn at rest: its boat, its build and its squad (shore.ts). */
 function drawnIn(
   frame: Generation,
   group: Generation["soldier_groups"][number],
 ) {
   const castle = (id: number) => frame.castles.find((c) => c.id === id);
-  return drawnPosition(
+  return groupLook(
     group,
     castle(group.origin_castle_id),
     castle(group.destination_castle_id),
@@ -91,7 +92,7 @@ const distance = (
 ) => Math.hypot(left.x - right.x, left.y - right.y);
 
 describe("planTurn on fixture pairs", () => {
-  test("a launch starts at the origin castle's edge and ends where the group now is", () => {
+  test("a launch walks out of the castle while its boat is built at the shore, then sails", () => {
     // busy-turn frame 4: a group leaves its castle and nothing clashes.
     const { previous, next, plan } = pair("busy-turn", 4);
     const launched = next.soldier_groups.filter(
@@ -100,32 +101,44 @@ describe("planTurn on fixture pairs", () => {
     expect(launched.length).toBeGreaterThan(0);
     for (const group of launched) {
       const origin = next.castles.find((c) => c.id === group.origin_castle_id);
-      const move = moveOf(plan, group.id);
-      const first = move.keys[0];
-      expect(first?.t).toBe(0);
-      // The boat starts at the origin island's shore on the line to its destination, outside
-      // the waterline: not inside the island, where the castle's edge was.
       const destination = next.castles.find(
         (c) => c.id === group.destination_castle_id,
       );
-      expect(first).toMatchObject(
-        shorePoint(origin as never, destination as never),
-      );
-      expect(insideWaterline(origin as never, first as never)).toBe(false);
+      const move = moveOf(plan, group.id);
+      // The server sends a group from its castle's centre, and so does the plan.
+      expect(move.keys[0]).toMatchObject({ t: 0, x: origin?.x, y: origin?.y });
       expect(move.keys.at(-1)).toMatchObject({ t: 1, x: group.x, y: group.y });
-      // It waits there until its true position has passed the shore point: drawn at the shore
-      // for as long as it is nearer the castle than that.
-      const shore = first as { x: number; y: number };
-      for (let step = 0; step <= 20; step++) {
-        const pose = sampleTurn(plan, step / 20).groups.get(group.id);
-        const sailed = distance(pose as never, origin as never);
-        expect(sailed).toBeGreaterThanOrEqual(
+      const shore = shorePoint(origin as never, destination as never);
+      // At the start the boat is not built, and the squad is at the gate, still coming out.
+      const start = sampleTurn(plan, 0).groups.get(group.id);
+      expect(start).toMatchObject({ x: shore.x, y: shore.y, build: 0 });
+      expect(start?.squad?.scale).toBe(0);
+      let build = 0;
+      let reach = 0;
+      for (let step = 0; step <= 40; step++) {
+        const pose = sampleTurn(plan, step / 40).groups.get(group.id);
+        if (!pose) throw new Error("no pose");
+        // The boat waits at the shore point, outside the waterline, until it sails.
+        expect(distance(pose, origin as never)).toBeGreaterThanOrEqual(
           distance(shore, origin as never) - 1e-9,
         );
+        expect(insideWaterline(origin as never, pose)).toBe(false);
+        // It is built up, never torn down; once it is complete the squad has boarded.
+        expect(pose.build).toBeGreaterThanOrEqual(build);
+        build = pose.build;
+        if (pose.squad) {
+          const walked = distance(pose.squad, origin as never);
+          expect(walked).toBeGreaterThanOrEqual(reach - 1e-9);
+          reach = walked;
+          if (pose.squad.scale > 0 && pose.build < 1) {
+            expect(insideOutline(origin as never, pose.squad)).toBe(true);
+          }
+        }
       }
+      // No spawn: the boat grows as it is built.
       expect(
         tracksOf(plan, "spawn").some((spawn) => spawn.groupId === group.id),
-      ).toBe(true);
+      ).toBe(false);
       // The soldiers leave the castle at t = 0: its count drops before anything lands.
       const count = tracksOf(plan, "castleCount").find(
         (track) => track.castleId === origin?.id,
@@ -138,7 +151,7 @@ describe("planTurn on fixture pairs", () => {
     expect(plan.transients).toHaveLength(0);
   });
 
-  test("an arrival sails to the castle's edge, then into it, and the castle counts it", () => {
+  test("an arrival docks at the shore and its squad walks on into the castle, which counts it", () => {
     // busy-turn frame 2: a group arrives and nothing clashes.
     const { previous, next, plan } = pair("busy-turn", 2);
     const arriving = previous.soldier_groups.filter(
@@ -149,32 +162,52 @@ describe("planTurn on fixture pairs", () => {
       const castle = next.castles.find(
         (c) => c.id === group.destination_castle_id,
       );
+      const origin = previous.castles.find(
+        (c) => c.id === group.origin_castle_id,
+      );
       const move = moveOf(plan, group.id);
       expect(move.keys[0]).toMatchObject({ t: 0, x: group.x, y: group.y });
       const merge = tracksOf(plan, "merge").find(
         (track) => track.groupId === group.id,
       );
       expect(merge?.castleId).toBe(castle?.id);
-      // The boat's last key is the destination's shore point, reached before the merge starts,
-      // and it stays there while it shrinks: it never moves from the shore to the centre.
-      const origin = previous.castles.find(
-        (c) => c.id === group.origin_castle_id,
-      );
-      const shore = shorePoint(castle as never, origin as never);
+      // The true position goes on to the castle's centre at the group's speed, and lands there.
       const last = move.keys.at(-1);
-      expect(last).toMatchObject(shore);
-      expect(last?.ease).toBe("out");
-      expect(last?.t).toBeLessThanOrEqual(merge?.t0 as number);
+      expect(last).toMatchObject({ x: castle?.x, y: castle?.y });
+      expect(last?.t).toBe(merge?.t1 as number);
+      expect(merge?.t0).toBe(merge?.t1 as number);
+      expect(last?.t).toBeCloseTo(
+        distance(group, castle as never) / speedOf(group.upgrades),
+        9,
+      );
+      // The boat stops at the shore and shrinks away there; the squad walks on to the gate.
+      const shore = shorePoint(castle as never, origin as never);
       expect(insideWaterline(castle as never, shore)).toBe(false);
-      for (let step = 0; step <= 20; step++) {
-        const time =
-          (merge?.t0 as number) +
-          (step / 20) * ((merge?.t1 as number) - (merge?.t0 as number));
+      let docked = false;
+      let left = Number.POSITIVE_INFINITY;
+      for (let step = 0; step < 40; step++) {
+        const time = (step / 40) * (last?.t as number);
         const pose = sampleTurn(plan, time).groups.get(group.id);
-        expect(pose).toMatchObject(shore);
+        if (!pose) throw new Error("no pose");
+        expect(insideWaterline(castle as never, pose)).toBe(false);
+        if (pose.squad) {
+          docked = true;
+          expect(pose).toMatchObject({ x: shore.x, y: shore.y });
+          const away = distance(pose.squad, castle as never);
+          expect(away).toBeLessThanOrEqual(left + 1e-9);
+          left = away;
+        } else {
+          // Once docked the group stays on land until it lands.
+          expect(docked).toBe(false);
+        }
       }
-      expect(merge?.t1).toBeLessThanOrEqual(1);
-      // Gone from the board once merged, and the sample before that still shows it.
+      expect(docked).toBe(true);
+      // Shrunk away before it lands.
+      expect(
+        sampleTurn(plan, (last?.t as number) - 1e-6).groups.get(group.id)
+          ?.scale,
+      ).toBe(0);
+      // Gone from the board once landed, and the sample before that still shows it.
       expect(sampleTurn(plan, 0).groups.get(group.id)?.visible).toBe(true);
       expect(sampleTurn(plan, 1).groups.get(group.id)?.visible).toBe(false);
     }
@@ -365,7 +398,8 @@ describe("planTurn on fixture pairs", () => {
     const destination = next.castles.find(
       (c) => c.id === now?.destination_castle_id,
     );
-    expect(move.keys[0]).toMatchObject(
+    expect(move.keys[0]).toMatchObject({ x: origin?.x, y: origin?.y });
+    expect(sampleTurn(plan, 0).groups.get(now?.id as number)).toMatchObject(
       shorePoint(origin as never, destination as never),
     );
     expect(move.keys[1]).toMatchObject({ x: survivor?.x, y: survivor?.y });
@@ -519,13 +553,18 @@ describe("planTurn on every fixture pair", () => {
     test(`${name}[${index}]: at t = 1 everything equals the next generation exactly`, () => {
       const sample = sampleTurn(plan, 1);
       for (const group of next.soldier_groups) {
-        expect(sample.groups.get(group.id)).toMatchObject({
-          ...drawnIn(next, group),
+        const look = drawnIn(next, group);
+        const pose = sample.groups.get(group.id);
+        expect(pose).toMatchObject({
+          x: look.x,
+          y: look.y,
+          build: look.build,
+          scale: look.boatScale,
           count: group.soldiers,
           visible: true,
           sink: 0,
-          scale: 1,
         });
+        expect(pose?.squad).toEqual(look.squad);
       }
       for (const [id, pose] of sample.groups) {
         if (!next.soldier_groups.some((g) => g.id === id)) {
@@ -544,11 +583,17 @@ describe("planTurn on every fixture pair", () => {
     test(`${name}[${index}]: at t = 0 it shows the previous generation`, () => {
       const sample = sampleTurn(plan, 0);
       for (const group of previous.soldier_groups) {
-        expect(sample.groups.get(group.id)).toMatchObject({
-          ...drawnIn(previous, group),
+        const look = drawnIn(previous, group);
+        const pose = sample.groups.get(group.id);
+        expect(pose).toMatchObject({
+          x: look.x,
+          y: look.y,
+          build: look.build,
+          scale: look.boatScale,
           count: group.soldiers,
           visible: true,
         });
+        expect(pose?.squad).toEqual(look.squad);
       }
       for (const castle of previous.castles) {
         const pose = sample.castles.get(castle.id);
