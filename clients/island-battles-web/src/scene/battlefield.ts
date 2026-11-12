@@ -449,6 +449,8 @@ export function updateGroup(
     fontSize: 13,
     bold: true,
     priority: 80,
+    // Two boats close together show both counts, side by side (#212).
+    rowGroup: "boats",
   });
 }
 
