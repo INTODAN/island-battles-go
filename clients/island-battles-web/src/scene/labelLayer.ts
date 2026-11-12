@@ -5,7 +5,12 @@ import { AdvancedDynamicTexture } from "@babylonjs/gui/2D/advancedDynamicTexture
 import { Control } from "@babylonjs/gui/2D/controls/control";
 import { Rectangle } from "@babylonjs/gui/2D/controls/rectangle";
 import { TextBlock } from "@babylonjs/gui/2D/controls/textBlock";
-import { fadeAlpha, type LabelRequest, placeLabels } from "./labels";
+import {
+  easeOffset,
+  fadeAlpha,
+  type LabelRequest,
+  placeLabels,
+} from "./labels";
 
 export interface LabelSpec {
   /** Lines of text; each line is drawn as given. */
@@ -20,6 +25,8 @@ export interface LabelSpec {
   bold: boolean;
   /** When two labels overlap, the one with the lower priority is hidden. */
   priority: number;
+  /** Overlapping labels of one row group are laid out side by side instead (#212). */
+  rowGroup?: string;
 }
 
 interface Label {
@@ -32,6 +39,15 @@ interface Label {
   shown: boolean;
   /** Its current opacity, 0 to 1. */
   alpha: number;
+  /** The row the last placement put it in, if any. */
+  row?: string | undefined;
+  /** Where the last placement drew its centre, in screen pixels. */
+  placedX?: number | undefined;
+  /** Its offset from the anchor, in pixels, and the offset it eases towards. */
+  offsetX: number;
+  offsetY: number;
+  targetX: number;
+  targetY: number;
 }
 
 const FONT_FAMILY = "system-ui, -apple-system, Segoe UI, sans-serif";
@@ -48,8 +64,9 @@ function measureWidth(text: string, fontSize: number, bold: boolean): number {
 
 /**
  * Babylon GUI labels linked to nodes in the scene. They are drawn in screen pixels, so they keep
- * their size at every zoom; each frame the lower priority one of two overlapping labels fades out. A label never moves
- * away from its anchor.
+ * their size at every zoom. Each frame, overlapping labels of one row group (the boats' counts) are
+ * laid out side by side, easing to their places over the fade time, and then the lower priority
+ * one of two overlapping labels fades out. Other labels never move away from their anchors.
  */
 export class LabelLayer {
   private readonly texture: AdvancedDynamicTexture;
@@ -66,7 +83,15 @@ export class LabelLayer {
     // Labels are drawn after the board's post-processing (#102), so tone mapping, bloom and FXAA
     // never soften their text or shift their team colours.
     if (this.texture.layer) this.texture.layer.applyPostProcess = false;
-    scene.onBeforeRenderObservable.add(() => this.place());
+    // Placed after everything has moved this frame and just before the texture projects its
+    // linked controls (inserted ahead of its observer), so the offsets of a row are worked out
+    // from the anchors where they are drawn. Earlier in the frame, two boats sailing towards
+    // each other would be drawn a few pixels closer than their row puts them.
+    scene.onBeforeCameraRenderObservable.add(
+      () => this.place(),
+      undefined,
+      true,
+    );
   }
 
   /** Adds or updates the label, keeping its GUI controls. */
@@ -94,7 +119,19 @@ export class LabelLayer {
       rectangle.addControl(text);
       this.texture.addControl(rectangle);
       rectangle.alpha = 0;
-      label = { spec, rectangle, text, width, height, shown: false, alpha: 0 };
+      label = {
+        spec,
+        rectangle,
+        text,
+        width,
+        height,
+        shown: false,
+        alpha: 0,
+        offsetX: 0,
+        offsetY: 0,
+        targetX: 0,
+        targetY: 0,
+      };
       this.labels.set(id, label);
     }
     label.spec = spec;
@@ -178,21 +215,51 @@ export class LabelLayer {
         height: label.height,
         priority: label.spec.priority,
         wasHidden: !label.shown,
+        rowGroup: label.spec.rowGroup,
+        previousRow: label.row,
+        previousX: label.placedX,
       });
     }
-    const shown = new Set(
-      placeLabels(requests)
-        .filter((placement) => placement.visible)
-        .map((placement) => placement.id),
+    const placements = new Map(
+      placeLabels(requests).map((placement, index) => [
+        placement.id,
+        { placement, request: requests[index] as LabelRequest },
+      ]),
     );
     for (const [id, label] of this.labels) {
-      label.shown = shown.has(id);
+      const placed = placements.get(id);
+      label.shown = placed?.placement.visible ?? false;
+      if (placed) {
+        label.row = placed.placement.row;
+        label.placedX = placed.placement.x;
+        label.targetX = placed.placement.x - placed.request.x;
+        label.targetY = placed.placement.y - placed.request.y;
+      } else {
+        // Off screen: it leaves its row.
+        label.row = undefined;
+        label.placedX = undefined;
+      }
       const alpha = fadeAlpha(label.alpha, label.shown, elapsed);
       if (alpha !== label.alpha) {
         label.alpha = alpha;
         label.rectangle.alpha = alpha;
       }
       label.rectangle.isVisible = alpha > 0;
+      // An unseen label goes straight to its place; a seen one eases there.
+      const offsetX =
+        alpha > 0
+          ? easeOffset(label.offsetX, label.targetX, elapsed)
+          : label.targetX;
+      const offsetY =
+        alpha > 0
+          ? easeOffset(label.offsetY, label.targetY, elapsed)
+          : label.targetY;
+      if (offsetX !== label.offsetX || offsetY !== label.offsetY) {
+        label.offsetX = offsetX;
+        label.offsetY = offsetY;
+        label.rectangle.linkOffsetXInPixels = offsetX;
+        label.rectangle.linkOffsetYInPixels = offsetY;
+      }
     }
   }
 }
