@@ -25,12 +25,13 @@ import (
 //	check    call the bot once on a fixture turn, and report what is wrong
 //	fixture  print the fixture turn as JSON, for curl
 //	run      play a seat of a lobby's game without a browser
+//	worker   play turns for the server's runners, as JSON Lines on stdin and stdout
 //
 // Run the program with -h, or a subcommand with -h, for their flags. Go
 // doesn't reload code: after changing the bot, stop serve and start it again.
 func Main(play Play) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	status := runMain(ctx, invocation{name: filepath.Base(os.Args[0]), play: play, stdout: os.Stdout, stderr: os.Stderr}, os.Args[1:])
+	status := runMain(ctx, invocation{name: filepath.Base(os.Args[0]), play: play, stdout: os.Stdout, stderr: os.Stderr, stdin: os.Stdin}, os.Args[1:])
 	stop()
 	os.Exit(status)
 }
@@ -42,6 +43,8 @@ type invocation struct {
 	play   Play
 	stdout io.Writer
 	stderr io.Writer
+	// stdin is what worker reads its requests from; nil means os.Stdin.
+	stdin io.Reader
 	// clientOptions are added to run's Client options; tests set them.
 	clientOptions []ClientOption
 }
@@ -61,6 +64,7 @@ func subcommands() []subcommand {
 		{name: "check", summary: "call the bot once on a fixture turn, and report what is wrong", run: check},
 		{name: "fixture", summary: "print the fixture turn as JSON, for curl", run: printFixture},
 		{name: "run", summary: "play a seat of a lobby's game without a browser", run: runSeat},
+		{name: "worker", summary: "play turns for the server's runners, as JSON Lines on stdin and stdout", run: worker},
 	}
 }
 

@@ -23,8 +23,9 @@ All run from any directory.
 | `scripts/run.sh` | Plays a seat of a started lobby without a browser: `scripts/run.sh BASE_URL TOKEN LOBBY_ID`, or set `ISLAND_BATTLES_BASE_URL`, `ISLAND_BATTLES_TOKEN`, `ISLAND_BATTLES_LOBBY_ID`. Logs to `bot.log`. |
 | `scripts/fixture.sh [file]` | Writes the sample turn to `turn.json` for experiments. |
 | `scripts/build.sh` | `uv build`: a wheel and a source archive in `dist/`, and prints their paths. |
+| `scripts/package.sh` | `island-battles-bot package`: `dist/island-battles-bot.zip`, the bot and its dependencies for the server's runners (Linux arm64). Needs a network. |
 
-`scripts/build.sh` makes the standard Python package of the bot. Uploading a bot to the game server does not exist yet; bots run on your machine.
+`scripts/build.sh` makes the standard Python package of the bot. `scripts/package.sh` makes the zip the game server's runners will run: your bot and its locked dependencies for Linux arm64 (`dist/island-battles-bot.zip`; see "Package your bot" in the SDK's README). Packaging exists; uploading a package to the game server comes with #112, and until then bots run on your machine. Packaging needs an `island-battles-python` release that has the worker mode, so raise the minimum in `pyproject.toml` and run `uv lock --upgrade-package island-battles-python` when it is out.
 
 ## Coding agents
 
