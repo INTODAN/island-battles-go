@@ -77,8 +77,11 @@ async def test_a_localhost_bot_plays_a_game_through_turn_deliveries(guests, bot_
         deadline = asyncio.get_running_loop().time() + 600
         while True:
             assert asyncio.get_running_loop().time() < deadline, f"the game didn't end; delivered {delivered[-5:]}"
-            state = (await http.get(f"{game}/generation")).json()
-            if state["outcome"] is not None:
+            read = await http.get(f"{game}/generation")
+            assert read.status_code == 200, read.text
+            state = read.json()
+            # The outcome is absent while the game runs.
+            if state.get("outcome") is not None:
                 break
             if state["submitted"] or state["generation_id"] in delivered:
                 await asyncio.sleep(0.05)
