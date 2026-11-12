@@ -355,6 +355,24 @@ export function groupLook(
 
   if (origin) {
     const towards = destination ?? heading ?? position;
+    if (samePoint(towards, origin)) {
+      // Sent and lost at its own castle's centre: it never got out of the gate (#213).
+      return {
+        x: origin.x,
+        y: origin.y,
+        build: 0,
+        boatScale: 0,
+        squad: {
+          x: origin.x,
+          y: origin.y,
+          height: ISLAND_TOP,
+          scale: 0,
+          walked: 0,
+          facingX: 1,
+          facingY: 0,
+        },
+      };
+    }
     const ray = rayFrom(origin, towards);
     const reach = shoreReach(origin, towards);
     const distance = Math.hypot(position.x - origin.x, position.y - origin.y);
@@ -400,6 +418,10 @@ export function groupLook(
     }
   }
   return afloat;
+}
+
+function samePoint(left: MapPoint, right: MapPoint): boolean {
+  return left.x === right.x && left.y === right.y;
 }
 
 /** Whether a map position is on the grass top of `castle`'s island (inside its outline). */

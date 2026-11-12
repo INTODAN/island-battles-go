@@ -35,6 +35,7 @@ function load(name: string): Demo {
 }
 
 const fixtures = {
+  "bot-clashes": load("bot-clashes"),
   "generated-map": load("generated-map"),
   "busy-turn": load("busy-turn"),
   "six-teams": load("six-teams"),
@@ -448,14 +449,22 @@ describe("rattle (#169)", () => {
     const clash = next.clashes[0];
     expect(clash && clashStops(clash)).toBe(true);
     const survivor = clash?.participants.find((p) => p.soldiers_after > 0);
-    expect(rattles(plan)).toEqual([
+    expect(rattles(plan)).toMatchObject([
       {
         kind: "rattle",
         groupId: survivor?.group_id as number,
         t0: clash?.time as number,
         t1: 1,
+        // It faces its opponent, from the clash to the end of the turn (#213).
+        facingUntil: 1,
       },
     ]);
+    const opponent = clash?.participants.find((p) => p.soldiers_after === 0);
+    const facing = rattles(plan)[0]?.facing;
+    expect(facing?.x).toBeCloseTo(
+      Math.sign((opponent?.x ?? 0) - (survivor?.x ?? 0)),
+      6,
+    );
     const id = survivor?.group_id as number;
     expect(
       sampleTurn(plan, (clash?.time ?? 0) - 0.01).groups.get(id)?.rattle,
@@ -472,9 +481,18 @@ describe("rattle (#169)", () => {
     );
     expect(held).toHaveLength(1);
     const id = held[0]?.id as number;
-    expect(rattles(plan)).toEqual([
-      { kind: "rattle", groupId: id, t0: 0, t1: HELD_RATTLE_SPAN },
+    expect(rattles(plan)).toMatchObject([
+      {
+        kind: "rattle",
+        groupId: id,
+        t0: 0,
+        t1: HELD_RATTLE_SPAN,
+        // Stopped last turn, so it faces its opponent during the burst.
+        facingUntil: HELD_RATTLE_SPAN,
+      },
     ]);
+    expect(sampleTurn(plan, 0.1).groups.get(id)?.fighting).not.toBeNull();
+    expect(sampleTurn(plan, 0.5).groups.get(id)?.fighting).toBeNull();
     expect(sampleTurn(plan, 0).groups.get(id)?.rattle).toBe(0);
     expect(sampleTurn(plan, 0.15).groups.get(id)?.rattle).toBeCloseTo(0.5, 6);
     expect(sampleTurn(plan, 0.5).groups.get(id)?.rattle).toBe(1);
@@ -822,7 +840,9 @@ describe("shores", () => {
         const sample = sampleTurn(plan, step / 40);
         for (const [id, pose] of sample.groups) {
           const group = routes.get(id);
-          if (!group || !pose.visible) continue;
+          // A boat not built yet, or shrunk away at a shore, is not drawn.
+          if (!group || !pose.visible || pose.build === 0 || pose.scale === 0)
+            continue;
           const origin = castles.get(group.origin_castle_id);
           const destination = castles.get(group.destination_castle_id);
           // Between castles of one landmass the boat crosses the bridge by design.
@@ -906,5 +926,129 @@ describe("speed", () => {
     expect(speedOf({})).toBe(0.5);
     expect(speedOf({ speed: 3 })).toBe(1.5);
     expect(speedOf({ speed: 9 })).toBe(2);
+  });
+});
+
+describe("clashes near a castle are fought on land (#213)", () => {
+  const botPairs = pairs.filter((entry) => entry.name === "bot-clashes");
+  const castlesOf = (plan: TurnPlan) =>
+    new Map(
+      [...plan.previous.castles, ...plan.next.castles].map((c) => [c.id, c]),
+    );
+
+  test("a participant on land flashes at its squad, on the island, not at a shore point", () => {
+    let onLand = 0;
+    for (const { previous, next } of botPairs) {
+      const plan = planTurn(previous, next);
+      const castles = [...castlesOf(plan).values()];
+      for (const clash of tracksOf(plan, "clash")) {
+        const sample = sampleTurn(plan, clash.t);
+        for (const flash of sample.flashes.filter(
+          (entry) => entry.clashId === clash.clashId,
+        )) {
+          const pose = sample.groups.get(flash.groupId);
+          if (!flash.onLand) {
+            // Afloat: at its boat, as before.
+            expect({ x: flash.x, y: flash.y }).toEqual({
+              x: pose?.x as number,
+              y: pose?.y as number,
+            });
+            continue;
+          }
+          onLand++;
+          expect(pose?.squad).not.toBeNull();
+          expect({ x: flash.x, y: flash.y }).toEqual({
+            x: pose?.squad?.x as number,
+            y: pose?.squad?.y as number,
+          });
+          expect(castles.some((castle) => insideWaterline(castle, flash))).toBe(
+            true,
+          );
+        }
+      }
+    }
+    // The fixture's clashes all happen inside a shore reach.
+    expect(onLand).toBeGreaterThan(10);
+  });
+
+  test("two squads that meet on land fight together, not at their shores on either side", () => {
+    let pairsOnLand = 0;
+    for (const { previous, next } of botPairs) {
+      const plan = planTurn(previous, next);
+      for (const clash of tracksOf(plan, "clash")) {
+        const flashes = sampleTurn(plan, clash.t).flashes.filter(
+          (entry) => entry.clashId === clash.clashId,
+        );
+        if (flashes.length < 2 || !flashes.every((entry) => entry.onLand)) {
+          continue;
+        }
+        pairsOnLand++;
+        // The squads stand within a castle's island of each other, as the server's contact
+        // positions do; their boats at the shores may be a whole island apart.
+        for (const flash of flashes) {
+          for (const other of flashes) {
+            expect(distance(flash, other)).toBeLessThan(1);
+          }
+        }
+      }
+    }
+    expect(pairsOnLand).toBeGreaterThan(0);
+  });
+
+  test("a squad stopped on land stands at its contact, facing its opponents", () => {
+    let stopped = 0;
+    for (const { previous, next } of botPairs) {
+      const plan = planTurn(previous, next);
+      for (const rattle of tracksOf(plan, "rattle")) {
+        if (rattle.facingUntil !== 1) continue;
+        const end = sampleTurn(plan, 1).groups.get(rattle.groupId);
+        if (!end?.squad) continue;
+        stopped++;
+        expect(end.fighting).toEqual(rattle.facing ?? null);
+        for (let step = 1; step <= 10; step++) {
+          const time = rattle.t0 + ((1 - rattle.t0) * step) / 10;
+          const pose = sampleTurn(plan, time).groups.get(rattle.groupId);
+          // At most the short slide from its contact to the clash's midpoint, where the server
+          // stops it (half the participants' distance, within a clash radius).
+          expect(distance(pose?.squad as never, end.squad)).toBeLessThan(0.15);
+        }
+      }
+    }
+    expect(stopped).toBeGreaterThan(0);
+  });
+
+  test("a group defeated on land is a squad when it falls, not a boat that sinks", () => {
+    let fallen = 0;
+    for (const { previous, next } of botPairs) {
+      const plan = planTurn(previous, next);
+      for (const sink of tracksOf(plan, "sink")) {
+        const pose = sampleTurn(plan, sink.t0).groups.get(sink.groupId);
+        if (!pose?.squad) continue;
+        fallen++;
+        expect(
+          sampleTurn(plan, sink.t1).groups.get(sink.groupId)?.visible,
+        ).toBe(sink.t1 < 1 ? false : false);
+      }
+    }
+    expect(fallen).toBeGreaterThan(0);
+  });
+
+  test("a clash in open sea is unchanged: its flashes are at the boats, not on land", () => {
+    let atSea = 0;
+    for (const { name, previous, next } of pairs) {
+      if (name === "bot-clashes") continue;
+      const plan = planTurn(previous, next);
+      for (const clash of tracksOf(plan, "clash")) {
+        const sample = sampleTurn(plan, clash.t);
+        for (const flash of sample.flashes) {
+          if (flash.onLand || flash.clashId !== clash.clashId) continue;
+          atSea++;
+          const pose = sample.groups.get(flash.groupId);
+          expect(pose?.squad).toBeNull();
+          expect(flash.x).toBe(pose?.x as number);
+        }
+      }
+    }
+    expect(atSea).toBeGreaterThan(0);
   });
 });

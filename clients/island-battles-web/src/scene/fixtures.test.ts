@@ -11,6 +11,7 @@ const names = readdirSync(directory).filter((name) => name.endsWith(".json"));
 describe("fixtures", () => {
   test("the fixtures are there", () => {
     expect(names.sort()).toEqual([
+      "bot-clashes.json",
       "busy-turn.json",
       "generated-map.json",
       "heading-arrows.json",

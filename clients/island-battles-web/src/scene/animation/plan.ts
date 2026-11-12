@@ -10,7 +10,7 @@
 
 import type { components } from "../../api/generated/game";
 import { castleDisplayLevel } from "../castleLevel";
-import { groupLook, type SquadLook } from "../shore";
+import { groupLook, insideWaterline, type SquadLook } from "../shore";
 
 type Generation = components["schemas"]["Generation"];
 type Castle = components["schemas"]["Castle"];
@@ -97,6 +97,13 @@ export interface RattleTrack {
   groupId: number;
   t0: number;
   t1: number;
+  /**
+   * The direction of the opponents of the clash that holds it (map units, unit length), so a
+   * squad held on land faces them (#213); missing when not known.
+   */
+  facing?: { x: number; y: number };
+  /** Until when in the turn the squad faces its opponents: 1 when stopped, `t1` when held. */
+  facingUntil?: number;
 }
 
 /** A castle's team over the turn, as `team` from each key's `t` on; the first key is at 0. */
@@ -286,6 +293,33 @@ export function isHeld(
   return !destination || !samePlace(after, destination);
 }
 
+/**
+ * Where the group `groupId` faces in the last clash of `generation` it took part in: towards
+ * the mean contact position of its opponents (map units, unit length). Empty when it had none.
+ */
+export function facingOf(
+  generation: Generation,
+  groupId: number,
+): { facing?: { x: number; y: number } } {
+  let last: Clash | undefined;
+  for (const clash of generation.clashes) {
+    if (!clash.participants.some((p) => p.group_id === groupId)) continue;
+    if (!last || clash.time >= last.time) last = clash;
+  }
+  const mine = last?.participants.find((p) => p.group_id === groupId);
+  const opponents =
+    last?.participants.filter((p) => p.team_color !== mine?.team_color) ?? [];
+  if (!mine || opponents.length === 0) return {};
+  const x =
+    opponents.reduce((sum, p) => sum + p.x, 0) / opponents.length - mine.x;
+  const y =
+    opponents.reduce((sum, p) => sum + p.y, 0) / opponents.length - mine.y;
+  const length = Math.hypot(x, y);
+  return length > SAME_PLACE
+    ? { facing: { x: x / length, y: y / length } }
+    : {};
+}
+
 interface Participation {
   clashId: number;
   t: number;
@@ -416,13 +450,25 @@ export function planTurn(previous: Generation, next: Generation): TurnPlan {
     tracks.push({ kind: "move", groupId: group.id, keys });
     const stoppedAt = stoppedByClashAt(next, group.id);
     if (stoppedAt !== undefined) {
-      tracks.push({ kind: "rattle", groupId: group.id, t0: stoppedAt, t1: 1 });
+      tracks.push({
+        kind: "rattle",
+        groupId: group.id,
+        t0: stoppedAt,
+        t1: 1,
+        ...facingOf(next, group.id),
+        facingUntil: 1,
+      });
     } else if (isHeld(previous, next, group.id)) {
       tracks.push({
         kind: "rattle",
         groupId: group.id,
         t0: 0,
         t1: HELD_RATTLE_SPAN,
+        // It faces its opponents at the start only if it did at rest: stopped last turn.
+        ...(stoppedByClashAt(previous, group.id) !== undefined
+          ? facingOf(previous, group.id)
+          : {}),
+        facingUntil: HELD_RATTLE_SPAN,
       });
     }
     const initial = before
@@ -508,24 +554,51 @@ export function planTurn(previous: Generation, next: Generation): TurnPlan {
     if (!first) continue;
     const lost = list.find((entry) => entry.point.soldiersAfter === 0);
     const initial = first.point.soldiersBefore;
-    const origin = castlePairs
-      .filter(
-        ({ before, after }) =>
-          before.team_color === first.point.teamColor &&
-          replayCastle(
+    // Its castle is one of its team whose turn adds up with these soldiers sent: replayed
+    // exactly with them (which also holds when the castle is captured after they left), or
+    // short of exactly them. Failing both, it is the castle of its team on whose island it
+    // was lost (#213: a group sent out against attackers at its own gate).
+    const sameTeam = castlePairs.filter(
+      ({ before }) => before.team_color === first.point.teamColor,
+    );
+    const nearest = (candidates: typeof castlePairs) =>
+      candidates
+        .map(({ after }) => after)
+        .sort(
+          (left, right) =>
+            mapDistance(left, first.point) - mapDistance(right, first.point),
+        )[0];
+    const origin =
+      nearest(
+        sameTeam.filter(({ before, after }) => {
+          const replay = replayCastle(
             before,
             after,
-            launched.get(after.id) ?? 0,
+            (launched.get(after.id) ?? 0) + initial,
             arrivals.get(after.id) ?? [],
-          ).soldiers -
-            after.soldiers ===
+          );
+          return (
+            replay.soldiers === after.soldiers &&
+            replay.team === after.team_color
+          );
+        }),
+      ) ??
+      nearest(
+        sameTeam.filter(
+          ({ before, after }) =>
+            replayCastle(
+              before,
+              after,
+              launched.get(after.id) ?? 0,
+              arrivals.get(after.id) ?? [],
+            ).soldiers -
+              after.soldiers ===
             initial,
-      )
-      .map(({ after }) => after)
-      .sort(
-        (left, right) =>
-          mapDistance(left, first.point) - mapDistance(right, first.point),
-      )[0];
+        ),
+      ) ??
+      nearest(
+        sameTeam.filter(({ before }) => insideWaterline(before, first.point)),
+      );
     transients.push({
       id: groupId,
       team_color: first.point.teamColor,
@@ -693,6 +766,8 @@ export interface GroupPose {
   sink: number;
   /** 0 before a boat that a clash holds is rattled, to 1 when its rattle is over. */
   rattle: number;
+  /** Where a group held by a clash faces its opponents (map units), while it is rattled. */
+  fighting: { x: number; y: number } | null;
   visible: boolean;
   count: number;
 }
@@ -707,8 +782,11 @@ export interface FlashPose {
   clashId: number;
   groupId: number;
   teamColor: number;
+  /** Where the participant is drawn: its squad on land, else its boat (#213). */
   x: number;
   y: number;
+  /** Whether it fights on land: no splash, dust instead (#213). */
+  onLand: boolean;
   radius: number;
   /** 0 at contact to 1 when the flash is over. */
   age: number;
@@ -845,6 +923,7 @@ export function sampleTurn(plan: TurnPlan, time: number): TurnSample {
         squad: null,
         sink: 0,
         rattle: 0,
+        fighting: null,
         visible: true,
         count: 0,
       };
@@ -895,9 +974,15 @@ export function sampleTurn(plan: TurnPlan, time: number): TurnSample {
         if (t >= track.t1) pose.visible = false;
         break;
       }
-      case "rattle":
-        group(track.groupId).rattle = progress(t, track.t0, track.t1);
+      case "rattle": {
+        const pose = group(track.groupId);
+        pose.rattle = progress(t, track.t0, track.t1);
+        pose.fighting =
+          t >= track.t0 && t <= (track.facingUntil ?? track.t1)
+            ? (track.facing ?? null)
+            : null;
         break;
+      }
       case "castleCount":
         castle(track.castleId).count = countAt(track.keys, t);
         break;
@@ -914,14 +999,17 @@ export function sampleTurn(plan: TurnPlan, time: number): TurnSample {
         const age = (t - track.t) / FLASH_SPAN;
         if (age < 0 || age > 1) break;
         for (const point of track.points) {
-          // A clash close to a castle is drawn where the boats are drawn, so they stay together.
+          // A clash is drawn where its participants are drawn, so they stay together: between
+          // the squads when they meet on land (#213), at the boats at sea or at a shore.
           const drawn = look(point.groupId, point);
+          const at = drawn.squad ?? drawn;
           flashes.push({
             clashId: track.clashId,
             groupId: point.groupId,
             teamColor: point.teamColor,
-            x: drawn.x,
-            y: drawn.y,
+            x: at.x,
+            y: at.y,
+            onLand: drawn.squad !== null,
             radius: point.radius,
             age,
           });
