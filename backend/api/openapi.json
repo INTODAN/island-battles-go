@@ -24,6 +24,143 @@
         ],
         "type": "object"
       },
+      "BotPackage": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/BotPackage.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "entry_or_command": {
+            "description": "A python package's module:function entry, such as bot:play, or a native package's command, its arguments joined with spaces, such as ./bot worker.",
+            "type": "string"
+          },
+          "language": {
+            "description": "python: a Python bot for the python3.14 runtime. native: a program for Linux arm64, such as a Go bot.",
+            "enum": [
+              "python",
+              "native"
+            ],
+            "type": "string"
+          },
+          "owner_name": {
+            "description": "Their display name when they uploaded it.",
+            "type": "string"
+          },
+          "owner_player_id": {
+            "description": "The member who uploaded it. Only they can delete it.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "package_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "size_bytes": {
+            "description": "The zip's size in bytes.",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "uploaded_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "package_id",
+          "owner_player_id",
+          "owner_name",
+          "language",
+          "entry_or_command",
+          "size_bytes",
+          "uploaded_at"
+        ],
+        "type": "object"
+      },
+      "BotPackageUpload": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/BotPackageUpload.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "package_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "upload": {
+            "$ref": "#/components/schemas/PresignedBotUpload"
+          }
+        },
+        "required": [
+          "package_id",
+          "upload"
+        ],
+        "type": "object"
+      },
+      "BotPackageUploadRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/BotPackageUploadRequest.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "file_name": {
+            "description": "The zip's file name, such as island-battles-bot.zip. It must end in .zip.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "file_name"
+        ],
+        "type": "object"
+      },
+      "BotPackages": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/BotPackages.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "packages": {
+            "description": "Every checked package of the lobby, newest first, at most one per member.",
+            "items": {
+              "$ref": "#/components/schemas/BotPackage"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "packages"
+        ],
+        "type": "object"
+      },
       "BotTurn": {
         "additionalProperties": false,
         "description": "What a bot is given to play one turn. A bot is a stateless function: whatever it needs to keep between turns goes in the memory it returns, which the server stores per player and game.",
@@ -107,6 +244,33 @@
           "commands",
           "memory",
           "logs"
+        ],
+        "type": "object"
+      },
+      "BotUploadToken": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/BotUploadToken.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "token": {
+            "description": "An upload token, ibut1.…: send it as Authorization: Bearer \u003ctoken\u003e to the two upload endpoints of this lobby, in place of a session.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "expires_at"
         ],
         "type": "object"
       },
@@ -1055,6 +1219,27 @@
         ],
         "type": "object"
       },
+      "PresignedBotUpload": {
+        "additionalProperties": false,
+        "properties": {
+          "fields": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "The form fields to send before the file, unchanged.",
+            "type": "object"
+          },
+          "url": {
+            "description": "POST a multipart/form-data body here: every field of fields, then the zip as the last field, named file.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "fields"
+        ],
+        "type": "object"
+      },
       "Problem": {
         "additionalProperties": false,
         "properties": {
@@ -1614,11 +1799,17 @@
         "description": "A submit token from a TurnDelivery, submit.token, which starts with ibst1. It authorizes POST /generation/commands for one player's turn of one generation of one game, until the turn's deadline plus 30 seconds, or 24 hours after the generation when turns have no time limit.",
         "scheme": "bearer",
         "type": "http"
+      },
+      "UploadToken": {
+        "bearerFormat": "ibut1",
+        "description": "An upload token from POST /game/lobbies/{lobby_id}/bot-packages/upload-token, which starts with ibut1. It stands for its player in POST /game/lobbies/{lobby_id}/bot-packages and its complete, for that lobby only, for 15 minutes. Its payload, the base64url JSON between its two dots, names the lobby as lobby_id, which the command line reads.",
+        "scheme": "bearer",
+        "type": "http"
       }
     }
   },
   "info": {
-    "description": "Operations a player client calls during a started game. After every turn, each roster player's Centrifugo channel `player:{player_id}` receives a `GenerationEvent`, except after the turn that ends the game, which pushes a `GameEndedEvent` with the final generation and its outcome instead. Clients reconcile with the generation read after subscribing or reconnecting; HTTP state is authoritative, and its `outcome` is set once the game has ended. A turn times out at its `turn_deadline_at`; the server runs no timers, so a client waiting for other players calls `POST /game/from-lobby/{lobby_id}/deadline` about a second after it. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the `game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose. `GET /game/upgrades` lists what each castle upgrade level costs, and `GET /bots/defaults` the default bots that the backend plays. Before getting ready in a lobby, every member chooses their bot in their lobby member settings with the lobby's `setLobbyMemberSettings`: `{\"bot\": {\"kind\": \"localhost\"}}`, their own bot, whose turns their client relays, or `{\"bot\": {\"kind\": \"default\", \"level\": N}}`, a default bot level; `GenerationState.bot` reports it during the game. `Demo` is the demo file format, which `GET /game/from-lobby/{lobby_id}/demo` returns and the demo viewer at `/game/demo-viewer/` opens. People outside the roster watch a game with its lobby's join code (`POST /lobby/v1/watches`): the lobby's watch channel `watch:island-battles:{lobby_id}` receives a `WatchGenerationEvent` after every turn and a `WatchGameEndedEvent` after the last, in the same push as the players' events, and `GET /game/from-lobby/{lobby_id}/watch` and `/watch/demo` are their reads. `BotTurn` and `BotTurnResult` are the stateless bot contract: a bot gets a `BotTurn` each turn and answers with a `BotTurnResult`, which is sent as one completing batch. A localhost bot gets its turns as a `TurnDelivery` from `GET /game/from-lobby/{lobby_id}/turn-delivery`, which its player's client posts to it, and submits its answer itself with the delivery's one-turn submit token.",
+    "description": "Operations a player client calls during a started game. After every turn, each roster player's Centrifugo channel `player:{player_id}` receives a `GenerationEvent`, except after the turn that ends the game, which pushes a `GameEndedEvent` with the final generation and its outcome instead. Clients reconcile with the generation read after subscribing or reconnecting; HTTP state is authoritative, and its `outcome` is set once the game has ended. A turn times out at its `turn_deadline_at`; the server runs no timers, so a client waiting for other players calls `POST /game/from-lobby/{lobby_id}/deadline` about a second after it. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the `game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose. `GET /game/upgrades` lists what each castle upgrade level costs, and `GET /bots/defaults` the default bots that the backend plays. Before getting ready in a lobby, every member chooses their bot in their lobby member settings with the lobby's `setLobbyMemberSettings`: `{\"bot\": {\"kind\": \"localhost\"}}`, their own bot, whose turns their client relays, or `{\"bot\": {\"kind\": \"default\", \"level\": N}}`, a default bot level; `GenerationState.bot` reports it during the game. `Demo` is the demo file format, which `GET /game/from-lobby/{lobby_id}/demo` returns and the demo viewer at `/game/demo-viewer/` opens. People outside the roster watch a game with its lobby's join code (`POST /lobby/v1/watches`): the lobby's watch channel `watch:island-battles:{lobby_id}` receives a `WatchGenerationEvent` after every turn and a `WatchGameEndedEvent` after the last, in the same push as the players' events, and `GET /game/from-lobby/{lobby_id}/watch` and `/watch/demo` are their reads. `BotTurn` and `BotTurnResult` are the stateless bot contract: a bot gets a `BotTurn` each turn and answers with a `BotTurnResult`, which is sent as one completing batch. A localhost bot gets its turns as a `TurnDelivery` from `GET /game/from-lobby/{lobby_id}/turn-delivery`, which its player's client posts to it, and submits its answer itself with the delivery's one-turn submit token. Any member of a lobby can upload a bot package, the zip that the SDKs' `package` command builds, to the lobby: `POST /game/lobbies/{lobby_id}/bot-packages` presigns the upload, the zip goes straight to storage, and `POST /game/lobbies/{lobby_id}/bot-packages/{package_id}/complete` checks it. The command line uploads with an upload token from `POST /game/lobbies/{lobby_id}/bot-packages/upload-token` instead of a session.",
     "title": "Island Battles Player API",
     "version": "1.0.0"
   },
@@ -2074,6 +2265,306 @@
           }
         ],
         "summary": "Read a lobby game's history for a watcher",
+        "tags": [
+          "Island Battles"
+        ]
+      }
+    },
+    "/game/lobbies/{lobby_id}/bot-packages": {
+      "get": {
+        "description": "Requires an active membership of the Island Battles lobby, in any phase; anyone else gets 404. Lists every package that a member uploaded and completed, newest first, with who uploaded it, its language, its entry or command and its size. A member has at most one. Packages are deleted 8 days after their upload, with their zips. A server without storage for packages answers 503.",
+        "operationId": "listIslandBotPackages",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lobby_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotPackages"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "LobbyBearer": []
+          }
+        ],
+        "summary": "List a lobby's bot packages",
+        "tags": [
+          "Island Battles"
+        ]
+      },
+      "post": {
+        "description": "Requires an active membership of the Island Battles lobby, in any phase, with your session or an upload token for this lobby (Authorization: Bearer ibut1.…); anyone else gets 404, and a token for another lobby, or an expired one, 401. A bot package is the zip that the SDKs' package command builds: island-battles-bot package in Python, or the Go SDK's island-battles-package. A package belongs to the lobby, and anyone in it may upload one. This stores a pending package and returns its package_id and a presigned POST: send a multipart/form-data POST to upload.url with every field of upload.fields, unchanged, and the zip last, in a field named file. The zip goes straight to storage, never through this server, so it may be up to 250 MiB (262,144,000 bytes); the presigned POST refuses an empty or larger file, and expires after 15 minutes. Then call POST /game/lobbies/{lobby_id}/bot-packages/{package_id}/complete. file_name must end in .zip, or this is 422. A server without storage for packages answers 503.",
+        "operationId": "startIslandBotPackageUpload",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lobby_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BotPackageUploadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotPackageUpload"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "LobbyBearer": []
+          },
+          {
+            "UploadToken": []
+          }
+        ],
+        "summary": "Start uploading a bot package to a lobby",
+        "tags": [
+          "Island Battles"
+        ]
+      }
+    },
+    "/game/lobbies/{lobby_id}/bot-packages/upload-token": {
+      "post": {
+        "description": "Requires an active membership of the Island Battles lobby, in any phase; anyone else gets 404. Returns an upload token for you and this lobby, valid for 15 minutes, for a command line that doesn't hold your session: island-battles-bot upload --game-url \u003curl\u003e --token \u003ctoken\u003e dist/island-battles-bot.zip, or the Go SDK's island-battles-package upload with the same arguments. The two upload endpoints, POST /game/lobbies/{lobby_id}/bot-packages and its complete, accept it as Authorization: Bearer \u003ctoken\u003e in place of your session; nothing else does. The command line reads the lobby from the token. A server without storage for packages answers 503.",
+        "operationId": "createIslandBotUploadToken",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lobby_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotUploadToken"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "LobbyBearer": []
+          }
+        ],
+        "summary": "Get an upload token for uploading a bot package from the command line",
+        "tags": [
+          "Island Battles"
+        ]
+      }
+    },
+    "/game/lobbies/{lobby_id}/bot-packages/{package_id}": {
+      "delete": {
+        "description": "Requires an active membership of the Island Battles lobby, in any phase; anyone else gets 404. Deletes the package and its zip. Only the member who uploaded it can: anyone else gets 403. A package that the lobby doesn't have is 404. A server without storage for packages answers 503.",
+        "operationId": "deleteIslandBotPackage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lobby_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "package_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "LobbyBearer": []
+          }
+        ],
+        "summary": "Delete your bot package from a lobby",
+        "tags": [
+          "Island Battles"
+        ]
+      }
+    },
+    "/game/lobbies/{lobby_id}/bot-packages/{package_id}/complete": {
+      "post": {
+        "description": "Requires an active membership of the Island Battles lobby, in any phase, with your session or an upload token for this lobby (Authorization: Bearer ibut1.…); anyone else gets 404, and a token for another lobby, or an expired one, 401. Only the member who started the upload can complete it; for anyone else the package is 404. It reads the zip's central directory and island-battles-bot.json with range requests, without downloading the zip, and checks that: the manifest is format 1, either python with python \"3.14\" and a module:function entry, or native with a command whose program is a file in the zip; the files come to at most 1 GiB (1,073,741,824 bytes) unpacked; and no path leaves the package (.., absolute paths or symbolic links). A package that fails a check is 422 with a detail that says what is wrong, and is deleted with its zip: start another upload. Before the zip is uploaded this is 409, and nothing changes. A valid package is the member's package in the lobby from then on, and every member sees it in GET /game/lobbies/{lobby_id}/bot-packages. A member has one package per lobby: completing a new one deletes their previous one. Completing it again returns it. A server without storage for packages answers 503.",
+        "operationId": "completeIslandBotPackageUpload",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lobby_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "package_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotPackage"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "LobbyBearer": []
+          },
+          {
+            "UploadToken": []
+          }
+        ],
+        "summary": "Check an uploaded bot package and add it to the lobby",
         "tags": [
           "Island Battles"
         ]

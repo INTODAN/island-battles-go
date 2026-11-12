@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,6 +18,7 @@ import (
 	"islandBattles/backend/app"
 	"islandBattles/backend/dependencies"
 	"islandBattles/backend/observability"
+	"islandBattles/backend/packagestore/locals3"
 
 	"github.com/lmittmann/tint"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
@@ -43,6 +45,20 @@ func main() {
 	}
 }
 
+// localOrigin is where players and this host itself reach this host: the
+// public URL when one is set, and otherwise localhost on the port it listens
+// on. Presigned uploads of bot packages go there.
+func localOrigin(config dependencies.Config, address string) string {
+	if config.PublicURL != "" {
+		return config.PublicURL
+	}
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || host == "" || host == "0.0.0.0" || host == "::" {
+		host = "localhost"
+	}
+	return "http://" + net.JoinHostPort(host, port)
+}
+
 func run(ctx context.Context, config dependencies.Config, address string, logger *slog.Logger) error {
 	// Locally, tracing is off unless OTEL_EXPORTER_OTLP_ENDPOINT is set, and
 	// then records every request. The free-tier limits only apply on Lambda.
@@ -62,7 +78,19 @@ func run(ctx context.Context, config dependencies.Config, address string, logger
 	defer func() { _ = sqlDatabase.Close() }()
 	// The graph page reads any game without authentication, so only this local
 	// host serves it.
-	handler, err := app.New(config, database, logger, app.WithGameGraph())
+	options := []app.Option{app.WithGameGraph()}
+	if config.BotPackagesBucket == "" {
+		// Without a bucket, bot packages are kept on disk, behind a fake S3
+		// that this host serves itself.
+		directory := dependencies.LoadBotPackagesDir(os.LookupEnv)
+		store, storage, err := locals3.New(directory, localOrigin(config, address))
+		if err != nil {
+			return err
+		}
+		options = append(options, app.WithLocalBotPackages(store, locals3.Prefix, storage))
+		logger.Info("Keeping uploaded bot packages on disk", "directory", directory)
+	}
+	handler, err := app.New(config, database, logger, options...)
 	if err != nil {
 		return err
 	}

@@ -2,7 +2,8 @@
 // turn. Nothing runs between requests, so the game's own requests run the
 // passes as they end, in small batches. When nobody plays, no game data is
 // added, so none needs deleting. The lobby deletes its own data separately,
-// and this package never reads lobby tables.
+// and this package never reads lobby tables. The same passes delete the bot
+// packages uploaded to lobbies 8 days after their upload.
 package retention
 
 import (
@@ -60,14 +61,22 @@ func (policy Policy) Validate() error {
 	return nil
 }
 
+// BotPackagePeriod keeps an uploaded bot package's row for 8 days after it
+// was created, as long as the bot package bucket's lifecycle rule keeps its
+// zip (deploy/terraform/bot_packages.tf). It doesn't follow Period.
+const BotPackagePeriod = 8 * 24 * time.Hour
+
 // Result counts what one pass did.
 type Result struct {
 	// RetiredGames were hidden from every request. Later passes delete them.
 	RetiredGames int
 	dal.GamePurge
+	// BotPackages counts the bot packages deleted.
+	BotPackages int
 }
 
-// Store retires and deletes games. DatabaseStore is the real one.
+// Store retires and deletes games, and deletes old bot packages.
+// DatabaseStore is the real one.
 type Store interface {
 	// RetireExpiredGames hides up to limit games with no generation since
 	// before, skipping games that a request has locked.
@@ -75,6 +84,9 @@ type Store interface {
 	// PurgeRetiredGames deletes up to generationLimit generations of at most
 	// gameLimit retired games, and the retired games left with none.
 	PurgeRetiredGames(ctx context.Context, generationLimit, gameLimit int) (dal.GamePurge, error)
+	// DeleteExpiredBotPackages deletes up to limit bot packages created
+	// before before.
+	DeleteExpiredBotPackages(ctx context.Context, before time.Time, limit int) (int, error)
 }
 
 // DatabaseStore runs the game's retention queries in dal.
@@ -88,6 +100,10 @@ func (store DatabaseStore) RetireExpiredGames(ctx context.Context, before time.T
 
 func (store DatabaseStore) PurgeRetiredGames(ctx context.Context, generationLimit, gameLimit int) (dal.GamePurge, error) {
 	return dal.PurgeRetiredGames(store.Database.WithContext(ctx), generationLimit, gameLimit)
+}
+
+func (store DatabaseStore) DeleteExpiredBotPackages(ctx context.Context, before time.Time, limit int) (int, error) {
+	return dal.DeleteExpiredBotPackages(store.Database.WithContext(ctx), before, limit)
 }
 
 // MaxPurgedGames bounds the retired games one pass deletes from. Each takes a
@@ -153,15 +169,16 @@ func (retention *Retention) RunIfDue(ctx context.Context) {
 	}
 	if result != (Result{}) {
 		retention.logger.InfoContext(ctx, "Game retention pass deleted expired games",
-			"retired_games", result.RetiredGames, "generations", result.Generations, "games", result.Games)
+			"retired_games", result.RetiredGames, "generations", result.Generations, "games", result.Games, "bot_packages", result.BotPackages)
 	}
 }
 
-// Pass retires the games that expired by now and deletes one batch of
-// retired games' rows, whether or not a pass is due. Each step runs even when
-// the other fails, so games retired earlier are still deleted while retiring
-// fails, and the reverse. The result counts what succeeded, and the error
-// joins every failure.
+// Pass retires the games that expired by now, deletes one batch of retired
+// games' rows and one batch of bot packages older than BotPackagePeriod,
+// whether or not a pass is due. Each step runs even when another fails, so
+// games retired earlier are still deleted while retiring fails, and the
+// reverse. The result counts what succeeded, and the error joins every
+// failure.
 func (retention *Retention) Pass(ctx context.Context, now time.Time) (Result, error) {
 	var result Result
 	retired, retireErr := retention.store.RetireExpiredGames(ctx, now.Add(-retention.policy.Period), retention.policy.BatchSize)
@@ -176,7 +193,13 @@ func (retention *Retention) Pass(ctx context.Context, now time.Time) (Result, er
 	}
 	// A purge that fails for some games still reports the others.
 	result.GamePurge = purge
-	return result, errors.Join(retireErr, purgeErr)
+	packages, packagesErr := retention.store.DeleteExpiredBotPackages(ctx, now.Add(-BotPackagePeriod), retention.policy.BatchSize)
+	if packagesErr != nil {
+		packagesErr = fmt.Errorf("delete expired bot packages: %w", packagesErr)
+	} else {
+		result.BotPackages = packages
+	}
+	return result, errors.Join(retireErr, purgeErr, packagesErr)
 }
 
 // purgedGames is the number of retired games one pass deletes from.
@@ -187,5 +210,5 @@ func (retention *Retention) purgedGames() int {
 // backlog reports a pass that filled a batch, which may have left more.
 func (retention *Retention) backlog(result Result) bool {
 	batchSize := retention.policy.BatchSize
-	return result.RetiredGames >= batchSize || result.Generations >= batchSize || result.Games >= retention.purgedGames()
+	return result.RetiredGames >= batchSize || result.Generations >= batchSize || result.Games >= retention.purgedGames() || result.BotPackages >= batchSize
 }

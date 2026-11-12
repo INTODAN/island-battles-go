@@ -66,6 +66,25 @@ func TestLoadConfigReadsThePublicURL(t *testing.T) {
 	}
 }
 
+func TestLoadConfigReadsTheBotPackageBucket(t *testing.T) {
+	t.Parallel()
+
+	values := validConfigurationEnvironment()
+	if config, err := LoadConfigFromLookup(mapLookup(values)); err != nil || config.BotPackagesBucket != "" {
+		t.Fatalf("BotPackagesBucket = %q without %s, error = %v", config.BotPackagesBucket, BotPackagesBucketEnv, err)
+	}
+	values[BotPackagesBucketEnv] = " island-battles-bot-packages "
+	if config, err := LoadConfigFromLookup(mapLookup(values)); err != nil || config.BotPackagesBucket != "island-battles-bot-packages" {
+		t.Fatalf("BotPackagesBucket = %q, error = %v", config.BotPackagesBucket, err)
+	}
+	if directory := LoadBotPackagesDir(mapLookup(map[string]string{BotPackagesDirEnv: "/srv/packages"})); directory != "/srv/packages" {
+		t.Fatalf("directory = %q", directory)
+	}
+	if directory := LoadBotPackagesDir(mapLookup(map[string]string{})); !strings.HasSuffix(directory, "island-battles-bot-packages") {
+		t.Fatalf("default directory = %q", directory)
+	}
+}
+
 func TestLoadConfigRejectsInvalidPublicWebSocketURL(t *testing.T) {
 	t.Parallel()
 

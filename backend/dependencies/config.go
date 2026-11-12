@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,6 +29,10 @@ const (
 	PublicURLEnv                     = "ISLAND_BATTLES_PUBLIC_URL"
 	AdminAPIKeyEnv                   = "ISLAND_BATTLES_ADMIN_API_KEY"
 	GameRetentionPeriodEnv           = "ISLAND_BATTLES_GAME_RETENTION_PERIOD"
+	BotPackagesBucketEnv             = "ISLAND_BATTLES_BOT_PACKAGES_BUCKET"
+	// BotPackagesDirEnv is read by the local server host alone; see
+	// LoadBotPackagesDir.
+	BotPackagesDirEnv = "ISLAND_BATTLES_BOT_PACKAGES_DIR"
 )
 
 // The pool defaults suit Lambda, where an instance serves one request at a
@@ -83,6 +88,11 @@ type Config struct {
 	// GameRetentionPeriod is how long a game is kept after its latest
 	// generation was created; see the retention package.
 	GameRetentionPeriod time.Duration
+	// BotPackagesBucket is the S3 bucket that keeps uploaded bot packages,
+	// in the region and with the credentials of the environment. Empty
+	// means none: the local server host then keeps them on disk, and the
+	// Lambda host refuses uploads.
+	BotPackagesBucket string
 }
 
 // LoadConfig reads and validates the HTTP API's environment values.
@@ -115,6 +125,7 @@ func LoadConfigFromLookup(lookup func(string) (string, bool)) (Config, error) {
 		PublicURL:                 strings.TrimRight(readEnvironment(lookup, PublicURLEnv), "/"),
 		AdminAPIKey:               readEnvironment(lookup, AdminAPIKeyEnv),
 		GameRetentionPeriod:       gameRetentionPeriod,
+		BotPackagesBucket:         readEnvironment(lookup, BotPackagesBucketEnv),
 	}
 	if err := validateURL(CentrifugoPublicURLEnv, config.CentrifugoPublicURL, "ws", "wss"); err != nil {
 		return Config{}, err
@@ -181,6 +192,16 @@ func LoadDatabaseConfigFromLookup(lookup func(string) (string, bool)) (DatabaseC
 		}
 	}
 	return config, nil
+}
+
+// LoadBotPackagesDir reads the folder where the local server host keeps bot
+// packages when no bucket is configured, island-battles-bot-packages in the
+// system's temporary folder by default.
+func LoadBotPackagesDir(lookup func(string) (string, bool)) string {
+	if directory := readEnvironment(lookup, BotPackagesDirEnv); directory != "" {
+		return directory
+	}
+	return filepath.Join(os.TempDir(), "island-battles-bot-packages")
 }
 
 // LoadHTTPAddr reads the address the HTTP server host listens on.

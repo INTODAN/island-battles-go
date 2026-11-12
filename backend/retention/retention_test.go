@@ -25,6 +25,12 @@ type recordingStore struct {
 	err      error
 	purgeErr error
 	purges   int
+	// packages is what deleting bot packages returns, packagesErr fails it,
+	// and packageBefores and packageLimits record its calls.
+	packages       int
+	packagesErr    error
+	packageBefores []time.Time
+	packageLimits  []int
 	// block, when set, holds every pass until it is closed.
 	block   chan struct{}
 	entered chan struct{}
@@ -54,6 +60,14 @@ func (store *recordingStore) PurgeRetiredGames(_ context.Context, generationLimi
 	store.limits = append(store.limits, generationLimit, gameLimit)
 	store.purges++
 	return store.purge, store.purgeErr
+}
+
+func (store *recordingStore) DeleteExpiredBotPackages(_ context.Context, before time.Time, limit int) (int, error) {
+	store.mutex.Lock()
+	defer store.mutex.Unlock()
+	store.packageBefores = append(store.packageBefores, before)
+	store.packageLimits = append(store.packageLimits, limit)
+	return store.packages, store.packagesErr
 }
 
 func (store *recordingStore) passCount() int {
@@ -130,6 +144,7 @@ func TestAFullBatchMakesTheNextRequestRunAnotherPass(t *testing.T) {
 		"retired a full batch":            {retired: 10},
 		"deleted a full generation batch": {purge: dal.GamePurge{Generations: 10}},
 		"deleted from the most games":     {purge: dal.GamePurge{Generations: 3, Games: retention.MaxPurgedGames}},
+		"deleted a full package batch":    {packages: 10},
 	} {
 		clock := &fakeClock{now: time.Now()}
 		runner := newRetention(t, store, clock)
@@ -139,7 +154,7 @@ func TestAFullBatchMakesTheNextRequestRunAnotherPass(t *testing.T) {
 			t.Errorf("%s: passes=%d, want the second request to continue the backlog", name, store.passCount())
 		}
 	}
-	partial := &recordingStore{retired: 9, purge: dal.GamePurge{Generations: 9, Games: retention.MaxPurgedGames - 1}}
+	partial := &recordingStore{retired: 9, purge: dal.GamePurge{Generations: 9, Games: retention.MaxPurgedGames - 1}, packages: 9}
 	runner := newRetention(t, partial, &fakeClock{now: time.Now()})
 	runner.RunIfDue(context.Background())
 	runner.RunIfDue(context.Background())
@@ -170,6 +185,27 @@ func TestAFailingStepDoesNotStopTheOther(t *testing.T) {
 	result, err = runner.Pass(context.Background(), time.Now())
 	if err == nil || result.RetiredGames != 3 || result.Generations != 2 {
 		t.Fatalf("result=%+v error=%v, want the retired games and the other games' purge counted", result, err)
+	}
+	packagesFail := &recordingStore{retired: 2, purge: dal.GamePurge{Generations: 1}, packagesErr: errors.New("delete failed")}
+	runner = newRetention(t, packagesFail, &fakeClock{now: time.Now()})
+	result, err = runner.Pass(context.Background(), time.Now())
+	if err == nil || result.RetiredGames != 2 || result.Generations != 1 || result.BotPackages != 0 {
+		t.Fatalf("result=%+v error=%v, want the games counted although deleting packages failed", result, err)
+	}
+	gamesFail := &recordingStore{err: errors.New("retire failed"), purgeErr: errors.New("purge failed"), packages: 4}
+	runner = newRetention(t, gamesFail, &fakeClock{now: time.Now()})
+	result, err = runner.Pass(context.Background(), time.Now())
+	if err == nil || result.BotPackages != 4 {
+		t.Fatalf("result=%+v error=%v, want packages deleted although the games' steps failed", result, err)
+	}
+}
+
+func TestBotPackagesAreDeletedEightDaysAfterTheirUpload(t *testing.T) {
+	store := &recordingStore{}
+	clock := &fakeClock{now: time.Date(2026, 11, 12, 12, 0, 0, 0, time.UTC)}
+	newRetention(t, store, clock).RunIfDue(context.Background())
+	if len(store.packageBefores) != 1 || !store.packageBefores[0].Equal(clock.now.Add(-8*24*time.Hour)) || store.packageLimits[0] != 10 {
+		t.Fatalf("befores=%v limits=%v, want one batch of 10 older than 8 days", store.packageBefores, store.packageLimits)
 	}
 }
 
