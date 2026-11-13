@@ -147,9 +147,10 @@ resource "aws_lambda_function_event_invoke_config" "bot_runner" {
 
 # The backend reads the runners' month-to-date Duration and InitDuration from
 # CloudWatch, at most once per 10 minutes, for the monthly guard on games with
-# uploaded bots (#226). GetMetricData can't be scoped to resources or metrics:
-# IAM takes only "*" for it, so this statement allows reading any metric of
-# the account, and nothing else.
+# uploaded bots (#226), with GetMetricStatistics, whose requests count against
+# CloudWatch's free API requests (GetMetricData's are billed). It can't be
+# scoped to resources or metrics: IAM takes only "*" for it, so this
+# statement allows reading any metric of the account, and nothing else.
 resource "aws_iam_role_policy" "lambda_bot_compute" {
   name = "bot-compute"
   role = aws_iam_role.lambda.id
@@ -158,7 +159,7 @@ resource "aws_iam_role_policy" "lambda_bot_compute" {
     Statement = [{
       Sid      = "ReadTheBotRunnersCompute"
       Effect   = "Allow"
-      Action   = "cloudwatch:GetMetricData"
+      Action   = "cloudwatch:GetMetricStatistics"
       Resource = "*"
     }]
   })

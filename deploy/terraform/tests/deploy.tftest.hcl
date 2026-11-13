@@ -1181,11 +1181,11 @@ run "lets_the_backend_invoke_only_the_two_runners" {
       jsondecode(aws_iam_role_policy.lambda_bot_compute.policy).Statement == [{
         Sid      = "ReadTheBotRunnersCompute"
         Effect   = "Allow"
-        Action   = "cloudwatch:GetMetricData"
+        Action   = "cloudwatch:GetMetricStatistics"
         Resource = "*"
       }]
     )
-    error_message = "The backend's role may read metrics with cloudwatch:GetMetricData, which takes no resource, and nothing more (#226)."
+    error_message = "The backend's role may read metrics with cloudwatch:GetMetricStatistics, which takes no resource, and nothing more (#226)."
   }
 
   assert {

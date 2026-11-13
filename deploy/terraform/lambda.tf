@@ -72,7 +72,7 @@ data "archive_file" "backend" {
 # (observability.tf). In S3 it presigns uploads to, reads and deletes the zips
 # of the bot package bucket, and only that bucket (bot_packages.tf). It
 # invokes the two bot runner functions, and no other function, and reads
-# their compute with cloudwatch:GetMetricData (bot_runners.tf). It calls
+# their compute with cloudwatch:GetMetricStatistics (bot_runners.tf). It calls
 # nothing else in AWS: it reaches Postgres and
 # Centrifugo over the internet.
 resource "aws_iam_role" "lambda" {

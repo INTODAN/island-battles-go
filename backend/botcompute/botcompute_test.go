@@ -15,26 +15,24 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatch/types"
 )
 
-// fakeMetrics answers GetMetricData with pages, in order, and keeps the
-// requests.
+// fakeMetrics answers GetMetricStatistics with hourly sums by function and
+// metric, and keeps the requests.
 type fakeMetrics struct {
-	pages    []*cloudwatch.GetMetricDataOutput
+	sums     map[string][]float64
 	err      error
-	requests []cloudwatch.GetMetricDataInput
+	requests []cloudwatch.GetMetricStatisticsInput
 }
 
-func (metrics *fakeMetrics) GetMetricData(_ context.Context, input *cloudwatch.GetMetricDataInput, _ ...func(*cloudwatch.Options)) (*cloudwatch.GetMetricDataOutput, error) {
+func (metrics *fakeMetrics) GetMetricStatistics(_ context.Context, input *cloudwatch.GetMetricStatisticsInput, _ ...func(*cloudwatch.Options)) (*cloudwatch.GetMetricStatisticsOutput, error) {
 	metrics.requests = append(metrics.requests, *input)
 	if metrics.err != nil {
 		return nil, metrics.err
 	}
-	page := metrics.pages[0]
-	metrics.pages = metrics.pages[1:]
-	return page, nil
-}
-
-func result(id string, values ...float64) types.MetricDataResult {
-	return types.MetricDataResult{Id: aws.String(id), Values: values, StatusCode: types.StatusCodeComplete}
+	output := &cloudwatch.GetMetricStatisticsOutput{Label: input.MetricName}
+	for _, sum := range metrics.sums[aws.ToString(input.Dimensions[0].Value)+" "+aws.ToString(input.MetricName)] {
+		output.Datapoints = append(output.Datapoints, types.Datapoint{Sum: aws.Float64(sum), Unit: types.StandardUnitMilliseconds})
+	}
+	return output, nil
 }
 
 var (
@@ -43,11 +41,13 @@ var (
 )
 
 // Duration and InitDuration of both runners, summed over the month's hourly
-// datapoints and every page, are milliseconds of 1 GB.
+// datapoints, are milliseconds of 1 GB, read with one call per function and
+// metric.
 func TestMonthToDateSumsBothRunnersDurationAndInitDuration(t *testing.T) {
-	metrics := &fakeMetrics{pages: []*cloudwatch.GetMetricDataOutput{
-		{MetricDataResults: []types.MetricDataResult{result("m0_0", 1_000_000, 500_000), result("m0_1", 2_000)}, NextToken: aws.String("more")},
-		{MetricDataResults: []types.MetricDataResult{result("m1_0", 250_000), result("m1_1")}},
+	metrics := &fakeMetrics{sums: map[string][]float64{
+		"island-battles-bot-runner-python Duration":     {1_000_000, 500_000},
+		"island-battles-bot-runner-python InitDuration": {2_000},
+		"island-battles-bot-runner-native Duration":     {250_000},
 	}}
 	reader := &botcompute.CloudWatch{Client: metrics, Functions: []string{"island-battles-bot-runner-python", "island-battles-bot-runner-native"}}
 	used, err := reader.MonthToDate(context.Background(), november, now)
@@ -57,21 +57,20 @@ func TestMonthToDateSumsBothRunnersDurationAndInitDuration(t *testing.T) {
 	if want := 1752.0; math.Abs(used-want) > 1e-9 {
 		t.Fatalf("used %v GB-s, want %v", used, want)
 	}
-	if len(metrics.requests) != 2 || aws.ToString(metrics.requests[1].NextToken) != "more" {
-		t.Fatalf("requests %+v, want a second page with the token", metrics.requests)
-	}
-	request := metrics.requests[0]
-	if !aws.ToTime(request.StartTime).Equal(november) || !aws.ToTime(request.EndTime).Equal(time.Date(2026, time.November, 13, 11, 0, 0, 0, time.UTC)) {
-		t.Fatalf("from %v to %v, want the first of the month to the end of the current hour", request.StartTime, request.EndTime)
-	}
 	var asked []string
-	for _, query := range request.MetricDataQueries {
-		stat := query.MetricStat
-		if aws.ToString(stat.Metric.Namespace) != "AWS/Lambda" || aws.ToString(stat.Stat) != "Sum" || aws.ToInt32(stat.Period) != 3600 || !aws.ToBool(query.ReturnData) {
-			t.Fatalf("query %s: %+v", aws.ToString(query.Id), stat)
+	for _, request := range metrics.requests {
+		if aws.ToString(request.Namespace) != "AWS/Lambda" || !slices.Equal(request.Statistics, []types.Statistic{types.StatisticSum}) || aws.ToInt32(request.Period) != 3600 {
+			t.Fatalf("request %+v", request)
 		}
-		dimension := stat.Metric.Dimensions[0]
-		asked = append(asked, aws.ToString(dimension.Name)+"="+aws.ToString(dimension.Value)+" "+aws.ToString(stat.Metric.MetricName))
+		if !aws.ToTime(request.StartTime).Equal(november) || !aws.ToTime(request.EndTime).Equal(time.Date(2026, time.November, 13, 11, 0, 0, 0, time.UTC)) {
+			t.Fatalf("from %v to %v, want the first of the month to the end of the current hour", request.StartTime, request.EndTime)
+		}
+		// Hourly datapoints of a whole month fit one call.
+		if hours := aws.ToTime(request.EndTime).Sub(aws.ToTime(request.StartTime)) / time.Hour; hours > 1440 {
+			t.Fatalf("%d datapoints in one call", hours)
+		}
+		dimension := request.Dimensions[0]
+		asked = append(asked, aws.ToString(dimension.Name)+"="+aws.ToString(dimension.Value)+" "+aws.ToString(request.MetricName))
 	}
 	want := []string{
 		"FunctionName=island-battles-bot-runner-python Duration", "FunctionName=island-battles-bot-runner-python InitDuration",
@@ -86,12 +85,6 @@ func TestMonthToDateFailsWhenCloudWatchDoes(t *testing.T) {
 	failing := &botcompute.CloudWatch{Client: &fakeMetrics{err: errors.New("AccessDenied")}, Functions: []string{"runner"}}
 	if _, err := failing.MonthToDate(context.Background(), november, now); err == nil {
 		t.Fatal("a failed request read")
-	}
-	forbidden := &botcompute.CloudWatch{Client: &fakeMetrics{pages: []*cloudwatch.GetMetricDataOutput{{MetricDataResults: []types.MetricDataResult{
-		{Id: aws.String("m0_0"), StatusCode: types.StatusCodeForbidden},
-	}}}}, Functions: []string{"runner"}}
-	if _, err := forbidden.MonthToDate(context.Background(), november, now); err == nil {
-		t.Fatal("a forbidden metric read as 0")
 	}
 	none := &botcompute.CloudWatch{Client: &fakeMetrics{}}
 	if _, err := none.MonthToDate(context.Background(), november, now); err == nil {

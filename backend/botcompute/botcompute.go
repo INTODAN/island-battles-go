@@ -4,6 +4,10 @@
 // estimating it from the turns sent: the AWS/Lambda Duration metric, and
 // InitDuration where the account publishes it, summed over both functions
 // since the first of the month (UTC), times their memory.
+//
+// It reads them with GetMetricStatistics, whose requests count against
+// CloudWatch's free 1,000,000 API requests a month, rather than
+// GetMetricData, which is billed from the first metric.
 package botcompute
 
 import (
@@ -23,9 +27,11 @@ import (
 // is billed.
 const RunnerMemoryGB = 1.0
 
-// period is the length of each datapoint that CloudWatch sums: an hour,
-// which CloudWatch keeps for 455 days and which divides every month, so a
-// month is at most 744 datapoints per metric.
+// period is the length of each datapoint that CloudWatch sums: an hour. A
+// month is at most 744 of them, under GetMetricStatistics' 1,440 datapoints
+// per call. CloudWatch keeps hourly data for 455 days, and the first of a
+// month at midnight is aligned to the hour, as a start more than 63 days ago
+// must be.
 const period = time.Hour
 
 // metrics are the AWS/Lambda metrics that a runner is billed for, in
@@ -36,7 +42,7 @@ var metrics = []string{"Duration", "InitDuration"}
 // MetricsAPI is the part of the CloudWatch client that CloudWatch uses; tests
 // fake it.
 type MetricsAPI interface {
-	GetMetricData(ctx context.Context, params *cloudwatch.GetMetricDataInput, optFns ...func(*cloudwatch.Options)) (*cloudwatch.GetMetricDataOutput, error)
+	GetMetricStatistics(ctx context.Context, params *cloudwatch.GetMetricStatisticsInput, optFns ...func(*cloudwatch.Options)) (*cloudwatch.GetMetricStatisticsOutput, error)
 }
 
 // CloudWatch reads the runner functions' month-to-date compute.
@@ -48,7 +54,7 @@ type CloudWatch struct {
 
 // CloudWatchFromEnvironment reads the functions' metrics with the credentials
 // and region of the environment, such as the backend function's role, which
-// needs cloudwatch:GetMetricData.
+// needs cloudwatch:GetMetricStatistics.
 func CloudWatchFromEnvironment(ctx context.Context, functions ...string) (*CloudWatch, error) {
 	config, err := awsconfig.LoadDefaultConfig(ctx)
 	if err != nil {
@@ -62,54 +68,33 @@ func CloudWatchFromEnvironment(ctx context.Context, functions ...string) (*Cloud
 
 // MonthToDate returns the GB-seconds that the functions have used from
 // month, the first of a month at midnight UTC, until now: the sum of their
-// Duration and InitDuration, in hourly datapoints, times RunnerMemoryGB.
+// Duration and InitDuration, in hourly datapoints, times RunnerMemoryGB. It
+// makes one GetMetricStatistics call per function and metric.
 func (reader *CloudWatch) MonthToDate(ctx context.Context, month, now time.Time) (float64, error) {
 	if len(reader.Functions) == 0 {
 		return 0, errors.New("no bot runner functions to measure")
 	}
-	queries := make([]types.MetricDataQuery, 0, len(reader.Functions)*len(metrics))
-	for functionIndex, function := range reader.Functions {
-		for metricIndex, metric := range metrics {
-			queries = append(queries, types.MetricDataQuery{
-				Id: aws.String(fmt.Sprintf("m%d_%d", functionIndex, metricIndex)),
-				MetricStat: &types.MetricStat{
-					Metric: &types.Metric{
-						Namespace:  aws.String("AWS/Lambda"),
-						MetricName: aws.String(metric),
-						Dimensions: []types.Dimension{{Name: aws.String("FunctionName"), Value: aws.String(function)}},
-					},
-					Period: aws.Int32(int32(period / time.Second)),
-					Stat:   aws.String("Sum"),
-				},
-				ReturnData: aws.Bool(true),
-			})
-		}
-	}
 	// The end is the next whole hour, so the current hour counts.
-	input := &cloudwatch.GetMetricDataInput{
-		MetricDataQueries: queries,
-		StartTime:         aws.Time(month.UTC()),
-		EndTime:           aws.Time(now.UTC().Truncate(period).Add(period)),
-		ScanBy:            types.ScanByTimestampAscending,
-	}
+	start, end := month.UTC(), now.UTC().Truncate(period).Add(period)
 	var milliseconds float64
-	for {
-		output, err := reader.Client.GetMetricData(ctx, input)
-		if err != nil {
-			return 0, fmt.Errorf("read the bot runners' metrics: %w", err)
-		}
-		for _, result := range output.MetricDataResults {
-			if result.StatusCode == types.StatusCodeForbidden || result.StatusCode == types.StatusCodeInternalError {
-				return 0, fmt.Errorf("read the bot runners' metrics: %s: %s", aws.ToString(result.Id), result.StatusCode)
+	for _, function := range reader.Functions {
+		for _, metric := range metrics {
+			output, err := reader.Client.GetMetricStatistics(ctx, &cloudwatch.GetMetricStatisticsInput{
+				Namespace:  aws.String("AWS/Lambda"),
+				MetricName: aws.String(metric),
+				Dimensions: []types.Dimension{{Name: aws.String("FunctionName"), Value: aws.String(function)}},
+				StartTime:  aws.Time(start),
+				EndTime:    aws.Time(end),
+				Period:     aws.Int32(int32(period / time.Second)),
+				Statistics: []types.Statistic{types.StatisticSum},
+			})
+			if err != nil {
+				return 0, fmt.Errorf("read %s of %s: %w", metric, function, err)
 			}
-			for _, value := range result.Values {
-				milliseconds += value
+			for _, datapoint := range output.Datapoints {
+				milliseconds += aws.ToFloat64(datapoint.Sum)
 			}
 		}
-		if aws.ToString(output.NextToken) == "" {
-			break
-		}
-		input.NextToken = output.NextToken
 	}
 	return milliseconds / 1000 * RunnerMemoryGB, nil
 }
