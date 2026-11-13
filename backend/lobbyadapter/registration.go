@@ -17,32 +17,57 @@ import (
 // GameKey identifies Island Battles lobbies.
 const GameKey = models.LobbyGameKey
 
+// Lobbies reads a lobby as the game does, through the lobby's game API. The
+// start's ready check reads the lobby's bot seats with it. The lobby service
+// implements the API but is created after its registration, so the host sets
+// API once the service exists; while it is nil, no seats are read.
+type Lobbies struct {
+	API domain.GameAPI
+}
+
+// seats reads the members of a lobby, seats among them.
+func (lobbies *Lobbies) seats(lobbyID string) func(context.Context) ([]domain.Member, error) {
+	if lobbies == nil || lobbies.API == nil {
+		return nil
+	}
+	return func(ctx context.Context) ([]domain.Member, error) {
+		snapshot, err := lobbies.API.GameSnapshot(ctx, domain.Scope{GameKey: GameKey, LobbyID: lobbyID})
+		switch {
+		case err == nil:
+			return snapshot.Members, nil
+		case ctx.Err() != nil:
+			return nil, ctx.Err()
+		default:
+			return nil, fmt.Errorf("%w: read the lobby's seats: %w", domain.ErrUnavailable, err)
+		}
+	}
+}
+
 // Registration declares Island Battles to the lobby policy. Its settings
 // validator reads default maps from database. Every team owns castles on the
 // map, so a game can't start with an empty team. Every member chooses a bot
 // in their member settings, {"bot": {...}}, before getting ready, so the
 // ready gate refuses a member without one with
-// services.BotNotChosenProblemType; it reads only the members' settings. The
-// host can add bot seats, whose seat_settings {"bot_level": N} name a default
-// bot that the backend plays. A lobby plays one game per round, and a member
-// can reopen it for the next round once the game of the current one has
-// ended.
-func Registration(database *gorm.DB) domain.GameRegistration {
+// services.BotNotChosenProblemType. The host can add bot seats, whose
+// seat_settings {"bot_level": N} name a default bot that the backend plays.
+// While serverBots are enabled, a member's bot, and a seat's, may also be a
+// hosted bot at a URL or a bot package uploaded to the lobby, which the
+// validators and the ready gate check against database and lobbies (see
+// services.BotRules). A lobby plays one game per round, and a member can
+// reopen it for the next round once the game of the current one has ended.
+func Registration(database *gorm.DB, serverBots services.ServerBots, lobbies *Lobbies) domain.GameRegistration {
+	rules := services.BotRules{Database: database, ServerBots: serverBots}
 	return domain.GameRegistration{
 		Key: GameKey,
 		ValidateSettings: func(ctx context.Context, _ string, settings json.RawMessage, teams []domain.TeamDefinition) error {
 			return validateSettings(ctx, database, settings, teams)
 		},
 		StartRules: domain.StartRules{EveryTeamNeedsMember: true},
-		ReadyGate: func(context.Context, string) (domain.ReadyCheck, error) {
-			return services.BotReadyCheck, nil
+		ReadyGate: func(ctx context.Context, lobbyID string) (domain.ReadyCheck, error) {
+			return rules.ReadyGate(ctx, lobbyID, lobbies.seats(lobbyID))
 		},
-		ValidateSeat: func(_ context.Context, _ string, settings json.RawMessage) (string, error) {
-			return services.ValidateBotSeat(settings)
-		},
-		ValidateMemberSettings: func(_ context.Context, _ string, settings json.RawMessage) error {
-			return services.ValidateMemberSettings(settings)
-		},
+		ValidateSeat:           rules.ValidateBotSeat,
+		ValidateMemberSettings: rules.ValidateMemberSettings,
 		GameOver: func(ctx context.Context, lobbyID string, round int64) (bool, error) {
 			return gameOver(ctx, database, lobbyID, round)
 		},

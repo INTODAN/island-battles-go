@@ -46,6 +46,14 @@ const BOT_RETRY_MS = 2000;
 // It reads and writes the game through fetcher, which the lobby page passes
 // with the player's token for the game; the player sends no credential of
 // its own.
+// The status of a player whose hosted or uploaded bot the server plays, as
+// [title, detail], or null for another bot.
+export function serverBotStatus(bot) {
+  if (bot?.kind === "hosted") return ["Played by the server", `The server sends each turn to your hosted bot${bot.host ? ` at ${bot.host}` : ""}; this page relays nothing.`];
+  if (bot?.kind === "uploaded") return ["Played by the server", "The server runs your uploaded bot each turn; this page relays nothing."];
+  return null;
+}
+
 export class ExamplePlayer {
   constructor({ lobbyID, lobbyRound = null, playerID, subscription, enabled = true, demo = true, pending = null, savePending = () => {},
     onState = () => {}, onStatus = () => {}, retryDelay = 500, botRetryDelay = BOT_RETRY_MS, deliver = (delivery) => deliverTurn(delivery),
@@ -162,8 +170,13 @@ export class ExamplePlayer {
 
   scheduleTurn() {
     if (this.stopped || this.inFlight || this.commandRetry || this.refreshing || this.refreshRetry || !this.state) return;
-    // A default bot's player has nothing to relay or report.
-    if (!this.demo && this.state.bot?.kind !== "localhost") return;
+    // A default bot's player has nothing to relay or report. The server
+    // plays a hosted or an uploaded bot without the page, which says so.
+    if (!this.demo && this.state.bot?.kind !== "localhost") {
+      const served = serverBotStatus(this.state.bot);
+      if (served) this.onStatus(...served);
+      return;
+    }
     const key = `${this.state.game_id}:${this.state.generation_id}`;
     if (this.failed === key) return;
     if (this.ended || this.state.outcome) {

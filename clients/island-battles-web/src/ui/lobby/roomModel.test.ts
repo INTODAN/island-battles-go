@@ -71,6 +71,14 @@ describe("a bot in the member settings", () => {
       kind: "default",
       level: 2,
     });
+    expect(
+      memberSettingsBot({
+        bot: { kind: "hosted", url: "https://bot.example.com/turn" },
+      }),
+    ).toEqual({ kind: "hosted", url: "https://bot.example.com/turn" });
+    expect(
+      memberSettingsBot({ bot: { kind: "uploaded", package_id: "pkg-1" } }),
+    ).toEqual({ kind: "uploaded", package_id: "pkg-1" });
     for (const settings of [
       null,
       undefined,
@@ -78,6 +86,8 @@ describe("a bot in the member settings", () => {
       { bot: null },
       { bot: { kind: "default" } },
       { bot: { kind: "uploaded" } },
+      { bot: { kind: "hosted" } },
+      { bot: { kind: "remote" } },
     ]) {
       expect(memberSettingsBot(settings)).toBeUndefined();
     }
@@ -185,12 +195,26 @@ describe("bot choices", () => {
     for (const choice of [
       { kind: "localhost" as const },
       { kind: "default" as const, level: 3 },
+      { kind: "uploaded" as const, package_id: "pkg-1" },
     ]) {
       expect(choiceFromValue(choiceValue(choice))).toEqual(choice);
     }
     expect(choiceValue(undefined)).toBe("");
     expect(choiceFromValue("")).toBeNull();
     expect(choiceFromValue("level-0")).toBeNull();
+    expect(choiceFromValue("package-")).toBeNull();
+  });
+
+  test("a hosted bot takes the URL typed next to it", () => {
+    const hosted = {
+      kind: "hosted" as const,
+      url: "https://bot.example.com/turn",
+    };
+    expect(choiceValue(hosted)).toBe("hosted");
+    expect(choiceFromValue("hosted", " https://bot.example.com/turn ")).toEqual(
+      hosted,
+    );
+    expect(choiceFromValue("hosted", "")).toBeNull();
   });
 
   test("words for a bot", () => {
@@ -198,6 +222,12 @@ describe("bot choices", () => {
     expect(describeBot({ kind: "localhost" })).toBe("Own bot (localhost)");
     expect(describeBot({ kind: "default", level: 2 })).toBe(
       "Default bot, level 2",
+    );
+    expect(
+      describeBot({ kind: "hosted", url: "https://bot.example.com/a/turn" }),
+    ).toBe("Hosted bot (bot.example.com)");
+    expect(describeBot({ kind: "uploaded", package_id: "pkg-1" })).toBe(
+      "Uploaded bot",
     );
   });
 });

@@ -2,6 +2,7 @@ import { webClientUrl } from "../../platform";
 import type { Realtime, Snapshot } from "../../realtime";
 import { copyText, h } from "../dom";
 import {
+  type BotPackage,
   type DefaultBot,
   type LobbyActions,
   type MapTemplateSummary,
@@ -25,6 +26,7 @@ import {
   type MemberRow,
   type RoomModel,
   seatBody,
+  seatSettingsFromValue,
   startBlocker,
   type TeamRow,
   teamTaken,
@@ -88,8 +90,14 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
   let problems = noProblems();
   let templates: MapTemplateSummary[] = [];
   let levels: DefaultBot[] = fallbackLevels;
-  /** The level each team's Add bot select shows, by team ID. */
-  const chosenLevel = new Map<string, number>();
+  /** The server offers hosted and uploaded bots, so Add bot offers them too. */
+  let serverBots = false;
+  /** The lobby's packages, which the host may seat, as the bot picker last read them. */
+  let lobbyPackages: BotPackage[] = [];
+  /** The bot each team's Add bot select shows, by team ID: `level-N`, `package-<id>` or `hosted`. */
+  const chosenSeat = new Map<string, string>();
+  /** The URL typed for each team's hosted bot, by team ID. */
+  const seatUrls = new Map<string, string>();
   let lastVersion = -1;
 
   const title = h("h1", {});
@@ -241,6 +249,13 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
       return handleProblem(cause, "bot").message;
     },
     playerId: () => realtime.session.get()?.playerId,
+    onPackages(items) {
+      const key = (list: BotPackage[]) =>
+        list.map((item) => item.package_id).join();
+      if (key(items) === key(lobbyPackages)) return;
+      lobbyPackages = items;
+      render();
+    },
   });
 
   // The people who watch with the join code, in a section of their own.
@@ -336,8 +351,20 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
   };
   /** A fresh request ID per click; a transport retry resends the same body, so the seat is added once. */
   const addBot = (teamId: string) => {
-    const level = chosenLevel.get(teamId) ?? levels[0]?.level ?? 1;
-    const body = seatBody(teamId, level, crypto.randomUUID());
+    const settings = seatSettingsFromValue(
+      seatChoice(teamId),
+      seatUrls.get(teamId) ?? "",
+    );
+    if (!settings) {
+      problems.seat = {
+        teamId,
+        message:
+          "Type the bot's URL first, such as https://bot.example.com/turn.",
+      };
+      render();
+      return Promise.resolve();
+    }
+    const body = seatBody(teamId, settings, crypto.randomUUID());
     problems.seat = undefined;
     return run(
       "seat",
@@ -380,6 +407,18 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
         render();
       });
   });
+
+  /** The Add bot select's value for a team: its last choice while still offered, or the first level. */
+  function seatChoice(teamId: string): string {
+    const first = `level-${levels[0]?.level ?? 1}`;
+    const value = chosenSeat.get(teamId) ?? first;
+    const offered = value.startsWith("level-")
+      ? levels.some((bot) => value === `level-${bot.level}`)
+      : serverBots &&
+        (value === "hosted" ||
+          lobbyPackages.some((item) => value === `package-${item.package_id}`));
+    return offered ? value : first;
+  }
 
   const room = (snapshot: Snapshot): RoomModel =>
     buildRoom(snapshot, realtime.session.get()?.playerId ?? "");
@@ -451,7 +490,24 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     // Bots are added and removed by the host, while the lobby waits.
     const editSeats = model.isHost && model.phase === "waiting";
     // A team holds one member, so a bot goes only on an empty team.
-    const level = chosenLevel.get(team.id) ?? levels[0]?.level ?? 1;
+    const choice = seatChoice(team.id);
+    const option = (value: string, text: string) =>
+      h("option", { attrs: { value }, selected: value === choice }, text);
+    const urlInput =
+      choice === "hosted"
+        ? h("input", {
+            type: "url",
+            class: "bot-url",
+            value: seatUrls.get(team.id) ?? "",
+            placeholder: "https://bot.example.com/turn",
+            attrs: {
+              "aria-label": `Hosted bot URL for ${team.name}`,
+              maxlength: "2048",
+            },
+            oninput: (event: Event) =>
+              seatUrls.set(team.id, (event.target as HTMLInputElement).value),
+          })
+        : null;
     const addSeat =
       editSeats && !taken
         ? h(
@@ -460,24 +516,32 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
             h(
               "select",
               {
-                attrs: { "aria-label": `Bot level for ${team.name}` },
-                onchange: (event: Event) =>
-                  chosenLevel.set(
+                attrs: { "aria-label": `Bot for ${team.name}` },
+                onchange: (event: Event) => {
+                  chosenSeat.set(
                     team.id,
-                    Number((event.target as HTMLSelectElement).value),
-                  ),
+                    (event.target as HTMLSelectElement).value,
+                  );
+                  // The URL field shows only for a hosted bot.
+                  render();
+                },
               },
               ...levels.map((bot) =>
-                h(
-                  "option",
-                  {
-                    attrs: { value: String(bot.level) },
-                    selected: bot.level === level,
-                  },
-                  `Bot level ${bot.level}`,
-                ),
+                option(`level-${bot.level}`, `Bot level ${bot.level}`),
               ),
+              ...(serverBots
+                ? [
+                    ...lobbyPackages.map((item) =>
+                      option(
+                        `package-${item.package_id}`,
+                        `Uploaded: ${item.owner_name}'s bot (${item.language})`,
+                      ),
+                    ),
+                    option("hosted", "Hosted bot (URL)"),
+                  ]
+                : []),
             ),
+            urlInput,
             h(
               "button",
               {
@@ -651,10 +715,11 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     })
     .catch(() => undefined);
   void actions
-    .defaultBots()
-    .then((list) => {
-      if (disposed || list.length === 0) return;
-      levels = list;
+    .botOptions()
+    .then((offered) => {
+      if (disposed) return;
+      if (offered.bots.length > 0) levels = offered.bots;
+      serverBots = offered.serverBots;
       render();
     })
     .catch(() => undefined);

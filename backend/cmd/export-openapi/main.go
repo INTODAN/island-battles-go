@@ -58,8 +58,9 @@ var PlayerOperations = []string{"createLobbyConnectionToken", "getIslandLobbyGen
 var PlayerEventSchemas = []string{"GenerationEvent", "GameEndedEvent", "WatchGenerationEvent", "WatchGameEndedEvent"}
 
 // FileSchemas describe the map file format, the body of POST /map/create,
-// the lobby game_settings that choose a map, and the demo file format.
-var FileSchemas = []string{"MapTemplate", "LobbySettings", "Demo"}
+// the lobby game_settings that choose a map, the member_settings and
+// seat_settings that choose a bot, and the demo file format.
+var FileSchemas = []string{"MapTemplate", "LobbySettings", "MemberSettings", "BotSeatSettings", "Demo"}
 
 // BotSchemas are the stateless bot turn contract, which a client relays
 // between the game and a bot rather than sending over HTTP itself.

@@ -13,14 +13,27 @@ type FrozenGamePlayer struct {
 	// DisplayName is the player's lobby name at the start. The game log names
 	// players by it, because the lobby is deleted later.
 	DisplayName string `gorm:"not null;default:''"`
+	// BotKind says who plays this player, copied at the start from the bot in
+	// the player's lobby member settings, or from the settings of a bot seat
+	// that the host added. The player's own client relays a localhost bot;
+	// the server plays the others.
+	BotKind BotKind `gorm:"column:bot_kind;not null;default:'localhost'"`
 	// BotLevel is the level of the default bot that the backend plays for
-	// this player, one of bots.Defaults, or nil when the player's own client
-	// plays, relaying their localhost bot. The backend plays it as soon as
-	// each generation is created, so it never times out. The start copies it
-	// from the bot in the player's lobby member settings, or from the level
-	// of a bot seat that the host added.
-	BotLevel  *uint
-	CreatedAt time.Time
+	// this player, one of bots.Defaults, for BotKind default only. The
+	// backend plays it as soon as each generation is created, so it never
+	// times out.
+	BotLevel *uint
+	// BotURL is a hosted bot's URL, for BotKind hosted only.
+	BotURL *string `gorm:"column:bot_url"`
+	// BotPackageID, BotPackageKey and BotPackageLanguage name an uploaded
+	// bot's package, for BotKind uploaded only: its ID, its zip's key in the
+	// bot package bucket and its language, as they were at the start. Key
+	// and language are nil when the package was deleted in the moment
+	// between the start's ready check and the copy.
+	BotPackageID       *string `gorm:"column:bot_package_id;type:uuid"`
+	BotPackageKey      *string `gorm:"column:bot_package_key"`
+	BotPackageLanguage *string `gorm:"column:bot_package_language"`
+	CreatedAt          time.Time
 }
 
 type GenerationInput struct {
@@ -109,7 +122,7 @@ type GenerationState struct {
 
 	Memory BotMemory `json:"memory" doc:"The memory sent with your latest completed turn of this game, for your bot's next BotTurn.memory. Null before your first completed turn, and after a completed turn without memory."`
 
-	Bot BotChoiceView `json:"bot" doc:"Your bot in this game, the one you chose in the lobby, copied when the game started. For kind localhost your client relays each turn to your bot and submits its answer. For kind default the backend plays your turns itself as soon as each generation is created, so your client submits nothing."`
+	Bot BotChoiceView `json:"bot" doc:"Your bot in this game, the one you chose in the lobby, copied when the game started. For kind localhost your client delivers each turn to your bot, which submits its answer. For kind default the backend plays your turns itself as soon as each generation is created. For kinds hosted and uploaded the server plays your turns with your bot, without your client. Only for kind localhost does your client relay anything."`
 
 	// TurnDeadlineAt is nil when the lobby set no turn timeout, and once the
 	// game has ended.

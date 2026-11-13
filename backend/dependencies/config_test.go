@@ -102,6 +102,28 @@ func TestLoadConfigReadsThePublicURL(t *testing.T) {
 	}
 }
 
+// Hosted and uploaded bots are off unless ISLAND_BATTLES_SERVER_BOTS is on.
+func TestLoadConfigReadsTheServerBotsFlag(t *testing.T) {
+	t.Parallel()
+
+	for value, want := range map[string]bool{"": false, "off": false, "on": true} {
+		values := validConfigurationEnvironment()
+		if value != "" {
+			values[ServerBotsEnv] = value
+		}
+		if config, err := LoadConfigFromLookup(mapLookup(values)); err != nil || config.ServerBots != want {
+			t.Errorf("%s=%q: ServerBots = %v, error = %v", ServerBotsEnv, value, config.ServerBots, err)
+		}
+	}
+	for _, invalid := range []string{"yes", "true", "1", "ON"} {
+		values := validConfigurationEnvironment()
+		values[ServerBotsEnv] = invalid
+		if _, err := LoadConfigFromLookup(mapLookup(values)); err == nil || !strings.Contains(err.Error(), ServerBotsEnv) {
+			t.Errorf("%s=%q: error = %v", ServerBotsEnv, invalid, err)
+		}
+	}
+}
+
 func TestLoadConfigReadsTheBotPackageBucket(t *testing.T) {
 	t.Parallel()
 

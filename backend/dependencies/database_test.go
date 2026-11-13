@@ -82,6 +82,65 @@ CONSTRAINT fk_island_lobby_bot_choices_membership FOREIGN KEY (lobby_id, player_
 	}
 }
 
+// frozenPlayerBeforeBotKinds is the frozen_game_players table from before
+// bot kinds, when a NULL bot level meant the localhost bot.
+type frozenPlayerBeforeBotKinds struct {
+	GameID      uint   `gorm:"primaryKey;autoIncrement:false"`
+	PlayerID    string `gorm:"type:uuid;primaryKey"`
+	TeamColor   uint   `gorm:"not null"`
+	DisplayName string `gorm:"not null;default:''"`
+	BotLevel    *uint
+	CreatedAt   time.Time
+}
+
+func (frozenPlayerBeforeBotKinds) TableName() string { return "frozen_game_players" }
+
+// Migrating gives the frozen players stored before bot kinds their kind:
+// default where a level is set, localhost otherwise. Later runs keep the
+// kinds that games store.
+func TestMigrateSchemaBackfillsTheFrozenPlayersBotKinds(t *testing.T) {
+	db := testutils.InitEmptyTestDB(t)
+	if err := db.AutoMigrate(&frozenPlayerBeforeBotKinds{}); err != nil {
+		t.Fatal(err)
+	}
+	level := uint(3)
+	const localhostPlayer, defaultPlayer = "00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000002"
+	if err := db.Create(&[]frozenPlayerBeforeBotKinds{{GameID: 1, PlayerID: localhostPlayer, TeamColor: 1}, {GameID: 1, PlayerID: defaultPlayer, TeamColor: 2, BotLevel: &level}}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := dependencies.MigrateSchema(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	// A game started since stores a hosted bot, which another run keeps.
+	url := "https://bot.example.com/turn"
+	if err := db.Create(&models.FrozenGamePlayer{GameID: 2, PlayerID: localhostPlayer, TeamColor: 1, BotKind: models.HostedBot, BotURL: &url}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := dependencies.MigrateSchema(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	players, err := dal.LoadFrozenPlayers(db, 1)
+	if err != nil || len(players) != 2 {
+		t.Fatalf("players = %+v, %v", players, err)
+	}
+	for _, player := range players {
+		want := models.LocalhostBot
+		if player.PlayerID == defaultPlayer {
+			want = models.DefaultBot
+		}
+		if player.BotKind != want {
+			t.Errorf("player %s: kind %q, want %q", player.PlayerID, player.BotKind, want)
+		}
+		if bot := models.FrozenBot(player); bot.Kind != want || (want == models.DefaultBot) != (bot.Level != nil) {
+			t.Errorf("player %s: GenerationState.bot = %+v", player.PlayerID, bot)
+		}
+	}
+	hosted, err := dal.LoadFrozenPlayers(db, 2)
+	if err != nil || len(hosted) != 1 || hosted[0].BotKind != models.HostedBot || models.FrozenBot(hosted[0]).Host != "bot.example.com" {
+		t.Fatalf("hosted = %+v, %v", hosted, err)
+	}
+}
+
 // gameWithReplay is the games table from before replays were derived from
 // generations.
 type gameWithReplay struct {

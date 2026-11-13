@@ -320,7 +320,7 @@ func TestClientTypesMatchTheOpenAPIDocument(t *testing.T) {
 	if err := json.Unmarshal(encoded, &kinds); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(kinds.Kind.Enum, []string{"localhost", "default"}) {
+	if !slices.Equal(kinds.Kind.Enum, botKinds) {
 		t.Errorf("BotChoice.kind is %v in the document", kinds.Kind.Enum)
 	}
 }

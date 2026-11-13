@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"time"
 )
 
@@ -39,11 +40,35 @@ type GameOutcome struct {
 	Summary string `json:"summary"`
 }
 
-// botChoice is who plays a seat: the player's own bot (localhost), or a
-// default bot that the backend plays. It is the contract's BotChoice.
+// botChoice is who plays a seat: the player's own bot (localhost), which a
+// Client plays, or a bot that the server plays: a default bot, the player's
+// hosted bot at a URL, or a bot package uploaded to the lobby. It is the
+// contract's BotChoice.
 type botChoice struct {
 	Kind  string `json:"kind"`
 	Level *uint  `json:"level,omitempty"`
+	Host  string `json:"host,omitempty"`
+}
+
+// botKinds are the contract's BotChoice kinds.
+var botKinds = []string{"localhost", "default", "hosted", "uploaded"}
+
+// playedByServer says which bot the server plays a seat with, and how to
+// play the seat with a Client instead.
+func (bot botChoice) playedByServer() string {
+	const instead = "; to play it with your own bot here, choose your localhost bot in the lobby before getting ready"
+	switch bot.Kind {
+	case "default":
+		level := uint(0)
+		if bot.Level != nil {
+			level = *bot.Level
+		}
+		return fmt.Sprintf("the backend plays this seat with its level %d default bot%s", level, instead)
+	case "hosted":
+		return fmt.Sprintf("the server plays this seat with your hosted bot at %s%s", bot.Host, instead)
+	default:
+		return "the server plays this seat with your uploaded bot" + instead
+	}
 }
 
 // generationState is the player's view of the game's current generation:
@@ -153,7 +178,7 @@ func (state generationState) validate() error {
 		return errors.New("generation_id must be at least 1")
 	case state.TeamColor < 1:
 		return errors.New("team_color must be at least 1")
-	case state.Bot.Kind != "localhost" && state.Bot.Kind != "default":
+	case !slices.Contains(botKinds, state.Bot.Kind):
 		return fmt.Errorf("unknown bot kind %q", state.Bot.Kind)
 	}
 	if _, err := canonicalUUID(state.LobbyID); err != nil {

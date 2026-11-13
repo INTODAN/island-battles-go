@@ -20,23 +20,22 @@ import (
 // pushes it to every roster player. The generation starts on the map that the
 // lobby's settings choose, or on the generated map without a choice. Each
 // roster player keeps the bot in their member settings, as the start's
-// snapshot shows them: the backend plays the default bots, and the players'
-// own clients relay their localhost bots. The backend also plays each bot
-// seat that the host added, with its level. Repeated and concurrent starts
-// reuse the committed state.
+// snapshot shows them, and each bot seat that the host added the bot in its
+// seat settings: the backend plays the default bots, the players' own
+// clients relay their localhost bots, and the server plays hosted and
+// uploaded bots. Repeated and concurrent starts reuse the committed state.
 func RunLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, snapshot domain.Snapshot) (models.BindingResult, error) {
-	botLevels, err := lobbyBotLevels(snapshot)
+	chosen, err := lobbyBots(snapshot)
 	if err != nil {
 		return models.BindingResult{}, err
 	}
-	return runLobbyGame(ctx, database, publisher, snapshot, botLevels)
+	return runLobbyGame(ctx, database, publisher, snapshot, chosen)
 }
 
-// runLobbyGame is RunLobbyGame, with the levels of the default bots that the
-// backend plays for some roster players, by player ID. Their Go bots play the
-// first generation before it is pushed. RunLobbyGame passes the levels of the
-// lobby's bot seats and the levels that the players chose.
-func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, snapshot domain.Snapshot, botLevels map[string]uint) (models.BindingResult, error) {
+// runLobbyGame is RunLobbyGame, with the bots that the server plays for some
+// roster players, by player ID; the others relay their localhost bots. Go
+// bots play the first generation before it is pushed.
+func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, snapshot domain.Snapshot, chosen map[string]frozenBot) (models.BindingResult, error) {
 	database = database.WithContext(ctx)
 	// A team has one player. The check comes before the binding, which creates the game.
 	teamsWithPlayers := map[string]bool{}
@@ -89,8 +88,11 @@ func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 				return fmt.Errorf("frozen player has no team binding")
 			}
 			player := models.FrozenGamePlayer{GameID: binding.GameID, PlayerID: entry.PlayerID, TeamColor: color, DisplayName: startDisplayName(snapshot, index)}
-			if level, found := botLevels[entry.PlayerID]; found {
-				player.BotLevel = &level
+			player.BotKind = models.LocalhostBot
+			if bot, found := chosen[entry.PlayerID]; found {
+				if err := bot.freeze(transaction, snapshot.Lobby.ID, &player); err != nil {
+					return err
+				}
 			}
 			players = append(players, player)
 		}

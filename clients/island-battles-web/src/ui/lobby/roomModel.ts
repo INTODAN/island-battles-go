@@ -1,5 +1,10 @@
 import type { Snapshot } from "../../realtime";
-import type { AddSeatBody, BotChoice, MapTemplateSummary } from "./actions";
+import type {
+  AddSeatBody,
+  BotSeatSettings,
+  MapTemplateSummary,
+  MemberBot,
+} from "./actions";
 import { describeTurnTimeout } from "./form";
 
 export interface MemberRow {
@@ -14,8 +19,8 @@ export interface MemberRow {
   connected: boolean;
   isYou: boolean;
   isHost: boolean;
-  /** A person's bot choice, or a seat's default level. */
-  bot: BotChoice | undefined;
+  /** A person's bot choice, or a seat's bot. */
+  bot: MemberBot | undefined;
 }
 
 /** The bot level a seat was added with, from its settings. */
@@ -26,12 +31,19 @@ export function seatLevel(
   return typeof level === "number" ? level : undefined;
 }
 
-/** A seat's bot as a default choice of its level, or none if its settings name no level. */
+/** A seat's bot, from its settings: a default level, a hosted bot's URL or an uploaded package. */
 function seatChoice(
   settings: Record<string, unknown> | null | undefined,
-): BotChoice | undefined {
+): MemberBot | undefined {
   const level = seatLevel(settings);
-  return level === undefined ? undefined : { kind: "default", level };
+  if (level !== undefined) return { kind: "default", level };
+  if (typeof settings?.bot_url === "string") {
+    return { kind: "hosted", url: settings.bot_url };
+  }
+  if (typeof settings?.bot_package_id === "string") {
+    return { kind: "uploaded", package_id: settings.bot_package_id };
+  }
+  return undefined;
 }
 
 /**
@@ -40,26 +52,60 @@ function seatChoice(
  */
 export function memberSettingsBot(
   settings: Record<string, unknown> | null | undefined,
-): BotChoice | undefined {
+): MemberBot | undefined {
   const bot = settings?.bot;
   if (typeof bot !== "object" || bot === null) return undefined;
-  const { kind, level } = bot as Record<string, unknown>;
+  const { kind, level, url, package_id } = bot as Record<string, unknown>;
   if (kind === "localhost") return { kind };
   if (kind === "default" && typeof level === "number") return { kind, level };
+  if (kind === "hosted" && typeof url === "string") return { kind, url };
+  if (kind === "uploaded" && typeof package_id === "string") {
+    return { kind, package_id };
+  }
   return undefined;
 }
 
-/** The body that adds a bot seat of `level` to a team; the request ID makes a retry safe. */
+/** The body that adds a bot seat with `settings` to a team; the request ID makes a retry safe. */
 export function seatBody(
   teamId: string,
-  level: number,
+  settings: BotSeatSettings,
   requestId: string,
 ): AddSeatBody {
   return {
     request_id: requestId,
     team_id: teamId,
-    seat_settings: { bot_level: level },
+    seat_settings: settings,
   };
+}
+
+/**
+ * The seat settings that an Add bot select's value stands for: `level-N`,
+ * `package-<id>`, or `hosted` with the URL typed next to it. Null when the
+ * value needs a URL that is empty.
+ */
+export function seatSettingsFromValue(
+  value: string,
+  url: string,
+): BotSeatSettings | null {
+  const level = /^level-([1-9][0-9]*)$/.exec(value);
+  if (level) return { bot_level: Number(level[1]) };
+  if (value.startsWith("package-") && value.length > "package-".length) {
+    return { bot_package_id: value.slice("package-".length) };
+  }
+  if (value === "hosted") {
+    const trimmed = url.trim();
+    return trimmed ? { bot_url: trimmed } : null;
+  }
+  return null;
+}
+
+/** The host name of a bot's URL, or the URL itself when it can't be read. */
+export function urlHost(url: string): string {
+  try {
+    return new URL(url).hostname || url;
+  } catch {
+    return url;
+  }
 }
 
 /** The people in a list of members: seats are bots, so they are not counted. */
@@ -96,22 +142,48 @@ export interface RoomModel {
 }
 
 /** A few words naming a member's bot. */
-export function describeBot(bot: BotChoice | undefined): string {
+export function describeBot(bot: MemberBot | undefined): string {
   if (!bot) return "No bot yet";
-  return bot.kind === "localhost"
-    ? "Own bot (localhost)"
-    : `Default bot, level ${bot.level ?? "?"}`;
+  switch (bot.kind) {
+    case "localhost":
+      return "Own bot (localhost)";
+    case "default":
+      return `Default bot, level ${bot.level ?? "?"}`;
+    case "hosted":
+      return `Hosted bot (${urlHost(bot.url ?? "")})`;
+    case "uploaded":
+      return "Uploaded bot";
+  }
 }
 
-/** The select value for a choice, "" for none. */
-export function choiceValue(bot: BotChoice | undefined): string {
+/** The radio value for a choice, "" for none. A hosted bot's URL is not in it. */
+export function choiceValue(bot: MemberBot | undefined): string {
   if (!bot) return "";
-  return bot.kind === "localhost" ? "localhost" : `level-${bot.level}`;
+  switch (bot.kind) {
+    case "localhost":
+      return "localhost";
+    case "default":
+      return `level-${bot.level}`;
+    case "hosted":
+      return "hosted";
+    case "uploaded":
+      return `package-${bot.package_id}`;
+  }
 }
 
-/** The choice a select value stands for, or null for none. */
-export function choiceFromValue(value: string): BotChoice | null {
+/**
+ * The choice a radio value stands for, or null for none. `hosted` takes the
+ * URL typed next to it, and is null while that is empty.
+ */
+export function choiceFromValue(value: string, url = ""): MemberBot | null {
   if (value === "localhost") return { kind: "localhost" };
+  if (value === "hosted") {
+    const trimmed = url.trim();
+    return trimmed ? { kind: "hosted", url: trimmed } : null;
+  }
+  if (value.startsWith("package-") && value.length > "package-".length) {
+    return { kind: "uploaded", package_id: value.slice("package-".length) };
+  }
   const level = /^level-([1-9][0-9]*)$/.exec(value);
   return level ? { kind: "default", level: Number(level[1]) } : null;
 }

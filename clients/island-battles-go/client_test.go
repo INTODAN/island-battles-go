@@ -481,17 +481,26 @@ func TestClientAppliesTheTurnDeadlineWhileWaiting(t *testing.T) {
 	server.mutex.Unlock()
 }
 
-func TestClientDoesNotPlayTheBackendsSeat(t *testing.T) {
-	server, realtime := newFakeServer(t), &fakeRealtime{}
-	state := server.stateOf(1, false, nil)
-	state["bot"] = map[string]any{"kind": "default", "level": 2}
-	server.setState(state)
-	client := testClient(t, server, realtime, func(context.Context, Turn) (Result, error) { return Result{}, nil })
-	if _, err := client.Start(context.Background()); !errors.Is(err, ErrRejected) || !strings.Contains(err.Error(), "level 2 default bot") {
-		t.Fatalf("got %v", err)
-	}
-	if _, err := client.Start(context.Background()); !errors.Is(err, ErrClientClosed) {
-		t.Fatalf("got %v", err)
+func TestClientDoesNotPlayTheServersSeats(t *testing.T) {
+	for _, seat := range []struct {
+		bot  map[string]any
+		says string
+	}{
+		{map[string]any{"kind": "default", "level": 2}, "level 2 default bot"},
+		{map[string]any{"kind": "hosted", "host": "bot.example.com"}, "your hosted bot at bot.example.com"},
+		{map[string]any{"kind": "uploaded"}, "your uploaded bot"},
+	} {
+		server, realtime := newFakeServer(t), &fakeRealtime{}
+		state := server.stateOf(1, false, nil)
+		state["bot"] = seat.bot
+		server.setState(state)
+		client := testClient(t, server, realtime, func(context.Context, Turn) (Result, error) { return Result{}, nil })
+		if _, err := client.Start(context.Background()); !errors.Is(err, ErrRejected) || !strings.Contains(err.Error(), seat.says) {
+			t.Fatalf("%v: got %v", seat.bot, err)
+		}
+		if _, err := client.Start(context.Background()); !errors.Is(err, ErrClientClosed) {
+			t.Fatalf("got %v", err)
+		}
 	}
 }
 

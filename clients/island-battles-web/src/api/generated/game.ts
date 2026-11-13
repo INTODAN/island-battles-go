@@ -9,8 +9,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List the default bots that the backend plays.
-         * @description Lists the default bots in level order, each with its level, a name and a description of how it plays. Higher levels play better. The backend plays a default bot itself, with no client: it plays each turn as soon as the generation is created, so it never misses a turn's deadline. A game in which only default bots are left plays on by itself, and each game request continues it for a few seconds. The list is static and needs no authentication.
+         * List the default bots that the backend plays, and whether it offers hosted and uploaded bots.
+         * @description Lists the default bots in level order, each with its level, a name and a description of how it plays. Higher levels play better. The backend plays a default bot itself, with no client: it plays each turn as soon as the generation is created, so it never misses a turn's deadline. A game in which only default bots are left plays on by itself, and each game request continues it for a few seconds. The list is static and needs no authentication. server_bots says whether the server also offers hosted and uploaded bots, which it plays without a player's tab, in member settings and bot seats.
          */
         get: operations["listDefaultBots"];
         put?: never;
@@ -330,14 +330,16 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         BotChoice: {
+            /** @description For kind hosted, the host name of the bot's URL, such as bot.example.com; the rest of the URL is not shown. Absent for the other kinds. */
+            host?: string;
             /**
-             * @description localhost: the player's own bot, which island-battles-bot serve runs on their machine; their game client relays each turn to it and submits its answer. default: a default bot of GET /bots/defaults, which the backend plays itself, so the player's client submits nothing.
+             * @description localhost: the player's own bot, which island-battles-bot serve runs on their machine; their game client relays each turn to it. default: a default bot of GET /bots/defaults, which the backend plays itself, so the player's client submits nothing. hosted: the player's own bot server at a public URL, which the server sends each turn to; no client relays it. uploaded: a bot package uploaded to the lobby, which the server runs; no client relays it.
              * @enum {string}
              */
-            kind: "localhost" | "default";
+            kind: "localhost" | "default" | "hosted" | "uploaded";
             /**
              * Format: int64
-             * @description For kind default, the level of the default bot, one that GET /bots/defaults lists. Absent for kind localhost.
+             * @description For kind default, the level of the default bot, one that GET /bots/defaults lists. Absent for the other kinds.
              */
             level?: number;
         };
@@ -396,6 +398,21 @@ export interface components {
             readonly $schema?: string;
             /** @description Every checked package of the lobby, newest first, at most one per member. */
             packages: components["schemas"]["BotPackage"][];
+        };
+        /** @description Island Battles seat_settings for a bot seat that the host adds with POST …/seats: exactly one of bot_level, bot_url and bot_package_id. */
+        BotSeatSettings: {
+            /**
+             * Format: int64
+             * @description A default bot of this level, one that GET /bots/defaults lists, which the backend plays. The seat is named "Bot (level N)".
+             */
+            bot_level?: number;
+            /**
+             * Format: uuid
+             * @description Any member's bot package in this lobby, which the server runs. The seat is named after its owner, such as "Alex's bot". Only when GET /bots/defaults says server_bots.
+             */
+            bot_package_id?: string;
+            /** @description A hosted bot at this URL, under the rules of a member's hosted bot; the server sends it each turn. The seat is named "Hosted bot". Only when GET /bots/defaults says server_bots. */
+            bot_url?: string;
         };
         /** @description What a bot is given to play one turn. A bot is a stateless function: whatever it needs to keep between turns goes in the memory it returns, which the server stores per player and game. */
         BotTurn: {
@@ -715,7 +732,7 @@ export interface components {
              * @example https://example.com/GenerationState.json
              */
             readonly $schema?: string;
-            /** @description Your bot in this game, the one you chose in the lobby, copied when the game started. For kind localhost your client relays each turn to your bot and submits its answer. For kind default the backend plays your turns itself as soon as each generation is created, so your client submits nothing. */
+            /** @description Your bot in this game, the one you chose in the lobby, copied when the game started. For kind localhost your client delivers each turn to your bot, which submits its answer. For kind default the backend plays your turns itself as soon as each generation is created. For kinds hosted and uploaded the server plays your turns with your bot, without your client. Only for kind localhost does your client relay anything. */
             bot: components["schemas"]["BotChoice"];
             /** @description Your personal Centrifugo channel, which receives GenerationEvent after each turn and GameEndedEvent after the last one. */
             channel: string;
@@ -762,6 +779,8 @@ export interface components {
              */
             readonly $schema?: string;
             bots: components["schemas"]["DefaultBot"][];
+            /** @description Whether this server offers the bots that it plays without a player's tab: kind hosted, a player's own bot server at a URL, and kind uploaded, a bot package uploaded to the lobby, as a player's own bot in their member settings and for a bot seat. When false, only the localhost bot and the default bots can be chosen. */
+            server_bots: boolean;
         };
         ListMapTemplatesResponseBody: {
             /**
@@ -844,6 +863,30 @@ export interface components {
              * @description Teams the map is made for, its player_amount. A lobby on this map has exactly this many teams, in team colour order.
              */
             team_count: number;
+        };
+        /** @description The bot you choose for yourself. Send only the field of its kind: level for default, url for hosted, package_id for uploaded, and none for localhost. A hosted bot's URL is https://, at most 2048 characters, without credentials, on port 443 or none, and names a host, not an IP address, whose addresses are all public: not loopback, private, link-local or unique-local. The server resolves it when you choose it, and again before it sends each turn. An uploaded bot is one of your ready packages in the lobby; if you replace or delete it, choose it again before getting ready. */
+        MemberBot: {
+            /**
+             * @description localhost: your own bot, which island-battles-bot serve runs on your machine and your game client relays each turn to. default: a default bot of GET /bots/defaults, which the backend plays. hosted: your own bot server at url, which the server sends each turn to. uploaded: your own bot package in this lobby, package_id, which the server runs. hosted and uploaded are offered only when GET /bots/defaults says server_bots.
+             * @enum {string}
+             */
+            kind: "localhost" | "default" | "hosted" | "uploaded";
+            /**
+             * Format: int64
+             * @description For kind default only: a level that GET /bots/defaults lists.
+             */
+            level?: number;
+            /**
+             * Format: uuid
+             * @description For kind uploaded only: a package of yours in this lobby, from GET /game/lobbies/{lobby_id}/bot-packages.
+             */
+            package_id?: string;
+            /** @description For kind hosted only: where the server POSTs each TurnDelivery. https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public. */
+            url?: string;
+        };
+        /** @description Island Battles member_settings for setLobbyMemberSettings: the bot that plays for you. */
+        MemberSettings: {
+            bot: components["schemas"]["MemberBot"];
         };
         PlayerGenerationLogs: {
             display_name: string;

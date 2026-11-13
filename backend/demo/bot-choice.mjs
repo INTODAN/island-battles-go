@@ -3,13 +3,16 @@
 // settings, {"bot": ...}, which the page saves with the lobby's
 // PUT …/member-settings: their localhost bot, which island-battles-bot serve
 // runs on their machine and their game client relays turns to, or a default
-// bot level that the backend plays itself. The room lists every member's
-// choice from the snapshot's member_settings, and each bot seat's level from
-// its seat_settings. The host can also seat a default bot on a team, through
-// the lobby page's seat controls, which seatOptions fills. Below the choice,
-// bot-packages.mjs lists the lobby's bot packages and uploads the player's.
+// bot level that the backend plays itself. When the server offers them
+// (server_bots in GET /bots/defaults), also their hosted bot at a URL or one
+// of their uploaded packages, which the server plays without the page. The
+// room lists every member's choice from the snapshot's member_settings, and
+// each bot seat's bot from its seat_settings. The host can also seat a bot
+// on a team, through the lobby page's seat controls, which seatOptions
+// fills. Below the choice, bot-packages.mjs lists the lobby's bot packages
+// and uploads the player's.
 
-import { PackagesPanel } from "./bot-packages.mjs";
+import { describePackage, PackagesPanel, packagesPath } from "./bot-packages.mjs";
 import { checkBotHealth, serveCommand } from "./localhost-bot.mjs";
 
 // How often the room asks the localhost bot's server whether it is running
@@ -20,31 +23,58 @@ export const healthPollMilliseconds = 2000;
 // read.
 const fallbackLevels = [1, 2, 3];
 
-// The select's value for a choice, "" for none.
+// The select's value for a choice, "" for none. A hosted bot's URL is not in
+// it.
 export function choiceValue(bot) {
   if (!bot) return "";
-  return bot.kind === "localhost" ? "localhost" : `level-${bot.level}`;
+  switch (bot.kind) {
+    case "localhost": return "localhost";
+    case "hosted": return "hosted";
+    case "uploaded": return `package-${bot.package_id}`;
+    default: return `level-${bot.level}`;
+  }
 }
 
-// The choice a select value stands for, or null for none.
-export function choiceFromValue(value) {
+// The choice a select value stands for, or null for none. "hosted" takes the
+// URL typed next to it, and is null while that is empty.
+export function choiceFromValue(value, url = "") {
   if (value === "localhost") return { kind: "localhost" };
+  if (value === "hosted") return url.trim() ? { kind: "hosted", url: url.trim() } : null;
+  if (value.startsWith("package-") && value.length > "package-".length) return { kind: "uploaded", package_id: value.slice("package-".length) };
   const level = /^level-([1-9][0-9]*)$/.exec(value);
   return level ? { kind: "default", level: Number(level[1]) } : null;
+}
+
+// The host name of a hosted bot's URL, or the URL when it can't be read.
+export function urlHost(url) {
+  try {
+    return new URL(url).hostname || url;
+  } catch {
+    return url;
+  }
 }
 
 // A few words naming a member's bot.
 export function describeBot(bot) {
   if (!bot) return "no bot yet";
-  return bot.kind === "localhost" ? "own bot (localhost)" : `level ${bot.level} bot`;
+  switch (bot.kind) {
+    case "localhost": return "own bot (localhost)";
+    case "hosted": return `hosted bot (${urlHost(bot.url ?? "")})`;
+    case "uploaded": return "uploaded bot";
+    default: return `level ${bot.level} bot`;
+  }
 }
 
 // A snapshot member's bot: a person's from their member settings, a bot
-// seat's default bot of its level, or null for a person who hasn't chosen.
+// seat's from its seat settings (a default bot of its level, a hosted bot's
+// URL or an uploaded package), or null for a person who hasn't chosen.
 export function memberBot(member) {
   if (member.kind === "seat") {
-    const level = member.seat_settings?.bot_level;
-    return Number.isInteger(level) ? { kind: "default", level } : null;
+    const settings = member.seat_settings ?? {};
+    if (Number.isInteger(settings.bot_level)) return { kind: "default", level: settings.bot_level };
+    if (typeof settings.bot_url === "string") return { kind: "hosted", url: settings.bot_url };
+    if (typeof settings.bot_package_id === "string") return { kind: "uploaded", package_id: settings.bot_package_id };
+    return null;
   }
   const bot = member.member_settings?.bot;
   return bot && typeof bot.kind === "string" ? bot : null;
@@ -58,27 +88,42 @@ export function describeChoices(members, playerID) {
 
 let defaultBots = null;
 
-// The default bots' levels, loaded once per page.
-function loadLevels() {
+// The default bots' levels, and whether the server offers hosted and
+// uploaded bots, loaded once per page.
+function loadOptions() {
   defaultBots ||= (async () => {
     const response = await fetch("/bots/defaults", { headers: { Accept: "application/json" } });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return (await response.json()).bots.map((bot) => bot.level);
+    const body = await response.json();
+    return { levels: body.bots.map((bot) => bot.level), serverBots: body.server_bots === true };
   })().catch(() => {
     defaultBots = null;
-    return fallbackLevels;
+    return { levels: fallbackLevels, serverBots: false };
   });
   return defaultBots;
 }
 
-// The bot seats that the host can add to a team: a default bot of each level,
-// whose seat_settings {bot_level} the lobby page sends with POST …/seats.
-// The backend plays the seat with that bot.
-export async function seatOptions({ levels = loadLevels } = {}) {
-  return {
-    label: "Add bot",
-    choices: (await levels()).map((level) => ({ label: `Default bot, level ${level}`, settings: { bot_level: level } })),
-  };
+// The lobby's packages, newest first, through the room's request.
+async function loadPackages(lobbyID, request) {
+  if (!lobbyID || !request) return [];
+  const answer = await request("GET", packagesPath(lobbyID));
+  return answer.status === 200 ? answer.body.packages : [];
+}
+
+// The bot seats that the host can add to a team, whose seat_settings the
+// lobby page sends with POST …/seats: a default bot of each level, which the
+// backend plays, and, when the server offers them, any package of the lobby
+// and a hosted bot at the URL that the host types, which the server plays.
+export async function seatOptions({ lobbyID, request, options = loadOptions, packages = loadPackages } = {}) {
+  const { levels, serverBots } = await options();
+  const choices = levels.map((level) => ({ label: `Default bot, level ${level}`, settings: { bot_level: level } }));
+  if (serverBots) {
+    for (const item of await packages(lobbyID, request).catch(() => [])) {
+      choices.push({ label: `Uploaded: ${item.owner_name}'s bot (${item.language})`, settings: { bot_package_id: item.package_id } });
+    }
+    choices.push({ label: "Hosted bot (URL)", settings: {}, input: { name: "bot_url", label: "Bot URL", placeholder: "https://bot.example.com/turn" } });
+  }
+  return { label: "Add bot", choices };
 }
 
 // What the localhost bot's indicator says.
@@ -92,9 +137,13 @@ export const safariNote = "Safari does not let an https page reach a bot on loca
 // The player's bot select and every member's choice, shown while the lobby
 // waits. saveMemberSettings(settings) saves the player's member settings
 // through the page and resolves to the snapshot. With the localhost bot
-// chosen, it also shows whether that bot is running.
+// chosen, it also shows whether that bot is running. When the server offers
+// them, the select also has "My hosted bot (URL)", with a field for the URL,
+// and "Uploaded: …" for each of the player's packages; the page's
+// refreshSeatOptions is called when the lobby's packages change, so the
+// host's Add bot offers them.
 export class RoomPanel {
-  constructor({ container, lobbyID, playerID, saveMemberSettings, request, checkHealth = checkBotHealth, copy = (text) => navigator.clipboard.writeText(text), postToStorage }) {
+  constructor({ container, lobbyID, playerID, saveMemberSettings, request, refreshSeatOptions = () => {}, checkHealth = checkBotHealth, copy = (text) => navigator.clipboard.writeText(text), postToStorage, options = loadOptions }) {
     this.container = container;
     this.checkHealth = checkHealth;
     this.copy = copy;
@@ -102,24 +151,99 @@ export class RoomPanel {
     this.lobbyID = lobbyID;
     this.playerID = playerID;
     this.saveMemberSettings = saveMemberSettings;
+    this.refreshSeatOptions = refreshSeatOptions;
     this.chosen = null;
     this.saving = false;
+    this.serverBots = false;
+    // The lobby's packages as last listed, and the player's own among them.
+    this.lobbyPackages = [];
+    this.ownPackages = [];
+    // The select shows "hosted" while the player types a URL to save.
+    this.typingURL = false;
     this.select = document.createElement("select");
     this.select.append(new Option("Choose your bot", ""), new Option("My localhost bot", "localhost"));
+    this.levelOptions = [];
     const label = document.createElement("label");
     label.append("Your bot", this.select);
     this.summary = document.createElement("p");
     this.summary.className = "hint";
     this.summary.setAttribute("role", "status");
     this.local = this.buildLocalHelp();
-    container.append(label, this.local, this.summary);
+    this.hosted = this.buildHostedHelp();
+    container.append(label, this.local, this.hosted, this.summary);
     // The lobby's bot packages, which the page's room requests reach.
-    this.packages = request ? new PackagesPanel({ container, lobbyID, playerID, request, copy, ...(postToStorage ? { post: postToStorage } : {}) }) : null;
-    this.select.addEventListener("change", () => void this.save(this.select.value));
-    void loadLevels().then((levels) => {
-      this.select.append(...levels.map((level) => new Option(`Default bot, level ${level}`, `level-${level}`)));
-      this.restore();
+    this.packages = request ? new PackagesPanel({ container, lobbyID, playerID, request, copy, onList: (items) => this.listed(items), ...(postToStorage ? { post: postToStorage } : {}) }) : null;
+    this.select.addEventListener("change", () => {
+      if (this.select.value === "hosted") {
+        this.typingURL = true;
+        this.restore();
+        this.url.focus();
+        return;
+      }
+      this.typingURL = false;
+      void this.save(this.select.value);
     });
+    void options().then(({ levels, serverBots }) => {
+      this.levelOptions = levels.map((level) => new Option(`Default bot, level ${level}`, `level-${level}`));
+      this.serverBots = serverBots;
+      this.packages?.setChoosable(serverBots);
+      this.fillSelect();
+    });
+  }
+
+  // The select's options: the localhost bot, the default levels, and, when
+  // the server offers them, the hosted bot and the player's packages.
+  fillSelect() {
+    const options = [new Option("Choose your bot", ""), new Option("My localhost bot", "localhost"), ...this.levelOptions];
+    if (this.serverBots) {
+      options.push(new Option("My hosted bot (URL)", "hosted"));
+      options.push(...this.ownPackages.map((item) => new Option(`Uploaded: ${describePackage(item)}`, `package-${item.package_id}`)));
+      // A chosen package that was replaced or deleted stays shown until the
+      // player chooses again.
+      if (this.chosen?.kind === "uploaded" && !this.ownPackages.some((item) => item.package_id === this.chosen.package_id)) {
+        options.push(new Option("Uploaded: replaced or deleted, choose again", choiceValue(this.chosen)));
+      }
+    }
+    this.select.replaceChildren(...options);
+    this.restore();
+  }
+
+  // The packages panel listed the lobby's packages.
+  listed(items) {
+    const key = (list) => list.map((item) => item.package_id).join();
+    if (key(items) === key(this.lobbyPackages)) return;
+    this.lobbyPackages = items;
+    this.ownPackages = items.filter((item) => item.owner_player_id === this.playerID);
+    if (this.serverBots) {
+      this.fillSelect();
+      this.refreshSeatOptions();
+    }
+  }
+
+  buildHostedHelp() {
+    const box = document.createElement("div");
+    box.className = "local-bot hosted-bot";
+    box.hidden = true;
+    const hint = document.createElement("p");
+    hint.className = "hint";
+    hint.textContent = "Your own bot server at a public https:// URL, which speaks the turn delivery protocol. The server sends it each turn; this page relays nothing.";
+    this.url = document.createElement("input");
+    this.url.type = "url";
+    this.url.maxLength = 2048;
+    this.url.placeholder = "https://bot.example.com/turn";
+    this.url.setAttribute("aria-label", "Your hosted bot's URL");
+    this.url.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") void this.save("hosted");
+    });
+    this.useURL = document.createElement("button");
+    this.useURL.type = "button";
+    this.useURL.className = "secondary";
+    this.useURL.textContent = "Use this URL";
+    this.useURL.addEventListener("click", () => void this.save("hosted"));
+    const row = document.createElement("p");
+    row.append(this.url, " ", this.useURL);
+    box.append(hint, row);
+    return box;
   }
 
   buildLocalHelp() {
@@ -166,12 +290,15 @@ export class RoomPanel {
   }
 
   // The localhost bot's help and indicator show for the saved choice, and the
-  // bot is asked about while the room is shown.
+  // bot is asked about while the room is shown. The hosted bot's URL field
+  // shows for a saved hosted bot, and while the player types one.
   showLocal() {
-    const local = this.chosen?.kind === "localhost";
+    const local = this.chosen?.kind === "localhost" && !this.typingURL;
     this.local.hidden = !local;
     if (!local) this.stopPolling();
     else if (!this.polling) this.poll();
+    this.hosted.hidden = !(this.typingURL || this.chosen?.kind === "hosted");
+    if (this.chosen?.kind === "hosted" && !this.typingURL && document.activeElement !== this.url) this.url.value = this.chosen.url ?? "";
   }
 
   stopPolling() {
@@ -206,38 +333,48 @@ export class RoomPanel {
   }
 
   async save(value) {
-    const choice = choiceFromValue(value);
+    const choice = choiceFromValue(value, this.url.value);
     // The select shows only what is saved: the placeholder, a choice that
     // is already saved, and a change while a save is in flight (the select
     // is disabled then, but not every browser agrees) go back to it.
-    if (!choice || this.saving || value === choiceValue(this.chosen)) {
+    const same = value === choiceValue(this.chosen) && (choice?.kind !== "hosted" || choice.url === this.chosen.url);
+    if (!choice || this.saving || same) {
+      if (value === "hosted" && !choice) this.summary.textContent = "Type your bot's URL first, such as https://bot.example.com/turn.";
       this.restore();
       return;
     }
     this.saving = true;
     this.select.disabled = true;
+    this.useURL.disabled = true;
     try {
       this.show(await this.saveMemberSettings({ bot: choice }));
+      this.typingURL = false;
     } catch (error) {
       this.summary.textContent = error.message || "Could not save your bot. Try again.";
     } finally {
       this.saving = false;
       this.select.disabled = false;
+      this.useURL.disabled = false;
       this.restore();
     }
   }
 
-  // Shows the saved choice, or the placeholder when there is none.
+  // Shows the saved choice, or the placeholder when there is none; "hosted"
+  // while the player types a URL.
   restore() {
-    this.select.value = choiceValue(this.chosen);
+    this.select.value = this.typingURL ? "hosted" : choiceValue(this.chosen);
     this.showLocal();
   }
 
   // Shows the player's saved choice and every member's, from a snapshot.
   show(snapshot) {
     const you = snapshot.members.find((member) => member.player_id === this.playerID);
+    const before = choiceValue(this.chosen);
     this.chosen = you ? memberBot(you) : null;
-    this.restore();
+    // A changed choice may need an option of its own, such as a package
+    // that was replaced since.
+    if (this.serverBots && choiceValue(this.chosen) !== before) this.fillSelect();
+    else this.restore();
     this.summary.textContent = describeChoices(snapshot.members, this.playerID);
   }
 }

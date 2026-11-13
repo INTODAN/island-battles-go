@@ -75,8 +75,11 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	}
 	clock := domain.SystemClock{}
 	identifiers := domain.CryptoIdentifiers{}
+	// The start's ready check reads the lobby's bot seats through the lobby
+	// service, which needs the policy first.
+	lobbies := &lobbyadapter.Lobbies{}
 	policy := domain.DefaultPolicy(
-		lobbyadapter.Registration(database),
+		lobbyadapter.Registration(database, services.ServerBots{Enabled: config.ServerBots}, lobbies),
 		// quiz-demo only shows that a second game can share the lobby. With no
 		// game behind it to read settings, it accepts any object. It has no
 		// seats, so it refuses every seat the host tries to add.
@@ -107,6 +110,7 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	if err != nil {
 		return nil, err
 	}
+	lobbies.API = lobbyService
 	gameBinding, err := lobbyadapter.NewService(database, lobbyService, publisher)
 	if err != nil {
 		return nil, err
@@ -183,7 +187,7 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	api := humachi.New(router, routes.NewAPIConfig("Island Battles Go Backend", "1.0.0"))
 	// Before any operation is registered, so every operation gets it.
 	api.UseMiddleware(observability.NameOperations)
-	environment := handlers.Env{DB: database}
+	environment := handlers.Env{DB: database, ServerBots: config.ServerBots}
 	routes.SetupRoutes(api, &environment, config.AdminAPIKey)
 	if config.AdminAPIKey == "" {
 		logger.Warn("POST /map/create refuses every request because " + dependencies.AdminAPIKeyEnv + " is not set")

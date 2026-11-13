@@ -12,6 +12,10 @@ import {
 } from "./form";
 
 export type BotChoice = GameComponents["schemas"]["BotChoice"];
+/** The bot in a person's member settings, `{"bot": ...}`. */
+export type MemberBot = GameComponents["schemas"]["MemberBot"];
+/** A bot seat's `seat_settings`: one of `bot_level`, `bot_url` and `bot_package_id`. */
+export type BotSeatSettings = GameComponents["schemas"]["BotSeatSettings"];
 export type DefaultBot = GameComponents["schemas"]["DefaultBot"];
 export type BotPackage = GameComponents["schemas"]["BotPackage"];
 export type BotPackageUpload = GameComponents["schemas"]["BotPackageUpload"];
@@ -258,7 +262,7 @@ export function createLobbyActions(options: {
      * lobby waits. A new bot clears your ready; every member sees it in the
      * snapshot.
      */
-    async chooseBot(choice: BotChoice) {
+    async chooseBot(choice: MemberBot) {
       const { path } = room();
       const { data } = await lobbyApi.PUT(
         "/lobby/v1/games/{game_key}/lobbies/{lobby_id}/member-settings",
@@ -323,9 +327,14 @@ export function createLobbyActions(options: {
       return required(data);
     },
 
-    async defaultBots(): Promise<DefaultBot[]> {
+    /**
+     * The default bots, and whether the server offers hosted and uploaded
+     * bots (`ISLAND_BATTLES_SERVER_BOTS`).
+     */
+    async botOptions(): Promise<{ bots: DefaultBot[]; serverBots: boolean }> {
       const { data } = await gameApi.GET("/bots/defaults");
-      return required(data).bots;
+      const body = required(data);
+      return { bots: body.bots, serverBots: body.server_bots };
     },
 
     async mapTemplates(): Promise<MapTemplateSummary[]> {

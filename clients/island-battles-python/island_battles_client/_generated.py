@@ -29,13 +29,17 @@ class BotChoice(GameModel):
     model_config = ConfigDict(
         extra="ignore",
     )
-    kind: Literal["localhost", "default"]
+    host: StrictStr | None = None
     """
-    localhost: the player's own bot, which island-battles-bot serve runs on their machine; their game client relays each turn to it and submits its answer. default: a default bot of GET /bots/defaults, which the backend plays itself, so the player's client submits nothing.
+    For kind hosted, the host name of the bot's URL, such as bot.example.com; the rest of the URL is not shown. Absent for the other kinds.
+    """
+    kind: Literal["localhost", "default", "hosted", "uploaded"]
+    """
+    localhost: the player's own bot, which island-battles-bot serve runs on their machine; their game client relays each turn to it. default: a default bot of GET /bots/defaults, which the backend plays itself, so the player's client submits nothing. hosted: the player's own bot server at a public URL, which the server sends each turn to; no client relays it. uploaded: a bot package uploaded to the lobby, which the server runs; no client relays it.
     """
     level: Annotated[StrictInt | None, Field(ge=1)] = None
     """
-    For kind default, the level of the default bot, one that GET /bots/defaults lists. Absent for kind localhost.
+    For kind default, the level of the default bot, one that GET /bots/defaults lists. Absent for the other kinds.
     """
 
 
@@ -113,6 +117,24 @@ class BotPackages(GameModel):
     packages: Sequence[BotPackage]
     """
     Every checked package of the lobby, newest first, at most one per member.
+    """
+
+
+class BotSeatSettings(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    bot_level: Annotated[StrictInt | None, Field(ge=1)] = None
+    """
+    A default bot of this level, one that GET /bots/defaults lists, which the backend plays. The seat is named "Bot (level N)".
+    """
+    bot_package_id: UUID | None = None
+    """
+    Any member's bot package in this lobby, which the server runs. The seat is named after its owner, such as "Alex's bot". Only when GET /bots/defaults says server_bots.
+    """
+    bot_url: Annotated[StrictStr | None, Field(max_length=2048)] = None
+    """
+    A hosted bot at this URL, under the rules of a member's hosted bot; the server sends it each turn. The seat is named "Hosted bot". Only when GET /bots/defaults says server_bots.
     """
 
 
@@ -519,7 +541,7 @@ class GenerationState(GameModel):
     """
     bot: BotChoice
     """
-    Your bot in this game, the one you chose in the lobby, copied when the game started. For kind localhost your client relays each turn to your bot and submits its answer. For kind default the backend plays your turns itself as soon as each generation is created, so your client submits nothing.
+    Your bot in this game, the one you chose in the lobby, copied when the game started. For kind localhost your client delivers each turn to your bot, which submits its answer. For kind default the backend plays your turns itself as soon as each generation is created. For kinds hosted and uploaded the server plays your turns with your bot, without your client. Only for kind localhost does your client relay anything.
     """
     channel: StrictStr
     """
@@ -576,6 +598,10 @@ class ListDefaultBotsResponseBody(GameModel):
     A URL to the JSON Schema for this object.
     """
     bots: Sequence[DefaultBot]
+    server_bots: StrictBool
+    """
+    Whether this server offers the bots that it plays without a player's tab: kind hosted, a player's own bot server at a URL, and kind uploaded, a bot package uploaded to the lobby, as a player's own bot in their member settings and for a bot seat. When false, only the localhost bot and the default bots can be chosen.
+    """
 
 
 class ListMapTemplatesResponseBody(GameModel):
@@ -679,6 +705,35 @@ class MapTemplateSummary(GameModel):
     """
     Teams the map is made for, its player_amount. A lobby on this map has exactly this many teams, in team colour order.
     """
+
+
+class MemberBot(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    kind: Literal["localhost", "default", "hosted", "uploaded"]
+    """
+    localhost: your own bot, which island-battles-bot serve runs on your machine and your game client relays each turn to. default: a default bot of GET /bots/defaults, which the backend plays. hosted: your own bot server at url, which the server sends each turn to. uploaded: your own bot package in this lobby, package_id, which the server runs. hosted and uploaded are offered only when GET /bots/defaults says server_bots.
+    """
+    level: Annotated[StrictInt | None, Field(ge=1)] = None
+    """
+    For kind default only: a level that GET /bots/defaults lists.
+    """
+    package_id: UUID | None = None
+    """
+    For kind uploaded only: a package of yours in this lobby, from GET /game/lobbies/{lobby_id}/bot-packages.
+    """
+    url: Annotated[StrictStr | None, Field(max_length=2048)] = None
+    """
+    For kind hosted only: where the server POSTs each TurnDelivery. https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public.
+    """
+
+
+class MemberSettings(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    bot: MemberBot
 
 
 class PlayerGenerationLogs(GameModel):
