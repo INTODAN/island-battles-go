@@ -38,7 +38,9 @@ var lobbyGame []byte
 // the example player, the map choice settings module, and the bot choice room
 // module, which calls the lobby's bot package routes under its room API
 // prefix. Its links open the demo viewer, /game/demo-viewer/, and the 3D web
-// client that the deployment serves at /play/.
+// client that the deployment serves at /play/. Its seat names and its example
+// player's heading give the generic lobby page Island Battles' words for its
+// bots.
 //
 // frontendOrigin is where browsers reach the game, such as
 // https://island-battles.example.org, for a lobby page on another origin:

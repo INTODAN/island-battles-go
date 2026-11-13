@@ -162,6 +162,28 @@ export function describeHealth(running) {
   return running ? "Connected: your bot is running on 127.0.0.1:41414." : "Not running: start your bot with the command below.";
 }
 
+// The styles of the panel's boxes for the localhost bot, the hosted bot and
+// the packages, and of the localhost bot's indicator. The generic lobby
+// page's stylesheet knows nothing of bots, so the panel adds them to the page
+// once.
+export const panelStylesID = "island-battles-bot-choice-styles";
+export const panelStyles = `
+.local-bot { margin: 10px 0; }
+.local-bot code { display: inline-block; margin: 0 6px 0 2px; padding: 3px 8px; background: #eef1f7; border-radius: 6px; font-size: .82rem; overflow-wrap: anywhere; }
+.bot-health { margin: 0 0 6px; font-weight: 600; }
+.bot-health::before { content: "●"; margin-right: 6px; color: #9aa3b5; }
+.bot-health[data-state="connected"]::before { color: #1f9d55; }
+.bot-health[data-state="stopped"]::before { color: #d64545; }
+`;
+
+export function addPanelStyles(page = globalThis.document) {
+  if (!page?.head || page.getElementById(panelStylesID)) return;
+  const style = page.createElement("style");
+  style.id = panelStylesID;
+  style.textContent = panelStyles;
+  page.head.append(style);
+}
+
 // The note for browsers that block a page from reaching localhost.
 export const safariNote = "Safari does not let an https page reach a bot on localhost. Use Chrome, Edge or Firefox to play with your own bot, or open this page over http on localhost.";
 
@@ -176,6 +198,7 @@ export const safariNote = "Safari does not let an https page reach a bot on loca
 // uploaded choices are greyed out, with the sentence that says why.
 export class RoomPanel {
   constructor({ container, lobbyID, playerID, saveMemberSettings, request, refreshSeatOptions = () => {}, gameURL = globalThis.location?.origin ?? "", checkHealth = checkBotHealth, copy = (text) => navigator.clipboard.writeText(text), postToStorage, options = loadOptions, compute = loadCompute }) {
+    addPanelStyles();
     this.container = container;
     this.checkHealth = checkHealth;
     this.copy = copy;

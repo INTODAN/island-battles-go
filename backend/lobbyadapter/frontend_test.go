@@ -80,6 +80,19 @@ func TestFrontendGameWatchersReadOnlyTheWatchRoutes(t *testing.T) {
 	}
 }
 
+// The generic lobby page names no bots of its own: Island Battles' entry
+// gives it the words for its bot seats and the heading of the example
+// player's panel, which relays a localhost bot's turns outside a demo.
+func TestFrontendGameNamesItsBots(t *testing.T) {
+	game := catalogEntry(t)
+	if game.SeatNames == nil || *game.SeatNames != (frontend.SeatNames{Singular: "a bot", Plural: "bots"}) {
+		t.Fatalf("seat names = %+v", game.SeatNames)
+	}
+	if game.ExamplePlayer.Heading != "Your bot" {
+		t.Fatalf("example player heading = %q", game.ExamplePlayer.Heading)
+	}
+}
+
 // The web client is served at /play/ by CloudFront, not the backend
 // (deploy/README.md, "The web client").
 func TestFrontendGameLinksThe3DClient(t *testing.T) {
