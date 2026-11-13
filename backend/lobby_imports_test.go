@@ -22,10 +22,12 @@ var gameLobbyPackages = []string{
 // that builds it with lobby/app (and, locally, reaches a lobby of its own at
 // ISLAND_BATTLES_LOBBY_URL instead), the two hosts that serve the app (the
 // local server, this package, and the Lambda),
-// the schema migration with the lobby's tables and the migrate command, the
-// admin MCP server with the lobby's admin tools, the OpenAPI export, which
-// describes the lobby's connection token route that game clients call, and
-// the test fixtures that build a database with the lobby's tables.
+// the schema migration, which runs the map templates' migrations on the
+// lobby's migration runner, and the migrate command, which tells whether the
+// lobby has a database of its own, the admin MCP server with the lobby's
+// admin tools, the OpenAPI export, which describes the lobby's connection
+// token route that game clients call, and the test fixtures that build the
+// lobby's own database beside Island Battles'.
 var lobbyHosts = []string{
 	"islandBattles/backend",
 	"islandBattles/backend/app",
