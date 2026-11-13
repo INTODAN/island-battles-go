@@ -210,8 +210,7 @@ def test_the_command_line(
             "upload",
             "--game-url",
             "https://game.example",
-            "--token",
-            token(),
+            f"--token={token()}",
             str(zip_file),
         ]
     )
@@ -237,11 +236,31 @@ def test_the_command_line(
                 "upload",
                 "--game-url",
                 "https://game.example",
-                "--token",
-                token(),
+                f"--token={token()}",
                 str(zip_file),
             ]
         )
         == 1
     )
     assert capsys.readouterr().err == "FAIL: the package was refused: no manifest.\n"
+
+
+def test_a_token_starting_with_a_dash_is_read_as_a_value() -> None:
+    """argparse takes "--token -abc" for an option, so the commands use --token=<value>."""
+    parser = cli.build_parser()
+    uploading = parser.parse_args(
+        ["upload", "--game-url", "https://game.example", "--token=-abc", "a.zip"]
+    )
+    assert uploading.token == "-abc"
+    running = parser.parse_args(
+        [
+            "run",
+            "bot:play",
+            "--base-url",
+            "https://game.example",
+            "--token=-abc",
+            "--lobby-id",
+            LOBBY,
+        ]
+    )
+    assert running.token == "-abc"

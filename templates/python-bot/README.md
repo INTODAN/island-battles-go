@@ -30,7 +30,7 @@ All run from any directory.
 To upload the zip to your lobby, open the bot picker in the lobby page or the 3D client: **Upload bot (.zip)** takes the file, or **Upload from the command line** shows a command to copy, with the game's address and a token that is valid for 15 minutes:
 
 ```sh
-uv run island-battles-bot upload --game-url <url> --token <token> dist/island-battles-bot.zip
+uv run island-battles-bot upload --game-url <url> --token=<token> dist/island-battles-bot.zip
 ```
 
 The game checks the package and lists it for everyone in the lobby; a new upload replaces your previous one. `upload` needs an `island-battles-python` release that has it, like the worker mode. Running uploaded packages comes with #112; until then bots run on your machine.

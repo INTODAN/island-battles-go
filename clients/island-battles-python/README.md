@@ -131,7 +131,7 @@ PYTHONPATH=unpacked/site python -m island_battles_client.worker bot:play < reque
 ### Upload your package to a lobby
 
 ```sh
-uv run island-battles-bot upload --game-url <url> --token <token> dist/island-battles-bot.zip
+uv run island-battles-bot upload --game-url <url> --token=<token> dist/island-battles-bot.zip
 ```
 
 uploads the zip that `package` wrote to a lobby (#221), where everyone in it sees it in the bot picker. Copy the command from the bot picker's **Upload from the command line**, in the lobby page or the 3D client: it fills in the game's address and an **upload token**, which stands for you in that lobby for 15 minutes, so the command line needs no session of yours. The zip goes straight to the game's storage, never through the game server; then the game checks it.
@@ -145,7 +145,7 @@ Choosing an uploaded package as your bot comes later; for now it is only uploade
 ### Run a seat without a browser
 
 ```sh
-uv run island-battles-bot run mybot:play --base-url http://localhost:8888 --token GUEST_BEARER_TOKEN --lobby-id LOBBY_UUID
+uv run island-battles-bot run mybot:play --base-url http://localhost:8888 --token=GUEST_BEARER_TOKEN --lobby-id LOBBY_UUID
 ```
 
 plays one seat of a started lobby until the game ends, for CI and headless testing. `--log-file` and `--log-level` set the log output. The seat's player must have chosen their localhost bot in the lobby before getting ready (their lobby member settings `{"bot": {"kind": "localhost"}}`, set with `PUT /lobby/v1/games/island-battles/lobbies/{lobby_id}/member-settings`; see the [backend README](../../backend/README.md#choosing-a-bot)): a player who chose a default level is played by the backend, and the client stops at once with a `GameError` that says so. `GenerationState.bot` reports which bot a seat plays with. The same in code:

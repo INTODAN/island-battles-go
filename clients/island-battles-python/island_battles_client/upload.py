@@ -3,7 +3,7 @@
 The bot picker's **Upload from the command line** gives a ready-to-copy
 command with a short-lived upload token for the player and the lobby:
 
-    island-battles-bot upload --game-url <url> --token <token> dist/island-battles-bot.zip
+    island-battles-bot upload --game-url <url> --token=<token> dist/island-battles-bot.zip
 
 The token stands in for the player's credentials. Uploading takes three requests:
 the game presigns the upload, the zip goes straight to storage with that

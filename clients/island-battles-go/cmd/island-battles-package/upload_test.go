@@ -94,7 +94,7 @@ func TestUploadPresignsStoresAndCompletes(t *testing.T) {
 	game, server := newFakeGame(t)
 	path := zipToUpload(t, 5000)
 	var stdout, stderr bytes.Buffer
-	if status := run([]string{"upload", "--game-url", server.URL + "/", "--token", uploadToken(testLobby), path}, &stdout, &stderr); status != 0 {
+	if status := run([]string{"upload", "--game-url", server.URL + "/", "--token=" + uploadToken(testLobby), path}, &stdout, &stderr); status != 0 {
 		t.Fatalf("status %d, stderr %q", status, stderr.String())
 	}
 	if want := "uploaded " + path + ": native, command ./bot worker, 0.0 MiB, package " + testPackage; !strings.HasPrefix(stdout.String(), want) {
@@ -145,7 +145,7 @@ func TestUploadShowsTheGamesReasonForABadPackage(t *testing.T) {
 		_, _ = io.WriteString(response, `{"detail":"the package was refused: the command runs ./server, which is not a file in the zip."}`)
 	}
 	var stdout, stderr bytes.Buffer
-	if status := run([]string{"upload", "--game-url", server.URL, "--token", uploadToken(testLobby), zipToUpload(t, 10)}, &stdout, &stderr); status != 1 {
+	if status := run([]string{"upload", "--game-url", server.URL, "--token=" + uploadToken(testLobby), zipToUpload(t, 10)}, &stdout, &stderr); status != 1 {
 		t.Fatalf("status %d", status)
 	}
 	if stderr.String() != "FAIL: the package was refused: the command runs ./server, which is not a file in the zip.\n" {
@@ -200,7 +200,15 @@ func TestUploadChecksTheFileAndTheTokenFirst(t *testing.T) {
 
 func TestUploadNeedsTheGameURLAndTheToken(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if status := run([]string{"upload", "--token", "x"}, &stdout, &stderr); status != 2 || !strings.Contains(stderr.String(), "Usage: island-battles-package upload") {
+	if status := run([]string{"upload", "--token=x"}, &stdout, &stderr); status != 2 || !strings.Contains(stderr.String(), "Usage: island-battles-package upload") {
+		t.Fatalf("status %d, stderr %q", status, stderr.String())
+	}
+}
+
+func TestUploadReadsATokenThatStartsWithADash(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	// The flag is read as a value (status 1, a bad token), not as a usage error (status 2).
+	if status := run([]string{"upload", "--game-url", "https://game.example", "--token=-abc", zipToUpload(t, 10)}, &stdout, &stderr); status != 1 || !strings.Contains(stderr.String(), "is not an upload token") {
 		t.Fatalf("status %d, stderr %q", status, stderr.String())
 	}
 }

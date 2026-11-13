@@ -64,10 +64,10 @@ describe("uploadCommands", () => {
   test("uploads with the token in both SDKs", () => {
     const commands = uploadCommands("https://game.example", "ibut1.a.b");
     expect(commands.python).toBe(
-      "uv run island-battles-bot upload --game-url https://game.example --token ibut1.a.b dist/island-battles-bot.zip",
+      "uv run island-battles-bot upload --game-url https://game.example --token=ibut1.a.b dist/island-battles-bot.zip",
     );
     expect(commands.go).toBe(
-      "go run github.com/INTODAN/island-battles-go/clients/island-battles-go/cmd/island-battles-package upload --game-url https://game.example --token ibut1.a.b dist/island-battles-bot.zip",
+      "go run github.com/INTODAN/island-battles-go/clients/island-battles-go/cmd/island-battles-package upload --game-url https://game.example --token=ibut1.a.b dist/island-battles-bot.zip",
     );
   });
 });

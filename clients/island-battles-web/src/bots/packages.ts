@@ -28,7 +28,7 @@ export function uploadCommands(
   gameUrl: string,
   token: string,
 ): { python: string; go: string } {
-  const rest = `upload --game-url ${gameUrl} --token ${token} dist/island-battles-bot.zip`;
+  const rest = `upload --game-url ${gameUrl} --token=${token} dist/island-battles-bot.zip`;
   return {
     python: `uv run island-battles-bot ${rest}`,
     go: `go run github.com/INTODAN/island-battles-go/clients/island-battles-go/cmd/island-battles-package ${rest}`,

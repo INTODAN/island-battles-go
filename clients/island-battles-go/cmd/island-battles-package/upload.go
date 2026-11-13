@@ -44,7 +44,7 @@ type botPackage struct {
 
 // runUpload is the upload subcommand:
 //
-//	island-battles-package upload --game-url <url> --token <token> [zip]
+//	island-battles-package upload --game-url <url> --token=<token> [zip]
 //
 // The token is the one the bot picker's "Upload from the command line"
 // shows, which stands for the player in one lobby for 15 minutes.
@@ -54,7 +54,7 @@ func runUpload(arguments []string, stdout, stderr io.Writer) int {
 	gameURL := flags.String("game-url", "", "the game's address, such as https://island-battles.example.org")
 	token := flags.String("token", "", "the upload token from the bot picker, valid for 15 minutes")
 	flags.Usage = func() {
-		_, _ = fmt.Fprintf(stderr, "Usage: island-battles-package upload --game-url <url> --token <token> [zip]\n\nUploads the zip, %s by default, to the lobby of the upload token that the\nbot picker's \"Upload from the command line\" shows.\n\nFlags:\n", defaultOutput)
+		_, _ = fmt.Fprintf(stderr, "Usage: island-battles-package upload --game-url <url> --token=<token> [zip]\n\nUploads the zip, %s by default, to the lobby of the upload token that the\nbot picker's \"Upload from the command line\" shows.\n\nFlags:\n", defaultOutput)
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(arguments); err != nil {

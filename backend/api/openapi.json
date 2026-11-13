@@ -2388,7 +2388,7 @@
     },
     "/game/lobbies/{lobby_id}/bot-packages/upload-token": {
       "post": {
-        "description": "Requires an active membership of the Island Battles lobby, in any phase, with your player token (PlayerToken); anyone else gets 404. Returns an upload token for you and this lobby, valid for 15 minutes, for a command line that doesn't hold your session: island-battles-bot upload --game-url \u003curl\u003e --token \u003ctoken\u003e dist/island-battles-bot.zip, or the Go SDK's island-battles-package upload with the same arguments. The two upload endpoints, POST /game/lobbies/{lobby_id}/bot-packages and its complete, accept it as Authorization: Bearer \u003ctoken\u003e in place of your player token; nothing else does. The command line reads the lobby from the token. A server without storage for packages answers 503.",
+        "description": "Requires an active membership of the Island Battles lobby, in any phase, with your player token (PlayerToken); anyone else gets 404. Returns an upload token for you and this lobby, valid for 15 minutes, for a command line that doesn't hold your session: island-battles-bot upload --game-url \u003curl\u003e --token=\u003ctoken\u003e dist/island-battles-bot.zip, or the Go SDK's island-battles-package upload with the same arguments. The two upload endpoints, POST /game/lobbies/{lobby_id}/bot-packages and its complete, accept it as Authorization: Bearer \u003ctoken\u003e in place of your player token; nothing else does. The command line reads the lobby from the token. A server without storage for packages answers 503.",
         "operationId": "createIslandBotUploadToken",
         "parameters": [
           {

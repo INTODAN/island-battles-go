@@ -13,4 +13,4 @@ if [ -z "$base_url" ] || [ -z "$token" ] || [ -z "$lobby_id" ]; then
   exit 2
 fi
 exec uv run island-battles-bot run bot:play \
-  --base-url "$base_url" --token "$token" --lobby-id "$lobby_id" --log-file bot.log
+  --base-url "$base_url" --token="$token" --lobby-id "$lobby_id" --log-file bot.log

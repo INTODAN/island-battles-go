@@ -76,8 +76,8 @@ test("a package is described by its language, entry or command, and size", () =>
 
 test("the commands upload with the token in both SDKs", () => {
   const commands = uploadCommands("https://game.example", "ibut1.a.b");
-  assert.equal(commands.python, "uv run island-battles-bot upload --game-url https://game.example --token ibut1.a.b dist/island-battles-bot.zip");
-  assert.match(commands.go, /^go run github\.com\/INTODAN\/island-battles-go\/clients\/island-battles-go\/cmd\/island-battles-package upload --game-url https:\/\/game\.example --token ibut1\.a\.b dist\/island-battles-bot\.zip$/);
+  assert.equal(commands.python, "uv run island-battles-bot upload --game-url https://game.example --token=ibut1.a.b dist/island-battles-bot.zip");
+  assert.match(commands.go, /^go run github\.com\/INTODAN\/island-battles-go\/clients\/island-battles-go\/cmd\/island-battles-package upload --game-url https:\/\/game\.example --token=ibut1\.a\.b dist\/island-battles-bot\.zip$/);
 });
 
 test("an upload starts, posts the zip to storage and completes", async () => {
@@ -173,8 +173,8 @@ test("Upload from the command line shows both commands with a fresh token", asyn
   assert.ok(calls.some(([method, path]) => method === "POST" && path === `${base}/upload-token`));
   assert.equal(instance.command.hidden, false);
   const text = instance.command.textContent;
-  assert.match(text, /Python, in your bot's folder: uv run island-battles-bot upload --game-url https:\/\/game\.example --token ibut1\.abc\.def dist\/island-battles-bot\.zip/);
-  assert.match(text, /Go, in your bot's folder: go run .*island-battles-package upload --game-url https:\/\/game\.example --token ibut1\.abc\.def/);
+  assert.match(text, /Python, in your bot's folder: uv run island-battles-bot upload --game-url https:\/\/game\.example --token=ibut1\.abc\.def dist\/island-battles-bot\.zip/);
+  assert.match(text, /Go, in your bot's folder: go run .*island-battles-package upload --game-url https:\/\/game\.example --token=ibut1\.abc\.def/);
   await buttons(container, "Copy")[0].listeners.click();
   assert.deepEqual(copied, [uploadCommands("https://game.example", "ibut1.abc.def").python]);
 });

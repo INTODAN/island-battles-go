@@ -69,7 +69,7 @@ func SetupBotPackageRoutes(api huma.API, handler *handlers.BotPackages) {
 		OperationID: "createIslandBotUploadToken", Path: "/game/lobbies/{lobby_id}/bot-packages/upload-token", Method: http.MethodPost,
 		Summary: "Get an upload token for uploading a bot package from the command line",
 		Description: membership + "Returns an upload token for you and this lobby, valid for 15 minutes, for a command line that doesn't hold your session: " +
-			"island-battles-bot upload --game-url <url> --token <token> dist/island-battles-bot.zip, or the Go SDK's island-battles-package upload with the same arguments. " +
+			"island-battles-bot upload --game-url <url> --token=<token> dist/island-battles-bot.zip, or the Go SDK's island-battles-package upload with the same arguments. " +
 			"The two upload endpoints, POST /game/lobbies/{lobby_id}/bot-packages and its complete, accept it as Authorization: Bearer <token> in place of your player token; nothing else does. The command line reads the lobby from the token." + storage,
 		Tags: []string{"Island Battles"}, Security: members,
 	}, handler.UploadToken)
