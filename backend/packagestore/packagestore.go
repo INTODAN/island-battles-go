@@ -42,6 +42,9 @@ type Store interface {
 	ReadRange(ctx context.Context, key string, offset, length int64) ([]byte, error)
 	// Delete removes the object at key; a missing object is no error.
 	Delete(ctx context.Context, key string) error
+	// PresignDownload lets whoever holds the URL GET the object at key, for
+	// expires: a bot runner, which has no AWS permissions of its own.
+	PresignDownload(ctx context.Context, key string, expires time.Duration) (string, error)
 }
 
 // S3 is a Store in one bucket.
@@ -92,6 +95,15 @@ func (store *S3) PresignUpload(ctx context.Context, key string, maxBytes int64, 
 		return Upload{}, fmt.Errorf("presign the upload: %w", err)
 	}
 	return Upload{URL: presigned.URL, Fields: presigned.Values}, nil
+}
+
+func (store *S3) PresignDownload(ctx context.Context, key string, expires time.Duration) (string, error) {
+	presigned, err := store.presign.PresignGetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(store.bucket), Key: aws.String(key)},
+		s3.WithPresignExpires(expires))
+	if err != nil {
+		return "", fmt.Errorf("presign the download: %w", err)
+	}
+	return presigned.URL, nil
 }
 
 func (store *S3) Size(ctx context.Context, key string) (int64, error) {

@@ -10,8 +10,10 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
+	"islandBattles/backend/botrunner"
 	"islandBattles/backend/demo"
 	"islandBattles/backend/demoviewer"
 	"islandBattles/backend/dependencies"
@@ -43,6 +45,11 @@ type Option func(*options)
 
 type options struct {
 	gameGraph bool
+	// localRunners play hosted and uploaded bots when no runner functions
+	// are configured, and localOrigin is where the bots submit when no
+	// public URL is.
+	localRunners services.BotRunners
+	localOrigin  string
 	// localPackages keeps bot packages when no bucket is configured, and
 	// localPackagesHandler serves its storage at localPackagesPrefix.
 	localPackages        packagestore.Store
@@ -65,6 +72,14 @@ func WithLocalBotPackages(store packagestore.Store, prefix string, handler http.
 	}
 }
 
+// WithLocalBotRunners plays hosted and uploaded bots' turns with runners when
+// the configuration names no runner functions, has the bots submit to origin
+// when it names no public URL, and accepts hosted bots on this machine.
+// Only the local server host passes it, with the runners in its own process.
+func WithLocalBotRunners(runners services.BotRunners, origin string) Option {
+	return func(options *options) { options.localRunners, options.localOrigin = runners, origin }
+}
+
 // New wires the stores and services to a router. It starts no goroutines and
 // holds nothing that outlives a request besides the database pool, which the
 // host owns and closes. Without options it serves only what is safe in public.
@@ -79,7 +94,7 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	// service, which needs the policy first.
 	lobbies := &lobbyadapter.Lobbies{}
 	policy := domain.DefaultPolicy(
-		lobbyadapter.Registration(database, services.ServerBots{Enabled: config.ServerBots}, lobbies),
+		lobbyadapter.Registration(database, services.ServerBots{Enabled: config.ServerBots, LoopbackHosts: selected.localRunners != nil}, lobbies),
 		// quiz-demo only shows that a second game can share the lobby. With no
 		// game behind it to read settings, it accepts any object. It has no
 		// seats, so it refuses every seat the host tries to add.
@@ -111,10 +126,6 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 		return nil, err
 	}
 	lobbies.API = lobbyService
-	gameBinding, err := lobbyadapter.NewService(database, lobbyService, publisher)
-	if err != nil {
-		return nil, err
-	}
 	retentionStore, err := lobbypostgres.NewRetentionStore(database)
 	if err != nil {
 		return nil, err
@@ -165,6 +176,14 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	default:
 		logger.Warn("Bot package uploads answer 503 because " + dependencies.BotPackagesBucketEnv + " is not set")
 	}
+	bots, err := turnSender(config, selected, packages, submitTokens, logger)
+	if err != nil {
+		return nil, err
+	}
+	gameBinding, err := lobbyadapter.NewService(database, lobbyService, publisher, bots)
+	if err != nil {
+		return nil, err
+	}
 	if config.PlayerTokenKeys == nil {
 		return nil, errors.New("app: no player token keys")
 	}
@@ -196,7 +215,7 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 		routes.SetupGameGraphRoute(api, &environment)
 	}
 	routes.SetupLobbyRoutes(api, lobbyService, authenticated, playerTokens, gameBinding, lobbyRetention, &handlers.LobbyGame{Database: database, Players: handlers.PlayerTokens{Verifier: playerVerifier}, Publisher: publisher, Retention: gameRetention, Watchers: lobbyService,
-		SubmitTokens: submitTokens, PublicURL: config.PublicURL})
+		SubmitTokens: submitTokens, PublicURL: config.PublicURL, Bots: bots})
 	routes.SetupBotPackageRoutes(api, &handlers.BotPackages{Players: handlers.PlayerTokens{Verifier: playerVerifier}, Service: services.BotPackages{
 		Database: database, Lobbies: lobbyService, GameKey: lobbyadapter.GameKey, Store: packages, Tokens: uploadTokens}})
 	if config.BotPackagesBucket == "" && selected.localPackagesHandler != nil {
@@ -208,6 +227,43 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	}
 	router.Get("/healthz", healthz(Version))
 	return router, nil
+}
+
+// turnSender sends hosted and uploaded bots' turns (#225) while the
+// configuration offers them: to the runner functions it names, or else to
+// the local server host's own runners. A host with neither, such as the
+// Lambda host without the functions' names, sends nothing, and those bots
+// lose at their first deadline.
+func turnSender(config dependencies.Config, selected options, packages packagestore.Store, tokens *submittoken.Signer, logger *slog.Logger) (*services.TurnSender, error) {
+	if !config.ServerBots {
+		return nil, nil
+	}
+	origin := strings.TrimRight(config.PublicURL, "/")
+	if origin == "" {
+		origin = strings.TrimRight(selected.localOrigin, "/")
+	}
+	sender := &services.TurnSender{Tokens: tokens}
+	if packages != nil {
+		sender.Packages = packages
+	}
+	if origin != "" {
+		sender.SubmitURL = origin + "/generation/commands"
+	} else {
+		logger.Warn("Hosted and uploaded bots get no turns because " + dependencies.PublicURLEnv + " is not set")
+	}
+	switch {
+	case config.BotRunnerPython != "":
+		runners, err := botrunner.LambdaFromEnvironment(context.Background(), config.BotRunnerPython, config.BotRunnerNative)
+		if err != nil {
+			return nil, err
+		}
+		sender.Runners = runners
+	case selected.localRunners != nil:
+		sender.Runners = selected.localRunners
+	default:
+		logger.Warn("Hosted and uploaded bots get no turns because " + dependencies.BotRunnerPythonEnv + " and " + dependencies.BotRunnerNativeEnv + " are not set")
+	}
+	return sender, nil
 }
 
 // annotatingAuthentication adds the player of each verified session to the

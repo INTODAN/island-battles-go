@@ -3,9 +3,12 @@ package hostedbot
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeResolver answers from a table, without a network.
@@ -137,5 +140,83 @@ func TestCheckReportsACancelledLookup(t *testing.T) {
 	_, err := Check(ctx, resolver, "https://missing.example.com/turn")
 	if !errors.Is(err, context.Canceled) || IsInvalid(err) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestDialControlAllowsOnlyPublicAddressesOnPort443(t *testing.T) {
+	for _, address := range []string{"203.0.113.7:443", "[2606:4700::1111]:443", "100.64.0.1:443"} {
+		if err := DialControl("tcp", address, nil); err != nil {
+			t.Errorf("DialControl(%s) = %v, want nil", address, err)
+		}
+	}
+	for address, want := range map[string]string{
+		"10.0.0.1:443":           "private network",
+		"127.0.0.1:443":          "private network",
+		"[::1]:443":              "private network",
+		"169.254.169.254:443":    "private network",
+		"[fd12:3456::1]:443":     "private network",
+		"[::ffff:10.1.2.3]:443":  "private network",
+		"0.0.0.0:443":            "private network",
+		"224.0.0.1:443":          "private network",
+		"192.168.1.20:443":       "private network",
+		"203.0.113.7:80":         "port 443",
+		"203.0.113.7:8443":       "port 443",
+		"bot.example.com:443":    "IP address and port",
+		"[fe80::1%eth0]:443":     "private network",
+		"[2606:4700::1111]:4430": "port 443",
+	} {
+		err := DialControl("tcp", address, nil)
+		if !IsInvalid(err) || !strings.Contains(err.Error(), want) {
+			t.Errorf("DialControl(%s) = %v, want a refusal with %q", address, err, want)
+		}
+	}
+}
+
+// A name that passed the check when the bot was chosen may resolve to
+// something else when a turn is sent: the client checks the address it
+// really connects to. localhost stands for a rebound name here.
+func TestClientRefusesANameThatResolvesToALoopbackAddress(t *testing.T) {
+	_, err := Client(time.Second).Post("https://localhost/turn", "application/json", strings.NewReader("{}"))
+	if !IsInvalid(err) || !strings.Contains(err.Error(), "private network") {
+		t.Fatalf("err = %v, want the dialer's refusal", err)
+	}
+}
+
+func TestClientRefusesALoopbackServerOnAnyPort(t *testing.T) {
+	served := false
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { served = true }))
+	defer server.Close()
+	_, err := Client(time.Second).Post(server.URL, "application/json", strings.NewReader("{}"))
+	if !IsInvalid(err) || served {
+		t.Fatalf("err = %v, served = %v; want a refusal before connecting", err, served)
+	}
+}
+
+func TestClientFollowsNoRedirects(t *testing.T) {
+	client := Client(time.Second)
+	request, _ := http.NewRequest(http.MethodPost, "https://bot.example.com/turn", nil)
+	if err := client.CheckRedirect(request, []*http.Request{request}); !errors.Is(err, http.ErrUseLastResponse) {
+		t.Fatalf("CheckRedirect = %v, want http.ErrUseLastResponse", err)
+	}
+	if transport := client.Transport.(*http.Transport); transport.Proxy != nil {
+		t.Fatal("the client must not use a proxy, which would connect for it")
+	}
+}
+
+func TestLoopbackNamesOnlyThisMachine(t *testing.T) {
+	for raw, want := range map[string]bool{
+		"http://127.0.0.1:41414/turn":   true,
+		"http://localhost:8000/turn":    true,
+		"https://LOCALHOST/turn":        true,
+		"http://[::1]:9000/turn":        true,
+		"http://user@127.0.0.1:1/turn":  false,
+		"http://10.0.0.1/turn":          false,
+		"https://bot.example.com/turn":  false,
+		"ftp://127.0.0.1/turn":          false,
+		"http://127.0.0.1.example/turn": false,
+	} {
+		if got := Loopback(raw); got != want {
+			t.Errorf("Loopback(%q) = %v, want %v", raw, got, want)
+		}
 	}
 }

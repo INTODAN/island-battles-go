@@ -97,6 +97,15 @@ class DeployModeTest(unittest.TestCase):
         self.assertEqual(run("apply", *created)[:2], (0, ""))
         self.assertEqual(run("publishes-backend", *created)[1], "no\n")
 
+    def test_letting_the_backend_invoke_the_runners_publishes_it_and_destroys_nothing(self):
+        # The plan of #225: the backend role's invoke policy, and the
+        # function's new settings, the runners' names.
+        policy = change("aws_iam_role_policy.lambda_bot_runners", ["create"])
+        code, _, stderr = run("deploy", FUNCTION_UPDATE, policy)
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(run("apply", FUNCTION_UPDATE, policy)[:2], (0, ""))
+        self.assertEqual(run("publishes-backend", FUNCTION_UPDATE, policy)[1], "yes\n")
+
     def test_refuses_deleting_the_bot_package_bucket(self):
         code, _, stderr = run("deploy", change("aws_s3_bucket.bot_packages", ["delete"], "island-battles-bot-packages"))
         self.assertEqual(code, 1)

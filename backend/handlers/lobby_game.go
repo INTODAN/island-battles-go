@@ -39,6 +39,9 @@ type LobbyGame struct {
 	// starts with. Empty uses the request's own scheme and Host, which suits
 	// a server that players reach directly.
 	PublicURL string
+	// Bots sends the turns of hosted and uploaded bots that requests create.
+	// Nil sends none.
+	Bots *services.TurnSender
 }
 
 // runRetention runs after the handler has its response, and after a turn has
@@ -60,7 +63,7 @@ func (handler *LobbyGame) Replay(ctx context.Context, input *struct {
 	if err != nil {
 		return nil, err
 	}
-	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher}
+	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher, Bots: handler.Bots}
 	replay, err := service.Replay(ctx, principal, input.LobbyID)
 	if err != nil {
 		return nil, generationHTTPError(ctx, err)
@@ -90,7 +93,7 @@ func (handler *LobbyGame) WatchReplay(ctx context.Context, input *struct {
 	if err != nil {
 		return nil, err
 	}
-	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher, Watchers: handler.Watchers}
+	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher, Bots: handler.Bots, Watchers: handler.Watchers}
 	replay, err := service.WatchReplay(ctx, principal, input.LobbyID)
 	if err != nil {
 		return nil, generationHTTPError(ctx, err)
@@ -119,7 +122,7 @@ func (handler *LobbyGame) Demo(ctx context.Context, input *struct {
 	if err != nil {
 		return nil, err
 	}
-	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher}
+	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher, Bots: handler.Bots}
 	demo, err := service.Demo(ctx, principal, input.LobbyID)
 	if err != nil {
 		return nil, generationHTTPError(ctx, err)
@@ -138,7 +141,7 @@ func (handler *LobbyGame) WatchDemo(ctx context.Context, input *struct {
 	if err != nil {
 		return nil, err
 	}
-	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher, Watchers: handler.Watchers}
+	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher, Bots: handler.Bots, Watchers: handler.Watchers}
 	demo, err := service.WatchDemo(ctx, principal, input.LobbyID)
 	if err != nil {
 		return nil, generationHTTPError(ctx, err)
@@ -158,7 +161,7 @@ func (handler *LobbyGame) WatchGeneration(ctx context.Context, input *struct {
 	if err != nil {
 		return nil, err
 	}
-	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher, Watchers: handler.Watchers}
+	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher, Bots: handler.Bots, Watchers: handler.Watchers}
 	state, err := service.Watch(ctx, principal, input.LobbyID)
 	if err != nil {
 		return nil, generationHTTPError(ctx, err)

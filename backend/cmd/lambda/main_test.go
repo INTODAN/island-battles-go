@@ -126,7 +126,7 @@ func TestReplayOverSixMegabytesStreamsThroughTheFunctionURL(t *testing.T) {
 		t.Fatal(err)
 	}
 	lobbyID, red, blue := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	binding, err := services.RunLobbyGame(context.Background(), database, &testutils.RecordedPublisher{}, domain.Snapshot{
+	binding, err := services.RunLobbyGame(context.Background(), database, &testutils.RecordedPublisher{}, nil, domain.Snapshot{
 		Lobby:       domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted},
 		Teams:       []domain.Team{{ID: red, Name: "Red", Order: 1}, {ID: blue, Name: "Blue", Order: 2}},
 		StartRoster: domain.StartRoster{{PlayerID: alice.PlayerID, TeamID: red, TeamOrder: 1}, {PlayerID: uuid.NewString(), TeamID: blue, TeamOrder: 2}},

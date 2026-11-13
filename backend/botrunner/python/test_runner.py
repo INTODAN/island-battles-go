@@ -536,6 +536,29 @@ class RunnerTest(unittest.TestCase):
             self.assertEqual(first.directory, self.directory / "lambda")
 
 
+class EventsTest(unittest.TestCase):
+    """``--events``, the local server host's runner: one event per line."""
+
+    def test_plays_each_line_and_keeps_the_package_loaded(self) -> None:
+        packages, game = Packages(), Game()
+        self.addCleanup(packages.server.close)
+        self.addCleanup(game.server.close)
+        event = example_event(packages.add("one", fake_package("answering")), game.submit_url)
+        lines = [json.dumps(event), "", json.dumps(event), "not json", json.dumps(example_event({}, "https://x/y"))]
+        output = io.StringIO()
+
+        with mock.patch.object(runner.log, "disabled", True):
+            runner.serve_events(lines, output, game.server.host)
+
+        answers = [json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertEqual(answers[:2], [{"outcome": "submitted", "status": 200}] * 2)
+        self.assertIn("error", answers[2])
+        self.assertIn("not on the game's host", answers[3]["error"])
+        self.assertEqual(len(answers), 4)
+        first, second = (submission["batch"]["memory"]["pid"] for submission in game.submissions)
+        self.assertEqual(first, second, "the same worker plays both turns")
+
+
 class LogLineTest(unittest.TestCase):
     def test_keeps_the_end_of_the_output(self) -> None:
         message = runner.with_output("The uploaded bot stopped", "x" * 1000 + "\nthe last line")

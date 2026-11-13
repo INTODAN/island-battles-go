@@ -42,7 +42,7 @@ func deliveryGame(t *testing.T) (humatest.TestAPI, *submittoken.Signer, []string
 	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted}, Teams: []domain.Team{{ID: blue, Order: 1}, {ID: red, Order: 2}},
 		StartRoster: domain.StartRoster{{PlayerID: players[0], TeamID: blue}, {PlayerID: players[1], TeamID: red}}}
 	publisher := &testutils.RecordedPublisher{}
-	if _, err := services.RunLobbyGame(context.Background(), database, publisher, snapshot); err != nil {
+	if _, err := services.RunLobbyGame(context.Background(), database, publisher, nil, snapshot); err != nil {
 		t.Fatal(err)
 	}
 	signer, err := submittoken.New([]byte("test-submit-token-secret"))

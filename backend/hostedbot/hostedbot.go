@@ -7,8 +7,14 @@
 // credentials, on port 443 or none. Its host must be a name, not an IP
 // literal, and every address the name resolves to must be public: not
 // loopback, private, link-local, unique-local or unspecified. The name is
-// resolved when the bot is chosen, and again before each turn is sent, since
-// what a name resolves to can change. Nothing is sent to the bot here.
+// resolved when the bot is chosen, with Check. Nothing is sent to the bot
+// then.
+//
+// What a name resolves to can change after that (DNS rebinding), so whoever
+// sends a turn checks again as it sends: Client connects only to public
+// addresses on port 443, checking the very address it connects to, and
+// follows no redirects. The native bot runner sends hosted bots' turns with
+// it (backend/botrunner/native).
 package hostedbot
 
 import (
@@ -16,9 +22,11 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/netip"
 	"net/url"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf8"
 )
@@ -123,4 +131,56 @@ func Public(address netip.Addr) bool {
 func IsInvalid(err error) bool {
 	var invalid *Invalid
 	return errors.As(err, &invalid)
+}
+
+// DialControl refuses to connect to an address that isn't Public, or to a
+// port other than 443. A net.Dialer calls it with each address it is about
+// to connect to, after resolving the name, so the check covers what the
+// connection really reaches, whatever the name resolved to before.
+func DialControl(_, address string, _ syscall.RawConn) error {
+	addressPort, err := netip.ParseAddrPort(address)
+	if err != nil {
+		return refuse("a hosted bot's connection must go to an IP address and port, not %q", address)
+	}
+	if addressPort.Port() != 443 {
+		return refuse("a hosted bot's connection must use port 443, not %d", addressPort.Port())
+	}
+	if !Public(addressPort.Addr()) {
+		return refuse("the bot's host resolves to %s, an address on a private network: a hosted bot needs a public address", addressPort.Addr().Unmap())
+	}
+	return nil
+}
+
+// Client is an HTTP client for sending a hosted bot its turns, whose URL
+// passed CheckSyntax. It connects only where DialControl allows, uses no
+// proxy, follows no redirects, and gives up after timeout.
+func Client(timeout time.Duration) *http.Client {
+	dialer := &net.Dialer{Timeout: timeout, Control: DialControl}
+	transport := &http.Transport{
+		Proxy:               nil,
+		DialContext:         dialer.DialContext,
+		TLSHandshakeTimeout: timeout,
+		ForceAttemptHTTP2:   true,
+		MaxIdleConns:        10,
+		IdleConnTimeout:     30 * time.Second,
+	}
+	return &http.Client{Transport: transport, Timeout: timeout, CheckRedirect: refuseRedirects}
+}
+
+func refuseRedirects(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+
+// Loopback reports whether raw is an http or https URL on this machine:
+// localhost, 127.0.0.1 or [::1], on any port, without credentials. They break
+// the rules above, so only local development accepts them, for a bot server
+// such as island-battles-bot serve on the developer's own machine.
+func Loopback(raw string) bool {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.User != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return false
+	}
+	switch strings.ToLower(parsed.Hostname()) {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	return false
 }

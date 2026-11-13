@@ -3,7 +3,9 @@
 # token. The Python runner plays python packages on the python3.14 runtime;
 # the native runner plays native packages, such as Go bots, and also posts a
 # hosted bot's delivery to its server. The backend invokes them
-# asynchronously (#225). See deploy/README.md, "Bot runners".
+# asynchronously when a turn opens (#225), and never waits for them: a bot
+# submits its own answer with the turn's submit token. See deploy/README.md,
+# "Bot runners".
 #
 # Like the backend, Terraform publishes their code: scripts/aws.sh builds the
 # native runner's bootstrap next to the backend's, and the Python runner is
@@ -141,4 +143,22 @@ resource "aws_lambda_function_event_invoke_config" "bot_runner" {
   function_name                = each.value.function_name
   maximum_retry_attempts       = 0
   maximum_event_age_in_seconds = local.bot_runner_maximum_event_age
+}
+
+# The backend invokes the two runners, and only them, asynchronously: one
+# event per turn of each hosted and uploaded bot (#225). It passes their
+# names in ISLAND_BATTLES_BOT_RUNNER_PYTHON and ISLAND_BATTLES_BOT_RUNNER_NATIVE
+# (lambda.tf).
+resource "aws_iam_role_policy" "lambda_bot_runners" {
+  name = "bot-runners"
+  role = aws_iam_role.lambda.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid      = "InvokeTheBotRunners"
+      Effect   = "Allow"
+      Action   = "lambda:InvokeFunction"
+      Resource = [for runner in aws_lambda_function.bot_runner : runner.arn]
+    }]
+  })
 }

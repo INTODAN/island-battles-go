@@ -69,7 +69,7 @@ func newDeadlineFixture(t *testing.T, settings string, names ...[]string) deadli
 		}
 		fixture.players = append(fixture.players, players)
 	}
-	if _, err := services.RunLobbyGame(context.Background(), database, fixture.publisher, snapshot); err != nil {
+	if _, err := services.RunLobbyGame(context.Background(), database, fixture.publisher, nil, snapshot); err != nil {
 		t.Fatal(err)
 	}
 	clock := time.Now()

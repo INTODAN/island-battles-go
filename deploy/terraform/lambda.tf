@@ -42,6 +42,11 @@ locals {
     ISLAND_BATTLES_TRACE_INTERVAL                = "${var.trace_interval_seconds}s"
     # The bucket that this configuration creates (bot_packages.tf).
     ISLAND_BATTLES_BOT_PACKAGES_BUCKET = local.bot_packages_bucket
+    # The bot runners that play hosted and uploaded bots' turns, which the
+    # backend invokes (bot_runners.tf, #225). Naming the functions makes
+    # Terraform create them before it updates the backend.
+    ISLAND_BATTLES_BOT_RUNNER_PYTHON = aws_lambda_function.bot_runner["python"].function_name
+    ISLAND_BATTLES_BOT_RUNNER_NATIVE = aws_lambda_function.bot_runner["native"].function_name
   }
   lambda_settings_overridden = sort([
     for key in concat(keys(local.lambda_settings), keys(var.extra_lambda_environment)) : key
@@ -65,8 +70,10 @@ data "archive_file" "backend" {
 
 # The function writes its logs, and its collector layer sends traces to X-Ray
 # (observability.tf). In S3 it presigns uploads to, reads and deletes the zips
-# of the bot package bucket, and only that bucket (bot_packages.tf). It calls
-# nothing else in AWS: it reaches Postgres and Centrifugo over the internet.
+# of the bot package bucket, and only that bucket (bot_packages.tf). It
+# invokes the two bot runner functions, and no other function
+# (bot_runners.tf). It calls nothing else in AWS: it reaches Postgres and
+# Centrifugo over the internet.
 resource "aws_iam_role" "lambda" {
   name = "${var.name}-lambda"
   assume_role_policy = jsonencode({

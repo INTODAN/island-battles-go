@@ -39,8 +39,10 @@ run "passes_every_lambda_setting" {
       ISLAND_BATTLES_LOG_LINE_BYTES                = "1024"
       ISLAND_BATTLES_TRACE_INTERVAL                = "180s"
       ISLAND_BATTLES_BOT_PACKAGES_BUCKET           = "island-battles-bot-packages"
+      ISLAND_BATTLES_BOT_RUNNER_PYTHON             = "island-battles-bot-runner-python"
+      ISLAND_BATTLES_BOT_RUNNER_NATIVE             = "island-battles-bot-runner-native"
     })
-    error_message = "The function must get every lambda.env setting, the last value of a repeated key, the pool size, the log and trace limits with C from the reserved concurrency, and the bot package bucket."
+    error_message = "The function must get every lambda.env setting, the last value of a repeated key, the pool size, the log and trace limits with C from the reserved concurrency, the bot package bucket and the bot runners' names."
   }
 
   assert {
@@ -1087,5 +1089,58 @@ run "runs_uploaded_bots_in_two_runner_functions" {
   assert {
     condition     = jsondecode(aws_iam_role.bot_runner.assume_role_policy).Statement[0].Principal == { Service = "lambda.amazonaws.com" }
     error_message = "Only Lambda may assume the runners' role."
+  }
+}
+
+run "lets_the_backend_invoke_only_the_two_runners" {
+  command = plan
+
+  override_resource {
+    target          = aws_iam_role.lambda
+    override_during = plan
+    values = {
+      id  = "island-battles-lambda"
+      arn = "arn:aws:iam::123456789012:role/island-battles-lambda"
+    }
+  }
+
+  override_resource {
+    target          = aws_lambda_function.bot_runner["python"]
+    override_during = plan
+    values = {
+      arn = "arn:aws:lambda:eu-central-1:123456789012:function:island-battles-bot-runner-python"
+    }
+  }
+
+  override_resource {
+    target          = aws_lambda_function.bot_runner["native"]
+    override_during = plan
+    values = {
+      arn = "arn:aws:lambda:eu-central-1:123456789012:function:island-battles-bot-runner-native"
+    }
+  }
+
+  assert {
+    condition = (
+      aws_iam_role_policy.lambda_bot_runners.role == "island-battles-lambda" &&
+      jsondecode(aws_iam_role_policy.lambda_bot_runners.policy).Statement == [{
+        Sid    = "InvokeTheBotRunners"
+        Effect = "Allow"
+        Action = "lambda:InvokeFunction"
+        Resource = [
+          "arn:aws:lambda:eu-central-1:123456789012:function:island-battles-bot-runner-native",
+          "arn:aws:lambda:eu-central-1:123456789012:function:island-battles-bot-runner-python",
+        ]
+      }]
+    )
+    error_message = "The backend's role may invoke the two bot runners, and no other function."
+  }
+
+  assert {
+    condition = (
+      nonsensitive(aws_lambda_function.backend.environment[0].variables)["ISLAND_BATTLES_BOT_RUNNER_PYTHON"] == aws_lambda_function.bot_runner["python"].function_name &&
+      nonsensitive(aws_lambda_function.backend.environment[0].variables)["ISLAND_BATTLES_BOT_RUNNER_NATIVE"] == aws_lambda_function.bot_runner["native"].function_name
+    )
+    error_message = "The backend must invoke the runners this configuration creates."
   }
 }

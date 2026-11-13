@@ -21,7 +21,9 @@ import (
 // Go bots are the default bots of the bots package, which the backend plays
 // itself for the roster players whose FrozenGamePlayer.BotKind is default. A Go
 // bot plays each generation's turn in the transaction that creates the
-// generation, and completes it at once, so it never times out.
+// generation, and completes it at once, so it never times out. An uploaded
+// bot whose package was deleted before the start froze it plays the same
+// way: it passes every turn at once.
 
 // goBotWriteBudget and goBotReadBudget are how long one request keeps playing
 // the turns of a game in which every player still in the game is a Go bot.
@@ -43,10 +45,23 @@ const goBotRequestMargin = 2 * time.Second
 // turn failed.
 const GoBotLogger = "island_battles.bots"
 
-// isGoBot reports whether the backend plays the player.
+// isGoBot reports whether the backend plays the player in the transaction
+// that creates each turn: a default bot, or an uploaded bot without a
+// package (passesEveryTurn).
 func isGoBot(player models.FrozenGamePlayer) bool {
-	return player.BotKind == models.DefaultBot && player.BotLevel != nil
+	return (player.BotKind == models.DefaultBot && player.BotLevel != nil) || passesEveryTurn(player)
 }
+
+// passesEveryTurn reports whether the player is an uploaded bot whose package
+// was deleted in the moment between the start's ready check and the freeze,
+// so it was frozen without one. Nothing can play it, so it passes each turn
+// at once, as a failed Go bot does, rather than lose at the first deadline.
+func passesEveryTurn(player models.FrozenGamePlayer) bool {
+	return player.BotKind == models.UploadedBot && player.BotPackageKey == nil
+}
+
+// packageGoneLine is the game log line of each turn passesEveryTurn passes.
+const packageGoneLine = "Your uploaded bot's package was deleted before the game started, so it passes every turn."
 
 // goBotTurn is a Go bot's checked answer: the commands to store, as
 // POST /generation/commands would store them, its log lines and its memory.
@@ -170,8 +185,14 @@ func playGoBots(ctx context.Context, transaction *gorm.DB, game *models.Game, ge
 		if !slices.Contains(standing, player.TeamColor) {
 			continue
 		}
-		turn := newGoBotTurn(game, generation, player.TeamColor, memories[player.PlayerID])
-		played, err := runGoBot(ctx, *player.BotLevel, turn, generation, inputs)
+		var played goBotTurn
+		var err error
+		if passesEveryTurn(player) {
+			played = goBotTurn{memory: memories[player.PlayerID], logs: []models.GenerationLogLine{{Level: models.GenerationLogError, Logger: GoBotLogger, Message: packageGoneLine}}}
+		} else {
+			turn := newGoBotTurn(game, generation, player.TeamColor, memories[player.PlayerID])
+			played, err = runGoBot(ctx, *player.BotLevel, turn, generation, inputs)
+		}
 		if err != nil {
 			slog.WarnContext(ctx, "A Go bot failed its turn and passes it", "game_id", game.ID, "generation_id", generation.ID, "bot_level", *player.BotLevel, "error", err)
 			played = goBotTurn{memory: memories[player.PlayerID], logs: []models.GenerationLogLine{{Level: models.GenerationLogError, Logger: GoBotLogger,
@@ -248,48 +269,53 @@ func turnComplete(game *models.Game, generation *models.Generation, players []mo
 // playTurn plays a completed turn: it applies every player's commands and the
 // end-of-turn steps as the next generation, ends the game when the end rule
 // says so, and has the Go bots play the new generation at once. It returns
-// the new generation, its inputs, which are the Go bots', and the events to
-// push once the transaction commits.
-func playTurn(ctx context.Context, transaction *gorm.DB, game *models.Game, players []models.FrozenGamePlayer, inputs []models.GenerationInput) (*models.Generation, []models.GenerationInput, []realtime.Publication, error) {
+// the new generation, its inputs, which are the Go bots', and what to do once
+// the transaction commits: push the events and send the turns of the hosted
+// and uploaded bots with sender.
+func playTurn(ctx context.Context, transaction *gorm.DB, game *models.Game, players []models.FrozenGamePlayer, inputs []models.GenerationInput, sender *TurnSender) (*models.Generation, []models.GenerationInput, []realtime.Publication, []turnToSend, error) {
 	allCommands := []models.CommandFields{}
 	for _, input := range inputs {
 		var playerCommands []models.CommandFields
 		if err := json.Unmarshal(input.Commands, &playerCommands); err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 		allCommands = append(allCommands, playerCommands...)
 	}
 	generationID, board, err := migrateGeneration(transaction, game.ID, allCommands)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	generations, err := dal.CountGenerationsForGame(transaction, game.ID)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	// A game that ends keeps this generation as its last one.
 	if outcome := simulation.Outcome(board, game.Teams, generations >= MaxGenerations); outcome != nil {
 		if err := dal.SaveGameOutcome(transaction, game, *outcome); err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 	}
 	generation, err := dal.GetGeneration(transaction, generationID)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	inputs, err = playGoBots(ctx, transaction, game, generation, players, nil)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	memories, err := dal.LoadBotMemories(transaction, game.ID)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	events, err := generationEvents(game, generation, players, inputs, memories)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
-	return generation, inputs, events, nil
+	turns, err := sender.sentTurns(game, generation, players, inputs, memories)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	return generation, inputs, events, turns, nil
 }
 
 // playGoBotTurns brings a game's Go bots up to date, and returns whether it
@@ -302,7 +328,8 @@ func playTurn(ctx context.Context, transaction *gorm.DB, game *models.Game, play
 // playing turns, each in its own transaction and pushed as it commits, until
 // the game ends or budget, goBotWriteBudget or goBotReadBudget, runs out. It
 // plays at least one turn. The next game request continues. A game without Go
-// bots costs one read of its roster.
+// bots costs one read of its roster. The turns of hosted and uploaded bots
+// that it creates are sent as each commits.
 func (service *GenerationService) playGoBotTurns(ctx context.Context, gameID uint, budget time.Duration) (bool, error) {
 	database := service.Database.WithContext(ctx)
 	players, err := dal.LoadFrozenPlayers(database, gameID)
@@ -318,6 +345,7 @@ func (service *GenerationService) playGoBotTurns(ctx context.Context, gameID uin
 	played := false
 	for ctx.Err() == nil {
 		var events []realtime.Publication
+		var turns []turnToSend
 		next := false
 		err := dal.WithLockedGame(database, gameID, func(transaction *gorm.DB, game *models.Game) error {
 			// Teams are saved with the first generation.
@@ -338,7 +366,7 @@ func (service *GenerationService) playGoBotTurns(ctx context.Context, gameID uin
 			if !turnComplete(game, generation, players, inputs) {
 				return nil
 			}
-			_, _, events, err = playTurn(ctx, transaction, game, players, inputs)
+			_, _, events, turns, err = playTurn(ctx, transaction, game, players, inputs, service.Bots)
 			next = game.Outcome == nil
 			return err
 		})
@@ -346,6 +374,7 @@ func (service *GenerationService) playGoBotTurns(ctx context.Context, gameID uin
 			return played, err
 		}
 		service.publish(ctx, events)
+		service.Bots.send(ctx, database, turns)
 		played = played || len(events) > 0
 		if !next || !time.Now().Before(stop) {
 			break

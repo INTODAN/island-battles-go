@@ -25,15 +25,17 @@ type FrozenGamePlayer struct {
 	BotLevel *uint
 	// BotURL is a hosted bot's URL, for BotKind hosted only.
 	BotURL *string `gorm:"column:bot_url"`
-	// BotPackageID, BotPackageKey and BotPackageLanguage name an uploaded
-	// bot's package, for BotKind uploaded only: its ID, its zip's key in the
-	// bot package bucket and its language, as they were at the start. Key
-	// and language are nil when the package was deleted in the moment
-	// between the start's ready check and the copy.
-	BotPackageID       *string `gorm:"column:bot_package_id;type:uuid"`
-	BotPackageKey      *string `gorm:"column:bot_package_key"`
-	BotPackageLanguage *string `gorm:"column:bot_package_language"`
-	CreatedAt          time.Time
+	// BotPackageID, BotPackageKey, BotPackageLanguage and
+	// BotPackageSizeBytes name an uploaded bot's package, for BotKind
+	// uploaded only: its ID, its zip's key in the bot package bucket, its
+	// language and its zip's size, as they were at the start. All but the
+	// ID are nil when the package was deleted in the moment between the
+	// start's ready check and the copy; that player passes every turn.
+	BotPackageID        *string `gorm:"column:bot_package_id;type:uuid"`
+	BotPackageKey       *string `gorm:"column:bot_package_key"`
+	BotPackageLanguage  *string `gorm:"column:bot_package_language"`
+	BotPackageSizeBytes *int64  `gorm:"column:bot_package_size_bytes"`
+	CreatedAt           time.Time
 }
 
 type GenerationInput struct {

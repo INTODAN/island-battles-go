@@ -1,4 +1,4 @@
-package main
+package native
 
 import (
 	"archive/zip"
@@ -180,7 +180,7 @@ func (fake *game) host() string {
 // runners' tests use, with the package and the submit URL given.
 func exampleEvent(t *testing.T, botPackage models.BotRunnerPackage, submitURL string, limits models.BotRunnerLimits) models.BotRunnerEvent {
 	t.Helper()
-	data, err := os.ReadFile("../../botrunner/testdata/event.json")
+	data, err := os.ReadFile("../testdata/event.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -678,6 +678,8 @@ func TestHostedModePostsTheDelivery(t *testing.T) {
 	}))
 	t.Cleanup(hosted.Close)
 	runner := newRunner(t, fake)
+	// The test's bot server is on this machine, as in local development.
+	runner.AllowLoopbackHosted = true
 	event := exampleEvent(t, models.BotRunnerPackage{}, fake.server.URL+"/generation/commands", fastLimits)
 	event.Package, event.Limits = nil, nil
 	event.Hosted = &models.BotRunnerHosted{URL: hosted.URL + "/turn"}
@@ -711,6 +713,7 @@ func TestHostedModeGivesUpAfterFiveSeconds(t *testing.T) {
 	hosted := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
 	t.Cleanup(func() { close(release); hosted.Close() })
 	runner := newRunner(t, fake)
+	runner.AllowLoopbackHosted = true
 	event := exampleEvent(t, models.BotRunnerPackage{}, fake.server.URL+"/generation/commands", fastLimits)
 	event.Package, event.Limits = nil, nil
 	event.Hosted = &models.BotRunnerHosted{URL: hosted.URL + "/turn"}
@@ -720,6 +723,60 @@ func TestHostedModeGivesUpAfterFiveSeconds(t *testing.T) {
 
 	if elapsed := time.Since(started); outcome.Outcome != "undelivered" || elapsed < deliveryTimeout || elapsed > deliveryTimeout+2*time.Second {
 		t.Errorf("outcome %+v after %v", outcome, elapsed)
+	}
+}
+
+// On Lambda a hosted bot's URL must pass hostedbot's rules again when its
+// turn is sent, and the delivery connects only to public addresses: a name
+// that resolves to this machine by then (DNS rebinding) reaches nothing.
+func TestHostedModeChecksTheURLAndTheAddressItConnectsTo(t *testing.T) {
+	fake := serveGame(t)
+	served := false
+	hosted := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { served = true }))
+	t.Cleanup(hosted.Close)
+	runner := newRunner(t, fake)
+	submitURL := fake.server.URL + "/generation/commands"
+	for _, refused := range []string{hosted.URL + "/turn", "http://bot.example.org/turn", "https://127.0.0.1/turn", "https://bot.example.org:8443/turn"} {
+		event := exampleEvent(t, models.BotRunnerPackage{}, submitURL, fastLimits)
+		event.Package, event.Limits = nil, nil
+		event.Hosted = &models.BotRunnerHosted{URL: refused}
+		if outcome, err := handle(t, runner, event); err == nil || !strings.Contains(err.Error(), "refused") {
+			t.Errorf("%s: outcome %+v, err %v; want the URL refused", refused, outcome, err)
+		}
+	}
+	// localhost passes the URL's rules, as a public name that now resolves
+	// to a loopback address would; the dialer refuses the address.
+	event := exampleEvent(t, models.BotRunnerPackage{}, submitURL, fastLimits)
+	event.Package, event.Limits = nil, nil
+	event.Hosted = &models.BotRunnerHosted{URL: "https://localhost/turn"}
+	outcome := mustHandle(t, runner, event)
+	if outcome.Outcome != "undelivered" || !strings.Contains(outcome.Reason, "private network") {
+		t.Errorf("outcome = %+v, want undelivered by the dialer", outcome)
+	}
+	if served || len(fake.taken()) != 0 {
+		t.Error("a refused hosted bot gets nothing, and nothing is submitted")
+	}
+}
+
+func TestHostedModeFollowsNoRedirects(t *testing.T) {
+	fake := serveGame(t)
+	redirected := false
+	target := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { redirected = true }))
+	t.Cleanup(target.Close)
+	hosted := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		http.Redirect(response, request, target.URL+"/elsewhere", http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(hosted.Close)
+	runner := newRunner(t, fake)
+	runner.AllowLoopbackHosted = true
+	event := exampleEvent(t, models.BotRunnerPackage{}, fake.server.URL+"/generation/commands", fastLimits)
+	event.Package, event.Limits = nil, nil
+	event.Hosted = &models.BotRunnerHosted{URL: hosted.URL + "/turn"}
+
+	outcome := mustHandle(t, runner, event)
+
+	if outcome != (Outcome{Outcome: "delivered", Status: http.StatusTemporaryRedirect}) || redirected {
+		t.Errorf("outcome = %+v, redirected = %v", outcome, redirected)
 	}
 }
 

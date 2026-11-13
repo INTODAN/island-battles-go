@@ -42,12 +42,17 @@ const notYourPackageMessage = "Your uploaded bot must be a package you uploaded;
 
 // ServerBots configures the bots that the server plays without a player's
 // tab: a hosted bot at a URL and an uploaded bot package. They are offered
-// only while Enabled (ISLAND_BATTLES_SERVER_BOTS=on); otherwise a player's
-// bot is their localhost bot or a default bot, as before.
+// only while Enabled (ISLAND_BATTLES_SERVER_BOTS, on by default); otherwise a
+// player's bot is their localhost bot or a default bot.
 type ServerBots struct {
 	Enabled bool
 	// Resolver looks up a hosted bot's host; nil is the system's.
 	Resolver hostedbot.Resolver
+	// LoopbackHosts also accepts a hosted bot on this machine, such as
+	// http://127.0.0.1:41414/turn (hostedbot.Loopback), which breaks the
+	// URL rules. Only the local server host sets it, for development, as its
+	// local runners deliver to such a URL.
+	LoopbackHosts bool
 }
 
 // BotRules are Island Battles' bot rules for its lobbies: which bots a
@@ -171,6 +176,9 @@ func (rules BotRules) ValidateMemberSettings(ctx context.Context, lobbyID string
 // checkURL checks a hosted bot's URL, resolving its host. A cancelled
 // request is reported as such, not as invalid settings.
 func (rules BotRules) checkURL(ctx context.Context, url string) error {
+	if rules.ServerBots.LoopbackHosts && hostedbot.Loopback(url) {
+		return nil
+	}
 	_, err := hostedbot.Check(ctx, rules.ServerBots.Resolver, url)
 	return err
 }
@@ -372,8 +380,8 @@ func (bot frozenBot) freeze(transaction *gorm.DB, lobbyID string, player *models
 			return err
 		}
 		if record != nil && record.Status == models.BotPackageReady {
-			key, language := record.S3Key, record.Language
-			player.BotPackageKey, player.BotPackageLanguage = &key, &language
+			key, language, size := record.S3Key, record.Language, record.SizeBytes
+			player.BotPackageKey, player.BotPackageLanguage, player.BotPackageSizeBytes = &key, &language, &size
 		}
 	}
 	return nil

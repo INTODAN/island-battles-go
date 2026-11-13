@@ -202,7 +202,7 @@ func newGameBinding(t *testing.T, db *gorm.DB, snapshot domain.Snapshot) *applic
 
 func newPublishingGameBinding(t *testing.T, db *gorm.DB, snapshot domain.Snapshot, publisher *testutils.RecordedPublisher) *application.GameBinding[models.BindingResult] {
 	t.Helper()
-	service, err := lobbyadapter.NewService(db, snapshotApplication{snapshot: snapshot}, publisher)
+	service, err := lobbyadapter.NewService(db, snapshotApplication{snapshot: snapshot}, publisher, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
