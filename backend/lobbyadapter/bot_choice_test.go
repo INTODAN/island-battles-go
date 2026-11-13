@@ -1,8 +1,6 @@
 package lobbyadapter_test
 
 import (
-	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,88 +8,16 @@ import (
 	"strings"
 	"testing"
 
-	"islandBattles/backend/handlers"
-	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/models"
-	"islandBattles/backend/routes"
 	"islandBattles/backend/services"
-	"islandBattles/lobby/application"
-	"islandBattles/lobby/auth"
 	"islandBattles/lobby/domain"
-	"islandBattles/lobby/playertoken"
 	lobbypostgres "islandBattles/lobby/postgres"
 
-	"github.com/danielgtaylor/huma/v2/humatest"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
-
-// lobbyStack serves the lobby API and the Island Battles routes on one
-// database, as the backend does, without Centrifugo.
-type lobbyStack struct {
-	t        *testing.T
-	database *gorm.DB
-	api      humatest.TestAPI
-}
-
-func newLobbyStack(t *testing.T) *lobbyStack {
-	t.Helper()
-	return newLobbyStackWith(t, services.ServerBots{})
-}
-
-// newLobbyStackWith is newLobbyStack with the server's bots configured, as
-// ISLAND_BATTLES_SERVER_BOTS does.
-func newLobbyStackWith(t *testing.T, serverBots services.ServerBots) *lobbyStack {
-	t.Helper()
-	database := testutils.InitTestDB(t)
-	clock := domain.SystemClock{}
-	identifiers := domain.CryptoIdentifiers{}
-	readLobbies := &lobbyadapter.Lobbies{}
-	policy := domain.DefaultPolicy(lobbyadapter.Registration(database, serverBots, readLobbies),
-		domain.GameRegistration{Key: "quiz-demo", ValidateSettings: func(context.Context, string, json.RawMessage, []domain.TeamDefinition) error { return nil }})
-	store, err := lobbypostgres.NewStore(database, clock)
-	if err != nil {
-		t.Fatal(err)
-	}
-	identities, err := lobbypostgres.NewIdentityStore(database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	authentication, err := auth.NewService(identities, clock, policy, identifiers, []byte(strings.Repeat("s", 32)), "ws://127.0.0.1:1/connection/websocket")
-	if err != nil {
-		t.Fatal(err)
-	}
-	lobbies, err := application.NewService(store, clock, identifiers, policy)
-	if err != nil {
-		t.Fatal(err)
-	}
-	readLobbies.API = lobbies
-	publisher := &testutils.RecordedPublisher{}
-	binding, err := lobbyadapter.NewService(database, lobbies, publisher, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The game verifies the lobby's player tokens in process, as the backend does.
-	keys, err := playertoken.ParseKeySet("test:" + base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("k", 32))))
-	if err != nil {
-		t.Fatal(err)
-	}
-	playerTokens, err := auth.NewPlayerTokens(keys, "https://lobby.example.test", playertoken.MaxLifetime, clock, policy)
-	if err != nil {
-		t.Fatal(err)
-	}
-	verifier, err := playertoken.NewVerifier("https://lobby.example.test", keys)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, api := humatest.New(t, routes.NewAPIConfig("test", "1.0.0"))
-	routes.SetupLobbyRoutes(api, lobbies, authentication, playerTokens, binding, nil,
-		&handlers.LobbyGame{Database: database, Players: handlers.PlayerTokens{Verifier: verifier}, Publisher: publisher})
-	routes.SetupRoutes(api, &handlers.Env{DB: database, ServerBots: serverBots.Enabled}, "")
-	return &lobbyStack{t: t, database: database, api: api}
-}
 
 // playerToken is a player token header for member, as clients send to the
 // game's routes.
@@ -360,19 +286,5 @@ func deleteLobby(t *testing.T, database *gorm.DB, lobbyID string) {
 	}
 	if err := database.Where(clause.Eq{Column: clause.Column{Name: "id"}, Value: lobbyID}).Delete(&lobbypostgres.RoomRecord{}).Error; err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestAQuizDemoLobbyGetsReadyWithoutABot(t *testing.T) {
-	stack := newLobbyStack(t)
-	alice, bob := stack.guest("Alice"), stack.guest("Bob")
-	room := stack.room("quiz-demo", alice, bob)
-	for _, member := range []guest{alice, bob} {
-		stack.expect(stack.ready(room, member), http.StatusOK, nil)
-	}
-	var started domain.Snapshot
-	stack.expect(stack.api.Post(stack.lobbyPath(room)+"/start", alice.header, map[string]any{}), http.StatusOK, &started)
-	if started.Lobby.Phase != domain.PhaseStarted {
-		t.Fatalf("quiz-demo phase = %s", started.Lobby.Phase)
 	}
 }

@@ -6,8 +6,6 @@ package demo
 import (
 	"embed"
 	"net/http"
-
-	"islandBattles/lobby/frontend"
 )
 
 //go:embed example-player.mjs lobby-settings.mjs bot-choice.mjs bot-packages.mjs localhost-bot.mjs
@@ -17,7 +15,12 @@ func Handler() http.Handler {
 	files := http.FileServer(http.FS(assets))
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		// These are scripts only; a deploy reaches players within five minutes.
-		response.Header().Set("Cache-Control", frontend.StaticAssetCacheControl)
+		response.Header().Set("Cache-Control", staticAssetCacheControl)
 		files.ServeHTTP(response, request)
 	})
 }
+
+// staticAssetCacheControl caches the scripts and styles beside the lobby page
+// for five minutes, as the lobby page caches its own, so a deploy reaches
+// players within five minutes without fingerprinted file names.
+const staticAssetCacheControl = "public, max-age=300"

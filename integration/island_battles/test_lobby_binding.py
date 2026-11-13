@@ -60,13 +60,18 @@ async def test_start_initializes_one_generation_and_binding_is_idempotent(guests
     alice, bob, scope = await started_lobby(guests, "island-battles")
     assert (await alice.snapshot(scope)).lobby.game_settings.to_dict() == {}
     assert await sql(f"SELECT count(*) FROM games WHERE lobby_id='{scope.lobby_id}' AND jsonb_array_length(teams) = 2 AND outcome IS NULL") == "1"
-    async with httpx.AsyncClient(base_url=BASE, headers={"Authorization": f"Bearer {alice.credential}"}) as adapter:
-        first = await adapter.post("/game/from-lobby", json={"game_key": scope.game_key, "lobby_id": scope.lobby_id})
-        replay = await adapter.post("/game/from-lobby", json={"game_key": scope.game_key, "lobby_id": scope.lobby_id})
-    assert first.status_code == replay.status_code == 200
-    assert first.json() == replay.json()
+    # Starting a started lobby again returns it and binds nothing new: the
+    # game bound the round once, through the lobby's start hook.
+    started = await alice.snapshot(scope)
+    again = await alice.start(scope)
+    assert (again.lobby.phase, again.lobby.round_, again.lobby.version) == ("started", 1, started.lobby.version)
     assert await sql(f"SELECT count(*) FROM games WHERE lobby_id='{scope.lobby_id}'") == "1"
-    game_id = first.json()["game_id"]
+    game_id = await sql(f"SELECT id FROM games WHERE lobby_id='{scope.lobby_id}'")
+    async with httpx.AsyncClient(base_url=BASE) as http:
+        # The retry route of the game is gone; the lobby's start retries.
+        gone = await http.post("/game/from-lobby", json={"game_key": scope.game_key, "lobby_id": scope.lobby_id},
+                               headers={"Authorization": f"Bearer {alice.credential}"})
+    assert gone.status_code in (404, 405)
     assert await sql(f"SELECT count(*) FROM generations WHERE game_id={game_id}") == "1"
     result_path = f"/game/from-lobby/{scope.lobby_id}/replay"
     async with httpx.AsyncClient(base_url=BASE) as client:
@@ -170,13 +175,13 @@ async def test_roster_keeps_game_access_after_lobby_is_deleted(guests):
 
 
 async def test_other_game_never_creates_island_state(guests):
-    _, _, scope = await started_lobby(guests, "quiz-demo")
+    _, _, scope = await started_lobby(guests, "mock-game")
     assert await sql(f"SELECT count(*) FROM games WHERE lobby_id='{scope.lobby_id}'") == "0"
 
 
 async def test_game_settings_reach_the_started_snapshot(guests):
-    settings = {"rounds": 3, "theme": {"name": "space", "dark": True}}
-    _, bob, scope = await started_lobby(guests, "quiz-demo", settings)
+    settings = {"turn_timeout_seconds": 120}
+    _, bob, scope = await started_lobby(guests, "island-battles", settings)
     started = await bob.snapshot(scope)
     assert started.lobby.phase == "started"
     assert started.lobby.game_settings.to_dict() == settings

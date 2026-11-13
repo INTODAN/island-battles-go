@@ -10,7 +10,6 @@ import (
 	"islandBattles/backend/models"
 	"islandBattles/backend/observability"
 	"islandBattles/lobby/domain"
-	"islandBattles/lobby/realtime"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"gorm.io/gorm"
@@ -50,7 +49,7 @@ func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 	if err != nil {
 		return models.BindingResult{}, err
 	}
-	var events []realtime.Publication
+	var events []Publication
 	var turns []turnToSend
 	// goBotsOnly is set when Go bots alone play the first turn, and have
 	// completed it.

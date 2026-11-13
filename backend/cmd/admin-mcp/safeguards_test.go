@@ -2,13 +2,13 @@ package main
 
 import (
 	"context"
+	"islandBattles/backend/schema"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
 
-	"islandBattles/backend/dependencies"
 	"islandBattles/backend/internal/testutils"
 
 	"gorm.io/gorm"
@@ -55,7 +55,7 @@ func TestAdvisoryLocksEndWithTheCall(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := dependencies.MigrateSchema(ctx, owner.WithContext(ctx)); err != nil {
+	if err := schema.Migrate(ctx, owner.WithContext(ctx)); err != nil {
 		t.Fatalf("the migrations waited for the admin server's lock: %v", err)
 	}
 	if locked := ownerValue(t, owner, "SELECT pg_try_advisory_lock(42)::text"); locked != "true" {

@@ -83,7 +83,7 @@ func seed(t *testing.T, database *gorm.DB) fixture {
 	}
 	create(t, database, &game)
 	ids.runningGameID = game.ID
-	create(t, database, &[]models.FrozenGamePlayer{{GameID: game.ID, PlayerID: ids.alice, TeamColor: 1}, {GameID: game.ID, PlayerID: ids.bob, TeamColor: 2}})
+	create(t, database, &[]models.FrozenGamePlayer{{GameID: game.ID, PlayerID: ids.alice, TeamColor: 1, DisplayName: "Alice"}, {GameID: game.ID, PlayerID: ids.bob, TeamColor: 2, DisplayName: "Bob"}})
 	if ids.firstGeneration, err = dal.CreateGenerationFromTemplate(database, templateID, game.ID); err != nil {
 		t.Fatal(err)
 	}

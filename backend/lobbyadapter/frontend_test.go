@@ -8,19 +8,18 @@ import (
 
 	"islandBattles/backend/demo"
 	"islandBattles/backend/demoviewer"
-	"islandBattles/backend/lobbyadapter"
 	"islandBattles/lobby/frontend"
 )
 
 func TestFrontendGameIsAValidCatalogEntry(t *testing.T) {
-	if _, err := frontend.Handler([]frontend.Game{lobbyadapter.FrontendGame()}); err != nil {
+	if _, err := frontend.Handler([]frontend.Game{catalogEntry(t)}); err != nil {
 		t.Fatal(err)
 	}
 }
 
 // The catalog's modules are served where main.go mounts the demo handler.
 func TestFrontendGameModulesAreServed(t *testing.T) {
-	game := lobbyadapter.FrontendGame()
+	game := catalogEntry(t)
 	handler := http.StripPrefix("/game/demo/", demo.Handler())
 	for _, module := range []string{game.ExamplePlayer.Module, game.SettingsModule, game.RoomModule} {
 		recorder := httptest.NewRecorder()
@@ -34,7 +33,7 @@ func TestFrontendGameModulesAreServed(t *testing.T) {
 // The room module reaches the lobby's bot packages, and nothing of the game
 // that a roster player reads.
 func TestFrontendGameRoomReachesTheBotPackages(t *testing.T) {
-	prefix := lobbyadapter.FrontendGame().RoomAPIPrefix
+	prefix := catalogEntry(t).RoomAPIPrefix
 	if prefix != "/game/lobbies/{lobby_id}/" || !strings.HasPrefix("/game/lobbies/{lobby_id}/bot-packages", prefix) {
 		t.Fatalf("room API prefix = %q", prefix)
 	}
@@ -45,7 +44,7 @@ func TestFrontendGameRoomReachesTheBotPackages(t *testing.T) {
 
 // The catalog links the demo viewer where app.go mounts it.
 func TestFrontendGameLinksTheDemoViewer(t *testing.T) {
-	links := lobbyadapter.FrontendGame().Links
+	links := catalogEntry(t).Links
 	if len(links) != 2 || links[0].Label != "Watch a saved demo" {
 		t.Fatalf("links = %+v", links)
 	}
@@ -63,7 +62,7 @@ func TestFrontendGameLinksTheDemoViewer(t *testing.T) {
 // A watcher's frame reads only the watcher routes: the catalog gives it a
 // prefix of their own, which names none of a player's reads.
 func TestFrontendGameWatchersReadOnlyTheWatchRoutes(t *testing.T) {
-	game := lobbyadapter.FrontendGame()
+	game := catalogEntry(t)
 	if game.WatchResultURL != "/game/from-lobby/{lobby_id}/watch/replay" || game.WatchDataURLPrefix != "/game/from-lobby/{lobby_id}/watch/" {
 		t.Fatalf("watch URLs = %q, %q", game.WatchResultURL, game.WatchDataURLPrefix)
 	}
@@ -82,8 +81,15 @@ func TestFrontendGameWatchersReadOnlyTheWatchRoutes(t *testing.T) {
 // The web client is served at /play/ by CloudFront, not the backend
 // (deploy/README.md, "The web client").
 func TestFrontendGameLinksThe3DClient(t *testing.T) {
-	links := lobbyadapter.FrontendGame().Links
+	links := catalogEntry(t).Links
 	if len(links) != 2 || links[1].Label != "Play in 3D" || links[1].URL != "/play/" {
 		t.Fatalf("links = %+v", links)
 	}
+}
+
+// catalogEntry is the lobby page's catalog entry of Island Battles, from
+// LobbyGame as the lobby reads it.
+func catalogEntry(t *testing.T) frontend.Game {
+	t.Helper()
+	return configuredGames(t)[0].Frontend
 }

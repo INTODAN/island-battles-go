@@ -197,7 +197,7 @@ func assertNoGameData(t *testing.T, database *gorm.DB) {
 	// The 12 tables of games, and island_bot_packages, which belongs to
 	// lobbies rather than games and is deleted on its own schedule.
 	if checked != 13 {
-		t.Errorf("checked %d game tables, want the 13 that MigrateSchema creates; update countGameRows for a new one", checked)
+		t.Errorf("checked %d game tables, want the 13 that schema.Migrate creates; update countGameRows for a new one", checked)
 	}
 }
 

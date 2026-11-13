@@ -10,6 +10,11 @@ export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/lobby-uv-cache}"
 # The backend requires it, though the clients under test submit with their
 # player's session.
 export ISLAND_BATTLES_SUBMIT_TOKEN_SECRET=conformance-submit-token-secret
+# Signs the lobby's calls of Island Battles' hooks, and Island Battles' calls
+# of the lobby's game API, in the backend's process: one secret by its two
+# names.
+export ISLAND_BATTLES_LOBBY_HOOK_SECRET=conformance-lobby-hook-secret-of-32-bytes
+export LOBBY_GAME_SECRET_ISLAND_BATTLES="$ISLAND_BATTLES_LOBBY_HOOK_SECRET"
 if [[ $# -gt 0 ]]; then
   export ISLAND_BATTLES_CLIENT_COMMAND="$1"
 fi

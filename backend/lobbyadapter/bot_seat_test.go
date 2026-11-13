@@ -124,14 +124,3 @@ func TestOnlyTheHostSeatsABotWhileTheLobbyWaits(t *testing.T) {
 		t.Fatalf("members after removing the seat = %+v", removed.Members)
 	}
 }
-
-func TestAQuizDemoLobbyRefusesBotSeats(t *testing.T) {
-	stack := newLobbyStack(t)
-	alice := stack.guest("Alice")
-	room := stack.soloRoom("quiz-demo", alice)
-	var refusal problem
-	stack.expect(stack.api.Post(stack.lobbyPath(room)+"/seats", alice.header, map[string]any{"team_id": room.Teams[1].ID, "seat_settings": map[string]any{"bot_level": 2}}), http.StatusUnprocessableEntity, &refusal)
-	if refusal.Code != "invalid_seat_settings" {
-		t.Fatalf("quiz-demo seat = %+v", refusal)
-	}
-}

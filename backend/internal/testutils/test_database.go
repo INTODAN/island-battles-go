@@ -3,6 +3,7 @@ package testutils
 import (
 	"context"
 	"islandBattles/backend/dependencies"
+	"islandBattles/backend/schema"
 	"log/slog"
 	"testing"
 	"time"
@@ -23,7 +24,7 @@ func InitTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("connect test database: %v", err)
 	}
 	closeWithTest(t, db)
-	if err := dependencies.MigrateSchema(context.Background(), db); err != nil {
+	if err := schema.Migrate(context.Background(), db); err != nil {
 		t.Fatalf("migrate test database: %v", err)
 	}
 	return db

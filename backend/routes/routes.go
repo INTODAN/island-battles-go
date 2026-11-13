@@ -4,13 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"islandBattles/backend/handlers"
-	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/models"
 	"islandBattles/backend/observability"
 	"islandBattles/backend/services"
-	"islandBattles/lobby/application"
-	"islandBattles/lobby/domain"
-	"islandBattles/lobby/httpapi"
 	"net/http"
 	"reflect"
 	"strings"
@@ -22,37 +18,26 @@ import (
 
 // NewAPIConfig names API view types without their View suffix, so generated
 // clients receive domain names such as Castle and Generation. It also bounds
-// every problem response, as httpapi.BoundErrorDetails describes, after
+// every problem response, as models.BoundErrorDetails describes, after
 // observability.RecordProblems has kept each 5xx problem whole for the
 // request's error line.
 func NewAPIConfig(title, version string) huma.Config {
 	config := huma.DefaultConfig(title, version)
-	config.Transformers = append(config.Transformers, observability.RecordProblems, httpapi.BoundErrorDetails)
+	config.Transformers = append(config.Transformers, observability.RecordProblems, models.BoundErrorDetails)
 	config.Components.Schemas = huma.NewMapRegistry("#/components/schemas/", func(t reflect.Type, hint string) string {
 		return strings.TrimSuffix(huma.DefaultSchemaNamer(t, hint), "View")
 	})
 	return config
 }
 
-// LobbyAuthentication verifies lobby sessions and issues connection tokens.
-type LobbyAuthentication interface {
-	domain.Authenticator
-	domain.ConnectionTokenIssuer
-}
-
-// SetupLobbyRoutes embeds reusable lobby commands and the explicit game binding.
-// Centrifugo's trusted proxy endpoints are registered separately from OpenAPI.
-// Lobby requests end with a lobby retention pass when one is due.
-// The game's own routes take the lobby's player tokens, which game.Players
-// verifies, instead of the guest credential.
-func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authentication LobbyAuthentication, playerTokens domain.PlayerTokenIssuer, gameBinding *application.GameBinding[models.BindingResult], retention domain.RetentionRunner, game *handlers.LobbyGame) {
-	httpapi.Register(api, lobbyadapter.WithGameStart(lobbyApplication, gameBinding), authentication, authentication, playerTokens, retention)
-	lobbyadapter.Register(api, gameBinding, authentication)
-	api.OpenAPI().Paths["/lobby/v1/games/{game_key}/lobbies/{lobby_id}/start"].Post.Description += " Island Battles initializes one playable generation and waits for every frozen roster player to complete their turn. Retrying resumes a failed initialization. Each roster player plays with the bot in their member_settings, and each bot seat with the bot in its seat_settings, which the game copies at the start and GenerationState.bot reports; a roster player without one fails the start with game_requirement of type " + services.BotNotChosenProblemType + ", and a player or seat whose uploaded bot is no longer a ready package of the lobby with type " + services.BotPackageGoneProblemType + "."
-	api.OpenAPI().Paths["/lobby/v1/games/{game_key}/lobbies/{lobby_id}/seats"].Post.Description += ` Island Battles seats a bot, whose seat_settings are a BotSeatSettings: {"bot_level": N} with a level that GET /bots/defaults lists, a default bot that the backend plays, named "Bot (level N)". When GET /bots/defaults says server_bots, also {"bot_url": "https://…"}, a hosted bot under the rules of MemberBot's url, named "Hosted bot", or {"bot_package_id": "…"}, any ready bot package of the lobby, named after its owner, such as "Alex's bot"; the server plays both.`
-	api.OpenAPI().Paths["/lobby/v1/games/{game_key}/lobbies/{lobby_id}/settings"].Put.Description += " Island Battles checks game_settings as on create, as its LobbySettings: a default map that exists, or a map file, whose player_amount equals the number of teams sent, and a turn_timeout_seconds from 5 to 600 or null. Send one team per colour of the new map. The start uses the map and turn timeout set last."
-	api.OpenAPI().Paths["/lobby/v1/games/{game_key}/lobbies/{lobby_id}/ready"].Put.Description += " Island Battles requires a bot in your member_settings first, set with setLobbyMemberSettings, and refuses to set a member without one ready with game_requirement of type " + services.BotNotChosenProblemType + ". An uploaded bot must still be a ready package of yours in the lobby: one that was replaced or deleted, or that someone else uploaded, is refused with type " + services.BotPackageGoneProblemType + "."
-	api.OpenAPI().Paths["/lobby/v1/games/{game_key}/lobbies/{lobby_id}/member-settings"].Put.Description += ` Island Battles' member_settings are a MemberSettings, naming your bot: {"bot": {"kind": "localhost"}} for your own bot, which island-battles-bot serve runs on your machine and your game client relays each turn to, or {"bot": {"kind": "default", "level": N}} with a level that GET /bots/defaults lists, for a default bot that the backend plays itself. When GET /bots/defaults says server_bots, also {"bot": {"kind": "hosted", "url": "https://…"}} for your own bot server at a public URL, or {"bot": {"kind": "uploaded", "package_id": "…"}} for one of your bot packages in the lobby; the server plays both, without your game client. Anything else is invalid_member_settings. You choose a bot before getting ready, and can change it while the lobby waits. When the lobby starts, the game copies each roster player's bot, which GenerationState.bot reports from then on.`
+// SetupGameRoutes registers the routes of a player's Island Battles game,
+// which take the lobby's player tokens, verified by game.Players, instead of
+// the lobby's guest credential. The lobby's own routes are the host's to
+// register, and the game reads the lobby only through its game API.
+func SetupGameRoutes(api huma.API, game *handlers.LobbyGame) {
+	if api.OpenAPI().Components.SecuritySchemes == nil {
+		api.OpenAPI().Components.SecuritySchemes = map[string]*huma.SecurityScheme{}
+	}
 	api.OpenAPI().Components.SecuritySchemes[PlayerTokenScheme] = &huma.SecurityScheme{Type: "http", Scheme: "bearer", BearerFormat: "JWT",
 		Description: "A player token for the island-battles game, from POST /lobby/v1/player-tokens with game_key island-battles: a JWT signed with EdDSA that the game verifies with the lobby's public keys, GET /lobby/v1/jwks.json, without reading the lobby. It lasts at most 15 minutes, until its expires_at; get a new one before then, at about 80 % of its life, and once more when a request answers 401. " +
 			"The guest credential of POST /lobby/v1/sessions is refused here: a missing, expired or invalid token is 401."}
@@ -211,15 +196,20 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 	turnDelivery.Description = "One turn delivered to a bot that runs outside the backend, such as the player's own bot server: the BotTurn to play, and where and with which submit token to submit the answer. A bot server answers the delivery with 202 at once and submits its BotTurnResult itself as one completing batch."
 	// Sent inside the generic lobby create request as its game_settings.
 	settings := registry.SchemaFromRef(registry.Schema(reflect.TypeOf(models.LobbySettings{}), true, "").Ref)
-	settings.Description = "Island Battles game_settings for a lobby create request. Choose at most one map: map_template_id or map. The map must be made for exactly the lobby's teams: player_amount equal to the team count, and castle team colours exactly 1 to that count, in team order, with 0 for neutral castles. Without a map the game starts on a generated map. turn_timeout_seconds sets how long each turn lasts, from 5 to 600 seconds, 30 when left out, or null for no limit. An invalid choice fails lobby creation with invalid_game_settings, and its detail names each invalid field, such as game_settings.map.castles[0].x."
-	api.OpenAPI().Paths["/lobby/v1/lobbies"].Post.Description += " Island Battles reads game_settings as the LobbySettings schema."
+	settings.Description = "Island Battles game_settings for a lobby create request. Choose at most one map: map_template_id or map. The map must be made for exactly the lobby's teams: player_amount equal to the team count, and castle team colours exactly 1 to that count, in team order, with 0 for neutral castles. Without a map the game starts on a generated map. turn_timeout_seconds sets how long each turn lasts, from 5 to 600 seconds, 30 when left out, or null for no limit. An invalid choice fails lobby creation with invalid_game_settings, and its detail names each invalid field, such as game_settings.map.castles[0].x. " +
+		"The host can change them while the lobby waits, with the lobby's changeLobbySettings (PUT …/settings), which checks them as on create: send one team per colour of the new map. The start uses the map and turn timeout set last."
 	// Sent inside the generic lobby requests as member_settings and seat_settings.
 	memberSettings := registry.SchemaFromRef(registry.Schema(reflect.TypeOf(models.MemberSettingsView{}), true, "").Ref)
-	memberSettings.Description = "Island Battles member_settings for setLobbyMemberSettings: the bot that plays for you."
+	memberSettings.Description = "Island Battles member_settings for setLobbyMemberSettings: the bot that plays for you. " +
+		"{\"bot\": {\"kind\": \"localhost\"}} is your own bot, which island-battles-bot serve runs on your machine and your game client relays each turn to, and {\"bot\": {\"kind\": \"default\", \"level\": N}} a default bot of a level that GET /bots/defaults lists, which the backend plays itself. " +
+		"When GET /bots/defaults says server_bots, also {\"bot\": {\"kind\": \"hosted\", \"url\": \"https://…\"}}, your own bot server at a public URL, or {\"bot\": {\"kind\": \"uploaded\", \"package_id\": \"…\"}}, one of your bot packages in the lobby; the server plays both, without your game client. Anything else is invalid_member_settings. " +
+		"You choose a bot before getting ready, and can change it while the lobby waits: getting ready without one is refused with game_requirement of type " + services.BotNotChosenProblemType + ", and an uploaded bot that is no longer a ready package of yours in the lobby, replaced, deleted or someone else's, with type " + services.BotPackageGoneProblemType + ". " +
+		"The start checks every roster player and bot seat the same way. It then initializes one playable generation, which waits for every frozen roster player to complete their turn, and copies each roster player's bot, and each bot seat's, which GenerationState.bot reports from then on."
 	memberBot := registry.SchemaFromRef(registry.Schema(reflect.TypeOf(models.MemberBotView{}), true, "").Ref)
 	memberBot.Description = "The bot you choose for yourself. Send only the field of its kind: level for default, url for hosted, package_id for uploaded, and none for localhost. A hosted bot's URL is https://, at most 2048 characters, without credentials, on port 443 or none, and names a host, not an IP address, whose addresses are all public: not loopback, private, link-local or unique-local. The server resolves it when you choose it, and again before it sends each turn. An uploaded bot is one of your ready packages in the lobby; if you replace or delete it, choose it again before getting ready."
 	seatSettings := registry.SchemaFromRef(registry.Schema(reflect.TypeOf(models.BotSeatSettingsView{}), true, "").Ref)
-	seatSettings.Description = "Island Battles seat_settings for a bot seat that the host adds with POST …/seats: exactly one of bot_level, bot_url and bot_package_id."
+	seatSettings.Description = "Island Battles seat_settings for a bot seat that the host adds with POST …/seats: exactly one of bot_level, bot_url and bot_package_id. " +
+		"{\"bot_level\": N}, with a level that GET /bots/defaults lists, is a default bot that the backend plays, named \"Bot (level N)\". When GET /bots/defaults says server_bots, also {\"bot_url\": \"https://…\"}, a hosted bot under the rules of MemberBot's url, named \"Hosted bot\", or {\"bot_package_id\": \"…\"}, any ready bot package of the lobby, named after its owner, such as \"Alex's bot\"; the server plays both. A seat whose package is gone by the start stops it with game_requirement of type " + services.BotPackageGoneProblemType + "."
 }
 
 // SubmitTokenScheme names the security scheme of the submit tokens that turn

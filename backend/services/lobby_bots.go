@@ -213,52 +213,79 @@ func isUUID(value string) bool {
 // ReadyGate is the lobby's ready gate for Island Battles: a member may get
 // ready, and a roster start, only once their member settings name a bot,
 // and an uploaded bot only while it is a ready package of theirs in the
-// lobby. While server bots are offered, the gate reads the lobby's ready
-// packages before the check, and the lobby's members with seats, since the
-// lobby passes no seats to the check: at the start, a bot seat whose package
-// is gone stops it too. seats may be nil, which checks no seats.
+// lobby. While server bots are offered, the check also reads the lobby's
+// bot seats at the start, with seats, since the lobby passes no seats to the
+// check: a bot seat whose package is gone stops the start too. seats may be
+// nil, which checks no seats.
+//
+// The lobby runs the check while it holds the lobby's lock, so the check
+// reads as little as it can: nothing for a member getting ready without an
+// uploaded bot, and the lobby's packages only when a member or a seat has
+// an uploaded bot.
 func (rules BotRules) ReadyGate(ctx context.Context, lobbyID string, seats func(context.Context) ([]domain.Member, error)) (domain.ReadyCheck, error) {
 	if !rules.ServerBots.Enabled {
 		return func(members []domain.ReadyMember, atStart bool) error {
 			return checkMembersReady(members, atStart, false, nil)
 		}, nil
 	}
-	records, err := dal.ListBotPackages(rules.Database.WithContext(ctx), lobbyID)
-	if err != nil {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		return nil, fmt.Errorf("%w: read the lobby's bot packages: %w", domain.ErrUnavailable, err)
-	}
-	owners := make(map[string]string, len(records))
-	for _, record := range records {
-		owners[record.PackageID] = record.OwnerPlayerID
-	}
-	var goneSeats []string
-	if seats != nil {
-		members, err := seats(ctx)
+	return func(members []domain.ReadyMember, atStart bool) error {
+		return rules.checkReady(ctx, lobbyID, seats, members, atStart)
+	}, nil
+}
+
+func (rules BotRules) checkReady(ctx context.Context, lobbyID string, seats func(context.Context) ([]domain.Member, error), members []domain.ReadyMember, atStart bool) error {
+	var packageSeats []domain.Member
+	if atStart && seats != nil {
+		lobbyMembers, err := seats(ctx)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		for _, member := range members {
+		for _, member := range lobbyMembers {
 			if !member.IsSeat() {
 				continue
 			}
-			settings, err := seatSettings(member.SeatSettings, true)
-			if err == nil && settings.BotPackageID != "" && owners[settings.BotPackageID] == "" {
-				goneSeats = append(goneSeats, member.DisplayName)
+			if settings, err := seatSettings(member.SeatSettings, true); err == nil && settings.BotPackageID != "" {
+				packageSeats = append(packageSeats, member)
 			}
 		}
 	}
-	return func(members []domain.ReadyMember, atStart bool) error {
-		if err := checkMembersReady(members, atStart, true, owners); err != nil {
-			return err
+	var owners map[string]string
+	if len(packageSeats) > 0 || choseUploadedBot(members) {
+		records, err := dal.ListBotPackages(rules.Database.WithContext(ctx), lobbyID)
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return fmt.Errorf("%w: read the lobby's bot packages: %w", domain.ErrUnavailable, err)
 		}
-		if atStart && len(goneSeats) > 0 {
-			return domain.GameRequirement(BotPackageGoneProblemType, "The uploaded bot of "+strings.Join(goneSeats, ", ")+" was replaced or deleted: remove the seat and add the bot again.")
+		owners = make(map[string]string, len(records))
+		for _, record := range records {
+			owners[record.PackageID] = record.OwnerPlayerID
 		}
-		return nil
-	}, nil
+	}
+	if err := checkMembersReady(members, atStart, true, owners); err != nil {
+		return err
+	}
+	var goneSeats []string
+	for _, member := range packageSeats {
+		if settings, _ := seatSettings(member.SeatSettings, true); owners[settings.BotPackageID] == "" {
+			goneSeats = append(goneSeats, member.DisplayName)
+		}
+	}
+	if len(goneSeats) > 0 {
+		return domain.GameRequirement(BotPackageGoneProblemType, "The uploaded bot of "+strings.Join(goneSeats, ", ")+" was replaced or deleted: remove the seat and add the bot again.")
+	}
+	return nil
+}
+
+// choseUploadedBot reports whether a member's settings name an uploaded bot.
+func choseUploadedBot(members []domain.ReadyMember) bool {
+	for _, member := range members {
+		if bot, err := MemberBot(member.Settings, true); err == nil && bot.Kind == models.UploadedBot {
+			return true
+		}
+	}
+	return false
 }
 
 // checkMembersReady refuses members without a bot, then members whose

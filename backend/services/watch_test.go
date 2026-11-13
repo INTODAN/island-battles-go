@@ -15,7 +15,6 @@ import (
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
 	"islandBattles/lobby/domain"
-	"islandBattles/lobby/realtime"
 )
 
 // lobbyWatchers stands in for the lobby's watcher rows: the players who may
@@ -49,10 +48,10 @@ func (failingWatchers) AuthorizeWatch(context.Context, domain.Principal, domain.
 // together.
 type batchPublisher struct {
 	mutex   sync.Mutex
-	batches [][]realtime.Publication
+	batches [][]services.Publication
 }
 
-func (publisher *batchPublisher) Publish(_ context.Context, publications ...realtime.Publication) error {
+func (publisher *batchPublisher) Publish(_ context.Context, publications ...services.Publication) error {
 	publisher.mutex.Lock()
 	defer publisher.mutex.Unlock()
 	publisher.batches = append(publisher.batches, publications)

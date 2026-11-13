@@ -3,9 +3,7 @@ package dependencies
 import (
 	"context"
 	"fmt"
-	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
-	lobbypostgres "islandBattles/lobby/postgres"
 	"log/slog"
 	"time"
 
@@ -25,7 +23,7 @@ const ConnectTimeout = 5 * time.Second
 
 // InitDB connects to the database with a bounded pool. It runs no DDL, so a
 // Lambda cold start stays fast and concurrent starts don't race; the schema
-// comes from MigrateSchema, which runs once per deploy. It returns errors to
+// comes from schema.Migrate, which runs once per deploy. It returns errors to
 // bootstrap instead of terminating the process from a reusable dependency.
 //
 // GORM logs failed and slow queries through logger, so they share the host's
@@ -89,18 +87,10 @@ func (handler warningsAtMost) WithGroup(name string) slog.Handler {
 	return warningsAtMost{handler.Handler.WithGroup(name)}
 }
 
-// MigrateSchema brings the database to the schema this build expects. The
-// migrate command runs it once per deploy, before any host serves requests.
-// It runs the lobby and map template migrations, which keep their rows, and
-// then AutoMigrates the game tables, whose data may be reset. Game tables
-// come last so that they may reference templates.
-func MigrateSchema(ctx context.Context, db *gorm.DB) error {
-	if err := lobbypostgres.Migrate(ctx, db); err != nil {
-		return fmt.Errorf("migrate lobby schema: %w", err)
-	}
-	if err := dal.MigrateMapTemplates(ctx, db); err != nil {
-		return fmt.Errorf("migrate map template schema: %w", err)
-	}
+// MigrateGameSchema AutoMigrates the game tables, whose data may be reset.
+// schema.Migrate runs it last, after the lobby's and the map templates'
+// migrations, so that game tables may reference templates.
+func MigrateGameSchema(ctx context.Context, db *gorm.DB) error {
 	// A lobby plays one game per round, so the unique index on a game's
 	// lobby alone gives way to one on its lobby and round. AutoMigrate never
 	// drops an index, so it goes here, before AutoMigrate creates the new

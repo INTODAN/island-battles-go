@@ -12,7 +12,7 @@ type GenerationLogsResponse struct{ Body models.GenerationLogs }
 func (handler *LobbyGame) GenerationLogs(ctx context.Context, input *struct {
 	LobbyID string `path:"lobby_id" format:"uuid"`
 	// The service checks the generation after authorizing the caller, so a
-	// caller off the roster learns nothing from a 422. SetupLobbyRoutes
+	// caller off the roster learns nothing from a 422. SetupGameRoutes
 	// documents the parameter as required.
 	GenerationID  uint   `query:"generation_id" doc:"The generation whose lines to read, from Generation.id."`
 	Authorization string `header:"Authorization"`

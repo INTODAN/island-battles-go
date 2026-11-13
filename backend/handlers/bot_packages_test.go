@@ -39,10 +39,10 @@ type packageLobbies struct {
 	members map[string][]domain.Member
 }
 
-func (lobbies *packageLobbies) GameSnapshot(_ context.Context, scope domain.Scope) (domain.Snapshot, error) {
+func (lobbies *packageLobbies) Snapshot(_ context.Context, lobbyID string) (domain.Snapshot, error) {
 	lobbies.mutex.Lock()
 	defer lobbies.mutex.Unlock()
-	members, found := lobbies.members[scope.LobbyID]
+	members, found := lobbies.members[lobbyID]
 	if !found {
 		return domain.Snapshot{}, domain.ErrNotFound
 	}
@@ -52,11 +52,7 @@ func (lobbies *packageLobbies) GameSnapshot(_ context.Context, scope domain.Scop
 			active = append(active, member)
 		}
 	}
-	return domain.Snapshot{Lobby: domain.Lobby{ID: scope.LobbyID, GameKey: scope.GameKey}, Members: active}, nil
-}
-
-func (*packageLobbies) AuthorizeGameWatch(context.Context, domain.Scope, string) error {
-	return domain.ErrNotFound
+	return domain.Snapshot{Lobby: domain.Lobby{ID: lobbyID, GameKey: "island-battles"}, Members: active}, nil
 }
 
 func (lobbies *packageLobbies) leave(lobbyID, playerID string) {
@@ -116,7 +112,7 @@ func newPackageWorld(t *testing.T) *packageWorld {
 	now := time.Now()
 	world.clock = &now
 	handler := &handlers.BotPackages{Players: sessionAuthentication{[]string{world.alex, world.sam, world.outsider}}, Service: services.BotPackages{
-		Database: testutils.InitTestDB(t), Lobbies: world.lobbies, GameKey: "island-battles", Store: world.store, Tokens: signer, Now: func() time.Time { return *world.clock }}}
+		Database: testutils.InitTestDB(t), Lobbies: world.lobbies, Store: world.store, Tokens: signer, Now: func() time.Time { return *world.clock }}}
 	_, world.api = humatest.New(t)
 	routes.SetupBotPackageRoutes(world.api, handler)
 	return world
@@ -463,7 +459,7 @@ func TestAServerWithoutStorageAnswers503(t *testing.T) {
 	_, api := humatest.New(t)
 	player := uuid.NewString()
 	routes.SetupBotPackageRoutes(api, &handlers.BotPackages{Players: sessionAuthentication{[]string{player}},
-		Service: services.BotPackages{Lobbies: &packageLobbies{}, GameKey: "island-battles"}})
+		Service: services.BotPackages{Lobbies: &packageLobbies{}}})
 	lobby := "/game/lobbies/" + uuid.NewString() + "/bot-packages"
 	for name, response := range map[string]*httptest.ResponseRecorder{
 		"start":        api.Post(lobby, "Authorization: Bearer "+player, map[string]any{"file_name": "bot.zip"}),

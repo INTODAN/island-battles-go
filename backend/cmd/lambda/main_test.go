@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"islandBattles/backend/lobbyadapter"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -97,8 +98,14 @@ func testConfig(t *testing.T, database *gorm.DB) dependencies.Config {
 		GameRetentionPeriod:       retention.DefaultPeriod,
 		PlayerTokenKeys:           testPlayerTokenKeys(t),
 		PlayerTokenLifetime:       playertoken.MaxLifetime,
+		LobbyHookSecret:           []byte(testHookSecret),
+		LobbyGameSecrets:          map[string]string{lobbyadapter.SecretEnv: testHookSecret},
 	}
 }
+
+// testHookSecret signs the lobby's calls of the game's hooks, and the game's
+// of the lobby's game API.
+const testHookSecret = "test-lobby-hook-secret-of-32-bytes"
 
 func testPlayerTokenKeys(t *testing.T) *playertoken.KeySet {
 	t.Helper()
@@ -218,8 +225,22 @@ var publicRoutes = map[string]string{
 	"GET /schemas/{schema}":   "API schemas",
 }
 
+// signedMounts serve only operations that check a Lobby-Signature: the
+// lobby's game API and the game's hooks. A mount answers a path without an
+// operation with 404, so each is checked with its operations' paths.
+var signedMounts = map[string][]string{
+	"/lobby/v1/game-api/*": {
+		"GET /lobby/v1/game-api/games/island-battles/lobbies/00000000-0000-4000-8000-000000000001",
+		"POST /lobby/v1/game-api/games/island-battles/lobbies/00000000-0000-4000-8000-000000000001/authorize-watch",
+	},
+	"/game/lobby-hooks/*": {
+		"POST /game/lobby-hooks/validate-settings", "POST /game/lobby-hooks/validate-seat", "POST /game/lobby-hooks/validate-member-settings",
+		"POST /game/lobby-hooks/ready-check", "POST /game/lobby-hooks/start", "POST /game/lobby-hooks/round-ended",
+	},
+}
+
 // Every other route must refuse a request without credentials: no bearer
-// token, no admin key and no proxy secret.
+// token, no admin key, no proxy secret and no Lobby-Signature.
 func TestTheLambdaHostServesOnlyListedRoutesWithoutAuthentication(t *testing.T) {
 	database := testutils.InitTestDB(t)
 	config := testConfig(t, database)
@@ -242,6 +263,9 @@ func TestTheLambdaHostServesOnlyListedRoutesWithoutAuthentication(t *testing.T) 
 		if _, public := publicRoutes[route]; public {
 			return nil
 		}
+		if _, signed := signedMounts[route]; signed {
+			return nil
+		}
 		path := parameter.ReplaceAllString(route, "00000000-0000-4000-8000-000000000001")
 		response, content := call(t, invoke, method, path, `{}`, "")
 		if response.StatusCode != http.StatusUnauthorized && response.StatusCode != http.StatusForbidden {
@@ -254,6 +278,17 @@ func TestTheLambdaHostServesOnlyListedRoutesWithoutAuthentication(t *testing.T) 
 	}
 	if guarded == 0 {
 		t.Fatal("found no authenticated routes")
+	}
+	for mount, operations := range signedMounts {
+		if !router.Match(chi.NewRouteContext(), http.MethodPost, strings.TrimSuffix(mount, "*")+"x") {
+			t.Fatalf("%s is not served", mount)
+		}
+		for _, operation := range operations {
+			method, path, _ := strings.Cut(operation, " ")
+			if response, content := call(t, invoke, method, path, `{}`, ""); response.StatusCode != http.StatusUnauthorized {
+				t.Fatalf("%s answered %d without a Lobby-Signature: %.300s", operation, response.StatusCode, content)
+			}
+		}
 	}
 	if router.Match(chi.NewRouteContext(), http.MethodGet, "/game/1/graph") {
 		t.Fatal("the Lambda host serves the graph page")

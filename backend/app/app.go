@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -31,10 +32,13 @@ import (
 	"islandBattles/lobby/auth"
 	"islandBattles/lobby/domain"
 	"islandBattles/lobby/frontend"
+	"islandBattles/lobby/gamehooks"
+	"islandBattles/lobby/httpapi"
 	"islandBattles/lobby/playertoken"
 	lobbypostgres "islandBattles/lobby/postgres"
 	"islandBattles/lobby/realtime"
 
+	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 	"gorm.io/gorm"
@@ -90,16 +94,42 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	}
 	clock := domain.SystemClock{}
 	identifiers := domain.CryptoIdentifiers{}
-	// The start's ready check reads the lobby's bot seats through the lobby
-	// service, which needs the policy first.
-	lobbies := &lobbyadapter.Lobbies{}
-	policy := domain.DefaultPolicy(
-		lobbyadapter.Registration(database, services.ServerBots{Enabled: config.ServerBots, LoopbackHosts: selected.localRunners != nil}, lobbies),
-		// quiz-demo only shows that a second game can share the lobby. With no
-		// game behind it to read settings, it accepts any object. It has no
-		// seats, so it refuses every seat the host tries to add.
-		domain.GameRegistration{Key: "quiz-demo", ValidateSettings: func(context.Context, string, json.RawMessage, []domain.TeamDefinition) error { return nil }},
-	)
+	// The lobby and the game talk HTTP. While the lobby runs in this process,
+	// the lobby's hook calls and the game's game API calls reach the other
+	// side's handler in memory, through loopback; both handlers are set below.
+	var hooks, gameAPI http.Handler
+	loopback := &Loopback{}
+	gameAPIURL := config.LobbyURL
+	var hookOptions []gamehooks.Option
+	if config.LobbyURL == "" {
+		gameAPIURL = LoopbackOrigin
+		loopback.Handle(LoopbackOrigin+gamehooks.GameAPIPath, func() http.Handler { return gameAPI })
+		hookOptions = append(hookOptions, gamehooks.WithHTTPClient(loopback.Client()))
+	}
+	lobbyGames, err := config.LobbyGamesConfig()
+	if err != nil {
+		return nil, err
+	}
+	games, err := gamehooks.ParseGames(lobbyGames, config.LookupLobbyGameSecret, hookOptions...)
+	if err != nil {
+		return nil, err
+	}
+	catalog := make([]frontend.Game, 0, len(games))
+	for _, game := range games {
+		catalog = append(catalog, game.Frontend)
+	}
+	if config.LobbyURL == "" {
+		hooksURL, err := islandBattlesHooksURL(lobbyGames)
+		if err != nil {
+			return nil, err
+		}
+		loopback.Handle(hooksURL, func() http.Handler { return hooks })
+	}
+	policy := domain.DefaultPolicy(gamehooks.Registrations(games)...)
+	lobbyClient, err := gamehooks.NewGameAPIClient(lobbyadapter.GameKey, gameAPIURL, config.LobbyHookSecret, gamehooks.WithHTTPClient(loopback.Client()))
+	if err != nil {
+		return nil, err
+	}
 	// Requests push their own committed changes, so nothing runs between requests.
 	publisher, err := realtime.NewPublisher(dependencies.ConnectCentrifugoClient(config), logger, realtime.DefaultPushRetry())
 	if err != nil {
@@ -125,7 +155,12 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	if err != nil {
 		return nil, err
 	}
-	lobbies.API = lobbyService
+	gameAPIRouter := chi.NewMux()
+	httpapi.RegisterGameAPI(humachi.New(gameAPIRouter, undocumented("Lobby game API")), lobbyService, gamehooks.Secrets(games))
+	gameAPI = gameAPIRouter
+	// The game publishes its events with the lobby's publisher, until the
+	// game has a Centrifugo client of its own.
+	gamePublisher := publications{publisher}
 	retentionStore, err := lobbypostgres.NewRetentionStore(database)
 	if err != nil {
 		return nil, err
@@ -180,7 +215,8 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	if err != nil {
 		return nil, err
 	}
-	gameBinding, err := lobbyadapter.NewService(database, lobbyService, publisher, bots)
+	serverBots := services.ServerBots{Enabled: config.ServerBots, LoopbackHosts: selected.localRunners != nil}
+	hooks, err = lobbyadapter.Hooks(config.LobbyHookSecret, lobbyadapter.Registration(database, gamePublisher, bots, serverBots, lobbyClient))
 	if err != nil {
 		return nil, err
 	}
@@ -214,15 +250,20 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	if selected.gameGraph {
 		routes.SetupGameGraphRoute(api, &environment)
 	}
-	routes.SetupLobbyRoutes(api, lobbyService, authenticated, playerTokens, gameBinding, lobbyRetention, &handlers.LobbyGame{Database: database, Players: handlers.PlayerTokens{Verifier: playerVerifier}, Publisher: publisher, Retention: gameRetention, Watchers: lobbyService,
+	httpapi.Register(api, lobbyService, authenticated, authenticated, playerTokens, lobbyRetention)
+	routes.SetupGameRoutes(api, &handlers.LobbyGame{Database: database, Players: handlers.PlayerTokens{Verifier: playerVerifier}, Publisher: gamePublisher, Retention: gameRetention, Watchers: lobbyClient,
 		SubmitTokens: submitTokens, PublicURL: config.PublicURL, Bots: bots})
 	routes.SetupBotPackageRoutes(api, &handlers.BotPackages{Players: handlers.PlayerTokens{Verifier: playerVerifier}, Service: services.BotPackages{
-		Database: database, Lobbies: lobbyService, GameKey: lobbyadapter.GameKey, Store: packages, Tokens: uploadTokens}})
+		Database: database, Lobbies: lobbyClient, Store: packages, Tokens: uploadTokens}})
+	// The lobby's game API, which games sign their calls of, and the game's
+	// hooks, which the lobby signs its calls of.
+	router.Handle(gamehooks.GameAPIPath+"/*", gameAPI)
+	router.Handle(lobbyadapter.HooksPath+"/*", hooks)
 	if config.BotPackagesBucket == "" && selected.localPackagesHandler != nil {
 		router.Handle(selected.localPackagesPrefix+"/*", selected.localPackagesHandler)
 	}
 	proxy.Register(router)
-	if err := registerPages(router); err != nil {
+	if err := registerPages(router, catalog); err != nil {
 		return nil, err
 	}
 	router.Get("/healthz", healthz(Version))
@@ -286,13 +327,13 @@ func (authentication annotatingAuthentication) Authenticate(ctx context.Context,
 
 // registerPages serves the embedded browser pages, which need no files beside
 // the binary. The bare name opens the lobby.
-func registerPages(router chi.Router) error {
+func registerPages(router chi.Router, games []frontend.Game) error {
 	toLobby := func(response http.ResponseWriter, request *http.Request) {
 		http.Redirect(response, request, "/lobby/ui/", http.StatusTemporaryRedirect)
 	}
 	router.Get("/", toLobby)
 	router.Get("/lobby/ui", toLobby)
-	lobbyFrontend, err := frontend.Handler([]frontend.Game{lobbyadapter.FrontendGame()})
+	lobbyFrontend, err := frontend.Handler(games)
 	if err != nil {
 		return err
 	}
@@ -315,4 +356,45 @@ func registerPages(router chi.Router) error {
 	})
 	router.Handle("/game/demo-viewer/*", http.StripPrefix("/game/demo-viewer/", demoViewer))
 	return nil
+}
+
+// undocumented is an API's configuration without documentation routes, for
+// an API that shares a router with another.
+func undocumented(title string) huma.Config {
+	config := huma.DefaultConfig(title, "1.0.0")
+	config.OpenAPIPath, config.DocsPath, config.SchemasPath = "", "", ""
+	return config
+}
+
+// publications publishes the game's events with the lobby's publisher.
+type publications struct{ *realtime.Publisher }
+
+func (publisher publications) Publish(ctx context.Context, events ...services.Publication) error {
+	converted := make([]realtime.Publication, len(events))
+	for index, event := range events {
+		converted[index] = realtime.Publication{Channel: event.Channel, Data: event.Data}
+	}
+	return publisher.Publisher.Publish(ctx, converted...)
+}
+
+// islandBattlesHooksURL returns the hooks_url of island-battles in a
+// LOBBY_GAMES value, whose calls the loopback serves in this process.
+func islandBattlesHooksURL(lobbyGames string) (string, error) {
+	var entries []struct {
+		Key      string `json:"key"`
+		HooksURL string `json:"hooks_url"`
+	}
+	if err := json.Unmarshal([]byte(lobbyGames), &entries); err != nil {
+		return "", err
+	}
+	for _, entry := range entries {
+		if entry.Key == lobbyadapter.GameKey {
+			parsed, err := gamehooks.ParseServiceURL(entry.HooksURL)
+			if err != nil {
+				return "", err
+			}
+			return parsed.String(), nil
+		}
+	}
+	return "", fmt.Errorf("%s lists no %s", gamehooks.GamesEnv, lobbyadapter.GameKey)
 }

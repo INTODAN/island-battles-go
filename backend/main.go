@@ -40,6 +40,14 @@ func main() {
 		logger.Error("Invalid configuration", "error", err)
 		os.Exit(1)
 	}
+	// This host serves many requests at once. The lobby holds a connection
+	// and the lobby's lock while it calls a game hook, which may read with a
+	// connection of its own while other requests to the lobby hold theirs,
+	// waiting for the lock; so the pool is wider than Lambda's, where an
+	// instance serves one request at a time.
+	if _, set := os.LookupEnv(dependencies.DatabaseMaxOpenConnectionsEnv); !set {
+		config.Database.MaxOpenConnections = LocalMaxOpenConnections
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	if err := run(ctx, config, address, logger); err != nil {
@@ -47,6 +55,10 @@ func main() {
 		os.Exit(1)
 	}
 }
+
+// LocalMaxOpenConnections is this host's default pool limit, which
+// ISLAND_BATTLES_DATABASE_MAX_OPEN_CONNECTIONS overrides.
+const LocalMaxOpenConnections = 10
 
 // localOrigin is where players and this host itself reach this host: the
 // public URL when one is set, and otherwise localhost on the port it listens

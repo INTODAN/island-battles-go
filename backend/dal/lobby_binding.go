@@ -1,17 +1,19 @@
 package dal
 
 import (
+	"errors"
+
 	"islandBattles/backend/models"
 	"islandBattles/lobby/domain"
-	"islandBattles/lobby/postgres"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
 // BindLobbyGame persists the game of the snapshot's lobby round, and its
-// simulation colors, from a snapshot that application.GameBinding has already
-// authorized and validated. Each round of a lobby gets its own game.
+// simulation colors, from the snapshot of a started lobby that the start hook
+// has checked. Each round of a lobby gets its own game.
 // models.NeutralTeamColor is reserved.
 func BindLobbyGame(database *gorm.DB, snapshot domain.Snapshot) (models.BindingResult, error) {
 	teams := make([]models.TeamBinding, len(snapshot.Teams))
@@ -19,7 +21,7 @@ func BindLobbyGame(database *gorm.DB, snapshot domain.Snapshot) (models.BindingR
 		teams[index] = models.TeamBinding{TeamID: team.ID, TeamOrder: team.Order, TeamColor: uint(team.Order)}
 	}
 	lobbyID, round := snapshot.Lobby.ID, snapshot.Lobby.Round
-	return postgres.BindOnce(database, "idx_games_lobby_round", func(transaction *gorm.DB) (*models.BindingResult, error) {
+	return bindOnce(database, "idx_games_lobby_round", func(transaction *gorm.DB) (*models.BindingResult, error) {
 		return loadLobbyBinding(transaction, lobbyID, round, teams)
 	}, func(transaction *gorm.DB) (models.BindingResult, error) {
 		game := models.Game{LobbyID: &lobbyID, LobbyRound: round, Generations: []models.Generation{}}
@@ -61,4 +63,46 @@ func loadLobbyBinding(database *gorm.DB, lobbyID string, round int64, expected [
 		}
 	}
 	return result, nil
+}
+
+// bindOnce runs a game's lookup and creation in one transaction. load must
+// return nil only when no game exists, and reject incomplete persisted
+// bindings. create must use the supplied transaction for all writes. Both
+// callbacks must be free of external side effects. The database carries the
+// request context.
+//
+// A concurrent creation is replayed only for the named unique lobby-link
+// constraint. Unrelated database errors are returned without retrying.
+func bindOnce[Result any](database *gorm.DB, constraint string, load func(*gorm.DB) (*Result, error), create func(*gorm.DB) (Result, error)) (Result, error) {
+	var result Result
+	err := database.Transaction(func(transaction *gorm.DB) error {
+		existing, err := load(transaction)
+		if err != nil {
+			return err
+		}
+		if existing != nil {
+			result = *existing
+			return nil
+		}
+		result, err = create(transaction)
+		return err
+	})
+	if err == nil {
+		return result, nil
+	}
+	var zero Result
+	var postgresError *pgconn.PgError
+	if !errors.As(err, &postgresError) || postgresError.Code != "23505" || postgresError.ConstraintName != constraint {
+		return zero, err
+	}
+	// The competing transaction has committed by the time its unique conflict
+	// is reported. Load still validates that all of its game state is present.
+	existing, lookupErr := load(database)
+	if lookupErr != nil {
+		return zero, lookupErr
+	}
+	if existing == nil {
+		return zero, err
+	}
+	return *existing, nil
 }

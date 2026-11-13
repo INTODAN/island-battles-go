@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"islandBattles/backend/models"
-	"islandBattles/lobby/frontend"
 )
 
 //go:embed index.html app.mjs builder.mjs style.css
@@ -39,7 +38,7 @@ func Handler() (http.Handler, error) {
 		if name == "" || name == "index.html" || name == upgradesPath {
 			response.Header().Set("Cache-Control", "no-store")
 		} else {
-			response.Header().Set("Cache-Control", frontend.StaticAssetCacheControl)
+			response.Header().Set("Cache-Control", staticAssetCacheControl)
 		}
 		if name == upgradesPath {
 			response.Header().Set("Content-Type", "application/json")
@@ -49,3 +48,8 @@ func Handler() (http.Handler, error) {
 		files.ServeHTTP(response, request)
 	}), nil
 }
+
+// staticAssetCacheControl caches the scripts and styles beside the lobby page
+// for five minutes, as the lobby page caches its own, so a deploy reaches
+// players within five minutes without fingerprinted file names.
+const staticAssetCacheControl = "public, max-age=300"

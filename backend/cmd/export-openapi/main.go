@@ -17,6 +17,7 @@ import (
 
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/routes"
+	"islandBattles/lobby/httpapi"
 
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
@@ -131,7 +132,9 @@ func BuildPlayerOpenAPI() ([]byte, error) {
 	config.SchemasPath = ""
 	api := humachi.New(chi.NewRouter(), config)
 	routes.SetupRoutes(api, &handlers.Env{}, "")
-	routes.SetupLobbyRoutes(api, nil, nil, nil, nil, nil, &handlers.LobbyGame{})
+	// The lobby's connection token route, which game clients call too.
+	httpapi.Register(api, nil, nil, nil, nil, nil)
+	routes.SetupGameRoutes(api, &handlers.LobbyGame{})
 	routes.SetupBotPackageRoutes(api, &handlers.BotPackages{})
 	api.OpenAPI().Info.Description = apiDescription
 
