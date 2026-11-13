@@ -141,10 +141,7 @@
             "items": {
               "$ref": "#/components/schemas/BotPackage"
             },
-            "type": [
-              "array",
-              "null"
-            ]
+            "type": "array"
           }
         },
         "required": [

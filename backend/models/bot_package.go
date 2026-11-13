@@ -60,7 +60,7 @@ type BotPackageView struct {
 
 // BotPackagesView lists a lobby's packages.
 type BotPackagesView struct {
-	Packages []BotPackageView `json:"packages" doc:"Every checked package of the lobby, newest first, at most one per member."`
+	Packages []BotPackageView `json:"packages" nullable:"false" doc:"Every checked package of the lobby, newest first, at most one per member."`
 }
 
 // BotPackageUploadRequest starts an upload.

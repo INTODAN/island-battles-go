@@ -13,6 +13,9 @@ import {
 
 export type BotChoice = GameComponents["schemas"]["BotChoice"];
 export type DefaultBot = GameComponents["schemas"]["DefaultBot"];
+export type BotPackage = GameComponents["schemas"]["BotPackage"];
+export type BotPackageUpload = GameComponents["schemas"]["BotPackageUpload"];
+export type BotUploadToken = GameComponents["schemas"]["BotUploadToken"];
 export type AddSeatBody = LobbyComponents["schemas"]["AddSeatBody"];
 export type Watcher = LobbyComponents["schemas"]["Watcher"];
 export type MapTemplateSummary =
@@ -262,6 +265,62 @@ export function createLobbyActions(options: {
         { params: { path }, body: { member_settings: { bot: choice } } },
       );
       adopt(data);
+    },
+
+    /** The lobby's bot packages, newest first. */
+    async listBotPackages(): Promise<BotPackage[]> {
+      const { path } = room();
+      const { data } = await gameApi.GET(
+        "/game/lobbies/{lobby_id}/bot-packages",
+        { params: { path: { lobby_id: path.lobby_id } } },
+      );
+      return required(data).packages;
+    },
+
+    /** Starts an upload: a pending package and its presigned POST. */
+    async startBotPackageUpload(fileName: string): Promise<BotPackageUpload> {
+      const { path } = room();
+      const { data } = await gameApi.POST(
+        "/game/lobbies/{lobby_id}/bot-packages",
+        {
+          params: { path: { lobby_id: path.lobby_id } },
+          body: { file_name: fileName },
+        },
+      );
+      return required(data);
+    },
+
+    /** Checks an uploaded zip; a bad package rejects with the game's reason. */
+    async completeBotPackageUpload(packageId: string): Promise<BotPackage> {
+      const { path } = room();
+      const { data } = await gameApi.POST(
+        "/game/lobbies/{lobby_id}/bot-packages/{package_id}/complete",
+        {
+          params: { path: { lobby_id: path.lobby_id, package_id: packageId } },
+        },
+      );
+      return required(data);
+    },
+
+    /** Deletes your package. */
+    async deleteBotPackage(packageId: string) {
+      const { path } = room();
+      await gameApi.DELETE(
+        "/game/lobbies/{lobby_id}/bot-packages/{package_id}",
+        {
+          params: { path: { lobby_id: path.lobby_id, package_id: packageId } },
+        },
+      );
+    },
+
+    /** An upload token for the command line, valid for 15 minutes. */
+    async botUploadToken(): Promise<BotUploadToken> {
+      const { path } = room();
+      const { data } = await gameApi.POST(
+        "/game/lobbies/{lobby_id}/bot-packages/upload-token",
+        { params: { path: { lobby_id: path.lobby_id } } },
+      );
+      return required(data);
     },
 
     async defaultBots(): Promise<DefaultBot[]> {

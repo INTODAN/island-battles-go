@@ -240,6 +240,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     describeError(cause) {
       return handleProblem(cause, "bot").message;
     },
+    playerId: () => realtime.session.get()?.playerId,
   });
 
   // The people who watch with the join code, in a section of their own.

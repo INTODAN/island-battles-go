@@ -395,7 +395,7 @@ export interface components {
              */
             readonly $schema?: string;
             /** @description Every checked package of the lobby, newest first, at most one per member. */
-            packages: components["schemas"]["BotPackage"][] | null;
+            packages: components["schemas"]["BotPackage"][];
         };
         /** @description What a bot is given to play one turn. A bot is a stateless function: whatever it needs to keep between turns goes in the memory it returns, which the server stores per player and game. */
         BotTurn: {

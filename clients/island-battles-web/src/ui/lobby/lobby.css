@@ -581,6 +581,30 @@ select:focus-visible {
   opacity: 0.85;
 }
 
+.bot-packages-panel {
+  margin-top: 12px;
+  border-top: 1px solid rgba(127, 127, 127, 0.25);
+  padding-top: 8px;
+}
+
+.bot-packages-panel progress {
+  width: 100%;
+}
+
+.bot-packages {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.bot-packages li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 4px 0;
+  overflow-wrap: anywhere;
+}
+
 /* Over the game view */
 
 .relay-banner {

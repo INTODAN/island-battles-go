@@ -110,7 +110,7 @@ class BotPackages(GameModel):
     """
     A URL to the JSON Schema for this object.
     """
-    packages: Sequence[BotPackage] | None
+    packages: Sequence[BotPackage]
     """
     Every checked package of the lobby, newest first, at most one per member.
     """

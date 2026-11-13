@@ -1,4 +1,12 @@
 import { checkBotHealth, serveCommand } from "../../bots";
+import {
+  type BotPackage,
+  describePackage,
+  type StoragePost,
+  uploadCommands,
+  uploadPackage,
+} from "../../bots/packages";
+import { apiBaseUrl } from "../../platform";
 import { copyText, h } from "../dom";
 import type { BotChoice, DefaultBot, LobbyActions } from "./actions";
 import { choiceFromValue, choiceValue } from "./roomModel";
@@ -28,6 +36,13 @@ export function mountBotPicker(options: {
   onError(message: string): void;
   describeError(cause: unknown): string;
   healthIntervalMs?: number;
+  /** The player, whose own package gets Delete. */
+  playerId?(): string | undefined;
+  /** The game's address in the command-line upload; the API's by default. */
+  gameUrl?: string;
+  /** Replaces the upload to storage; tests use it. */
+  post?: StoragePost;
+  packagesIntervalMs?: number;
 }): BotPicker {
   const { actions } = options;
   let chosen: BotChoice | undefined;
@@ -85,6 +100,13 @@ export function mountBotPicker(options: {
     h("span", { class: "hint" }, safariNote),
   );
   const defaults = h("div", { class: "bot-defaults" });
+  const packages = mountPackages({
+    actions,
+    playerId: options.playerId ?? (() => undefined),
+    gameUrl: options.gameUrl ?? apiBaseUrl(),
+    post: options.post,
+    refreshIntervalMs: options.packagesIntervalMs ?? 10000,
+  });
   const el = h(
     "section",
     { class: "card bot-picker" },
@@ -97,6 +119,7 @@ export function mountBotPicker(options: {
       "Or let the server play for you with a default bot:",
     ),
     defaults,
+    packages.el,
   );
 
   function radios(): HTMLInputElement[] {
@@ -196,6 +219,239 @@ export function mountBotPicker(options: {
       locked = isLocked;
       sync();
     },
+    dispose() {
+      disposed = true;
+      clearInterval(timer);
+      packages.dispose();
+    },
+  };
+}
+
+/** What the lobby's bot packages need from the lobby screens. */
+interface PackagesOptions {
+  actions: Pick<
+    LobbyActions,
+    | "listBotPackages"
+    | "startBotPackageUpload"
+    | "completeBotPackageUpload"
+    | "deleteBotPackage"
+    | "botUploadToken"
+  >;
+  playerId(): string | undefined;
+  /** The game's address, for the command line. */
+  gameUrl: string;
+  post?: StoragePost | undefined;
+  refreshIntervalMs: number;
+}
+
+const messageOf = (cause: unknown): string =>
+  cause instanceof Error && cause.message
+    ? cause.message
+    : "Something went wrong. Try again.";
+
+/**
+ * The lobby's bot packages: "Upload bot (.zip)", "Upload from the command
+ * line", the upload's progress and result, and every member's package, with
+ * Delete on your own. The list is read again every `refreshIntervalMs`, so
+ * packages that others upload appear.
+ */
+export function mountPackages(options: PackagesOptions): {
+  el: HTMLElement;
+  /** Reads the list again; resolves once it is shown. */
+  refresh(): Promise<void>;
+  /** Uploads a file, as choosing it in the file picker does. */
+  upload(file: File): Promise<void>;
+  dispose(): void;
+} {
+  const { actions } = options;
+  let busy = false;
+  let disposed = false;
+
+  const fileInput = h("input", {
+    type: "file",
+    accept: ".zip,application/zip",
+    hidden: true,
+    attrs: { "aria-label": "Bot package (.zip)" },
+  });
+  const uploadButton = h(
+    "button",
+    { type: "button", class: "small" },
+    "Upload bot (.zip)",
+  );
+  const commandButton = h(
+    "button",
+    { type: "button", class: "secondary small" },
+    "Upload from the command line",
+  );
+  const progress = h("progress", { max: 1, value: 0, hidden: true });
+  const status = h("p", { class: "hint", attrs: { role: "status" } });
+  const commands = h("div", {
+    class: "bot-help package-commands",
+    hidden: true,
+  });
+  const list = h("ul", { class: "bot-packages" });
+  const el = h(
+    "div",
+    { class: "bot-packages-panel" },
+    h(
+      "p",
+      { class: "hint" },
+      "Bot packages of this lobby: the zip that island-battles-bot package or island-battles-package builds. Choosing one as your bot comes later.",
+    ),
+    h("div", { class: "bot-help" }, uploadButton, commandButton, fileInput),
+    progress,
+    status,
+    commands,
+    list,
+  );
+
+  function setBusy(next: boolean): void {
+    busy = next;
+    uploadButton.disabled = next;
+    commandButton.disabled = next;
+  }
+
+  function show(items: BotPackage[]): void {
+    const you = options.playerId();
+    list.replaceChildren(
+      ...(items.length === 0
+        ? [h("li", { class: "hint" }, "No packages yet.")]
+        : items.map((item) => {
+            const mine = item.owner_player_id === you;
+            const remove = mine
+              ? h(
+                  "button",
+                  { type: "button", class: "secondary small" },
+                  "Delete",
+                )
+              : null;
+            remove?.addEventListener("click", () => void removePackage(item));
+            return h(
+              "li",
+              { attrs: { "data-package-id": item.package_id } },
+              h(
+                "span",
+                {},
+                `${item.owner_name}${mine ? " (you)" : ""}: ${describePackage(item)}`,
+              ),
+              remove,
+            );
+          })),
+    );
+  }
+
+  async function refresh(): Promise<void> {
+    try {
+      const items = await actions.listBotPackages();
+      if (!disposed) show(items);
+    } catch (cause) {
+      if (!disposed) status.textContent = messageOf(cause);
+    }
+  }
+
+  async function upload(file: File): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    status.textContent = `Uploading ${file.name}…`;
+    progress.value = 0;
+    progress.hidden = false;
+    try {
+      const uploaded = await uploadPackage({
+        file,
+        calls: actions,
+        post: options.post,
+        onProgress(fraction) {
+          progress.value = fraction;
+          if (fraction >= 1) status.textContent = "Checking the package…";
+        },
+      });
+      status.textContent = `Uploaded ${file.name}: ${describePackage(uploaded)}.`;
+      await refresh();
+    } catch (cause) {
+      status.textContent = messageOf(cause);
+    } finally {
+      progress.hidden = true;
+      setBusy(false);
+    }
+  }
+
+  async function removePackage(item: BotPackage): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await actions.deleteBotPackage(item.package_id);
+      status.textContent = "Deleted your package.";
+      await refresh();
+    } catch (cause) {
+      status.textContent = messageOf(cause);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function showCommands(): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const issued = await actions.botUploadToken();
+      const both = uploadCommands(options.gameUrl, issued.token);
+      const until = new Date(issued.expires_at).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      commands.replaceChildren(
+        ...(
+          [
+            ["Python", both.python],
+            ["Go", both.go],
+          ] as const
+        ).flatMap(([label, text]) => {
+          const copy = h(
+            "button",
+            { type: "button", class: "secondary small" },
+            "Copy",
+          );
+          copy.addEventListener("click", async () => {
+            copy.textContent = (await copyText(text))
+              ? "Copied"
+              : "Copy failed";
+          });
+          return [
+            h("span", { class: "hint" }, `${label}, in your bot's folder:`),
+            h("code", { class: "command" }, text),
+            copy,
+          ];
+        }),
+        h(
+          "span",
+          { class: "hint" },
+          `The token in these commands uploads to this lobby as you until ${until}.`,
+        ),
+      );
+      commands.hidden = false;
+    } catch (cause) {
+      status.textContent = messageOf(cause);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  uploadButton.addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", () => {
+    const chosen = fileInput.files?.[0];
+    fileInput.value = "";
+    if (chosen) void upload(chosen);
+  });
+  commandButton.addEventListener("click", () => void showCommands());
+  void refresh();
+  const timer = setInterval(() => {
+    if (!busy && !document.hidden) void refresh();
+  }, options.refreshIntervalMs);
+
+  return {
+    el,
+    refresh,
+    upload,
     dispose() {
       disposed = true;
       clearInterval(timer);
