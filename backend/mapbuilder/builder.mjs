@@ -269,12 +269,19 @@ export function openerState(opener, origin) {
 
 // lobbyPageFromMessage returns the window that a message names as the lobby
 // page, or null. A lobby form that reloaded sends it to a builder that outlived
-// the reload, because the builder's opener is then the form's old page. Only
-// a window of the builder's own origin, other than the builder itself, counts.
-export function lobbyPageFromMessage(event, origin, self) {
-  if (event.origin !== origin || !event.source || event.source === self) return null;
+// the reload, because the builder's opener is then the form's old page. A
+// lobby page on another origin, the lobby's own site, sends it in answer to
+// the builder's hello. Only a window of one of origins, the builder's own and
+// the lobby origins the game allows, other than the builder itself, counts.
+export function lobbyPageFromMessage(event, origins, self) {
+  if (!origins.includes(event.origin) || !event.source || event.source === self) return null;
   return event.data?.type === lobbyPageMessageType ? event.source : null;
 }
+
+// builderHello is what the builder posts to an opener on another origin,
+// which it can't read: a lobby form there answers with the lobby page
+// message. It carries nothing, so it may go to any origin.
+export const builderHello = { type: "island-battles.map-builder" };
 
 // lobbyGate decides whether text can be sent to the lobby. It needs what
 // downloadGate needs: the server accepts only a map that a lobby can use, with

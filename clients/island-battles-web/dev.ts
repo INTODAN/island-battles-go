@@ -1,14 +1,20 @@
 import index from "./index.html";
-import { proxyOrigin } from "./proxy";
+import { lobbyOrigin, proxyOrigin } from "./proxy";
 
-// The lobby and the backend run as separate processes (./scripts/dev.sh), and
-// this server forwards each one's paths to it (proxy.ts), so the browser stays
-// on one origin. The Centrifugo WebSocket is not proxied: the browser connects
-// straight to :8000, whose allowed origins already include this server.
+// The lobby and the backend run as separate processes (./scripts/dev.sh). This
+// server forwards the game's paths to the backend (proxy.ts), as the game
+// serves the client in production, and its config.json sends the client
+// straight to the lobby, on its own origin, which allows this one
+// (LOBBY_ALLOWED_ORIGINS). ISLAND_BATTLES_WEB_LOBBY_URL names another lobby.
+// The Centrifugo WebSocket is not proxied: the browser connects straight to
+// :8000, whose allowed origins already include this server.
+const runtimeConfig = {
+  lobby_url: process.env.ISLAND_BATTLES_WEB_LOBBY_URL || lobbyOrigin,
+};
 const server = Bun.serve({
   port: 3000,
   development: { hmr: true, console: true },
-  routes: { "/": index },
+  routes: { "/": index, "/config.json": Response.json(runtimeConfig) },
   async fetch(request) {
     const url = new URL(request.url);
     // Saved games for the 3D board's dev page, /?fixture=<file>.

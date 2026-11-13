@@ -76,7 +76,7 @@ func newLobbyStackWith(t *testing.T, serverBots services.ServerBots) *lobbyStack
 			hooks.ServeHTTP(response, request)
 		})
 	})
-	islandBattles, err := lobbyadapter.LobbyGame(app.LoopbackOrigin + lobbyadapter.HooksPath)
+	islandBattles, err := lobbyadapter.LobbyGame(app.LoopbackOrigin+lobbyadapter.HooksPath, "")
 	if err != nil {
 		t.Fatal(err)
 	}

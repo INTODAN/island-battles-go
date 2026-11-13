@@ -202,7 +202,7 @@ func testClient(t *testing.T, server *fakeServer, realtime *fakeRealtime, play P
 			client.timing.deadlineRetry = 20 * time.Millisecond
 		},
 	}, options...)
-	client, err := NewClient(server.server.URL, "good", testLobbyID, play, options...)
+	client, err := NewClient(BaseURL(server.server.URL), "good", testLobbyID, play, options...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -506,7 +506,7 @@ func TestClientDoesNotPlayTheServersSeats(t *testing.T) {
 
 func TestClientReportsARefusedCredential(t *testing.T) {
 	server, realtime := newFakeServer(t), &fakeRealtime{}
-	client, err := NewClient(server.server.URL, "bad", testLobbyID, func(context.Context, Turn) (Result, error) { return Result{}, nil }, WithLogOutput(nil), func(client *Client) { client.dial = realtime.dial })
+	client, err := NewClient(BaseURL(server.server.URL), "bad", testLobbyID, func(context.Context, Turn) (Result, error) { return Result{}, nil }, WithLogOutput(nil), func(client *Client) { client.dial = realtime.dial })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -554,7 +554,7 @@ func TestClientRecoversWithBackoffAfterFailedReads(t *testing.T) {
 
 func TestStateNeverGoesBackwards(t *testing.T) {
 	server := newFakeServer(t)
-	client, err := NewClient(server.server.URL, "good", testLobbyID, func(context.Context, Turn) (Result, error) { return Result{}, nil })
+	client, err := NewClient(BaseURL(server.server.URL), "good", testLobbyID, func(context.Context, Turn) (Result, error) { return Result{}, nil })
 	if err != nil {
 		t.Fatal(err)
 	}

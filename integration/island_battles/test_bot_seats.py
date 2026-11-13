@@ -9,7 +9,7 @@ from integration.test_live import guests as guests_fixture
 from lobby_api_client.models import TeamDefinition
 from lobby_client import LobbyError, Scope
 from test_bot_choice import run_bot
-from test_lobby_binding import choose_bot, game_auth
+from test_lobby_binding import GAME, choose_bot, game_auth
 
 guests = guests_fixture
 pytestmark = pytest.mark.asyncio
@@ -51,7 +51,7 @@ async def test_one_person_plays_a_whole_game_against_a_level_two_bot_seat(guests
     status, output, error = await run_bot(alice, scope.lobby_id, 600)
     assert status == 0, error
     assert "game ended at generation" in output, output
-    async with httpx.AsyncClient(base_url=BASE) as http:
+    async with httpx.AsyncClient(base_url=GAME) as http:
         response = await http.get(
             f"/game/from-lobby/{scope.lobby_id}/generation",
             headers=await game_auth(alice),

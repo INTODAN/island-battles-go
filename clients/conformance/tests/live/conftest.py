@@ -2,6 +2,7 @@
 a fault-injecting proxy; the runner plays Bob over plain HTTP."""
 
 import asyncio
+import os
 
 import httpx
 import pytest_asyncio
@@ -14,6 +15,9 @@ from island_conformance.live import Match, Seat, choose_localhost_bots
 from island_conformance.proxy import FaultProxy
 
 guests = guests_fixture
+# The lobby and the game are separate sites (#228): BASE is the lobby's URL,
+# and GAME the game's.
+GAME = os.environ["LOBBY_TEST_GAME_URL"]
 
 
 @pytest_asyncio.fixture
@@ -28,8 +32,8 @@ async def match(guests):
     await alice.set_ready(scope, True)
     await bob.set_ready(scope, True)
     await alice.start(scope)
-    async with httpx.AsyncClient(base_url=BASE, timeout=10) as http:
-        game = Match(http, scope.lobby_id, Seat(alice.credential), Seat(bob.credential))
+    async with httpx.AsyncClient(base_url=GAME, timeout=10) as http:
+        game = Match(http, scope.lobby_id, Seat(alice.credential), Seat(bob.credential), BASE)
         game.alice.state = await game.read(game.alice)
         game.bob.state = await game.read(game.bob)
         yield game
@@ -37,7 +41,7 @@ async def match(guests):
 
 @pytest_asyncio.fixture
 async def proxy():
-    async with FaultProxy(BASE) as fault_proxy:
+    async with FaultProxy(GAME) as fault_proxy:
         yield fault_proxy
 
 
@@ -54,7 +58,10 @@ async def launch(match, proxy):
         processes.append(process)
         message = {
             "type": "start",
-            "base_url": proxy.url,
+            # The game's routes go through the proxy, the lobby's straight
+            # to the lobby.
+            "game_url": proxy.url,
+            "lobby_url": BASE,
             "credential": credential or match.alice.credential,
             "lobby_id": match.lobby_id,
         }

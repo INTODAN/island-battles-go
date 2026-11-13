@@ -1,5 +1,5 @@
 import createClient, { type Middleware } from "openapi-fetch";
-import { apiBaseUrl, platformFetch } from "../platform";
+import { gameBaseUrl, lobbyBaseUrl, platformFetch } from "../platform";
 import { ApiError, errorFromResponse } from "./errors";
 import type { paths as GamePaths } from "./generated/game";
 import type { paths as LobbyPaths } from "./generated/lobby";
@@ -11,7 +11,11 @@ import {
 import { retryThrottled } from "./retry";
 
 export interface ApiOptions {
-  /** Server origin. Defaults to the page's own origin, or the game server in the desktop build. */
+  /** The lobby's origin, for `/lobby/v1/*`. Defaults to `lobbyBaseUrl()`. */
+  lobbyUrl?: string;
+  /** The game's origin, for its own routes. Defaults to `gameBaseUrl()`. */
+  gameUrl?: string;
+  /** Shorthand for one server that serves both, such as a test's. */
   baseUrl?: string;
   /** Returns the current bearer token, or undefined before a session exists. */
   getAccessToken?: () => string | undefined;
@@ -90,7 +94,8 @@ function transportFetch(inner: typeof fetch): typeof fetch {
  * renews at 80 % of its life and once more when the game answers 401.
  */
 export function createApiClients(options: ApiOptions = {}) {
-  const baseUrl = options.baseUrl ?? apiBaseUrl();
+  const lobbyUrl = options.lobbyUrl ?? options.baseUrl ?? lobbyBaseUrl();
+  const gameUrl = options.gameUrl ?? options.baseUrl ?? gameBaseUrl();
   const getAccessToken = options.getAccessToken ?? (() => accessToken);
   const inner = options.fetch;
   // Look fetch up per call so a later global replacement (and tests) is honoured.
@@ -99,7 +104,10 @@ export function createApiClients(options: ApiOptions = {}) {
       sleep: options.sleep,
       random: options.random,
     });
-  const lobbyApi = createClient<LobbyPaths>({ baseUrl, fetch: send() });
+  const lobbyApi = createClient<LobbyPaths>({
+    baseUrl: lobbyUrl,
+    fetch: send(),
+  });
   lobbyApi.use(authMiddleware(getAccessToken), errorMiddleware);
   const playerTokens =
     options.playerTokens ??
@@ -117,11 +125,9 @@ export function createApiClients(options: ApiOptions = {}) {
       return data;
     }, options.now);
   const gameApi = createClient<GamePaths>({
-    baseUrl,
+    baseUrl: gameUrl,
     fetch: playerTokenFetch(send(), playerTokens, getAccessToken),
   });
   gameApi.use(errorMiddleware);
   return { lobbyApi, gameApi };
 }
-
-export const { lobbyApi, gameApi } = createApiClients();

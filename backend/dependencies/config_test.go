@@ -104,6 +104,26 @@ func TestLoadConfigReadsThePublicURL(t *testing.T) {
 	}
 }
 
+// The lobby's sites that may read the game from another origin (#228).
+func TestLoadConfigReadsTheLobbyOrigins(t *testing.T) {
+	t.Parallel()
+
+	values := validConfigurationEnvironment()
+	if config, err := LoadConfigFromLookup(mapLookup(values)); err != nil || len(config.LobbyOrigins) != 0 {
+		t.Fatalf("LobbyOrigins = %q, error = %v", config.LobbyOrigins, err)
+	}
+	values[LobbyOriginsEnv] = "https://lobby.example.org, http://localhost:8890"
+	if config, err := LoadConfigFromLookup(mapLookup(values)); err != nil || strings.Join(config.LobbyOrigins, " ") != "https://lobby.example.org http://localhost:8890" {
+		t.Fatalf("LobbyOrigins = %q, error = %v", config.LobbyOrigins, err)
+	}
+	for _, invalid := range []string{"*", "lobby.example.org", "https://lobby.example.org/", "https://lobby.example.org/lobby", "https://LOBBY.example.org", "https://lobby.example.org:443", "ws://lobby.example.org"} {
+		values[LobbyOriginsEnv] = invalid
+		if _, err := LoadConfigFromLookup(mapLookup(values)); err == nil || !strings.Contains(err.Error(), LobbyOriginsEnv) {
+			t.Errorf("%q: error = %v, want %s validation error", invalid, err, LobbyOriginsEnv)
+		}
+	}
+}
+
 // Hosted and uploaded bots are on unless ISLAND_BATTLES_SERVER_BOTS is off
 // (#225).
 func TestLoadConfigReadsTheServerBotsFlag(t *testing.T) {
@@ -355,7 +375,7 @@ func TestLoadConfigBindsTheLobbyToIslandBattles(t *testing.T) {
 	}
 	// Without LOBBY_GAMES, the lobby calls Island Battles alone, in this
 	// process.
-	games, err := config.LobbyGamesConfig()
+	games, err := config.LobbyGamesConfig("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -376,7 +396,7 @@ func TestLoadConfigBindsTheLobbyToIslandBattles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if games, err = config.LobbyGamesConfig(); err != nil {
+	if games, err = config.LobbyGamesConfig(""); err != nil {
 		t.Fatal(err)
 	}
 	if err := json.Unmarshal([]byte(games), &entries); err != nil || len(entries) != 2 || entries[0].Key != "mock-game" || entries[1].HooksURL != "https://island-battles.example.test"+lobbyadapter.HooksPath {
@@ -388,7 +408,7 @@ func TestLoadConfigBindsTheLobbyToIslandBattles(t *testing.T) {
 	if config, err = LoadConfigFromLookup(mapLookup(values)); err != nil {
 		t.Fatal(err)
 	}
-	if games, err = config.LobbyGamesConfig(); err != nil || games != values[LobbyGamesEnv] {
+	if games, err = config.LobbyGamesConfig(""); err != nil || games != values[LobbyGamesEnv] {
 		t.Fatalf("LOBBY_GAMES = %s, %v", games, err)
 	}
 

@@ -15,12 +15,12 @@ MAX_GENERATIONS = 300
 
 
 async def choose_localhost_bots(
-    base_url: str, lobby_id: str, *credentials: str
+    lobby_url: str, lobby_id: str, *credentials: str
 ) -> None:
     """Choose each player's localhost bot in their lobby member settings, which
     every Island Battles lobby member needs before getting ready: the client
     under test and the runner play these seats themselves."""
-    async with httpx.AsyncClient(base_url=base_url, timeout=10) as http:
+    async with httpx.AsyncClient(base_url=lobby_url, timeout=10) as http:
         for credential in credentials:
             response = await http.put(
                 f"/lobby/v1/games/island-battles/lobbies/{lobby_id}/member-settings",
@@ -41,10 +41,14 @@ class Seat:
 
 @dataclass
 class Match:
+    """The runner's view of the game: http reaches the game's site, and
+    lobby_url is the lobby's, which issues the player tokens."""
+
     http: httpx.AsyncClient
     lobby_id: str
     alice: Seat
     bob: Seat
+    lobby_url: str
 
     @property
     def generation_path(self) -> str:
@@ -55,7 +59,7 @@ class Match:
         token from the lobby, renewed after 80 % of its life."""
         if not seat.token or time.time() >= seat.renew_at:
             response = await self.http.post(
-                "/lobby/v1/player-tokens",
+                f"{self.lobby_url}/lobby/v1/player-tokens",
                 json={"game_key": "island-battles"},
                 headers={"Authorization": f"Bearer {seat.credential}"},
             )

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"islandBattles/backend/observability"
 	"islandBattles/lobby/domain"
@@ -38,7 +39,13 @@ var lobbyGame []byte
 // module, which calls the lobby's bot package routes under its room API
 // prefix. Its links open the demo viewer, /game/demo-viewer/, and the 3D web
 // client that the deployment serves at /play/.
-func LobbyGame(hooksURL string) (json.RawMessage, error) {
+//
+// frontendOrigin is where browsers reach the game, such as
+// https://island-battles.example.org, for a lobby page on another origin:
+// the catalog entry's URLs are then absolute URLs there, and frontendOrigin
+// is the entry's origin. Empty, they are paths on the lobby page's origin,
+// which is the game's while the lobby runs in the backend's process.
+func LobbyGame(hooksURL, frontendOrigin string) (json.RawMessage, error) {
 	var entry map[string]json.RawMessage
 	if err := json.Unmarshal(lobbyGame, &entry); err != nil {
 		return nil, err
@@ -48,7 +55,47 @@ func LobbyGame(hooksURL string) (json.RawMessage, error) {
 		return nil, err
 	}
 	entry["hooks_url"] = url
+	if frontendOrigin != "" {
+		if entry["frontend"], err = onOrigin(entry["frontend"], frontendOrigin); err != nil {
+			return nil, err
+		}
+	}
 	return json.Marshal(entry)
+}
+
+// catalogURLFields are the catalog entry's fields that hold one URL path.
+var catalogURLFields = []string{"result_url", "data_url_prefix", "watch_result_url", "watch_data_url_prefix", "settings_module", "room_module", "room_api_prefix"}
+
+// onOrigin puts the paths of a catalog entry on origin, and names origin as
+// the entry's origin.
+func onOrigin(frontend json.RawMessage, origin string) (json.RawMessage, error) {
+	var catalog map[string]any
+	if err := json.Unmarshal(frontend, &catalog); err != nil {
+		return nil, err
+	}
+	absolute := func(value any) any {
+		if path, ok := value.(string); ok && strings.HasPrefix(path, "/") {
+			return origin + path
+		}
+		return value
+	}
+	for _, field := range catalogURLFields {
+		if value, found := catalog[field]; found {
+			catalog[field] = absolute(value)
+		}
+	}
+	if links, ok := catalog["links"].([]any); ok {
+		for _, link := range links {
+			if fields, ok := link.(map[string]any); ok {
+				fields["url"] = absolute(fields["url"])
+			}
+		}
+	}
+	if player, ok := catalog["example_player"].(map[string]any); ok {
+		player["module"] = absolute(player["module"])
+	}
+	catalog["origin"] = origin
+	return json.Marshal(catalog)
 }
 
 // Hooks serves registration's hooks, signed with secret, under HooksPath.

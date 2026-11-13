@@ -1,7 +1,7 @@
 // The map builder page. builder.mjs holds the logic; this module only draws
 // the map and turns the page's events into edits.
 import {
-  castleRadius, checkMap, describeProblems, downloadGate, dragPosition, fieldLabel, fileName, freeSpot, lobbyGate, lobbyMessage, lobbyPageFromMessage, missingTeams,
+  builderHello, castleRadius, checkMap, describeProblems, downloadGate, dragPosition, fieldLabel, fileName, freeSpot, lobbyGate, lobbyMessage, lobbyPageFromMessage, missingTeams,
   newMap, openMapFile, openerState, placeProblems, problemCastle, problemsFor, serialize, teamColor, upgradeLabel, withoutCastle,
 } from "./builder.mjs";
 
@@ -31,9 +31,19 @@ let checkTimer;
 // stays set once the page that opened the builder is gone.
 let sentText = null;
 let lobbyPageClosed = false;
-// lobbyPage is the same-origin window that opened this page, if one did. The
-// page keeps it, because browsers clear window.opener once that window closes.
+// lobbyPage is the lobby page that opened this page, if one did, and
+// lobbyPageOrigin its origin, which maps are posted to. A same-origin opener
+// is known at once; a lobby page on the lobby's own site names itself in
+// answer to the hello below. The page keeps it, because browsers clear
+// window.opener once that window closes.
 let lobbyPage = openerState(window.opener, location.origin) === "ready" ? window.opener : null;
+let lobbyPageOrigin = location.origin;
+// The lobby sites that may open the builder: lobby-origins.json, the game's
+// ISLAND_BATTLES_LOBBY_ORIGINS, besides the builder's own origin.
+const lobbyOrigins = fetch("./lobby-origins.json", { headers: { Accept: "application/json" } })
+  .then((response) => (response.ok ? response.json() : []))
+  .then((origins) => (Array.isArray(origins) ? origins.filter((origin) => typeof origin === "string") : []))
+  .catch(() => []);
 const lobbyPageState = () => (!lobbyPage ? "none" : lobbyPage.closed ? "closed" : "ready");
 let drag = null;
 
@@ -121,8 +131,8 @@ function renderCheck() {
 
 // ---- Lobby hand-off
 
-// renderLobby shows Use in lobby only on a page that a same-origin window
-// opened, such as the lobby's create form, and says why it is disabled.
+// renderLobby shows Use in lobby only on a page that a lobby page opened,
+// such as the lobby's create form, and says why it is disabled.
 function renderLobby() {
   const opener = lobbyPageState();
   if (opener === "closed") lobbyPageClosed = true;
@@ -141,20 +151,27 @@ lobbyButton.addEventListener("click", () => {
   const text = serialize(map);
   if (!lobbyGate(text, check).ready) return;
   if (lobbyPageState() === "ready") {
-    lobbyPage.postMessage(lobbyMessage(text), location.origin);
+    lobbyPage.postMessage(lobbyMessage(text), lobbyPageOrigin);
     sentText = text;
   }
   renderLobby();
 });
 
-// A lobby form that reloaded names itself as the page to send maps to.
-window.addEventListener("message", (event) => {
-  const page = lobbyPageFromMessage(event, location.origin, window);
+// A lobby form that reloaded, or one on the lobby's own site, names itself
+// as the page to send maps to.
+window.addEventListener("message", async (event) => {
+  const page = lobbyPageFromMessage(event, [location.origin, ...(await lobbyOrigins)], window);
   if (!page) return;
   lobbyPage = page;
+  lobbyPageOrigin = event.origin;
   lobbyPageClosed = false;
   renderLobby();
 });
+// An opener on another origin can't be read, so ask it whether it is a lobby
+// page. The hello carries nothing.
+if (window.opener && !lobbyPage) {
+  void lobbyOrigins.then(() => window.opener?.postMessage(builderHello, "*"));
+}
 
 // A closed lobby page raises no event on this page, so look again now and then.
 setInterval(renderLobby, 1000);

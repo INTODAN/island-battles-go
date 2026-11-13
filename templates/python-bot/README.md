@@ -20,7 +20,7 @@ All run from any directory.
 | `scripts/check.sh` | `ruff format --check`, `ruff check`, `ty check`, `pytest`, then `island-battles-bot check bot:play`. Run it before playing. |
 | `scripts/format.sh` | `ruff format` and `ruff check --fix`. |
 | `scripts/serve.sh` | The localhost bot a browser tab plays (`island-battles-bot serve bot:play`). |
-| `scripts/run.sh` | Plays a seat of a started lobby without a browser: `scripts/run.sh BASE_URL TOKEN LOBBY_ID`, or set `ISLAND_BATTLES_BASE_URL`, `ISLAND_BATTLES_TOKEN`, `ISLAND_BATTLES_LOBBY_ID`. Logs to `bot.log`. |
+| `scripts/run.sh` | Plays a seat of a started lobby without a browser: `scripts/run.sh TOKEN LOBBY_ID`, or set `ISLAND_BATTLES_TOKEN` and `ISLAND_BATTLES_LOBBY_ID`. The lobby and the game are separate sites: set `ISLAND_BATTLES_GAME_URL` and `ISLAND_BATTLES_LOBBY_URL` (they need `island-battles-python` with #228), or `ISLAND_BATTLES_BASE_URL` for one server that serves both. Logs to `bot.log`. |
 | `scripts/fixture.sh [file]` | Writes the sample turn to `turn.json` for experiments. |
 | `scripts/build.sh` | `uv build`: a wheel and a source archive in `dist/`, and prints their paths. |
 | `scripts/package.sh` | `island-battles-bot package`: `dist/island-battles-bot.zip`, the bot and its dependencies for the server's runners (Linux arm64). Needs a network. |

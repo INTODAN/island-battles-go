@@ -8,7 +8,9 @@ import (
 
 	"islandBattles/backend/demo"
 	"islandBattles/backend/demoviewer"
+	"islandBattles/backend/lobbyadapter"
 	"islandBattles/lobby/frontend"
+	"islandBattles/lobby/gamehooks"
 )
 
 func TestFrontendGameIsAValidCatalogEntry(t *testing.T) {
@@ -84,6 +86,44 @@ func TestFrontendGameLinksThe3DClient(t *testing.T) {
 	links := catalogEntry(t).Links
 	if len(links) != 2 || links[1].Label != "Play in 3D" || links[1].URL != "/play/" {
 		t.Fatalf("links = %+v", links)
+	}
+}
+
+// For a lobby page on another origin, every URL of the entry is on the
+// game's origin, which the lobby checks it against.
+func TestFrontendGameOnTheGamesOwnOrigin(t *testing.T) {
+	origin := "https://island-battles.example.test"
+	entry, err := lobbyadapter.LobbyGame(origin+lobbyadapter.HooksPath, origin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	games, err := gamehooks.ParseGames("["+string(entry)+"]", func(name string) (string, bool) {
+		return string(hookSecret), name == lobbyadapter.SecretEnv
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	game, paths := games[0].Frontend, catalogEntry(t)
+	if _, err := frontend.Handler([]frontend.Game{game}); err != nil {
+		t.Fatal(err)
+	}
+	if game.Origin != origin || paths.Origin != "" {
+		t.Fatalf("origins %q and %q", game.Origin, paths.Origin)
+	}
+	for _, pair := range [][2]string{
+		{game.ResultURL, paths.ResultURL}, {game.DataURLPrefix, paths.DataURLPrefix}, {game.WatchResultURL, paths.WatchResultURL},
+		{game.WatchDataURLPrefix, paths.WatchDataURLPrefix}, {game.SettingsModule, paths.SettingsModule}, {game.RoomModule, paths.RoomModule},
+		{game.RoomAPIPrefix, paths.RoomAPIPrefix}, {game.ExamplePlayer.Module, paths.ExamplePlayer.Module},
+		{game.Links[0].URL, paths.Links[0].URL}, {game.Links[1].URL, paths.Links[1].URL},
+	} {
+		if pair[0] != origin+pair[1] {
+			t.Errorf("%q is not %q on the game's origin", pair[0], pair[1])
+		}
+	}
+	// The lobby refuses the entry when its URLs are on another origin.
+	game.Origin = "https://other.example.test"
+	if _, err := frontend.Handler([]frontend.Game{game}); err == nil {
+		t.Fatal("a catalog on another origin was accepted")
 	}
 }
 

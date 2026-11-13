@@ -3,6 +3,11 @@
 // GET /map/templates, or loads a map file made with the map builder. The
 // chosen map sets the lobby's teams: one per team colour, named after the
 // colour the board draws. The turn timeout sets how long each turn lasts.
+//
+// The lobby page passes gameURL, the game's site, which is not the lobby
+// page's origin when the lobby runs on its own: the form reads the default
+// maps and opens the map builder there. Without it, the page's own origin is
+// used.
 
 // The board's team colours, in team colour order (see replay.html).
 const colourNames = ["Blue", "Red", "Green", "Purple", "Amber", "Teal"];
@@ -47,19 +52,22 @@ export function describeTurnTimeout(settings) {
   return `Turn limit: ${seconds % 60 === 0 ? `${seconds / 60} min` : `${seconds} s`}`;
 }
 
-let defaultMaps = null;
+// The default maps by the game's URL, loaded once per page and shared by the
+// form and the room.
+const defaultMaps = new Map();
 
-// The default maps, loaded once per page and shared by the form and the room.
-export function loadDefaultMaps() {
-  defaultMaps ||= (async () => {
-    const response = await fetch("/map/templates", { headers: { Accept: "application/json" } });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return (await response.json()).maps;
-  })().catch((error) => {
-    defaultMaps = null;
-    throw error;
-  });
-  return defaultMaps;
+export function loadDefaultMaps(gameURL = "") {
+  if (!defaultMaps.has(gameURL)) {
+    defaultMaps.set(gameURL, (async () => {
+      const response = await fetch(`${gameURL}/map/templates`, { headers: { Accept: "application/json" } });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return (await response.json()).maps;
+    })().catch((error) => {
+      defaultMaps.delete(gameURL);
+      throw error;
+    }));
+  }
+  return defaultMaps.get(gameURL);
 }
 
 // Read a map file's text. The server checks the whole file when the lobby is
@@ -78,6 +86,10 @@ export function readMapFile(text) {
 const mapMessageType = "island-battles.map-file";
 const builderURL = "/map/builder/";
 const builderWindowName = "island-battles-map-builder";
+// A builder on the game's site, which is not this page's origin, can't see
+// which page opened it, so it says hello to its opener with this message,
+// and the form answers with lobbyPageMessageType.
+const builderHelloType = "island-battles.map-builder";
 
 // mapFromBuilderMessage reads a message event for the map it carries. It
 // returns null for a message that isn't the builder's: from another origin or
@@ -97,14 +109,25 @@ export function mapFromBuilderMessage(event, { origin, builder }) {
 const lobbyPageMessageType = "island-battles.lobby-page";
 
 // builderWindowAction decides what to do with the window that
-// window.open("", name) returned. A window already on the builder is kept,
-// because navigating it would reload the builder and lose its unsaved map.
-// Anything else, such as a fresh blank window, is sent to the builder.
-export function builderWindowAction(opened, origin) {
+// window.open("", name) returned. A window already on the builder, at
+// builderOrigin, is kept, because navigating it would reload the builder and
+// lose its unsaved map. Anything else, such as a fresh blank window, is sent
+// to the builder. A window of another origin can't be read: when the builder
+// is on another origin than pageOrigin, the window of the builder's name is
+// that builder, and otherwise it is taken over.
+export function builderWindowAction(opened, builderOrigin, pageOrigin = builderOrigin) {
   try {
-    if (opened.location.origin === origin && opened.location.pathname.startsWith(builderURL)) return "keep";
-  } catch { /* A window of another origin can't be read; take it over. */ }
+    if (opened.location.origin === builderOrigin && opened.location.pathname.startsWith(builderURL)) return "keep";
+  } catch {
+    return builderOrigin === pageOrigin ? "navigate" : "keep";
+  }
   return "navigate";
+}
+
+// builderHello tells whether a message is the hello of the builder window
+// that the form opened, on the builder's origin.
+export function builderHello(event, { origin, builder }) {
+  return Boolean(builder) && event.origin === origin && event.source === builder && event.data?.type === builderHelloType;
 }
 
 function describeMap(name, teamCount, width, height) {
@@ -113,15 +136,15 @@ function describeMap(name, teamCount, width, height) {
 
 // A short line for the room, naming the map that a lobby's settings chose and
 // its turn timeout.
-export async function describeSettings(settings) {
-  return `${await describeMapChoice(settings)} · ${describeTurnTimeout(settings)}`;
+export async function describeSettings(settings, { gameURL = "" } = {}) {
+  return `${await describeMapChoice(settings, gameURL)} · ${describeTurnTimeout(settings)}`;
 }
 
-async function describeMapChoice(settings) {
+async function describeMapChoice(settings, gameURL) {
   if (settings?.map) return `Map: ${settings.map.map_name}`;
   if (settings?.map_template_id) {
     try {
-      const chosen = (await loadDefaultMaps()).find((map) => map.map_template_id === settings.map_template_id);
+      const chosen = (await loadDefaultMaps(gameURL)).find((map) => map.map_template_id === settings.map_template_id);
       if (chosen) return `Map: ${chosen.map_name}`;
     } catch { /* Name the map by its ID instead. */ }
     return `Map: default map #${settings.map_template_id}`;
@@ -161,8 +184,11 @@ function node(tag, properties = {}, ...children) {
 // chosen. destroy() stops a form that the
 // page removes from listening to the map builder.
 export class SettingsForm {
-  constructor({ container, onChange = () => {}, current = null, teamCount = defaultGeneratedTeams }) {
+  constructor({ container, onChange = () => {}, current = null, teamCount = defaultGeneratedTeams, gameURL = "" }) {
     this.onChange = onChange;
+    this.gameURL = gameURL;
+    // The builder is on the game's site.
+    this.builderOrigin = gameURL ? new URL(gameURL).origin : location.origin;
     this.maps = [];
     this.file = null;
     this.fileError = "";
@@ -228,7 +254,7 @@ export class SettingsForm {
 
   async loadMaps() {
     try {
-      this.maps = await loadDefaultMaps();
+      this.maps = await loadDefaultMaps(this.gameURL);
     } catch {
       this.mapsError = "Could not load the default maps. You can still load a map file.";
       this.update();
@@ -259,21 +285,26 @@ export class SettingsForm {
     const opened = window.open("", builderWindowName);
     if (!opened) return;
     this.builder = opened;
-    if (builderWindowAction(opened, location.origin) === "keep") {
+    if (builderWindowAction(opened, this.builderOrigin, location.origin) === "keep") {
       // Its opener is the page before the reload, so name this page instead.
-      opened.postMessage({ type: lobbyPageMessageType }, location.origin);
+      opened.postMessage({ type: lobbyPageMessageType }, this.builderOrigin);
       opened.focus();
     } else {
-      opened.location.href = builderURL;
+      opened.location.href = `${this.gameURL}${builderURL}`;
     }
   }
 
   // receive takes the map that the builder sends. The latest map or file the
-  // host picks wins.
+  // host picks wins. A builder on another origin says hello first, and learns
+  // from the answer that this is the page to send maps to.
   receive(event) {
+    if (builderHello(event, { origin: this.builderOrigin, builder: this.builder })) {
+      this.builder.postMessage({ type: lobbyPageMessageType }, this.builderOrigin);
+      return;
+    }
     let map;
     try {
-      map = mapFromBuilderMessage(event, { origin: location.origin, builder: this.builder });
+      map = mapFromBuilderMessage(event, { origin: this.builderOrigin, builder: this.builder });
     } catch (error) {
       this.chooseFile(null, error.message, "file");
       return;

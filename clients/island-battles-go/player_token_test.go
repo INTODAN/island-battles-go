@@ -99,7 +99,7 @@ func TestARefusedPlayerTokenIsRenewedOnce(t *testing.T) {
 
 func TestASessionTheLobbyRefusesStopsTheClient(t *testing.T) {
 	server := newFakeServer(t)
-	client, err := NewClient(server.server.URL, "stale", testLobbyID, passTurn, WithLogOutput(nil))
+	client, err := NewClient(BaseURL(server.server.URL), "stale", testLobbyID, passTurn, WithLogOutput(nil))
 	if err != nil {
 		t.Fatal(err)
 	}

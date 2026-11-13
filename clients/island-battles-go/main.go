@@ -47,6 +47,8 @@ type invocation struct {
 	stdin io.Reader
 	// clientOptions are added to run's Client options; tests set them.
 	clientOptions []ClientOption
+	// lookupEnv reads the environment; nil means os.LookupEnv.
+	lookupEnv func(string) (string, bool)
 }
 
 // subcommand is one subcommand of Main. run gets the arguments after the
