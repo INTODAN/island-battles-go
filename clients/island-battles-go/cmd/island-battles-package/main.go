@@ -19,7 +19,7 @@
 // Its upload subcommand uploads the zip to a lobby, with the upload token that
 // the bot picker's "Upload from the command line" shows:
 //
-//	go run github.com/INTODAN/island-battles-go/clients/island-battles-go/cmd/island-battles-package upload --game-url <url> --token <token> [zip]
+//	go run github.com/INTODAN/island-battles-go/clients/island-battles-go/cmd/island-battles-package upload --game-url <url> --token=<token> [zip]
 package main
 
 import (
@@ -83,7 +83,7 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 	flags.SetOutput(stderr)
 	output := flags.String("output", defaultOutput, "the zip to write")
 	flags.Usage = func() {
-		_, _ = fmt.Fprintf(stderr, "Usage: island-battles-package [--output file] [package path]\n\nBuilds the bot program for Linux arm64 and zips it with its manifest for the\nserver's runners. The package is the bot's main package, \".\" by default.\n\n       island-battles-package upload --game-url <url> --token <token> [zip]\n\nUploads the zip to a lobby; see island-battles-package upload --help.\n\nFlags:\n")
+		_, _ = fmt.Fprintf(stderr, "Usage: island-battles-package [--output file] [package path]\n\nBuilds the bot program for Linux arm64 and zips it with its manifest for the\nserver's runners. The package is the bot's main package, \".\" by default.\n\n       island-battles-package upload --game-url <url> --token=<token> [zip]\n\nUploads the zip to a lobby; see island-battles-package upload --help.\n\nFlags:\n")
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(arguments); err != nil {

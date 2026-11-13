@@ -661,7 +661,7 @@ func TestRunPlaysASeatToTheEnd(t *testing.T) {
 	status := runMain(context.Background(), invocation{
 		name: "mybot", play: play, stdout: &syncWriter{writer: &stdout}, stderr: &stderr,
 		clientOptions: []ClientOption{func(client *Client) { client.dial = realtime.dial }},
-	}, []string{"run", "--base-url", server.server.URL, "--token", "good", "--lobby-id", testLobbyID, "--log-file", logFile})
+	}, []string{"run", "--base-url", server.server.URL, "--token=good", "--lobby-id", testLobbyID, "--log-file", logFile})
 	if status != 0 || !strings.Contains(stdout.String(), "INFO island_battles.player: playing generation=1\n") || !strings.HasSuffix(stdout.String(), "game ended at generation 2: Draw\n") || strings.Contains(stdout.String(), "not logged") {
 		t.Fatalf("got status %d, stdout %q, stderr %q", status, stdout.String(), stderr.String())
 	}
@@ -672,7 +672,15 @@ func TestRunPlaysASeatToTheEnd(t *testing.T) {
 	if status, _, stderr := run(t, sender, "run", "--base-url", server.server.URL); status != 2 || !strings.Contains(stderr, "--token and --lobby-id are required") {
 		t.Fatalf("got status %d, stderr %q", status, stderr)
 	}
-	if status, _, stderr := run(t, sender, "run", "--base-url", server.server.URL, "--token", "bad", "--lobby-id", testLobbyID); status != 1 || !strings.Contains(stderr, "FAIL: HTTP 401: bad credential") {
+	if status, _, stderr := run(t, sender, "run", "--base-url", server.server.URL, "--token=bad", "--lobby-id", testLobbyID); status != 1 || !strings.Contains(stderr, "FAIL: HTTP 401: bad credential") {
+		t.Fatalf("got status %d, stderr %q", status, stderr)
+	}
+}
+
+func TestRunReadsATokenThatStartsWithADash(t *testing.T) {
+	server := newFakeServer(t)
+	// "--token=-abc" is one argument; the server answers 401 to a token it doesn't know, so reaching it proves the flag was read.
+	if status, _, stderr := run(t, sender, "run", "--base-url", server.server.URL, "--token=-abc", "--lobby-id", testLobbyID); status != 1 || !strings.Contains(stderr, "FAIL: HTTP 401: bad credential") {
 		t.Fatalf("got status %d, stderr %q", status, stderr)
 	}
 }

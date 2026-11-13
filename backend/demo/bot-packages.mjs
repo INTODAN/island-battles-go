@@ -32,8 +32,8 @@ export function describePackage(item) {
 // and the Go SDK.
 export function uploadCommands(gameURL, token) {
   return {
-    python: `uv run island-battles-bot upload --game-url ${gameURL} --token ${token} dist/island-battles-bot.zip`,
-    go: `go run github.com/INTODAN/island-battles-go/clients/island-battles-go/cmd/island-battles-package upload --game-url ${gameURL} --token ${token} dist/island-battles-bot.zip`,
+    python: `uv run island-battles-bot upload --game-url ${gameURL} --token=${token} dist/island-battles-bot.zip`,
+    go: `go run github.com/INTODAN/island-battles-go/clients/island-battles-go/cmd/island-battles-package upload --game-url ${gameURL} --token=${token} dist/island-battles-bot.zip`,
   };
 }
 

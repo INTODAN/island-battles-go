@@ -81,7 +81,7 @@ A turn has a deadline (30 seconds unless the lobby's host chose another): a bot 
 ### Play it without a browser: run
 
 ```sh
-go run . run --base-url http://localhost:8888 --token <credential> --lobby-id <lobby ID> [--log-file bot.log] [--log-level info]
+go run . run --base-url http://localhost:8888 --token=<credential> --lobby-id <lobby ID> [--log-file bot.log] [--log-level info]
 ```
 
 plays your seat of a lobby's game to its end, straight against the server, with no browser tab; build the program once (`go build -o mybot .`) to start it faster. `--token` is your player's guest credential, and `--lobby-id` the lobby whose game it plays. Choose **your localhost bot** in the lobby before you get ready, as for `serve`. `run` reads the game's state, hears of each new turn on your player's realtime channel, calls your bot once per turn and submits its answer, and prints `game ended at generation 300: …` when the game ends. A request that gets no response is sent again identically, and a turn missed while the connection was down is read again after it reconnects.
@@ -258,7 +258,7 @@ Try it, after `go build -o mybot .`:
 ### Upload it to a lobby
 
 ```sh
-go run github.com/INTODAN/island-battles-go/clients/island-battles-go/cmd/island-battles-package upload --game-url <url> --token <token> dist/island-battles-bot.zip
+go run github.com/INTODAN/island-battles-go/clients/island-battles-go/cmd/island-battles-package upload --game-url <url> --token=<token> dist/island-battles-bot.zip
 ```
 
 uploads the zip to a lobby (#221), where everyone in it sees it in the bot picker. Copy the game's address and the **upload token** from the bot picker's **Upload from the command line**, in the lobby page or the 3D client: the token stands for you in that lobby for 15 minutes, so the command needs no session of yours. It is the same as the Python SDK's `island-battles-bot upload`. The zip goes straight to the game's storage, then the game checks it as `package` does (the manifest, its command's file, at most 250 MiB zipped and 1 GiB unpacked, no path outside the package) and prints its reason if it refuses it. A member has one package per lobby: uploading a new one replaces the previous one. The browser pickers can also upload the zip themselves with **Upload bot (.zip)**. Choosing an uploaded package as your bot comes later.
@@ -306,7 +306,7 @@ go run ./examples/level3 serve
 | `island-battles-bot serve mybot:play` | `go run . serve` |
 | `island-battles-bot check mybot:play` | `go run . check` |
 | `island-battles-bot fixture` | `go run . fixture` |
-| `island-battles-bot run mybot:play --base-url … --token … --lobby-id …` | `go run . run --base-url … --token … --lobby-id …` |
+| `island-battles-bot run mybot:play --base-url … --token=… --lobby-id …` | `go run . run --base-url … --token=… --lobby-id …` |
 | `IslandBattlesClient(base_url, credential, lobby_id, play=play)`: `start`, `refresh`, `wait`, `run`, `close` | `NewClient(baseURL, credential, lobbyID, play)`: `Start`, `Refresh`, `Wait`, `Run`, `Close`, each with a `ctx` |
 | `client.generation`, `client.team_color`, `client.outcome` | `client.Generation()`, `client.TeamColor()`, `client.Outcome()` |
 | `on_game_ended=`, `log_level=`, `log_file=`, `log_to_stdout=False` | `WithGameEnded(...)`, `WithLogLevel(...)`, `WithLogFile(...)`, `WithLogOutput(nil)` |

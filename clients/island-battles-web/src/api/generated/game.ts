@@ -196,7 +196,7 @@ export interface paths {
         put?: never;
         /**
          * Get an upload token for uploading a bot package from the command line
-         * @description Requires an active membership of the Island Battles lobby, in any phase, with your player token (PlayerToken); anyone else gets 404. Returns an upload token for you and this lobby, valid for 15 minutes, for a command line that doesn't hold your session: island-battles-bot upload --game-url <url> --token <token> dist/island-battles-bot.zip, or the Go SDK's island-battles-package upload with the same arguments. The two upload endpoints, POST /game/lobbies/{lobby_id}/bot-packages and its complete, accept it as Authorization: Bearer <token> in place of your player token; nothing else does. The command line reads the lobby from the token. A server without storage for packages answers 503.
+         * @description Requires an active membership of the Island Battles lobby, in any phase, with your player token (PlayerToken); anyone else gets 404. Returns an upload token for you and this lobby, valid for 15 minutes, for a command line that doesn't hold your session: island-battles-bot upload --game-url <url> --token=<token> dist/island-battles-bot.zip, or the Go SDK's island-battles-package upload with the same arguments. The two upload endpoints, POST /game/lobbies/{lobby_id}/bot-packages and its complete, accept it as Authorization: Bearer <token> in place of your player token; nothing else does. The command line reads the lobby from the token. A server without storage for packages answers 503.
          */
         post: operations["createIslandBotUploadToken"];
         delete?: never;

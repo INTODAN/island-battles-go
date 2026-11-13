@@ -23,7 +23,7 @@ async def run_bot(player, lobby_id, timeout):
     """Play a seat with ``island-battles-bot run`` and the example bot."""
     process = await asyncio.create_subprocess_exec(
         sys.executable, "-m", "island_battles_client.cli", "run", "examples.bot:play",
-        "--base-url", BASE, "--token", player.credential, "--lobby-id", lobby_id,
+        "--base-url", BASE, f"--token={player.credential}", "--lobby-id", lobby_id,
         cwd=PYTHON_CLIENT, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
     try:
