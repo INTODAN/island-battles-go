@@ -1,3 +1,4 @@
+import { loadServerUrls } from "./platform";
 import { createRealtime, type Realtime } from "./realtime";
 
 declare global {
@@ -14,6 +15,8 @@ if (typeof __DESKTOP_API_BASE__ === "string") {
   const { installDesktopFetch } = await import("./desktop");
   installDesktopFetch();
 }
+// The lobby's and the game's URLs, before any API client is made.
+await loadServerUrls();
 
 const canvas = document.getElementById("scene");
 if (!(canvas instanceof HTMLCanvasElement)) {

@@ -1,11 +1,14 @@
 import { expect, test } from "bun:test";
 import { createApiClients } from "./api/client";
 import {
-  apiBaseUrl,
+  gameBaseUrl,
   isDesktop,
+  loadServerUrls,
+  lobbyBaseUrl,
   platformFetch,
   resolveAgainstBase,
   setDesktopFetch,
+  setServerUrls,
   tabStorage,
   webClientUrl,
 } from "./platform";
@@ -13,7 +16,60 @@ import {
 // bun test never defines __DESKTOP_API_BASE__, so these are the browser build's answers.
 test("the browser build is not the desktop build", () => {
   expect(isDesktop).toBe(false);
-  expect(apiBaseUrl()).toBe(globalThis.location?.origin ?? "");
+  expect(gameBaseUrl()).toBe(globalThis.location?.origin ?? "");
+  expect(lobbyBaseUrl()).toBe(globalThis.location?.origin ?? "");
+});
+
+test("the runtime config names the lobby's and the game's URLs", () => {
+  try {
+    setServerUrls({
+      lobby_url: "https://lobby.example.test/",
+      game_url: "https://game.example.test",
+    });
+    expect(lobbyBaseUrl()).toBe("https://lobby.example.test");
+    expect(gameBaseUrl()).toBe("https://game.example.test");
+    // A missing or invalid URL keeps the page's own origin.
+    setServerUrls({ lobby_url: "javascript:alert(1)" });
+    expect(lobbyBaseUrl()).toBe(globalThis.location?.origin ?? "");
+    expect(gameBaseUrl()).toBe(globalThis.location?.origin ?? "");
+  } finally {
+    setServerUrls({});
+  }
+});
+
+test("the browser reads config.json beside the page, and keeps its own origin without one", async () => {
+  const saved = (globalThis as { document?: unknown }).document;
+  (globalThis as { document?: unknown }).document = {
+    baseURI: "https://game.example.test/play/",
+  };
+  const asked: string[] = [];
+  const answer =
+    (response: Response) =>
+    async (input: URL | RequestInfo): Promise<Response> => {
+      asked.push(String(input));
+      return response;
+    };
+  try {
+    await loadServerUrls(
+      answer(
+        Response.json({ lobby_url: "https://lobby.example.test" }),
+      ) as typeof fetch,
+    );
+    expect(asked).toEqual(["https://game.example.test/play/config.json"]);
+    expect(lobbyBaseUrl()).toBe("https://lobby.example.test");
+    expect(gameBaseUrl()).toBe(globalThis.location?.origin ?? "");
+    setServerUrls({});
+    await loadServerUrls(
+      answer(new Response("<html>", { status: 200 })) as typeof fetch,
+    );
+    await loadServerUrls(
+      answer(new Response("", { status: 404 })) as typeof fetch,
+    );
+    expect(lobbyBaseUrl()).toBe(globalThis.location?.origin ?? "");
+  } finally {
+    setServerUrls({});
+    (globalThis as { document?: unknown }).document = saved;
+  }
 });
 
 test("the browser keeps its tab's state in sessionStorage", () => {
@@ -55,6 +111,30 @@ test("paths resolve against the desktop game server and other inputs are left al
   );
   const request = new Request("https://island-battles.elidan.org/healthz");
   expect(resolveAgainstBase(request, base)).toBe(request);
+});
+
+test("API clients send the lobby's routes to the lobby and the game's to the game", async () => {
+  const seen: string[] = [];
+  const { lobbyApi, gameApi } = createApiClients({
+    lobbyUrl: "https://lobby.example.test",
+    gameUrl: "https://game.example.test",
+    getAccessToken: () => "guest",
+    fetch: (async (input: Request) => {
+      seen.push(input.url);
+      const body = input.url.endsWith("/player-tokens")
+        ? { token: "t", expires_at: "2999-01-01T00:00:00Z" }
+        : {};
+      return new Response(JSON.stringify(body), {
+        headers: { "content-type": "application/json" },
+      });
+    }) as unknown as typeof fetch,
+  });
+  await lobbyApi.POST("/lobby/v1/connection-token", { body: {} });
+  await gameApi.GET("/bots/defaults");
+  expect(seen).toEqual([
+    "https://lobby.example.test/lobby/v1/connection-token",
+    "https://game.example.test/bots/defaults",
+  ]);
 });
 
 test("API clients use an explicit base URL over the default", async () => {

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { backendOrigin, lobbyOrigin, proxyOrigin } from "./proxy";
+import { backendOrigin, proxyOrigin } from "./proxy";
 
 test("forwards the game's paths to the backend", () => {
   for (const pathname of [
@@ -15,19 +15,10 @@ test("forwards the game's paths to the backend", () => {
   }
 });
 
-test("forwards the lobby's API and page to the lobby", () => {
+test("keeps the client's own paths local, and forwards nothing to the lobby, which is on its own origin", () => {
   for (const pathname of [
     "/lobby/v1/sessions",
-    "/lobby/v1/jwks.json",
     "/lobby/ui/",
-    "/lobby/ui/app.js",
-  ]) {
-    expect(proxyOrigin(pathname)).toBe(lobbyOrigin);
-  }
-});
-
-test("keeps the client's own paths local", () => {
-  for (const pathname of [
     "/",
     "/index.html",
     "/gamepad",

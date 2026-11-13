@@ -15,7 +15,8 @@ export ISLAND_BATTLES_SUBMIT_TOKEN_SECRET=conformance-submit-token-secret
 # game's. The runner starts the lobby (lobby/cmd/lobby) and the backend as
 # separate processes, the backend with ISLAND_BATTLES_LOBBY_URL, and the lobby
 # with the LOBBY_GAMES that backend/cmd/lobby-games prints for the backend's
-# address. Clients reach both through one front URL.
+# address. They are separate origins: clients get the lobby's URL and the
+# game's, and send each route to its own.
 export ISLAND_BATTLES_LOBBY_HOOK_SECRET=conformance-lobby-hook-secret-of-32-bytes
 export LOBBY_GAME_SECRET_ISLAND_BATTLES="$ISLAND_BATTLES_LOBBY_HOOK_SECRET"
 if [[ $# -gt 0 ]]; then

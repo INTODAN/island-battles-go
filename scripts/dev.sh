@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Start local dependencies, then run the lobby and the backend as separate
-# processes: the lobby (lobby/cmd/lobby) on :8890, and the backend on
-# ISLAND_BATTLES_HTTP_ADDR, which reaches the lobby at ISLAND_BATTLES_LOBBY_URL.
-# Open both on one origin through the 3D client's dev server
-# (clients/island-battles-web: bun run dev), at http://localhost:3000/ and
-# http://localhost:3000/lobby/ui/.
+# processes on separate origins, as in production: the lobby
+# (lobby/cmd/lobby) on :8890, and the backend on ISLAND_BATTLES_HTTP_ADDR,
+# which reaches the lobby at ISLAND_BATTLES_LOBBY_URL. The lobby page,
+# http://localhost:8890/lobby/ui/, loads Island Battles' screens from the
+# backend; the 3D client's dev server (clients/island-battles-web: bun run
+# dev), http://localhost:3000/, calls the lobby on :8890.
 set -euo pipefail
 repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repository_root"
@@ -18,13 +19,13 @@ set +a
 
 missing=()
 for name in LOBBY_DATABASE_URL LOBBY_PUBLIC_URL LOBBY_CENTRIFUGO_API_URL LOBBY_CENTRIFUGO_API_KEY LOBBY_CENTRIFUGO_PUBLIC_URL \
-  LOBBY_CONNECTION_TOKEN_HMAC_SECRET LOBBY_PROXY_SECRET ISLAND_BATTLES_LOBBY_URL; do
+  LOBBY_CONNECTION_TOKEN_HMAC_SECRET LOBBY_PROXY_SECRET LOBBY_ALLOWED_ORIGINS ISLAND_BATTLES_LOBBY_URL ISLAND_BATTLES_LOBBY_ORIGINS; do
   if [[ -z "${!name:-}" ]]; then
     missing+=("$name")
   fi
 done
 if [[ ${#missing[@]} -gt 0 ]]; then
-  echo "Your .env lacks ${missing[*]}, which the lobby's own process needs. Copy them from .env.example." >&2
+  echo "Your .env lacks ${missing[*]}, which the lobby and the backend on their own origins need. Copy them from .env.example." >&2
   exit 1
 fi
 
@@ -70,7 +71,7 @@ elif command -v podman >/dev/null && [[ "$(uname -s)" == Linux ]]; then
     -e CENTRIFUGO_HTTP_API_KEY="$LOBBY_CENTRIFUGO_API_KEY" \
     -e CENTRIFUGO_VAR_LOBBY_PROXY_SECRET="$LOBBY_PROXY_SECRET" \
     -e CENTRIFUGO_ADMIN_ENABLED=false \
-    -e CENTRIFUGO_CLIENT_ALLOWED_ORIGINS="${ISLAND_BATTLES_CENTRIFUGO_ALLOWED_ORIGINS:-http://localhost:3000 http://127.0.0.1:3000 tauri://localhost http://tauri.localhost}" \
+    -e CENTRIFUGO_CLIENT_ALLOWED_ORIGINS="${ISLAND_BATTLES_CENTRIFUGO_ALLOWED_ORIGINS:-http://localhost:3000 http://127.0.0.1:3000 http://localhost:8890 http://127.0.0.1:8890 tauri://localhost http://tauri.localhost}" \
     docker.io/centrifugo/centrifugo:v6.9.6 centrifugo -c /centrifugo/centrifugo-config.toml >/dev/null
 else
   echo "Install Docker with Compose, or Podman on Linux, to run local dependencies." >&2
@@ -82,8 +83,9 @@ fi
 # for now.
 go run ./backend/cmd/migrate
 
-# The lobby calls Island Battles' hooks on the backend's port, and lists the
-# games of LOBBY_GAMES in .env too.
+# The lobby calls Island Battles' hooks on the backend's port, and its page
+# loads Island Battles' screens from there; it lists the games of LOBBY_GAMES
+# in .env too.
 backend_origin="http://localhost:${ISLAND_BATTLES_HTTP_ADDR##*:}"
 LOBBY_GAMES="$(go run ./backend/cmd/lobby-games "$backend_origin")"
 export LOBBY_GAMES
@@ -104,5 +106,5 @@ for attempt in {1..60}; do
 done
 
 echo "Starting the backend on $ISLAND_BATTLES_HTTP_ADDR and the lobby on ${LOBBY_HTTP_ADDR:-:8890}."
-echo "For one origin, run bun run dev in clients/island-battles-web and open http://localhost:3000/ or http://localhost:3000/lobby/ui/."
+echo "Open the lobby page at $ISLAND_BATTLES_LOBBY_URL/lobby/ui/. For the 3D client, run bun run dev in clients/island-battles-web and open http://localhost:3000/."
 go run ./backend

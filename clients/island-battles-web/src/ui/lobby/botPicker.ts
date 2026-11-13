@@ -7,7 +7,7 @@ import {
   uploadCommands,
   uploadPackage,
 } from "../../bots/packages";
-import { apiBaseUrl } from "../../platform";
+import { gameBaseUrl } from "../../platform";
 import { copyText, h } from "../dom";
 import type { DefaultBot, LobbyActions, MemberBot } from "./actions";
 import { choiceFromValue, choiceValue } from "./roomModel";
@@ -160,7 +160,7 @@ export function mountBotPicker(options: {
   const packages = mountPackages({
     actions,
     playerId: options.playerId ?? (() => undefined),
-    gameUrl: options.gameUrl ?? apiBaseUrl(),
+    gameUrl: options.gameUrl ?? gameBaseUrl(),
     post: options.post,
     refreshIntervalMs: options.packagesIntervalMs ?? 10000,
     onList(items) {
