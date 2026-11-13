@@ -103,6 +103,31 @@ function loadOptions() {
   return defaultBots;
 }
 
+const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+// Why uploaded bots can't be chosen, once the bot runners have used the
+// month's compute (GET /game/bot-compute), such as "Uploaded bots have used
+// this month's free compute. They're back on 1 December.", the sentence of
+// the server's refused start; null while they can.
+export function computeSpentMessage(compute) {
+  if (!compute || compute.available !== false) return null;
+  const month = Number(/^\d{4}-(\d{2})$/.exec(String(compute.month))?.[1]);
+  const back = month >= 1 && month <= 12 ? `on 1 ${monthNames[month % 12]}` : "next month";
+  return `Uploaded bots have used this month's free compute. They're back ${back}.`;
+}
+
+// Whether games with uploaded bots may start this month, read when a room is
+// shown; null when it can't be read, which greys out nothing: the start
+// refuses them all the same.
+async function loadCompute() {
+  try {
+    const response = await fetch("/game/bot-compute", { headers: { Accept: "application/json" } });
+    return response.ok ? await response.json() : null;
+  } catch {
+    return null;
+  }
+}
+
 // The lobby's packages, newest first, through the room's request.
 async function loadPackages(lobbyID, request) {
   if (!lobbyID || !request) return [];
@@ -114,12 +139,15 @@ async function loadPackages(lobbyID, request) {
 // lobby page sends with POST …/seats: a default bot of each level, which the
 // backend plays, and, when the server offers them, any package of the lobby
 // and a hosted bot at the URL that the host types, which the server plays.
-export async function seatOptions({ lobbyID, request, options = loadOptions, packages = loadPackages } = {}) {
+// The packages are greyed out (disabled) once the month's compute is spent.
+export async function seatOptions({ lobbyID, request, options = loadOptions, packages = loadPackages, compute = loadCompute } = {}) {
   const { levels, serverBots } = await options();
   const choices = levels.map((level) => ({ label: `Default bot, level ${level}`, settings: { bot_level: level } }));
   if (serverBots) {
-    for (const item of await packages(lobbyID, request).catch(() => [])) {
-      choices.push({ label: `Uploaded: ${item.owner_name}'s bot (${item.language})`, settings: { bot_package_id: item.package_id } });
+    const [items, usage] = await Promise.all([packages(lobbyID, request).catch(() => []), compute().catch(() => null)]);
+    const spent = computeSpentMessage(usage) !== null;
+    for (const item of items) {
+      choices.push({ label: `Uploaded: ${item.owner_name}'s bot (${item.language})`, settings: { bot_package_id: item.package_id }, ...(spent ? { disabled: true } : {}) });
     }
     choices.push({ label: "Hosted bot (URL)", settings: {}, input: { name: "bot_url", label: "Bot URL", placeholder: "https://bot.example.com/turn" } });
   }
@@ -141,9 +169,10 @@ export const safariNote = "Safari does not let an https page reach a bot on loca
 // them, the select also has "My hosted bot (URL)", with a field for the URL,
 // and "Uploaded: …" for each of the player's packages; the page's
 // refreshSeatOptions is called when the lobby's packages change, so the
-// host's Add bot offers them.
+// host's Add bot offers them. Once the month's compute is spent, the
+// uploaded choices are greyed out, with the sentence that says why.
 export class RoomPanel {
-  constructor({ container, lobbyID, playerID, saveMemberSettings, request, refreshSeatOptions = () => {}, checkHealth = checkBotHealth, copy = (text) => navigator.clipboard.writeText(text), postToStorage, options = loadOptions }) {
+  constructor({ container, lobbyID, playerID, saveMemberSettings, request, refreshSeatOptions = () => {}, checkHealth = checkBotHealth, copy = (text) => navigator.clipboard.writeText(text), postToStorage, options = loadOptions, compute = loadCompute }) {
     this.container = container;
     this.checkHealth = checkHealth;
     this.copy = copy;
@@ -168,9 +197,14 @@ export class RoomPanel {
     this.summary = document.createElement("p");
     this.summary.className = "hint";
     this.summary.setAttribute("role", "status");
+    // Why uploaded bots are greyed out this month, or null while they aren't.
+    this.computeSpent = null;
+    this.spentNote = document.createElement("p");
+    this.spentNote.className = "hint";
+    this.spentNote.hidden = true;
     this.local = this.buildLocalHelp();
     this.hosted = this.buildHostedHelp();
-    container.append(label, this.local, this.hosted, this.summary);
+    container.append(label, this.spentNote, this.local, this.hosted, this.summary);
     // The lobby's bot packages, which the page's room requests reach.
     this.packages = request ? new PackagesPanel({ container, lobbyID, playerID, request, copy, onList: (items) => this.listed(items), ...(postToStorage ? { post: postToStorage } : {}) }) : null;
     this.select.addEventListener("change", () => {
@@ -188,6 +222,14 @@ export class RoomPanel {
       this.serverBots = serverBots;
       this.packages?.setChoosable(serverBots);
       this.fillSelect();
+      if (serverBots) {
+        void compute().catch(() => null).then((usage) => {
+          this.computeSpent = computeSpentMessage(usage);
+          this.spentNote.textContent = this.computeSpent ?? "";
+          this.spentNote.hidden = this.computeSpent === null;
+          if (this.computeSpent !== null) this.fillSelect();
+        });
+      }
     });
   }
 
@@ -197,12 +239,15 @@ export class RoomPanel {
     const options = [new Option("Choose your bot", ""), new Option("My localhost bot", "localhost"), ...this.levelOptions];
     if (this.serverBots) {
       options.push(new Option("My hosted bot (URL)", "hosted"));
-      options.push(...this.ownPackages.map((item) => new Option(`Uploaded: ${describePackage(item)}`, `package-${item.package_id}`)));
+      const uploaded = this.ownPackages.map((item) => new Option(`Uploaded: ${describePackage(item)}`, `package-${item.package_id}`));
       // A chosen package that was replaced or deleted stays shown until the
       // player chooses again.
       if (this.chosen?.kind === "uploaded" && !this.ownPackages.some((item) => item.package_id === this.chosen.package_id)) {
-        options.push(new Option("Uploaded: replaced or deleted, choose again", choiceValue(this.chosen)));
+        uploaded.push(new Option("Uploaded: replaced or deleted, choose again", choiceValue(this.chosen)));
       }
+      // Greyed out once the month's compute is spent; spentNote says why.
+      for (const option of uploaded) option.disabled = this.computeSpent !== null;
+      options.push(...uploaded);
     }
     this.select.replaceChildren(...options);
     this.restore();

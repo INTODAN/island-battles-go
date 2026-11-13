@@ -145,6 +145,26 @@ resource "aws_lambda_function_event_invoke_config" "bot_runner" {
   maximum_event_age_in_seconds = local.bot_runner_maximum_event_age
 }
 
+# The backend reads the runners' month-to-date Duration and InitDuration from
+# CloudWatch, at most once per 10 minutes, for the monthly guard on games with
+# uploaded bots (#226), with GetMetricStatistics, whose requests count against
+# CloudWatch's free API requests (GetMetricData's are billed). It can't be
+# scoped to resources or metrics: IAM takes only "*" for it, so this
+# statement allows reading any metric of the account, and nothing else.
+resource "aws_iam_role_policy" "lambda_bot_compute" {
+  name = "bot-compute"
+  role = aws_iam_role.lambda.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid      = "ReadTheBotRunnersCompute"
+      Effect   = "Allow"
+      Action   = "cloudwatch:GetMetricStatistics"
+      Resource = "*"
+    }]
+  })
+}
+
 # The backend invokes the two runners, and only them, asynchronously: one
 # event per turn of each hosted and uploaded bot (#225). It passes their
 # names in ISLAND_BATTLES_BOT_RUNNER_PYTHON and ISLAND_BATTLES_BOT_RUNNER_NATIVE

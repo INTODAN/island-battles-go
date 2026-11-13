@@ -24,6 +24,10 @@ game_hostname = "island-battles.<your-domain>"
 # Where the error alarms and the zero-spend budget send their emails.
 alert_email = "<your email address>"
 
+# Optional: where the $5 monthly cost budget emails at 80 % of actual costs.
+# Unset, it emails alert_email.
+# budget_email = "<your email address>"
+
 # Optional: let the repository's Deploy workflow deploy through an IAM role
 # that GitHub Actions assumes with OIDC (deploy/README.md).
 # github_repository = "<owner>/<name>"

@@ -243,6 +243,23 @@ variable "alert_email" {
   }
 }
 
+variable "budget_email" {
+  description = <<-EOT
+    Where the $5 monthly cost budget emails once actual costs pass 80 % of it
+    (observability.tf, #226). Unset, it emails alert_email. Set it in
+    deploy/local/aws.tfvars and never commit it. Budgets emails directly,
+    without a confirmation.
+  EOT
+  type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition     = var.budget_email == null || can(regex("^[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$", var.budget_email))
+    error_message = "budget_email must be an email address, or unset for alert_email."
+  }
+}
+
 variable "log_lines_per_minute" {
   description = <<-EOT
     N: the most warning and error lines one Lambda instance writes a minute.

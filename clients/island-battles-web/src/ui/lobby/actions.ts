@@ -20,6 +20,7 @@ export type DefaultBot = GameComponents["schemas"]["DefaultBot"];
 export type BotPackage = GameComponents["schemas"]["BotPackage"];
 export type BotPackageUpload = GameComponents["schemas"]["BotPackageUpload"];
 export type BotUploadToken = GameComponents["schemas"]["BotUploadToken"];
+export type BotCompute = GameComponents["schemas"]["BotCompute"];
 export type AddSeatBody = LobbyComponents["schemas"]["AddSeatBody"];
 export type Watcher = LobbyComponents["schemas"]["Watcher"];
 export type MapTemplateSummary =
@@ -335,6 +336,12 @@ export function createLobbyActions(options: {
       const { data } = await gameApi.GET("/bots/defaults");
       const body = required(data);
       return { bots: body.bots, serverBots: body.server_bots };
+    },
+
+    /** Whether games with uploaded bots may start this month (`GET /game/bot-compute`). */
+    async botCompute(): Promise<BotCompute> {
+      const { data } = await gameApi.GET("/game/bot-compute");
+      return required(data);
     },
 
     async mapTemplates(): Promise<MapTemplateSummary[]> {

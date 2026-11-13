@@ -259,6 +259,11 @@ func SetupRoutes(api huma.API, env *handlers.Env, adminAPIKey string) {
 			"The backend plays a default bot itself, with no client: it plays each turn as soon as the generation is created, so it never misses a turn's deadline. " +
 			"A game in which only default bots are left plays on by itself, and each game request continues it for a few seconds. The list is static and needs no authentication. " +
 			"server_bots says whether the server also offers hosted and uploaded bots, which it plays without a player's tab, in member settings and bot seats."}, env.ListDefaultBots)
+	huma.Register(api, huma.Operation{OperationID: "getBotCompute", Path: "/game/bot-compute", Method: http.MethodGet,
+		Summary: "Say whether games with uploaded bots may start this month.",
+		Description: "Uploaded bots run in the server's bot runners, whose compute has a monthly budget, so that they stay inside Lambda's free tier. Once the runners have used it this month (UTC), a lobby whose start roster has an uploaded bot, a member's or a bot seat's, can't start until the first of the next month: the start fails with the lobby's game_requirement of type " + services.BotComputeProblemType + ", and the bot pickers grey out uploaded bots with the same sentence. Games already running go on, and games with only localhost, hosted and default bots are unaffected. " +
+			"The runners' compute is read from CloudWatch at most once per 10 minutes and kept in between, so this needs no authentication. A server that doesn't measure it, such as a local one, reports 0 and available. 503 when the compute can't be read.",
+		Errors: []int{http.StatusServiceUnavailable}}, env.GetBotCompute)
 	huma.Register(api, huma.Operation{OperationID: "listMapTemplates", Path: "/map/templates", Method: http.MethodGet,
 		Summary: "List the default maps a lobby can start on.",
 		Description: "Lists every default map whose castle team colours are exactly 1 to player_amount, ordered by name. " +

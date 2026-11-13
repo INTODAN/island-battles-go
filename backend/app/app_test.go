@@ -213,6 +213,9 @@ func TestTheBackendUsesALobbyOfItsOwnAtTheLobbyURL(t *testing.T) {
 			dependencies.SubmitTokenSecretEnv: "test-submit-token-secret",
 			dependencies.LobbyHookSecretEnv:   hookSecret,
 			dependencies.LobbyURLEnv:          lobbyURL,
+			// The game's monthly compute guard applies in either mode.
+			dependencies.BotComputeBudgetEnv: "1000",
+			dependencies.BotComputeFakeEnv:   "1000",
 		}[name]
 		return value, found
 	})
@@ -260,5 +263,16 @@ func TestTheBackendUsesALobbyOfItsOwnAtTheLobbyURL(t *testing.T) {
 	}
 	if status, _, _ := send(t, http.MethodGet, backend.URL+"/game/from-lobby/"+uuid.NewString()+"/generation", alice.AccessToken, nil); status != http.StatusUnauthorized {
 		t.Fatalf("generation with the guest credential = %d", status)
+	}
+	// The game guards the bot runners' compute itself: with the month's
+	// budget spent, games with uploaded bots may not start.
+	status, content, _ = send(t, http.MethodGet, backend.URL+"/game/bot-compute", "", nil)
+	var compute struct {
+		UsedGBSeconds   float64 `json:"used_gb_seconds"`
+		BudgetGBSeconds float64 `json:"budget_gb_seconds"`
+		Available       bool    `json:"available"`
+	}
+	if err := json.Unmarshal(content, &compute); status != http.StatusOK || err != nil || compute.UsedGBSeconds != 1000 || compute.BudgetGBSeconds != 1000 || compute.Available {
+		t.Fatalf("bot compute = %d %s", status, content)
 	}
 }

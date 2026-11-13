@@ -71,8 +71,9 @@ data "archive_file" "backend" {
 # The function writes its logs, and its collector layer sends traces to X-Ray
 # (observability.tf). In S3 it presigns uploads to, reads and deletes the zips
 # of the bot package bucket, and only that bucket (bot_packages.tf). It
-# invokes the two bot runner functions, and no other function
-# (bot_runners.tf). It calls nothing else in AWS: it reaches Postgres and
+# invokes the two bot runner functions, and no other function, and reads
+# their compute with cloudwatch:GetMetricStatistics (bot_runners.tf). It calls
+# nothing else in AWS: it reaches Postgres and
 # Centrifugo over the internet.
 resource "aws_iam_role" "lambda" {
   name = "${var.name}-lambda"
