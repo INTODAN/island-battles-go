@@ -13,12 +13,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/INTODAN/mpl/adminmcp"
+	lobbypostgres "github.com/INTODAN/mpl/postgres"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/models"
 	"islandBattles/backend/retention"
-	"islandBattles/lobby/adminmcp"
-	lobbypostgres "islandBattles/lobby/postgres"
 
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"

@@ -1,5 +1,5 @@
 // Command lobby-games prints the LOBBY_GAMES of a lobby that runs on its own
-// (lobby/cmd/lobby) with Island Battles in it: the LOBBY_GAMES of its
+// (github.com/INTODAN/mpl/cmd/lobby) with Island Battles in it: the LOBBY_GAMES of its
 // environment, plus Island Battles' entry (backend/lobbyadapter's
 // lobby_game.json) with its hooks at the backend's origin, unless that
 // LOBBY_GAMES lists island-battles itself. scripts/dev.sh and the live test
@@ -21,8 +21,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/INTODAN/mpl/gamehooks"
 	"islandBattles/backend/dependencies"
-	"islandBattles/lobby/gamehooks"
 )
 
 func main() {

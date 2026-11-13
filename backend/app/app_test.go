@@ -12,14 +12,14 @@ import (
 	"sync/atomic"
 	"testing"
 
+	lobbyapp "github.com/INTODAN/mpl/app"
+	"github.com/INTODAN/mpl/domain"
+	"github.com/INTODAN/mpl/playertoken"
 	"islandBattles/backend/app"
 	"islandBattles/backend/dependencies"
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/retention"
-	lobbyapp "islandBattles/lobby/app"
-	"islandBattles/lobby/domain"
-	"islandBattles/lobby/playertoken"
 
 	"github.com/google/uuid"
 	gormpostgres "gorm.io/driver/postgres"
@@ -94,7 +94,7 @@ func send(t *testing.T, method, url, token string, body any) (int, []byte, http.
 }
 
 // In-process mode, production's until the cutover: without
-// ISLAND_BATTLES_LOBBY_URL, the backend serves the lobby that lobby/app
+// ISLAND_BATTLES_LOBBY_URL, the backend serves the lobby that the lobby's package app
 // builds, which calls Island Battles' hooks in memory and keeps its tables in
 // its own database.
 func TestTheBackendRunsTheLobbyInItsOwnProcessWithoutALobbyURL(t *testing.T) {

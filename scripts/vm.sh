@@ -210,8 +210,9 @@ EOF
       echo "Set game_url in $settings_file. scripts/aws.sh output game_url prints it." >&2
       exit 1
     fi
-    # The smoke test uses the lobby client's locked dependencies.
-    uv run --project "$repository_root/lobby/clients/lobby-python" --locked \
+    # The smoke test needs httpx and websockets, which the Python SDK's locked
+    # dependencies include.
+    uv run --project "$repository_root/clients/island-battles-python" --locked --no-dev \
       python "$repository_root/deploy/smoke.py" \
       --game-url "$game_url" --session-file "$local_directory/smoke-session.json" \
       ${ISLAND_BATTLES_EXPECTED_VERSION:+--expected-version "$ISLAND_BATTLES_EXPECTED_VERSION"} \

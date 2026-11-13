@@ -1,4 +1,4 @@
-# Releases the backend and the lobby, started by hand from main (deploy/README.md,
+# Releases the backend, started by hand from main (deploy/README.md,
 # "Releasing"). Merging to main releases nothing.
 #
 # Starting this workflow is the approval: only people with write access can,
@@ -136,18 +136,18 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # Annotated tags on the commit that was checked and deployed. The lobby
-      # module and the Go SDK module are tagged with the same version, with
-      # their directory as the prefix, as Go modules in a subdirectory
-      # require; the SDK's tag is what `go get` of a version resolves.
+      # Annotated tags on the commit that was checked and deployed. The Go SDK
+      # module is tagged with the same version, with its directory as the
+      # prefix, as Go modules in a subdirectory require; the SDK's tag is what
+      # `go get` of a version resolves. The lobby is released from its own
+      # repository, INTODAN/mpl.
       - name: Tag the release
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "$VERSION" -m "Release $VERSION" "$GITHUB_SHA"
-          git tag -a "lobby/$VERSION" -m "Lobby $VERSION" "$GITHUB_SHA"
           git tag -a "clients/island-battles-go/$VERSION" -m "Go SDK $VERSION" "$GITHUB_SHA"
-          git push --atomic origin "refs/tags/$VERSION" "refs/tags/lobby/$VERSION" "refs/tags/clients/island-battles-go/$VERSION"
+          git push --atomic origin "refs/tags/$VERSION" "refs/tags/clients/island-battles-go/$VERSION"
 
       - name: Create the GitHub release
         run: |
@@ -161,43 +161,29 @@ jobs:
           gh release create "$VERSION" --verify-tag --title "$VERSION" --generate-notes \
             "${start[@]}" --notes "$note
 
-          The lobby module is tagged lobby/$VERSION, and the Go SDK clients/island-battles-go/$VERSION: go get github.com/INTODAN/island-battles-go/clients/island-battles-go@$VERSION"
+          The Go SDK is tagged clients/island-battles-go/$VERSION: go get github.com/INTODAN/island-battles-go/clients/island-battles-go@$VERSION"
 
-      # Hook for #117 (publishing the Python clients to PyPI): add jobs here
-      # with `needs: release`. A release
-      # made with GITHUB_TOKEN doesn't trigger `on: release`, so they belong
-      # in this workflow, not in a workflow of their own.
+      # A release made with GITHUB_TOKEN doesn't trigger `on: release`, so the
+      # jobs that follow it (publish-python, #117) belong in this workflow, not
+      # in a workflow of their own.
 
-  # Publishes the two Python distributions (#117) at the release's version, after the
-  # tags and the GitHub release exist, so a PyPI version never lacks its tag.
-  # It needs `release` rather than the deploy jobs: the deploy is done by then,
-  # and a failure here fails only this job and the run, visibly. The deploy and
-  # the tags and release stay. Fix the cause and re-run this job alone; the
-  # `skip-existing` setting makes a re-run skip the files a partial run uploaded.
-  # Trusted publishing: no PyPI token exists. The PyPI pending publishers name
-  # this workflow and its own environment, `pypi` or `pypi-island-battles` (deploy/README.md, "Publishing the
-  # Python clients").
+  # Publishes the Python SDK, island-battles-python (#117), at the release's
+  # version, after the tags and the GitHub release exist, so a PyPI version
+  # never lacks its tag. It needs `release` rather than the deploy jobs: the
+  # deploy is done by then, and a failure here fails only this job and the
+  # run, visibly. The deploy and the tags and release stay. Fix the cause and
+  # re-run this job alone; the `skip-existing` setting makes a re-run skip the
+  # files a partial run uploaded. The lobby's client, mpl-lobby-client, is
+  # published by the lobby's own repository, INTODAN/mpl.
+  # Trusted publishing: no PyPI token exists. The PyPI publisher names this
+  # workflow and the environment `pypi-island-battles` (deploy/README.md,
+  # "Publishing the Python clients").
   publish-python:
     needs: [plan, release]
     if: ${{ !cancelled() && needs.release.result == 'success' }}
     runs-on: ubuntu-24.04
-    # One job per distribution, each in its own GitHub environment: PyPI refuses
-    # two pending publishers with identical settings (owner, repository,
-    # workflow and environment), so the two projects can't share `pypi`.
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # `mpl-lobby-client` ships both `lobby_client` and the generated
-          # `lobby_api_client`; there is no separate API-client distribution.
-          - directory: lobby/clients/lobby-python
-            module: mpl_lobby_client
-            environment: pypi
-          - directory: clients/island-battles-python
-            module: island_battles_python
-            environment: pypi-island-battles
     environment:
-      name: ${{ matrix.environment }}
+      name: pypi-island-battles
     permissions:
       contents: read
       # Only the publish step uses it; PyPI exchanges this token for an upload token.
@@ -212,23 +198,16 @@ jobs:
       # The version comes from the tag and is set in this run's working copy
       # only, never committed. PyPI wants PEP 440, so `v0.1.0` becomes `0.1.0`.
       - name: Set the release version
-        run: |
-          v="${VERSION#v}"
-          (cd "${{ matrix.directory }}" && uv version --frozen "$v")
+        working-directory: clients/island-battles-python
+        run: uv version --frozen "${VERSION#v}"
 
       - name: Build the package
         run: |
           v="${VERSION#v}"
-          uv build "${{ matrix.directory }}" --out-dir "$RUNNER_TEMP/dist"
-          test -f "$RUNNER_TEMP/dist/${{ matrix.module }}-${v}-py3-none-any.whl"
-          test -f "$RUNNER_TEMP/dist/${{ matrix.module }}-${v}.tar.gz"
+          uv build clients/island-battles-python --out-dir "$RUNNER_TEMP/dist"
+          test -f "$RUNNER_TEMP/dist/island_battles_python-${v}-py3-none-any.whl"
+          test -f "$RUNNER_TEMP/dist/island_battles_python-${v}.tar.gz"
           test "$(ls "$RUNNER_TEMP/dist" | wc -l)" -eq 2
-          if [ "${{ matrix.module }}" = mpl_lobby_client ]; then
-            contents="$(python3 -m zipfile -l "$RUNNER_TEMP/dist/mpl_lobby_client-${v}-py3-none-any.whl")"
-            for package in lobby_client lobby_api_client; do
-              grep -q "^${package}/__init__.py " <<<"$contents"
-            done
-          fi
           ls -l "$RUNNER_TEMP/dist"
 
       - name: Publish to PyPI

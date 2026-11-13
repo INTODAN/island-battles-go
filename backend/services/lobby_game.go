@@ -6,10 +6,10 @@ import (
 	"math"
 	"slices"
 
+	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
 	"islandBattles/backend/observability"
-	"islandBattles/lobby/domain"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"gorm.io/gorm"

@@ -14,11 +14,11 @@ import (
 	"github.com/danielgtaylor/huma/v2/humatest"
 	"github.com/google/uuid"
 
+	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
-	"islandBattles/lobby/domain"
 )
 
 // A browser asks for gzip, and Lambda streams a response's first 6 MB at

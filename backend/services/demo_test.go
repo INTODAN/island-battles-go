@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/INTODAN/mpl/domain"
 	"github.com/google/uuid"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
-	"islandBattles/lobby/domain"
 )
 
 // playLoggedTurns plays turns of the log fixture's game from its current
@@ -242,7 +242,7 @@ func (writer *countingWriter) Write(data []byte) (int, error) {
 	return len(data), nil
 }
 
-// The lobby page reads at most 64 MiB of a response (lobby/frontend/relay.mjs).
+// The lobby page reads at most 64 MiB of a response (frontend/relay.mjs in github.com/INTODAN/mpl).
 // A two-player game that runs to the generation cap, with both bots logging
 // the most and the longest lines they may every turn, still fits. Packed
 // with gzip, as browsers receive it, its varying bot-like lines take a

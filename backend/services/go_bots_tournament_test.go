@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/bots"
 	"islandBattles/backend/models"
 	"islandBattles/backend/simulation"
-	"islandBattles/lobby/domain"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"gorm.io/gorm"

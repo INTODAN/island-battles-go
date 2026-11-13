@@ -6,11 +6,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/INTODAN/mpl/frontend"
+	"github.com/INTODAN/mpl/gamehooks"
 	"islandBattles/backend/demo"
 	"islandBattles/backend/demoviewer"
 	"islandBattles/backend/lobbyadapter"
-	"islandBattles/lobby/frontend"
-	"islandBattles/lobby/gamehooks"
 )
 
 func TestFrontendGameIsAValidCatalogEntry(t *testing.T) {

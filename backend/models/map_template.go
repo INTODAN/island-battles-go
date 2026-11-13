@@ -11,9 +11,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/INTODAN/mpl/domain"
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/jackc/pgx/v5/pgtype"
-	"islandBattles/lobby/domain"
 )
 
 // MapTemplateView is the map file format, published as MapTemplate. The same

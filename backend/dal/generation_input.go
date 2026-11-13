@@ -1,10 +1,10 @@
 package dal
 
 import (
+	"github.com/INTODAN/mpl/domain"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"islandBattles/backend/models"
-	"islandBattles/lobby/domain"
 )
 
 // FindLobbyGame returns the lobby's newest game, the one of its highest

@@ -1,4 +1,4 @@
-// Generated from lobby/api/events.json by tools/codegen/generate.ts. Do not edit; run `bun run generate`.
+// Generated from api/lobby/events.json by tools/codegen/generate.ts. Do not edit; run `bun run generate`.
 
 export interface LobbyInvalidation {
 event_id: string

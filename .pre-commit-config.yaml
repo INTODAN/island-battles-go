@@ -11,29 +11,29 @@ repos:
     hooks:
       - id: go-fmt
         name: go fmt
-        # go fmt doesn't read go.work, so the lobby and Go SDK modules are formatted separately.
-        entry: sh -c 'go fmt ./... && go -C lobby fmt ./... && go -C clients/island-battles-go fmt ./...'
+        # go fmt doesn't read go.work, so the Go SDK module is formatted separately.
+        entry: sh -c 'go fmt ./... && go -C clients/island-battles-go fmt ./...'
         language: system
         types: [go]
         pass_filenames: false # go fmt runs on whole project by default
 
       - id: go-vet
         name: go vet
-        entry: go vet ./... ./lobby/... ./clients/island-battles-go/...
+        entry: go vet ./... ./clients/island-battles-go/...
         language: system
         types: [go]
         pass_filenames: false # go vet runs on whole project by default
 
       - id: golangci-lint
         name: golangci-lint
-        entry: golangci-lint run --timeout=5m ./... ./lobby/... ./clients/island-battles-go/...
+        entry: golangci-lint run --timeout=5m ./... ./clients/island-battles-go/...
         language: system
         types: [go]
         pass_filenames: false # golangci-lint runs on whole project by default
 
       - id: go-test
         name: go test
-        entry: go test ./... ./lobby/... ./clients/island-battles-go/...
+        entry: go test ./... ./clients/island-battles-go/...
         language: system
         types: [go]
         pass_filenames: false

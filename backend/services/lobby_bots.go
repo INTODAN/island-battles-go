@@ -9,11 +9,11 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/bots"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/hostedbot"
 	"islandBattles/backend/models"
-	"islandBattles/lobby/domain"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"

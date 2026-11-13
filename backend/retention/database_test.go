@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/models"
 	"islandBattles/backend/retention"
 	"islandBattles/backend/services"
-	"islandBattles/lobby/domain"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"

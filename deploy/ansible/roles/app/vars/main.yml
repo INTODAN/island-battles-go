@@ -33,8 +33,9 @@ app_databases:
     role: "{{ lobby_app_role }}"
     password: "{{ lobby_app_password }}"
     description: the lobby's
-# The repository on the developer machine, whose lobby/cmd/migrate the VM
-# deploy runs.
+# The repository on the developer machine, where the VM deploy runs the
+# lobby's migrate command (go run github.com/INTODAN/mpl/cmd/migrate, the
+# version go.mod pins).
 app_repository_root: "{{ (playbook_dir ~ '/../..') | ansible.builtin.realpath }}"
 # The database that a dump or a restore is of: the backend's unless
 # -e app_database=<name> names the lobby's.

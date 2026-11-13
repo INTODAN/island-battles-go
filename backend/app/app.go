@@ -14,6 +14,10 @@ import (
 	"strings"
 	"time"
 
+	lobbyapp "github.com/INTODAN/mpl/app"
+	"github.com/INTODAN/mpl/gamehooks"
+	"github.com/INTODAN/mpl/playertoken"
+	"github.com/INTODAN/mpl/realtime"
 	"islandBattles/backend/botcompute"
 	"islandBattles/backend/botrunner"
 	"islandBattles/backend/demo"
@@ -29,10 +33,6 @@ import (
 	"islandBattles/backend/services"
 	"islandBattles/backend/submittoken"
 	"islandBattles/backend/uploadtoken"
-	lobbyapp "islandBattles/lobby/app"
-	"islandBattles/lobby/gamehooks"
-	"islandBattles/lobby/playertoken"
-	"islandBattles/lobby/realtime"
 
 	"github.com/centrifugal/gocent/v3"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
@@ -84,11 +84,12 @@ func WithLocalBotRunners(runners services.BotRunners, origin string) Option {
 // holds nothing that outlives a request besides the database pool, which the
 // host owns and closes. Without options it serves only what is safe in public.
 //
-// Without config.LobbyURL, the lobby runs in this process, built by lobby/app
-// as the lobby's own hosts build it, with its tables in lobbyDatabase, its own
-// database (dependencies.InitLobbyDB), and New serves its routes too. With it,
-// the lobby is a server of its own (lobby/cmd/lobby): New serves none of the
-// lobby's routes, reads the lobby's game API over the network, and verifies
+// Without config.LobbyURL, the lobby runs in this process, built by the
+// lobby's package app (github.com/INTODAN/mpl/app) as the lobby's own hosts
+// build it, with its tables in lobbyDatabase, its own database
+// (dependencies.InitLobbyDB), and New serves its routes too. With it, the
+// lobby is a server of its own (github.com/INTODAN/mpl/cmd/lobby): New serves
+// none of the lobby's routes, reads the lobby's game API over the network, and verifies
 // player tokens with the lobby's JWKS, and lobbyDatabase is nil. Either way
 // the game serves its hooks. The host owns both pools.
 func New(config dependencies.Config, database, lobbyDatabase *gorm.DB, logger *slog.Logger, opts ...Option) (http.Handler, error) {
@@ -224,7 +225,7 @@ func New(config dependencies.Config, database, lobbyDatabase *gorm.DB, logger *s
 	return router, nil
 }
 
-// inProcessLobby builds the lobby in this process with lobby/app, on its own
+// inProcessLobby builds the lobby in this process with the lobby's package app, on its own
 // database, from the backend's settings, as the lobby's own hosts build it from LOBBY_*. Its
 // LOBBY_GAMES lists Island Battles, whose hooks it calls through loopback,
 // which also carries the game's calls of its game API to it. The lobby's

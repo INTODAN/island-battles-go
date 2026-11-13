@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/INTODAN/mpl/domain"
+	"github.com/INTODAN/mpl/playertoken"
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/humatest"
 	"github.com/google/uuid"
@@ -14,8 +16,6 @@ import (
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
-	"islandBattles/lobby/domain"
-	"islandBattles/lobby/playertoken"
 )
 
 type commandAuthentication struct{ principal domain.Principal }

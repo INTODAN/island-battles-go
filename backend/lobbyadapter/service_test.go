@@ -14,13 +14,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/INTODAN/mpl/domain"
+	"github.com/INTODAN/mpl/gamehooks"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
-	"islandBattles/lobby/domain"
-	"islandBattles/lobby/gamehooks"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"

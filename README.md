@@ -12,7 +12,8 @@
 
 ## Project Structure
 
-- `lobby/`: Independent generic lobby component: Go module, clients, API artifacts, transport configuration, docs, and shared test tooling. See [its README](lobby/README.md).
+- The generic lobby lives in its own repository, [`INTODAN/mpl`](https://github.com/INTODAN/mpl), and Island Battles uses it as any game would: the Go module `github.com/INTODAN/mpl` and the Python client `mpl-lobby-client`, at the version in [The lobby's version](#the-lobbys-version). Lobby changes go there first.
+- `api/lobby/`: The lobby's player API and event schema, copied from the pinned lobby module by `scripts/sync-lobby-api.sh` for the web client's generator. See [its README](api/lobby/README.md).
 - `backend/`: Island Battles game logic and wiring to the generic lobby module. `backend/api/openapi.json` is the player API that gameplay clients are generated from.
 - `clients/island-battles-python/`: The Python gameplay SDK and the `island-battles-bot` command (serve, check and run a bot function). Its models are generated; only the turn runtime, the bot helpers and model utilities are hand-written.
 - `clients/island-battles-go/`: The Go SDK for writing bots, its own Go module (`github.com/INTODAN/island-battles-go/clients/island-battles-go`): a bot is a function, and `islandbattles.Main` gives its program `serve`, `check`, `fixture` and `run`, which plays a seat without a browser. Its `examples/` hold the three default bots, which the backend plays from there. See [its README](clients/island-battles-go/README.md).
@@ -21,7 +22,7 @@
 - `clients/conformance/`: Language-agnostic tests that verify any gameplay client through a JSON Lines adapter.
 - `integration/island_battles/`: Host-specific lobby/game binding acceptance checks.
 - `scripts/test-lobby-acceptance.sh`: Runs the shared acceptance suite against the Island Battles host, including its game-specific checks.
-- `go.work`: Connects the host, lobby and Go SDK modules for local development.
+- `go.work`: Connects the host and Go SDK modules for local development.
 - `deploy/`: Deployment to AWS: the Terraform configuration for the AWS resources, the Ansible setup for the Postgres and Centrifugo VM, and the backend's Lambda deploy. See [deploy/README.md](deploy/README.md).
 
 ## Development Setup
@@ -32,7 +33,7 @@ Requires Go 1.25+ and either Docker with Compose or Podman on Linux. Python 3.14
 ./scripts/dev.sh
 ```
 
-The script creates `.env` from `.env.example` if needed, exports it, starts the dependencies, waits for PostgreSQL, creates the lobby's own database beside Island Battles' if it's missing, runs both migrate commands (`go run ./lobby/cmd/migrate`, then `go run ./backend/cmd/migrate`), and runs the lobby and the backend as separate processes: the lobby ([`lobby/cmd/lobby`](lobby/README.md#running-the-lobby)) on 8890, and the backend on 8888, which reaches the lobby at `ISLAND_BATTLES_LOBBY_URL`. The backend never changes the schema itself, locally or on [AWS Lambda](backend/README.md#hosts-and-deploys). In production the backend still runs the lobby in its own process, until the lobby is deployed on its own. An `.env` made before the lobby ran on its own lacks the `LOBBY_*` settings and `ISLAND_BATTLES_LOBBY_URL`; the script says so, and they can be copied from `.env.example`. One made before the lobby had its own database (#229) names the backend's database in `LOBBY_DATABASE_URL`; the script stops until it's copied from `.env.example`, and the next start drops the lobby's tables from the backend's local database, with any open local lobbies.
+The script creates `.env` from `.env.example` if needed, exports it, starts the dependencies, waits for PostgreSQL, creates the lobby's own database beside Island Battles' if it's missing, runs both migrate commands (`go run github.com/INTODAN/mpl/cmd/migrate`, then `go run ./backend/cmd/migrate`), and runs the lobby and the backend as separate processes: the lobby ([`cmd/lobby`](https://github.com/INTODAN/mpl#running-the-lobby) of the pinned lobby module, with its Centrifugo configuration, which the script copies to `.lobby-centrifugo/`) on 8890, and the backend on 8888, which reaches the lobby at `ISLAND_BATTLES_LOBBY_URL`. The backend never changes the schema itself, locally or on [AWS Lambda](backend/README.md#hosts-and-deploys). In production the backend still runs the lobby in its own process, until the lobby is deployed on its own. An `.env` made before the lobby ran on its own lacks the `LOBBY_*` settings and `ISLAND_BATTLES_LOBBY_URL`; the script says so, and they can be copied from `.env.example`. One made before the lobby had its own database (#229) names the backend's database in `LOBBY_DATABASE_URL`; the script stops until it's copied from `.env.example`, and the next start drops the lobby's tables from the backend's local database, with any open local lobbies.
 
 The lobby and the game are separate origins, as in production once the lobby moves to its own subdomain, so cross-origin mistakes show up locally. Open **http://localhost:8890/lobby/ui/** in two fresh tabs to test the lobby page with two players: it is the lobby's, and it loads Island Battles' settings, room and result screens from the backend on `:8888`, which allows the lobby's origin (`ISLAND_BATTLES_LOBBY_ORIGINS`). For the 3D client, run `bun run dev` in [`clients/island-battles-web`](clients/island-battles-web/README.md) and open **http://localhost:3000/**: the dev server sends the game's paths to the backend, and the client calls the lobby on `:8890`, which allows the dev server's origin (`LOBBY_ALLOWED_ORIGINS`). An `.env` made before this lacks those two settings; the script says so.
 
@@ -40,29 +41,29 @@ PostgreSQL listens on port 5432, Centrifugo on 8000, the lobby on 8890, the back
 
 Ctrl+C stops the backend and the lobby. Dependencies remain running for the next launch. Stop them with `docker compose stop` or, for native Podman, `podman stop island-battles-dev-db island-battles-dev-centrifugo`.
 
-Use the [Python lobby client walkthrough](lobby/clients/lobby-python/README.md) for two-player team selection, the [Island Battles Python client](clients/island-battles-python/README.md) or the [Go SDK](clients/island-battles-go/README.md) for writing a bot, or the [Go example](lobby/clients/README.md). Backend settings and the game endpoints are documented in [backend/README.md](backend/README.md). The implementation contract is recorded in the [Issue #6 task plan](docs/tasks/issue-6-player-generation-commands.md).
+Use the [Python lobby client walkthrough](https://github.com/INTODAN/mpl/blob/main/clients/lobby-python/README.md) for two-player team selection, the [Island Battles Python client](clients/island-battles-python/README.md) or the [Go SDK](clients/island-battles-go/README.md) for writing a bot, or the lobby's [Go example](https://github.com/INTODAN/mpl/blob/main/clients/README.md). Backend settings and the game endpoints are documented in [backend/README.md](backend/README.md). The implementation contract is recorded in the [Issue #6 task plan](docs/tasks/issue-6-player-generation-commands.md).
 
 ## Architecture Notes
 
-The [multiplayer architecture decision](lobby/docs/multiplayer-architecture.md) explains the design, and the [task pack](lobby/docs/tasks/generic-lobby/README.md) records contracts, edge cases and agent assignments. Guest credentials identify players; opening a socket does not create or join a room. PostgreSQL holds only state, and the backend runs no work between requests. A request that commits a lobby change or completes a turn pushes the result straight to Centrifugo before it responds, retrying briefly and logging an error if Centrifugo stays unreachable. Every lobby request, including the 15-second heartbeat, and every Centrifugo subscription refresh applies due lease and grace expiry. Centrifugo keeps a short history on lobby and player channels for reconnecting clients; clients also reconcile authorized HTTP snapshots after subscribing, which recovers any push that failed.
+The lobby's [multiplayer architecture decision](https://github.com/INTODAN/mpl/blob/main/docs/multiplayer-architecture.md) explains the design, and its [task pack](https://github.com/INTODAN/mpl/blob/main/docs/tasks/generic-lobby/README.md) records contracts, edge cases and agent assignments. Guest credentials identify players; opening a socket does not create or join a room. PostgreSQL holds only state, and the backend runs no work between requests. A request that commits a lobby change or completes a turn pushes the result straight to Centrifugo before it responds, retrying briefly and logging an error if Centrifugo stays unreachable. Every lobby request, including the 15-second heartbeat, and every Centrifugo subscription refresh applies due lease and grace expiry. Centrifugo keeps a short history on lobby and player channels for reconnecting clients; clients also reconcile authorized HTTP snapshots after subscribing, which recovers any push that failed.
 
 Teams and readiness belong to the generic lobby. Starting freezes a roster. The Island Battles adapter initializes generation one with a castle and 30 soldiers for each team. Every player in that frozen roster registers commands and completes their turn, or the backend plays their [default bot](backend/README.md#default-bots) as soon as each generation is created; the game advances once all roster players have completed. Disconnected players remain part of the turn barrier and must reconnect to submit or complete their turn before the turn deadline the host set, or their team loses. The generic lobby has no dependency on the game simulation.
 
 ## Commands
 
-*   **Lint/Verify (Go):** `go vet ./... ./lobby/... ./clients/island-battles-go/...` and `golangci-lint run --timeout=5m ./... ./lobby/... ./clients/island-battles-go/...`
-*   **Format:** `go fmt ./... && go -C lobby fmt ./... && go -C clients/island-battles-go fmt ./...` (`go fmt` doesn't read `go.work`)
-*   **Test (disposable PostgreSQL containers):** `go test ./... ./lobby/... ./clients/island-battles-go/...`. On rootless Podman, enable the Podman socket and disable Ryuk first; see [database tests on rootless Podman](backend/README.md#database-tests-on-rootless-podman).
-*   **Check OpenAPI:** `go run ./lobby/cmd/export-lobby-openapi --output lobby/api/openapi.json --events-output lobby/api/events.json --game-api-output lobby/api/game-api.openapi.json --check` and `go run ./backend/cmd/export-openapi --output backend/api/openapi.json --check`
+*   **Lint/Verify (Go):** `go vet ./... ./clients/island-battles-go/...` and `golangci-lint run --timeout=5m ./... ./clients/island-battles-go/...`
+*   **Format:** `go fmt ./... && go -C clients/island-battles-go fmt ./...` (`go fmt` doesn't read `go.work`)
+*   **Test (disposable PostgreSQL containers):** `go test ./... ./clients/island-battles-go/...`. On rootless Podman, enable the Podman socket and disable Ryuk first; see [database tests on rootless Podman](backend/README.md#database-tests-on-rootless-podman).
+*   **Check OpenAPI:** `go run ./backend/cmd/export-openapi --output backend/api/openapi.json --check`
+*   **Check the lobby's API documents:** `scripts/sync-lobby-api.sh --check` (without `--check`, it copies them from the pinned lobby module into `api/lobby/`)
 *   **Check generated gameplay models:** `uv run --project clients/island-battles-python/tools --locked python clients/island-battles-python/scripts/generate.py --check`
-*   **Regenerate the web client's API types:** `bun run generate` in `clients/island-battles-web/` (`bun run generate --check` verifies they are current; `web-client.yml` runs it on any change to `lobby/api/` or `backend/api/`)
-*   **Python unit tests:** `uv run --project lobby/clients/lobby-python --locked pytest lobby/clients/lobby-python/tests`
+*   **Regenerate the web client's API types:** `bun run generate` in `clients/island-battles-web/` (`bun run generate --check` verifies they are current; `web-client.yml` runs it on any change to `api/lobby/` or `backend/api/`)
 *   **Python bot client tests:** `uv run --project clients/island-battles-python --locked pytest clients/island-battles-python/tests`
 *   **Python bot runner tests:** `uv run --no-project --python 3.14 python -I -m unittest discover -s backend/botrunner/python` (the end-to-end test needs PyPI; see [Bot runners](backend/README.md#bot-runners))
 *   **Gameplay client conformance (offline):** `uv run --project clients/conformance --locked pytest clients/conformance/tests/test_models.py`
 *   **Go SDK conformance (offline):** `ISLAND_BATTLES_CLIENT_COMMAND="go run ./clients/island-battles-go/conformance" uv run --project clients/conformance --locked pytest clients/conformance/tests/test_models.py`; live: `./scripts/test-client-conformance.sh "go -C $PWD run ./clients/island-battles-go/conformance"`
 *   **Gameplay client conformance (live, Linux Docker or Podman):** `./scripts/test-client-conformance.sh ["<adapter command>"]`
-*   **Live acceptance (Linux Docker or Podman):** `./scripts/test-lobby-acceptance.sh`
+*   **Live acceptance (Linux Docker or Podman):** `./scripts/test-lobby-acceptance.sh`. It and the live conformance script run the lobby's own live test runner, `integration/run.py` of the pinned lobby module, from a temporary copy (`scripts/lobby-module.sh --copy`), since Go's module cache is read-only; `INTODAN/mpl`'s CI runs the same generic suite with the mock game alone.
 *   **Web client** (in `clients/island-battles-web/`, needs [Bun](https://bun.sh/)): `bun install`, then `bun run dev` (dev server on `:3000`, proxying the backend from `./scripts/dev.sh`), `bun run generate` (regenerate the TypeScript API types from the OpenAPI files and `events.json` after an API change), `bun run check` (Biome, `generate --check`, `tsc`, `bun test`) and `bun run build`
 
 ### Checks on every pull request
@@ -71,13 +72,23 @@ Teams and readiness belong to the generic lobby. Starting freezes a roster. The 
 
 | Job | Runs |
 |---|---|
-| Go | `go vet`, `golangci-lint` (pinned to the version in the workflow), a `gofmt -l` check of the three modules (the host, `lobby/` and the Go SDK in `clients/island-battles-go/`), and `go test` with Testcontainers on the runner's Docker |
-| API contract | both OpenAPI `--check` commands and the generated gameplay models' `--check` |
-| Python | the lobby client's unit tests, the bot client's tests, the Python bot runner's tests and the offline gameplay client conformance tests, with `uv --locked`, for the Python client and the Go SDK's adapter, and the [Python bot template](templates/python-bot/README.md)'s `scripts/check.sh` against the locked PyPI SDK and against `clients/island-battles-python` |
-| JS | `node --test` for the tests in `backend/demo`, `backend/demoviewer`, `backend/mapbuilder` and `lobby/frontend` |
+| Go | `go vet`, `golangci-lint` (pinned to the version in the workflow), a `gofmt -l` check of the two modules (the host and the Go SDK in `clients/island-battles-go/`), and `go test` with Testcontainers on the runner's Docker |
+| API contract | the player OpenAPI `--check`, `scripts/sync-lobby-api.sh --check` and the generated gameplay models' `--check` |
+| Python | the bot client's tests, the Python bot runner's tests and the offline gameplay client conformance tests, with `uv --locked`, for the Python client and the Go SDK's adapter, and the [Python bot template](templates/python-bot/README.md)'s `scripts/check.sh` against the locked PyPI SDK and against `clients/island-battles-python` |
+| JS | `node --test` for the tests in `backend/demo`, `backend/demoviewer` and `backend/mapbuilder` |
 | Deploy | `python3 -I -m unittest discover -s deploy -p 'test_*.py'` |
 
 The workflow leaves out the live acceptance and live client conformance scripts, which start the whole stack. It also has a `workflow_call` trigger, so the release workflow can run the same checks with `uses: ./.github/workflows/checks.yml` before it deploys. Go comes from `go.mod`; when you change the golangci-lint version in the workflow, change the one you run locally to match.
+
+### The lobby's version
+
+The lobby comes from [`INTODAN/mpl`](https://github.com/INTODAN/mpl) at one version, pinned in three places that change together:
+
+- **Go:** `go.mod` requires `github.com/INTODAN/mpl`. The backend builds the lobby in its process from it, and the scripts and the VM deploy run `go run github.com/INTODAN/mpl/cmd/lobby` and `go run github.com/INTODAN/mpl/cmd/migrate` (both `tool` lines in `go.mod`) at that version.
+- **Python:** the `mpl-lobby-client` requirement in `clients/island-battles-python/pyproject.toml` (its `integration` group) and in `clients/conformance/pyproject.toml`, each with its `uv.lock`.
+- **API documents:** `api/lobby/`, copied from the Go module by `scripts/sync-lobby-api.sh`, whose `--check` fails in CI when they differ.
+
+**Today the pin is a commit,** `1892a86d801ed42e8f41988cf40196152a6cdfb9` (the pseudo-version `v0.0.0-20261113212428-1892a86d801e`, and a git dependency for Python), because the lobby has no release yet. Once `INTODAN/mpl` releases `v0.3.0`, move it with a one-line change each: `go get github.com/INTODAN/mpl@v0.3.0 && go mod tidy`, and `"mpl-lobby-client==0.3.0"` in place of the git URL in the two `pyproject.toml` files, then `uv lock` in both projects. After any move of the pin, also run `scripts/sync-lobby-api.sh` and `bun run generate` in `clients/island-battles-web` (both change nothing while the lobby's API is the same), and commit what changed.
 
 ## Testing & Visualization
 

@@ -3,8 +3,8 @@ package dal
 import (
 	"errors"
 
+	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/models"
-	"islandBattles/lobby/domain"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"

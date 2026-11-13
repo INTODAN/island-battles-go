@@ -59,9 +59,9 @@ else
   esac
 fi
 
-# The release tags these three; the Go modules in subdirectories need their
-# directory as the tag's prefix.
-for tag in "$version" "lobby/$version" "clients/island-battles-go/$version"; do
+# The release tags these two; the Go SDK module, in a subdirectory, needs its
+# directory as the tag's prefix. The lobby is released from INTODAN/mpl.
+for tag in "$version" "clients/island-battles-go/$version"; do
   if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
     echo "The tag $tag already exists." >&2
     exit 1

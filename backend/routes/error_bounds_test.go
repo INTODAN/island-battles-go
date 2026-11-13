@@ -3,10 +3,10 @@ package routes_test
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/INTODAN/mpl/httpapi"
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/models"
 	"islandBattles/backend/routes"
-	"islandBattles/lobby/httpapi"
 	"net/http"
 	"net/http/httptest"
 	"runtime"

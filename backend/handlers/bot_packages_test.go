@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/INTODAN/mpl/domain"
+	"github.com/INTODAN/mpl/playertoken"
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/models"
@@ -23,8 +25,6 @@ import (
 	"islandBattles/backend/routes"
 	"islandBattles/backend/services"
 	"islandBattles/backend/uploadtoken"
-	"islandBattles/lobby/domain"
-	"islandBattles/lobby/playertoken"
 
 	"github.com/danielgtaylor/huma/v2/humatest"
 	"github.com/google/uuid"

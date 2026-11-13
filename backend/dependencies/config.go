@@ -13,11 +13,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/INTODAN/mpl/gamehooks"
+	"github.com/INTODAN/mpl/playertoken"
 	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/retention"
 	"islandBattles/backend/services"
-	"islandBattles/lobby/gamehooks"
-	"islandBattles/lobby/playertoken"
 )
 
 const (
@@ -51,7 +51,7 @@ const (
 	// game's hooks and the game's calls of the lobby's game API: the lobby's
 	// LOBBY_GAME_SECRET_ISLAND_BATTLES, by the game's name for it.
 	LobbyHookSecretEnv = "ISLAND_BATTLES_LOBBY_HOOK_SECRET"
-	// LobbyURLEnv is the URL of a lobby that runs on its own (lobby/cmd/lobby),
+	// LobbyURLEnv is the URL of a lobby that runs on its own (github.com/INTODAN/mpl/cmd/lobby),
 	// whose game API and JWKS the game reads. Empty, the lobby runs in this
 	// process and the two call each other in memory.
 	LobbyURLEnv = "ISLAND_BATTLES_LOBBY_URL"

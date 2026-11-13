@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
-	"islandBattles/lobby/domain"
 )
 
 // modelCastle is one castle in an independent model of the command rules.

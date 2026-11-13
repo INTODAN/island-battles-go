@@ -15,9 +15,9 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/INTODAN/mpl/httpapi"
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/routes"
-	"islandBattles/lobby/httpapi"
 
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
@@ -51,7 +51,7 @@ const (
 // turn delivery that a client relays to its localhost bot, the turn deadline that waiting clients apply, the upgrade cost table, the default bot list, the game log read that the replay also shows, the demo
 // download, the default map list for choosing a lobby's map, whether uploaded bots may start this month, and the lobby's bot packages, which the
 // bot pickers and the SDKs' upload commands use. Lobby setup, including each member's
-// bot in their member settings, has its own generated SDK in lobby/api/openapi.json.
+// bot in their member settings, has its own generated SDK from api/lobby/openapi.json.
 var PlayerOperations = []string{"createLobbyConnectionToken", "getIslandLobbyGeneration", "getIslandLobbyTurnDelivery", "applyIslandLobbyTurnDeadline", "registerGenerationCommand", "getIslandLobbyGenerationLogs", "getIslandLobbyDemo", "watchIslandLobbyGeneration", "watchIslandLobbyDemo", "listUpgrades", "listMapTemplates", "listDefaultBots", "getBotCompute",
 	"startIslandBotPackageUpload", "completeIslandBotPackageUpload", "listIslandBotPackages", "deleteIslandBotPackage", "createIslandBotUploadToken"}
 

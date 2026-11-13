@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/INTODAN/mpl/domain"
+	"github.com/INTODAN/mpl/gamehooks"
 	"islandBattles/backend/lobbyadapter"
-	"islandBattles/lobby/domain"
-	"islandBattles/lobby/gamehooks"
 )
 
 // The game authorizes a lobby's watchers through the lobby's game API: a

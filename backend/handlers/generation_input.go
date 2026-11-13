@@ -8,13 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/INTODAN/mpl/domain"
 	"github.com/danielgtaylor/huma/v2"
 	"gorm.io/gorm"
 	"islandBattles/backend/models"
 	"islandBattles/backend/observability"
 	"islandBattles/backend/services"
 	"islandBattles/backend/submittoken"
-	"islandBattles/lobby/domain"
 )
 
 type GenerationStateResponse struct{ Body models.GenerationState }

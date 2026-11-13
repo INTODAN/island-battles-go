@@ -2,7 +2,7 @@
 // expects: the map template migrations, then the game tables. Run it once per
 // deploy, and locally before starting the backend; the hosts of the HTTP API
 // only connect. The lobby's schema is in the lobby's own database, which the
-// lobby's migrate command, lobby/cmd/migrate, migrates first.
+// lobby's migrate command, github.com/INTODAN/mpl/cmd/migrate, migrates first.
 //
 // It reads ISLAND_BATTLES_DATABASE_URL and the optional pool settings, and
 // LOBBY_DATABASE_URL, and nothing else, so a deploy script can run it with

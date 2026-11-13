@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	lobbypostgres "github.com/INTODAN/mpl/postgres"
 	"islandBattles/backend/dependencies"
 	"islandBattles/backend/internal/testutils"
-	lobbypostgres "islandBattles/lobby/postgres"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -51,7 +51,7 @@ func migrate(t *testing.T, gameURL, lobbyURL string) string {
 	return output.String()
 }
 
-// migrateLobby runs the lobby's migrations, as lobby/cmd/migrate does.
+// migrateLobby runs the lobby's migrations, as github.com/INTODAN/mpl/cmd/migrate does.
 func migrateLobby(t *testing.T, database *gorm.DB) {
 	t.Helper()
 	if err := lobbypostgres.Migrate(context.Background(), database); err != nil {

@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/INTODAN/mpl/domain"
+	"github.com/INTODAN/mpl/playertoken"
 	"islandBattles/backend/app"
 	"islandBattles/backend/dependencies"
 	"islandBattles/backend/internal/testutils"
@@ -25,8 +27,6 @@ import (
 	"islandBattles/backend/observability"
 	"islandBattles/backend/retention"
 	"islandBattles/backend/services"
-	"islandBattles/lobby/domain"
-	"islandBattles/lobby/playertoken"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambdaurl"

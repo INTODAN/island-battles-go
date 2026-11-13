@@ -10,11 +10,11 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/INTODAN/mpl/domain"
 	"github.com/google/uuid"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
-	"islandBattles/lobby/domain"
 )
 
 // lobbyWatchers stands in for the lobby's watcher rows: the players who may

@@ -6,11 +6,11 @@ import (
 	"slices"
 	"time"
 
+	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
 	"islandBattles/backend/observability"
 	"islandBattles/backend/submittoken"
-	"islandBattles/lobby/domain"
 
 	"gorm.io/gorm"
 )

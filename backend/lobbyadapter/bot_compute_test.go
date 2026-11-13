@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
-	"islandBattles/lobby/domain"
 )
 
 // Once the bot runners have used the month's compute, no game with an

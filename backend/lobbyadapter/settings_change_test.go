@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/models"
-	"islandBattles/lobby/domain"
 
 	"github.com/google/uuid"
 )
