@@ -3,11 +3,11 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/models"
 	"islandBattles/backend/observability"
 	"islandBattles/backend/services"
 	"islandBattles/backend/submittoken"
-	"islandBattles/lobby/domain"
 	"strconv"
 	"strings"
 

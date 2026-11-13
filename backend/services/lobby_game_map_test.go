@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/models"
-	"islandBattles/lobby/domain"
 )
 
 // The generated lobby map written as a map file. Positions are the floating

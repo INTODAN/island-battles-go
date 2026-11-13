@@ -22,8 +22,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/INTODAN/mpl/adminmcp"
 	"islandBattles/backend/dependencies"
-	"islandBattles/lobby/adminmcp"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"gorm.io/gorm"

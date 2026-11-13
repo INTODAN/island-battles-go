@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/INTODAN/mpl/domain"
+	"github.com/INTODAN/mpl/gamehooks"
 	"islandBattles/backend/observability"
-	"islandBattles/lobby/domain"
-	"islandBattles/lobby/gamehooks"
 )
 
 // HooksPath is where the backend serves Island Battles' lobby hooks:

@@ -13,12 +13,12 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
-	"islandBattles/lobby/domain"
 )
 
 // countingRetention counts the passes it was asked for, and records how many

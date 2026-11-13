@@ -11,6 +11,10 @@ import (
 	"testing"
 	"time"
 
+	lobbyapp "github.com/INTODAN/mpl/app"
+	"github.com/INTODAN/mpl/domain"
+	"github.com/INTODAN/mpl/gamehooks"
+	"github.com/INTODAN/mpl/playertoken"
 	"islandBattles/backend/app"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/dependencies"
@@ -18,10 +22,6 @@ import (
 	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/models"
 	"islandBattles/backend/retention"
-	lobbyapp "islandBattles/lobby/app"
-	"islandBattles/lobby/domain"
-	"islandBattles/lobby/gamehooks"
-	"islandBattles/lobby/playertoken"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
-	"islandBattles/lobby/domain"
 )
 
 func upgrade(castleID uint, upgradeType models.UpgradeType) models.PublicGenerationCommand {

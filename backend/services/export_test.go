@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/models"
-	"islandBattles/lobby/domain"
 
 	"gorm.io/gorm"
 )

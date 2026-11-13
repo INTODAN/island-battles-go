@@ -9,7 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	lobbypostgres "islandBattles/lobby/postgres"
+	lobbypostgres "github.com/INTODAN/mpl/postgres"
 
 	"gorm.io/gorm"
 )

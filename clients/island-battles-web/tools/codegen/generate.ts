@@ -1,7 +1,9 @@
 // Generates src/api/generated/ from the checked-in API contract:
-//   lobby/api/openapi.json   -> lobby.ts   (openapi-typescript)
+//   api/lobby/openapi.json   -> lobby.ts   (openapi-typescript)
 //   backend/api/openapi.json -> game.ts    (openapi-typescript)
-//   lobby/api/events.json    -> events.ts  (json-schema-to-typescript)
+//   api/lobby/events.json    -> events.ts  (json-schema-to-typescript)
+// api/lobby/ holds the lobby's documents, copied from the lobby module that
+// go.mod pins by scripts/sync-lobby-api.sh.
 // `bun run generate --check` regenerates into a temporary directory and fails
 // if the result differs from what is committed.
 import {
@@ -30,16 +32,16 @@ const openapi = async (source: string) =>
 
 async function generate(outDir: string) {
   await mkdir(outDir, { recursive: true });
-  const eventsSource = "lobby/api/events.json";
+  const eventsSource = "api/lobby/events.json";
   const schema = JSON.parse(await readFile(join(root, eventsSource), "utf8"));
   const files: Record<string, string> = {
-    "lobby.ts": await openapi("lobby/api/openapi.json"),
+    "lobby.ts": await openapi("api/lobby/openapi.json"),
     "game.ts": await openapi("backend/api/openapi.json"),
     "events.ts":
       header(eventsSource) +
       (await compile(schema, "LobbyChanged", {
         bannerComment: "",
-        cwd: join(root, "lobby/api"),
+        cwd: join(root, "api/lobby"),
         format: false,
       })),
   };

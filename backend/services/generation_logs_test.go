@@ -9,13 +9,13 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/INTODAN/mpl/domain"
 	"github.com/google/uuid"
 	"gorm.io/gorm/clause"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
-	"islandBattles/lobby/domain"
 )
 
 // newLogFixture starts a game with Alice on Blue and Bob on Red.

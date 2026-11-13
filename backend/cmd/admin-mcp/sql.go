@@ -15,7 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"islandBattles/lobby/adminmcp"
+	"github.com/INTODAN/mpl/adminmcp"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"

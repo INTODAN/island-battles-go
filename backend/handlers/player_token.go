@@ -5,10 +5,10 @@ import (
 	"errors"
 	"log/slog"
 
+	"github.com/INTODAN/mpl/domain"
+	"github.com/INTODAN/mpl/playertoken"
 	"islandBattles/backend/models"
 	"islandBattles/backend/observability"
-	"islandBattles/lobby/domain"
-	"islandBattles/lobby/playertoken"
 
 	"github.com/danielgtaylor/huma/v2"
 )

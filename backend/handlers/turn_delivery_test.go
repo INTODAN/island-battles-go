@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/INTODAN/mpl/domain"
+	"github.com/INTODAN/mpl/playertoken"
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/humatest"
 	"github.com/google/uuid"
@@ -16,8 +18,6 @@ import (
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
 	"islandBattles/backend/submittoken"
-	"islandBattles/lobby/domain"
-	"islandBattles/lobby/playertoken"
 )
 
 // playerAuthentication accepts "Bearer <player ID>" for each of its players.

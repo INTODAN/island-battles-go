@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/INTODAN/mpl/adminmcp"
+	lobbypostgres "github.com/INTODAN/mpl/postgres"
 	"islandBattles/backend/models"
-	"islandBattles/lobby/adminmcp"
-	lobbypostgres "islandBattles/lobby/postgres"
 
 	"gorm.io/gorm"
 )

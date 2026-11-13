@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	lobbypostgres "islandBattles/lobby/postgres"
+	lobbypostgres "github.com/INTODAN/mpl/postgres"
 
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"

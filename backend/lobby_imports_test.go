@@ -12,14 +12,14 @@ import (
 // lobby's domain types that those two speak, such as its snapshots, errors and
 // channel names.
 var gameLobbyPackages = []string{
-	"islandBattles/lobby/gamehooks",
-	"islandBattles/lobby/playertoken",
-	"islandBattles/lobby/domain",
+	"github.com/INTODAN/mpl/gamehooks",
+	"github.com/INTODAN/mpl/playertoken",
+	"github.com/INTODAN/mpl/domain",
 }
 
 // lobbyHosts build the in-process lobby, which production runs until the
 // lobby is deployed on its own, so they may use any of its packages: the app
-// that builds it with lobby/app (and, locally, reaches a lobby of its own at
+// that builds it with the lobby's package app (and, locally, reaches a lobby of its own at
 // ISLAND_BATTLES_LOBBY_URL instead), the two hosts that serve the app (the
 // local server, this package, and the Lambda),
 // the schema migration, which runs the map templates' migrations on the
@@ -64,7 +64,7 @@ func listPackages(t *testing.T, patterns ...string) map[string]listedPackage {
 }
 
 func isLobbyPackage(path string) bool {
-	return strings.HasPrefix(path, "islandBattles/lobby/")
+	return strings.HasPrefix(path, "github.com/INTODAN/mpl/")
 }
 
 // Island Battles talks to the lobby as a separate game would. Outside the

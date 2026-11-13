@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/INTODAN/mpl/domain"
+	lobbypostgres "github.com/INTODAN/mpl/postgres"
 	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
-	"islandBattles/lobby/domain"
-	lobbypostgres "islandBattles/lobby/postgres"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"

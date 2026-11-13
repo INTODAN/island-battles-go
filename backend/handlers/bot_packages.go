@@ -5,11 +5,11 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/models"
 	"islandBattles/backend/observability"
 	"islandBattles/backend/services"
 	"islandBattles/backend/uploadtoken"
-	"islandBattles/lobby/domain"
 
 	"github.com/danielgtaylor/huma/v2"
 )

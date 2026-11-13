@@ -8,10 +8,10 @@ import (
 	"slices"
 	"time"
 
+	"github.com/INTODAN/mpl/adminmcp"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
-	"islandBattles/lobby/adminmcp"
 
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"

@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
 	"islandBattles/backend/observability"
-	"islandBattles/lobby/domain"
 
 	"github.com/danielgtaylor/huma/v2"
 )

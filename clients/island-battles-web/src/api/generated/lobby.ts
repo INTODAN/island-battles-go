@@ -1,4 +1,4 @@
-// Generated from lobby/api/openapi.json by tools/codegen/generate.ts. Do not edit; run `bun run generate`.
+// Generated from api/lobby/openapi.json by tools/codegen/generate.ts. Do not edit; run `bun run generate`.
 
 export interface paths {
     "/lobby/v1/connection-token": {

@@ -6,10 +6,10 @@ import (
 	"errors"
 	"log/slog"
 
+	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
 	"islandBattles/backend/observability"
-	"islandBattles/lobby/domain"
 )
 
 // Watchers are people outside the roster who watch a lobby's game with its

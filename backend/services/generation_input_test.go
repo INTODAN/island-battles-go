@@ -7,13 +7,13 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/INTODAN/mpl/domain"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
-	"islandBattles/lobby/domain"
 )
 
 type turnFixture struct {

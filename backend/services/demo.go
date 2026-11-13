@@ -10,10 +10,10 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
 	"islandBattles/backend/observability"
-	"islandBattles/lobby/domain"
 )
 
 // Demo saves a lobby's game as a demo for a roster player: every stored

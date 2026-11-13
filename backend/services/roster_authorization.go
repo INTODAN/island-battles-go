@@ -3,9 +3,9 @@ package services
 import (
 	"context"
 
+	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
-	"islandBattles/lobby/domain"
 )
 
 // authorize admits only the players frozen into the game's roster at start.

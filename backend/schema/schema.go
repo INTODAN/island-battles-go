@@ -1,18 +1,18 @@
 // Package schema migrates Island Battles' database: the map templates and the
 // game tables. The lobby keeps its tables in a database of its own, which the
-// lobby's migrate command (lobby/cmd/migrate) migrates. The map templates'
-// migrations run on the lobby's migration runner, and the check before the
+// lobby's migrate command (github.com/INTODAN/mpl/cmd/migrate) migrates. The
+// map templates' migrations run on the lobby's migration runner, and the check before the
 // lobby's old tables are dropped reads the lobby's migration history, so this
-// package may use lobby/postgres.
+// package may use the lobby's package postgres.
 package schema
 
 import (
 	"context"
 	"fmt"
 
+	lobbypostgres "github.com/INTODAN/mpl/postgres"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/dependencies"
-	lobbypostgres "islandBattles/lobby/postgres"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -112,7 +112,7 @@ func CheckLobbyTables(ctx context.Context, game, lobby *gorm.DB) (LobbyTablesChe
 		return LobbyTablesCheck{}, fmt.Errorf("read the lobby's migrations: %w", err)
 	}
 	if !current {
-		return LobbyTablesCheck{Reason: fmt.Sprintf("the lobby's database %q lacks this build's lobby migrations, so the lobby's tables in Island Battles' database stay; run lobby/cmd/migrate, then this command again",
+		return LobbyTablesCheck{Reason: fmt.Sprintf("the lobby's database %q lacks this build's lobby migrations, so the lobby's tables in Island Battles' database stay; run github.com/INTODAN/mpl/cmd/migrate, then this command again",
 			lobbyIdentity.Database)}, nil
 	}
 	return LobbyTablesCheck{Drop: true, Reason: fmt.Sprintf("the lobby's own database %q is migrated", lobbyIdentity.Database)}, nil

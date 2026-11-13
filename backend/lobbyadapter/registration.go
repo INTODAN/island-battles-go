@@ -1,5 +1,5 @@
 // Package lobbyadapter binds Island Battles to the lobby the way a separate
-// game would: it serves the lobby's signed hooks (lobby/gamehooks) at
+// game would: it serves the lobby's signed hooks (github.com/INTODAN/mpl/gamehooks) at
 // HooksPath, reads lobbies through the lobby's game API, and declares the
 // game to the lobby with the LOBBY_GAMES entry of LobbyGame.
 package lobbyadapter
@@ -13,11 +13,11 @@ import (
 	"slices"
 	"strconv"
 
+	"github.com/INTODAN/mpl/domain"
+	"github.com/INTODAN/mpl/gamehooks"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
-	"islandBattles/lobby/domain"
-	"islandBattles/lobby/gamehooks"
 
 	"gorm.io/gorm"
 )

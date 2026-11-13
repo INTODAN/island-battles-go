@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/botpackage"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
 	"islandBattles/backend/packagestore"
 	"islandBattles/backend/uploadtoken"
-	"islandBattles/lobby/domain"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
