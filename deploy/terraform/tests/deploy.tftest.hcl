@@ -100,8 +100,9 @@ run "rejects_too_many_database_connections" {
   command = plan
 
   variables {
-    # 5 × 19 = 95 leaves 5 of 100 free, fewer than the 10 spare connections.
-    database_max_open_connections = 19
+    # 5 × 2 pools × 10 = 100 leaves none of 100 free, fewer than the 10
+    # spare connections.
+    database_max_open_connections = 10
   }
 
   expect_failures = [aws_lambda_function.backend]
@@ -111,12 +112,12 @@ run "allows_the_largest_safe_pool" {
   command = plan
 
   variables {
-    database_max_open_connections = 18
+    database_max_open_connections = 9
   }
 
   assert {
-    condition     = nonsensitive(aws_lambda_function.backend.environment[0].variables["ISLAND_BATTLES_DATABASE_MAX_OPEN_CONNECTIONS"]) == "18"
-    error_message = "5 × 18 = 90 leaves exactly the 10 spare connections."
+    condition     = nonsensitive(aws_lambda_function.backend.environment[0].variables["ISLAND_BATTLES_DATABASE_MAX_OPEN_CONNECTIONS"]) == "9"
+    error_message = "5 × 2 pools × 9 = 90 leaves exactly the 10 spare connections."
   }
 }
 
@@ -147,11 +148,11 @@ run "checks_the_account_limit_when_concurrency_is_unreserved" {
   command = plan
 
   variables {
-    # Unreserved, the account limit caps the function: 5 × 19 = 95 leaves 5
-    # of 100 free, fewer than the 10 spare connections.
+    # Unreserved, the account limit caps the function: 5 × 2 pools × 10 =
+    # 100 leaves none of 100 free, fewer than the 10 spare connections.
     reserved_concurrency          = null
     account_concurrency_limit     = 5
-    database_max_open_connections = 19
+    database_max_open_connections = 10
   }
 
   expect_failures = [aws_lambda_function.backend]
@@ -176,12 +177,12 @@ run "allows_the_largest_safe_account_limit_without_a_reservation" {
   variables {
     reserved_concurrency          = null
     account_concurrency_limit     = 5
-    database_max_open_connections = 18
+    database_max_open_connections = 9
   }
 
   assert {
     condition     = aws_lambda_function.backend.reserved_concurrent_executions == -1
-    error_message = "An account limit of 5 × 18 = 90 leaves exactly the 10 spare connections."
+    error_message = "An account limit of 5 × 2 pools × 9 = 90 leaves exactly the 10 spare connections."
   }
 }
 

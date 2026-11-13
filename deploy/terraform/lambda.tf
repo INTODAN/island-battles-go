@@ -25,9 +25,13 @@ locals {
   }
   lambda_settings = { for key, values in local.lambda_settings_values : key => values[length(values) - 1] }
 
-  # Without a reservation, the account's own limit caps the function.
+  # Without a reservation, the account's own limit caps the function. Each
+  # instance keeps two pools of database_max_open_connections: one to the
+  # backend's database and one to the lobby's own (#229), for the lobby that
+  # runs in its process.
   lambda_concurrency_cap      = var.reserved_concurrency == null ? var.account_concurrency_limit : var.reserved_concurrency
-  lambda_database_connections = local.lambda_concurrency_cap * var.database_max_open_connections
+  lambda_database_pools       = 2
+  lambda_database_connections = local.lambda_concurrency_cap * local.lambda_database_pools * var.database_max_open_connections
 
   # Terraform sets these itself, so it can check them against the
   # concurrency cap: the pool size against Postgres's connections, and the
@@ -163,7 +167,7 @@ resource "aws_lambda_function" "backend" {
     }
     precondition {
       condition     = local.lambda_database_connections <= var.postgres_max_connections - var.postgres_spare_connections
-      error_message = "${var.reserved_concurrency == null ? "account_concurrency_limit (reserved_concurrency is null)" : "reserved_concurrency"} × database_max_open_connections is ${local.lambda_database_connections}, which leaves fewer than postgres_spare_connections (${var.postgres_spare_connections}) of Postgres's ${var.postgres_max_connections} connections free. Lower one of them."
+      error_message = "${var.reserved_concurrency == null ? "account_concurrency_limit (reserved_concurrency is null)" : "reserved_concurrency"} × 2 pools (the backend's database and the lobby's) × database_max_open_connections is ${local.lambda_database_connections}, which leaves fewer than postgres_spare_connections (${var.postgres_spare_connections}) of Postgres's ${var.postgres_max_connections} connections free. Lower one of them."
     }
   }
 }

@@ -206,16 +206,22 @@ lambda_setting() {
 }
 
 # Migrations run from this machine, straight against Postgres over TLS, before
-# the new code is published. A cold start runs no DDL.
+# the new code is published. A cold start runs no DDL. Both databases (#229):
+# the lobby's first, with the lobby's migrate command, then the backend's,
+# which drops the lobby's tables that older builds left in the backend's
+# database once LOBBY_DATABASE_URL names the lobby's own.
 migrate_database() {
-  local database_url
+  local database_url lobby_database_url
   database_url="$(lambda_setting ISLAND_BATTLES_DATABASE_URL)"
-  if [[ -z "$database_url" ]]; then
-    echo "$lambda_settings_file has no ISLAND_BATTLES_DATABASE_URL. Run the VM deploy again to rewrite it." >&2
+  lobby_database_url="$(lambda_setting LOBBY_DATABASE_URL)"
+  if [[ -z "$database_url" ]] || [[ -z "$lobby_database_url" ]]; then
+    echo "$lambda_settings_file lacks ISLAND_BATTLES_DATABASE_URL or LOBBY_DATABASE_URL. Run the VM deploy again to rewrite it." >&2
     exit 1
   fi
-  echo "Migrating the database..."
-  (cd "$repository_root" && ISLAND_BATTLES_DATABASE_URL="$database_url" go run ./backend/cmd/migrate)
+  echo "Migrating the lobby's database..."
+  (cd "$repository_root" && LOBBY_DATABASE_URL="$lobby_database_url" go run ./lobby/cmd/migrate)
+  echo "Migrating the backend's database..."
+  (cd "$repository_root" && ISLAND_BATTLES_DATABASE_URL="$database_url" LOBBY_DATABASE_URL="$lobby_database_url" go run ./backend/cmd/migrate)
 }
 
 check_plan() {
