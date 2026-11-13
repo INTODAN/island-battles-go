@@ -7,7 +7,9 @@ import { rm } from "node:fs/promises";
 const desktop = process.argv.includes("--desktop");
 const dev = process.argv.includes("--dev");
 const productionServer = "https://island-battles.elidan.org";
-const localServer = "http://localhost:8888";
+// The dev server (bun run dev), which forwards to the lobby and the backend
+// that ./scripts/dev.sh runs, on one origin.
+const localServer = "http://localhost:3000";
 if (dev && !desktop) {
   console.error("--dev only applies to --desktop");
   process.exit(1);

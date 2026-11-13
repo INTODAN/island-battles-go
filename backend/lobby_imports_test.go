@@ -17,9 +17,11 @@ var gameLobbyPackages = []string{
 	"islandBattles/lobby/domain",
 }
 
-// lobbyHosts build the in-process lobby until the lobby is a service of its
-// own, so they may use any of its packages: the app that wires it, the two
-// hosts that serve the app (the local server, this package, and the Lambda),
+// lobbyHosts build the in-process lobby, which production runs until the
+// lobby is deployed on its own, so they may use any of its packages: the app
+// that builds it with lobby/app (and, locally, reaches a lobby of its own at
+// ISLAND_BATTLES_LOBBY_URL instead), the two hosts that serve the app (the
+// local server, this package, and the Lambda),
 // the schema migration with the lobby's tables and the migrate command, the
 // admin MCP server with the lobby's admin tools, the OpenAPI export, which
 // describes the lobby's connection token route that game clients call, and
