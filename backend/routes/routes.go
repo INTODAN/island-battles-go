@@ -43,27 +43,32 @@ type LobbyAuthentication interface {
 // SetupLobbyRoutes embeds reusable lobby commands and the explicit game binding.
 // Centrifugo's trusted proxy endpoints are registered separately from OpenAPI.
 // Lobby requests end with a lobby retention pass when one is due.
-func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authentication LobbyAuthentication, gameBinding *application.GameBinding[models.BindingResult], retention domain.RetentionRunner, game *handlers.LobbyGame) {
-	httpapi.Register(api, lobbyadapter.WithGameStart(lobbyApplication, gameBinding), authentication, authentication, retention)
+// The game's own routes take the lobby's player tokens, which game.Players
+// verifies, instead of the guest credential.
+func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authentication LobbyAuthentication, playerTokens domain.PlayerTokenIssuer, gameBinding *application.GameBinding[models.BindingResult], retention domain.RetentionRunner, game *handlers.LobbyGame) {
+	httpapi.Register(api, lobbyadapter.WithGameStart(lobbyApplication, gameBinding), authentication, authentication, playerTokens, retention)
 	lobbyadapter.Register(api, gameBinding, authentication)
 	api.OpenAPI().Paths["/lobby/v1/games/{game_key}/lobbies/{lobby_id}/start"].Post.Description += " Island Battles initializes one playable generation and waits for every frozen roster player to complete their turn. Retrying resumes a failed initialization. Each roster player plays with the bot in their member_settings, which the game copies at the start and GenerationState.bot reports; a roster player without one fails the start with game_requirement of type " + services.BotNotChosenProblemType + "."
 	api.OpenAPI().Paths["/lobby/v1/games/{game_key}/lobbies/{lobby_id}/seats"].Post.Description += ` Island Battles seats a default bot: seat_settings is {"bot_level": N} with a level that GET /bots/defaults lists, the seat is named "Bot (level N)", and the backend plays it with that default bot once the lobby starts.`
 	api.OpenAPI().Paths["/lobby/v1/games/{game_key}/lobbies/{lobby_id}/settings"].Put.Description += " Island Battles checks game_settings as on create, as its LobbySettings: a default map that exists, or a map file, whose player_amount equals the number of teams sent, and a turn_timeout_seconds from 5 to 600 or null. Send one team per colour of the new map. The start uses the map and turn timeout set last."
 	api.OpenAPI().Paths["/lobby/v1/games/{game_key}/lobbies/{lobby_id}/ready"].Put.Description += " Island Battles requires a bot in your member_settings first, set with setLobbyMemberSettings, and refuses to set a member without one ready with game_requirement of type " + services.BotNotChosenProblemType + "."
 	api.OpenAPI().Paths["/lobby/v1/games/{game_key}/lobbies/{lobby_id}/member-settings"].Put.Description += ` Island Battles' member_settings name your bot: {"bot": {"kind": "localhost"}} for your own bot, which island-battles-bot serve runs on your machine and your game client relays each turn to, or {"bot": {"kind": "default", "level": N}} with a level that GET /bots/defaults lists, for a default bot that the backend plays itself. Anything else is invalid_member_settings. You choose a bot before getting ready, and can change it while the lobby waits. When the lobby starts, the game copies each roster player's bot, which GenerationState.bot reports from then on.`
+	api.OpenAPI().Components.SecuritySchemes[PlayerTokenScheme] = &huma.SecurityScheme{Type: "http", Scheme: "bearer", BearerFormat: "JWT",
+		Description: "A player token for the island-battles game, from POST /lobby/v1/player-tokens with game_key island-battles: a JWT signed with EdDSA that the game verifies with the lobby's public keys, GET /lobby/v1/jwks.json, without reading the lobby. It lasts at most 15 minutes, until its expires_at; get a new one before then, at about 80 % of its life, and once more when a request answers 401. " +
+			"The guest credential of POST /lobby/v1/sessions is refused here: a missing, expired or invalid token is 401."}
 	// newestGame is said of every route that finds a game by its lobby.
 	const newestGame = " A lobby can play several games, one per round (lobby.round, raised by POST /lobby/v1/games/island-battles/lobbies/{lobby_id}/reopen once a game has ended); this route serves the lobby's newest game and its frozen roster, and an older game can't be reached once the next one starts."
 	huma.Register(api, huma.Operation{
 		OperationID: "getIslandLobbyReplay", Path: "/game/from-lobby/{lobby_id}/replay", Method: http.MethodGet,
 		Summary:     "View the Island Battles replay history for a started lobby",
 		Description: "Players on the game's frozen roster can view every stored generation of the game, built from the generations on each request, including clash effects with survivor losses and defeated troop outlines, and the outcome once the game has ended. The game does not consult the lobby, so access continues after the lobby is deleted. The game, and with it the replay, is deleted 7 days after its last generation by default, and then this returns 404." + newestGame,
-		Tags:        []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
+		Tags:        []string{"Island Battles"}, Security: playerTokenSecurity,
 	}, game.Replay)
 	huma.Register(api, huma.Operation{
 		OperationID: "getIslandLobbyGeneration", Path: "/game/from-lobby/{lobby_id}/generation", Method: http.MethodGet,
 		Summary: "Read the current generation for a roster player", Description: "Requires a place on the game's frozen roster. The game does not consult the lobby, so access continues after the lobby is deleted. Returns castle and soldier group IDs, which are never reassigned within a game, troop state, every castle's and soldier group's upgrade levels, recorded clashes with per-participant before/after counts, your turn completion flag, the turn's deadline, and the outcome once the game has ended. " +
 			"Like every game request, it first applies the turn's deadline once it has passed, which ends the game. A finished game stays readable until the game is deleted, 7 days after its last generation by default; then this returns 404." + newestGame,
-		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
+		Tags: []string{"Island Battles"}, Security: playerTokenSecurity,
 	}, game.CurrentGeneration)
 	huma.Register(api, huma.Operation{
 		OperationID: "applyIslandLobbyTurnDeadline", Path: "/game/from-lobby/{lobby_id}/deadline", Method: http.MethodPost,
@@ -71,7 +76,7 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 		Description: "Requires a place on the game's frozen roster; the lobby is not consulted. The server runs no timers, so a turn times out when a request applies its deadline, GenerationState.turn_deadline_at. Every game request does that first, and a client that is waiting for other players calls this once about a second after the deadline. " +
 			"Before the deadline, and for a game that has ended or has no turn timeout, it changes nothing. After it, every team with a player who hasn't completed the turn loses, the game ends with reason turn_timeout, and among the other teams still standing the team with the most castles wins; equal counts, or no team left, are a draw. The open generation stays the final one, game.ended is pushed to every roster player, and later commands conflict (409) with problem type " + services.GameEndedProblemType + ". " +
 			"Calling it again is safe and ends the game once. Returns your current state, as GET /game/from-lobby/{lobby_id}/generation does." + newestGame,
-		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
+		Tags: []string{"Island Battles"}, Security: playerTokenSecurity,
 	}, game.ApplyTurnDeadline)
 	huma.Register(api, huma.Operation{
 		OperationID: "getIslandLobbyTurnDelivery", Path: "/game/from-lobby/{lobby_id}/turn-delivery", Method: http.MethodGet,
@@ -79,7 +84,7 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 		Description: "Requires a place on the game's frozen roster; the lobby is not consulted. Returns the caller's turn of the current generation as a TurnDelivery: the BotTurn the server builds for their bot (the board, their team, the upgrade cost table, the memory their latest completed turn sent and the deadline), and how to submit the answer: submit.url, POST /generation/commands on the game's public URL, and submit.token, a submit token that submits exactly this player's turn of this generation. " +
 			"A game client relays it to the player's bot server, island-battles-bot serve, which answers 202 at once, plays the turn and submits its commands, logs and memory itself, with complete true and Authorization: Bearer <token>; the client submits nothing. Each call issues a new token for the same turn. " +
 			"Like every game request, it first applies the turn's deadline once it has passed. When the caller has nothing to play it returns 409: the game has ended (problem type " + services.GameEndedProblemType + "), their team has been eliminated, or they have already completed the turn." + newestGame,
-		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
+		Tags: []string{"Island Battles"}, Security: playerTokenSecurity,
 	}, game.TurnDelivery)
 	huma.Register(api, huma.Operation{
 		OperationID: "getIslandLobbyGenerationLogs", Path: "/game/from-lobby/{lobby_id}/logs", Method: http.MethodGet,
@@ -87,7 +92,7 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 		Description: "Requires a place on the game's frozen roster; the lobby is not consulted. Returns the game log lines that players' bots sent with their batches for the generation, grouped by player, each named by the display name they had at the start, never by ID. " +
 			"While the game runs you see only your own team's lines; once it has an outcome you see every team's. hidden_team_colors lists the teams you can't see yet, without saying whether they logged anything. " +
 			"A generation of another game returns 404. The lines are deleted with the game, 7 days after its last generation by default; then this returns 404." + newestGame,
-		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
+		Tags: []string{"Island Battles"}, Security: playerTokenSecurity,
 	}, game.GenerationLogs)
 	// The demo is streamed, so Huma can't derive its response from the
 	// handler; the published file format is the Demo schema.
@@ -104,7 +109,7 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 		Description: "Requires a place on the game's frozen roster; the lobby is not consulted. Returns the game as a demo file, the Demo schema, as an attachment named island-battles-game-<game_id>-generation-<n>.json, where n is the number of generations played. " +
 			"Any roster player can save a demo at any time: one saved during the game holds the generations played so far and a null outcome. Each frame's game log lines follow the rule of GET /game/from-lobby/{lobby_id}/logs when the demo is saved: while the game runs only your own team's lines, once it has ended every team's. " +
 			"The demo viewer at /game/demo-viewer/ opens the file without the lobby, a session or the game. The body is streamed, and a long game with full logs takes tens of megabytes, so it is packed with gzip (Content-Encoding: gzip) when Accept-Encoding allows it. The game is deleted 7 days after its last generation by default; then this returns 404." + newestGame,
-		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
+		Tags: []string{"Island Battles"}, Security: playerTokenSecurity,
 		Responses: map[string]*huma.Response{"200": {
 			Description: "The demo file.",
 			Headers: map[string]*huma.Param{
@@ -120,21 +125,21 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 		Description: "For the people who watch the lobby with its join code (POST /lobby/v1/watches): a watcher the host hasn't kicked, an active member of the lobby, or a roster player. Returns the WatchState: the board, the teams, the turn's deadline and the outcome once the game has ended, without the player-only fields of GenerationState. " +
 			"The lobby's watch channel, WatchState.channel, receives WatchGenerationEvent after each turn and WatchGameEndedEvent after the last one, in the same push as the players' events; read this after subscribing or reconnecting. A watcher never plays and never delays a turn. " +
 			"Like the other game reads, it first applies the turn's deadline once it has passed. A kicked watcher gets 403. Anyone else, a lobby whose game hasn't started, and a lobby that was deleted get 404." + newestGame,
-		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
+		Tags: []string{"Island Battles"}, Security: playerTokenSecurity,
 	}, game.WatchGeneration)
 	huma.Register(api, huma.Operation{
 		OperationID: "watchIslandLobbyReplay", Path: "/game/from-lobby/{lobby_id}/watch/replay", Method: http.MethodGet,
 		Summary: "View the Island Battles replay of a lobby's game as a watcher",
 		Description: "The replay page of GET /game/from-lobby/{lobby_id}/replay for the people who may read GET /game/from-lobby/{lobby_id}/watch: every stored generation, the teams and the outcome once the game has ended, drawn by the same code as the roster's replay. " +
 			"The page reads its history for Save demo through /game/from-lobby/{lobby_id}/watch/demo, and shows no game log lines, since a watcher sees none while the game runs. A kicked watcher gets 403; anyone else, and a lobby whose game hasn't started, get 404." + newestGame,
-		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
+		Tags: []string{"Island Battles"}, Security: playerTokenSecurity,
 	}, game.WatchReplay)
 	huma.Register(api, huma.Operation{
 		OperationID: "watchIslandLobbyDemo", Path: "/game/from-lobby/{lobby_id}/watch/demo", Method: http.MethodGet,
 		Summary: "Read a lobby game's history for a watcher",
 		Description: "For the people who may read GET /game/from-lobby/{lobby_id}/watch. Returns the game so far as a demo file, the Demo schema, as GET /game/from-lobby/{lobby_id}/demo does, for scrubbing back through it. " +
 			"A watcher belongs to no team, so while the game runs no game log lines are included and every frame's hidden_team_colors names every team; once the game has ended every team's lines are. Packed with gzip when Accept-Encoding allows it." + newestGame,
-		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}},
+		Tags: []string{"Island Battles"}, Security: playerTokenSecurity,
 		Responses: map[string]*huma.Response{"200": {
 			Description: "The demo file.",
 			Headers: map[string]*huma.Param{
@@ -163,7 +168,7 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 		Description: "A submit token from a TurnDelivery, submit.token, which starts with ibst1. It authorizes POST /generation/commands for one player's turn of one generation of one game, until the turn's deadline plus 30 seconds, or 24 hours after the generation when turns have no time limit."}
 	huma.Register(api, huma.Operation{
 		OperationID: "registerGenerationCommand", Path: "/generation/commands", Method: http.MethodPost,
-		Summary: "Register an atomic player command batch and optionally complete the turn", Description: "Requires a place on the game's frozen roster, or a submit token: Authorization: Bearer ibst1.… from GET /game/from-lobby/{lobby_id}/turn-delivery stands for its player for the batch of its game and generation only, and anything else (another game or generation, an expired or altered token, a player no longer on the roster) is 401. Either way the lobby is not consulted, and the rules below are the same. Players send send_soldier_group and upgrade_castle commands for castles their team owns; other command types are forbidden (403). " +
+		Summary: "Register an atomic player command batch and optionally complete the turn", Description: "Requires a player token of a player on the game's frozen roster (PlayerToken), or a submit token: Authorization: Bearer ibst1.… from GET /game/from-lobby/{lobby_id}/turn-delivery stands for its player for the batch of its game and generation only, and anything else (another game or generation, an expired or altered token, a player no longer on the roster) is 401. Either way the lobby is not consulted, and the rules below are the same. Players send send_soldier_group and upgrade_castle commands for castles their team owns; other command types are forbidden (403). " +
 			"upgrade_castle buys the next level of one upgrade type and pays that level's soldier_cost, listed by GET /game/upgrades, from the castle's soldiers. A castle may be upgraded several times in one turn, and each upgrade buys the next level. " +
 			"Every command is checked against the generation and every command already accepted this turn, including your own earlier batches, so an accepted command cannot fail when the turn runs. An invalid command rejects the whole batch, and nothing of it is stored. " +
 			"Malformed parameters are 422. Rejections that clients tell apart carry a problem type: a castle that is not in the generation is 422 " + services.CastleNotFoundProblemType + ", an unknown upgrade_type is 422 " + services.UnknownUpgradeTypeProblemType + ", a castle your team does not own is 403 " + services.CastleNotOwnedProblemType + ", " +
@@ -176,7 +181,7 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 			"A batch may also carry game log lines, which are stored in order with the generation and read with GET /game/from-lobby/{lobby_id}/logs. A player has at most 100 lines per generation, each of at most 500 characters; a batch over either limit is rejected whole (422) with problem type " + services.GameLogLimitProblemType + ". " +
 			"A batch may also carry the memory of the player's bot, any JSON object of at most 64 KiB as compact JSON. The batch with complete true saves it, replacing the player's previous memory, and an absent or null memory clears it; other batches ignore it. " +
 			"GenerationState.memory returns the memory sent with the player's latest completed turn, and the retry hash covers it. Larger memory is rejected whole (422) with problem type " + services.BotMemoryTooLargeProblemType + ".",
-		Tags: []string{"Island Battles"}, Security: []map[string][]string{{"LobbyBearer": {}}, {SubmitTokenScheme: {}}},
+		Tags: []string{"Island Battles"}, Security: []map[string][]string{{PlayerTokenScheme: {}}, {SubmitTokenScheme: {}}},
 		// The service validates the body itself so forbidden command types and
 		// unowned castles keep their 403 status instead of a schema 422.
 		SkipValidateBody: true,
@@ -213,6 +218,12 @@ func SetupLobbyRoutes(api huma.API, lobbyApplication domain.Application, authent
 // SubmitTokenScheme names the security scheme of the submit tokens that turn
 // deliveries carry.
 const SubmitTokenScheme = "SubmitToken"
+
+// PlayerTokenScheme names the security scheme of the lobby's player tokens,
+// which every route of a player's game takes.
+const PlayerTokenScheme = "PlayerToken"
+
+var playerTokenSecurity = []map[string][]string{{PlayerTokenScheme: {}}}
 
 // SetupRoutes registers the game routes every host serves. adminAPIKey
 // authorizes POST /map/create; an empty key refuses every request.

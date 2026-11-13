@@ -11,11 +11,13 @@ export const maxRetryWaitMs = 5000;
 /**
  * Requests other than GET that are safe to send again: they set a value, so a
  * repeat changes nothing. Reopening a lobby after its game is one too: a
- * lobby that already waits comes back unchanged. Creating, joining, starting,
+ * lobby that already waits comes back unchanged. So is getting a player
+ * token, which stores nothing. Creating, joining, starting,
  * adding or removing a seat and kicking a watcher are not in this list and are
  * never retried.
  */
 const repeatableRequests: ReadonlyArray<{ method: string; path: RegExp }> = [
+  { method: "POST", path: /\/lobby\/v1\/player-tokens$/ },
   {
     method: "PUT",
     path: /\/lobby\/v1\/games\/[^/]+\/lobbies\/[^/]+\/member-settings$/,

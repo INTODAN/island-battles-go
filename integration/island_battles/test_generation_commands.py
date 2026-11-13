@@ -9,7 +9,7 @@ import pytest
 from integration.test_live import BASE, control_backend, sql
 from integration.test_live import guests as guests_fixture
 from island_battles_client import IslandBattlesClient, send_soldier_group, turn_result
-from test_lobby_binding import started_lobby
+from test_lobby_binding import game_auth, started_lobby
 
 guests = guests_fixture
 pytestmark = pytest.mark.asyncio
@@ -103,7 +103,7 @@ async def test_rejection_retry_restart_and_public_migration_bypass(guests):
 
         async def read(player):
             response = await http.get(
-                path, headers={"Authorization": f"Bearer {player.credential}"}
+                path, headers=await game_auth(player)
             )
             assert response.status_code == 200, response.text
             return response.json()
@@ -119,7 +119,7 @@ async def test_rejection_retry_restart_and_public_migration_bypass(guests):
             for castle in initial["generation"]["castles"]
             if castle["team_color"] != initial["team_color"]
         )
-        headers = {"Authorization": f"Bearer {alice.credential}"}
+        headers = await game_auth(alice)
         batch = {
             "game_id": initial["game_id"],
             "generation_id": initial["generation_id"],
@@ -158,7 +158,7 @@ async def test_rejection_retry_restart_and_public_migration_bypass(guests):
         outsider = await guests("Outside game")
         assert (
             await http.get(
-                path, headers={"Authorization": f"Bearer {outsider.credential}"}
+                path, headers=await game_auth(outsider)
             )
         ).status_code == 404
         for old_path in ("/generation/migrate", "/generation/create"):
@@ -197,7 +197,7 @@ async def test_rejection_retry_restart_and_public_migration_bypass(guests):
         bob_done = {**alice_done, "request_id": str(uuid4())}
         response = await http.post(
             "/generation/commands",
-            headers={"Authorization": f"Bearer {bob.credential}"},
+            headers=await game_auth(bob),
             json=bob_done,
         )
         assert response.status_code == 200, response.text
@@ -272,7 +272,7 @@ async def test_a_player_who_never_plays_loses_at_the_turn_deadline(guests):
         await sql(f"SELECT outcome->>'reason' FROM games WHERE id={game_id}")
         == "turn_timeout"
     )
-    headers = {"Authorization": f"Bearer {bob.credential}"}
+    headers = await game_auth(bob)
     async with httpx.AsyncClient(base_url=BASE) as http:
         # Bob's late batch for the expired generation conflicts.
         late = await http.post(

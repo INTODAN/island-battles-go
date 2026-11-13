@@ -48,7 +48,7 @@ func TestGameRequestsEndWithARetentionPass(t *testing.T) {
 		t.Fatal(err)
 	}
 	retention := &countingRetention{database: database, gameID: binding.GameID}
-	handler := handlers.LobbyGame{Database: database, Authenticator: commandAuthentication{domain.Principal{PlayerID: playerID}},
+	handler := handlers.LobbyGame{Database: database, Players: commandAuthentication{domain.Principal{PlayerID: playerID}},
 		Publisher: &testutils.RecordedPublisher{}, Retention: retention}
 	_, api := humatest.New(t)
 	huma.Register(api, huma.Operation{OperationID: "current", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/generation"}, handler.CurrentGeneration)

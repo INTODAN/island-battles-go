@@ -3,6 +3,11 @@ import { apiBaseUrl, platformFetch } from "../platform";
 import { ApiError, errorFromResponse } from "./errors";
 import type { paths as GamePaths } from "./generated/game";
 import type { paths as LobbyPaths } from "./generated/lobby";
+import {
+  PlayerTokens,
+  playerTokenFetch,
+  playerTokenGameKey,
+} from "./playerTokens";
 import { retryThrottled } from "./retry";
 
 export interface ApiOptions {
@@ -16,6 +21,13 @@ export interface ApiOptions {
   sleep?: (milliseconds: number) => Promise<void>;
   /** Replaces the retry jitter source, a number in [0, 1); tests use it. */
   random?: () => number;
+  /**
+   * The player tokens of the game client. Clients that share one share the
+   * tokens; by default each `createApiClients` has its own.
+   */
+  playerTokens?: PlayerTokens;
+  /** Epoch milliseconds, for when a player token is renewed; tests use it. */
+  now?: () => number;
 }
 
 let accessToken: string | undefined;
@@ -72,24 +84,44 @@ function transportFetch(inner: typeof fetch): typeof fetch {
 /**
  * Creates the lobby and game clients. Calls resolve with `{ data }` on success
  * and reject with ApiError on any failure, so callers never see `error`.
+ *
+ * The lobby client sends the guest credential. The game client never does:
+ * its player's routes take a player token from the lobby, which it gets,
+ * renews at 80 % of its life and once more when the game answers 401.
  */
 export function createApiClients(options: ApiOptions = {}) {
   const baseUrl = options.baseUrl ?? apiBaseUrl();
   const getAccessToken = options.getAccessToken ?? (() => accessToken);
   const inner = options.fetch;
-  const make = <P extends {}>() => {
-    // Look fetch up per call so a later global replacement (and tests) is honoured.
-    const client = createClient<P>({
-      baseUrl,
-      fetch: retryThrottled(transportFetch(inner ?? platformFetch), {
-        sleep: options.sleep,
-        random: options.random,
-      }),
+  // Look fetch up per call so a later global replacement (and tests) is honoured.
+  const send = () =>
+    retryThrottled(transportFetch(inner ?? platformFetch), {
+      sleep: options.sleep,
+      random: options.random,
     });
-    client.use(authMiddleware(getAccessToken), errorMiddleware);
-    return client;
-  };
-  return { lobbyApi: make<LobbyPaths>(), gameApi: make<GamePaths>() };
+  const lobbyApi = createClient<LobbyPaths>({ baseUrl, fetch: send() });
+  lobbyApi.use(authMiddleware(getAccessToken), errorMiddleware);
+  const playerTokens =
+    options.playerTokens ??
+    new PlayerTokens(async () => {
+      const { data } = await lobbyApi.POST("/lobby/v1/player-tokens", {
+        body: { game_key: playerTokenGameKey },
+      });
+      if (data === undefined) {
+        throw new ApiError({
+          kind: "http",
+          status: 0,
+          detail: "empty response",
+        });
+      }
+      return data;
+    }, options.now);
+  const gameApi = createClient<GamePaths>({
+    baseUrl,
+    fetch: playerTokenFetch(send(), playerTokens, getAccessToken),
+  });
+  gameApi.use(errorMiddleware);
+  return { lobbyApi, gameApi };
 }
 
 export const { lobbyApi, gameApi } = createApiClients();

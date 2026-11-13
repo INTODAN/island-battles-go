@@ -43,7 +43,7 @@ function relay(context, { bot = async () => {}, state = stateOf(), delivery = nu
   const statuses = [];
   let current = state;
   const player = new ExamplePlayer({
-    lobbyID: "room", playerID: "player", credential: "test", subscription, demo: false, botRetryDelay: 20, retryDelay: 20,
+    lobbyID: "room", playerID: "player", subscription, demo: false, botRetryDelay: 20, retryDelay: 20,
     onStatus: (title, detail) => statuses.push({ title, detail }),
     deliver: async (sent) => { deliveries.push(sent); return bot(sent); },
     fetcher: async (url, init) => {
@@ -69,7 +69,8 @@ test("a localhost bot gets the server's turn delivery, and the page submits noth
   await until(() => deliveries.length === 1 && !player.inFlight);
   assert.equal(reads()[0].url, "/game/from-lobby/room/turn-delivery");
   assert.equal(reads()[0].method, "GET");
-  assert.equal(reads()[0].headers.Authorization, "Bearer test");
+  // The page's fetcher adds the player's token; the player adds no credential.
+  assert.equal(reads()[0].headers.Authorization, undefined);
   assert.deepEqual(deliveries[0], deliveryOf(stateOf({ memory: { seen: 0 }, turn_deadline_at: DEADLINE })));
   await delay(30);
   assert.equal(submissions().length, 0, "the bot submits, not the page");

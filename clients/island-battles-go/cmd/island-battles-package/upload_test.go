@@ -23,7 +23,7 @@ const (
 )
 
 func uploadToken(lobby string) string {
-	payload := fmt.Sprintf(`{"lobby_id":%q,"player_id":"p","session_id":"s","exp":2000000000}`, lobby)
+	payload := fmt.Sprintf(`{"lobby_id":%q,"player_id":"p","exp":2000000000}`, lobby)
 	return "ibut1." + base64.RawURLEncoding.EncodeToString([]byte(payload)) + ".mac"
 }
 

@@ -97,6 +97,14 @@ type registerCommands struct {
 
 // connectionToken is POST /lobby/v1/connection-token's answer: a Centrifugo
 // connection token and where to connect with it.
+// playerToken is the lobby's answer to POST /lobby/v1/player-tokens: the
+// token the game's routes take, and when it expires.
+type playerToken struct {
+	Schema    string    `json:"$schema,omitempty"`
+	Token     string    `json:"token"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
 type connectionToken struct {
 	Schema       string    `json:"$schema,omitempty"`
 	Token        string    `json:"token"`

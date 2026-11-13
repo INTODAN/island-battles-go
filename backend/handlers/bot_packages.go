@@ -16,8 +16,10 @@ import (
 
 // BotPackages serves the bot packages that members upload to a lobby.
 type BotPackages struct {
-	Authenticator domain.Authenticator
-	Service       services.BotPackages
+	// Players tells who sends a request from its player token. Nil refuses
+	// every request but those with an upload token.
+	Players PlayerAuthenticator
+	Service services.BotPackages
 }
 
 type BotPackageUploadResponse struct {
@@ -37,16 +39,12 @@ type BotUploadTokenResponse struct {
 	Body models.BotUploadTokenView
 }
 
-// principal authenticates a player's session.
+// principal authenticates a player's player token.
 func (handler *BotPackages) principal(ctx context.Context, authorization string) (domain.Principal, error) {
-	verified, err := handler.Authenticator.Authenticate(ctx, authorization)
-	if err != nil {
-		return domain.Principal{}, huma.Error401Unauthorized("authentication required")
-	}
-	return verified.Principal, nil
+	return authenticatePlayer(ctx, handler.Players, authorization)
 }
 
-// uploader authenticates a player's session, or an upload token for the
+// uploader authenticates a player's player token, or an upload token for the
 // lobby, which stands for its player.
 func (handler *BotPackages) uploader(ctx context.Context, authorization, lobbyID string) (domain.Principal, error) {
 	token, isToken := uploadtoken.FromAuthorization(authorization)

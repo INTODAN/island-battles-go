@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"islandBattles/backend/retention"
+	"islandBattles/lobby/playertoken"
 )
 
 const (
@@ -33,7 +34,16 @@ const (
 	// BotPackagesDirEnv is read by the local server host alone; see
 	// LoadBotPackagesDir.
 	BotPackagesDirEnv = "ISLAND_BATTLES_BOT_PACKAGES_DIR"
+	// The lobby's settings keep the lobby's own prefix, since the lobby
+	// becomes its own service (#118).
+	PlayerTokenKeysEnv     = "LOBBY_PLAYER_TOKEN_KEYS"
+	PlayerTokenLifetimeEnv = "LOBBY_PLAYER_TOKEN_LIFETIME"
 )
+
+// LocalLobbyIssuer is the iss of player tokens when ISLAND_BATTLES_PUBLIC_URL
+// is unset, as on a local server. The lobby and the game share the process
+// and its settings, so they agree on it.
+const LocalLobbyIssuer = "urn:island-battles:local-lobby"
 
 // The pool defaults suit Lambda, where an instance serves one request at a
 // time and every instance has its own pool.
@@ -93,6 +103,22 @@ type Config struct {
 	// means none: the local server host then keeps them on disk, and the
 	// Lambda host refuses uploads.
 	BotPackagesBucket string
+	// PlayerTokenKeys are the lobby's player token keys, kid:seed pairs; the
+	// first signs. See playertoken.ParseKeySet.
+	PlayerTokenKeys *playertoken.KeySet
+	// PlayerTokenLifetime is how long a player token lasts:
+	// playertoken.MaxLifetime unless a development setup shortens it.
+	PlayerTokenLifetime time.Duration
+}
+
+// LobbyIssuer is the iss of the lobby's player tokens: the public URL, which
+// the lobby and the game share until they are deployed apart, or
+// LocalLobbyIssuer without one.
+func (config Config) LobbyIssuer() string {
+	if config.PublicURL == "" {
+		return LocalLobbyIssuer
+	}
+	return config.PublicURL
 }
 
 // LoadConfig reads and validates the HTTP API's environment values.
@@ -103,7 +129,7 @@ func LoadConfig() (Config, error) {
 // LoadConfigFromLookup makes configuration validation deterministic in tests.
 func LoadConfigFromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if err := requireEnvironment(lookup, DatabaseURLEnv, CentrifugoPublicURLEnv, CentrifugoAPIURLEnv,
-		CentrifugoAPIKeyEnv, ConnectionTokenHMACSecretEnv, LobbyProxySecretEnv, SubmitTokenSecretEnv); err != nil {
+		CentrifugoAPIKeyEnv, ConnectionTokenHMACSecretEnv, LobbyProxySecretEnv, SubmitTokenSecretEnv, PlayerTokenKeysEnv); err != nil {
 		return Config{}, err
 	}
 	database, err := LoadDatabaseConfigFromLookup(lookup)
@@ -113,6 +139,18 @@ func LoadConfigFromLookup(lookup func(string) (string, bool)) (Config, error) {
 	gameRetentionPeriod, err := LoadGameRetentionPeriodFromLookup(lookup)
 	if err != nil {
 		return Config{}, err
+	}
+	playerTokenKeys, err := playertoken.ParseKeySet(readEnvironment(lookup, PlayerTokenKeysEnv))
+	if err != nil {
+		// The error names no seed.
+		return Config{}, fmt.Errorf("%s: %w", PlayerTokenKeysEnv, err)
+	}
+	playerTokenLifetime := playertoken.MaxLifetime
+	if value := readEnvironment(lookup, PlayerTokenLifetimeEnv); value != "" {
+		playerTokenLifetime, err = time.ParseDuration(value)
+		if err != nil || playerTokenLifetime < time.Minute || playerTokenLifetime > playertoken.MaxLifetime {
+			return Config{}, fmt.Errorf("%s must be a duration from 1m to 15m", PlayerTokenLifetimeEnv)
+		}
 	}
 	config := Config{
 		Database:                  database,
@@ -126,6 +164,8 @@ func LoadConfigFromLookup(lookup func(string) (string, bool)) (Config, error) {
 		AdminAPIKey:               readEnvironment(lookup, AdminAPIKeyEnv),
 		GameRetentionPeriod:       gameRetentionPeriod,
 		BotPackagesBucket:         readEnvironment(lookup, BotPackagesBucketEnv),
+		PlayerTokenKeys:           playerTokenKeys,
+		PlayerTokenLifetime:       playerTokenLifetime,
 	}
 	if err := validateURL(CentrifugoPublicURLEnv, config.CentrifugoPublicURL, "ws", "wss"); err != nil {
 		return Config{}, err

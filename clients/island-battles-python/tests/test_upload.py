@@ -20,7 +20,6 @@ def token(lobby: str = LOBBY) -> str:
         {
             "lobby_id": lobby,
             "player_id": PLAYER,
-            "session_id": "s",
             "exp": 2_000_000_000,
         }
     )

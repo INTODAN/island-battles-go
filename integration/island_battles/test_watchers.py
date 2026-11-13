@@ -10,7 +10,7 @@ from integration.test_live import BASE, create
 from integration.test_live import guests as guests_fixture
 from integration.test_protocol import Publications, connection_client, denied_subscription, disconnect
 from lobby_client import LobbyError, Scope
-from test_lobby_binding import started_lobby
+from test_lobby_binding import game_auth, started_lobby
 
 guests = guests_fixture
 pytestmark = pytest.mark.asyncio
@@ -31,13 +31,14 @@ class WatchEvents(Publications):
         self.unsubscribed.put_nowait(ctx)
 
 
-def bearer(player):
-    return {"Authorization": f"Bearer {player.credential}"}
+async def bearer(player):
+    """A player token for the game's routes, which watchers read too."""
+    return await game_auth(player)
 
 
 async def complete_turn(http, player, lobby_id):
-    state = (await http.get(f"/game/from-lobby/{lobby_id}/generation", headers=bearer(player))).json()
-    response = await http.post("/generation/commands", headers=bearer(player), json={
+    state = (await http.get(f"/game/from-lobby/{lobby_id}/generation", headers=await bearer(player))).json()
+    response = await http.post("/generation/commands", headers=await bearer(player), json={
         "game_id": state["game_id"], "generation_id": state["generation_id"], "request_id": str(uuid4()),
         "commands": [], "complete": True,
     })
@@ -82,15 +83,15 @@ async def test_a_watcher_outside_the_roster_follows_the_game_until_the_host_kick
         await denied_subscription(watcher, snapshot.channel)
 
         async with httpx.AsyncClient(base_url=BASE) as http:
-            watched = await http.get(f"/game/from-lobby/{scope.lobby_id}/watch", headers=bearer(robin))
+            watched = await http.get(f"/game/from-lobby/{scope.lobby_id}/watch", headers=await bearer(robin))
             assert watched.status_code == 200, watched.text
             state = watched.json()
             assert [team["players"] for team in state["teams"]] == [["Alice"], ["Bob"]]
             assert "player_id" not in state and "bot" not in state and "submitted" not in state
-            history = await http.get(f"/game/from-lobby/{scope.lobby_id}/watch/demo", headers=bearer(robin))
+            history = await http.get(f"/game/from-lobby/{scope.lobby_id}/watch/demo", headers=await bearer(robin))
             assert history.status_code == 200 and len(history.json()["frames"]) == 1
             for path in ("watch", "watch/demo"):
-                denied = await http.get(f"/game/from-lobby/{scope.lobby_id}/{path}", headers=bearer(stranger))
+                denied = await http.get(f"/game/from-lobby/{scope.lobby_id}/{path}", headers=await bearer(stranger))
                 assert denied.status_code == 404, denied.text
 
             # The roster alone plays the turn, and the watcher gets it live.
@@ -106,7 +107,7 @@ async def test_a_watcher_outside_the_roster_follows_the_game_until_the_host_kick
             async with httpx.AsyncClient(base_url=BASE) as raw:
                 kicked = await raw.delete(
                     f"/lobby/v1/games/island-battles/lobbies/{scope.lobby_id}/watchers/{robin_id}",
-                    headers=bearer(bob))
+                    headers={"Authorization": f"Bearer {bob.credential}"})
             assert (kicked.status_code, kicked.json()["code"]) == (403, "not_host")
             await alice.kick_watcher(scope, robin_id)
             ended = await asyncio.wait_for(events.unsubscribed.get(), 5)
@@ -114,7 +115,7 @@ async def test_a_watcher_outside_the_roster_follows_the_game_until_the_host_kick
             with pytest.raises(LobbyError) as refused:
                 await robin.watch(game_key="island-battles", join_code=code)
             assert (refused.value.code, refused.value.status) == ("watcher_kicked", 403)
-            assert (await http.get(f"/game/from-lobby/{scope.lobby_id}/watch", headers=bearer(robin))).status_code == 403
+            assert (await http.get(f"/game/from-lobby/{scope.lobby_id}/watch", headers=await bearer(robin))).status_code == 403
             assert (await alice.snapshot(scope)).watcher_count == 0
             again = await connection_client(robin.credential)
             try:

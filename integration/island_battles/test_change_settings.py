@@ -9,7 +9,7 @@ from lobby_api_client.models import TeamDefinition
 from lobby_client import LobbyError, Scope
 
 from integration.test_live import BASE, create, guests, latest, sql
-from test_lobby_binding import LOCALHOST_BOT, choose_bot, started_map, strait_map
+from test_lobby_binding import LOCALHOST_BOT, choose_bot, game_auth, started_map, strait_map
 
 pytestmark = pytest.mark.asyncio
 
@@ -93,7 +93,7 @@ async def test_the_host_changes_the_map_and_then_plays_the_first_turn_on_it(gues
     async with httpx.AsyncClient(base_url=BASE) as http:
         async def state(player):
             response = await http.get(f"/game/from-lobby/{scope.lobby_id}/generation",
-                                      headers={"Authorization": f"Bearer {player.credential}"})
+                                      headers=await game_auth(player))
             assert response.status_code == 200, response.text
             return response.json()
 
@@ -103,7 +103,7 @@ async def test_the_host_changes_the_map_and_then_plays_the_first_turn_on_it(gues
             current = await state(player)
             batch = {"game_id": current["game_id"], "generation_id": current["generation_id"], "request_id": str(uuid4()), "commands": [], "complete": True}
             response = await http.post("/generation/commands", json=batch,
-                                       headers={"Authorization": f"Bearer {player.credential}"})
+                                       headers=await game_auth(player))
             assert response.status_code == 200, response.text
         # The bot seat on Green plays its own turn, so the generation advances.
         async with asyncio.timeout(20):

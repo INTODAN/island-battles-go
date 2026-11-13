@@ -54,6 +54,19 @@ DEADLINE_SLACK_SECONDS = 1.0
 DEADLINE_RETRY_SECONDS = 2.0
 DEADLINE_RETRY_MAX_SECONDS = 30.0
 
+# The game's key in the lobby, the audience of its player tokens.
+GAME_KEY = "island-battles"
+# The game's routes take a player token from the lobby, which lasts at most 15
+# minutes. The client gets a new one once this share of its life has passed,
+# and once more when the game answers 401.
+PLAYER_TOKEN_REFRESH_SHARE = 0.8
+
+
+def _is_lobby_path(path: str) -> bool:
+    """The lobby's own routes take the guest credential; the game's take a
+    player token."""
+    return path.startswith("/lobby/")
+
 
 def _parse_state(data: object) -> GenerationState:
     try:
@@ -196,6 +209,10 @@ class IslandBattlesClient:
         self._started = False
         self._closed = False
         self._logging = ClientLogging(self, log_level, log_to_stdout, log_file)
+        # The player token for the game's routes, and when to get a new one.
+        self._player_token: str | None = None
+        self._player_token_renew_at: datetime | None = None
+        self._player_token_lock = asyncio.Lock()
         # The game log of the generation whose callback runs.
         self._game_log: GameLog | None = None
 
@@ -255,14 +272,75 @@ class IslandBattlesClient:
         payload: dict[str, Any] | None = None,
         retry_transport: bool = False,
     ) -> Any:
+        """Send one request: with the guest credential to the lobby, and with
+        a player token to the game. A game request answered 401 is sent once
+        more with a new token. A 401 that remains fails the client."""
         self._check_open()
+        try:
+            if _is_lobby_path(path):
+                return await self._send(
+                    method, path, self.credential, payload, retry_transport
+                )
+            token = await self._game_token()
+            try:
+                return await self._send(method, path, token, payload, retry_transport)
+            except GameAuthenticationError:
+                token = await self._game_token(stale=token)
+                return await self._send(method, path, token, payload, retry_transport)
+        except GameAuthenticationError as error:
+            self._fail(error)
+            raise
+
+    async def _game_token(self, *, stale: str | None = None) -> str:
+        """The player token for the game's routes. A new one is issued once
+        PLAYER_TOKEN_REFRESH_SHARE of the current one's life has passed, or
+        when ``stale``, a token the game refused, is still the current one."""
+        async with self._player_token_lock:
+            now = self._clock()
+            if (
+                self._player_token is not None
+                and self._player_token != stale
+                and self._player_token_renew_at is not None
+                and now < self._player_token_renew_at
+            ):
+                return self._player_token
+            data = await self._send(
+                "POST",
+                "/lobby/v1/player-tokens",
+                self.credential,
+                {"game_key": GAME_KEY},
+                True,
+            )
+            try:
+                token = data["token"]
+                expires_at = datetime.fromisoformat(data["expires_at"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise GameProtocolError("invalid player-token response") from exc
+            if not isinstance(token, str) or not token or expires_at.tzinfo is None:
+                raise GameProtocolError("invalid player-token response")
+            self._player_token = token
+            self._player_token_renew_at = now + (expires_at - now) * (
+                PLAYER_TOKEN_REFRESH_SHARE
+            )
+            return token
+
+    async def _send(
+        self,
+        method: str,
+        path: str,
+        credential: str,
+        payload: dict[str, Any] | None,
+        retry_transport: bool,
+    ) -> Any:
+        """Send one request with ``credential`` and return its JSON body."""
         attempts = self._retry_attempts if retry_transport else 1
         for attempt in range(attempts):
+            self._check_open()
             try:
                 response = await self._http.request(
                     method,
                     f"{self.base_url}{path}",
-                    headers={"Authorization": f"Bearer {self.credential}"},
+                    headers={"Authorization": f"Bearer {credential}"},
                     json=payload,
                 )
             except httpx.TransportError as exc:
@@ -290,10 +368,7 @@ class IslandBattlesClient:
                     if isinstance(problem_type, str)
                     else GameError
                 )
-                error = error_class(detail, response.status_code)
-                if isinstance(error, GameAuthenticationError):
-                    self._fail(error)
-                raise error
+                raise error_class(detail, response.status_code)
             try:
                 return response.json()
             except (ValueError, TypeError) as exc:

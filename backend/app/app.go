@@ -29,6 +29,7 @@ import (
 	"islandBattles/lobby/auth"
 	"islandBattles/lobby/domain"
 	"islandBattles/lobby/frontend"
+	"islandBattles/lobby/playertoken"
 	lobbypostgres "islandBattles/lobby/postgres"
 	"islandBattles/lobby/realtime"
 
@@ -160,6 +161,19 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	default:
 		logger.Warn("Bot package uploads answer 503 because " + dependencies.BotPackagesBucketEnv + " is not set")
 	}
+	if config.PlayerTokenKeys == nil {
+		return nil, errors.New("app: no player token keys")
+	}
+	playerTokens, err := auth.NewPlayerTokens(config.PlayerTokenKeys, config.LobbyIssuer(), config.PlayerTokenLifetime, clock, policy)
+	if err != nil {
+		return nil, err
+	}
+	// The game verifies player tokens with the lobby's keys in this process,
+	// until the lobby is a service of its own and the game reads its JWKS.
+	playerVerifier, err := playertoken.NewVerifier(config.LobbyIssuer(), config.PlayerTokenKeys)
+	if err != nil {
+		return nil, err
+	}
 
 	// The authenticated player goes on a failed request's error line.
 	authenticated := annotatingAuthentication{authentication}
@@ -177,9 +191,9 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	if selected.gameGraph {
 		routes.SetupGameGraphRoute(api, &environment)
 	}
-	routes.SetupLobbyRoutes(api, lobbyService, authenticated, gameBinding, lobbyRetention, &handlers.LobbyGame{Database: database, Authenticator: authenticated, Publisher: publisher, Retention: gameRetention, Watchers: lobbyService,
+	routes.SetupLobbyRoutes(api, lobbyService, authenticated, playerTokens, gameBinding, lobbyRetention, &handlers.LobbyGame{Database: database, Players: handlers.PlayerTokens{Verifier: playerVerifier}, Publisher: publisher, Retention: gameRetention, Watchers: lobbyService,
 		SubmitTokens: submitTokens, PublicURL: config.PublicURL})
-	routes.SetupBotPackageRoutes(api, &handlers.BotPackages{Authenticator: authenticated, Service: services.BotPackages{
+	routes.SetupBotPackageRoutes(api, &handlers.BotPackages{Players: handlers.PlayerTokens{Verifier: playerVerifier}, Service: services.BotPackages{
 		Database: database, Lobbies: lobbyService, GameKey: lobbyadapter.GameKey, Store: packages, Tokens: uploadTokens}})
 	if config.BotPackagesBucket == "" && selected.localPackagesHandler != nil {
 		router.Handle(selected.localPackagesPrefix+"/*", selected.localPackagesHandler)
@@ -193,7 +207,8 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 }
 
 // annotatingAuthentication adds the player of each verified session to the
-// request's error line.
+// request's error line. The lobby's routes authenticate with it; the game's
+// take player tokens instead.
 type annotatingAuthentication struct{ *auth.Service }
 
 func (authentication annotatingAuthentication) Authenticate(ctx context.Context, authorization string) (domain.SessionVerification, error) {

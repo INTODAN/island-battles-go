@@ -28,12 +28,12 @@ func (handler *LobbyGame) CurrentGeneration(ctx context.Context, input *struct {
 	Authorization string `header:"Authorization"`
 }) (*GenerationStateResponse, error) {
 	defer handler.runRetention(ctx)
-	verified, err := handler.Authenticator.Authenticate(ctx, input.Authorization)
+	principal, err := handler.authenticate(ctx, input.Authorization)
 	if err != nil {
-		return nil, huma.Error401Unauthorized("authentication required")
+		return nil, err
 	}
 	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher}
-	state, err := service.Current(ctx, verified.Principal, input.LobbyID)
+	state, err := service.Current(ctx, principal, input.LobbyID)
 	if err != nil {
 		return nil, generationHTTPError(ctx, err)
 	}
@@ -47,12 +47,12 @@ func (handler *LobbyGame) ApplyTurnDeadline(ctx context.Context, input *struct {
 	Authorization string `header:"Authorization"`
 }) (*GenerationStateResponse, error) {
 	defer handler.runRetention(ctx)
-	verified, err := handler.Authenticator.Authenticate(ctx, input.Authorization)
+	principal, err := handler.authenticate(ctx, input.Authorization)
 	if err != nil {
-		return nil, huma.Error401Unauthorized("authentication required")
+		return nil, err
 	}
 	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher}
-	state, err := service.ApplyDeadline(ctx, verified.Principal, input.LobbyID)
+	state, err := service.ApplyDeadline(ctx, principal, input.LobbyID)
 	if err != nil {
 		return nil, generationHTTPError(ctx, err)
 	}
@@ -71,11 +71,10 @@ func (handler *LobbyGame) RegisterGenerationCommands(ctx context.Context, input 
 			return nil, err
 		}
 	} else {
-		verified, err := handler.Authenticator.Authenticate(ctx, input.Authorization)
-		if err != nil {
-			return nil, huma.Error401Unauthorized("authentication required")
+		var err error
+		if principal, err = handler.authenticate(ctx, input.Authorization); err != nil {
+			return nil, err
 		}
-		principal = verified.Principal
 	}
 	observability.Annotate(ctx, slog.Uint64("game_id", uint64(input.Body.GameID)), slog.Uint64("generation_id", uint64(input.Body.GenerationID)))
 	state, err := service.Register(ctx, principal, input.Body)
@@ -132,9 +131,9 @@ func (request *TurnDeliveryRequest) Resolve(ctx huma.Context) []error {
 // submit token, for their bot to play and submit itself.
 func (handler *LobbyGame) TurnDelivery(ctx context.Context, input *TurnDeliveryRequest) (*TurnDeliveryResponse, error) {
 	defer handler.runRetention(ctx)
-	verified, err := handler.Authenticator.Authenticate(ctx, input.Authorization)
+	principal, err := handler.authenticate(ctx, input.Authorization)
 	if err != nil {
-		return nil, huma.Error401Unauthorized("authentication required")
+		return nil, err
 	}
 	if handler.SubmitTokens == nil {
 		return nil, huma.Error503ServiceUnavailable("turn deliveries are not configured")
@@ -144,7 +143,7 @@ func (handler *LobbyGame) TurnDelivery(ctx context.Context, input *TurnDeliveryR
 		origin = input.origin
 	}
 	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher}
-	delivery, err := service.TurnDelivery(ctx, verified.Principal, input.LobbyID, handler.SubmitTokens, origin+"/generation/commands")
+	delivery, err := service.TurnDelivery(ctx, principal, input.LobbyID, handler.SubmitTokens, origin+"/generation/commands")
 	if err != nil {
 		return nil, generationHTTPError(ctx, err)
 	}

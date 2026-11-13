@@ -17,22 +17,19 @@ import (
 	"islandBattles/backend/services"
 	"islandBattles/backend/submittoken"
 	"islandBattles/lobby/domain"
+	"islandBattles/lobby/playertoken"
 )
 
 // playerAuthentication accepts "Bearer <player ID>" for each of its players.
 type playerAuthentication struct{ players []string }
 
-func (playerAuthentication) CreateGuest(context.Context, domain.CreateGuestRequest) (domain.GuestSession, error) {
-	return domain.GuestSession{}, domain.ErrUnauthenticated
-}
-
-func (authentication playerAuthentication) Authenticate(_ context.Context, authorization string) (domain.SessionVerification, error) {
+func (authentication playerAuthentication) AuthenticatePlayer(_ context.Context, authorization string) (domain.Principal, error) {
 	for _, player := range authentication.players {
 		if authorization == "Bearer "+player {
-			return domain.SessionVerification{Principal: domain.Principal{PlayerID: player}}, nil
+			return domain.Principal{PlayerID: player}, nil
 		}
 	}
-	return domain.SessionVerification{}, domain.ErrUnauthenticated
+	return domain.Principal{}, playertoken.ErrInvalid
 }
 
 // deliveryGame starts a two-team game and serves the turn delivery and the
@@ -52,7 +49,7 @@ func deliveryGame(t *testing.T) (humatest.TestAPI, *submittoken.Signer, []string
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := &handlers.LobbyGame{Database: database, Authenticator: playerAuthentication{players}, Publisher: publisher, SubmitTokens: signer}
+	handler := &handlers.LobbyGame{Database: database, Players: playerAuthentication{players}, Publisher: publisher, SubmitTokens: signer}
 	_, api := humatest.New(t)
 	huma.Register(api, huma.Operation{OperationID: "testDelivery", Method: "GET", Path: "/game/from-lobby/{lobby_id}/turn-delivery"}, handler.TurnDelivery)
 	huma.Register(api, huma.Operation{OperationID: "registerGenerationCommand", Method: "POST", Path: "/generation/commands", SkipValidateBody: true}, handler.RegisterGenerationCommands)

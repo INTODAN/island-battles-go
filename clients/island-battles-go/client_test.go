@@ -39,10 +39,15 @@ type fakeServer struct {
 	deadline func() map[string]any
 	// failReads answers this many generation reads with 503.
 	failReads int
+	// issued counts the player tokens the lobby issued; valid are those the
+	// game accepts, and refuseTokens makes it refuse every one.
+	issued       int
+	valid        map[string]bool
+	refuseTokens bool
 }
 
 func newFakeServer(t *testing.T) *fakeServer {
-	fake := &fakeServer{t: t}
+	fake := &fakeServer{t: t, valid: map[string]bool{}}
 	fake.state = fake.stateOf(1, false, nil)
 	fake.server = httptest.NewServer(http.HandlerFunc(fake.handle))
 	t.Cleanup(fake.server.Close)
@@ -71,12 +76,31 @@ func (fake *fakeServer) setState(state map[string]any) {
 }
 
 func (fake *fakeServer) handle(writer http.ResponseWriter, request *http.Request) {
-	if request.Header.Get("Authorization") != "Bearer good" {
+	authorization := request.Header.Get("Authorization")
+	body, _ := io.ReadAll(request.Body)
+	fake.mutex.Lock()
+	// The lobby takes the guest credential; the game, the player tokens the
+	// lobby issued.
+	authorized := authorization == "Bearer good"
+	if !strings.HasPrefix(request.URL.Path, "/lobby/") {
+		authorized = !fake.refuseTokens && fake.valid[strings.TrimPrefix(authorization, "Bearer ")]
+	}
+	if !authorized {
+		fake.mutex.Unlock()
 		writeJSON(writer, http.StatusUnauthorized, map[string]any{"title": "Unauthorized", "status": 401, "detail": "bad credential", "code": "unauthenticated"})
 		return
 	}
-	body, _ := io.ReadAll(request.Body)
-	fake.mutex.Lock()
+	if request.URL.Path == "/lobby/v1/player-tokens" {
+		if string(body) != `{"game_key":"island-battles"}` {
+			fake.t.Errorf("player token request = %s", body)
+		}
+		fake.issued++
+		token := fmt.Sprintf("player-token-%d", fake.issued)
+		fake.valid[token] = true
+		fake.mutex.Unlock()
+		writeJSON(writer, 200, map[string]any{"$schema": "http://lobby.test/schemas/PlayerToken.json", "token": token, "expires_at": time.Now().Add(15 * time.Minute)})
+		return
+	}
 	if request.Method == http.MethodGet && strings.HasSuffix(request.URL.Path, "/generation") && fake.failReads > 0 {
 		fake.failReads--
 		fake.mutex.Unlock()

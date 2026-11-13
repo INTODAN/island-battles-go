@@ -2,7 +2,7 @@
 // uploads the zip that the SDKs' package command builds, from this page or
 // from the command line, and everyone sees the lobby's packages. The page
 // calls the game's bot package endpoints through the lobby page's room
-// requests, which add the player's credential, and posts the zip itself
+// requests, which add the player's token for the game, and posts the zip itself
 // straight to storage with the presigned POST, which needs none. Choosing a
 // package as a bot comes later; here it is only uploaded, listed and deleted.
 

@@ -16,6 +16,13 @@ function clientFor(respond: (request: Request) => Response) {
     getAccessToken: () => "tok",
     fetch: (async (input: Request | string | URL, init?: RequestInit) => {
       const request = new Request(input, init);
+      // The demo routes take a player token, which the lobby issues first.
+      if (new URL(request.url).pathname === "/lobby/v1/player-tokens") {
+        return Response.json({
+          token: "player-token",
+          expires_at: new Date(Date.now() + 900_000).toISOString(),
+        });
+      }
       requests.push(request);
       return respond(request);
     }) as typeof fetch,

@@ -105,11 +105,12 @@ func TestALobbyPlaysASecondGameAfterTheFirstEnds(t *testing.T) {
 	}
 	// Carol played the first game, not the second: she can't read or play
 	// the lobby's game any more.
+	carolToken := stack.playerToken(carol, lobbyadapter.GameKey)
 	for _, response := range []int{
-		stack.api.Get("/game/from-lobby/"+room.Lobby.ID+"/generation", carol.header).Code,
-		stack.api.Get("/game/from-lobby/"+room.Lobby.ID+"/replay", carol.header).Code,
-		stack.api.Post("/game/from-lobby/"+room.Lobby.ID+"/deadline", carol.header, map[string]any{}).Code,
-		stack.api.Post("/generation/commands", carol.header, map[string]any{"game_id": secondGame.GameID, "generation_id": secondGame.GenerationID, "request_id": uuid.NewString(), "commands": []any{}}).Code,
+		stack.api.Get("/game/from-lobby/"+room.Lobby.ID+"/generation", carolToken).Code,
+		stack.api.Get("/game/from-lobby/"+room.Lobby.ID+"/replay", carolToken).Code,
+		stack.api.Post("/game/from-lobby/"+room.Lobby.ID+"/deadline", carolToken, map[string]any{}).Code,
+		stack.api.Post("/generation/commands", carolToken, map[string]any{"game_id": secondGame.GameID, "generation_id": secondGame.GenerationID, "request_id": uuid.NewString(), "commands": []any{}}).Code,
 	} {
 		if response != http.StatusNotFound {
 			t.Fatalf("Carol's request to the second game = %d, want 404", response)

@@ -2,6 +2,7 @@ package lobbyadapter_test
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	"islandBattles/lobby/application"
 	"islandBattles/lobby/auth"
 	"islandBattles/lobby/domain"
+	"islandBattles/lobby/playertoken"
 	lobbypostgres "islandBattles/lobby/postgres"
 
 	"github.com/danielgtaylor/huma/v2/humatest"
@@ -62,9 +64,32 @@ func newLobbyStack(t *testing.T) *lobbyStack {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The game verifies the lobby's player tokens in process, as the backend does.
+	keys, err := playertoken.ParseKeySet("test:" + base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("k", 32))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	playerTokens, err := auth.NewPlayerTokens(keys, "https://lobby.example.test", playertoken.MaxLifetime, clock, policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier, err := playertoken.NewVerifier("https://lobby.example.test", keys)
+	if err != nil {
+		t.Fatal(err)
+	}
 	_, api := humatest.New(t, routes.NewAPIConfig("test", "1.0.0"))
-	routes.SetupLobbyRoutes(api, lobbies, authentication, binding, nil, &handlers.LobbyGame{Database: database, Authenticator: authentication, Publisher: publisher})
+	routes.SetupLobbyRoutes(api, lobbies, authentication, playerTokens, binding, nil,
+		&handlers.LobbyGame{Database: database, Players: handlers.PlayerTokens{Verifier: verifier}, Publisher: publisher})
 	return &lobbyStack{t: t, database: database, api: api}
+}
+
+// playerToken is a player token header for member, as clients send to the
+// game's routes.
+func (stack *lobbyStack) playerToken(member guest, gameKey string) string {
+	stack.t.Helper()
+	var token domain.PlayerToken
+	stack.expect(stack.api.Post("/lobby/v1/player-tokens", member.header, map[string]string{"game_key": gameKey}), http.StatusOK, &token)
+	return "Authorization: Bearer " + token.Token
 }
 
 // guest is a player with a lobby session.
@@ -156,7 +181,7 @@ func (stack *lobbyStack) bots(snapshot domain.Snapshot) map[string]*models.BotCh
 func (stack *lobbyStack) state(snapshot domain.Snapshot, member guest) models.GenerationState {
 	stack.t.Helper()
 	var state models.GenerationState
-	stack.expect(stack.api.Get("/game/from-lobby/"+snapshot.Lobby.ID+"/generation", member.header), http.StatusOK, &state)
+	stack.expect(stack.api.Get("/game/from-lobby/"+snapshot.Lobby.ID+"/generation", stack.playerToken(member, lobbyadapter.GameKey)), http.StatusOK, &state)
 	return state
 }
 

@@ -44,5 +44,6 @@ app_secret_files:
   - "{{ deploy_secrets_dir }}/lobby_proxy_secret"
   - "{{ deploy_secrets_dir }}/admin_api_key"
   - "{{ deploy_secrets_dir }}/submit_token_secret"
+  - "{{ deploy_secrets_dir }}/lobby_player_token_key"
   - "{{ app_postgres_tls_dir }}/server.key"
   - "{{ app_postgres_tls_dir }}/server.crt"

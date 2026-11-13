@@ -9,7 +9,7 @@ from integration.test_live import guests as guests_fixture
 from lobby_api_client.models import TeamDefinition
 from lobby_client import LobbyError, Scope
 from test_bot_choice import run_bot
-from test_lobby_binding import choose_bot
+from test_lobby_binding import choose_bot, game_auth
 
 guests = guests_fixture
 pytestmark = pytest.mark.asyncio
@@ -54,7 +54,7 @@ async def test_one_person_plays_a_whole_game_against_a_level_two_bot_seat(guests
     async with httpx.AsyncClient(base_url=BASE) as http:
         response = await http.get(
             f"/game/from-lobby/{scope.lobby_id}/generation",
-            headers={"Authorization": f"Bearer {alice.credential}"},
+            headers=await game_auth(alice),
         )
     assert response.status_code == 200, response.text
     state = response.json()

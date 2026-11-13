@@ -17,7 +17,7 @@ from integration.test_live import BASE, create
 from integration.test_live import guests as guests_fixture
 from island_battles_client.cli import BotServer, ReloadingPlay
 from lobby_client import Scope
-from test_lobby_binding import choose_bot
+from test_lobby_binding import choose_bot, game_auth
 
 guests = guests_fixture
 pytestmark = pytest.mark.asyncio
@@ -73,7 +73,7 @@ async def test_a_localhost_bot_plays_a_game_through_turn_deliveries(guests, bot_
     game = f"/game/from-lobby/{scope.lobby_id}"
     bot_url = f"http://127.0.0.1:{bot_server.server_address[1]}/turn"
     delivered = []
-    async with httpx.AsyncClient(base_url=BASE, headers={"Authorization": f"Bearer {alice.credential}"}, timeout=10) as http:
+    async with httpx.AsyncClient(base_url=BASE, headers=await game_auth(alice), timeout=10) as http:
         deadline = asyncio.get_running_loop().time() + 600
         while True:
             assert asyncio.get_running_loop().time() < deadline, f"the game didn't end; delivered {delivered[-5:]}"

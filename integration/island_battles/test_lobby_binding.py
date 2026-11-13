@@ -1,4 +1,6 @@
 """Island Battles integration checks layered on the shared lobby acceptance suite."""
+import base64
+import json
 import os
 import signal
 from uuid import uuid4
@@ -13,6 +15,13 @@ pytestmark = pytest.mark.asyncio
 
 
 LOCALHOST_BOT = {"kind": "localhost"}
+
+
+async def game_auth(player):
+    """The Authorization header for the game's routes: a player token that the
+    lobby issues for island-battles. The game refuses the guest credential."""
+    token = await player.issue_player_token("island-battles")
+    return {"Authorization": f"Bearer {token.token}"}
 
 
 def member_settings_path(lobby_id):
@@ -61,17 +70,46 @@ async def test_start_initializes_one_generation_and_binding_is_idempotent(guests
     assert await sql(f"SELECT count(*) FROM generations WHERE game_id={game_id}") == "1"
     result_path = f"/game/from-lobby/{scope.lobby_id}/replay"
     async with httpx.AsyncClient(base_url=BASE) as client:
-        host_result = await client.get(result_path, headers={"Authorization": f"Bearer {alice.credential}"})
-        guest_result = await client.get(result_path, headers={"Authorization": f"Bearer {bob.credential}"})
+        bob_auth = await game_auth(bob)
+        host_result = await client.get(result_path, headers=await game_auth(alice))
+        guest_result = await client.get(result_path, headers=bob_auth)
         assert host_result.status_code == guest_result.status_code == 200
         assert host_result.text == guest_result.text
         assert "Alice" in host_result.text and "Bob" in host_result.text
         assert "battlefield" in host_result.text
         assert (await client.get(result_path)).status_code == 401
+        # The game takes player tokens only, not the guest credential.
+        assert (await client.get(result_path, headers={"Authorization": f"Bearer {bob.credential}"})).status_code == 401
         outsider = await guests("Outsider")
-        assert (await client.get(result_path, headers={"Authorization": f"Bearer {outsider.credential}"})).status_code == 404
+        assert (await client.get(result_path, headers=await game_auth(outsider))).status_code == 404
+        # A token outlives the process that issued it: the game keeps no state for it.
         await control_backend(signal.SIGUSR1)
-        assert (await client.get(result_path, headers={"Authorization": f"Bearer {bob.credential}"})).text == guest_result.text
+        assert (await client.get(result_path, headers=bob_auth)).text == guest_result.text
+
+
+def decode_segment(segment):
+    return json.loads(base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4)))
+
+
+async def test_the_lobby_issues_player_tokens_for_its_games_and_publishes_their_keys(guests):
+    alice = await guests("Alice")
+    room = await create(alice, "island-battles")
+    player_id = next(str(member.player_id) for member in room.members)
+    issued = await alice.issue_player_token("island-battles")
+    header, claims, _ = issued.token.split(".")
+    header, claims = decode_segment(header), decode_segment(claims)
+    assert header["alg"] == "EdDSA" and header["kid"]
+    assert (claims["sub"], claims["aud"], claims["name"]) == (player_id, "island-battles", "Alice")
+    assert 0 < claims["exp"] - claims["iat"] <= 15 * 60
+    assert claims["exp"] == int(issued.expires_at.timestamp())
+    with pytest.raises(LobbyError) as unknown:
+        await alice.issue_player_token("chess")
+    assert (unknown.value.code, unknown.value.status) == ("not_found", 404)
+    async with httpx.AsyncClient(base_url=BASE) as http:
+        keys = await http.get("/lobby/v1/jwks.json")
+    assert keys.status_code == 200 and keys.headers["Cache-Control"] == "public, max-age=300"
+    assert header["kid"] in {key["kid"] for key in keys.json()["keys"]}
+    assert all((key["kty"], key["crv"], key["alg"]) == ("OKP", "Ed25519", "EdDSA") for key in keys.json()["keys"])
 
 
 async def delete_lobby(lobby_id):
@@ -92,11 +130,13 @@ async def test_roster_keeps_game_access_after_lobby_is_deleted(guests):
     replay_path = f"/game/from-lobby/{scope.lobby_id}/replay"
     outsider = await guests("Outsider")
 
+    tokens = {player.credential: await game_auth(player) for player in (alice, bob, outsider)}
+
     def bearer(player):
-        return {"Authorization": f"Bearer {player.credential}"}
+        return tokens[player.credential]
 
     async with httpx.AsyncClient(base_url=BASE) as http:
-        lobby = await http.get(f"/lobby/v1/games/{scope.game_key}/lobbies/{scope.lobby_id}", headers=bearer(alice))
+        lobby = await http.get(f"/lobby/v1/games/{scope.game_key}/lobbies/{scope.lobby_id}", headers={"Authorization": f"Bearer {alice.credential}"})
         assert lobby.status_code == 404, lobby.text
         response = await http.get(state_path, headers=bearer(alice))
         assert response.status_code == 200, response.text

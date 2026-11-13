@@ -15,18 +15,16 @@ import (
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
 	"islandBattles/lobby/domain"
+	"islandBattles/lobby/playertoken"
 )
 
 type commandAuthentication struct{ principal domain.Principal }
 
-func (authentication commandAuthentication) CreateGuest(context.Context, domain.CreateGuestRequest) (domain.GuestSession, error) {
-	return domain.GuestSession{}, domain.ErrUnauthenticated
-}
-func (authentication commandAuthentication) Authenticate(_ context.Context, authorization string) (domain.SessionVerification, error) {
+func (authentication commandAuthentication) AuthenticatePlayer(_ context.Context, authorization string) (domain.Principal, error) {
 	if authorization != "Bearer valid" {
-		return domain.SessionVerification{}, domain.ErrUnauthenticated
+		return domain.Principal{}, playertoken.ErrInvalid
 	}
-	return domain.SessionVerification{Principal: authentication.principal}, nil
+	return authentication.principal, nil
 }
 
 func TestGenerationHTTPAuthenticationValidationAndStatus(t *testing.T) {
@@ -38,7 +36,7 @@ func TestGenerationHTTPAuthenticationValidationAndStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := handlers.LobbyGame{Database: database, Authenticator: commandAuthentication{domain.Principal{PlayerID: playerID}}, Publisher: publisher}
+	handler := handlers.LobbyGame{Database: database, Players: commandAuthentication{domain.Principal{PlayerID: playerID}}, Publisher: publisher}
 	_, api := humatest.New(t)
 	huma.Register(api, huma.Operation{OperationID: "testCurrent", Method: "GET", Path: "/game/from-lobby/{lobby_id}/generation"}, handler.CurrentGeneration)
 	huma.Register(api, huma.Operation{OperationID: "registerGenerationCommand", Method: "POST", Path: "/generation/commands"}, handler.RegisterGenerationCommands)
@@ -128,7 +126,7 @@ func TestGenerationHTTPCarriesBotMemory(t *testing.T) {
 	if _, err := services.RunLobbyGame(context.Background(), database, publisher, snapshot); err != nil {
 		t.Fatal(err)
 	}
-	handler := handlers.LobbyGame{Database: database, Authenticator: commandAuthentication{domain.Principal{PlayerID: players[0]}}, Publisher: publisher}
+	handler := handlers.LobbyGame{Database: database, Players: commandAuthentication{domain.Principal{PlayerID: players[0]}}, Publisher: publisher}
 	_, api := humatest.New(t)
 	huma.Register(api, huma.Operation{OperationID: "testCurrent", Method: "GET", Path: "/game/from-lobby/{lobby_id}/generation"}, handler.CurrentGeneration)
 	huma.Register(api, huma.Operation{OperationID: "registerGenerationCommand", Method: "POST", Path: "/generation/commands", SkipValidateBody: true}, handler.RegisterGenerationCommands)
