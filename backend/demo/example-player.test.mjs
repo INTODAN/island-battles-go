@@ -42,7 +42,7 @@ test("a player of a lobby round takes only that round's game", async (context) =
   const commands = [];
   // The lobby's newest game is still the first round's, which has ended.
   let state = { ...initial(), lobby_round: 1, game_id: 1, outcome: { reason: "all_eliminated" } };
-  const player = new ExamplePlayer({ lobbyID: "room", lobbyRound: 2, playerID: "player", credential: "test", subscription,
+  const player = new ExamplePlayer({ lobbyID: "room", lobbyRound: 2, playerID: "player", subscription,
     fetcher: async (url, options) => {
       if (options.method !== "GET") { commands.push(JSON.parse(options.body)); state = { ...state, submitted: true }; }
       return { ok: true, json: async () => state };
@@ -65,7 +65,7 @@ test("push-driven turns deduplicate events; paused idle players do not poll", as
   let reads = 0;
   const commands = [];
   let state = initial();
-  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", credential: "test", subscription,
+  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", subscription,
     fetcher: async (url, options) => {
       if (options.method === "GET") reads++;
       else { commands.push(JSON.parse(options.body)); state = { ...state, submitted: true }; }
@@ -101,7 +101,7 @@ test("lost command responses retry the same UUID and body without polling", asyn
   const subscription = new Subscription();
   const attempts = [];
   let reads = 0;
-  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", credential: "test", subscription, retryDelay: 1,
+  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", subscription, retryDelay: 1,
     fetcher: async (url, options) => {
       if (options.method === "GET") { reads++; return { ok: true, json: async () => initial() }; }
       attempts.push(options.body);
@@ -121,7 +121,7 @@ test("new generations submit immediately, with no concurrent turn requests", asy
   const commands = [];
   let releaseFirst;
   const firstResponse = new Promise((resolve) => { releaseFirst = resolve; });
-  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", credential: "test", subscription,
+  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", subscription,
     fetcher: async (url, options) => {
       if (options.method === "GET") return { ok: true, json: async () => initial() };
       const command = JSON.parse(options.body);
@@ -145,7 +145,7 @@ test("new generations submit immediately, with no concurrent turn requests", asy
 test("transport failures back off and pause cancels the pending retry", async (context) => {
   const subscription = new Subscription();
   let attempts = 0;
-  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", credential: "test", subscription, retryDelay: 100,
+  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", subscription, retryDelay: 100,
     fetcher: async () => { attempts++; throw new Error("offline"); },
   });
   context.after(() => player.stop());
@@ -163,7 +163,7 @@ test("game.ended shows the outcome and submits no further turn", async (context)
   const commands = [];
   const statuses = [];
   const outcome = { reason: "last_team_standing", winner_team_color: 1, summary: "Blue wins as the last team standing" };
-  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", credential: "test", subscription,
+  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", subscription,
     onStatus: (title, detail) => statuses.push([title, detail]),
     fetcher: async (url, options) => {
       if (options.method !== "GET") commands.push(JSON.parse(options.body));
@@ -187,7 +187,7 @@ test("the game-ended problem stops the player without resending", async (context
   let posts = 0;
   let reads = 0;
   const statuses = [];
-  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", credential: "test", subscription,
+  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", subscription,
     onStatus: (title, detail) => statuses.push([title, detail]),
     fetcher: async (url, options) => {
       if (options.method === "GET") { reads++; return { ok: true, json: async () => initial() }; }
@@ -211,7 +211,7 @@ test("a stale turn is retried for the new generation, but a repeated conflict st
   const commands = [];
   let generation = 1;
   const statuses = [];
-  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", credential: "test", subscription,
+  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", subscription,
     onStatus: (title, detail) => statuses.push([title, detail]),
     fetcher: async (url, options) => {
       if (options.method === "GET") return { ok: true, json: async () => ({ ...initial(), generation_id: generation }) };
@@ -238,7 +238,7 @@ test("a waiting player applies the turn's deadline a second after it", async (co
   const deadlines = [];
   const statuses = [];
   const outcome = { reason: "turn_timeout", winner_team_color: 1, summary: "Red lost: Sam's bot didn't answer within 30 s; Blue wins" };
-  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", credential: "test", subscription, now: () => clock,
+  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", subscription, now: () => clock,
     onStatus: (title, detail) => statuses.push([title, detail]),
     fetcher: async (url, options) => {
       assert.equal(options.method, "POST");
@@ -274,7 +274,7 @@ test("a waiting player applies the turn's deadline a second after it", async (co
 test("only a waiting player of a turn with a deadline applies it", (context) => {
   const subscription = new Subscription();
   const deadline = "2026-11-07T12:00:30Z";
-  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", credential: "test", subscription,
+  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", subscription,
     fetcher: async () => new Promise(() => {}) });
   context.after(() => player.stop());
   // A player whose own turn is open is playing it.
@@ -296,7 +296,7 @@ test("only a waiting player of a turn with a deadline applies it", (context) => 
 test("a late state without the outcome does not replace the known outcome", (context) => {
   const outcome = { reason: "turn_timeout", winner_team_color: 1, summary: "Red lost: Sam's bot didn't answer within 30 s; Blue wins" };
   const shown = [];
-  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", credential: "test", subscription: new Subscription(),
+  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", subscription: new Subscription(),
     fetcher: async () => new Promise(() => {}), onState: (state) => shown.push(state) });
   context.after(() => player.stop());
   player.setEnabled(false);

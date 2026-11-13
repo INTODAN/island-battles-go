@@ -20,6 +20,8 @@ A bot is a **function**: it gets a `BotTurn` (the board, your team and the `memo
 
 `island-battles-bot package` zips the bot for the server's runners, and `island-battles-bot upload` uploads that zip to a lobby.
 
+**The game's routes take a player token, a breaking change for every client of the game API (#218).** `GET /game/from-lobby/…`, `POST /game/from-lobby/…/deadline` and `POST /generation/commands` refuse the guest credential (401): they take `Authorization: Bearer <player token>`, a short-lived token from the lobby's `POST /lobby/v1/player-tokens` with `{"game_key": "island-battles"}` (`issue_player_token` in the lobby client). `IslandBattlesClient` still takes the guest credential: it gets the player token itself, renews it at 80 % of its life, and once more when the game answers 401. What to do: upgrade the client; code that calls the game's routes itself gets a player token first.
+
 **This is a breaking change, and `BotTurn` now has a required `upgrades` field.** The `Player` class, `player_factory`, `CommandReceiver`, `UpgradeTable` and `client.upgrades` are gone: a strategy is now `play(turn)`. Pass it to `IslandBattlesClient(..., play=play)`. Port a strategy by moving `on_generation(generation, commands)` into `play(turn)` (the board is `turn.generation`, your team `turn.team_color`), returning the commands instead of sending them, and keeping state in `memory` instead of attributes. Update your bots before you upgrade the client.
 
 **Turn deliveries are a breaking change for `serve`; upgrade the SDK.** `POST /turn` now takes a `TurnDelivery` (the turn plus a one-turn submit token), answers `202` at once, and submits the bot's answer to the game itself; it no longer answers a `BotTurnResult`. The 3D web client and the lobby page deliver turns this way, so an older SDK's `serve` doesn't work with them, and this SDK's `serve` doesn't work with older game clients. A bot that raises or runs out of time now passes its turn instead of leaving it open. What to do: upgrade `island-battles-python` (and the Go SDK, for Go bots); your `play` function doesn't change.
@@ -80,10 +82,12 @@ serves the bot on `http://127.0.0.1:41414`, the Island Battles bot port (`--port
 - **The server reloads the module when a `.py` file in its directory changes**: edit, save, and the next turn uses the new code. It re-imports the bot module and the other modules in the same directory (never the standard library or site-packages), so keep a bot in its own directory rather than a shared one. A file that doesn't load passes each turn, with the error in the line, until it is fixed.
 - **Browsers:** the server answers CORS preflights, with `Access-Control-Allow-Private-Network: true` for Chrome's Private Network Access, only for the game's origins: `http://localhost:8888` (the local backend), `http://localhost:3000` (the web client's dev server) and `https://island-battles.elidan.org` (the deployed game), and `tauri://localhost` and `http://tauri.localhost` (the desktop app, whose requests go through Tauri's HTTP plugin and carry its web view's origin) always, and any other with `--allow-origin https://game.example.org` (repeatable). Requests from other origins, a `Host` other than `127.0.0.1:<port>` or `localhost:<port>` (DNS rebinding) get `403`, a POST that isn't `application/json` gets `415`, and a body that isn't a `TurnDelivery` gets `422`; the bot doesn't run, and the connection is closed after every refusal. Chrome, Edge and Firefox can reach `http://127.0.0.1` from an HTTPS page; Safari can't.
 
-Deliver a turn by hand with curl, with your guest credential and a started lobby against a local backend:
+Deliver a turn by hand with curl, with your guest credential and a started lobby against a local backend. The game's routes take a player token from the lobby, not the guest credential:
 
 ```sh
-curl -s -H "Authorization: Bearer $TOKEN" localhost:8888/game/from-lobby/$LOBBY_ID/turn-delivery \
+PLAYER_TOKEN=$(curl -s -X POST localhost:8888/lobby/v1/player-tokens -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"game_key": "island-battles"}' | jq -r .token)
+curl -s -H "Authorization: Bearer $PLAYER_TOKEN" localhost:8888/game/from-lobby/$LOBBY_ID/turn-delivery \
   | curl -X POST localhost:41414/turn -H 'Content-Type: application/json' -d @-
 curl localhost:41414/health
 ```
@@ -161,7 +165,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-Keep the authenticated generic `LobbyClient` joined and running while the game client plays: it owns the lobby heartbeat and lease. Closing it can revoke game access after the lease expires. Obtain the guest credential and lobby ID through the generic lobby flow before starting this client.
+Keep the authenticated generic `LobbyClient` joined and running while the game client plays: it owns the lobby heartbeat and lease. Closing it can revoke game access after the lease expires. Obtain the guest credential and lobby ID through the generic lobby flow before starting this client. The client sends the guest credential only to the lobby: for the game's routes it gets a player token from the lobby (`POST /lobby/v1/player-tokens`), renews it at 80 % of its life, and once more when the game answers 401.
 
 To start a lobby on a chosen map, pass Island Battles' `game_settings` to the lobby client's `create_lobby`: `{"map_template_id": id}` for a default map from `GET /map/templates`, or `{"map": map_file}` for a map file, with exactly the map's number of teams. The player OpenAPI document publishes them as `LobbySettings`; the [backend README](../../backend/README.md#choosing-a-lobbys-map) has the rules.
 

@@ -19,20 +19,18 @@ import (
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
 	"islandBattles/lobby/domain"
+	"islandBattles/lobby/playertoken"
 )
 
 // bearerPlayers maps whole Authorization headers to players.
 type bearerPlayers map[string]domain.Principal
 
-func (players bearerPlayers) CreateGuest(context.Context, domain.CreateGuestRequest) (domain.GuestSession, error) {
-	return domain.GuestSession{}, domain.ErrUnauthenticated
-}
-func (players bearerPlayers) Authenticate(_ context.Context, authorization string) (domain.SessionVerification, error) {
+func (players bearerPlayers) AuthenticatePlayer(_ context.Context, authorization string) (domain.Principal, error) {
 	principal, exists := players[authorization]
 	if !exists {
-		return domain.SessionVerification{}, domain.ErrUnauthenticated
+		return domain.Principal{}, playertoken.ErrInvalid
 	}
-	return domain.SessionVerification{Principal: principal}, nil
+	return principal, nil
 }
 
 // dropLobbyTables stands in for deleting the lobby. Authentication is faked
@@ -85,8 +83,8 @@ func TestWatcherReplayIsServedToWatchersOnly(t *testing.T) {
 	}
 	watcher, kicked := uuid.NewString(), uuid.NewString()
 	handler := handlers.LobbyGame{Database: database, Publisher: &testutils.RecordedPublisher{},
-		Watchers:      watchingPlayers{watching: map[string]bool{watcher: true}, kicked: map[string]bool{kicked: true}},
-		Authenticator: bearerPlayers{"Bearer alice": {PlayerID: alice}, "Bearer watcher": {PlayerID: watcher}, "Bearer kicked": {PlayerID: kicked}, "Bearer outsider": {PlayerID: uuid.NewString()}}}
+		Watchers: watchingPlayers{watching: map[string]bool{watcher: true}, kicked: map[string]bool{kicked: true}},
+		Players:  bearerPlayers{"Bearer alice": {PlayerID: alice}, "Bearer watcher": {PlayerID: watcher}, "Bearer kicked": {PlayerID: kicked}, "Bearer outsider": {PlayerID: uuid.NewString()}}}
 	_, api := humatest.New(t)
 	huma.Register(api, huma.Operation{OperationID: "watchReplay", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/watch/replay"}, handler.WatchReplay)
 	huma.Register(api, huma.Operation{OperationID: "replay", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/replay"}, handler.Replay)
@@ -133,7 +131,7 @@ func TestStartedGameServesItsRosterWithoutTheLobby(t *testing.T) {
 		t.Fatal(err)
 	}
 	dropLobbyTables(t, database)
-	handler := handlers.LobbyGame{Database: database, Publisher: &testutils.RecordedPublisher{}, Authenticator: bearerPlayers{
+	handler := handlers.LobbyGame{Database: database, Publisher: &testutils.RecordedPublisher{}, Players: bearerPlayers{
 		"Bearer alice": {PlayerID: alice}, "Bearer bob": {PlayerID: bob}, "Bearer outsider": {PlayerID: uuid.NewString()}, "Bearer carol": {PlayerID: carol},
 	}}
 	_, api := humatest.New(t)

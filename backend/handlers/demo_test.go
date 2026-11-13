@@ -33,7 +33,7 @@ func TestTheDemoIsPackedWithGzipForClientsThatAcceptIt(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	handler := handlers.LobbyGame{Database: database, Authenticator: commandAuthentication{domain.Principal{PlayerID: playerID}}, Publisher: &testutils.RecordedPublisher{}}
+	handler := handlers.LobbyGame{Database: database, Players: commandAuthentication{domain.Principal{PlayerID: playerID}}, Publisher: &testutils.RecordedPublisher{}}
 	_, api := humatest.New(t)
 	huma.Register(api, huma.Operation{OperationID: "demo", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/demo"}, handler.Demo)
 	demoPath := "/game/from-lobby/" + lobbyID + "/demo"

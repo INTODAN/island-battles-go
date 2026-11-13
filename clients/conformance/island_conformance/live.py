@@ -2,7 +2,9 @@
 
 import asyncio
 import os
+import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from uuid import uuid4
 
 import httpx
@@ -32,6 +34,9 @@ async def choose_localhost_bots(
 class Seat:
     credential: str
     state: dict = field(default_factory=dict)
+    # The player token the game's routes take, and when to get a new one.
+    token: str = ""
+    renew_at: float = 0.0
 
 
 @dataclass
@@ -45,9 +50,25 @@ class Match:
     def generation_path(self) -> str:
         return f"/game/from-lobby/{self.lobby_id}/generation"
 
+    async def auth(self, seat: Seat) -> dict[str, str]:
+        """The seat's Authorization header for the game's routes: a player
+        token from the lobby, renewed after 80 % of its life."""
+        if not seat.token or time.time() >= seat.renew_at:
+            response = await self.http.post(
+                "/lobby/v1/player-tokens",
+                json={"game_key": "island-battles"},
+                headers={"Authorization": f"Bearer {seat.credential}"},
+            )
+            assert response.status_code == 200, response.text
+            issued = response.json()
+            now = time.time()
+            expires = datetime.fromisoformat(issued["expires_at"]).timestamp()
+            seat.token, seat.renew_at = issued["token"], now + (expires - now) * 0.8
+        return {"Authorization": f"Bearer {seat.token}"}
+
     async def read(self, seat: Seat) -> dict:
         response = await self.http.get(
-            self.generation_path, headers={"Authorization": f"Bearer {seat.credential}"}
+            self.generation_path, headers=await self.auth(seat)
         )
         assert response.status_code == 200, response.text
         return response.json()
@@ -57,7 +78,7 @@ class Match:
         response = await self.http.get(
             f"/game/from-lobby/{self.lobby_id}/logs",
             params={"generation_id": generation_id},
-            headers={"Authorization": f"Bearer {seat.credential}"},
+            headers=await self.auth(seat),
         )
         assert response.status_code == 200, response.text
         return response.json()
@@ -77,7 +98,7 @@ class Match:
         """Post one batch for the generation of state and return the raw answer."""
         return await self.http.post(
             COMMANDS,
-            headers={"Authorization": f"Bearer {seat.credential}"},
+            headers=await self.auth(seat),
             json={
                 "game_id": state["game_id"],
                 "generation_id": state["generation_id"],

@@ -39,7 +39,7 @@ Messages from the runner:
 | Type | Fields | Effect |
 | --- | --- | --- |
 | `evaluate` | `id`, `generation` (wire `Generation`) | Parse it with the client's public model and reply `evaluation`. Needs no server. |
-| `start` | `base_url`, `credential`, `lobby_id`, optional `log_file` | Start the client, with its log written to `log_file` when given, and to no stdout output. The bot reports each turn and waits for `log`, `finish` or `fail`. |
+| `start` | `base_url`, `credential` (the guest credential; the client gets its player tokens for the game's routes itself), `lobby_id`, optional `log_file` | Start the client, with its log written to `log_file` when given, and to no stdout output. The bot reports each turn and waits for `log`, `finish` or `fail`. |
 | `log` | `level` (`debug`, `info`, `warning` or `error`), `message` | Log the message with the bot's logger during the current turn, or the next one when none runs, and reply `logged`. |
 | `finish` | optional `commands`, `logs`, `memory` | Return a result from the current turn. Each command is `{"type": "send_soldier_group", "origin_castle_id", "destination_castle_id", "soldier_amount"}` or `{"type": "upgrade_castle", "castle_id", "upgrade_type"}`, built with the client's helpers with the values as given, which may be invalid or missing. Each log is `{"level", "message"}`; `memory` is a JSON object, or absent for none. |
 | `fail` | | Raise from the current turn. |

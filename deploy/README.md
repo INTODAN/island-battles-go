@@ -259,19 +259,30 @@ The first deploy generates these into `deploy/local/secrets/`. Every later deplo
 - Centrifugo's API key, the connection token secret and the lobby proxy secret. Reusing them keeps issued tokens valid when you move to a new VM.
 - The backend's admin API key, `admin_api_key`. Only the Lambda reads it, from `lambda.env`. Send it in the `X-Admin-API-Key` header to create default maps with `POST /map/create` (see [map files](../backend/README.md#map-files)). Without it, the Lambda refuses every map creation.
 - The secret of the bots' one-turn submit tokens, `submit_token_secret` (#215). Only the Lambda reads it, from `lambda.env`. A new one only invalidates the tokens of turns being played at that moment.
+- The lobby's player token key, `lobby_player_token_key` (#218): the Ed25519 seed that signs the short-lived player tokens games verify. Only the Lambda reads it, from `lambda.env`, as `LOBBY_PLAYER_TOKEN_KEYS`. To replace it, see [Rotating the player token key](#rotating-the-player-token-key).
 - Postgres's TLS key and its self-signed certificate.
 
 The scripts keep them in the [deploy bucket](#the-deploy-bucket), so every machine and worktree gets them with its first pull.
 
 A deploy stops if any of these files is missing, because new secrets would replace the live VM's password and keys. Pass `-e app_generate_secrets=true` only for a first deploy, or if the secrets are lost for good. In that case the deploy resets the backend's password and Centrifugo's keys, and you redeploy the backend with the new `lambda.env`: `scripts/aws.sh deploy`. Players then need new connection tokens, which clients fetch on their own.
 
-`admin_api_key` (#37), `postgres_admin_password` (#79) and `submit_token_secret` (#215) were added after the first secrets, so an existing `deploy/local/secrets/` without them fails this check. Run one deploy with `-e app_generate_secrets=true`: it generates only the missing files and reads the others unchanged, so no password or key on the VM changes. A new `admin_api_key` or `submit_token_secret` also needs the Lambda redeployed with the new `lambda.env`; the backend doesn't start without `ISLAND_BATTLES_SUBMIT_TOKEN_SECRET`.
+`admin_api_key` (#37), `postgres_admin_password` (#79), `submit_token_secret` (#215) and `lobby_player_token_key` (#218) were added after the first secrets, so an existing `deploy/local/secrets/` without them fails this check. Run one deploy with `-e app_generate_secrets=true`: it generates only the missing files and reads the others unchanged, so no password or key on the VM changes. A new `admin_api_key`, `submit_token_secret` or `lobby_player_token_key` also needs the Lambda redeployed with the new `lambda.env`; the backend doesn't start without `ISLAND_BATTLES_SUBMIT_TOKEN_SECRET` or `LOBBY_PLAYER_TOKEN_KEYS`.
+
+### Rotating the player token key
+
+The lobby signs player tokens with the first key of `LOBBY_PLAYER_TOKEN_KEYS`, a comma-separated list of `kid:seed` pairs, and publishes every key at `GET /lobby/v1/jwks.json`, which games keep for up to 5 minutes and fetch again when a token names a key they don't have. A token lasts at most 15 minutes. So a new key goes first while the old one stays published, and the old one goes 15 minutes later:
+
+1. Note the current `LOBBY_PLAYER_TOKEN_KEYS` line of `deploy/local/lambda.env`, the old `kid:seed`.
+2. Write a new key over `deploy/local/secrets/lobby_player_token_key` (a pull would bring a deleted file back): `python3 -c 'import secrets, string; print("".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(43)), end="")' > deploy/local/secrets/lobby_player_token_key`. Then deploy the VM with `-e '{"lobby_player_token_previous_keys": ["<old kid:seed>"]}'`, which pushes the new key to the deploy bucket, and the backend with `scripts/aws.sh deploy`. The new key, whose ID comes from the key itself, signs; tokens of the old one still verify.
+3. 15 minutes later, deploy the VM again without the extra variable, and the backend. The old key is gone.
+
+A key that leaked is removed at once instead, with step 2 alone and no previous key: every token it signed stops working, and clients get a new one from the lobby when the game answers 401.
 
 Nothing secret is committed. Never copy anything from `deploy/local/` into the repo.
 
 ### The Lambda's settings
 
-`deploy/local/lambda.env` holds the nine settings the backend reads from the VM deploy, including the admin API key (see `backend/dependencies/config.go`). [`scripts/aws.sh deploy`](#deploying-the-backend) passes every line of it to the Lambda:
+`deploy/local/lambda.env` holds the ten settings the backend reads from the VM deploy, including the admin API key (see `backend/dependencies/config.go`). [`scripts/aws.sh deploy`](#deploying-the-backend) passes every line of it to the Lambda:
 
 | Variable | Value |
 |---|---|
@@ -283,7 +294,8 @@ Nothing secret is committed. Never copy anything from `deploy/local/` into the r
 | `ISLAND_BATTLES_LOBBY_PROXY_SECRET` | The secret Centrifugo sends to the subscribe proxy |
 | `ISLAND_BATTLES_ADMIN_API_KEY` | The admin API key that `POST /map/create` requires |
 | `ISLAND_BATTLES_SUBMIT_TOKEN_SECRET` | The secret that signs the bots' one-turn submit tokens |
-| `ISLAND_BATTLES_PUBLIC_URL` | `game_url` from `vm.yml`, where turn deliveries tell bots to submit their commands |
+| `ISLAND_BATTLES_PUBLIC_URL` | `game_url` from `vm.yml`, where turn deliveries tell bots to submit their commands, and the `iss` of the lobby's player tokens |
+| `LOBBY_PLAYER_TOKEN_KEYS` | `<kid>:<seed>` of `lobby_player_token_key`, the key that signs player tokens, then any previous keys during a [rotation](#rotating-the-player-token-key) |
 
 The URLs use the hostname, not an IP, so they stay the same when you move to a new VM.
 

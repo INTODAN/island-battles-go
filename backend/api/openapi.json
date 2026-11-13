@@ -1783,6 +1783,12 @@
         "scheme": "bearer",
         "type": "http"
       },
+      "PlayerToken": {
+        "bearerFormat": "JWT",
+        "description": "A player token for the island-battles game, from POST /lobby/v1/player-tokens with game_key island-battles: a JWT signed with EdDSA that the game verifies with the lobby's public keys, GET /lobby/v1/jwks.json, without reading the lobby. It lasts at most 15 minutes, until its expires_at; get a new one before then, at about 80 % of its life, and once more when a request answers 401. The guest credential of POST /lobby/v1/sessions is refused here: a missing, expired or invalid token is 401.",
+        "scheme": "bearer",
+        "type": "http"
+      },
       "SubmitToken": {
         "bearerFormat": "ibst1",
         "description": "A submit token from a TurnDelivery, submit.token, which starts with ibst1. It authorizes POST /generation/commands for one player's turn of one generation of one game, until the turn's deadline plus 30 seconds, or 24 hours after the generation when turns have no time limit.",
@@ -1879,7 +1885,7 @@
         },
         "security": [
           {
-            "LobbyBearer": []
+            "PlayerToken": []
           }
         ],
         "summary": "Apply the current turn's deadline for a roster player",
@@ -1948,7 +1954,7 @@
         },
         "security": [
           {
-            "LobbyBearer": []
+            "PlayerToken": []
           }
         ],
         "summary": "Save a lobby's game as a demo file for a roster player",
@@ -2003,7 +2009,7 @@
         },
         "security": [
           {
-            "LobbyBearer": []
+            "PlayerToken": []
           }
         ],
         "summary": "Read the current generation for a roster player",
@@ -2071,7 +2077,7 @@
         },
         "security": [
           {
-            "LobbyBearer": []
+            "PlayerToken": []
           }
         ],
         "summary": "Read a generation's game log lines for a roster player",
@@ -2126,7 +2132,7 @@
         },
         "security": [
           {
-            "LobbyBearer": []
+            "PlayerToken": []
           }
         ],
         "summary": "Read your turn as a delivery for your bot, with a one-turn submit token",
@@ -2181,7 +2187,7 @@
         },
         "security": [
           {
-            "LobbyBearer": []
+            "PlayerToken": []
           }
         ],
         "summary": "Read the current generation of a lobby's game for a watcher",
@@ -2250,7 +2256,7 @@
         },
         "security": [
           {
-            "LobbyBearer": []
+            "PlayerToken": []
           }
         ],
         "summary": "Read a lobby game's history for a watcher",
@@ -2590,7 +2596,7 @@
     },
     "/generation/commands": {
       "post": {
-        "description": "Requires a place on the game's frozen roster, or a submit token: Authorization: Bearer ibst1.… from GET /game/from-lobby/{lobby_id}/turn-delivery stands for its player for the batch of its game and generation only, and anything else (another game or generation, an expired or altered token, a player no longer on the roster) is 401. Either way the lobby is not consulted, and the rules below are the same. Players send send_soldier_group and upgrade_castle commands for castles their team owns; other command types are forbidden (403). upgrade_castle buys the next level of one upgrade type and pays that level's soldier_cost, listed by GET /game/upgrades, from the castle's soldiers. A castle may be upgraded several times in one turn, and each upgrade buys the next level. Every command is checked against the generation and every command already accepted this turn, including your own earlier batches, so an accepted command cannot fail when the turn runs. An invalid command rejects the whole batch, and nothing of it is stored. Malformed parameters are 422. Rejections that clients tell apart carry a problem type: a castle that is not in the generation is 422 urn:island-battles:problem:castle-not-found, an unknown upgrade_type is 422 urn:island-battles:problem:unknown-upgrade-type, a castle your team does not own is 403 urn:island-battles:problem:castle-not-owned, an upgrade past its type's max_level, counting this turn's upgrades, is 409 urn:island-battles:problem:upgrade-max-level, and soldiers or an upgrade cost beyond what the castle has left after this turn's reservations is 409 urn:island-battles:problem:insufficient-soldiers. A castle may spend all its soldiers. Complete defaults to true; an empty batch can complete a turn. The last frozen roster completion advances exactly once. The game ends after the turn that leaves one team with castles or soldier groups, a draw when the last teams are eliminated in the same turn, or after the turn that creates generation 300, where the team with the most castles wins. That turn's generation is the last, its state carries the outcome, and every later command conflicts (409) with problem type urn:island-battles:problem:game-ended. A turn also ends the game when its deadline, GenerationState.turn_deadline_at, passes before every roster player completed it: each team with a player who hadn't loses (outcome reason turn_timeout), the open generation stays the last, and a batch for it after the deadline conflicts with the same problem type. Retry the same request UUID and payload safely, also after the game ended; changed payloads and stale new requests conflict. A batch may also carry game log lines, which are stored in order with the generation and read with GET /game/from-lobby/{lobby_id}/logs. A player has at most 100 lines per generation, each of at most 500 characters; a batch over either limit is rejected whole (422) with problem type urn:island-battles:problem:game-log-limit. A batch may also carry the memory of the player's bot, any JSON object of at most 64 KiB as compact JSON. The batch with complete true saves it, replacing the player's previous memory, and an absent or null memory clears it; other batches ignore it. GenerationState.memory returns the memory sent with the player's latest completed turn, and the retry hash covers it. Larger memory is rejected whole (422) with problem type urn:island-battles:problem:bot-memory-too-large.",
+        "description": "Requires a player token of a player on the game's frozen roster (PlayerToken), or a submit token: Authorization: Bearer ibst1.… from GET /game/from-lobby/{lobby_id}/turn-delivery stands for its player for the batch of its game and generation only, and anything else (another game or generation, an expired or altered token, a player no longer on the roster) is 401. Either way the lobby is not consulted, and the rules below are the same. Players send send_soldier_group and upgrade_castle commands for castles their team owns; other command types are forbidden (403). upgrade_castle buys the next level of one upgrade type and pays that level's soldier_cost, listed by GET /game/upgrades, from the castle's soldiers. A castle may be upgraded several times in one turn, and each upgrade buys the next level. Every command is checked against the generation and every command already accepted this turn, including your own earlier batches, so an accepted command cannot fail when the turn runs. An invalid command rejects the whole batch, and nothing of it is stored. Malformed parameters are 422. Rejections that clients tell apart carry a problem type: a castle that is not in the generation is 422 urn:island-battles:problem:castle-not-found, an unknown upgrade_type is 422 urn:island-battles:problem:unknown-upgrade-type, a castle your team does not own is 403 urn:island-battles:problem:castle-not-owned, an upgrade past its type's max_level, counting this turn's upgrades, is 409 urn:island-battles:problem:upgrade-max-level, and soldiers or an upgrade cost beyond what the castle has left after this turn's reservations is 409 urn:island-battles:problem:insufficient-soldiers. A castle may spend all its soldiers. Complete defaults to true; an empty batch can complete a turn. The last frozen roster completion advances exactly once. The game ends after the turn that leaves one team with castles or soldier groups, a draw when the last teams are eliminated in the same turn, or after the turn that creates generation 300, where the team with the most castles wins. That turn's generation is the last, its state carries the outcome, and every later command conflicts (409) with problem type urn:island-battles:problem:game-ended. A turn also ends the game when its deadline, GenerationState.turn_deadline_at, passes before every roster player completed it: each team with a player who hadn't loses (outcome reason turn_timeout), the open generation stays the last, and a batch for it after the deadline conflicts with the same problem type. Retry the same request UUID and payload safely, also after the game ended; changed payloads and stale new requests conflict. A batch may also carry game log lines, which are stored in order with the generation and read with GET /game/from-lobby/{lobby_id}/logs. A player has at most 100 lines per generation, each of at most 500 characters; a batch over either limit is rejected whole (422) with problem type urn:island-battles:problem:game-log-limit. A batch may also carry the memory of the player's bot, any JSON object of at most 64 KiB as compact JSON. The batch with complete true saves it, replacing the player's previous memory, and an absent or null memory clears it; other batches ignore it. GenerationState.memory returns the memory sent with the player's latest completed turn, and the retry hash covers it. Larger memory is rejected whole (422) with problem type urn:island-battles:problem:bot-memory-too-large.",
         "operationId": "registerGenerationCommand",
         "parameters": [
           {
@@ -2635,7 +2641,7 @@
         },
         "security": [
           {
-            "LobbyBearer": []
+            "PlayerToken": []
           },
           {
             "SubmitToken": []

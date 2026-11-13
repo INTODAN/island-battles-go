@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 
-	"github.com/danielgtaylor/huma/v2"
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
 )
@@ -19,12 +18,12 @@ func (handler *LobbyGame) GenerationLogs(ctx context.Context, input *struct {
 	Authorization string `header:"Authorization"`
 }) (*GenerationLogsResponse, error) {
 	defer handler.runRetention(ctx)
-	verified, err := handler.Authenticator.Authenticate(ctx, input.Authorization)
+	principal, err := handler.authenticate(ctx, input.Authorization)
 	if err != nil {
-		return nil, huma.Error401Unauthorized("authentication required")
+		return nil, err
 	}
 	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher}
-	logs, err := service.Logs(ctx, verified.Principal, input.LobbyID, input.GenerationID)
+	logs, err := service.Logs(ctx, principal, input.LobbyID, input.GenerationID)
 	if err != nil {
 		return nil, generationHTTPError(ctx, err)
 	}

@@ -147,7 +147,7 @@ async def test_memory_the_server_refuses_leaves_the_turn_open(launch, match):
     state = match.alice.state
     response = await match.http.post(
         COMMANDS,
-        headers={"Authorization": f"Bearer {match.alice.credential}"},
+        headers=await match.auth(match.alice),
         json={
             "game_id": state["game_id"],
             "generation_id": state["generation_id"],

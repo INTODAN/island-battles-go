@@ -90,7 +90,7 @@ While your bot waits for the other players on a turn with a deadline, `run` asks
 
 `run` stops with `FAIL: …` and status 1 when your bot returns an error, panics or returns an invalid result, or when the server rejects the result, for example because a castle doesn't have the soldiers it sends. It sends the error and the turn's log lines first, and leaves the turn open: fix the bot and start `run` again for the same turn. Its log goes to stdout, and to `--log-file` when you give one.
 
-In your own program, `islandbattles.NewClient(baseURL, credential, lobbyID, play, options...)` is the same client: `Run(ctx)`, or `Start(ctx)`, `Wait(ctx)` and `Close(ctx)`, `Refresh(ctx)`, and `Generation()`, `TeamColor()` and `Outcome()`. `WithGameEnded` reports the end; `WithLogLevel`, `WithLogFile`, `WithLogOutput` and `WithHTTPClient` configure it. Its errors are `*islandbattles.GameError` values: test them with `errors.Is(err, islandbattles.ErrInsufficientSoldiers)` (also `ErrCastleNotFound`, `ErrCastleNotOwned`, `ErrUpgradeMaxLevel`, `ErrMemoryTooLarge`, `ErrGameEnded`, `ErrAuthentication`, `ErrTransport`, `ErrProtocol`, `ErrClientClosed` and `ErrRejected`), and read the HTTP status with `errors.As`.
+In your own program, `islandbattles.NewClient(baseURL, credential, lobbyID, play, options...)` is the same client, with the guest credential, which it sends only to the lobby: the game's routes take a player token, which it gets from the lobby (`POST /lobby/v1/player-tokens`), renews at 80 % of its life, and once more when the game answers 401 (a breaking change of the game API, #218; upgrade the SDK). It has `Run(ctx)`, or `Start(ctx)`, `Wait(ctx)` and `Close(ctx)`, `Refresh(ctx)`, and `Generation()`, `TeamColor()` and `Outcome()`. `WithGameEnded` reports the end; `WithLogLevel`, `WithLogFile`, `WithLogOutput` and `WithHTTPClient` configure it. Its errors are `*islandbattles.GameError` values: test them with `errors.Is(err, islandbattles.ErrInsufficientSoldiers)` (also `ErrCastleNotFound`, `ErrCastleNotOwned`, `ErrUpgradeMaxLevel`, `ErrMemoryTooLarge`, `ErrGameEnded`, `ErrAuthentication`, `ErrTransport`, `ErrProtocol`, `ErrClientClosed` and `ErrRejected`), and read the HTTP status with `errors.As`.
 
 ## The turn
 
@@ -215,10 +215,12 @@ serves the bot on `http://127.0.0.1:41414`, the port the game looks for a localh
 - `GET /health` answers `{"name": "mybot", "ok": true}`, with your program's name, so the game can show that your bot is connected.
 - **Browsers:** the server answers CORS preflights, with `Access-Control-Allow-Private-Network: true` for Chrome's Private Network Access, only for the game's origins: `http://localhost:8888` (a local backend), `http://localhost:3000` (the web client's dev server), `https://island-battles.elidan.org` (the deployed game), and `tauri://localhost` and `http://tauri.localhost` (the desktop app). Add another with `--allow-origin` (repeatable). A request from another origin, or with a `Host` other than `127.0.0.1:<port>` or `localhost:<port>` (against DNS rebinding), gets `403`, and the bot doesn't run. The server closes the connection after every answer.
 
-Deliver a turn by hand with curl, with your guest credential and a started lobby against a local backend:
+Deliver a turn by hand with curl, with your guest credential and a started lobby against a local backend. The game's routes take a player token from the lobby, not the guest credential:
 
 ```sh
-curl -s -H "Authorization: Bearer $TOKEN" localhost:8888/game/from-lobby/$LOBBY_ID/turn-delivery \
+PLAYER_TOKEN=$(curl -s -X POST localhost:8888/lobby/v1/player-tokens -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"game_key": "island-battles"}' | jq -r .token)
+curl -s -H "Authorization: Bearer $PLAYER_TOKEN" localhost:8888/game/from-lobby/$LOBBY_ID/turn-delivery \
   | curl -X POST localhost:41414/turn -H 'Content-Type: application/json' -d @-
 curl localhost:41414/health
 ```

@@ -190,6 +190,13 @@ function harness(extra: Partial<RealtimeOptions> = {}): Harness {
       websocket_url: "ws://centrifugo.test/connection/websocket",
     }),
   );
+  // The game's routes take a player token, which the lobby issues.
+  routes.set("POST /lobby/v1/player-tokens", () =>
+    json({
+      token: "player-token",
+      expires_at: new Date(Date.now() + 900_000).toISOString(),
+    }),
+  );
   const fetchStub = (async (
     input: Request | string | URL,
     init?: RequestInit,

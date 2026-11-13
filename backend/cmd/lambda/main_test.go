@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,6 +25,7 @@ import (
 	"islandBattles/backend/retention"
 	"islandBattles/backend/services"
 	"islandBattles/lobby/domain"
+	"islandBattles/lobby/playertoken"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambdaurl"
@@ -93,7 +95,18 @@ func testConfig(t *testing.T, database *gorm.DB) dependencies.Config {
 		LobbyProxySecret:          "test-lobby-proxy-secret",
 		SubmitTokenSecret:         "test-submit-token-secret",
 		GameRetentionPeriod:       retention.DefaultPeriod,
+		PlayerTokenKeys:           testPlayerTokenKeys(t),
+		PlayerTokenLifetime:       playertoken.MaxLifetime,
 	}
+}
+
+func testPlayerTokenKeys(t *testing.T) *playertoken.KeySet {
+	t.Helper()
+	keys, err := playertoken.ParseKeySet("test:" + base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("k", 32))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return keys
 }
 
 func TestReplayOverSixMegabytesStreamsThroughTheFunctionURL(t *testing.T) {
@@ -123,7 +136,16 @@ func TestReplayOverSixMegabytesStreamsThroughTheFunctionURL(t *testing.T) {
 	}
 	enlargeGame(t, database, binding.GameID)
 
-	response, content = call(t, invoke, http.MethodGet, "/game/from-lobby/"+lobbyID+"/replay", "", "Bearer "+alice.AccessToken)
+	// The game's routes take a player token from the lobby, not the session.
+	response, content = call(t, invoke, http.MethodPost, "/lobby/v1/player-tokens", `{"game_key":"island-battles"}`, "Bearer "+alice.AccessToken)
+	var playerToken domain.PlayerToken
+	if response.StatusCode != http.StatusOK || json.Unmarshal(content, &playerToken) != nil {
+		t.Fatalf("player token=%d %s", response.StatusCode, content)
+	}
+	if response, content = call(t, invoke, http.MethodGet, "/game/from-lobby/"+lobbyID+"/replay", "", "Bearer "+alice.AccessToken); response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("replay with the session=%d %.200s", response.StatusCode, content)
+	}
+	response, content = call(t, invoke, http.MethodGet, "/game/from-lobby/"+lobbyID+"/replay", "", "Bearer "+playerToken.Token)
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("replay=%d %.500s", response.StatusCode, content)
 	}
@@ -140,7 +162,7 @@ func TestReplayOverSixMegabytesStreamsThroughTheFunctionURL(t *testing.T) {
 
 	// The demo of the same game streams packed with gzip to a browser, which
 	// asks for it, and unpacks to the whole file.
-	response, content = callWithHeaders(t, invoke, http.MethodGet, "/game/from-lobby/"+lobbyID+"/demo", "", "Bearer "+alice.AccessToken,
+	response, content = callWithHeaders(t, invoke, http.MethodGet, "/game/from-lobby/"+lobbyID+"/demo", "", "Bearer "+playerToken.Token,
 		map[string]string{"accept-encoding": "gzip, deflate, br, zstd"})
 	if response.StatusCode != http.StatusOK || response.Headers["Content-Encoding"] != "gzip" || response.Headers["Vary"] != "Accept-Encoding" {
 		t.Fatalf("demo=%d %v", response.StatusCode, response.Headers)
@@ -176,6 +198,7 @@ var publicRoutes = map[string]string{
 	"GET /healthz":            "readiness",
 	"GET /":                   "redirect to the embedded lobby UI",
 	"POST /lobby/v1/sessions": "creates a guest credential",
+	"GET /lobby/v1/jwks.json": "the lobby's public keys, which verify player tokens",
 	"GET /map/templates":      "lists default map templates, which are not game data",
 	"GET /game/upgrades":      "lists the static upgrade cost table, which is not game data",
 	"GET /bots/defaults":      "lists the static default bot catalog, which is not game data",

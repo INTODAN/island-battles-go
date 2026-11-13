@@ -321,6 +321,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/lobby/v1/jwks.json": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the lobby's public keys
+         * @description Returns the JWKS (RFC 7517) of the Ed25519 keys that verify player tokens (issuePlayerToken): the key that signs new tokens, and any previous key that still verifies tokens issued before a rotation. A key is published before it signs and kept for 15 minutes after it stops, the longest a token lasts. A game caches the keys for the response's max-age, 300 seconds, and fetches them again, at most once a minute, when a token names a kid it doesn't have.
+         */
+        get: operations["getLobbyPublicKeys"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/lobby/v1/lobbies": {
         parameters: {
             query?: never;
@@ -355,6 +375,26 @@ export interface paths {
          * @description Joins by game key and join code; a lobby with as many members as teams is full (lobby_full). Started lobbies allow only frozen-roster rejoin; once a member reopens the lobby after its game, it waits and anyone with the code can join again.
          */
         post: operations["joinLobby"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/lobby/v1/player-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue a player token for a game
+         * @description Issues a short-lived player token for one game: a JWT signed with EdDSA (Ed25519), which the game verifies with the lobby's public keys (getLobbyPublicKeys), without the lobby's database or a call to the lobby. Its claims are iss, the lobby's public URL; sub, your player ID; aud, game_key; iat and exp; and name, your display name. Send it to the game's API as Authorization: Bearer <token>, where the game would otherwise need your guest credential; the lobby's own API takes only the guest credential. A token lasts at most 15 minutes, and never past your session's expiry; expires_at says when it expires. Clients get a new one before it expires, at about 80 % of its life, and once more when the game answers 401. A game_key that no game of this lobby has is not_found.
+         */
+        post: operations["issuePlayerToken"];
         delete?: never;
         options?: never;
         head?: never;
@@ -579,6 +619,52 @@ export interface components {
             /** Format: int64 */
             version: number;
         };
+        IssuePlayerTokenBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/IssuePlayerTokenBody.json
+             */
+            readonly $schema?: string;
+            /** @description The game whose requests the token is for, its aud claim, such as island-battles. */
+            game_key: string;
+        };
+        JWK: {
+            /**
+             * @description Always EdDSA.
+             * @enum {string}
+             */
+            alg: "EdDSA";
+            /**
+             * @description Always Ed25519.
+             * @enum {string}
+             */
+            crv: "Ed25519";
+            /** @description The key's ID, which a token's header names as kid. */
+            kid: string;
+            /**
+             * @description Always OKP.
+             * @enum {string}
+             */
+            kty: "OKP";
+            /**
+             * @description Always sig.
+             * @enum {string}
+             */
+            use: "sig";
+            /** @description The 32-byte public key, base64url without padding. */
+            x: string;
+        };
+        JWKS: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/JWKS.json
+             */
+            readonly $schema?: string;
+            /** @description The lobby's current public key, which signs new player tokens, and any previous ones that still verify tokens issued before a rotation. */
+            keys: components["schemas"]["JWK"][] | null;
+        };
         JoinLobbyBody: {
             /**
              * Format: uri
@@ -671,6 +757,21 @@ export interface components {
             member_settings: {
                 [key: string]: unknown;
             };
+        };
+        PlayerToken: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/PlayerToken.json
+             */
+            readonly $schema?: string;
+            /**
+             * Format: date-time
+             * @description When the token expires, its exp: at most 15 minutes after it was issued, and never after your session expires.
+             */
+            expires_at: string;
+            /** @description A JWT signed with EdDSA (Ed25519), whose header names its key with kid. Its claims: iss, the lobby's public URL; sub, your player ID; aud, the game key; iat and exp; and name, your display name. Send it to the game as Authorization: Bearer <token>. */
+            token: string;
         };
         Problem: {
             /** @enum {string} */
@@ -2222,6 +2323,90 @@ export interface operations {
             };
         };
     };
+    getLobbyPublicKeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JWKS"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     createLobby: {
         parameters: {
             query?: never;
@@ -2329,6 +2514,93 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Snapshot"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    issuePlayerToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IssuePlayerTokenBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlayerToken"];
                 };
             };
             /** @description Unauthorized */

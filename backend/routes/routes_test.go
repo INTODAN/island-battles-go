@@ -9,6 +9,7 @@ import (
 	"islandBattles/backend/models"
 	"islandBattles/backend/routes"
 	"islandBattles/lobby/domain"
+	"islandBattles/lobby/playertoken"
 	"net/http"
 	"reflect"
 	"strings"
@@ -127,11 +128,8 @@ func TestRawGenerationMutationRoutesAreRemoved(t *testing.T) {
 // rejectEveryone authenticates nobody.
 type rejectEveryone struct{}
 
-func (rejectEveryone) CreateGuest(context.Context, domain.CreateGuestRequest) (domain.GuestSession, error) {
-	return domain.GuestSession{}, domain.ErrUnauthenticated
-}
-func (rejectEveryone) Authenticate(context.Context, string) (domain.SessionVerification, error) {
-	return domain.SessionVerification{}, domain.ErrUnauthenticated
+func (rejectEveryone) AuthenticatePlayer(context.Context, string) (domain.Principal, error) {
+	return domain.Principal{}, playertoken.ErrInvalid
 }
 
 // The logs read documents generation_id as required and positive, but checks
@@ -139,7 +137,7 @@ func (rejectEveryone) Authenticate(context.Context, string) (domain.SessionVerif
 // the roster learns nothing from a 422. From the review of PR #86.
 func TestTheLogsReadAuthenticatesBeforeCheckingTheGeneration(t *testing.T) {
 	_, api := humatest.New(t, routes.NewAPIConfig("test", "1.0.0"))
-	routes.SetupLobbyRoutes(api, nil, nil, nil, nil, &handlers.LobbyGame{Authenticator: rejectEveryone{}})
+	routes.SetupLobbyRoutes(api, nil, nil, nil, nil, nil, &handlers.LobbyGame{Players: rejectEveryone{}})
 	path := "/game/from-lobby/4a0f1a52-7f4e-4d5c-9a8e-2f3b6c1d0e9a/logs"
 	for _, query := range []string{"?generation_id=0", ""} {
 		if response := api.Get(path+query, "Authorization: Bearer stranger"); response.Code != http.StatusUnauthorized {

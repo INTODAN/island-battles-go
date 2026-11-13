@@ -130,7 +130,7 @@ func BuildPlayerOpenAPI() ([]byte, error) {
 	config.SchemasPath = ""
 	api := humachi.New(chi.NewRouter(), config)
 	routes.SetupRoutes(api, &handlers.Env{}, "")
-	routes.SetupLobbyRoutes(api, nil, nil, nil, nil, &handlers.LobbyGame{})
+	routes.SetupLobbyRoutes(api, nil, nil, nil, nil, nil, &handlers.LobbyGame{})
 	routes.SetupBotPackageRoutes(api, &handlers.BotPackages{})
 	api.OpenAPI().Info.Description = apiDescription
 

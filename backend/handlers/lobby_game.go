@@ -17,9 +17,11 @@ import (
 
 // LobbyGame serves a started game to its frozen roster without reading the lobby.
 type LobbyGame struct {
-	Database      *gorm.DB
-	Authenticator domain.Authenticator
-	Publisher     services.Publisher
+	Database *gorm.DB
+	// Players tells who sends a request from its player token. Nil refuses
+	// every request that needs a player.
+	Players   PlayerAuthenticator
+	Publisher services.Publisher
 	// Retention runs at the end of every game request: turns, which are what
 	// adds game data, and the state and replay reads that players poll. Nil
 	// deletes nothing. retention.Retention is the real one; it has the same
@@ -54,12 +56,12 @@ func (handler *LobbyGame) Replay(ctx context.Context, input *struct {
 	Authorization string `header:"Authorization"`
 }) (*huma.StreamResponse, error) {
 	defer handler.runRetention(ctx)
-	verified, err := handler.Authenticator.Authenticate(ctx, input.Authorization)
+	principal, err := handler.authenticate(ctx, input.Authorization)
 	if err != nil {
-		return nil, huma.Error401Unauthorized("authentication required")
+		return nil, err
 	}
 	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher}
-	replay, err := service.Replay(ctx, verified.Principal, input.LobbyID)
+	replay, err := service.Replay(ctx, principal, input.LobbyID)
 	if err != nil {
 		return nil, generationHTTPError(ctx, err)
 	}
@@ -84,12 +86,12 @@ func (handler *LobbyGame) WatchReplay(ctx context.Context, input *struct {
 	Authorization string `header:"Authorization"`
 }) (*huma.StreamResponse, error) {
 	defer handler.runRetention(ctx)
-	verified, err := handler.Authenticator.Authenticate(ctx, input.Authorization)
+	principal, err := handler.authenticate(ctx, input.Authorization)
 	if err != nil {
-		return nil, huma.Error401Unauthorized("authentication required")
+		return nil, err
 	}
 	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher, Watchers: handler.Watchers}
-	replay, err := service.WatchReplay(ctx, verified.Principal, input.LobbyID)
+	replay, err := service.WatchReplay(ctx, principal, input.LobbyID)
 	if err != nil {
 		return nil, generationHTTPError(ctx, err)
 	}
@@ -113,12 +115,12 @@ func (handler *LobbyGame) Demo(ctx context.Context, input *struct {
 	Authorization string `header:"Authorization"`
 }) (*huma.StreamResponse, error) {
 	defer handler.runRetention(ctx)
-	verified, err := handler.Authenticator.Authenticate(ctx, input.Authorization)
+	principal, err := handler.authenticate(ctx, input.Authorization)
 	if err != nil {
-		return nil, huma.Error401Unauthorized("authentication required")
+		return nil, err
 	}
 	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher}
-	demo, err := service.Demo(ctx, verified.Principal, input.LobbyID)
+	demo, err := service.Demo(ctx, principal, input.LobbyID)
 	if err != nil {
 		return nil, generationHTTPError(ctx, err)
 	}
@@ -132,12 +134,12 @@ func (handler *LobbyGame) WatchDemo(ctx context.Context, input *struct {
 	Authorization string `header:"Authorization"`
 }) (*huma.StreamResponse, error) {
 	defer handler.runRetention(ctx)
-	verified, err := handler.Authenticator.Authenticate(ctx, input.Authorization)
+	principal, err := handler.authenticate(ctx, input.Authorization)
 	if err != nil {
-		return nil, huma.Error401Unauthorized("authentication required")
+		return nil, err
 	}
 	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher, Watchers: handler.Watchers}
-	demo, err := service.WatchDemo(ctx, verified.Principal, input.LobbyID)
+	demo, err := service.WatchDemo(ctx, principal, input.LobbyID)
 	if err != nil {
 		return nil, generationHTTPError(ctx, err)
 	}
@@ -152,12 +154,12 @@ func (handler *LobbyGame) WatchGeneration(ctx context.Context, input *struct {
 	Authorization string `header:"Authorization"`
 }) (*WatchStateResponse, error) {
 	defer handler.runRetention(ctx)
-	verified, err := handler.Authenticator.Authenticate(ctx, input.Authorization)
+	principal, err := handler.authenticate(ctx, input.Authorization)
 	if err != nil {
-		return nil, huma.Error401Unauthorized("authentication required")
+		return nil, err
 	}
 	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher, Watchers: handler.Watchers}
-	state, err := service.Watch(ctx, verified.Principal, input.LobbyID)
+	state, err := service.Watch(ctx, principal, input.LobbyID)
 	if err != nil {
 		return nil, generationHTTPError(ctx, err)
 	}

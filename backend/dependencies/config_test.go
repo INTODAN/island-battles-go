@@ -50,6 +50,42 @@ func TestLoadConfigAcceptsExplicitValidConfiguration(t *testing.T) {
 	}
 }
 
+func TestLoadConfigReadsThePlayerTokenKeys(t *testing.T) {
+	t.Parallel()
+
+	values := validConfigurationEnvironment()
+	values[PlayerTokenKeysEnv] = "new:" + testSeed + ",old:" + testSeed
+	config, err := LoadConfigFromLookup(mapLookup(values))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keys := config.PlayerTokenKeys.JWKS().Keys; len(keys) != 2 || keys[0].KeyID != "new" {
+		t.Fatalf("keys = %+v", keys)
+	}
+	if config.PlayerTokenLifetime != 15*time.Minute || config.LobbyIssuer() != LocalLobbyIssuer {
+		t.Fatalf("lifetime = %v, issuer = %q", config.PlayerTokenLifetime, config.LobbyIssuer())
+	}
+	values[PublicURLEnv] = "https://island-battles.example.org"
+	values[PlayerTokenLifetimeEnv] = "2m"
+	if config, err := LoadConfigFromLookup(mapLookup(values)); err != nil || config.PlayerTokenLifetime != 2*time.Minute || config.LobbyIssuer() != "https://island-battles.example.org" {
+		t.Fatalf("lifetime = %v, issuer = %q, error = %v", config.PlayerTokenLifetime, config.LobbyIssuer(), err)
+	}
+	for _, lifetime := range []string{"30s", "16m", "soon"} {
+		values[PlayerTokenLifetimeEnv] = lifetime
+		if _, err := LoadConfigFromLookup(mapLookup(values)); err == nil || !strings.Contains(err.Error(), PlayerTokenLifetimeEnv) {
+			t.Errorf("lifetime %q: error = %v", lifetime, err)
+		}
+	}
+	delete(values, PlayerTokenLifetimeEnv)
+	for _, keys := range []string{"", "k1", "k1:" + testSeed[:20], "k1:" + testSeed + ",k1:" + testSeed} {
+		values[PlayerTokenKeysEnv] = keys
+		_, err := LoadConfigFromLookup(mapLookup(values))
+		if err == nil || !strings.Contains(err.Error(), PlayerTokenKeysEnv) || (len(keys) > 10 && strings.Contains(err.Error(), keys[3:])) {
+			t.Errorf("keys %q: error = %v", keys, err)
+		}
+	}
+}
+
 func TestLoadConfigReadsThePublicURL(t *testing.T) {
 	t.Parallel()
 
@@ -201,8 +237,12 @@ func validConfigurationEnvironment() map[string]string {
 		ConnectionTokenHMACSecretEnv: "connection-token-secret",
 		LobbyProxySecretEnv:          "proxy-secret",
 		SubmitTokenSecretEnv:         "submit-token-secret",
+		PlayerTokenKeysEnv:           "k1:" + testSeed,
 	}
 }
+
+// testSeed is an Ed25519 seed of 32 bytes in base64url: 32 times "s".
+const testSeed = "c3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3M"
 
 func mapLookup(values map[string]string) func(string) (string, bool) {
 	return func(name string) (string, bool) {

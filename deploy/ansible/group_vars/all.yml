@@ -64,3 +64,19 @@ admin_api_key: >-
 submit_token_secret: >-
   {{ lookup('ansible.builtin.password', deploy_secrets_dir ~ '/submit_token_secret',
      length=64, chars=['ascii_letters', 'digits']) }}
+# The lobby's player token key (#218): an Ed25519 seed of 32 bytes in base64url.
+# 43 letters and digits are a valid base64url encoding of 32 bytes, with about
+# 256 bits of randomness. Only the Lambda reads it.
+lobby_player_token_key: >-
+  {{ lookup('ansible.builtin.password', deploy_secrets_dir ~ '/lobby_player_token_key',
+     length=43, chars=['ascii_letters', 'digits']) }}
+# The key's ID, named in each token's header, comes from the key, so a new key
+# gets a new ID.
+lobby_player_token_key_id: "{{ (lobby_player_token_key | ansible.builtin.hash('sha256'))[:12] }}"
+# Keys that still verify tokens but no longer sign, as kid:seed, during a
+# rotation (deploy/README.md, "Rotating the player token key"). Pass them with
+# -e for 15 minutes after the new key starts signing.
+lobby_player_token_previous_keys: []
+# LOBBY_PLAYER_TOKEN_KEYS: the key that signs first, then the previous ones.
+lobby_player_token_keys: >-
+  {{ ([lobby_player_token_key_id ~ ':' ~ lobby_player_token_key] + lobby_player_token_previous_keys) | join(',') }}

@@ -68,6 +68,12 @@ type Client struct {
 	// The turn worker's own: the upgrade table, read once and reused.
 	upgrades []Upgrade
 
+	// tokenMutex guards the player token for the game's routes, and when to
+	// get a new one; it is held while one is issued.
+	tokenMutex         sync.Mutex
+	playerToken        string
+	playerTokenRenewAt time.Time
+
 	// mutex guards the fields below.
 	mutex      sync.Mutex
 	state      *generationState
@@ -564,10 +570,20 @@ func (client *Client) generationPath() string {
 	return "/game/from-lobby/" + client.lobbyID + "/generation"
 }
 
-// request sends one request and returns the body of a successful response.
-// The body is encoded once, so a request that fails without a response is
-// sent again identically, with the same request ID, when retryTransport is
-// set. An error response is reported, never retried.
+// gameKey is the game's key in the lobby, the audience of its player tokens.
+const gameKey = "island-battles"
+
+// playerTokenRenewShare is the share of a player token's life after which
+// the client gets a new one. The lobby's tokens last at most 15 minutes.
+const playerTokenRenewShare = 0.8
+
+// request sends one request and returns the body of a successful response:
+// with the guest credential to the lobby's routes, and with a player token
+// to the game's. The body is encoded once, so a request that fails without
+// a response is sent again identically, with the same request ID, when
+// retryTransport is set. A game request answered 401 is sent once more with
+// a new player token; any other error response is reported, never retried.
+// A 401 that remains stops the client.
 func (client *Client) request(ctx context.Context, method, path string, payload any, retryTransport bool) ([]byte, error) {
 	if err := client.checkOpen(); err != nil {
 		return nil, err
@@ -579,12 +595,67 @@ func (client *Client) request(ctx context.Context, method, path string, payload 
 			return nil, fmt.Errorf("could not encode the request: %w", err)
 		}
 	}
+	data, err := client.authorized(ctx, method, path, body, retryTransport)
+	if errors.Is(err, ErrAuthentication) {
+		client.fail(err)
+	}
+	return data, err
+}
+
+// authorized sends a request with the credential its route takes.
+func (client *Client) authorized(ctx context.Context, method, path string, body []byte, retryTransport bool) ([]byte, error) {
+	if strings.HasPrefix(path, "/lobby/") {
+		return client.attempt(ctx, method, path, body, client.credential, retryTransport)
+	}
+	token, err := client.gameToken(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	data, err := client.attempt(ctx, method, path, body, token, retryTransport)
+	if !errors.Is(err, ErrAuthentication) {
+		return data, err
+	}
+	if token, err = client.gameToken(ctx, token); err != nil {
+		return nil, err
+	}
+	return client.attempt(ctx, method, path, body, token, retryTransport)
+}
+
+// gameToken returns the player token for the game's routes. The lobby issues
+// a new one once playerTokenRenewShare of the current one's life has passed,
+// or when stale, a token the game refused, is still the current one.
+func (client *Client) gameToken(ctx context.Context, stale string) (string, error) {
+	client.tokenMutex.Lock()
+	defer client.tokenMutex.Unlock()
+	now := client.timing.now()
+	if client.playerToken != "" && client.playerToken != stale && now.Before(client.playerTokenRenewAt) {
+		return client.playerToken, nil
+	}
+	data, err := client.attempt(ctx, http.MethodPost, "/lobby/v1/player-tokens", []byte(`{"game_key":"`+gameKey+`"}`), client.credential, true)
+	if err != nil {
+		return "", err
+	}
+	var issued playerToken
+	if err := decodeStrict(data, &issued, "player token"); err != nil {
+		return "", protocolError("invalid player-token response", err)
+	}
+	if issued.Token == "" || issued.ExpiresAt.IsZero() {
+		return "", protocolError("invalid player-token response", errors.New("no token or expiry"))
+	}
+	client.playerToken = issued.Token
+	client.playerTokenRenewAt = now.Add(time.Duration(float64(issued.ExpiresAt.Sub(now)) * playerTokenRenewShare))
+	return issued.Token, nil
+}
+
+// attempt sends one request with credential, and again after a transport
+// error when retryTransport is set.
+func (client *Client) attempt(ctx context.Context, method, path string, body []byte, credential string, retryTransport bool) ([]byte, error) {
 	attempts := 1
 	if retryTransport {
 		attempts = client.timing.retryAttempts
 	}
 	for attempt := 0; ; attempt++ {
-		status, data, err := client.send(ctx, method, path, body)
+		status, data, err := client.send(ctx, method, path, body, credential)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil, client.interrupted(ctx, ctx.Err())
@@ -600,11 +671,7 @@ func (client *Client) request(ctx context.Context, method, path string, payload 
 		if status >= 400 {
 			var answer problem
 			_ = json.Unmarshal(data, &answer)
-			failure := responseError(status, answer.Type, answer.Detail)
-			if errors.Is(failure, ErrAuthentication) {
-				client.fail(failure)
-			}
-			return nil, failure
+			return nil, responseError(status, answer.Type, answer.Detail)
 		}
 		if !json.Valid(data) {
 			return nil, newGameError(ErrProtocol, 0, "invalid JSON response")
@@ -613,8 +680,8 @@ func (client *Client) request(ctx context.Context, method, path string, payload 
 	}
 }
 
-// send sends one request with the credential, and reads the whole response.
-func (client *Client) send(ctx context.Context, method, path string, body []byte) (int, []byte, error) {
+// send sends one request with credential, and reads the whole response.
+func (client *Client) send(ctx context.Context, method, path string, body []byte, credential string) (int, []byte, error) {
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
@@ -623,7 +690,7 @@ func (client *Client) send(ctx context.Context, method, path string, body []byte
 	if err != nil {
 		return 0, nil, err
 	}
-	request.Header.Set("Authorization", "Bearer "+client.credential)
+	request.Header.Set("Authorization", "Bearer "+credential)
 	request.Header.Set("Accept", "application/json")
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")

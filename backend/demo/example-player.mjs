@@ -42,11 +42,15 @@ const BOT_RETRY_MS = 2000;
 // round, with lobbyRound. The player takes only the states of that round's
 // game: until the next game exists, the lobby's newest game is the previous
 // round's, whose states it drops. Without lobbyRound it takes any round's.
+//
+// It reads and writes the game through fetcher, which the lobby page passes
+// with the player's token for the game; the player sends no credential of
+// its own.
 export class ExamplePlayer {
-  constructor({ lobbyID, lobbyRound = null, playerID, credential, subscription, enabled = true, demo = true, pending = null, savePending = () => {},
+  constructor({ lobbyID, lobbyRound = null, playerID, subscription, enabled = true, demo = true, pending = null, savePending = () => {},
     onState = () => {}, onStatus = () => {}, retryDelay = 500, botRetryDelay = BOT_RETRY_MS, deliver = (delivery) => deliverTurn(delivery),
     fetcher = (...args) => globalThis.fetch(...args), now = () => Date.now() }) {
-    Object.assign(this, { lobbyID, lobbyRound, playerID, credential, subscription, enabled, demo, pending, savePending, onState, onStatus, retryDelay,
+    Object.assign(this, { lobbyID, lobbyRound, playerID, subscription, enabled, demo, pending, savePending, onState, onStatus, retryDelay,
       botRetryDelay, deliver, fetcher, now });
     // The generation whose turn the localhost bot failed to accept.
     this.failed = null;
@@ -87,7 +91,7 @@ export class ExamplePlayer {
     try {
       const response = await this.fetcher(path, {
         method, signal: controller.signal,
-        headers: { Authorization: `Bearer ${this.credential}`, "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" },
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
       const result = await response.json();

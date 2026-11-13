@@ -6,7 +6,7 @@ import pytest
 from lobby_client import LobbyError, Scope
 
 from integration.test_live import BASE, create, guests, latest, sql
-from test_lobby_binding import LOCALHOST_BOT, choose_bot
+from test_lobby_binding import LOCALHOST_BOT, choose_bot, game_auth
 
 pytestmark = pytest.mark.asyncio
 
@@ -18,7 +18,7 @@ TURN_TIMEOUT_SECONDS = 5
 async def play_until_timeout(http, player, lobby_id):
     """Nobody completes the turn: once its deadline has passed, applying it
     ends the game with turn_timeout. Returns the ended state."""
-    headers = {"Authorization": f"Bearer {player.credential}"}
+    headers = await game_auth(player)
     async with asyncio.timeout(TURN_TIMEOUT_SECONDS + 20):
         while True:
             response = await http.post(f"/game/from-lobby/{lobby_id}/deadline", headers=headers)
@@ -78,7 +78,7 @@ async def test_a_lobby_plays_a_second_game_after_the_first_ends(guests):
 
         async def generation(player):
             return await http.get(f"/game/from-lobby/{scope.lobby_id}/generation",
-                                  headers={"Authorization": f"Bearer {player.credential}"})
+                                  headers=await game_auth(player))
 
         state = (await generation(carol)).json()
         assert state["lobby_round"] == 2 and state["game_id"] != first_game and state.get("outcome") is None
@@ -86,7 +86,7 @@ async def test_a_lobby_plays_a_second_game_after_the_first_ends(guests):
         # the second, and he isn't on its roster.
         assert (await generation(bob)).status_code == 404
         replay = await http.get(f"/game/from-lobby/{scope.lobby_id}/replay?lobby_round=1",
-                                headers={"Authorization": f"Bearer {alice.credential}"})
+                                headers=await game_auth(alice))
         assert replay.status_code == 404
         assert await sql(f"SELECT string_agg(lobby_round::text, ',' ORDER BY lobby_round) FROM games WHERE lobby_id='{scope.lobby_id}'") == "1,2"
 

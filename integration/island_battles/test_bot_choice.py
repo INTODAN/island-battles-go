@@ -11,7 +11,7 @@ import pytest
 from integration.test_live import BASE, create
 from integration.test_live import guests as guests_fixture
 from lobby_client import LobbyError, Scope
-from test_lobby_binding import choose_bot, member_settings_path
+from test_lobby_binding import choose_bot, game_auth, member_settings_path
 
 guests = guests_fixture
 pytestmark = pytest.mark.asyncio
@@ -74,7 +74,7 @@ async def test_a_localhost_bot_plays_a_default_level_to_the_end(guests):
         for player in (alice, bob):
             response = await http.get(
                 f"/game/from-lobby/{scope.lobby_id}/generation",
-                headers={"Authorization": f"Bearer {player.credential}"},
+                headers=await game_auth(player),
             )
             assert response.status_code == 200, response.text
             states.append(response.json())

@@ -37,7 +37,7 @@ func newBackendAPI(t *testing.T) http.Handler {
 	handler, api := humatest.New(t, routes.NewAPIConfig("test", "1.0.0"))
 	routes.SetupRoutes(api, &handlers.Env{}, testAdminAPIKey)
 	// Validation rejects these requests before any service is called.
-	httpapi.Register(api, nil, nil, nil, nil)
+	httpapi.Register(api, nil, nil, nil, nil, nil)
 	return handler
 }
 
