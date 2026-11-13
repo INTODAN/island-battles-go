@@ -1,4 +1,5 @@
 import { checkBotHealth, serveCommand } from "../../bots";
+import { computeSpentMessage, uploadedGreyedOut } from "../../bots/compute";
 import {
   type BotPackage,
   describePackage,
@@ -45,6 +46,8 @@ export function mountBotPicker(options: {
   packagesIntervalMs?: number;
   /** Gets the lobby's packages each time they are read, for the host's Add bot. */
   onPackages?(items: BotPackage[]): void;
+  /** Gets why uploaded bots can't be chosen this month, or null, for the host's Add bot. */
+  onCompute?(spent: string | null): void;
 }): BotPicker {
   const { actions } = options;
   let chosen: MemberBot | undefined;
@@ -55,6 +58,8 @@ export function mountBotPicker(options: {
   let serverBots = false;
   /** Your own packages in the lobby, which you may choose as your bot. */
   let ownPackages: BotPackage[] = [];
+  /** Why uploaded bots are greyed out this month (`GET /game/bot-compute`); null while they aren't. */
+  let computeSpent: string | null = null;
 
   const status = h(
     "span",
@@ -189,7 +194,8 @@ export function mountBotPicker(options: {
     const value = choiceValue(chosen);
     for (const radio of radios()) {
       radio.checked = radio.value === value;
-      radio.disabled = locked || saving;
+      radio.disabled =
+        locked || saving || uploadedGreyedOut(radio.value, computeSpent);
     }
     hostedUrl.disabled = locked || saving;
     useUrl.disabled = locked || saving;
@@ -236,6 +242,10 @@ export function mountBotPicker(options: {
         ),
       );
     }
+    if (computeSpent) {
+      items.unshift(h("p", { class: "field-error" }, computeSpent));
+    }
+    uploaded.classList.toggle("spent", computeSpent !== null);
     uploaded.replaceChildren(
       ...(items.length > 0
         ? items
@@ -330,8 +340,22 @@ export function mountBotPicker(options: {
       serverOptions.hidden = !serverBots;
       packages.setChoosable(serverBots);
       sync();
+      if (serverBots) void readCompute();
     })
     .catch(() => undefined);
+
+  /** Greys out uploaded bots once their month's compute is spent; a failed read greys out nothing, and the start says why. */
+  async function readCompute(): Promise<void> {
+    try {
+      const compute = await actions.botCompute();
+      if (disposed) return;
+      computeSpent = computeSpentMessage(compute);
+      options.onCompute?.(computeSpent);
+      showUploaded();
+    } catch {
+      // The start refuses uploaded bots all the same.
+    }
+  }
 
   async function checkHealth(): Promise<void> {
     if (document.hidden) return;

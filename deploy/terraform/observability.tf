@@ -153,3 +153,23 @@ resource "aws_budgets_budget" "zero_spend" {
     subscriber_email_addresses = [var.alert_email]
   }
 }
+
+# The safety net for everything, bots or not (#226): a $5 monthly cost
+# budget that emails once actual costs pass 80 % of it, $4. Like the tripwire
+# it stops nothing; the bot runners' monthly compute guard, in the backend,
+# keeps uploaded bots inside Lambda's free tier.
+resource "aws_budgets_budget" "monthly" {
+  name         = "${var.name}-monthly"
+  budget_type  = "COST"
+  limit_amount = "5"
+  limit_unit   = "USD"
+  time_unit    = "MONTHLY"
+
+  notification {
+    comparison_operator        = "GREATER_THAN"
+    threshold                  = 80
+    threshold_type             = "PERCENTAGE"
+    notification_type          = "ACTUAL"
+    subscriber_email_addresses = [coalesce(var.budget_email, var.alert_email)]
+  }
+}

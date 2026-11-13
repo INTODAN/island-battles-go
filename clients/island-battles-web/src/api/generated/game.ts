@@ -21,6 +21,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/game/bot-compute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Say whether games with uploaded bots may start this month.
+         * @description Uploaded bots run in the server's bot runners, whose compute has a monthly budget, so that they stay inside Lambda's free tier. Once the runners have used it this month (UTC), a lobby whose start roster has an uploaded bot, a member's or a bot seat's, can't start until the first of the next month: the start fails with the lobby's game_requirement of type urn:island-battles:problem:bot-compute-spent, and the bot pickers grey out uploaded bots with the same sentence. Games already running go on, and games with only localhost, hosted and default bots are unaffected. The runners' compute is read from CloudWatch at most once per 10 minutes and kept in between, so this needs no authentication. A server that doesn't measure it, such as a local one, reports 0 and available. 503 when the compute can't be read.
+         */
+        get: operations["getBotCompute"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/game/from-lobby/{lobby_id}/deadline": {
         parameters: {
             query?: never;
@@ -342,6 +362,31 @@ export interface components {
              * @description For kind default, the level of the default bot, one that GET /bots/defaults lists. Absent for the other kinds.
              */
             level?: number;
+        };
+        BotCompute: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/BotCompute.json
+             */
+            readonly $schema?: string;
+            /** @description Whether a game with an uploaded bot, a member's or a bot seat's, may start: used_gb_seconds is under budget_gb_seconds. When false, the start is refused until the next month, and the bot pickers grey out uploaded bots. Games already running go on. */
+            available: boolean;
+            /**
+             * Format: double
+             * @description The runners' monthly budget in GB-seconds (ISLAND_BATTLES_BOT_COMPUTE_BUDGET_GB_SECONDS).
+             */
+            budget_gb_seconds: number;
+            /**
+             * @description The month, in UTC, as YYYY-MM. The budget starts again on the first of the next month.
+             * @example 2026-11
+             */
+            month: string;
+            /**
+             * Format: double
+             * @description The GB-seconds that the bot runners have used this month, from CloudWatch, read at most once per 10 minutes. 0 on a server that doesn't measure them, such as a local one.
+             */
+            used_gb_seconds: number;
         };
         BotPackage: {
             /**
@@ -1156,6 +1201,44 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    getBotCompute: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotCompute"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };

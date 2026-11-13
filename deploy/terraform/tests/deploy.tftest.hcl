@@ -506,6 +506,45 @@ run "alerts_on_errors_within_the_free_tier" {
     )
     error_message = "A zero-spend budget must email alert_email."
   }
+
+  assert {
+    condition = (
+      aws_budgets_budget.monthly.budget_type == "COST" && aws_budgets_budget.monthly.limit_amount == "5" && aws_budgets_budget.monthly.limit_unit == "USD" &&
+      aws_budgets_budget.monthly.time_unit == "MONTHLY" &&
+      one(aws_budgets_budget.monthly.notification).threshold == 80 && one(aws_budgets_budget.monthly.notification).threshold_type == "PERCENTAGE" &&
+      one(aws_budgets_budget.monthly.notification).notification_type == "ACTUAL" && one(aws_budgets_budget.monthly.notification).comparison_operator == "GREATER_THAN" &&
+      one(aws_budgets_budget.monthly.notification).subscriber_email_addresses == toset(["alerts@example.org"])
+    )
+    error_message = "A $5 monthly budget must email alert_email at 80 % of actual costs while budget_email is unset (#226)."
+  }
+}
+
+run "emails_the_monthly_budget_to_budget_email" {
+  command = plan
+
+  variables {
+    budget_email = "owner@example.org"
+  }
+
+  assert {
+    condition     = one(aws_budgets_budget.monthly.notification).subscriber_email_addresses == toset(["owner@example.org"])
+    error_message = "The monthly budget must email budget_email when it is set."
+  }
+
+  assert {
+    condition     = one(aws_budgets_budget.zero_spend.notification).subscriber_email_addresses == toset(["alerts@example.org"])
+    error_message = "budget_email changes only the monthly budget."
+  }
+}
+
+run "requires_a_budget_email_address" {
+  command = plan
+
+  variables {
+    budget_email = "not an address"
+  }
+
+  expect_failures = [var.budget_email]
 }
 
 run "rejects_logs_over_the_budget" {
@@ -1134,6 +1173,19 @@ run "lets_the_backend_invoke_only_the_two_runners" {
       }]
     )
     error_message = "The backend's role may invoke the two bot runners, and no other function."
+  }
+
+  assert {
+    condition = (
+      aws_iam_role_policy.lambda_bot_compute.role == "island-battles-lambda" &&
+      jsondecode(aws_iam_role_policy.lambda_bot_compute.policy).Statement == [{
+        Sid      = "ReadTheBotRunnersCompute"
+        Effect   = "Allow"
+        Action   = "cloudwatch:GetMetricStatistics"
+        Resource = "*"
+      }]
+    )
+    error_message = "The backend's role may read metrics with cloudwatch:GetMetricStatistics, which takes no resource, and nothing more (#226)."
   }
 
   assert {

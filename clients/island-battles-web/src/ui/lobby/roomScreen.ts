@@ -1,3 +1,4 @@
+import { offeredChoice, seatOptions } from "../../bots/compute";
 import { webClientUrl } from "../../platform";
 import type { Realtime, Snapshot } from "../../realtime";
 import { copyText, h } from "../dom";
@@ -94,6 +95,8 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
   let serverBots = false;
   /** The lobby's packages, which the host may seat, as the bot picker last read them. */
   let lobbyPackages: BotPackage[] = [];
+  /** Why uploaded bots can't be seated this month, from the bot picker; null while they can. */
+  let computeSpent: string | null = null;
   /** The bot each team's Add bot select shows, by team ID: `level-N`, `package-<id>` or `hosted`. */
   const chosenSeat = new Map<string, string>();
   /** The URL typed for each team's hosted bot, by team ID. */
@@ -256,6 +259,10 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
       lobbyPackages = items;
       render();
     },
+    onCompute(spent) {
+      computeSpent = spent;
+      render();
+    },
   });
 
   // The people who watch with the join code, in a section of their own.
@@ -408,16 +415,19 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
       });
   });
 
+  /** The Add bot select's choices: uploaded bots are greyed out once their month's compute is spent. */
+  const seatChoices = () =>
+    seatOptions({
+      levels: levels.map((bot) => bot.level),
+      serverBots,
+      packages: lobbyPackages,
+      spent: computeSpent,
+    });
+
   /** The Add bot select's value for a team: its last choice while still offered, or the first level. */
   function seatChoice(teamId: string): string {
-    const first = `level-${levels[0]?.level ?? 1}`;
-    const value = chosenSeat.get(teamId) ?? first;
-    const offered = value.startsWith("level-")
-      ? levels.some((bot) => value === `level-${bot.level}`)
-      : serverBots &&
-        (value === "hosted" ||
-          lobbyPackages.some((item) => value === `package-${item.package_id}`));
-    return offered ? value : first;
+    const choices = seatChoices();
+    return offeredChoice(choices, chosenSeat.get(teamId) ?? "");
   }
 
   const room = (snapshot: Snapshot): RoomModel =>
@@ -491,8 +501,19 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     const editSeats = model.isHost && model.phase === "waiting";
     // A team holds one member, so a bot goes only on an empty team.
     const choice = seatChoice(team.id);
-    const option = (value: string, text: string) =>
-      h("option", { attrs: { value }, selected: value === choice }, text);
+    const option = (value: string, text: string, disabled: boolean) =>
+      h(
+        "option",
+        {
+          attrs: {
+            value,
+            ...(disabled && computeSpent ? { title: computeSpent } : {}),
+          },
+          selected: value === choice,
+          disabled,
+        },
+        text,
+      );
     const urlInput =
       choice === "hosted"
         ? h("input", {
@@ -526,22 +547,14 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
                   render();
                 },
               },
-              ...levels.map((bot) =>
-                option(`level-${bot.level}`, `Bot level ${bot.level}`),
+              ...seatChoices().map((item) =>
+                option(item.value, item.label, item.disabled),
               ),
-              ...(serverBots
-                ? [
-                    ...lobbyPackages.map((item) =>
-                      option(
-                        `package-${item.package_id}`,
-                        `Uploaded: ${item.owner_name}'s bot (${item.language})`,
-                      ),
-                    ),
-                    option("hosted", "Hosted bot (URL)"),
-                  ]
-                : []),
             ),
             urlInput,
+            computeSpent && serverBots && lobbyPackages.length > 0
+              ? h("span", { class: "hint" }, computeSpent)
+              : null,
             h(
               "button",
               {

@@ -553,6 +553,13 @@ select:focus-visible {
   margin-top: 4px;
 }
 
+/* Uploaded bots once their month's compute is spent (GET /game/bot-compute). */
+.bot-uploaded.spent .bot-option {
+  background: #e7eef3;
+  color: #6b7f8f;
+  cursor: not-allowed;
+}
+
 .bot-text .hint {
   margin: 2px 0 0;
   font-size: 12px;

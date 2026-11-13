@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { choiceFromValue, choiceValue, describeBot, describeChoices, memberBot, prepareDemo, seatOptions } from "./bot-choice.mjs";
+import { choiceFromValue, choiceValue, computeSpentMessage, describeBot, describeChoices, memberBot, prepareDemo, seatOptions } from "./bot-choice.mjs";
 
 test("select values stand for choices and back", () => {
   for (const choice of [{ kind: "localhost" }, { kind: "default", level: 1 }, { kind: "default", level: 3 }, { kind: "uploaded", package_id: "p-1" }]) {
@@ -66,6 +66,7 @@ test("with server bots the host can also seat any package of the lobby and a hos
       asked.push([lobbyID, request]);
       return [{ package_id: "p-1", owner_name: "Uma", language: "python" }, { package_id: "p-2", owner_name: "Sam", language: "native" }];
     },
+    compute: async () => ({ month: "2026-11", available: true }),
   });
   assert.deepEqual(asked, [["lobby-1", "the room's request"]]);
   assert.deepEqual(options, {
@@ -78,6 +79,29 @@ test("with server bots the host can also seat any package of the lobby and a hos
     ],
   });
   // Packages that can't be read leave the other choices.
-  const withoutPackages = await seatOptions({ options: async () => ({ levels: [1], serverBots: true }), packages: async () => { throw new Error("offline"); } });
+  const withoutPackages = await seatOptions({ options: async () => ({ levels: [1], serverBots: true }), packages: async () => { throw new Error("offline"); }, compute: async () => null });
   assert.deepEqual(withoutPackages.choices.map((choice) => choice.label), ["Default bot, level 1", "Hosted bot (URL)"]);
+});
+
+test("once the month's compute is spent, the host's packages are greyed out and nothing else", async () => {
+  const seat = (compute) => seatOptions({
+    options: async () => ({ levels: [1], serverBots: true }),
+    packages: async () => [{ package_id: "p-1", owner_name: "Uma", language: "python" }],
+    compute,
+  });
+  const spent = await seat(async () => ({ month: "2026-11", used_gb_seconds: 300000, budget_gb_seconds: 300000, available: false }));
+  assert.deepEqual(spent.choices.map((choice) => [choice.label, choice.disabled === true]), [
+    ["Default bot, level 1", false], ["Uploaded: Uma's bot (python)", true], ["Hosted bot (URL)", false],
+  ]);
+  // Available, or unknown, greys out nothing.
+  for (const compute of [async () => ({ month: "2026-11", available: true }), async () => null, async () => { throw new Error("offline"); }]) {
+    assert.ok((await seat(compute)).choices.every((choice) => choice.disabled === undefined));
+  }
+});
+
+test("the spent sentence names the first of the next month, as the server's refused start does", () => {
+  assert.equal(computeSpentMessage({ month: "2026-11", available: false }), "Uploaded bots have used this month's free compute. They're back on 1 December.");
+  assert.equal(computeSpentMessage({ month: "2026-12", available: false }), "Uploaded bots have used this month's free compute. They're back on 1 January.");
+  assert.equal(computeSpentMessage({ month: "2026-12", available: true }), null);
+  assert.equal(computeSpentMessage(null), null);
 });

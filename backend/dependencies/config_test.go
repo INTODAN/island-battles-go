@@ -149,6 +149,36 @@ func TestLoadConfigReadsBothBotRunnerFunctionsOrNeither(t *testing.T) {
 	}
 }
 
+func TestLoadConfigReadsTheBotComputeBudgetAndFake(t *testing.T) {
+	t.Parallel()
+
+	config, err := LoadConfigFromLookup(mapLookup(validConfigurationEnvironment()))
+	if err != nil || config.BotComputeBudgetGBSeconds != 300000 || config.BotComputeFakeGBSeconds != nil {
+		t.Fatalf("defaults: budget %v, fake %v, %v", config.BotComputeBudgetGBSeconds, config.BotComputeFakeGBSeconds, err)
+	}
+	values := validConfigurationEnvironment()
+	values[BotComputeBudgetEnv], values[BotComputeFakeEnv] = "1200.5", "0"
+	config, err = LoadConfigFromLookup(mapLookup(values))
+	if err != nil || config.BotComputeBudgetGBSeconds != 1200.5 || config.BotComputeFakeGBSeconds == nil || *config.BotComputeFakeGBSeconds != 0 {
+		t.Fatalf("set: budget %v, fake %v, %v", config.BotComputeBudgetGBSeconds, config.BotComputeFakeGBSeconds, err)
+	}
+	for _, name := range []string{BotComputeBudgetEnv, BotComputeFakeEnv} {
+		for _, invalid := range []string{"-1", "lots", "NaN", "Inf"} {
+			values := validConfigurationEnvironment()
+			values[name] = invalid
+			if _, err := LoadConfigFromLookup(mapLookup(values)); err == nil || !strings.Contains(err.Error(), name) {
+				t.Errorf("%s=%q: error = %v", name, invalid, err)
+			}
+		}
+	}
+	// The runner functions' compute is read from CloudWatch, never faked.
+	values = validConfigurationEnvironment()
+	values[BotRunnerPythonEnv], values[BotRunnerNativeEnv], values[BotComputeFakeEnv] = "python", "native", "1"
+	if _, err := LoadConfigFromLookup(mapLookup(values)); err == nil || !strings.Contains(err.Error(), BotComputeFakeEnv) {
+		t.Errorf("a fake with the runner functions: error = %v", err)
+	}
+}
+
 func TestLoadLocalBotPythonSplitsTheCommand(t *testing.T) {
 	t.Parallel()
 

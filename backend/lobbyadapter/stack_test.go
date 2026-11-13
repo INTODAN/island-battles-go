@@ -139,7 +139,7 @@ func newLobbyStackWith(t *testing.T, serverBots services.ServerBots) *lobbyStack
 	_, api := humatest.New(t, routes.NewAPIConfig("test", "1.0.0"))
 	httpapi.Register(api, lobbies, authentication, authentication, playerTokens, nil)
 	routes.SetupGameRoutes(api, &handlers.LobbyGame{Database: database, Players: handlers.PlayerTokens{Verifier: verifier}, Publisher: stack.publisher, Watchers: lobbyClient})
-	routes.SetupRoutes(api, &handlers.Env{DB: database, ServerBots: serverBots.Enabled}, "")
+	routes.SetupRoutes(api, &handlers.Env{DB: database, ServerBots: serverBots.Enabled, BotCompute: serverBots.Compute}, "")
 	stack.api = api
 	return stack
 }

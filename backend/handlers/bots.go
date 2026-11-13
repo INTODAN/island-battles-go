@@ -5,6 +5,9 @@ import (
 
 	"islandBattles/backend/bots"
 	"islandBattles/backend/models"
+	"islandBattles/backend/observability"
+
+	"github.com/danielgtaylor/huma/v2"
 )
 
 type ListDefaultBotsResponse struct {
@@ -22,4 +25,21 @@ func (env *Env) ListDefaultBots(context.Context, *struct{}) (*ListDefaultBotsRes
 	response.Body.Bots = bots.Defaults()
 	response.Body.ServerBots = env.ServerBots
 	return response, nil
+}
+
+type GetBotComputeResponse struct {
+	Body models.BotComputeView
+}
+
+// GetBotCompute reports the bot runners' compute this month against their
+// budget, through the guard's cache, so that the bot pickers can grey out
+// uploaded bots once it is spent. It needs no authentication. A failed read
+// answers 503, and its cause goes on the request's error line.
+func (env *Env) GetBotCompute(ctx context.Context, _ *struct{}) (*GetBotComputeResponse, error) {
+	view, err := env.BotCompute.Usage(ctx)
+	if err != nil {
+		observability.RecordError(ctx, err)
+		return nil, huma.Error503ServiceUnavailable("the bot runners' compute is temporarily unavailable")
+	}
+	return &GetBotComputeResponse{Body: view}, nil
 }
