@@ -31,9 +31,9 @@ let resultFailures = 0;
 let resultDocument = null;
 let gamePlayer = null;
 let playerLoading = false;
-// True once a player outside a demo reports what it does for its game, such
-// as passing the player's turns on to a program of theirs, so the page shows
-// the status panel. A game's player that reports nothing shows nothing.
+// True once a player outside a demo reports what it does for its game, so the
+// page shows the status panel. A game's player that reports nothing shows
+// nothing.
 let playerReports = false;
 let latestGameState = null;
 // The selected game's settings form, from its catalog settings module.
@@ -892,7 +892,7 @@ async function connectWatch() {
     subscription.on("subscribed", (context) => {
       if (epoch !== watchEpoch) return;
       // After a reconnect that could not recover every publication, the
-      // document is read again, so it misses no generation.
+      // document is read again, so it misses nothing the game published.
       if (subscribed && !context.recovered) reloadWatchResult();
       subscribed = true;
     });
@@ -1409,7 +1409,7 @@ function render() {
     ? `Every team needs a player before the game can start. Still empty: ${empty.map((team) => team.name).join(", ")}.`
     : "";
   const startedHint = state.demoPlayer && game?.example_player
-    ? `${game.example_player.summary} Keep both tabs open; pause either player to hold the next turn.`
+    ? `${game.example_player.summary} Keep both tabs open; you can pause either player.`
     : game?.started_hint || "The game has started.";
   $("room-hint").textContent = !waiting ? startedHint : state.demoPlayer ? "The demo starts automatically when both players are ready." : members.length < 2 ? "Share the code above to invite the other players." : allReady && emptyHint ? emptyHint : host ? "Once every player chooses a team and marks ready, you can start the lobby." : "Choose a team and mark ready. The host will start the lobby.";
   $("retry-game").disabled = busy;
