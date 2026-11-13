@@ -11,7 +11,7 @@ The Playwright MCP tools in this project do not launch a browser. They attach ov
 
 Run both as background commands with a long timeout, so they outlive the call that started them.
 
-1. Start the backend and its dependencies with `./scripts/dev.sh`, then wait until `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8888/healthz` prints `204`.
+1. Start the lobby, the backend and their dependencies with `./scripts/dev.sh`, then wait until `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8888/healthz` and the same for the lobby's `http://127.0.0.1:8890/healthz` print `204`. The lobby and the backend are separate processes, so open the pages on one origin through the 3D client's dev server: run `bun install` and `bun run dev` in `clients/island-battles-web/` (another background command), and open `http://localhost:3000/lobby/ui/` for the lobby page and `http://localhost:3000/` for the 3D client. The backend's own pages (`/game/demo-viewer/`, `/map/builder/`) work there too.
 2. Launch a separate Chrome with a throwaway profile. Never attach to the user's own profile, and never reuse it.
 
    ```sh

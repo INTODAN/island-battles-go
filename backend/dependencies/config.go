@@ -51,8 +51,9 @@ const (
 	// game's hooks and the game's calls of the lobby's game API: the lobby's
 	// LOBBY_GAME_SECRET_ISLAND_BATTLES, by the game's name for it.
 	LobbyHookSecretEnv = "ISLAND_BATTLES_LOBBY_HOOK_SECRET"
-	// LobbyURLEnv is the lobby's URL, whose game API the game reads. Empty,
-	// the lobby runs in this process and the two call each other in memory.
+	// LobbyURLEnv is the URL of a lobby that runs on its own (lobby/cmd/lobby),
+	// whose game API and JWKS the game reads. Empty, the lobby runs in this
+	// process and the two call each other in memory.
 	LobbyURLEnv = "ISLAND_BATTLES_LOBBY_URL"
 	// BotPackagesDirEnv is read by the local server host alone; see
 	// LoadBotPackagesDir.
@@ -101,8 +102,11 @@ func DefaultDatabaseConfig(url string) DatabaseConfig {
 // supplied explicitly by the deployment, except for the pool limits and the
 // game retention period, which have defaults, the admin API key, without
 // which admin operations refuse every request, and the public URL, which
-// defaults to each request's own. Values are loaded only by
-// executables, never by package init.
+// defaults to each request's own. With LobbyURL set, the lobby runs on its
+// own, and the settings that only the lobby reads are neither required nor
+// read: the Centrifugo public URL, the connection token and proxy secrets,
+// the player token keys and lifetime, and LOBBY_GAMES. Values are loaded
+// only by executables, never by package init.
 // The listen address belongs to the HTTP server host alone; see LoadHTTPAddr.
 type Config struct {
 	Database                  DatabaseConfig
@@ -162,9 +166,12 @@ type Config struct {
 	// Island Battles' calls of the lobby's game API, at least
 	// gamehooks.MinSecretBytes bytes.
 	LobbyHookSecret []byte
-	// LobbyURL is where the game reads the lobby's game API. Empty, the
-	// lobby runs in this process, and the lobby's hook calls and the game's
-	// game API calls reach the other side's handler in memory.
+	// LobbyURL is the URL of a lobby that runs on its own, such as
+	// http://localhost:8890: the game reads its game API and its JWKS there,
+	// and it is the iss of the lobby's player tokens, so the lobby's
+	// LOBBY_PUBLIC_URL must be the same. Empty, the lobby runs in this
+	// process, and the lobby's hook calls and the game's game API calls reach
+	// the other side's handler in memory.
 	LobbyURL string
 	// LobbyGames is the lobby's LOBBY_GAMES: the games it calls over HTTP,
 	// as a JSON array of gamehooks.GameConfig. Island Battles is added, as
@@ -218,15 +225,21 @@ func (config Config) LookupLobbyGameSecret(name string) (string, bool) {
 // loadLobbyGames reads the secrets of the lobby's games and checks the
 // lobby's binding to Island Battles: LOBBY_GAMES must parse, with Island
 // Battles added, and ISLAND_BATTLES_LOBBY_HOOK_SECRET must equal the lobby's
-// secret for Island Battles while the lobby runs in this process.
+// secret for Island Battles while the lobby runs in this process. A lobby
+// that runs on its own reads its games itself.
 func (config *Config) loadLobbyGames(lookup func(string) (string, bool)) error {
 	if len(config.LobbyHookSecret) < gamehooks.MinSecretBytes {
 		return fmt.Errorf("%s must hold a secret of at least %d bytes", LobbyHookSecretEnv, gamehooks.MinSecretBytes)
 	}
 	if config.LobbyURL != "" {
-		if _, err := gamehooks.ParseServiceURL(config.LobbyURL); err != nil {
+		parsed, err := gamehooks.ParseServiceURL(config.LobbyURL)
+		if err != nil {
 			return fmt.Errorf("%s: %w", LobbyURLEnv, err)
 		}
+		if parsed.Path != "" {
+			return fmt.Errorf("%s must be an origin, such as https://lobby.example.org, without a path", LobbyURLEnv)
+		}
+		return nil
 	}
 	var listed []struct {
 		SecretEnv string `json:"secret_env"`
@@ -262,10 +275,13 @@ func (config *Config) loadLobbyGames(lookup func(string) (string, bool)) error {
 	return nil
 }
 
-// LobbyIssuer is the iss of the lobby's player tokens: the public URL, which
-// the lobby and the game share until they are deployed apart, or
-// LocalLobbyIssuer without one.
+// LobbyIssuer is the iss of the lobby's player tokens: the URL of a lobby
+// that runs on its own; or, while the lobby runs in this process, the public
+// URL, which the two share, or LocalLobbyIssuer without one.
 func (config Config) LobbyIssuer() string {
+	if config.LobbyURL != "" {
+		return config.LobbyURL
+	}
 	if config.PublicURL == "" {
 		return LocalLobbyIssuer
 	}
@@ -279,8 +295,13 @@ func LoadConfig() (Config, error) {
 
 // LoadConfigFromLookup makes configuration validation deterministic in tests.
 func LoadConfigFromLookup(lookup func(string) (string, bool)) (Config, error) {
-	if err := requireEnvironment(lookup, DatabaseURLEnv, CentrifugoPublicURLEnv, CentrifugoAPIURLEnv,
-		CentrifugoAPIKeyEnv, ConnectionTokenHMACSecretEnv, LobbyProxySecretEnv, SubmitTokenSecretEnv, PlayerTokenKeysEnv, LobbyHookSecretEnv); err != nil {
+	lobbyURL := strings.TrimRight(readEnvironment(lookup, LobbyURLEnv), "/")
+	required := []string{DatabaseURLEnv, CentrifugoAPIURLEnv, CentrifugoAPIKeyEnv, SubmitTokenSecretEnv, LobbyHookSecretEnv}
+	if lobbyURL == "" {
+		// The lobby in this process reads these too.
+		required = append(required, CentrifugoPublicURLEnv, ConnectionTokenHMACSecretEnv, LobbyProxySecretEnv, PlayerTokenKeysEnv)
+	}
+	if err := requireEnvironment(lookup, required...); err != nil {
 		return Config{}, err
 	}
 	database, err := LoadDatabaseConfigFromLookup(lookup)
@@ -291,16 +312,19 @@ func LoadConfigFromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	playerTokenKeys, err := playertoken.ParseKeySet(readEnvironment(lookup, PlayerTokenKeysEnv))
-	if err != nil {
-		// The error names no seed.
-		return Config{}, fmt.Errorf("%s: %w", PlayerTokenKeysEnv, err)
-	}
+	var playerTokenKeys *playertoken.KeySet
 	playerTokenLifetime := playertoken.MaxLifetime
-	if value := readEnvironment(lookup, PlayerTokenLifetimeEnv); value != "" {
-		playerTokenLifetime, err = time.ParseDuration(value)
-		if err != nil || playerTokenLifetime < time.Minute || playerTokenLifetime > playertoken.MaxLifetime {
-			return Config{}, fmt.Errorf("%s must be a duration from 1m to 15m", PlayerTokenLifetimeEnv)
+	if lobbyURL == "" {
+		playerTokenKeys, err = playertoken.ParseKeySet(readEnvironment(lookup, PlayerTokenKeysEnv))
+		if err != nil {
+			// The error names no seed.
+			return Config{}, fmt.Errorf("%s: %w", PlayerTokenKeysEnv, err)
+		}
+		if value := readEnvironment(lookup, PlayerTokenLifetimeEnv); value != "" {
+			playerTokenLifetime, err = time.ParseDuration(value)
+			if err != nil || playerTokenLifetime < time.Minute || playerTokenLifetime > playertoken.MaxLifetime {
+				return Config{}, fmt.Errorf("%s must be a duration from 1m to 15m", PlayerTokenLifetimeEnv)
+			}
 		}
 	}
 	serverBots := true
@@ -332,11 +356,8 @@ func LoadConfigFromLookup(lookup func(string) (string, bool)) (Config, error) {
 	}
 	config := Config{
 		Database:                  database,
-		CentrifugoPublicURL:       readEnvironment(lookup, CentrifugoPublicURLEnv),
 		CentrifugoAPIURL:          readEnvironment(lookup, CentrifugoAPIURLEnv),
 		CentrifugoAPIKey:          readEnvironment(lookup, CentrifugoAPIKeyEnv),
-		ConnectionTokenHMACSecret: readEnvironment(lookup, ConnectionTokenHMACSecretEnv),
-		LobbyProxySecret:          readEnvironment(lookup, LobbyProxySecretEnv),
 		SubmitTokenSecret:         readEnvironment(lookup, SubmitTokenSecretEnv),
 		PublicURL:                 strings.TrimRight(readEnvironment(lookup, PublicURLEnv), "/"),
 		AdminAPIKey:               readEnvironment(lookup, AdminAPIKeyEnv),
@@ -350,11 +371,16 @@ func LoadConfigFromLookup(lookup func(string) (string, bool)) (Config, error) {
 		PlayerTokenKeys:           playerTokenKeys,
 		PlayerTokenLifetime:       playerTokenLifetime,
 		LobbyHookSecret:           []byte(readEnvironment(lookup, LobbyHookSecretEnv)),
-		LobbyURL:                  strings.TrimRight(readEnvironment(lookup, LobbyURLEnv), "/"),
-		LobbyGames:                readEnvironment(lookup, LobbyGamesEnv),
+		LobbyURL:                  lobbyURL,
 	}
-	if err := validateURL(CentrifugoPublicURLEnv, config.CentrifugoPublicURL, "ws", "wss"); err != nil {
-		return Config{}, err
+	if lobbyURL == "" {
+		config.CentrifugoPublicURL = readEnvironment(lookup, CentrifugoPublicURLEnv)
+		config.ConnectionTokenHMACSecret = readEnvironment(lookup, ConnectionTokenHMACSecretEnv)
+		config.LobbyProxySecret = readEnvironment(lookup, LobbyProxySecretEnv)
+		config.LobbyGames = readEnvironment(lookup, LobbyGamesEnv)
+		if err := validateURL(CentrifugoPublicURLEnv, config.CentrifugoPublicURL, "ws", "wss"); err != nil {
+			return Config{}, err
+		}
 	}
 	if err := validateURL(CentrifugoAPIURLEnv, config.CentrifugoAPIURL, "http", "https"); err != nil {
 		return Config{}, err

@@ -1,8 +1,10 @@
 import index from "./index.html";
-import { backendOrigin, isProxiedPath } from "./proxy";
+import { proxyOrigin } from "./proxy";
 
-// The Centrifugo WebSocket is not proxied: the browser connects straight to
-// :8000, whose allowed origins already include this server.
+// The lobby and the backend run as separate processes (./scripts/dev.sh), and
+// this server forwards each one's paths to it (proxy.ts), so the browser stays
+// on one origin. The Centrifugo WebSocket is not proxied: the browser connects
+// straight to :8000, whose allowed origins already include this server.
 const server = Bun.serve({
   port: 3000,
   development: { hmr: true, console: true },
@@ -20,11 +22,12 @@ const server = Bun.serve({
         ? new Response(file)
         : new Response("Not found", { status: 404 });
     }
-    if (!isProxiedPath(url.pathname)) {
+    const origin = proxyOrigin(url.pathname);
+    if (origin === undefined) {
       return new Response("Not found", { status: 404 });
     }
     const response = await fetch(
-      new Request(backendOrigin + url.pathname + url.search, request),
+      new Request(origin + url.pathname + url.search, request),
     );
     // Bun's fetch unpacks a gzipped body (the demo is sent gzipped), so passing the headers on
     // unchanged would make the browser unpack it a second time and fail.
