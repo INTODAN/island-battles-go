@@ -161,6 +161,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/game/lobbies/{lobby_id}/bot-packages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a lobby's bot packages
+         * @description Requires an active membership of the Island Battles lobby, in any phase; anyone else gets 404. Lists every package that a member uploaded and completed, newest first, with who uploaded it, its language, its entry or command and its size. A member has at most one. Packages are deleted 8 days after their upload, with their zips. A server without storage for packages answers 503.
+         */
+        get: operations["listIslandBotPackages"];
+        put?: never;
+        /**
+         * Start uploading a bot package to a lobby
+         * @description Requires an active membership of the Island Battles lobby, in any phase, with your session or an upload token for this lobby (Authorization: Bearer ibut1.…); anyone else gets 404, and a token for another lobby, or an expired one, 401. A bot package is the zip that the SDKs' package command builds: island-battles-bot package in Python, or the Go SDK's island-battles-package. A package belongs to the lobby, and anyone in it may upload one. This stores a pending package and returns its package_id and a presigned POST: send a multipart/form-data POST to upload.url with every field of upload.fields, unchanged, and the zip last, in a field named file. The zip goes straight to storage, never through this server, so it may be up to 250 MiB (262,144,000 bytes); the presigned POST refuses an empty or larger file, and expires after 15 minutes. Then call POST /game/lobbies/{lobby_id}/bot-packages/{package_id}/complete. file_name must end in .zip, or this is 422. A server without storage for packages answers 503.
+         */
+        post: operations["startIslandBotPackageUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/game/lobbies/{lobby_id}/bot-packages/upload-token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get an upload token for uploading a bot package from the command line
+         * @description Requires an active membership of the Island Battles lobby, in any phase; anyone else gets 404. Returns an upload token for you and this lobby, valid for 15 minutes, for a command line that doesn't hold your session: island-battles-bot upload --game-url <url> --token <token> dist/island-battles-bot.zip, or the Go SDK's island-battles-package upload with the same arguments. The two upload endpoints, POST /game/lobbies/{lobby_id}/bot-packages and its complete, accept it as Authorization: Bearer <token> in place of your session; nothing else does. The command line reads the lobby from the token. A server without storage for packages answers 503.
+         */
+        post: operations["createIslandBotUploadToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/game/lobbies/{lobby_id}/bot-packages/{package_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete your bot package from a lobby
+         * @description Requires an active membership of the Island Battles lobby, in any phase; anyone else gets 404. Deletes the package and its zip. Only the member who uploaded it can: anyone else gets 403. A package that the lobby doesn't have is 404. A server without storage for packages answers 503.
+         */
+        delete: operations["deleteIslandBotPackage"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/game/lobbies/{lobby_id}/bot-packages/{package_id}/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check an uploaded bot package and add it to the lobby
+         * @description Requires an active membership of the Island Battles lobby, in any phase, with your session or an upload token for this lobby (Authorization: Bearer ibut1.…); anyone else gets 404, and a token for another lobby, or an expired one, 401. Only the member who started the upload can complete it; for anyone else the package is 404. It reads the zip's central directory and island-battles-bot.json with range requests, without downloading the zip, and checks that: the manifest is format 1, either python with python "3.14" and a module:function entry, or native with a command whose program is a file in the zip; the files come to at most 1 GiB (1,073,741,824 bytes) unpacked; and no path leaves the package (.., absolute paths or symbolic links). A package that fails a check is 422 with a detail that says what is wrong, and is deleted with its zip: start another upload. Before the zip is uploaded this is 409, and nothing changes. A valid package is the member's package in the lobby from then on, and every member sees it in GET /game/lobbies/{lobby_id}/bot-packages. A member has one package per lobby: completing a new one deletes their previous one. Completing it again returns it. A server without storage for packages answers 503.
+         */
+        post: operations["completeIslandBotPackageUpload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/game/upgrades": {
         parameters: {
             query?: never;
@@ -257,6 +341,62 @@ export interface components {
              */
             level?: number;
         };
+        BotPackage: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/BotPackage.json
+             */
+            readonly $schema?: string;
+            /** @description A python package's module:function entry, such as bot:play, or a native package's command, its arguments joined with spaces, such as ./bot worker. */
+            entry_or_command: string;
+            /**
+             * @description python: a Python bot for the python3.14 runtime. native: a program for Linux arm64, such as a Go bot.
+             * @enum {string}
+             */
+            language: "python" | "native";
+            /** @description Their display name when they uploaded it. */
+            owner_name: string;
+            /**
+             * Format: uuid
+             * @description The member who uploaded it. Only they can delete it.
+             */
+            owner_player_id: string;
+            /** Format: uuid */
+            package_id: string;
+            /**
+             * Format: int64
+             * @description The zip's size in bytes.
+             */
+            size_bytes: number;
+            /** Format: date-time */
+            uploaded_at: string;
+        };
+        BotPackageUpload: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/BotPackageUpload.json
+             */
+            readonly $schema?: string;
+            /** Format: uuid */
+            package_id: string;
+            upload: components["schemas"]["PresignedBotUpload"];
+        };
+        BotPackageUploadRequest: {
+            /** @description The zip's file name, such as island-battles-bot.zip. It must end in .zip. */
+            file_name: string;
+        };
+        BotPackages: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/BotPackages.json
+             */
+            readonly $schema?: string;
+            /** @description Every checked package of the lobby, newest first, at most one per member. */
+            packages: components["schemas"]["BotPackage"][] | null;
+        };
         /** @description What a bot is given to play one turn. A bot is a stateless function: whatever it needs to keep between turns goes in the memory it returns, which the server stores per player and game. */
         BotTurn: {
             /** Format: int64 */
@@ -285,6 +425,18 @@ export interface components {
             memory: {
                 [key: string]: unknown;
             } | null;
+        };
+        BotUploadToken: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/BotUploadToken.json
+             */
+            readonly $schema?: string;
+            /** Format: date-time */
+            expires_at: string;
+            /** @description An upload token, ibut1.…: send it as Authorization: Bearer <token> to the two upload endpoints of this lobby, in place of a session. */
+            token: string;
         };
         Castle: {
             /**
@@ -698,6 +850,14 @@ export interface components {
             lines: components["schemas"]["GenerationLogLine"][];
             /** Format: int64 */
             team_color: number;
+        };
+        PresignedBotUpload: {
+            /** @description The form fields to send before the file, unchanged. */
+            fields: {
+                [key: string]: string;
+            };
+            /** @description POST a multipart/form-data body here: every field of fields, then the zip as the last field, named file. */
+            url: string;
         };
         Problem: {
             /** @enum {string} */
@@ -1186,6 +1346,175 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Demo"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    listIslandBotPackages: {
+        parameters: {
+            query?: never;
+            header?: {
+                Authorization?: string;
+            };
+            path: {
+                lobby_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotPackages"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    startIslandBotPackageUpload: {
+        parameters: {
+            query?: never;
+            header?: {
+                Authorization?: string;
+            };
+            path: {
+                lobby_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BotPackageUploadRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotPackageUpload"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    createIslandBotUploadToken: {
+        parameters: {
+            query?: never;
+            header?: {
+                Authorization?: string;
+            };
+            path: {
+                lobby_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotUploadToken"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    deleteIslandBotPackage: {
+        parameters: {
+            query?: never;
+            header?: {
+                Authorization?: string;
+            };
+            path: {
+                lobby_id: string;
+                package_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    completeIslandBotPackageUpload: {
+        parameters: {
+            query?: never;
+            header?: {
+                Authorization?: string;
+            };
+            path: {
+                lobby_id: string;
+                package_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BotPackage"];
                 };
             };
             /** @description Error */

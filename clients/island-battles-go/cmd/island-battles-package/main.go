@@ -15,6 +15,11 @@
 // and the executable bot, built with GOOS=linux GOARCH=arm64 CGO_ENABLED=0.
 // The zip may be at most 250 MiB and 1 GiB unpacked; over either, the command
 // names the largest files.
+//
+// Its upload subcommand uploads the zip to a lobby, with the upload token that
+// the bot picker's "Upload from the command line" shows:
+//
+//	go run github.com/INTODAN/island-battles-go/clients/island-battles-go/cmd/island-battles-package upload --game-url <url> --token <token> [zip]
 package main
 
 import (
@@ -71,11 +76,14 @@ type entry struct {
 }
 
 func run(arguments []string, stdout, stderr io.Writer) int {
+	if len(arguments) > 0 && arguments[0] == "upload" {
+		return runUpload(arguments[1:], stdout, stderr)
+	}
 	flags := flag.NewFlagSet("island-battles-package", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	output := flags.String("output", defaultOutput, "the zip to write")
 	flags.Usage = func() {
-		_, _ = fmt.Fprintf(stderr, "Usage: island-battles-package [--output file] [package path]\n\nBuilds the bot program for Linux arm64 and zips it with its manifest for the\nserver's runners. The package is the bot's main package, \".\" by default.\n\nFlags:\n")
+		_, _ = fmt.Fprintf(stderr, "Usage: island-battles-package [--output file] [package path]\n\nBuilds the bot program for Linux arm64 and zips it with its manifest for the\nserver's runners. The package is the bot's main package, \".\" by default.\n\n       island-battles-package upload --game-url <url> --token <token> [zip]\n\nUploads the zip to a lobby; see island-battles-package upload --help.\n\nFlags:\n")
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(arguments); err != nil {

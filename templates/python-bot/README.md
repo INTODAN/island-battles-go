@@ -25,7 +25,15 @@ All run from any directory.
 | `scripts/build.sh` | `uv build`: a wheel and a source archive in `dist/`, and prints their paths. |
 | `scripts/package.sh` | `island-battles-bot package`: `dist/island-battles-bot.zip`, the bot and its dependencies for the server's runners (Linux arm64). Needs a network. |
 
-`scripts/build.sh` makes the standard Python package of the bot. `scripts/package.sh` makes the zip the game server's runners will run: your bot and its locked dependencies for Linux arm64 (`dist/island-battles-bot.zip`; see "Package your bot" in the SDK's README). Packaging exists; uploading a package to the game server comes with #112, and until then bots run on your machine. Packaging needs an `island-battles-python` release that has the worker mode, so raise the minimum in `pyproject.toml` and run `uv lock --upgrade-package island-battles-python` when it is out.
+`scripts/build.sh` makes the standard Python package of the bot. `scripts/package.sh` makes the zip the game server's runners will run: your bot and its locked dependencies for Linux arm64 (`dist/island-battles-bot.zip`; see "Package your bot" in the SDK's README). Packaging needs an `island-battles-python` release that has the worker mode, so raise the minimum in `pyproject.toml` and run `uv lock --upgrade-package island-battles-python` when it is out.
+
+To upload the zip to your lobby, open the bot picker in the lobby page or the 3D client: **Upload bot (.zip)** takes the file, or **Upload from the command line** shows a command to copy, with the game's address and a token that is valid for 15 minutes:
+
+```sh
+uv run island-battles-bot upload --game-url <url> --token <token> dist/island-battles-bot.zip
+```
+
+The game checks the package and lists it for everyone in the lobby; a new upload replaces your previous one. `upload` needs an `island-battles-python` release that has it, like the worker mode. Running uploaded packages comes with #112; until then bots run on your machine.
 
 ## How your bot gets its turns
 
