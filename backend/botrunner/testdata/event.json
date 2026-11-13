@@ -1,0 +1,143 @@
+{
+  "package": {
+    "id": "6f1c2b9e-4d0a-4c55-9a7e-2f8b1d3c4e5a",
+    "url": "https://island-battles-bot-packages.s3.eu-central-1.amazonaws.com/lobbies/0b8f6a1e-3c2d-4e5f-8a9b-1c2d3e4f5a6b/6f1c2b9e-4d0a-4c55-9a7e-2f8b1d3c4e5a.zip?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Expires=3600&X-Amz-Signature=0000",
+    "size_bytes": 123
+  },
+  "delivery": {
+    "turn": {
+      "game_id": 1,
+      "team_color": 1,
+      "upgrades": [
+        {
+          "type": "clash_stop_generations",
+          "description": "Generations a troop stays stopped after a clash",
+          "max_level": 3,
+          "levels": [
+            {
+              "level": 1,
+              "value": 3,
+              "soldier_cost": 0
+            },
+            {
+              "level": 2,
+              "value": 2,
+              "soldier_cost": 10
+            },
+            {
+              "level": 3,
+              "value": 1,
+              "soldier_cost": 20
+            }
+          ]
+        },
+        {
+          "type": "speed",
+          "description": "World units a troop moves per turn",
+          "max_level": 4,
+          "levels": [
+            {
+              "level": 1,
+              "value": 0.5,
+              "soldier_cost": 0
+            },
+            {
+              "level": 2,
+              "value": 1,
+              "soldier_cost": 10
+            },
+            {
+              "level": 3,
+              "value": 1.5,
+              "soldier_cost": 20
+            },
+            {
+              "level": 4,
+              "value": 2,
+              "soldier_cost": 30
+            }
+          ]
+        }
+      ],
+      "memory": {
+        "sent_total": 4
+      },
+      "turn_deadline_at": "2026-11-13T12:00:30Z",
+      "generation": {
+        "id": 12,
+        "castles": [
+          {
+            "id": 0,
+            "team_color": 1,
+            "soldiers": 30,
+            "x": -3.0,
+            "y": 0.0,
+            "upgrades": {
+              "speed": 1,
+              "clash_stop_generations": 1
+            }
+          },
+          {
+            "id": 1,
+            "team_color": 2,
+            "soldiers": 30,
+            "x": 3.0,
+            "y": 0.0,
+            "upgrades": {
+              "speed": 1,
+              "clash_stop_generations": 1
+            }
+          },
+          {
+            "id": 2,
+            "team_color": 0,
+            "soldiers": 10,
+            "x": 0.0,
+            "y": 2.0,
+            "upgrades": {
+              "speed": 1,
+              "clash_stop_generations": 1
+            }
+          },
+          {
+            "id": 3,
+            "team_color": 1,
+            "soldiers": 12,
+            "x": -2.0,
+            "y": -2.0,
+            "upgrades": {
+              "speed": 1,
+              "clash_stop_generations": 1
+            }
+          }
+        ],
+        "soldier_groups": [
+          {
+            "id": 0,
+            "team_color": 2,
+            "soldiers": 4,
+            "origin_castle_id": 1,
+            "destination_castle_id": 0,
+            "x": 1.0,
+            "y": 0.0,
+            "clash_radius": 0.5,
+            "upgrades": {
+              "speed": 1,
+              "clash_stop_generations": 1
+            }
+          }
+        ],
+        "clashes": []
+      }
+    },
+    "submit": {
+      "url": "https://island-battles.example.org/generation/commands",
+      "token": "ibst1.eyJnYW1lX2lkIjo3fQ.c2lnbmF0dXJl",
+      "deadline_at": "2026-11-13T12:00:30Z"
+    }
+  },
+  "limits": {
+    "load_seconds": 10,
+    "play_seconds": 2
+  }
+}

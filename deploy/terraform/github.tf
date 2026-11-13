@@ -3,7 +3,8 @@
 # Only jobs in var.github_environment of var.github_repository may assume it.
 #
 # It can read the account, as a plan must, and write only what a backend or VM
-# deploy writes: the function's code and settings, the deploy bucket, the web
+# deploy writes: the function's code and settings, the bot runners' code
+# (bot_runners.tf), the deploy bucket, the web
 # client's files under play/ and their cache invalidation, and a temporary SSH
 # key for the VM. Anything else, such as new alarms or a change
 # to the VM, goes through `scripts/aws.sh apply`: on a person's machine, or in
@@ -67,6 +68,14 @@ resource "aws_iam_role_policy" "github_deploy" {
           "lambda:UntagResource",
         ]
         Resource = "arn:aws:lambda:${var.region}:${data.aws_caller_identity.current.account_id}:function:${var.name}"
+      },
+      {
+        # The bot runners' code (bot_runners.tf), which a backend deploy
+        # publishes with the backend. Their settings change only on an apply.
+        Sid      = "PublishTheBotRunners"
+        Effect   = "Allow"
+        Action   = "lambda:UpdateFunctionCode"
+        Resource = [for name in values(local.bot_runner_function_names) : "arn:aws:lambda:${var.region}:${data.aws_caller_identity.current.account_id}:function:${name}"]
       },
       {
         Sid      = "KeepTheFunctionsRole"

@@ -56,6 +56,7 @@ Teams and readiness belong to the generic lobby. Starting freezes a roster. The 
 *   **Regenerate the web client's API types:** `bun run generate` in `clients/island-battles-web/` (`bun run generate --check` verifies they are current; `web-client.yml` runs it on any change to `lobby/api/` or `backend/api/`)
 *   **Python unit tests:** `uv run --project lobby/clients/lobby-python --locked pytest lobby/clients/lobby-python/tests`
 *   **Python bot client tests:** `uv run --project clients/island-battles-python --locked pytest clients/island-battles-python/tests`
+*   **Python bot runner tests:** `uv run --no-project --python 3.14 python -I -m unittest discover -s backend/botrunner/python` (the end-to-end test needs PyPI; see [Bot runners](backend/README.md#bot-runners))
 *   **Gameplay client conformance (offline):** `uv run --project clients/conformance --locked pytest clients/conformance/tests/test_models.py`
 *   **Go SDK conformance (offline):** `ISLAND_BATTLES_CLIENT_COMMAND="go run ./clients/island-battles-go/conformance" uv run --project clients/conformance --locked pytest clients/conformance/tests/test_models.py`; live: `./scripts/test-client-conformance.sh "go -C $PWD run ./clients/island-battles-go/conformance"`
 *   **Gameplay client conformance (live, Linux Docker or Podman):** `./scripts/test-client-conformance.sh ["<adapter command>"]`
@@ -70,7 +71,7 @@ Teams and readiness belong to the generic lobby. Starting freezes a roster. The 
 |---|---|
 | Go | `go vet`, `golangci-lint` (pinned to the version in the workflow), a `gofmt -l` check of the three modules (the host, `lobby/` and the Go SDK in `clients/island-battles-go/`), and `go test` with Testcontainers on the runner's Docker |
 | API contract | both OpenAPI `--check` commands and the generated gameplay models' `--check` |
-| Python | the lobby client's unit tests, the bot client's tests and the offline gameplay client conformance tests, with `uv --locked`, for the Python client and the Go SDK's adapter, and the [Python bot template](templates/python-bot/README.md)'s `scripts/check.sh` against the locked PyPI SDK and against `clients/island-battles-python` |
+| Python | the lobby client's unit tests, the bot client's tests, the Python bot runner's tests and the offline gameplay client conformance tests, with `uv --locked`, for the Python client and the Go SDK's adapter, and the [Python bot template](templates/python-bot/README.md)'s `scripts/check.sh` against the locked PyPI SDK and against `clients/island-battles-python` |
 | JS | `node --test` for the tests in `backend/demo`, `backend/demoviewer`, `backend/mapbuilder` and `lobby/frontend` |
 | Deploy | `python3 -I -m unittest discover -s deploy -p 'test_*.py'` |
 

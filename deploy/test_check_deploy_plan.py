@@ -73,6 +73,30 @@ class DeployModeTest(unittest.TestCase):
         self.assertEqual(code, 0, stderr)
         self.assertEqual(run("publishes-backend", FUNCTION_UPDATE, *created)[1], "yes\n")
 
+    def test_allows_publishing_the_bot_runners_code_with_the_backend(self):
+        # A backend deploy publishes the runners' new code too (#223).
+        runners = [change(f'aws_lambda_function.bot_runner["{kind}"]', ["update"], f"island-battles-bot-runner-{kind}")
+                   for kind in ("python", "native")]
+        code, _, stderr = run("deploy", FUNCTION_UPDATE, *runners)
+        self.assertEqual(code, 0, stderr)
+
+    def test_the_runners_code_alone_runs_no_migrations(self):
+        runner = change('aws_lambda_function.bot_runner["native"]', ["update"], "island-battles-bot-runner-native")
+        self.assertEqual(run("publishes-backend", runner)[1], "no\n")
+
+    def test_creating_the_bot_runners_destroys_nothing(self):
+        # The apply of #223: the runners, their role, logs and invoke settings,
+        # and the deploy role's new statement.
+        created = [change(address, ["create"]) for address in (
+            "aws_iam_role.bot_runner", "aws_iam_role_policy.bot_runner_logs",
+            'aws_cloudwatch_log_group.bot_runner["python"]', 'aws_cloudwatch_log_group.bot_runner["native"]',
+            'aws_lambda_function.bot_runner["python"]', 'aws_lambda_function.bot_runner["native"]',
+            'aws_lambda_function_event_invoke_config.bot_runner["python"]',
+            'aws_lambda_function_event_invoke_config.bot_runner["native"]')]
+        created.append(change("aws_iam_role_policy.github_deploy[0]", ["update"]))
+        self.assertEqual(run("apply", *created)[:2], (0, ""))
+        self.assertEqual(run("publishes-backend", *created)[1], "no\n")
+
     def test_refuses_deleting_the_bot_package_bucket(self):
         code, _, stderr = run("deploy", change("aws_s3_bucket.bot_packages", ["delete"], "island-battles-bot-packages"))
         self.assertEqual(code, 1)

@@ -58,7 +58,7 @@ So one person plays a whole game against a bot: create a lobby with two teams, c
 
 ### Bot packages
 
-Any active member of a lobby, in any phase, can upload a **bot package** to it (#221): the zip that the SDKs' `package` command builds, with `island-battles-bot.json` at its root. A package belongs to the lobby; a member has at most one, and completing a new upload deletes their previous one. There are no quotas, only the size limits, which are the SDKs' own in binary units: 250 MiB zipped (262,144,000 bytes) and 1 GiB unpacked (1,073,741,824 bytes). Running packages comes in later issues of #112; for now they are uploaded, listed and deleted. [`services/bot_packages.go`](services/bot_packages.go) owns the rules.
+Any active member of a lobby, in any phase, can upload a **bot package** to it (#221): the zip that the SDKs' `package` command builds, with `island-battles-bot.json` at its root. A package belongs to the lobby; a member has at most one, and completing a new upload deletes their previous one. There are no quotas, only the size limits, which are the SDKs' own in binary units: 250 MiB zipped (262,144,000 bytes) and 1 GiB unpacked (1,073,741,824 bytes). The [bot runners](#bot-runners) play them; until the backend invokes the runners (#225), packages are uploaded, listed and deleted. [`services/bot_packages.go`](services/bot_packages.go) owns the rules.
 
 1. `POST /game/lobbies/{lobby_id}/bot-packages` with `{"file_name": "island-battles-bot.zip"}` stores a `pending` row and answers `201` with `package_id` and a **presigned POST**, `upload: {url, fields}`, valid 15 minutes, for 1 byte to 250 MiB, to the key `lobbies/<lobby_id>/<package_id>.zip`. The zip never passes through the backend, since a Lambda Function URL takes at most 6 MB: the client posts `fields` and then the file, as `file`, to `url`.
 2. `POST …/bot-packages/{package_id}/complete` checks the zip with range requests, without downloading it ([`botpackage/`](botpackage/botpackage.go), [`packagestore/`](packagestore/packagestore.go)): the tail and the central directory, then the manifest, usually three requests. The manifest must be format 1, either `python` with `"python": "3.14"` and a `module:function` entry, or `native` with a `command` whose program is a file in the zip; the files must come to at most 1 GiB unpacked, judged from the directory, so a zip bomb is never unpacked; and no path may leave the package (`..`, absolute paths, backslashes, symbolic links or other non-regular files). A package that fails is 422 with a plain `detail` that says what is wrong, and its row and zip are deleted. Before the zip arrives, it is 409 and nothing changes. Only the member who started the upload can complete it.
@@ -239,6 +239,74 @@ A bot that runs outside the backend gets each turn as a **turn delivery** and su
 **The submit URL** is `ISLAND_BATTLES_PUBLIC_URL` plus `/generation/commands`: the game's public origin, such as `https://island-battles.example.org`, which the VM deploy writes from `game_url` ([deploy README](../deploy/README.md#the-lambdas-settings)). Without it, each request's own scheme and `Host` are used, which suits a local backend that players reach directly. The bot servers submit only to `https://island-battles.elidan.org`, to `http://localhost` and `http://127.0.0.1` on any port, and to hosts added with `serve --allow-submit-host`.
 
 Bots that the backend plays itself implement the Go interface `bots.Bot` in [`bots/`](bots/bots.go), `Play(ctx, BotTurn) (BotTurnResult, error)`, on the Go types `models.BotTurn` and `models.BotTurnResult` that the schemas are exported from. To write a bot of your own in Go, use the [Go SDK](../clients/island-battles-go/README.md); in Python, the [Python SDK](../clients/island-battles-python/README.md).
+
+### Bot runners
+
+Two Lambda functions play the turns of [uploaded packages](#bot-packages) (#223), one turn of one bot per invocation, within the owner's budget of 1 GB and 2 seconds of play a turn, plus up to 10 seconds to load a package. The backend invokes them asynchronously in a later issue (#225); [deploy/README.md](../deploy/README.md#bot-runners) has the functions' settings.
+
+| Runner | Code | Plays |
+|---|---|---|
+| `<name>-bot-runner-python` | [`botrunner/python/runner.py`](botrunner/python/runner.py), the standard library only, on the `python3.14` runtime | `python` packages |
+| `<name>-bot-runner-native` | [`cmd/bot-runner-native`](cmd/bot-runner-native/main.go), a Go `bootstrap` on `provided.al2023` | `native` packages, such as Go bots, and hosted bots' deliveries |
+
+**The event** is [`models.BotRunnerEvent`](models/bot_runner.go), as JSON; both runners' tests use the example in [`botrunner/testdata/event.json`](botrunner/testdata/event.json):
+
+```json
+{"package": {"id": "6f1c…", "url": "<presigned GET, valid 1 hour>", "size_bytes": 123},
+ "delivery": <TurnDelivery>,
+ "limits": {"load_seconds": 10, "play_seconds": 2}}
+```
+
+**A turn:**
+
+1. **Load**, unless the instance already has this package. An instance keeps at most one package, under `/tmp/bot/<package id>`. Another package stops the worker and deletes `/tmp/bot`, then the runner downloads the zip (refusing one over 250 MiB, or of another size than `size_bytes`), checks it as the upload does ([`botpackage/`](botpackage/botpackage.go): the manifest, and no `..`, absolute paths, backslashes, links or other special files), and unpacks it, counting the bytes it writes and stopping past 1 GiB, since the sizes the zip declares come from the uploader. It starts the worker of #216 and waits for `{"ready": true}`. All of this has `load_seconds`.
+   - Python: `python3.14 -m island_battles_client.worker <entry>` in the unpacked folder, with `PYTHONPATH=<unpacked>/site`. Not `-I`, which would ignore `PYTHONPATH`, while the SDK's worker is inside `site/`.
+   - Native: the manifest's `command`, such as `./bot worker`, in the unpacked folder.
+   - The worker gets only `PATH`, `HOME`, `TMPDIR`, `LANG`, the runtime's `LD_LIBRARY_PATH` and, for Python, `PYTHONPATH`: none of the runner's environment, such as its AWS credentials. It runs in a process group of its own.
+2. **Play:** write `{"turn": <BotTurn>}` and wait at most `play_seconds` for the answer line.
+3. **Submit** `{game_id, generation_id, request_id, commands, logs, memory, complete: true}` to `delivery.submit.url` with `Authorization: Bearer <submit.token>`, as a hosted bot does ([turn deliveries](#turn-deliveries)), again after no answer or a 5xx while there is time. When the bot fails, the runner submits a **pass** instead: no commands, the turn's own memory, and one `error` line from `island_battles.bots`, as the [default bots](#default-bots) pass. A bot fails when it answers `{"error": …}`, doesn't load or answer in time, crashes, breaks the protocol, or answers with something the server rejects (403, 422, or a 409 for soldiers or an upgrade level). The line says why and ends with the worker's last stderr lines, cut to the line's 500 characters.
+4. A worker that timed out, crashed or broke the protocol is killed with its whole process group, and the next turn loads the package again. One that answered `{"error": …}` keeps running.
+
+**What a runner may reach.** The submit URL must be `https` on the host in `GAME_SUBMIT_HOST` (Terraform sets the game's name), or `http` when that host is `localhost` or `127.0.0.1`, so a crafted event can't make a runner post a token, or anything else, elsewhere: such an event fails and submits nothing. The package URL must be `https`. Neither runner follows redirects. Their role may only write their own logs, so they have no AWS access and hold no secrets; a package arrives as a presigned GET.
+
+**Hosted bots.** The native runner also takes `{"hosted": {"url": "…"}, "delivery": <TurnDelivery>}`: it POSTs the delivery to the URL with a 5-second timeout and `User-Agent: island-battles-bot-delivery/1`, and does nothing more, since a hosted bot submits for itself.
+
+**Running a runner locally.** Each runner has a `--local` mode that plays the current turn of a player in a local game, through the same code as on Lambda: it reads the player's turn delivery from the game, serves the zip on `127.0.0.1` in place of S3, and submits to the game. Start a lobby against a local backend (`./scripts/dev.sh`), and get a player token for the player whose turn the bot plays, as for [`serve`](../clients/island-battles-go/README.md):
+
+```sh
+PLAYER_TOKEN=$(curl -s -X POST localhost:8888/lobby/v1/player-tokens -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"game_key": "island-battles"}' | jq -r .token)
+# A native package, such as a Go bot:
+go run ./backend/cmd/bot-runner-native --local --package bot.zip --game-url=http://localhost:8888 --lobby-id=$LOBBY_ID --token=$PLAYER_TOKEN
+# A Python package:
+uv run --no-project --python 3.14 python -I backend/botrunner/python/runner.py --local --package bot.zip --game-url=http://localhost:8888 --lobby-id=$LOBBY_ID --token=$PLAYER_TOKEN
+```
+
+Each prints what it did, such as `{"outcome": "submitted", "status": 200}`, or `passed` with the reason. `--load-seconds` and `--play-seconds` change the limits, and `GAME_SUBMIT_HOST` defaults to the game URL's host. Choose the player's localhost bot in the lobby, so the backend waits for the turn.
+
+The package runs on your machine, so it must be built for it. The SDKs' `package` builds for Linux arm64, the Lambda's architecture, which runs as is only on a Linux arm64 machine. Elsewhere, build the same package for your machine, as the end-to-end tests do:
+
+- **Go:** build the bot for your machine and zip it with the same manifest:
+
+  ```sh
+  mkdir -p /tmp/host-bot && go -C clients/island-battles-go build -o /tmp/host-bot/bot ./examples/level1
+  printf '{"format": 1, "language": "native", "command": ["./bot", "worker"]}\n' >/tmp/host-bot/island-battles-bot.json
+  (cd /tmp/host-bot && zip -q ../host-bot.zip bot island-battles-bot.json)
+  ```
+
+- **Python** (Linux only, for dependencies such as `pydantic-core` that hold compiled code): run the SDK's packager with your machine's platform, in the bot's project. Its `uv.lock` needs an SDK with the worker mode, newer than 0.2.0 on PyPI; the end-to-end test points the template at this repository's SDK:
+
+  ```sh
+  uv run --project <repository>/clients/island-battles-python --locked python -I -c \
+    'from pathlib import Path; from island_battles_client import bundle; bundle.PYTHON_PLATFORM = "x86_64-manylinux_2_28"; bundle.package(Path("."), "bot:play", Path("dist/host-bot.zip"))'
+  ```
+
+**Tests.** The Go tests in `cmd/bot-runner-native` and the Python unit tests in `botrunner/python` run each runner against fake packages, shell scripts and a stand-in for the SDK's worker, and a fake game: loading once per package, load and play timeouts, crashes, refused paths and sizes, the submit host, and hosted deliveries. Each also has an end-to-end test of a real package: the native runner plays the Go SDK's level 1 example, packaged by its `island-battles-package`, and the Python runner the [bot template](../templates/python-bot/README.md), packaged by the SDK's `package` from this repository's SDK, and both check the batch the fake game receives. On a machine that isn't Linux arm64 they package for the machine's own architecture, as above; the Python one needs PyPI and is skipped without it.
+
+```sh
+go test ./backend/cmd/bot-runner-native/
+uv run --no-project --python 3.14 python -I -m unittest discover -s backend/botrunner/python
+```
 
 ### Default bots
 

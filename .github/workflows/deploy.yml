@@ -14,8 +14,9 @@
 # deploy an earlier release again with release_tag, to roll back.
 #
 # - backend, vm, web, smoke and plan use the deploy role
-#   (deploy/terraform/github.tf), which can only publish the backend, upload
-#   the web client, log in to the VM and use the deploy bucket.
+#   (deploy/terraform/github.tf), which can only publish the backend and the
+#   bot runners' code, upload the web client, log in to the VM and use the
+#   deploy bucket.
 # - plan saves a plan under plans/<run ID>/ in the deploy bucket and posts it
 #   to the run's summary. apply applies one saved plan, by that run ID, with
 #   the apply role (deploy/github_apply_role.py), so what was read is what's
@@ -150,7 +151,8 @@ jobs:
           role-to-assume: ${{ steps.role.outputs.arn }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      # Builds the backend, and runs the migrations with `go run`.
+      # Builds the backend and the native bot runner, and runs the migrations
+      # with `go run`.
       - if: contains(fromJSON('["backend", "plan", "apply"]'), inputs.target)
         uses: actions/setup-go@v6
         with:
