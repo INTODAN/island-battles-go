@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"islandBattles/backend/botcompute"
 	"islandBattles/backend/botrunner"
 	"islandBattles/backend/demo"
 	"islandBattles/backend/demoviewer"
@@ -215,7 +216,11 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	if err != nil {
 		return nil, err
 	}
-	serverBots := services.ServerBots{Enabled: config.ServerBots, LoopbackHosts: selected.localRunners != nil}
+	compute, err := botComputeGuard(config, database)
+	if err != nil {
+		return nil, err
+	}
+	serverBots := services.ServerBots{Enabled: config.ServerBots, LoopbackHosts: selected.localRunners != nil, Compute: compute}
 	hooks, err = lobbyadapter.Hooks(config.LobbyHookSecret, lobbyadapter.Registration(database, gamePublisher, bots, serverBots, lobbyClient))
 	if err != nil {
 		return nil, err
@@ -242,7 +247,7 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	api := humachi.New(router, routes.NewAPIConfig("Island Battles Go Backend", "1.0.0"))
 	// Before any operation is registered, so every operation gets it.
 	api.UseMiddleware(observability.NameOperations)
-	environment := handlers.Env{DB: database, ServerBots: config.ServerBots}
+	environment := handlers.Env{DB: database, ServerBots: config.ServerBots, BotCompute: compute}
 	routes.SetupRoutes(api, &environment, config.AdminAPIKey)
 	if config.AdminAPIKey == "" {
 		logger.Warn("POST /map/create refuses every request because " + dependencies.AdminAPIKeyEnv + " is not set")
@@ -305,6 +310,27 @@ func turnSender(config dependencies.Config, selected options, packages packagest
 		logger.Warn("Hosted and uploaded bots get no turns because " + dependencies.BotRunnerPythonEnv + " and " + dependencies.BotRunnerNativeEnv + " are not set")
 	}
 	return sender, nil
+}
+
+// botComputeGuard is the monthly guard on the bot runners' compute (#226).
+// While server bots are on, it reads the runner functions' compute from
+// CloudWatch, through the database's cache, where the configuration names
+// them. Without them, as on a local server, it reads the fake compute that
+// the configuration sets, or is off.
+func botComputeGuard(config dependencies.Config, database *gorm.DB) (*services.BotComputeGuard, error) {
+	guard := &services.BotComputeGuard{BudgetGBSeconds: config.BotComputeBudgetGBSeconds}
+	switch {
+	case !config.ServerBots:
+	case config.BotRunnerPython != "":
+		metrics, err := botcompute.CloudWatchFromEnvironment(context.Background(), config.BotRunnerPython, config.BotRunnerNative)
+		if err != nil {
+			return nil, err
+		}
+		guard.Meter = services.CachedBotCompute{Database: database, Meter: metrics}
+	case config.BotComputeFakeGBSeconds != nil:
+		guard.Meter = services.FixedBotCompute(*config.BotComputeFakeGBSeconds)
+	}
+	return guard, nil
 }
 
 // annotatingAuthentication adds the player of each verified session to the

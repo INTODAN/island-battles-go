@@ -53,6 +53,10 @@ type ServerBots struct {
 	// URL rules. Only the local server host sets it, for development, as its
 	// local runners deliver to such a URL.
 	LoopbackHosts bool
+	// Compute is the monthly guard on the bot runners' compute (#226): a
+	// start whose roster has an uploaded bot is refused once it is spent.
+	// Nil never refuses.
+	Compute *BotComputeGuard
 }
 
 // BotRules are Island Battles' bot rules for its lobbies: which bots a
@@ -216,12 +220,14 @@ func isUUID(value string) bool {
 // lobby. While server bots are offered, the check also reads the lobby's
 // bot seats at the start, with seats, since the lobby passes no seats to the
 // check: a bot seat whose package is gone stops the start too. seats may be
-// nil, which checks no seats.
+// nil, which checks no seats. A start with an uploaded bot, a member's or a
+// seat's, is also refused once the bot runners have used this month's
+// compute (ServerBots.Compute, #226); getting ready is not.
 //
 // The lobby runs the check while it holds the lobby's lock, so the check
 // reads as little as it can: nothing for a member getting ready without an
-// uploaded bot, and the lobby's packages only when a member or a seat has
-// an uploaded bot.
+// uploaded bot, and the lobby's packages, and at the start the runners'
+// cached compute, only when a member or a seat has an uploaded bot.
 func (rules BotRules) ReadyGate(ctx context.Context, lobbyID string, seats func(context.Context) ([]domain.Member, error)) (domain.ReadyCheck, error) {
 	if !rules.ServerBots.Enabled {
 		return func(members []domain.ReadyMember, atStart bool) error {
@@ -274,6 +280,28 @@ func (rules BotRules) checkReady(ctx context.Context, lobbyID string, seats func
 	}
 	if len(goneSeats) > 0 {
 		return domain.GameRequirement(BotPackageGoneProblemType, "The uploaded bot of "+strings.Join(goneSeats, ", ")+" was replaced or deleted: remove the seat and add the bot again.")
+	}
+	if atStart && (len(packageSeats) > 0 || choseUploadedBot(members)) {
+		return rules.checkCompute(ctx)
+	}
+	return nil
+}
+
+// checkCompute refuses a start with an uploaded bot once the bot runners
+// have used this month's compute budget. A failed read of their compute is
+// reported as unavailable.
+func (rules BotRules) checkCompute(ctx context.Context) error {
+	if rules.ServerBots.Compute == nil {
+		return nil
+	}
+	usage, err := rules.ServerBots.Compute.Usage(ctx)
+	switch {
+	case err != nil && ctx.Err() != nil:
+		return ctx.Err()
+	case err != nil:
+		return fmt.Errorf("%w: read the bot runners' compute: %w", domain.ErrUnavailable, err)
+	case !usage.Available:
+		return domain.GameRequirement(BotComputeProblemType, BotComputeSpentMessage(usage.Month))
 	}
 	return nil
 }

@@ -30,6 +30,51 @@
         ],
         "type": "object"
       },
+      "BotCompute": {
+        "additionalProperties": false,
+        "properties": {
+          "$schema": {
+            "description": "A URL to the JSON Schema for this object.",
+            "examples": [
+              "https://example.com/BotCompute.json"
+            ],
+            "format": "uri",
+            "readOnly": true,
+            "type": "string"
+          },
+          "available": {
+            "description": "Whether a game with an uploaded bot, a member's or a bot seat's, may start: used_gb_seconds is under budget_gb_seconds. When false, the start is refused until the next month, and the bot pickers grey out uploaded bots. Games already running go on.",
+            "type": "boolean"
+          },
+          "budget_gb_seconds": {
+            "description": "The runners' monthly budget in GB-seconds (ISLAND_BATTLES_BOT_COMPUTE_BUDGET_GB_SECONDS).",
+            "format": "double",
+            "minimum": 0,
+            "type": "number"
+          },
+          "month": {
+            "description": "The month, in UTC, as YYYY-MM. The budget starts again on the first of the next month.",
+            "examples": [
+              "2026-11"
+            ],
+            "pattern": "^[0-9]{4}-[0-9]{2}$",
+            "type": "string"
+          },
+          "used_gb_seconds": {
+            "description": "The GB-seconds that the bot runners have used this month, from CloudWatch, read at most once per 10 minutes. 0 on a server that doesn't measure them, such as a local one.",
+            "format": "double",
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "month",
+          "used_gb_seconds",
+          "budget_gb_seconds",
+          "available"
+        ],
+        "type": "object"
+      },
       "BotPackage": {
         "additionalProperties": false,
         "properties": {
@@ -1920,6 +1965,45 @@
           }
         },
         "summary": "List the default bots that the backend plays, and whether it offers hosted and uploaded bots."
+      }
+    },
+    "/game/bot-compute": {
+      "get": {
+        "description": "Uploaded bots run in the server's bot runners, whose compute has a monthly budget, so that they stay inside Lambda's free tier. Once the runners have used it this month (UTC), a lobby whose start roster has an uploaded bot, a member's or a bot seat's, can't start until the first of the next month: the start fails with the lobby's game_requirement of type urn:island-battles:problem:bot-compute-spent, and the bot pickers grey out uploaded bots with the same sentence. Games already running go on, and games with only localhost, hosted and default bots are unaffected. The runners' compute is read from CloudWatch at most once per 10 minutes and kept in between, so this needs no authentication. A server that doesn't measure it, such as a local one, reports 0 and available. 503 when the compute can't be read.",
+        "operationId": "getBotCompute",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BotCompute"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Say whether games with uploaded bots may start this month."
       }
     },
     "/game/from-lobby/{lobby_id}/deadline": {

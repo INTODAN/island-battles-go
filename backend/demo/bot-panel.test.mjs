@@ -48,13 +48,14 @@ const { serveCommand } = await import("./localhost-bot.mjs");
 // A lobby snapshot whose one member, the player, has settings.
 const snapshotWith = (settings) => ({ members: [{ player_id: "me", display_name: "Alex", kind: "human", seat_settings: null, member_settings: settings }] });
 
-function panel({ health = async () => true, refuse = null, serverBots = undefined, refreshSeatOptions = undefined } = {}) {
+function panel({ health = async () => true, refuse = null, serverBots = undefined, refreshSeatOptions = undefined, compute = undefined } = {}) {
   const container = new FakeElement("div");
   const saved = [];
   const copied = [];
   const checks = { count: 0 };
   const instance = new RoomPanel({
     container, lobbyID: "lobby", playerID: "me",
+    ...(compute ? { compute } : {}),
     ...(serverBots === undefined ? {} : { options: async () => ({ levels: [1], serverBots }) }),
     ...(refreshSeatOptions ? { refreshSeatOptions } : {}),
     saveMemberSettings: async (settings) => {
@@ -192,4 +193,26 @@ test("a chosen package that was replaced stays shown until you choose again", as
   instance.update(snapshotWith({ bot: { kind: "uploaded", package_id: "p-old" } }));
   assert.equal(instance.select.value, "package-p-old");
   assert.match(instance.select.children.at(-1).text, /replaced or deleted/);
+});
+
+test("once the month's compute is spent, your uploaded bots are greyed out and the panel says why", async () => {
+  const { instance } = panel({ serverBots: true, compute: async () => ({ month: "2026-11", used_gb_seconds: 300000, budget_gb_seconds: 300000, available: false }) });
+  await delay(10);
+  instance.listed(packages);
+  instance.update(snapshotWith({ bot: { kind: "uploaded", package_id: "p-old" } }));
+  assert.deepEqual(instance.select.children.map((option) => [option.value, option.disabled === true]), [
+    ["", false], ["localhost", false], ["level-1", false], ["hosted", false], ["package-p-mine", true], ["package-p-old", true],
+  ]);
+  assert.equal(instance.spentNote.hidden, false);
+  assert.equal(instance.spentNote.textContent, "Uploaded bots have used this month's free compute. They're back on 1 December.");
+  instance.stopPolling();
+});
+
+test("while the month's compute lasts, nothing is greyed out or said", async () => {
+  const { instance } = panel({ serverBots: true, compute: async () => ({ month: "2026-11", used_gb_seconds: 1200, budget_gb_seconds: 300000, available: true }) });
+  await delay(10);
+  instance.listed(packages);
+  assert.ok(instance.select.children.every((option) => option.disabled !== true));
+  assert.equal(instance.spentNote.hidden, true);
+  instance.stopPolling();
 });

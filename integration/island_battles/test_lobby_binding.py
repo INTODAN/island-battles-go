@@ -269,7 +269,7 @@ async def test_island_schema_survives_restart():
         "games", "maps", "castles", "castle_templates", "map_templates", "map_template_schema_migrations",
         "generations", "soldier_groups", "commands", "island_game_team_bindings",
         "frozen_game_players", "generation_inputs", "generation_requests", "generation_logs",
-        "game_player_bot_memory", "island_bot_packages",
+        "game_player_bot_memory", "island_bot_packages", "island_bot_compute_usage",
     }
     columns = await sql("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='games' ORDER BY ordinal_position")
     assert set(columns.splitlines()) == {"id", "created_at", "updated_at", "deleted_at", "lobby_id", "lobby_round", "teams", "outcome", "next_soldier_group_id", "turn_timeout_seconds"}

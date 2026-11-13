@@ -43,6 +43,37 @@ class BotChoice(GameModel):
     """
 
 
+class BotCompute(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    field_schema: Annotated[
+        AnyUrl | None,
+        Field(alias="$schema", examples=["https://example.com/BotCompute.json"]),
+    ] = None
+    """
+    A URL to the JSON Schema for this object.
+    """
+    available: StrictBool
+    """
+    Whether a game with an uploaded bot, a member's or a bot seat's, may start: used_gb_seconds is under budget_gb_seconds. When false, the start is refused until the next month, and the bot pickers grey out uploaded bots. Games already running go on.
+    """
+    budget_gb_seconds: Annotated[StrictFloat, Field(ge=0.0)]
+    """
+    The runners' monthly budget in GB-seconds (ISLAND_BATTLES_BOT_COMPUTE_BUDGET_GB_SECONDS).
+    """
+    month: Annotated[
+        StrictStr, Field(examples=["2026-11"], pattern="^[0-9]{4}-[0-9]{2}$")
+    ]
+    """
+    The month, in UTC, as YYYY-MM. The budget starts again on the first of the next month.
+    """
+    used_gb_seconds: Annotated[StrictFloat, Field(ge=0.0)]
+    """
+    The GB-seconds that the bot runners have used this month, from CloudWatch, read at most once per 10 minutes. 0 on a server that doesn't measure them, such as a local one.
+    """
+
+
 class BotPackage(GameModel):
     model_config = ConfigDict(
         extra="ignore",

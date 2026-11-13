@@ -3,6 +3,7 @@ package dependencies
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net"
 	"net/url"
 	"os"
@@ -14,6 +15,7 @@ import (
 
 	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/retention"
+	"islandBattles/backend/services"
 	"islandBattles/lobby/gamehooks"
 	"islandBattles/lobby/playertoken"
 )
@@ -37,6 +39,11 @@ const (
 	ServerBotsEnv                    = "ISLAND_BATTLES_SERVER_BOTS"
 	BotRunnerPythonEnv               = "ISLAND_BATTLES_BOT_RUNNER_PYTHON"
 	BotRunnerNativeEnv               = "ISLAND_BATTLES_BOT_RUNNER_NATIVE"
+	BotComputeBudgetEnv              = "ISLAND_BATTLES_BOT_COMPUTE_BUDGET_GB_SECONDS"
+	// BotComputeFakeEnv sets the bot runners' compute this month, in place
+	// of CloudWatch, for local development and tests; see
+	// Config.BotComputeFakeGBSeconds.
+	BotComputeFakeEnv = "ISLAND_BATTLES_BOT_COMPUTE_FAKE_GB_SECONDS"
 	// LocalBotPythonEnv is read by the local server host alone; see
 	// LoadLocalBotPython.
 	LocalBotPythonEnv = "ISLAND_BATTLES_LOCAL_BOT_PYTHON"
@@ -135,6 +142,16 @@ type Config struct {
 	// its own process, and the Lambda host sends no turns.
 	BotRunnerPython string
 	BotRunnerNative string
+	// BotComputeBudgetGBSeconds is the bot runners' monthly compute budget
+	// (#226): once they have used it, no game with an uploaded bot starts
+	// until the next month (UTC). 300,000 by default.
+	BotComputeBudgetGBSeconds float64
+	// BotComputeFakeGBSeconds, when set, is the runners' compute this month,
+	// for local development and tests. The runners' compute is read from
+	// CloudWatch while the runner functions are named; otherwise, as on a
+	// local server, the guard is off unless this is set. It can't be set
+	// with the runner functions.
+	BotComputeFakeGBSeconds *float64
 	// PlayerTokenKeys are the lobby's player token keys, kid:seed pairs; the
 	// first signs. See playertoken.ParseKeySet.
 	PlayerTokenKeys *playertoken.KeySet
@@ -298,6 +315,21 @@ func LoadConfigFromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if (botRunnerPython == "") != (botRunnerNative == "") {
 		return Config{}, fmt.Errorf("set both %s and %s, or neither", BotRunnerPythonEnv, BotRunnerNativeEnv)
 	}
+	budget, err := readGBSeconds(lookup, BotComputeBudgetEnv)
+	if err != nil {
+		return Config{}, err
+	}
+	if budget == nil {
+		defaultBudget := float64(services.DefaultBotComputeBudgetGBSeconds)
+		budget = &defaultBudget
+	}
+	fakeCompute, err := readGBSeconds(lookup, BotComputeFakeEnv)
+	if err != nil {
+		return Config{}, err
+	}
+	if fakeCompute != nil && botRunnerPython != "" {
+		return Config{}, fmt.Errorf("%s fakes the bot runners' compute where they run locally; unset it while %s and %s name the runner functions, whose compute is read from CloudWatch", BotComputeFakeEnv, BotRunnerPythonEnv, BotRunnerNativeEnv)
+	}
 	config := Config{
 		Database:                  database,
 		CentrifugoPublicURL:       readEnvironment(lookup, CentrifugoPublicURLEnv),
@@ -313,6 +345,8 @@ func LoadConfigFromLookup(lookup func(string) (string, bool)) (Config, error) {
 		ServerBots:                serverBots,
 		BotRunnerPython:           botRunnerPython,
 		BotRunnerNative:           botRunnerNative,
+		BotComputeBudgetGBSeconds: *budget,
+		BotComputeFakeGBSeconds:   fakeCompute,
 		PlayerTokenKeys:           playerTokenKeys,
 		PlayerTokenLifetime:       playerTokenLifetime,
 		LobbyHookSecret:           []byte(readEnvironment(lookup, LobbyHookSecretEnv)),
@@ -449,6 +483,19 @@ func requireEnvironment(lookup func(string) (string, bool), names ...string) err
 	}
 	sort.Strings(missing)
 	return fmt.Errorf("missing required environment variables: %s", strings.Join(missing, ", "))
+}
+
+// readGBSeconds reads an optional number of GB-seconds, nil when unset.
+func readGBSeconds(lookup func(string) (string, bool), name string) (*float64, error) {
+	value := readEnvironment(lookup, name)
+	if value == "" {
+		return nil, nil
+	}
+	amount, err := strconv.ParseFloat(value, 64)
+	if err != nil || amount < 0 || math.IsInf(amount, 0) || math.IsNaN(amount) {
+		return nil, fmt.Errorf("%s must be a number of GB-seconds, 0 or more, such as 300000", name)
+	}
+	return &amount, nil
 }
 
 // readCount reads an optional whole number of at least minimum.

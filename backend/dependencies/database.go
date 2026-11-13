@@ -105,7 +105,7 @@ func MigrateGameSchema(ctx context.Context, db *gorm.DB) error {
 	migrator := db.WithContext(ctx).Migrator()
 	backfillBotKinds := migrator.HasTable(&models.FrozenGamePlayer{}) && !migrator.HasColumn(&models.FrozenGamePlayer{}, "bot_kind")
 	err := db.WithContext(ctx).AutoMigrate(&models.Game{}, &models.Map{}, &models.Castle{},
-		&models.Generation{}, &models.SoldierGroup{}, &models.Command{}, &models.TeamBindingRecord{}, &models.FrozenGamePlayer{}, &models.GenerationInput{}, &models.GenerationRequest{}, &models.GenerationLog{}, &models.GamePlayerBotMemory{}, &models.BotPackage{})
+		&models.Generation{}, &models.SoldierGroup{}, &models.Command{}, &models.TeamBindingRecord{}, &models.FrozenGamePlayer{}, &models.GenerationInput{}, &models.GenerationRequest{}, &models.GenerationLog{}, &models.GamePlayerBotMemory{}, &models.BotPackage{}, &models.BotComputeUsage{})
 	if err != nil {
 		return fmt.Errorf("initialize game schema: %w", err)
 	}
