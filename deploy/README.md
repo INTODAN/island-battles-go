@@ -3,7 +3,7 @@
 Island Battles runs in one AWS region:
 
 - **Backend:** the Go backend runs on AWS Lambda behind its Function URL. Players open the game at `https://island-battles.<domain>`, which a CloudFront distribution serves from the Function URL with an ACM certificate (#75). `/` redirects to the lobby UI at `/lobby/ui/`.
-- **VM:** a Lightsail instance runs Postgres and Centrifugo in Docker Compose. Nothing else runs on it.
+- **VM:** a Lightsail instance runs Postgres and Centrifugo in Docker Compose. Nothing else runs on it. Postgres holds two databases (#229): the backend's, `island_battles`, and the lobby's own, `lobby`, each with its own role.
 - **Network:** there is no VPC or peering. The Lambda reaches Postgres and Centrifugo's HTTP API over the internet:
   - Postgres accepts only TLS (`hostssl`) logins, with scram and a generated password.
   - Centrifugo's API needs TLS and its API key.
@@ -38,7 +38,7 @@ The live deployment (#45, 2026-10-30) runs in `eu-central-1`, and its VM is `vm.
 ## Prerequisites
 
 - **On your machine:**
-  - Terraform 1.11 or newer, Go, which builds the backend and runs its migrations, and Python 3, for the backend deploy's plan check and the deploy bucket's sync.
+  - Terraform 1.11 or newer, Go, which builds the backend and runs the migrations, the lobby's in the VM deploy too, and Python 3, for the backend deploy's plan check and the deploy bucket's sync.
   - The AWS CLI 2.32 or newer. The scripts use it for the [deploy bucket](#the-deploy-bucket) and the VM's [temporary SSH keys](#logging-in-to-the-vm).
   - AWS credentials, which Terraform and the AWS CLI read from the standard AWS credential chain, e.g. `AWS_PROFILE=<profile>`. They need to manage Lightsail, Lambda, IAM roles and OIDC providers, CloudWatch Logs and alarms, SNS, Budgets, ACM and CloudFront, and the deploy bucket in S3. Nothing in the repo stores them, and nothing else is needed: no SSH key, and no copy of `deploy/local/`.
     - `aws login --profile <profile>` signs in through the console and gives short-lived credentials, which Terraform's AWS provider reads directly. They last up to 12 hours; run it again when Terraform reports expired credentials.
@@ -213,16 +213,16 @@ This needs only the AWS credentials, with `lightsail:GetInstanceAccessDetails`, 
 
 ### The concurrency cap
 
-Every Lambda instance has its own database pool, so the reserved concurrency caps the backend's Postgres connections ([backend/README.md](../backend/README.md#the-connection-pool)). Terraform checks that **`reserved_concurrency` × `database_max_open_connections` ≤ `postgres_max_connections` − `postgres_spare_connections`**. It also sets `ISLAND_BATTLES_DATABASE_MAX_OPEN_CONNECTIONS` itself, so the two can't drift apart.
+Every Lambda instance has its own database pools, one to the backend's database and one to the lobby's (#229), so the reserved concurrency caps the backend's Postgres connections ([backend/README.md](../backend/README.md#the-connection-pool)). Terraform checks that **`reserved_concurrency` × 2 × `database_max_open_connections` ≤ `postgres_max_connections` − `postgres_spare_connections`**. It also sets `ISLAND_BATTLES_DATABASE_MAX_OPEN_CONNECTIONS` itself, so the two can't drift apart.
 
 The same cap is C in the [free-tier budget](#the-budget): every instance logs and traces up to its own limits. Terraform passes the cap to the backend as `ISLAND_BATTLES_CONCURRENCY` and checks the budget too, so a bigger cap needs lower log and trace limits.
 
-- The defaults use at most 5 × 2 = 10 of Postgres's 100 connections. They leave at least 10 free: 3 that Postgres reserves for superusers, 2 for the migrate command, and the rest for administration. A bigger cap still fits under `max_connections`, but every connection costs memory on the 1 GB VM.
+- The defaults use at most 5 × 2 × 2 = 20 of Postgres's 100 connections. They leave at least 10 free: 3 that Postgres reserves for superusers, 2 for the migrate commands, which run one at a time, and the rest for administration. A bigger cap still fits under `max_connections`, but every connection costs memory on the 1 GB VM.
 - **Accounts with a low concurrency limit:** Lambda always keeps part of the account's concurrency unreserved, 100 on a normal account. On an account limited to 10, that's all of it, and any reserved concurrency fails with `decreases account's UnreservedConcurrentExecution below its minimum value`. Either request an increase of "Concurrent executions" in Service Quotas, which is free, or set `reserved_concurrency = null`.
-- **Without a reservation,** the account limit is the cap, so Terraform checks **`account_concurrency_limit` × `database_max_open_connections`** instead, and the budget for that many instances. Set `account_concurrency_limit` in `aws.tfvars` to the limit Service Quotas shows. It defaults to 10, which gives 10 × 2 = 20 connections.
+- **Without a reservation,** the account limit is the cap, so Terraform checks **`account_concurrency_limit` × 2 × `database_max_open_connections`** instead, and the budget for that many instances. Set `account_concurrency_limit` in `aws.tfvars` to the limit Service Quotas shows. It defaults to 10, which gives 10 × 2 × 2 = 40 connections.
   - The default log and trace limits fit 5 instances, not 10. For 10, also set `log_lines_per_minute = 2` and `trace_interval_seconds = 360`: 1.2 GB of logs and 74,400 traces at most.
   - **`scripts/aws.sh` rechecks the limit for you.** While `reserved_concurrency` is null, `apply`, `deploy` and `plan` read the account's limit with `aws lambda get-account-settings` (in the region from `aws.tfvars`) before they plan, and refuse when `account_concurrency_limit` is below it, so a limit that AWS raised can't leave the checks on a stale cap. The message says to reserve concurrency again or to set `account_concurrency_limit` to the new limit. A reservation, or a limit at or above the account's, passes. `deploy/check_concurrency.py` reads `aws.tfvars` (`null`, a number, a missing variable and comments) and `deploy/test_check_concurrency.py` tests it. The call needs only `lambda:GetAccountSettings`, which the [GitHub deploy role](#deploying-from-github-actions) has through `ReadOnlyAccess`, so the Deploy workflow runs the same guard.
-  - **A limit of 1000 lets 2,000 connections at Postgres:** AWS raises a new account's limit on its own after some use, which is what the guard catches.
+  - **A limit of 1000 lets 4,000 connections at Postgres:** AWS raises a new account's limit on its own after some use, which is what the guard catches.
   - Once it's raised, set `account_concurrency_limit` to the new value. The checks then fail, which tells you to reserve concurrency: set `reserved_concurrency` again, for example back to 5.
 - **The bot runners** reserve 10 each ([Bot runners](#bot-runners)), whatever `reserved_concurrency` is. They don't connect to Postgres, so they count only against the account's limit: it must leave 100 unreserved after the backend's reservation and their 20.
 - **Lingering connections:** a frozen or killed Lambda environment never closes its connections. Postgres's TCP keepalives on the VM close them about two minutes after the environment stops answering, so they don't pile up against `max_connections`.
@@ -240,15 +240,16 @@ The deploy logs in as `ubuntu`, which Lightsail's Ubuntu images use, and:
 1. **Checks** the settings, that the secrets exist, the Ubuntu version and the DNS record. It also refuses a VM that a move left behind (see [Moving to a new VM](#moving-to-a-new-vm)).
 2. **Base role:** installs Docker and the Compose plugin from Ubuntu's archive, enables unattended security upgrades, keeps containers running while the Docker daemon restarts, adds a 1 GB swap file, and creates the `deploy` user that owns the Compose project. Your SSH keys log in as `deploy` too.
 3. **App role:** writes the Compose project to `/opt/island-battles` and starts it with `docker compose up --wait`:
-   - `db` is `postgres:18-alpine` with a named volume. It publishes 5432 with TLS, using a self-signed certificate, and its `pg_hba.conf` allows only `hostssl` scram logins to the backend's database, by the backend's role and by the [admin MCP server's](#the-admin-mcp-server) read-only role. The `postgres` superuser only connects through the container's local socket. TCP keepalives close a connection about two minutes after its client stops answering, such as a frozen Lambda environment ([The concurrency cap](#the-concurrency-cap)).
+   - `db` is `postgres:18-alpine` with a named volume. It publishes 5432 with TLS, using a self-signed certificate, and its `pg_hba.conf` allows only `hostssl` scram logins: to the backend's database by the backend's role, to the lobby's database by the lobby's role, and to both by the [admin MCP server's](#the-admin-mcp-server) read-only role. The `postgres` superuser only connects through the container's local socket. TCP keepalives close a connection about two minutes after its client stops answering, such as a frozen Lambda environment ([The concurrency cap](#the-concurrency-cap)).
    - `centrifugo` is `centrifugo/centrifugo:v6.9.6`. Host port 443 maps to its public port, which serves TLS with an autocert certificate for `vm.<domain>`, the client endpoints and the HTTP API (`http_api.external`). Its health endpoint listens only inside the container, for the healthcheck. The admin UI is off. The `lobby`, `player` and `watch` namespaces keep history and force recovery, so reconnecting clients receive what they missed. `watch` carries a lobby's game to the people who watch it with the join code. The proxy timeout is 10 seconds, to allow for a Lambda cold start on top of the backend's push retry. The certificate cache is a named volume.
    - Both services rotate their Docker logs at 10 MB, keeping five files.
-4. **Creates** the backend's role and its database. The role owns the database but isn't a superuser.
+4. **Creates** two roles and their databases: the backend's, `island_battles`, and the lobby's own, `lobby` (#229). Each role owns its database but isn't a superuser, and logs in to its own database only. No join, foreign key or transaction spans the two.
    - Owning the database gives the role `CREATE` on it. The migration runner (#23) needs that: on a database without migration history, it creates a scratch schema in a transaction to check migration 1, then rolls it back.
-   - The deploy creates the database with the role as its owner, and a restore recreates it the same way.
-   - The VM doesn't create the schema. The migrate step in the Lambda deploy does (#29, #38), connecting as this role.
-   - It also creates `island_battles_admin`, the read-only role of the [admin MCP server](#the-admin-mcp-server), and grants it read access. Every deploy and restore grants it again.
-5. **Checks** that the role logs in over TLS and is refused without it, and that the admin role logs in over TLS and can't read `lobby_sessions.bearer_hash`. It also checks that `https://vm.<domain>/api/info` answers with a valid certificate when called with the API key, and refuses calls without it. That first TLS connection also makes Centrifugo request its certificate.
+   - The deploy creates each database with its role as its owner, and a restore recreates it the same way.
+   - The VM doesn't create the backend's schema. The migrate step in the Lambda deploy does (#29, #38), connecting as the backend's role.
+   - It **runs the lobby's migrations** from your machine, `go run ./lobby/cmd/migrate`, as the lobby's role, straight to the VM being deployed by its IP address over TLS, so it works while `vm.<domain>` still points at another VM.
+   - It also creates `island_battles_admin`, the read-only role of the [admin MCP server](#the-admin-mcp-server), and grants it read access to both databases. Every deploy and restore grants it again.
+5. **Checks** that both roles log in over TLS and are refused without it, and that the admin role logs in to both databases over TLS and can't read `lobby_sessions.bearer_hash`. It also checks that `https://vm.<domain>/api/info` answers with a valid certificate when called with the API key, and refuses calls without it. That first TLS connection also makes Centrifugo request its certificate.
 6. **Writes** `deploy/local/lambda.env`: the settings the backend Lambda needs to reach the VM.
 
 Then [deploy the backend](#deploying-the-backend) and run the [smoke test](#smoke-test).
@@ -257,7 +258,7 @@ Then [deploy the backend](#deploying-the-backend) and run the [smoke test](#smok
 
 The first deploy generates these into `deploy/local/secrets/`. Every later deploy and every new VM reuses them:
 
-- The Postgres passwords: the superuser's, the backend's role's, and the admin MCP server's read-only role's, `postgres_admin_password`.
+- The Postgres passwords: the superuser's, the backend's role's, the lobby's role's, `postgres_lobby_password` (#229), and the admin MCP server's read-only role's, `postgres_admin_password`.
 - Centrifugo's API key, the connection token secret and the lobby proxy secret. Reusing them keeps issued tokens valid when you move to a new VM.
 - The backend's admin API key, `admin_api_key`. Only the Lambda reads it, from `lambda.env`. Send it in the `X-Admin-API-Key` header to create default maps with `POST /map/create` (see [map files](../backend/README.md#map-files)). Without it, the Lambda refuses every map creation.
 - The secret of the bots' one-turn submit tokens, `submit_token_secret` (#215). Only the Lambda reads it, from `lambda.env`. A new one only invalidates the tokens of turns being played at that moment.
@@ -269,7 +270,7 @@ The scripts keep them in the [deploy bucket](#the-deploy-bucket), so every machi
 
 A deploy stops if any of these files is missing, because new secrets would replace the live VM's password and keys. Pass `-e app_generate_secrets=true` only for a first deploy, or if the secrets are lost for good. In that case the deploy resets the backend's password and Centrifugo's keys, and you redeploy the backend with the new `lambda.env`: `scripts/aws.sh deploy`. Players then need new connection tokens, which clients fetch on their own.
 
-`admin_api_key` (#37), `postgres_admin_password` (#79), `submit_token_secret` (#215), `lobby_player_token_key` (#218) and `lobby_game_secret_island_battles` (#224) were added after the first secrets, so an existing `deploy/local/secrets/` without them fails this check. Run one deploy with `-e app_generate_secrets=true`: it generates only the missing files and reads the others unchanged, so no password or key on the VM changes. A new `admin_api_key`, `submit_token_secret`, `lobby_player_token_key` or `lobby_game_secret_island_battles` also needs the Lambda redeployed with the new `lambda.env`; the backend doesn't start without `ISLAND_BATTLES_SUBMIT_TOKEN_SECRET`, `LOBBY_PLAYER_TOKEN_KEYS`, `LOBBY_GAME_SECRET_ISLAND_BATTLES` or `ISLAND_BATTLES_LOBBY_HOOK_SECRET`.
+`admin_api_key` (#37), `postgres_admin_password` (#79), `submit_token_secret` (#215), `lobby_player_token_key` (#218), `lobby_game_secret_island_battles` (#224) and `postgres_lobby_password` (#229) were added after the first secrets, so an existing `deploy/local/secrets/` without them fails this check. Run one deploy with `-e app_generate_secrets=true`: it generates only the missing files and reads the others unchanged, so no password or key on the VM changes. A new `admin_api_key`, `submit_token_secret`, `lobby_player_token_key`, `lobby_game_secret_island_battles` or `postgres_lobby_password` also needs the Lambda redeployed with the new `lambda.env`; the backend doesn't start without `ISLAND_BATTLES_SUBMIT_TOKEN_SECRET`, `LOBBY_PLAYER_TOKEN_KEYS`, `LOBBY_GAME_SECRET_ISLAND_BATTLES`, `ISLAND_BATTLES_LOBBY_HOOK_SECRET` or `LOBBY_DATABASE_URL`. For `postgres_lobby_password`, follow [Switching the lobby to its own database](#switching-the-lobby-to-its-own-database).
 
 ### Rotating the player token key
 
@@ -285,11 +286,12 @@ Nothing secret is committed. Never copy anything from `deploy/local/` into the r
 
 ### The Lambda's settings
 
-`deploy/local/lambda.env` holds the twelve settings the backend reads from the VM deploy, including the admin API key (see `backend/dependencies/config.go`). [`scripts/aws.sh deploy`](#deploying-the-backend) passes every line of it to the Lambda:
+`deploy/local/lambda.env` holds the thirteen settings the backend reads from the VM deploy, including the admin API key (see `backend/dependencies/config.go`). [`scripts/aws.sh deploy`](#deploying-the-backend) passes every line of it to the Lambda:
 
 | Variable | Value |
 |---|---|
 | `ISLAND_BATTLES_DATABASE_URL` | `postgres://island_battles:<password>@vm.<domain>:5432/island_battles?sslmode=require` |
+| `LOBBY_DATABASE_URL` | `postgres://lobby:<password>@vm.<domain>:5432/lobby?sslmode=require`: the lobby's own database (#229), which the lobby in the backend's process uses, and both migrate commands read |
 | `ISLAND_BATTLES_CENTRIFUGO_PUBLIC_URL` | `wss://vm.<domain>/connection/websocket` |
 | `ISLAND_BATTLES_CENTRIFUGO_API_URL` | `https://vm.<domain>/api` |
 | `ISLAND_BATTLES_CENTRIFUGO_API_KEY` | Centrifugo's API key |
@@ -317,7 +319,7 @@ scripts/aws.sh deploy
 1. **Builds** `deploy/local/lambda/bootstrap` with the build command from [backend/README.md](../backend/README.md#hosts-and-deploys). Terraform zips it with `archive_file`.
 2. **Plans** the Terraform configuration with `deploy/local/aws.tfvars` and `deploy/local/lambda.env`.
 3. **Checks the plan** with `deploy/check_deploy_plan.py`, which allows only creating or updating resources outside Lightsail, ACM and CloudFront. A plan that changes the VM, its firewall or its static IP, or the game's certificate or distribution, or that deletes or replaces anything, such as the Function URL, stops the deploy before the migrations. Review those changes with `scripts/aws.sh apply` instead. A deploy that created the certificate would wait for a DNS record nobody has added yet.
-4. **Migrates the database** from your machine: `go run ./backend/cmd/migrate`, with `ISLAND_BATTLES_DATABASE_URL` from `lambda.env`, straight to Postgres over TLS. The old code serves requests against the new schema until the next step finishes.
+4. **Migrates both databases** from your machine, straight to Postgres over TLS: the lobby's first, `go run ./lobby/cmd/migrate` with `LOBBY_DATABASE_URL` from `lambda.env`, then the backend's, `go run ./backend/cmd/migrate` with `ISLAND_BATTLES_DATABASE_URL` and `LOBBY_DATABASE_URL`. It stops when `lambda.env` lacks either. The backend's migrate command then drops the lobby's tables that builds before #229 left in the backend's database, only when both servers say the two are different databases (another `current_database()`, or another cluster by `pg_control_system()`'s system identifier; what they can't tell apart counts as one database, so two URLs that reach one database through `localhost` and `127.0.0.1`, a name and its address, or a pooler never drop it) and the lobby's database already has every lobby migration of the build (`lobby_schema_migrations` at the newest version) ([Switching the lobby to its own database](#switching-the-lobby-to-its-own-database)). The old code serves requests against the new schema until the next step finishes.
 5. **Applies the checked plan:** the new code and settings. Then it prints the Function URL.
 
 It doesn't ask for confirmation, never connects to the VM and never changes a Lightsail resource or the game's name. The plan file holds the settings, so the script deletes it afterwards.
@@ -362,6 +364,37 @@ Change `deploy/local/aws.tfvars` or `deploy/terraform/`, then run `scripts/aws.s
 - **Destroying needs the name.** When the plan deletes or replaces an instance, the static IP, a disk or the distribution, the apply lists them and asks you to type each one's name before the usual `yes`. For the distribution, that's its domain, `<id>.cloudfront.net`: a new distribution gets a new one, and the `island-battles` CNAME must follow it. A wrong answer applies nothing. If you didn't mean to destroy it, `aws.tfvars` probably doesn't match the instances that run. Without a terminal, list the names in `ISLAND_BATTLES_ALLOW_DESTROY`, separated by commas.
 - **It may publish the backend too.** When the plan changes the function, the apply first runs the migrations and then publishes the backend built from your checkout, so run it from the commit you last deployed or a newer one. A plan that leaves the function alone, such as moving the static IP, runs no migrations: in the middle of a move, the old VM refuses the backend.
 
+## Switching the lobby to its own database
+
+Since #229, the lobby keeps its tables in a database of its own, `lobby`, with its own role, `lobby`, on the same Postgres server as the backend's. No join, foreign key or transaction spans the two. A deployment from before keeps the lobby's tables in the backend's database, `island_battles`. The switch doesn't copy them: **lobbies open at that moment are dropped**, with their members and the guest sessions, as the owner decided, and players create new ones. Games already started keep working, because their data is in the backend's database. Pick a quiet time.
+
+Do it in this order, from a commit that has #229:
+
+1. **Deploy the VM from your machine,** once with `-e app_generate_secrets=true`:
+
+   ```sh
+   scripts/vm.sh deploy <static IP> -e app_generate_secrets=true
+   ```
+
+   It generates only the missing `postgres_lobby_password` and reads the other secrets unchanged ([Secrets](#secrets)). A Deploy workflow `vm` run can't pass the option. The deploy:
+   - creates the `lobby` role and database, and lets the role log in to it over TLS only (`pg_hba.conf`);
+   - runs the lobby's migrations into it, `go run ./lobby/cmd/migrate`, from your machine;
+   - grants the [admin MCP server's](#the-admin-mcp-server) role read access to it, without `lobby_sessions.bearer_hash`;
+   - backs up both databases;
+   - writes `LOBBY_DATABASE_URL` to `deploy/local/lambda.env` and pushes it to the deploy bucket.
+
+   Players notice nothing: the running backend still uses the lobby's tables in its own database.
+2. **Deploy the backend** with that `lambda.env`: `scripts/aws.sh deploy`, or a Deploy workflow `backend` run on `main`. A Terraform apply that publishes the backend, such as an `apply` run, does the same. Its migrate step migrates the lobby's database, then the backend's, and then publishes the build whose in-process lobby uses `LOBBY_DATABASE_URL`. Without `LOBBY_DATABASE_URL` in `lambda.env`, it stops before migrating anything: deploy the VM first.
+3. **The drop** runs in step 2's migrate step, before the new build serves: the backend's migrate command drops every `lobby_*` table and `lobby_schema_migrations` from the backend's database, in one transaction, only when both servers say the two are different databases (another `current_database()`, or another cluster by `pg_control_system()`'s system identifier; what they can't tell apart counts as one database, so two URLs that reach one database through `localhost` and `127.0.0.1`, a name and its address, or a pooler never drop it) and the lobby's database already has every lobby migration of the build (`lobby_schema_migrations` at the newest version). So a backend deploy without the VM deploy, or after a lobby migrate command that failed, can't lose the lobby's only tables: the command logs a warning that says why they stay, and the next deploy drops them. From the drop until the new build serves, a minute or two, the old build's lobby requests fail; game requests keep working.
+
+Then check it:
+
+- `scripts/vm.sh smoke`. The saved guest credential was dropped with the lobby's tables, so the test first reports it rejected: write an expired one over it, which the test replaces, and run it again: `printf '%s' '{"player_id": "", "access_token": "", "expires_at": "2000-01-01T00:00:00+00:00"}' > deploy/local/smoke-session.json`.
+- Create a lobby on the game's page and start a game.
+- With the [admin MCP server](#the-admin-mcp-server), `describe_schema` with `database: game` lists no `lobby_*` table, and with `database: lobby` only `lobby_*` tables.
+
+**Rolling back** to a build from before #229 doesn't bring the dropped lobbies back, and that build would use the backend's database for the lobby, which no longer has the lobby's tables: its migrate command creates them again, empty.
+
 ## Deploying from GitHub Actions
 
 The Deploy workflow, `.github/workflows/deploy.yml`, runs the same scripts on a GitHub runner. Start it from the repository's **Actions** tab, with `gh workflow run deploy.yml -f target=<target>`, or let an agent start it:
@@ -369,7 +402,7 @@ The Deploy workflow, `.github/workflows/deploy.yml`, runs the same scripts on a 
 | Target | Runs | Role |
 |---|---|---|
 | `backend` | `scripts/aws.sh deploy` | deploy |
-| `vm` | `scripts/vm.sh deploy "$(scripts/aws.sh output static_ip)"` | deploy |
+| `vm` | `scripts/vm.sh deploy "$(scripts/aws.sh output static_ip)"`, with Go for the lobby's migrations | deploy |
 | `web` | `scripts/deploy-web-client.sh`: builds the 3D web client and publishes it at `/play/` ([The web client](#the-web-client)) | deploy |
 | `smoke` | `scripts/vm.sh smoke` | deploy |
 | `plan` | `scripts/aws.sh plan`: plans every AWS resource, like `scripts/aws.sh apply`, and saves the plan | deploy |
@@ -584,23 +617,24 @@ The guest's credential is kept in `deploy/local/smoke-session.json`, and later r
 
 ## The admin MCP server
 
-The [admin MCP server](../backend/README.md#admin-mcp-server) (#79) answers questions about lobbies, players and games, such as "How many lobbies are currently active?", from Claude Code or another MCP client on your machine. Nothing of it is deployed: it runs on your machine and connects straight to Postgres on the VM, as the read-only role `island_battles_admin`.
+The [admin MCP server](../backend/README.md#admin-mcp-server) (#79) answers questions about lobbies, players and games, such as "How many lobbies are currently active?", from Claude Code or another MCP client on your machine. Nothing of it is deployed: it runs on your machine and connects straight to Postgres on the VM, to both databases, the backend's and the lobby's (#229), as the read-only role `island_battles_admin`.
 
-**The role.** The VM deploy creates it, with the password in `deploy/local/secrets/postgres_admin_password`, and grants it, in one transaction:
+**The role.** The VM deploy creates it, with the password in `deploy/local/secrets/postgres_admin_password` (`admin-role.sql.j2`), and grants it read access in each database, with that database's own SQL, each in one transaction:
 
-- `SELECT` on every table, and default privileges, so that it can read the tables that later migrations create;
-- on `lobby_sessions`, `SELECT` on `id`, `player_id`, `created_at` and `expires_at` only. `bearer_hash`, the digest of each guest's credential, stays unreadable, also through the server's SQL tool.
+- `SELECT` on every table, and default privileges, so that it can read the tables that later migrations create (`admin-grants-game.sql.j2` and `admin-grants-lobby.sql.j2`);
+- on `lobby_sessions`, `SELECT` on `id`, `player_id`, `created_at` and `expires_at` only. `bearer_hash`, the digest of each guest's credential, stays unreadable, also through the server's SQL tool. Until the [switch](#switching-the-lobby-to-its-own-database) drops it, the copy of `lobby_sessions` in the backend's database is guarded the same way.
 
-The deploy also revokes `EXECUTE` on `pg_logical_emit_message` from `PUBLIC` in the backend's database. It writes WAL that a rollback doesn't undo, so a loop of calls could fill the disk even from a read-only transaction. Nothing in the backend calls it, and the superuser keeps it.
+The deploy also revokes `EXECUTE` on `pg_logical_emit_message` from `PUBLIC` in both databases. It writes WAL that a rollback doesn't undo, so a loop of calls could fill the disk even from a read-only transaction. Nothing in the backend calls it, and the superuser keeps it.
 
-The role logs in only over TLS with its password, like the backend's. Its sessions are read-only with a 5-second statement timeout, and it has no privilege to write. The default privileges are only set once `lobby_sessions` exists, because set before, they would let the role read all of it. So on a new VM, run the VM deploy again after the backend deploy's first migration, or the role can read nothing. A restore leaves no grants, so the restore grants them again.
+The role logs in only over TLS with its password, like the backend's. Its sessions are read-only with a 5-second statement timeout, and it has no privilege to write. In the lobby's database, the default privileges are only set once `lobby_sessions` exists, because set before, they would let the role read all of it. The VM deploy runs the lobby's migrations before the grants, so the table exists by then. The backend's database holds no credentials, so its default privileges are set on every deploy; on a new VM, the role reads the backend's tables that the backend deploy's first migration creates. A restore leaves no grants, so the restore grants them again.
 
-The default privileges also make whatever a later migration creates readable, until the next VM deploy runs the grants again: a migration that recreates `lobby_sessions` would let the role read `bearer_hash`, and so would a new table that holds credentials. The server guards the first case: at startup and before every `query`, it checks whether its role can read `bearer_hash` without being a superuser or the table's owner. If so, `query` refuses to run and the server logs why, until you run `scripts/vm.sh deploy <static IP>`. The typed tools never read the column. A new table that holds credentials needs its own column grants in `admin-role.sql.j2`. A deployment from before #79 has neither the role nor its password: run one VM deploy with `-e app_generate_secrets=true`, as [Secrets](#secrets) describes.
+The default privileges also make whatever a later migration creates readable, until the next VM deploy runs the grants again: a migration that recreates `lobby_sessions` would let the role read `bearer_hash`, and so would a new table that holds credentials. The server guards the first case: at startup and before every `query`, it checks whether its role can read `bearer_hash` without being a superuser or the table's owner. If so, `query` refuses to run in that database and the server logs why, until you run `scripts/vm.sh deploy <static IP>`. The typed tools never read the column. A new table that holds credentials needs its own column grants in `admin-grants-lobby.sql.j2`. A deployment from before #79 has neither the role nor its password: run one VM deploy with `-e app_generate_secrets=true`, as [Secrets](#secrets) describes.
 
-**The connection string.** The certificate is self-signed for `vm.<domain>`, and you have it, so check it with `verify-full`:
+**The connection strings,** one per database. The certificate is self-signed for `vm.<domain>`, and you have it, so check it with `verify-full`:
 
 ```text
 postgres://island_battles_admin:<password>@vm.<domain>:5432/island_battles?sslmode=verify-full&sslrootcert=<repository>/deploy/local/secrets/postgres-tls/server.crt
+postgres://island_battles_admin:<password>@vm.<domain>:5432/lobby?sslmode=verify-full&sslrootcert=<repository>/deploy/local/secrets/postgres-tls/server.crt
 ```
 
 Use an absolute path for `sslrootcert`. The password has only letters and digits, so it needs no escaping.
@@ -610,20 +644,21 @@ Use an absolute path for `sslrootcert`. The password has only letters and digits
 ```sh
 claude mcp add island-battles-admin-production \
   --env ISLAND_BATTLES_ADMIN_DATABASE_URL="postgres://island_battles_admin:$(cat deploy/local/secrets/postgres_admin_password)@vm.<domain>:5432/island_battles?sslmode=verify-full&sslrootcert=$PWD/deploy/local/secrets/postgres-tls/server.crt" \
+  --env ISLAND_BATTLES_ADMIN_LOBBY_DATABASE_URL="postgres://island_battles_admin:$(cat deploy/local/secrets/postgres_admin_password)@vm.<domain>:5432/lobby?sslmode=verify-full&sslrootcert=$PWD/deploy/local/secrets/postgres-tls/server.crt" \
   -- go run ./backend/cmd/admin-mcp
 ```
 
-Claude Code keeps the URL, password included, in `~/.claude.json`, which only you can read. To run a built binary instead, and other clients, see the [backend README](../backend/README.md#admin-mcp-server).
+Claude Code keeps the URLs, password included, in `~/.claude.json`, which only you can read. To run a built binary instead, and other clients, see the [backend README](../backend/README.md#admin-mcp-server).
 
 ## Backups
 
-Postgres's data is the only state on the VM that can't be rebuilt: the playbooks rebuild the rest, the secrets are in the deploy bucket, and Centrifugo gets a new certificate on its own. So the VM backs up only the database, to S3, every day. Lightsail's automatic snapshots (#33) stored the whole disk seven times over, and are off.
+Postgres's data is the only state on the VM that can't be rebuilt: the playbooks rebuild the rest, the secrets are in the deploy bucket, and Centrifugo gets a new certificate on its own. So the VM backs up only its two databases, the backend's and the lobby's (#229), to S3, every day. Lightsail's automatic snapshots (#33) stored the whole disk seven times over, and are off.
 
-- **What:** a systemd timer on the VM, `island-battles-backup.timer`, runs at `app_backup_time`, 01:30 UTC by default. It dumps the database with `pg_dump`, in the same custom format as `scripts/vm.sh dump`, and uploads the dump to `s3://<name>-backups-<account>/postgres/island_battles-<time>.dump`. The VM deploy also backs up once at the end, so a wrong key fails the deploy instead of the night. Pass `-e app_backup_now=false` to skip that.
+- **What:** a systemd timer on the VM, `island-battles-backup.timer`, runs at `app_backup_time`, 01:30 UTC by default. It dumps each database with `pg_dump`, in the same custom format as `scripts/vm.sh dump`, and uploads the dumps to `s3://<name>-backups-<account>/postgres/island_battles-<time>.dump` and `.../postgres/lobby-<time>.dump`. Both have the same schedule and retention. The VM deploy also backs up once at the end, so a wrong key fails the deploy instead of the night. Pass `-e app_backup_now=false` to skip that.
 - **How long:** S3 deletes each dump after `database_backup_retention_days`, 7 by default. Versioning keeps a dump that was overwritten or deleted for as long again.
 - **The key:** Lightsail instances can't take an IAM role, so the VM has an access key of the `<name>-database-backups` user. It may only upload new dumps and publish the backup metric: it can't list, read or delete a backup, so a compromised VM can't destroy them. Terraform keeps the key in its state, and `scripts/aws.sh apply` copies it to `deploy/local/secrets/database_backups.json`, which the deploy bucket shares. The VM deploy installs it as `/etc/island-battles/backup.env`, readable only by root. To rotate it, run `scripts/aws.sh apply -replace=aws_iam_access_key.backups` and deploy the VM.
-- **Skipped:** a VM that a [move](#moving-to-a-new-vm) left behind, which has the moved-away marker, and a database without tables yet, such as a new VM before its restore or its first migration. A skip counts as no backup.
-- **The alarm:** each successful backup adds 1 to the `DatabaseBackups` metric. When none did for 26 hours, the `<name>-database-backups` alarm emails `alert_email`: the run failed, the VM was down, or the key stopped working. Read the run's log on the VM: `sudo journalctl -u island-battles-backup`. `systemctl list-timers island-battles-backup` shows the next run.
+- **Skipped:** a VM that a [move](#moving-to-a-new-vm) left behind, which has the moved-away marker, and a database without tables yet, such as a new VM before its restore or its first migration. A run that backed nothing up counts as no backup.
+- **The alarm:** each successful run adds 1 to the `DatabaseBackups` metric; a run where either database failed adds nothing, though the other database's dump is in S3. When none did for 26 hours, the `<name>-database-backups` alarm emails `alert_email`: the run failed, the VM was down, or the key stopped working. Read the run's log on the VM: `sudo journalctl -u island-battles-backup`. `systemctl list-timers island-battles-backup` shows the next run.
 - **What it costs:** a few MB of dumps and one upload a day, well under a cent a month. S3 has no always-free allowance, so this shows up in the zero-spend budget. The metric and the alarm are inside CloudWatch's free ones ([The budget](#the-budget)).
 - **What it doesn't cover:** the backups live in the same account and region as the VM, and a restore loses everything written since the last one, up to a day. The GitHub deploy role can't read them; reading them takes the account's own credentials.
 
@@ -633,10 +668,12 @@ Postgres's data is the only state on the VM that can't be rebuilt: the playbooks
 bucket="$(scripts/aws.sh output database_backup_bucket)"
 aws s3 ls "s3://$bucket/postgres/"
 aws s3 cp "s3://$bucket/postgres/island_battles-<time>.dump" deploy/local/dumps/
+aws s3 cp "s3://$bucket/postgres/lobby-<time>.dump" deploy/local/dumps/
 scripts/vm.sh restore <IP> deploy/local/dumps/island_battles-<time>.dump
+scripts/vm.sh restore <IP> deploy/local/dumps/lobby-<time>.dump -e app_database=lobby -e app_restore_replace_existing=true
 ```
 
-The restore needs a deployed VM with an empty database, or `-e app_restore_replace_existing=true` to replace one, which first dumps the database it replaces to `deploy/local/dumps/` ([Dumps on their own](#dumps-on-their-own)). If the VM itself is gone, create a new instance and deploy it as in steps 1 and 2 of [Moving to a new VM](#moving-to-a-new-vm), restore the latest backup into it, then continue with steps 5 and 6.
+The restore needs a deployed VM with an empty database, or `-e app_restore_replace_existing=true` to replace one. The VM deploy gives the lobby's database its schema, so restoring the lobby's always replaces it; which first dumps the database it replaces to `deploy/local/dumps/` ([Dumps on their own](#dumps-on-their-own)). If the VM itself is gone, create a new instance and deploy it as in steps 1 and 2 of [Moving to a new VM](#moving-to-a-new-vm), restore the latest backup into it, then continue with steps 5 and 6.
 
 ### Turning backups on for an existing deployment
 
@@ -674,11 +711,11 @@ Moving copies the database with `pg_dump` and restores it on the new VM (#31). I
    scripts/vm.sh move-data <static IP> <new IP>
    ```
 
-   - On the old VM, it locks the backend's role out (`NOLOGIN`) and ends its connections, so nothing is written after the dump. It locks the admin MCP server's read-only role out too, so nobody reads the old data by mistake. The Lambda's requests fail from here until step 5 is done.
+   - On the old VM, it locks both databases' roles out (`NOLOGIN`), the backend's and the lobby's, and ends their connections, so nothing is written after the dumps. It locks the admin MCP server's read-only role out too, so nobody reads the old data by mistake. The Lambda's requests fail from here until step 5 is done.
    - The lock is sticky. It leaves the marker file `/opt/island-battles/moved-away` on the old VM, and a deploy or restore there stops while the marker exists. A redeploy can't let the backend write to the old VM again, which would lose those writes.
-   - It dumps the old database to `deploy/local/dumps/` and restores the dump into the new VM's empty database, in one transaction.
-   - The restore refuses a dump without tables, and a database that already has tables. To overwrite one, pass `-e app_restore_replace_existing=true`: the restore first saves the database it replaces to `deploy/local/dumps/`.
-   - **If the restore fails,** the old VM stays locked and the new database stays empty. Fix the cause and run the same `move-data` command again. To give up on the move instead, unlock the old VM: `scripts/vm.sh deploy <static IP> -e app_unlock_after_move=true`.
+   - It dumps both old databases to `deploy/local/dumps/` and restores each dump into the new VM's database of the same name, in one transaction each. The new VM's lobby database already has its schema from the VM deploy, so its restore replaces it, after saving it to `deploy/local/dumps/`.
+   - The restore refuses a dump without tables, and a backend database that already has tables. To overwrite one, pass `-e app_restore_replace_existing=true`: the restore first saves the database it replaces to `deploy/local/dumps/`.
+   - **If a restore fails,** the old VM stays locked and the new database stays empty; the command prints how to go on. Fix the cause and run the same `move-data` command again. To give up on the move instead, unlock the old VM: `scripts/vm.sh deploy <static IP> -e app_unlock_after_move=true`.
 5. **Move the static IP** to the new instance: set `static_ip_instance = "island-battles-2"` in `aws.tfvars` and run `scripts/aws.sh apply`. The plan replaces only the static IP's attachment. The DNS record and the Lambda's settings don't change, because both use `vm.<domain>`. The Lambda's next connections reach the new VM.
 6. **Check the new VM:**
 
@@ -699,9 +736,11 @@ If the old VM is gone, there's nothing to dump. [Restore the latest backup](#lis
 ```sh
 scripts/vm.sh dump <IP>                  # writes deploy/local/dumps/island_battles-<time>.dump
 scripts/vm.sh restore <IP> <dump file>   # into an empty database
+scripts/vm.sh dump <IP> -e app_database=lobby                   # the lobby's: lobby-<time>.dump
+scripts/vm.sh restore <IP> <dump file> -e app_database=lobby -e app_restore_replace_existing=true
 ```
 
-Dumps use `pg_dump`'s custom format, without owners or grants. The restore makes the backend's role the owner of everything, and grants the admin MCP server's role read access again. Dumps hold player data, so keep them in `deploy/local/`. The VM's daily [backups](#backups) are dumps of the same kind.
+Dumps use `pg_dump`'s custom format, without owners or grants. The restore makes the database's role the owner of everything, and grants the admin MCP server's role read access again. Dumps hold player data, so keep them in `deploy/local/`. The VM's daily [backups](#backups) are dumps of the same kind.
 
 ## Logs, alerts and traces
 

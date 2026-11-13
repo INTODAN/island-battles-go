@@ -8,7 +8,7 @@ import pytest
 from lobby_api_client.models import TeamDefinition
 from lobby_client import LobbyError, Scope
 
-from integration.test_live import create, guests, latest, sql
+from integration.test_live import create, game_sql, guests, latest
 from test_lobby_binding import GAME, LOCALHOST_BOT, choose_bot, game_auth, started_map, strait_map
 
 pytestmark = pytest.mark.asyncio
@@ -89,7 +89,7 @@ async def test_the_host_changes_the_map_and_then_plays_the_first_turn_on_it(gues
 
     # The game starts on the new map with the new timeout, and plays its first turn.
     assert (await started_map(scope.lobby_id)).startswith(f"{delta_name}:")
-    assert await sql(f"SELECT turn_timeout_seconds FROM games WHERE lobby_id='{scope.lobby_id}'") == "120"
+    assert await game_sql(f"SELECT turn_timeout_seconds FROM games WHERE lobby_id='{scope.lobby_id}'") == "120"
     async with httpx.AsyncClient(base_url=GAME) as http:
         async def state(player):
             response = await http.get(f"/game/from-lobby/{scope.lobby_id}/generation",

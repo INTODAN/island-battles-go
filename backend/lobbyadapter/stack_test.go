@@ -42,7 +42,9 @@ const mockGameKey = "mock-game"
 type lobbyStack struct {
 	t        *testing.T
 	database *gorm.DB
-	api      humatest.TestAPI
+	// lobbyDatabase is the lobby's own database (#229).
+	lobbyDatabase *gorm.DB
+	api           humatest.TestAPI
 	// publisher keeps what the game pushed.
 	publisher *testutils.RecordedPublisher
 	// hookCalls counts the lobby's calls of each Island Battles hook.
@@ -58,8 +60,8 @@ func newLobbyStack(t *testing.T) *lobbyStack {
 // ISLAND_BATTLES_SERVER_BOTS does.
 func newLobbyStackWith(t *testing.T, serverBots services.ServerBots) *lobbyStack {
 	t.Helper()
-	database := testutils.InitTestDB(t)
-	stack := &lobbyStack{t: t, database: database, publisher: &testutils.RecordedPublisher{}, hookCalls: map[string]int{}}
+	database, lobbyDatabase := testutils.InitTestDatabases(t)
+	stack := &lobbyStack{t: t, database: database, lobbyDatabase: lobbyDatabase, publisher: &testutils.RecordedPublisher{}, hookCalls: map[string]int{}}
 	mock, err := mockgame.New(mockGameKey, []byte(strings.Repeat("m", 40)))
 	if err != nil {
 		t.Fatal(err)
@@ -95,11 +97,11 @@ func newLobbyStackWith(t *testing.T, serverBots services.ServerBots) *lobbyStack
 	clock := domain.SystemClock{}
 	identifiers := domain.CryptoIdentifiers{}
 	policy := domain.DefaultPolicy(gamehooks.Registrations(games)...)
-	store, err := lobbypostgres.NewStore(database, clock)
+	store, err := lobbypostgres.NewStore(lobbyDatabase, clock)
 	if err != nil {
 		t.Fatal(err)
 	}
-	identities, err := lobbypostgres.NewIdentityStore(database)
+	identities, err := lobbypostgres.NewIdentityStore(lobbyDatabase)
 	if err != nil {
 		t.Fatal(err)
 	}

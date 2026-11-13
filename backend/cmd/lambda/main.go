@@ -63,9 +63,10 @@ func main() {
 	lambdaurl.Start(instance)
 }
 
-// build runs once per cold start. The pool stays open for the instance's
-// lifetime, so warm invocations reuse its connections.
-// A failed attempt closes its pool, so the retries don't pile up connections.
+// build runs once per cold start. The pools, Island Battles' and the lobby's,
+// stay open for the instance's lifetime, so warm invocations reuse their
+// connections. A failed attempt closes them, so the retries don't pile up
+// connections.
 func build(ctx context.Context, settings observability.Settings, logger *slog.Logger) (_ http.Handler, err error) {
 	config, err := dependencies.LoadConfig()
 	if err != nil {
@@ -83,7 +84,20 @@ func build(ctx context.Context, settings observability.Settings, logger *slog.Lo
 			_ = sqlDatabase.Close()
 		}
 	}()
-	handler, err := newHandler(config, database, logger)
+	// The lobby's own database, while the lobby runs in this process.
+	lobbyDatabase, err := dependencies.InitLobbyDB(config, logger)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err == nil || lobbyDatabase == nil {
+			return
+		}
+		if lobbyPool, poolError := lobbyDatabase.DB(); poolError == nil {
+			_ = lobbyPool.Close()
+		}
+	}()
+	handler, err := newHandler(config, database, lobbyDatabase, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -96,8 +110,8 @@ func build(ctx context.Context, settings observability.Settings, logger *slog.Lo
 
 // newHandler passes no app options, so the public host leaves out the pages
 // that read games without authentication, such as GET /game/{id}/graph.
-func newHandler(config dependencies.Config, database *gorm.DB, logger *slog.Logger) (http.Handler, error) {
-	return app.New(config, database, logger)
+func newHandler(config dependencies.Config, database, lobbyDatabase *gorm.DB, logger *slog.Logger) (http.Handler, error) {
+	return app.New(config, database, lobbyDatabase, logger)
 }
 
 // host serves the backend once it has started. Until then it answers 503 and

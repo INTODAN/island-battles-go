@@ -152,8 +152,9 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
 
       # Builds the backend and the native bot runner, and runs the migrations
-      # with `go run`.
-      - if: contains(fromJSON('["backend", "plan", "apply"]'), inputs.target)
+      # with `go run`: the backend deploy both databases', and the VM deploy
+      # the lobby's (#229).
+      - if: contains(fromJSON('["backend", "vm", "plan", "apply"]'), inputs.target)
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod

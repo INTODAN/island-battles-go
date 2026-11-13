@@ -95,10 +95,11 @@ func send(t *testing.T, method, url, token string, body any) (int, []byte, http.
 
 // In-process mode, production's until the cutover: without
 // ISLAND_BATTLES_LOBBY_URL, the backend serves the lobby that lobby/app
-// builds, which calls Island Battles' hooks in memory.
+// builds, which calls Island Battles' hooks in memory and keeps its tables in
+// its own database.
 func TestTheBackendRunsTheLobbyInItsOwnProcessWithoutALobbyURL(t *testing.T) {
-	database := testutils.InitTestDB(t)
-	handler, err := app.New(dependencies.Config{
+	database, lobbyDatabase := testutils.InitTestDatabases(t)
+	config := dependencies.Config{
 		Database:                  dependencies.DefaultDatabaseConfig(databaseURL(t, database)),
 		CentrifugoPublicURL:       "ws://127.0.0.1:9/connection/websocket",
 		CentrifugoAPIURL:          fakeCentrifugo(t),
@@ -111,7 +112,12 @@ func TestTheBackendRunsTheLobbyInItsOwnProcessWithoutALobbyURL(t *testing.T) {
 		PlayerTokenLifetime:       playertoken.MaxLifetime,
 		LobbyHookSecret:           []byte(hookSecret),
 		LobbyGameSecrets:          map[string]string{lobbyadapter.SecretEnv: hookSecret},
-	}, database, discard)
+	}
+	// The lobby in this process needs its own database.
+	if _, err := app.New(config, database, nil, discard); err == nil {
+		t.Fatal("the lobby ran in this process without its own database")
+	}
+	handler, err := app.New(config, database, lobbyDatabase, discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,6 +137,15 @@ func TestTheBackendRunsTheLobbyInItsOwnProcessWithoutALobbyURL(t *testing.T) {
 	var alice domain.GuestSession
 	if err := json.Unmarshal(content, &alice); err != nil {
 		t.Fatal(err)
+	}
+	// The session is in the lobby's database, and Island Battles' has no
+	// lobby table.
+	var sessions int64
+	if err := lobbyDatabase.Table("lobby_sessions").Count(&sessions).Error; err != nil || sessions != 1 {
+		t.Fatalf("the lobby's database has %d sessions: %v", sessions, err)
+	}
+	if database.Migrator().HasTable("lobby_sessions") {
+		t.Fatal("Island Battles' database has the lobby's tables")
 	}
 	// The lobby calls the game's validate-settings hook in memory: a map
 	// that doesn't exist is the game's refusal, not an unavailable game.
@@ -159,7 +174,7 @@ func TestTheBackendRunsTheLobbyInItsOwnProcessWithoutALobbyURL(t *testing.T) {
 // serves none of its routes, serves the hooks that the lobby calls over the
 // network, and verifies player tokens with the lobby's JWKS.
 func TestTheBackendUsesALobbyOfItsOwnAtTheLobbyURL(t *testing.T) {
-	database := testutils.InitTestDB(t)
+	database, lobbyTestDatabase := testutils.InitTestDatabases(t)
 	centrifugo := fakeCentrifugo(t)
 	// The lobby and the backend each need the other's URL.
 	var backendHandler atomic.Value
@@ -172,7 +187,7 @@ func TestTheBackendUsesALobbyOfItsOwnAtTheLobbyURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lobbyDatabase, err := lobbyapp.OpenDatabase(lobbyapp.DatabaseConfig{URL: databaseURL(t, database), MaxOpenConnections: 10, MaxIdleConnections: 2}, discard)
+	lobbyDatabase, err := lobbyapp.OpenDatabase(lobbyapp.DatabaseConfig{URL: databaseURL(t, lobbyTestDatabase), MaxOpenConnections: 10, MaxIdleConnections: 2}, discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +237,7 @@ func TestTheBackendUsesALobbyOfItsOwnAtTheLobbyURL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gameHandler, err := app.New(config, database, discard)
+	gameHandler, err := app.New(config, database, nil, discard)
 	if err != nil {
 		t.Fatal(err)
 	}

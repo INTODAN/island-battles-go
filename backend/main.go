@@ -91,6 +91,18 @@ func run(ctx context.Context, config dependencies.Config, address string, logger
 		return err
 	}
 	defer func() { _ = sqlDatabase.Close() }()
+	// The lobby's own database, while the lobby runs in this process.
+	lobbyDatabase, err := dependencies.InitLobbyDB(config, logger)
+	if err != nil {
+		return err
+	}
+	if lobbyDatabase != nil {
+		lobbyPool, err := lobbyDatabase.DB()
+		if err != nil {
+			return err
+		}
+		defer func() { _ = lobbyPool.Close() }()
+	}
 	// The graph page reads any game without authentication, so only this local
 	// host serves it.
 	options := []app.Option{app.WithGameGraph()}
@@ -122,7 +134,7 @@ func run(ctx context.Context, config dependencies.Config, address string, logger
 		options = append(options, app.WithLocalBotRunners(runners, origin))
 		logger.Info("Playing hosted and uploaded bots with the local bot runners", "python", strings.Join(runners.Python, " "))
 	}
-	handler, err := app.New(config, database, logger, options...)
+	handler, err := app.New(config, database, lobbyDatabase, logger, options...)
 	if err != nil {
 		return err
 	}

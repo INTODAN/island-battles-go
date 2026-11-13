@@ -1,8 +1,8 @@
 # {{ ansible_managed }}
-# Dumps {{ postgres_database }} and uploads the dump to S3 (deploy/README.md,
-# "Backups"). Its log: journalctl -u island-battles-backup
+# Dumps {{ postgres_database }} and {{ lobby_database }} and uploads the dumps to
+# S3 (deploy/README.md, "Backups"). Its log: journalctl -u island-battles-backup
 [Unit]
-Description=Back up the {{ postgres_database }} database to S3
+Description=Back up the {{ postgres_database }} and {{ lobby_database }} databases to S3
 Requires=docker.service
 After=docker.service network-online.target
 Wants=network-online.target

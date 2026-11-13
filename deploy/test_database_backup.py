@@ -28,14 +28,15 @@ def load_script():
 backup = load_script()
 NOW = datetime.datetime(2026, 11, 8, 1, 30, 5, tzinfo=datetime.timezone.utc)
 DUMP_NAME = "island_battles-20261108T013005Z.dump"
+LOBBY_DUMP_NAME = "lobby-20261108T013005Z.dump"
 
 
 class FakeDocker:
-    """Answers the table count, and writes a dump where the db container's /dumps is."""
+    """Answers each database's table count, and writes a dump where the db container's /dumps is."""
 
-    def __init__(self, app_dir, tables="3", fail_dump=False):
+    def __init__(self, app_dir, tables=None, fail_dump=()):
         self.app_dir = app_dir
-        self.tables = tables
+        self.tables = {"island_battles": "3", "lobby": "11"} if tables is None else tables
         self.fail_dump = fail_dump
         self.commands = []
 
@@ -43,10 +44,11 @@ class FakeDocker:
         self.commands.append(command)
         assert options["cwd"] == self.app_dir
         assert command[:5] == ["docker", "compose", "exec", "-T", "db"]
+        database = command[command.index("--dbname") + 1]
         if command[5] == "psql":
-            return subprocess.CompletedProcess(command, 0, stdout=f"{self.tables}\n", stderr="")
+            return subprocess.CompletedProcess(command, 0, stdout=f"{self.tables[database]}\n", stderr="")
         if command[5] == "pg_dump":
-            if self.fail_dump:
+            if database in self.fail_dump:
                 raise subprocess.CalledProcessError(1, command)
             target = command[command.index("--file") + 1]
             self.dumped = os.path.join(self.app_dir, "dumps", os.path.basename(target))
@@ -87,7 +89,7 @@ class BackupTest(unittest.TestCase):
         os.mkdir(os.path.join(self.app_dir, "dumps"))
         self.environ = {
             "ISLAND_BATTLES_APP_DIR": self.app_dir,
-            "ISLAND_BATTLES_DATABASE": "island_battles",
+            "ISLAND_BATTLES_DATABASES": "island_battles lobby",
             "ISLAND_BATTLES_MOVED_AWAY_MARKER": os.path.join(self.app_dir, "moved-away"),
             "ISLAND_BATTLES_BACKUP_BUCKET": "island-battles-backups-123456789012",
             "ISLAND_BATTLES_BACKUP_PREFIX": "postgres/",
@@ -109,29 +111,30 @@ class BackupTest(unittest.TestCase):
             status = backup.main(environ=self.environ, run=docker, clients=self.clients, now=NOW)
         return status, output
 
-    def test_uploads_the_dump_and_counts_it(self):
+    def test_uploads_both_dumps_and_counts_them_once(self):
         docker = FakeDocker(self.app_dir)
         status, output = self.run_backup(docker)
 
         self.assertEqual(status, 0, output.getvalue())
-        self.assertEqual(self.regions, ["eu-central-1"])
+        self.assertEqual(set(self.regions), {"eu-central-1"})
         self.assertEqual(self.s3.uploads, [{
             "Bucket": "island-battles-backups-123456789012",
-            "Key": f"postgres/{DUMP_NAME}",
+            "Key": f"postgres/{name}",
             "Body": b"PGDMP fake",
             "ContentType": "application/octet-stream",
-        }])
+        } for name in (DUMP_NAME, LOBBY_DUMP_NAME)])
         self.assertEqual(self.cloudwatch.metrics, [{
             "Namespace": "IslandBattles/VM",
             "MetricData": [{"MetricName": "DatabaseBackups", "Value": 1, "Unit": "Count"}],
         }])
-        dump_command = docker.commands[-1]
-        self.assertEqual(dump_command[5:], [
-            "pg_dump", "--username", "postgres", "--dbname", "island_battles",
-            "--format", "custom", "--no-owner", "--no-privileges", "--file", f"/dumps/{DUMP_NAME}",
-        ])
-        self.assertEqual(os.listdir(os.path.join(self.app_dir, "dumps")), [], "the dump must not stay on the VM")
+        dump_commands = [command[5:] for command in docker.commands if command[5] == "pg_dump"]
+        self.assertEqual(dump_commands, [[
+            "pg_dump", "--username", "postgres", "--dbname", database,
+            "--format", "custom", "--no-owner", "--no-privileges", "--file", f"/dumps/{name}",
+        ] for database, name in (("island_battles", DUMP_NAME), ("lobby", LOBBY_DUMP_NAME))])
+        self.assertEqual(os.listdir(os.path.join(self.app_dir, "dumps")), [], "the dumps must not stay on the VM")
         self.assertIn(f"s3://island-battles-backups-123456789012/postgres/{DUMP_NAME}", output.getvalue())
+        self.assertIn(f"s3://island-battles-backups-123456789012/postgres/{LOBBY_DUMP_NAME}", output.getvalue())
 
     def test_skips_a_vm_that_was_moved_away_from(self):
         open(self.environ["ISLAND_BATTLES_MOVED_AWAY_MARKER"], "w").close()
@@ -143,19 +146,29 @@ class BackupTest(unittest.TestCase):
         self.assertEqual((self.s3.uploads, self.cloudwatch.metrics), ([], []))
         self.assertIn("moved away", output.getvalue())
 
-    def test_skips_a_database_without_tables(self):
-        status, output = self.run_backup(FakeDocker(self.app_dir, tables="0"))
+    def test_skips_databases_without_tables(self):
+        status, output = self.run_backup(FakeDocker(self.app_dir, tables={"island_battles": "0", "lobby": "0"}))
 
         self.assertEqual(status, 0)
         self.assertEqual((self.s3.uploads, self.cloudwatch.metrics), ([], []))
-        self.assertIn("no tables", output.getvalue())
+        self.assertIn("island_battles has no tables", output.getvalue())
+        self.assertIn("lobby has no tables", output.getvalue())
+
+    def test_backs_up_the_database_with_tables_when_the_other_has_none(self):
+        status, output = self.run_backup(FakeDocker(self.app_dir, tables={"island_battles": "0", "lobby": "11"}))
+
+        self.assertEqual(status, 0, output.getvalue())
+        self.assertEqual([upload["Key"] for upload in self.s3.uploads], [f"postgres/{LOBBY_DUMP_NAME}"])
+        self.assertEqual(len(self.cloudwatch.metrics), 1)
 
     def test_fails_without_counting_when_pg_dump_fails(self):
-        status, output = self.run_backup(FakeDocker(self.app_dir, fail_dump=True))
+        status, output = self.run_backup(FakeDocker(self.app_dir, fail_dump=("island_battles",)))
 
         self.assertEqual(status, 1)
-        self.assertEqual((self.s3.uploads, self.cloudwatch.metrics), ([], []))
-        self.assertIn("pg_dump failed", output.getvalue())
+        # The other database is still backed up, but the run doesn't count.
+        self.assertEqual([upload["Key"] for upload in self.s3.uploads], [f"postgres/{LOBBY_DUMP_NAME}"])
+        self.assertEqual(self.cloudwatch.metrics, [])
+        self.assertIn("pg_dump failed, so island_battles wasn't backed up", output.getvalue())
 
     def test_fails_without_counting_and_removes_the_dump_when_the_upload_fails(self):
         self.s3 = FakeS3(error=RuntimeError("AccessDenied"))
@@ -171,7 +184,7 @@ class BackupTest(unittest.TestCase):
         status, output = self.run_backup(FakeDocker(self.app_dir))
 
         self.assertEqual(status, 1)
-        self.assertEqual(len(self.s3.uploads), 1)
+        self.assertEqual(len(self.s3.uploads), 2)
         self.assertIn("is in S3, but counting it failed", output.getvalue())
 
     def test_refuses_to_run_without_its_settings(self):

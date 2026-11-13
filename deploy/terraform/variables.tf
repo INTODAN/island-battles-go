@@ -129,8 +129,9 @@ variable "lambda_timeout_seconds" {
 variable "reserved_concurrency" {
   description = <<-EOT
     The most Lambda instances that run at once, C in the free-tier budget.
-    Every instance keeps its own pool of up to database_max_open_connections,
-    so the product must leave postgres_spare_connections free under
+    Every instance keeps its own two pools of up to
+    database_max_open_connections, one per database, so the product must
+    leave postgres_spare_connections free under
     postgres_max_connections. Every instance also writes and traces up to its
     own limits, so C also bounds the month's logs and traces (deploy/README.md).
     Set it to null only on an account whose concurrency limit is too low to

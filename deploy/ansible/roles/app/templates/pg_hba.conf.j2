@@ -5,11 +5,15 @@
 local    all                     all                                 trust
 
 # The backend on Lambda, over the internet: TLS and a password only, and only
-# for its own role and database.
+# for each database's own role. The lobby has its own database and role (#229).
 hostssl  {{ postgres_database }}  {{ postgres_app_role }}  0.0.0.0/0   scram-sha-256
 hostssl  {{ postgres_database }}  {{ postgres_app_role }}  ::/0        scram-sha-256
+hostssl  {{ lobby_database }}  {{ lobby_app_role }}  0.0.0.0/0   scram-sha-256
+hostssl  {{ lobby_database }}  {{ lobby_app_role }}  ::/0        scram-sha-256
 
 # The admin MCP server on the operator's machine (#79), the same way, with its
-# read-only role. Everything else is rejected.
+# read-only role, to both databases. Everything else is rejected.
 hostssl  {{ postgres_database }}  {{ postgres_admin_role }}  0.0.0.0/0   scram-sha-256
 hostssl  {{ postgres_database }}  {{ postgres_admin_role }}  ::/0        scram-sha-256
+hostssl  {{ lobby_database }}  {{ postgres_admin_role }}  0.0.0.0/0   scram-sha-256
+hostssl  {{ lobby_database }}  {{ postgres_admin_role }}  ::/0        scram-sha-256

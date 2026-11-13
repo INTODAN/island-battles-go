@@ -64,9 +64,11 @@ func TestMigrateSchemaDropsTheGenerationNotificationQueue(t *testing.T) {
 
 // Each person's bot is in their lobby member settings, so migrating drops the
 // table of bot choices, with its foreign key to the lobby's memberships, and
-// its choices, in databases created before.
+// its choices, in databases created before, which also held the lobby's
+// tables.
 func TestMigrateSchemaDropsTheBotChoiceTable(t *testing.T) {
 	db := testutils.InitTestDB(t)
+	testutils.AddLobbyTablesForTest(t, db)
 	err := db.Exec(`CREATE TABLE island_lobby_bot_choices (lobby_id uuid, player_id uuid, kind text NOT NULL, level bigint, created_at timestamptz, updated_at timestamptz, PRIMARY KEY (lobby_id, player_id),
 CONSTRAINT fk_island_lobby_bot_choices_membership FOREIGN KEY (lobby_id, player_id) REFERENCES lobby_memberships (lobby_id, player_id) ON DELETE CASCADE)`).Error
 	if err != nil {
@@ -308,7 +310,7 @@ func TestMigrateSchemaIsRepeatable(t *testing.T) {
 	if err := schema.Migrate(context.Background(), connect(t, dependencies.DefaultDatabaseConfig(databaseURL(t, db)), slog.Default())); err != nil {
 		t.Fatal(err)
 	}
-	for _, table := range []string{"lobby_rooms", "map_templates", "games", "generations"} {
+	for _, table := range []string{"map_templates", "games", "generations"} {
 		if !db.Migrator().HasTable(table) {
 			t.Fatalf("missing table %s", table)
 		}

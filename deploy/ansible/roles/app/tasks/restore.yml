@@ -1,12 +1,16 @@
 ---
-# Restores a dump from the developer machine into the VM's database (#31). The
+# Restores a dump from the developer machine into one of the VM's databases
+# (#31): the backend's, or with -e app_database=lobby the lobby's (#229). The
 # VM must already be deployed, and nothing may write to the database meanwhile.
 - name: Check the dump to restore
   ansible.builtin.assert:
     that:
       - app_dump_file is defined
       - app_dump_file is ansible.builtin.file
-    fail_msg: "Pass -e app_dump_file=<path> with a dump made by dump.yml."
+      - app_database in (app_database_owners | map(attribute='name'))
+    fail_msg: >-
+      Pass -e app_dump_file=<path> with a dump made by dump.yml, and -e app_database=<name> with one of
+      {{ app_database_owners | map(attribute='name') | join(', ') }} when it isn't the backend's.
     quiet: true
 
 - name: Look for the moved-away marker
@@ -62,7 +66,7 @@
     - name: Count the tables in the database
       ansible.builtin.command:
         argv: >-
-          {{ app_superuser_psql + ['--dbname', postgres_database, '--tuples-only', '--no-align', '--command',
+          {{ app_superuser_psql + ['--dbname', app_database, '--tuples-only', '--no-align', '--command',
              "SELECT count(*) FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema')"] }}
         chdir: "{{ vm_app_dir }}"
       register: app_restore_table_count
@@ -73,7 +77,7 @@
         that:
           - app_restore_table_count.stdout | int == 0 or app_restore_replace_existing | bool
         fail_msg: >-
-          {{ postgres_database }} on {{ inventory_hostname }} isn't empty (tables: {{ app_restore_table_count.stdout }}).
+          {{ app_database }} on {{ inventory_hostname }} isn't empty (tables: {{ app_restore_table_count.stdout }}).
           Pass -e app_restore_replace_existing=true to drop it and restore the dump in its place.
         quiet: true
 
@@ -83,7 +87,7 @@
         - name: Choose the replaced database's dump name
           ansible.builtin.set_fact:
             app_restore_backup_name: >-
-              {{ postgres_database }}-{{ inventory_hostname }}-before-restore-{{ now(utc=true, fmt='%Y%m%dT%H%M%SZ') }}.dump
+              {{ app_database }}-{{ inventory_hostname }}-before-restore-{{ now(utc=true, fmt='%Y%m%dT%H%M%SZ') }}.dump
 
         - name: Create the dumps directory on the developer machine
           ansible.builtin.file:
@@ -96,7 +100,7 @@
         - name: Dump the database being replaced
           ansible.builtin.command:
             argv: >-
-              {{ app_db_exec + ['pg_dump', '--username', 'postgres', '--dbname', postgres_database,
+              {{ app_db_exec + ['pg_dump', '--username', 'postgres', '--dbname', app_database,
                  '--format', 'custom', '--no-owner', '--no-privileges', '--file', '/dumps/' ~ app_restore_backup_name] }}
             chdir: "{{ vm_app_dir }}"
           changed_when: true
@@ -129,24 +133,24 @@
             argv: "{{ app_superuser_psql + ['--dbname', 'postgres', '--set', 'ON_ERROR_STOP=1', '--quiet'] }}"
             chdir: "{{ vm_app_dir }}"
             stdin: |
-              DROP DATABASE "{{ postgres_database }}" WITH (FORCE);
-              CREATE DATABASE "{{ postgres_database }}" OWNER "{{ postgres_app_role }}";
+              DROP DATABASE "{{ app_database }}" WITH (FORCE);
+              CREATE DATABASE "{{ app_database }}" OWNER "{{ app_database_selected.role }}";
           changed_when: true
 
-    # --role makes the backend's role the owner of everything restored. A single
-    # transaction leaves the database empty if anything fails.
+    # --role makes the database's role the owner of everything restored. A
+    # single transaction leaves the database empty if anything fails.
     - name: Restore the dump in one transaction
       ansible.builtin.command:
         argv: >-
-          {{ app_db_exec + ['pg_restore', '--username', 'postgres', '--dbname', postgres_database,
-             '--role', postgres_app_role, '--no-owner', '--no-privileges', '--single-transaction', '--exit-on-error',
+          {{ app_db_exec + ['pg_restore', '--username', 'postgres', '--dbname', app_database,
+             '--role', app_database_selected.role, '--no-owner', '--no-privileges', '--single-transaction', '--exit-on-error',
              '/dumps/' ~ app_restore_remote_name] }}
         chdir: "{{ vm_app_dir }}"
       changed_when: true
 
     - name: Update the planner statistics
       ansible.builtin.command:
-        argv: "{{ app_db_exec + ['vacuumdb', '--username', 'postgres', '--dbname', postgres_database, '--analyze-only', '--quiet'] }}"
+        argv: "{{ app_db_exec + ['vacuumdb', '--username', 'postgres', '--dbname', app_database, '--analyze-only', '--quiet'] }}"
         chdir: "{{ vm_app_dir }}"
       changed_when: false
 

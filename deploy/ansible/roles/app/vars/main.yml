@@ -16,11 +16,31 @@ app_backend_psql:
   - -c
   - read -r PGPASSWORD && export PGPASSWORD && exec psql --no-psqlrc "$@"
   - psql
-app_backend_conninfo: host=127.0.0.1 port=5432 dbname={{ postgres_database }} user={{ postgres_app_role }}
 app_backend_ssl_query: SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()
+# The databases on the VM, each with the role that owns it and connects to it:
+# the backend's, and the lobby's own (#229). The backend's comes first.
+# Dumps and restores read the names alone, so they never read the passwords,
+# whose lookups would generate a missing one.
+app_database_owners:
+  - { name: "{{ postgres_database }}", role: "{{ postgres_app_role }}" }
+  - { name: "{{ lobby_database }}", role: "{{ lobby_app_role }}" }
+app_databases:
+  - name: "{{ postgres_database }}"
+    role: "{{ postgres_app_role }}"
+    password: "{{ postgres_app_password }}"
+    description: the backend's
+  - name: "{{ lobby_database }}"
+    role: "{{ lobby_app_role }}"
+    password: "{{ lobby_app_password }}"
+    description: the lobby's
+# The repository on the developer machine, whose lobby/cmd/migrate the VM
+# deploy runs.
+app_repository_root: "{{ (playbook_dir ~ '/../..') | ansible.builtin.realpath }}"
+# The database that a dump or a restore is of: the backend's unless
+# -e app_database=<name> names the lobby's.
+app_database_selected: "{{ app_database_owners | selectattr('name', 'equalto', app_database) | first }}"
 # The admin MCP server's read-only role (#79) connects the same way, and must
-# not be able to read lobby_sessions.bearer_hash once the table exists.
-app_admin_conninfo: host=127.0.0.1 port=5432 dbname={{ postgres_database }} user={{ postgres_admin_role }}
+# not be able to read lobby_sessions.bearer_hash in either database.
 app_admin_check_query: >-
   SELECT ssl AND (to_regclass('public.lobby_sessions') IS NULL
   OR NOT has_column_privilege('public.lobby_sessions', 'bearer_hash', 'SELECT'))
@@ -38,6 +58,7 @@ app_backup_settings_dir: /etc/island-battles
 app_secret_files:
   - "{{ deploy_secrets_dir }}/postgres_superuser_password"
   - "{{ deploy_secrets_dir }}/postgres_app_password"
+  - "{{ deploy_secrets_dir }}/postgres_lobby_password"
   - "{{ deploy_secrets_dir }}/postgres_admin_password"
   - "{{ deploy_secrets_dir }}/centrifugo_api_key"
   - "{{ deploy_secrets_dir }}/connection_token_hmac_secret"

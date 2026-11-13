@@ -1,23 +1,24 @@
--- Creates the backend's role and database, or resets the role's password.
--- Schema migrations are not run here; the migrate command does that (#29).
--- Owning the database gives the role CREATE on it, which the migration runner
--- needs to create its scratch schema on a database without history (#23).
-SELECT format('CREATE ROLE %I LOGIN', '{{ postgres_app_role }}')
-WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{{ postgres_app_role }}')
+-- Creates one of the databases and the role that owns it, or resets the
+-- role's password: the backend's, or the lobby's own (#229). Schema migrations
+-- are not run here; the migrate commands do that (#29). Owning the database
+-- gives the role CREATE on it, which the migration runner needs to create its
+-- scratch schema on a database without history (#23).
+SELECT format('CREATE ROLE %I LOGIN', '{{ app_database.role }}')
+WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{{ app_database.role }}')
 \gexec
 
 -- An existing role keeps its LOGIN or NOLOGIN. Moving to a new VM locks the old
--- VM's role out (dump.yml), and only app_unlock_after_move lets it in again.
-ALTER ROLE "{{ postgres_app_role }}"
+-- VM's roles out (dump.yml), and only app_unlock_after_move lets them in again.
+ALTER ROLE "{{ app_database.role }}"
   WITH NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
-  PASSWORD '{{ postgres_app_password }}';
+  PASSWORD '{{ app_database.password }}';
 {% if app_unlock_after_move | bool %}
 
-ALTER ROLE "{{ postgres_app_role }}" LOGIN;
+ALTER ROLE "{{ app_database.role }}" LOGIN;
 {% endif %}
 
-SELECT format('CREATE DATABASE %I OWNER %I', '{{ postgres_database }}', '{{ postgres_app_role }}')
-WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '{{ postgres_database }}')
+SELECT format('CREATE DATABASE %I OWNER %I', '{{ app_database.name }}', '{{ app_database.role }}')
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '{{ app_database.name }}')
 \gexec
 
-ALTER DATABASE "{{ postgres_database }}" OWNER TO "{{ postgres_app_role }}";
+ALTER DATABASE "{{ app_database.name }}" OWNER TO "{{ app_database.role }}";

@@ -36,23 +36,44 @@ type GamesOverview struct {
 	GenerationsLastHourGameIDs []uint `json:"generations_last_hour_game_ids" jsonschema:"The games those generations belong to."`
 }
 
-// islandBattlesGames adds Island Battles games to the lobby tools.
-type islandBattlesGames struct{}
+// islandBattlesGames adds Island Battles games to the lobby tools, read from
+// Island Battles' own database, apart from the lobby's (#229).
+type islandBattlesGames struct{ database *gorm.DB }
 
 var _ adminmcp.Games = islandBattlesGames{}
 
-func (islandBattlesGames) Overview(transaction *gorm.DB, now time.Time) (any, error) {
+func (games islandBattlesGames) Overview(ctx context.Context, now time.Time) (any, error) {
+	var overview GamesOverview
+	err := adminmcp.ReadOnly(ctx, games.database, func(transaction *gorm.DB) error {
+		var err error
+		overview, err = gamesOverview(transaction, now)
+		return err
+	})
+	return overview, err
+}
+
+func (games islandBattlesGames) GameIDs(ctx context.Context, lobbyIDs []string) (map[string]any, error) {
+	var ids map[string]any
+	err := adminmcp.ReadOnly(ctx, games.database, func(transaction *gorm.DB) error {
+		var err error
+		ids, err = gameIDs(transaction, lobbyIDs)
+		return err
+	})
+	return ids, err
+}
+
+func gamesOverview(transaction *gorm.DB, now time.Time) (GamesOverview, error) {
 	var overview GamesOverview
 	if err := transaction.Model(&models.Game{}).Where(clause.Eq{Column: outcomeColumn, Value: nil}).Count(&overview.RunningCount).Error; err != nil {
-		return nil, err
+		return GamesOverview{}, err
 	}
 	if err := transaction.Model(&models.Game{}).Where(clause.Neq{Column: outcomeColumn, Value: nil}).Count(&overview.FinishedCount).Error; err != nil {
-		return nil, err
+		return GamesOverview{}, err
 	}
 	var generations []models.Generation
 	if err := transaction.Select("GameID").Where(clause.Gte{Column: createdAtColumn, Value: now.Add(-time.Hour)}).
 		Find(&generations).Error; err != nil {
-		return nil, err
+		return GamesOverview{}, err
 	}
 	overview.GenerationsLastHourCount = int64(len(generations))
 	overview.GenerationsLastHourGameIDs = []uint{}
@@ -65,7 +86,7 @@ func (islandBattlesGames) Overview(transaction *gorm.DB, now time.Time) (any, er
 	return overview, nil
 }
 
-func (islandBattlesGames) GameIDs(transaction *gorm.DB, lobbyIDs []string) (map[string]any, error) {
+func gameIDs(transaction *gorm.DB, lobbyIDs []string) (map[string]any, error) {
 	values := make([]any, len(lobbyIDs))
 	for index, lobbyID := range lobbyIDs {
 		values[index] = lobbyID

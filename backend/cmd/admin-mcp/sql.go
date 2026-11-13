@@ -65,9 +65,33 @@ type informationSchemaColumn struct {
 
 func (informationSchemaColumn) TableName() string { return "information_schema.columns" }
 
-// DescribeSchemaInput names the table to describe.
+// The databases that the SQL tools read: Island Battles' and the lobby's,
+// which are two databases since #229, so no statement reads both.
+const (
+	GameDatabase  = "game"
+	LobbyDatabase = "lobby"
+)
+
+// databaseDescription describes the SQL tools' database argument.
+const databaseDescription = "The database to read: game, Island Battles' games, generations, maps, castles, soldier groups and commands; " +
+	"or lobby, the lobby's lobby_* tables of lobbies, teams, members and players. They are two databases, so no statement reads both."
+
+// sqlDatabases are the databases that the SQL tools read, by name.
+type sqlDatabases map[string]*gorm.DB
+
+// pick returns the database that name names.
+func (databases sqlDatabases) pick(name string) (*gorm.DB, error) {
+	database, found := databases[name]
+	if !found {
+		return nil, fmt.Errorf("database must be %s or %s, not %q", GameDatabase, LobbyDatabase, name)
+	}
+	return database, nil
+}
+
+// DescribeSchemaInput names the database, and the table to describe.
 type DescribeSchemaInput struct {
-	Table string `json:"table,omitempty" jsonschema:"A table to list the columns of. Without it, the tables are listed."`
+	Database string `json:"database" jsonschema:"The database to describe: game, Island Battles', or lobby, the lobby's."`
+	Table    string `json:"table,omitempty" jsonschema:"A table to list the columns of. Without it, the tables are listed."`
 }
 
 // SchemaTable is a table or view.
@@ -93,9 +117,10 @@ type Schema struct {
 	Columns []SchemaColumn `json:"columns,omitempty"`
 }
 
-// QueryInput is one SQL statement.
+// QueryInput is one SQL statement, and the database to run it in.
 type QueryInput struct {
-	SQL string `json:"sql" jsonschema:"One SELECT, VALUES, TABLE or WITH statement."`
+	Database string `json:"database" jsonschema:"The database to read: game, Island Battles', or lobby, the lobby's."`
+	SQL      string `json:"sql" jsonschema:"One SELECT, VALUES, TABLE or WITH statement."`
 }
 
 // QueryColumn names a result column and its PostgreSQL type.
@@ -112,16 +137,21 @@ type QueryResult struct {
 	Notes     []string      `json:"notes,omitempty"`
 }
 
-// addSQLTools registers describe_schema and query.
-func addSQLTools(server *mcp.Server, database *gorm.DB, logger *slog.Logger) {
+// addSQLTools registers describe_schema and query, which read the database
+// that their database argument names.
+func addSQLTools(server *mcp.Server, databases sqlDatabases, logger *slog.Logger) {
 	mcp.AddTool(server, &mcp.Tool{
 		Name: "describe_schema",
-		Description: "Lists the database's tables, or one table's columns with their types, nullability and defaults, from information_schema, " +
-			"to write SQL for query. Lobby tables start with lobby_; the others are Island Battles' games, generations, maps, castles, soldier groups and commands.",
+		Description: "Lists a database's tables, or one table's columns with their types, nullability and defaults, from information_schema, " +
+			"to write SQL for query. " + databaseDescription,
 		Annotations: adminmcp.ReadOnlyAnnotations("Describe schema"),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, input DescribeSchemaInput) (*mcp.CallToolResult, Schema, error) {
+		database, err := databases.pick(input.Database)
+		if err != nil {
+			return nil, Schema{}, err
+		}
 		var schema Schema
-		err := adminmcp.ReadOnly(ctx, database, func(transaction *gorm.DB) error {
+		err = adminmcp.ReadOnly(ctx, database, func(transaction *gorm.DB) error {
 			var err error
 			schema, err = describeSchema(transaction, input.Table)
 			return err
@@ -132,15 +162,19 @@ func addSQLTools(server *mcp.Server, database *gorm.DB, logger *slog.Logger) {
 		Name: "query",
 		Description: fmt.Sprintf("Runs one read-only SQL statement, a SELECT, VALUES, TABLE or WITH query, for questions the other tools don't answer. "+
 			"Use describe_schema first. Several statements are rejected, and so is anything that writes. The statement times out after %s. "+
-			"The result is cut to %d rows and %d KiB, and truncated says when. Times are returned in UTC.",
-			adminmcp.StatementTimeout, maxQueryRows, maxQueryBytes>>10),
+			"The result is cut to %d rows and %d KiB, and truncated says when. Times are returned in UTC. %s",
+			adminmcp.StatementTimeout, maxQueryRows, maxQueryBytes>>10, databaseDescription),
 		Annotations: adminmcp.ReadOnlyAnnotations("Query"),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, input QueryInput) (*mcp.CallToolResult, QueryResult, error) {
+		database, err := databases.pick(input.Database)
+		if err != nil {
+			return nil, QueryResult{}, err
+		}
 		var result QueryResult
-		err := adminmcp.ReadOnly(ctx, database, func(transaction *gorm.DB) error {
+		err = adminmcp.ReadOnly(ctx, database, func(transaction *gorm.DB) error {
 			if err := adminmcp.CheckCredentialsHidden(transaction); err != nil {
 				err = credentialsError(err)
-				logger.Error("query is refused", "error", err)
+				logger.Error("query is refused", "database", input.Database, "error", err)
 				return err
 			}
 			var err error
@@ -196,7 +230,7 @@ func credentialsError(err error) error {
 	case errors.Is(err, adminmcp.ErrCredentialsReadable):
 		return fmt.Errorf("%w. Run the VM deploy, which grants them again: see \"The admin MCP server\" in deploy/README.md", err)
 	case errors.Is(err, adminmcp.ErrCredentialsColumnChanged):
-		return fmt.Errorf("%w. Update the lobby_sessions column grants in deploy/ansible/roles/app/templates/admin-role.sql.j2 and run the VM deploy", err)
+		return fmt.Errorf("%w. Update the lobby_sessions column grants in deploy/ansible/roles/app/templates/admin-grants-lobby.sql.j2 and run the VM deploy", err)
 	}
 	return err
 }

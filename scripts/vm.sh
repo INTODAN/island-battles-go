@@ -18,12 +18,14 @@ Usage:
       Provision the VM, or update it. Safe to re-run. The first deploy needs
       -e app_generate_secrets=true to create deploy/local/secrets/.
   scripts/vm.sh dump <ip> [ansible-playbook options]
-      Dump the VM's database to deploy/local/dumps/.
+      Dump the backend's database to deploy/local/dumps/, or the lobby's with
+      -e app_database=lobby.
   scripts/vm.sh restore <ip> <dump file> [ansible-playbook options]
-      Restore a dump into the VM's empty database.
+      Restore a dump into the VM's empty database: the backend's, or the
+      lobby's with -e app_database=lobby.
   scripts/vm.sh move-data <old ip> <new ip> [ansible-playbook options]
-      Stop the backend from writing to the old VM, dump its database and
-      restore it into the new VM.
+      Stop the backend from writing to the old VM, dump both its databases,
+      the backend's and the lobby's, and restore them into the new VM.
   scripts/vm.sh smoke
       Check CloudFront, the Lambda, Postgres and Centrifugo together, reusing
       the saved guest credential in deploy/local/smoke-session.json. With
@@ -168,18 +170,35 @@ case "$command" in
     old_host="$1"
     new_host="$2"
     shift 2
-    dump_file="$local_directory/dumps/island_battles-$old_host-$(date -u +%Y%m%dT%H%M%SZ).dump"
+    stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+    dump_file="$local_directory/dumps/island_battles-$old_host-$stamp.dump"
+    lobby_dump_file="$local_directory/dumps/lobby-$old_host-$stamp.dump"
+    # The first dump locks both databases' roles out of the old VM.
     run_playbook "$old_host" dump.yml -e "$(dump_file_variables "$dump_file")" -e app_dump_lock_writes=true "$@"
+    run_playbook "$old_host" dump.yml -e "$(dump_file_variables "$lobby_dump_file")" -e app_database=lobby -e app_dump_lock_writes=true "$@"
     if ! run_playbook "$new_host" restore.yml -e "$(dump_file_variables "$dump_file")" "$@"; then
       cat >&2 <<EOF
-The restore into $new_host failed, and the backend stays locked out of $old_host.
-Fix the cause and run the same move-data command again, or let the backend use
-$old_host again with: scripts/vm.sh deploy $old_host -e app_unlock_after_move=true
+The restore of the backend's database into $new_host failed, and the backend
+stays locked out of $old_host. Fix the cause and run the same move-data command
+again, or let the backend use $old_host again with:
+scripts/vm.sh deploy $old_host -e app_unlock_after_move=true
+EOF
+      exit 1
+    fi
+    # The VM deploy gave the new VM's lobby database its schema, so the
+    # restore replaces it, after saving it to deploy/local/dumps/.
+    if ! run_playbook "$new_host" restore.yml -e "$(dump_file_variables "$lobby_dump_file")" -e app_database=lobby \
+      -e app_restore_replace_existing=true "$@"; then
+      cat >&2 <<EOF
+The backend's database is on $new_host, but the restore of the lobby's failed,
+and the backend stays locked out of $old_host. Fix the cause and restore it with:
+scripts/vm.sh restore $new_host $lobby_dump_file -e app_database=lobby -e app_restore_replace_existing=true
 EOF
       exit 1
     fi
     cat <<EOF
-Copied the database from $old_host to $new_host. The dump stays in $dump_file.
+Copied both databases from $old_host to $new_host. The dumps stay in
+$dump_file and $lobby_dump_file.
 The backend can't log in to $old_host any more, even after a redeploy. Move the
 static IP to the new VM next; deploy/README.md lists the remaining steps.
 EOF
