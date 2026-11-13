@@ -54,7 +54,7 @@ func TestGameRoutesTakePlayerTokensAndRefuseTheGuestCredential(t *testing.T) {
 
 	// Without the lobby's sessions, the token still serves every game route
 	// that reads, and the commands.
-	if err := stack.database.Exec("DELETE FROM lobby_sessions").Error; err != nil {
+	if err := stack.lobbyDatabase.Exec("DELETE FROM lobby_sessions").Error; err != nil {
 		t.Fatal(err)
 	}
 	stack.expect(stack.api.Get(generation, token), http.StatusOK, &state)

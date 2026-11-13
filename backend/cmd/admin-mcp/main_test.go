@@ -40,11 +40,34 @@ type fixture struct {
 	secondGeneration uint
 }
 
+// testDatabases are Island Battles' database and the lobby's (#229).
+type testDatabases struct{ game, lobby *gorm.DB }
+
+// initDatabases starts both databases with their schemas, as their owner.
+func initDatabases(t *testing.T) testDatabases {
+	t.Helper()
+	game, lobby := testutils.InitTestDatabases(t)
+	return testDatabases{game: game, lobby: lobby}
+}
+
+// urlsOf returns the databases' URLs.
+func urlsOf(t *testing.T, databases testDatabases) databaseURLs {
+	t.Helper()
+	return databaseURLs{game: dsnOf(t, databases.game), lobby: dsnOf(t, databases.lobby)}
+}
+
+// openBothAs connects to both databases the way the server does.
+func openBothAs(t *testing.T, urls databaseURLs) testDatabases {
+	t.Helper()
+	return testDatabases{game: openAs(t, urls.game), lobby: openAs(t, urls.lobby)}
+}
+
 // seed creates a started Island Battles lobby with Alice (connected) and
-// Bob (not), the game started from it with two generations, and a finished
-// game without a lobby. In the second generation, Alice has completed her
-// turn and Bob hasn't, and Blue has a soldier group of 5 on its way to Red.
-func seed(t *testing.T, database *gorm.DB) fixture {
+// Bob (not), in the lobby's database, and in Island Battles' the game started
+// from it with two generations, and a finished game without a lobby. In the
+// second generation, Alice has completed her turn and Bob hasn't, and Blue
+// has a soldier group of 5 on its way to Red.
+func seed(t *testing.T, databases testDatabases) fixture {
 	t.Helper()
 	now := time.Now().UTC()
 	ids := fixture{lobbyID: uuid.NewString(), alice: uuid.NewString(), bob: uuid.NewString()}
@@ -66,8 +89,9 @@ func seed(t *testing.T, database *gorm.DB) fixture {
 		&lobbypostgres.LeaseRecord{LobbyID: ids.lobbyID, PlayerID: ids.bob, Generation: 1, ClientInstanceID: uuid.NewString(), ExpiresAt: now.Add(-time.Minute)},
 	}
 	for _, record := range records {
-		create(t, database, record)
+		create(t, databases.lobby, record)
 	}
+	database := databases.game
 
 	var template models.MapTemplateView
 	if err := json.Unmarshal([]byte(testutils.MapExampleInput), &template); err != nil {
@@ -160,18 +184,18 @@ type client struct {
 	answers []string
 }
 
-func connect(t *testing.T, database *gorm.DB) *client {
+func connect(t *testing.T, databases testDatabases) *client {
 	t.Helper()
-	return connectWithRetention(t, database, retention.DefaultPeriod)
+	return connectWithRetention(t, databases, retention.DefaultPeriod)
 }
 
 // connectWithRetention serves newServer with a game retention period of its
 // own.
-func connectWithRetention(t *testing.T, database *gorm.DB, gameRetentionPeriod time.Duration) *client {
+func connectWithRetention(t *testing.T, databases testDatabases, gameRetentionPeriod time.Duration) *client {
 	t.Helper()
 	ctx := context.Background()
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
-	serverSession, err := newServer(database, slog.New(slog.NewTextHandler(io.Discard, nil)), gameRetentionPeriod).Connect(ctx, serverTransport, nil)
+	serverSession, err := newServer(databases.game, databases.lobby, slog.New(slog.NewTextHandler(io.Discard, nil)), gameRetentionPeriod).Connect(ctx, serverTransport, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,9 +272,9 @@ func checkNoBearerHash(t *testing.T, client *client, nameToo bool) {
 }
 
 func TestServerAnswersAboutLobbiesAndGames(t *testing.T) {
-	owner := testutils.InitTestDB(t)
+	owner := initDatabases(t)
 	ids := seed(t, owner)
-	client := connect(t, openAs(t, dsnOf(t, owner)))
+	client := connect(t, openBothAs(t, urlsOf(t, owner)))
 
 	tools, err := client.session.ListTools(context.Background(), nil)
 	if err != nil {
@@ -387,26 +411,53 @@ func TestServerAnswersAboutLobbiesAndGames(t *testing.T) {
 	})
 
 	t.Run("describe_schema", func(t *testing.T) {
-		tables := call[Schema](t, client, "describe_schema", nil)
-		var tableNames []string
-		for _, table := range tables.Tables {
-			tableNames = append(tableNames, table.Name)
-		}
-		for _, table := range []string{"lobby_rooms", "lobby_memberships", "games", "generations", "castles"} {
-			if !slices.Contains(tableNames, table) {
-				t.Errorf("tables = %v, missing %s", tableNames, table)
+		// Each database has its own tables only.
+		for database, tables := range map[string]struct{ has, lacks []string }{
+			GameDatabase:  {has: []string{"games", "generations", "castles"}, lacks: []string{"lobby_rooms"}},
+			LobbyDatabase: {has: []string{"lobby_rooms", "lobby_memberships"}, lacks: []string{"games"}},
+		} {
+			listed := call[Schema](t, client, "describe_schema", map[string]any{"database": database})
+			var tableNames []string
+			for _, table := range listed.Tables {
+				tableNames = append(tableNames, table.Name)
+			}
+			for _, table := range tables.has {
+				if !slices.Contains(tableNames, table) {
+					t.Errorf("%s's tables = %v, missing %s", database, tableNames, table)
+				}
+			}
+			for _, table := range tables.lacks {
+				if slices.Contains(tableNames, table) {
+					t.Errorf("%s's tables = %v, with %s", database, tableNames, table)
+				}
 			}
 		}
-		rooms := call[Schema](t, client, "describe_schema", map[string]any{"table": "lobby_rooms"})
+		rooms := call[Schema](t, client, "describe_schema", map[string]any{"database": LobbyDatabase, "table": "lobby_rooms"})
 		if len(rooms.Columns) == 0 || rooms.Columns[0].Name != "id" || rooms.Columns[0].Type != "uuid" || rooms.Columns[0].Nullable {
 			t.Errorf("lobby_rooms' columns = %+v", rooms.Columns)
 		}
-		callFailing(t, client, "describe_schema", map[string]any{"table": "no_such_table"})
+		callFailing(t, client, "describe_schema", map[string]any{"database": GameDatabase, "table": "lobby_rooms"})
+		callFailing(t, client, "describe_schema", map[string]any{"database": LobbyDatabase, "table": "no_such_table"})
+		for _, arguments := range []map[string]any{{}, {"database": "both"}} {
+			callFailing(t, client, "describe_schema", arguments)
+			callFailing(t, client, "query", map[string]any{"database": arguments["database"], "sql": "SELECT 1"})
+		}
+	})
+
+	t.Run("query reads the database it names", func(t *testing.T) {
+		games := call[QueryResult](t, client, "query", map[string]any{"database": GameDatabase, "sql": "SELECT count(*) FROM games"})
+		lobbies := call[QueryResult](t, client, "query", map[string]any{"database": LobbyDatabase, "sql": "SELECT count(*) FROM lobby_rooms"})
+		if games.Rows[0][0] != float64(2) || lobbies.Rows[0][0] != float64(1) {
+			t.Errorf("games = %v, lobbies = %v", games.Rows, lobbies.Rows)
+		}
+		if message := callFailing(t, client, "query", map[string]any{"database": GameDatabase, "sql": "SELECT count(*) FROM lobby_rooms"}); !strings.Contains(message, "lobby_rooms") {
+			t.Errorf("the lobby's table in Island Battles' database: %s", message)
+		}
 	})
 
 	t.Run("no answer holds a bearer hash", func(t *testing.T) {
 		// The owner may read the column, and describe_schema names it.
-		call[QueryResult](t, client, "query", map[string]any{"sql": "SELECT * FROM lobby_sessions"})
+		call[QueryResult](t, client, "query", map[string]any{"database": LobbyDatabase, "sql": "SELECT * FROM lobby_sessions"})
 		checkNoBearerHash(t, client, false)
 	})
 }

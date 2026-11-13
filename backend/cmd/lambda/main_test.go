@@ -434,12 +434,15 @@ func TestAFailedRequestLogsOneErrorLineWithItsCause(t *testing.T) {
 	if err := json.Unmarshal(content, &alice); response.StatusCode != http.StatusCreated || err != nil {
 		t.Fatalf("create session=%d %s", response.StatusCode, content)
 	}
-	sqlDatabase, err := database.DB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := sqlDatabase.Close(); err != nil {
-		t.Fatal(err)
+	// Both databases go away: Island Battles' and the lobby's.
+	for _, pool := range []*gorm.DB{database, lobbyDatabase} {
+		sqlDatabase, err := pool.DB()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := sqlDatabase.Close(); err != nil {
+			t.Fatal(err)
+		}
 	}
 	proxyRequest := func(t *testing.T) *events.LambdaFunctionURLStreamingResponse {
 		path := "/internal/lobby/centrifugo/subscribe"

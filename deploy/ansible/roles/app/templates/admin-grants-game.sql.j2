@@ -1,0 +1,40 @@
+-- Lets the admin MCP server's read-only role (#79) read the backend's
+-- database, after admin-role.sql.j2 created the role. It runs in that
+-- database in one transaction. Plain SQL without psql commands, so the Go
+-- tests in backend/cmd/admin-mcp run it too.
+
+-- pg_logical_emit_message writes WAL that a rollback doesn't undo, so a loop
+-- of them could fill the VM's disk even from a read-only transaction.
+-- Everyone may call it by default, and nothing in the backend does, so it is
+-- revoked from PUBLIC, in every signature this PostgreSQL version has. The
+-- superuser keeps it.
+DO $$
+DECLARE
+  emit_message regprocedure;
+BEGIN
+  FOR emit_message IN SELECT oid::regprocedure FROM pg_proc WHERE proname = 'pg_logical_emit_message' LOOP
+    EXECUTE format('REVOKE EXECUTE ON FUNCTION %s FROM PUBLIC', emit_message);
+  END LOOP;
+END
+$$;
+GRANT USAGE ON SCHEMA public TO "{{ postgres_admin_role }}";
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO "{{ postgres_admin_role }}";
+
+-- The backend's tables hold no credentials, so the role may read the tables
+-- that later migrations create too.
+ALTER DEFAULT PRIVILEGES FOR ROLE "{{ postgres_app_role }}" IN SCHEMA public
+  GRANT SELECT ON TABLES TO "{{ postgres_admin_role }}";
+
+-- Builds before the lobby's own database (#229) kept the lobby's tables here,
+-- and the backend deploy's migrate command drops them. Until then, sessions
+-- stay without bearer_hash, the digest of each guest's credential, as in the
+-- lobby's database. Revoking the table's SELECT also revokes its column
+-- grants, so the columns are granted again after it.
+DO $$
+BEGIN
+  IF to_regclass('public.lobby_sessions') IS NOT NULL THEN
+    REVOKE SELECT ON public.lobby_sessions FROM "{{ postgres_admin_role }}";
+    GRANT SELECT (id, player_id, created_at, expires_at) ON public.lobby_sessions TO "{{ postgres_admin_role }}";
+  END IF;
+END
+$$;

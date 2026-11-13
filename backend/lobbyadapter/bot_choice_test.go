@@ -235,7 +235,7 @@ func TestEveryMemberChoosesABotBeforeGettingReady(t *testing.T) {
 
 	// Deleting the lobby, as lobby retention does, deletes the member
 	// settings with it, and the game keeps its copy.
-	deleteLobby(t, stack.database, room.Lobby.ID)
+	deleteLobby(t, stack.lobbyDatabase, room.Lobby.ID)
 	assertFrozenBots()
 }
 
@@ -262,7 +262,7 @@ func TestStartRefusalNamesTheMembersWithoutABot(t *testing.T) {
 	stack.expect(stack.ready(room, bob), http.StatusOK, nil)
 	// Bob got ready before bots were required, which the API can't
 	// reproduce, so remove his settings directly.
-	if err := stack.database.Model(&lobbypostgres.MembershipRecord{}).Where(&lobbypostgres.MembershipRecord{LobbyID: room.Lobby.ID, PlayerID: bob.playerID}).Update("member_settings", nil).Error; err != nil {
+	if err := stack.lobbyDatabase.Model(&lobbypostgres.MembershipRecord{}).Where(&lobbypostgres.MembershipRecord{LobbyID: room.Lobby.ID, PlayerID: bob.playerID}).Update("member_settings", nil).Error; err != nil {
 		t.Fatal(err)
 	}
 	var refusal struct {

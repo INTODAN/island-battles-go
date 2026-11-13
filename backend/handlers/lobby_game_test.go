@@ -33,25 +33,20 @@ func (players bearerPlayers) AuthenticatePlayer(_ context.Context, authorization
 	return principal, nil
 }
 
-// dropLobbyTables stands in for deleting the lobby. Authentication is faked
-// here, so a game request that still read any lobby table would fail.
-func dropLobbyTables(t *testing.T, database *gorm.DB) {
+// requireNoLobbyTables checks that Island Battles' database has none of the
+// lobby's tables, which are in the lobby's own database (#229), so the game
+// works as if its lobby were deleted. Authentication is faked here, so a game
+// request that still read any lobby table would fail.
+func requireNoLobbyTables(t *testing.T, database *gorm.DB) {
 	t.Helper()
 	tables, err := database.Migrator().GetTables()
 	if err != nil {
 		t.Fatal(err)
 	}
-	var lobbyTables []any
 	for _, table := range tables {
 		if strings.HasPrefix(table, "lobby_") {
-			lobbyTables = append(lobbyTables, table)
+			t.Fatalf("Island Battles' database has the lobby's table %s", table)
 		}
-	}
-	if len(lobbyTables) == 0 {
-		t.Fatal("found no lobby tables to drop")
-	}
-	if err := database.Migrator().DropTable(lobbyTables...); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -130,7 +125,7 @@ func TestStartedGameServesItsRosterWithoutTheLobby(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	dropLobbyTables(t, database)
+	requireNoLobbyTables(t, database)
 	handler := handlers.LobbyGame{Database: database, Publisher: &testutils.RecordedPublisher{}, Players: bearerPlayers{
 		"Bearer alice": {PlayerID: alice}, "Bearer bob": {PlayerID: bob}, "Bearer outsider": {PlayerID: uuid.NewString()}, "Bearer carol": {PlayerID: carol},
 	}}

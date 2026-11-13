@@ -94,7 +94,7 @@ func TestTheSwitchDropsTheLobbysTablesFromTheGameDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	migrate(t, map[string]string{dependencies.DatabaseURLEnv: gameURL})
-	if err := game.Exec(`INSERT INTO lobby_players (id, display_name, created_at) VALUES ('player', 'Player', now())`).Error; err != nil {
+	if err := game.Exec(`INSERT INTO lobby_players (id, display_name, created_at) VALUES (gen_random_uuid(), 'Player', now())`).Error; err != nil {
 		t.Fatal(err)
 	}
 

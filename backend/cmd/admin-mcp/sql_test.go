@@ -2,14 +2,12 @@ package main
 
 import (
 	"context"
-	"net/url"
 	"os"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
 
-	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/models"
 	"islandBattles/lobby/adminmcp"
 	lobbypostgres "islandBattles/lobby/postgres"
@@ -18,12 +16,12 @@ import (
 )
 
 func TestQueryReadsOneStatement(t *testing.T) {
-	owner := testutils.InitTestDB(t)
+	owner := initDatabases(t)
 	ids := seed(t, owner)
-	client := connect(t, openAs(t, dsnOf(t, owner)))
+	client := connect(t, openBothAs(t, urlsOf(t, owner)))
 
 	t.Run("values keep their types", func(t *testing.T) {
-		result := call[QueryResult](t, client, "query", map[string]any{"sql": `SELECT id, phase, capacity, game_settings, created_at,
+		result := call[QueryResult](t, client, "query", map[string]any{"database": LobbyDatabase, "sql": `SELECT id, phase, capacity, game_settings, created_at,
 			'\x0102'::bytea AS raw, 1.5::numeric AS amount, 'NaN'::float8 AS not_a_number, NULL AS nothing
 			FROM lobby_rooms -- a trailing comment`})
 		if len(result.Rows) != 1 || result.Truncated || len(result.Columns) != 9 {
@@ -42,23 +40,23 @@ func TestQueryReadsOneStatement(t *testing.T) {
 		if result.Columns[0] != (QueryColumn{Name: "id", Type: "uuid"}) {
 			t.Errorf("columns = %+v", result.Columns)
 		}
-		withQuery := call[QueryResult](t, client, "query", map[string]any{"sql": "WITH games_per_lobby AS (SELECT lobby_id FROM games) SELECT count(*) FROM games_per_lobby;"})
+		withQuery := call[QueryResult](t, client, "query", map[string]any{"database": GameDatabase, "sql": "WITH games_per_lobby AS (SELECT lobby_id FROM games) SELECT count(*) FROM games_per_lobby;"})
 		if len(withQuery.Rows) != 1 || withQuery.Rows[0][0] != float64(2) {
 			t.Errorf("WITH query = %+v", withQuery)
 		}
 	})
 
 	t.Run("results are cut", func(t *testing.T) {
-		long := call[QueryResult](t, client, "query", map[string]any{"sql": "SELECT n FROM generate_series(1, 100000) AS n"})
+		long := call[QueryResult](t, client, "query", map[string]any{"database": GameDatabase, "sql": "SELECT n FROM generate_series(1, 100000) AS n"})
 		if len(long.Rows) != maxQueryRows || !long.Truncated || len(long.Notes) != 1 || !strings.Contains(long.Notes[0], "200 rows") {
 			t.Errorf("long result: %d rows, truncated %t, notes %v", len(long.Rows), long.Truncated, long.Notes)
 		}
 		// Each row is 1,004 bytes of JSON and a separator, so 65 fit in 64 KiB.
-		wide := call[QueryResult](t, client, "query", map[string]any{"sql": "SELECT repeat('x', 1000) FROM generate_series(1, 100)"})
+		wide := call[QueryResult](t, client, "query", map[string]any{"database": GameDatabase, "sql": "SELECT repeat('x', 1000) FROM generate_series(1, 100)"})
 		if len(wide.Rows) != 65 || !wide.Truncated || len(wide.Notes) != 1 || !strings.Contains(wide.Notes[0], "64 KiB") {
 			t.Errorf("wide result: %d rows, truncated %t, notes %v", len(wide.Rows), wide.Truncated, wide.Notes)
 		}
-		exact := call[QueryResult](t, client, "query", map[string]any{"sql": "SELECT n FROM generate_series(1, 200) AS n"})
+		exact := call[QueryResult](t, client, "query", map[string]any{"database": GameDatabase, "sql": "SELECT n FROM generate_series(1, 200) AS n"})
 		if len(exact.Rows) != maxQueryRows || exact.Truncated {
 			t.Errorf("200 rows: %d rows, truncated %t", len(exact.Rows), exact.Truncated)
 		}
@@ -91,32 +89,34 @@ func TestQueryReadsOneStatement(t *testing.T) {
 			"EXPLAIN ANALYZE UPDATE lobby_rooms SET name = 'Mallory'",
 			"",
 		} {
-			started := time.Now()
-			message := callFailing(t, client, "query", map[string]any{"sql": statement})
-			if elapsed := time.Since(started); elapsed > 8*time.Second {
-				t.Errorf("%q took %v to fail", statement, elapsed)
+			for _, database := range []string{GameDatabase, LobbyDatabase} {
+				started := time.Now()
+				message := callFailing(t, client, "query", map[string]any{"database": database, "sql": statement})
+				if elapsed := time.Since(started); elapsed > 8*time.Second {
+					t.Errorf("%q in %s took %v to fail", statement, database, elapsed)
+				}
+				t.Logf("%q in %s: %s", statement, database, message)
 			}
-			t.Logf("%q: %s", statement, message)
 		}
-		if message := callFailing(t, client, "query", map[string]any{"sql": "SELECT 1; SELECT 2"}); !strings.Contains(message, "exactly one statement") {
+		if message := callFailing(t, client, "query", map[string]any{"database": GameDatabase, "sql": "SELECT 1; SELECT 2"}); !strings.Contains(message, "exactly one statement") {
 			t.Errorf("several statements: %s", message)
 		}
-		if message := callFailing(t, client, "query", map[string]any{"sql": "SELECT pg_sleep(10)"}); !strings.Contains(message, "5s statement timeout") {
+		if message := callFailing(t, client, "query", map[string]any{"database": GameDatabase, "sql": "SELECT pg_sleep(10)"}); !strings.Contains(message, "5s statement timeout") {
 			t.Errorf("a long statement: %s", message)
 		}
-		if message := callFailing(t, client, "query", map[string]any{"sql": "SELECT lo_create(0)"}); !strings.Contains(message, "read-only") {
+		if message := callFailing(t, client, "query", map[string]any{"database": GameDatabase, "sql": "SELECT lo_create(0)"}); !strings.Contains(message, "read-only") {
 			t.Errorf("a write in a query: %s", message)
 		}
 		var names []string
-		if err := owner.Model(&lobbypostgres.RoomRecord{}).Pluck("name", &names).Error; err != nil || len(names) != 1 || names[0] != "Battle" {
+		if err := owner.lobby.Model(&lobbypostgres.RoomRecord{}).Pluck("name", &names).Error; err != nil || len(names) != 1 || names[0] != "Battle" {
 			t.Errorf("lobby names = %v, %v; want them unchanged", names, err)
 		}
 		var games int64
-		if err := owner.Model(&models.Game{}).Count(&games).Error; err != nil || games != 2 {
+		if err := owner.game.Model(&models.Game{}).Count(&games).Error; err != nil || games != 2 {
 			t.Errorf("games = %d, %v; want 2", games, err)
 		}
 		// The session is still read-only with its timeout afterwards.
-		settings := call[QueryResult](t, client, "query", map[string]any{"sql": "SELECT current_setting('default_transaction_read_only'), current_setting('statement_timeout')"})
+		settings := call[QueryResult](t, client, "query", map[string]any{"database": GameDatabase, "sql": "SELECT current_setting('default_transaction_read_only'), current_setting('statement_timeout')"})
 		if settings.Rows[0][0] != "on" || settings.Rows[0][1] != "5s" {
 			t.Errorf("settings after the tricks = %v", settings.Rows)
 		}
@@ -126,18 +126,23 @@ func TestQueryReadsOneStatement(t *testing.T) {
 // The read-only transaction refuses writes on its own, without the cursor
 // that query reads through.
 func TestToolTransactionsRefuseWrites(t *testing.T) {
-	owner := testutils.InitTestDB(t)
+	owner := initDatabases(t)
 	seed(t, owner)
-	database := openAs(t, dsnOf(t, owner))
-	for _, statement := range []string{
-		"INSERT INTO lobby_players (id, display_name, created_at) VALUES (gen_random_uuid(), 'Mallory', now())",
-		"UPDATE lobby_rooms SET name = 'Mallory'",
-		"DELETE FROM lobby_sessions",
-		"CREATE TABLE mallory (id int)",
-		"CREATE TEMPORARY TABLE mallory (id int)",
-		"TRUNCATE games",
+	databases := openBothAs(t, urlsOf(t, owner))
+	for _, write := range []struct {
+		database  *gorm.DB
+		statement string
+	}{
+		{databases.lobby, "INSERT INTO lobby_players (id, display_name, created_at) VALUES (gen_random_uuid(), 'Mallory', now())"},
+		{databases.lobby, "UPDATE lobby_rooms SET name = 'Mallory'"},
+		{databases.lobby, "DELETE FROM lobby_sessions"},
+		{databases.lobby, "CREATE TABLE mallory (id int)"},
+		{databases.game, "CREATE TABLE mallory (id int)"},
+		{databases.game, "CREATE TEMPORARY TABLE mallory (id int)"},
+		{databases.game, "TRUNCATE games"},
 	} {
-		err := adminmcp.ReadOnly(context.Background(), database, func(transaction *gorm.DB) error {
+		statement := write.statement
+		err := adminmcp.ReadOnly(context.Background(), write.database, func(transaction *gorm.DB) error {
 			sqlTransaction, err := adminmcp.SQLTransaction(transaction)
 			if err != nil {
 				return err
@@ -150,16 +155,17 @@ func TestToolTransactionsRefuseWrites(t *testing.T) {
 		}
 	}
 	var names []string
-	if err := owner.Model(&lobbypostgres.RoomRecord{}).Pluck("name", &names).Error; err != nil || len(names) != 1 || names[0] != "Battle" {
+	if err := owner.lobby.Model(&lobbypostgres.RoomRecord{}).Pluck("name", &names).Error; err != nil || len(names) != 1 || names[0] != "Battle" {
 		t.Errorf("lobby names = %v, %v; want them unchanged", names, err)
 	}
 }
 
-// adminRoleSQL renders the Ansible template that creates the production
-// read-only role. It uses only plain substitutions.
-func adminRoleSQL(t *testing.T, variables map[string]string) string {
+// adminSQL renders one of the Ansible templates for the production read-only
+// role: the role itself, or one database's grants. They use only plain
+// substitutions.
+func adminSQL(t *testing.T, name string, variables map[string]string) string {
 	t.Helper()
-	template, err := os.ReadFile("../../../deploy/ansible/roles/app/templates/admin-role.sql.j2")
+	template, err := os.ReadFile("../../../deploy/ansible/roles/app/templates/" + name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,35 +183,33 @@ func adminRoleSQL(t *testing.T, variables map[string]string) string {
 	return rendered
 }
 
-// The production role, as Ansible creates it, reads every table and every
-// lobby_sessions column except bearer_hash, also in tables created after it.
+// The production role, as Ansible creates it, reads every table of both
+// databases and every lobby_sessions column except bearer_hash, also in
+// tables created after it.
 func TestAdminRoleReadsAllButBearerHashes(t *testing.T) {
-	owner := testutils.InitTestDB(t)
+	owner := initDatabases(t)
 	ids := seed(t, owner)
-	ownerURL, err := url.Parse(dsnOf(t, owner))
-	if err != nil {
-		t.Fatal(err)
-	}
-	script := adminRoleSQL(t, map[string]string{
-		"postgres_admin_role": "island_battles_admin", "postgres_admin_password": "adminPassword123",
-		"postgres_app_role": ownerURL.User.Username(), "postgres_database": strings.TrimPrefix(ownerURL.Path, "/"),
-	})
-	// Ansible runs it in one transaction, and every deploy runs it again.
+	// Ansible runs each script in one transaction, and every deploy runs
+	// them again.
+	var adminURLs databaseURLs
 	for range 2 {
-		if err := owner.Transaction(func(transaction *gorm.DB) error { return transaction.Exec(script).Error }); err != nil {
+		adminURLs = grantAdminRole(t, owner)
+	}
+	// Tables that later migrations create, in each database.
+	for _, statement := range []struct {
+		database *gorm.DB
+		sql      string
+	}{
+		{owner.game, "CREATE TABLE later_game_notes (id bigserial PRIMARY KEY, message text NOT NULL)"},
+		{owner.game, "INSERT INTO later_game_notes (message) VALUES ('hello')"},
+		{owner.lobby, "CREATE TABLE lobby_later_notes (id bigserial PRIMARY KEY, message text NOT NULL)"},
+		{owner.lobby, "INSERT INTO lobby_later_notes (message) VALUES ('hello')"},
+	} {
+		if err := statement.database.Exec(statement.sql).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
-	// A table that a later migration creates.
-	if err := owner.Exec("CREATE TABLE later_game_notes (id bigserial PRIMARY KEY, message text NOT NULL)").Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := owner.Exec("INSERT INTO later_game_notes (message) VALUES ('hello')").Error; err != nil {
-		t.Fatal(err)
-	}
-	adminURL := *ownerURL
-	adminURL.User = url.UserPassword("island_battles_admin", "adminPassword123")
-	client := connect(t, openAs(t, adminURL.String()))
+	client := connect(t, openBothAs(t, adminURLs))
 
 	overview := call[adminmcp.Overview](t, client, "overview", nil)
 	if overview.LiveSessionCount != 1 {
@@ -221,10 +225,12 @@ func TestAdminRoleReadsAllButBearerHashes(t *testing.T) {
 		{"list_lobbies", nil}, {"get_lobby", map[string]any{"lobby_id": ids.lobbyID}}, {"find_players", map[string]any{"display_name": "a"}},
 		{"list_games", nil}, {"get_game", map[string]any{"game_id": ids.runningGameID}},
 		{"get_generation", map[string]any{"game_id": ids.runningGameID, "turn": 2, "include_board": true}},
-		{"describe_schema", nil}, {"describe_schema", map[string]any{"table": "lobby_sessions"}},
-		{"query", map[string]any{"sql": "SELECT id, player_id, created_at, expires_at FROM lobby_sessions"}},
-		{"query", map[string]any{"sql": "SELECT count(*) FROM lobby_sessions"}},
-		{"query", map[string]any{"sql": "SELECT message FROM later_game_notes"}},
+		{"describe_schema", map[string]any{"database": GameDatabase}}, {"describe_schema", map[string]any{"database": LobbyDatabase}},
+		{"describe_schema", map[string]any{"database": LobbyDatabase, "table": "lobby_sessions"}},
+		{"query", map[string]any{"database": LobbyDatabase, "sql": "SELECT id, player_id, created_at, expires_at FROM lobby_sessions"}},
+		{"query", map[string]any{"database": LobbyDatabase, "sql": "SELECT count(*) FROM lobby_sessions"}},
+		{"query", map[string]any{"database": GameDatabase, "sql": "SELECT message FROM later_game_notes"}},
+		{"query", map[string]any{"database": LobbyDatabase, "sql": "SELECT message FROM lobby_later_notes"}},
 	} {
 		if text, isError := client.callText(t, tool.name, tool.arguments); isError {
 			t.Errorf("%s(%v) failed: %s", tool.name, tool.arguments, text)
@@ -236,13 +242,13 @@ func TestAdminRoleReadsAllButBearerHashes(t *testing.T) {
 		"SELECT s FROM lobby_sessions AS s",
 		"SELECT encode(bearer_hash, 'hex') FROM lobby_sessions",
 	} {
-		if message := callFailing(t, client, "query", map[string]any{"sql": statement}); !strings.Contains(message, "permission denied") {
+		if message := callFailing(t, client, "query", map[string]any{"database": LobbyDatabase, "sql": statement}); !strings.Contains(message, "permission denied") {
 			t.Errorf("%q: %s", statement, message)
 		}
 	}
 	// The role has no write privileges even outside the server's read-only
 	// sessions. The server keeps one connection, so both statements use it.
-	adminDatabase := openAs(t, adminURL.String())
+	adminDatabase := openAs(t, adminURLs.lobby)
 	if err := adminDatabase.Exec("SET default_transaction_read_only = off").Error; err != nil {
 		t.Fatal(err)
 	}
