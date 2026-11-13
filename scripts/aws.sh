@@ -19,8 +19,9 @@ from the bucket first and push it back at the end.
 
 Usage:
   scripts/aws.sh apply [terraform plan options]
-      Build the backend, then create or update every AWS resource: the
-      Lightsail VM, its static IP and firewall, the Lambda, the game's
+      Build the backend and the native bot runner, then create or update
+      every AWS resource: the Lightsail VM, its static IP and firewall, the
+      Lambda, the bot runners (deploy/terraform/bot_runners.tf), the game's
       certificate and CloudFront distribution, and the database backups'
       bucket and key. Shows the plan and asks first. Writes the backups' key
       to deploy/local/secrets/database_backups.json for the VM deploy.
@@ -34,7 +35,8 @@ Usage:
       very first full apply needs -var allow_missing_lambda_settings=true.
   scripts/aws.sh deploy
       Build the backend, run the migrations against Postgres and publish the
-      new code and deploy/local/lambda.env's settings to the Lambda. Doesn't
+      new code and deploy/local/lambda.env's settings to the Lambda, and the
+      bot runners' new code to theirs. Doesn't
       ask, and refuses a plan that changes Lightsail resources or the game's
       certificate or distribution, or deletes anything. Never touches the VM.
       ISLAND_BATTLES_VERSION=v0.1.0 embeds that version in any build here;
@@ -184,7 +186,17 @@ build_backend() {
   echo "Building the backend for Lambda..."
   (cd "$repository_root" && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 \
     go build -tags lambda.norpc -trimpath -ldflags="-s -w -X islandBattles/backend/app.Version=$version" -o "$build_directory/bootstrap" ./backend/cmd/lambda)
+  # The native bot runner (deploy/terraform/bot_runners.tf) is published with
+  # the backend. The Python runner needs no build: Terraform zips its file.
+  echo "Building the native bot runner for Lambda..."
+  mkdir -p "$build_directory/bot-runner-native"
+  (cd "$repository_root" && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 \
+    go build -tags lambda.norpc -trimpath -ldflags="-s -w" -o "$build_directory/bot-runner-native/bootstrap" ./backend/cmd/bot-runner-native)
 }
+
+# The builds a plan packages: the backend, the native bot runner and the
+# Python runner's zip, which Terraform writes while it plans.
+saved_builds=(bootstrap bootstrap.zip bot-runner-native bot-runner-python.zip)
 
 # Reads one KEY=value line from lambda.env without evaluating it as shell. Like
 # Terraform (lambda.tf), it ignores spaces and a carriage return around the
@@ -251,8 +263,9 @@ save_backup_settings() {
 }
 
 # The Deploy workflow's plan target saves a plan, and its apply target applies
-# it in a later run, once someone has read it. The plan packages deploy/local/lambda/bootstrap.zip by
-# its hash, so the apply needs that same file, not a new build.
+# it in a later run, once someone has read it. The plan packages deploy/local/lambda/bootstrap.zip,
+# and the bot runners' zips, by their hashes, so the apply needs those same
+# files, not a new build.
 save_plan() {
   local directory="$1"
   require_migrated_state
@@ -263,7 +276,10 @@ save_plan() {
   run_terraform plan -input=false -var-file="$variables_file" -out="$plan_file"
   mkdir -p "$directory"
   cp "$plan_file" "$directory/tfplan"
-  cp "$build_directory/bootstrap" "$build_directory/bootstrap.zip" "$directory/"
+  local build
+  for build in "${saved_builds[@]}"; do
+    cp -R "$build_directory/$build" "$directory/"
+  done
   run_terraform show -no-color "$plan_file" >"$directory/plan.txt"
   # One name per line; the descriptions go to stderr, into the log.
   check_plan apply >"$directory/destroys"
@@ -275,7 +291,11 @@ apply_saved_plan() {
   require_migrated_state
   initialize_terraform
   mkdir -p "$build_directory" "$(dirname -- "$plan_file")"
-  cp "$directory/bootstrap" "$directory/bootstrap.zip" "$build_directory/"
+  local build
+  for build in "${saved_builds[@]}"; do
+    rm -rf "${build_directory:?}/$build"
+    cp -R "$directory/$build" "$build_directory/"
+  done
   cp "$directory/tfplan" "$plan_file"
   # Assigned first, so a failing check stops the script.
   local destroyed allowed=",${ISLAND_BATTLES_ALLOW_DESTROY:-},"

@@ -77,6 +77,11 @@ class PolicyTest(unittest.TestCase):
         # deploy/terraform/bot_packages.tf names its bucket <name>-bot-packages.
         self.assertTrue(fnmatch.fnmatchcase("arn:aws:s3:::island-battles-bot-packages",
                                             statements["ManageItsBuckets"]["Resource"][0]))
+        # deploy/terraform/bot_runners.tf names the runners' role
+        # <name>-bot-runner, and the functions' logs are logs:*.
+        self.assertTrue(fnmatch.fnmatchcase(f"arn:aws:iam::{ACCOUNT}:role/island-battles-bot-runner",
+                                            statements["ManageItsRolesAndUsers"]["Resource"][0]))
+        self.assertTrue({"lambda:*", "logs:*"} <= set(statements["ManageTheDeployment"]["Action"]))
         self.assertEqual(statements["ManageItsRolesAndUsers"]["Resource"], [
             f"arn:aws:iam::{ACCOUNT}:role/island-battles-*",
             f"arn:aws:iam::{ACCOUNT}:user/island-battles-*",

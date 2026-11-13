@@ -770,6 +770,17 @@ run "lets_only_the_repositorys_production_jobs_deploy" {
   }
 
   assert {
+    condition = (
+      one([for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : statement.Resource if statement.Sid == "PublishTheBotRunners"]) == [
+        "arn:aws:lambda:eu-central-1:123456789012:function:island-battles-bot-runner-native",
+        "arn:aws:lambda:eu-central-1:123456789012:function:island-battles-bot-runner-python",
+      ]
+      && one([for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : statement.Action if statement.Sid == "PublishTheBotRunners"]) == "lambda:UpdateFunctionCode"
+    )
+    error_message = "The role may update the bot runners' code, and nothing else of theirs."
+  }
+
+  assert {
     condition     = one([for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : statement.Resource if statement.Sid == "ReleaseTheStateLock"]) == "arn:aws:s3:::island-battles-deploy-123456789012/terraform/terraform.tfstate.tflock"
     error_message = "The role may delete nothing but the state's lock."
   }
@@ -988,5 +999,93 @@ run "keeps_bot_packages_in_a_private_bucket_for_8_days" {
   assert {
     condition     = [for statement in jsondecode(aws_s3_bucket_policy.bot_packages.policy).Statement : statement.Sid] == ["RequireTls"]
     error_message = "The bucket policy must require TLS."
+  }
+}
+
+# Bot runners ------------------------------------------------------------------
+
+run "runs_uploaded_bots_in_two_runner_functions" {
+  command = plan
+
+  override_resource {
+    target          = aws_iam_role.bot_runner
+    override_during = plan
+    values = {
+      id  = "island-battles-bot-runner"
+      arn = "arn:aws:iam::123456789012:role/island-battles-bot-runner"
+    }
+  }
+
+  override_resource {
+    target          = aws_cloudwatch_log_group.bot_runner
+    override_during = plan
+    values = {
+      arn = "arn:aws:logs:eu-central-1:123456789012:log-group:/aws/lambda/island-battles-bot-runner"
+    }
+  }
+
+  assert {
+    condition = (
+      aws_lambda_function.bot_runner["python"].function_name == "island-battles-bot-runner-python" &&
+      aws_lambda_function.bot_runner["python"].runtime == "python3.14" &&
+      aws_lambda_function.bot_runner["python"].handler == "runner.handler" &&
+      aws_lambda_function.bot_runner["native"].function_name == "island-battles-bot-runner-native" &&
+      aws_lambda_function.bot_runner["native"].runtime == "provided.al2023" &&
+      aws_lambda_function.bot_runner["native"].handler == "bootstrap"
+    )
+    error_message = "The Python runner must run runner.handler on python3.14, and the native runner a bootstrap on provided.al2023."
+  }
+
+  assert {
+    condition = alltrue([for runner in aws_lambda_function.bot_runner : (
+      runner.architectures == tolist(["arm64"]) &&
+      runner.memory_size == 1024 &&
+      runner.timeout == 20 &&
+      one(runner.ephemeral_storage).size == 2048 &&
+      runner.reserved_concurrent_executions == 10
+    )])
+    error_message = "Each runner must be arm64 with 1024 MB, a 20-second timeout, 2048 MB of /tmp and a reserved concurrency of 10."
+  }
+
+  assert {
+    condition     = alltrue([for runner in aws_lambda_function.bot_runner : runner.environment[0].variables == tomap({ GAME_SUBMIT_HOST = "island-battles.example.org" })])
+    error_message = "The runners must get the game's host to submit to, and no other setting."
+  }
+
+  assert {
+    condition = alltrue([for kind, runner in aws_lambda_function.bot_runner : (
+      one(runner.logging_config).log_group == "/aws/lambda/island-battles-bot-runner-${kind}" &&
+      one(runner.logging_config).log_format == "JSON" &&
+      one(runner.logging_config).application_log_level == "WARN" &&
+      one(runner.logging_config).system_log_level == "WARN"
+    )])
+    error_message = "Each runner must log warnings and errors only, to its own log group."
+  }
+
+  assert {
+    condition     = length(aws_cloudwatch_log_group.bot_runner) == 2 && alltrue([for group in aws_cloudwatch_log_group.bot_runner : group.retention_in_days == 7])
+    error_message = "Each runner's log group must keep its logs for 7 days."
+  }
+
+  assert {
+    condition = length(aws_lambda_function_event_invoke_config.bot_runner) == 2 && alltrue([for config in aws_lambda_function_event_invoke_config.bot_runner : (
+      config.maximum_retry_attempts == 0 && config.maximum_event_age_in_seconds == 60
+    )])
+    error_message = "An asynchronous turn must never be retried, and must be dropped after a minute."
+  }
+
+  assert {
+    condition = (
+      aws_lambda_function.bot_runner["python"].role == "arn:aws:iam::123456789012:role/island-battles-bot-runner" &&
+      aws_iam_role_policy.bot_runner_logs.role == "island-battles-bot-runner" &&
+      [for statement in jsondecode(aws_iam_role_policy.bot_runner_logs.policy).Statement : statement.Action] == [["logs:CreateLogStream", "logs:PutLogEvents"]] &&
+      length(one(jsondecode(aws_iam_role_policy.bot_runner_logs.policy).Statement).Resource) == 2
+    )
+    error_message = "The runners' role may write their own logs and nothing else: no S3, no other AWS access."
+  }
+
+  assert {
+    condition     = jsondecode(aws_iam_role.bot_runner.assume_role_policy).Statement[0].Principal == { Service = "lambda.amazonaws.com" }
+    error_message = "Only Lambda may assume the runners' role."
   }
 }
