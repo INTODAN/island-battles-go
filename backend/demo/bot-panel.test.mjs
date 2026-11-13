@@ -216,3 +216,24 @@ test("while the month's compute lasts, nothing is greyed out or said", async () 
   assert.equal(instance.spentNote.hidden, true);
   instance.stopPolling();
 });
+
+// The lobby page's stylesheet is the generic lobby's, which knows nothing of
+// bots, so the panel brings the styles of its boxes and adds them only once.
+test("the panel adds its styles to the page once", async () => {
+  const { addPanelStyles, panelStyles, panelStylesID } = await import("./bot-choice.mjs");
+  const head = new FakeElement("head");
+  const page = {
+    head,
+    createElement: (tag) => new FakeElement(tag),
+    getElementById: (id) => head.children.find((child) => child.id === id) ?? null,
+  };
+  addPanelStyles(page);
+  addPanelStyles(page);
+  assert.equal(head.children.length, 1);
+  assert.equal(head.children[0].tag, "style");
+  assert.equal(head.children[0].id, panelStylesID);
+  assert.equal(head.children[0].textContent, panelStyles);
+  assert.match(panelStyles, /\.bot-health\[data-state="connected"\]/);
+  // Without a page head, such as in these tests' stand-in, it adds nothing.
+  addPanelStyles({ createElement: page.createElement });
+});

@@ -16,10 +16,12 @@
       {"label": "Watch a saved demo", "url": "/game/demo-viewer/"},
       {"label": "Play in 3D", "url": "/play/"}
     ],
+    "seat_names": {"singular": "a bot", "plural": "bots"},
     "example_player": {
       "module": "/game/demo/example-player.mjs",
       "strategy": "One soldier",
-      "summary": "Each player sends one soldier to the first enemy castle, then finishes the turn."
+      "summary": "Each player sends one soldier to the first enemy castle, then finishes the turn.",
+      "heading": "Your bot"
     }
   }
 }
