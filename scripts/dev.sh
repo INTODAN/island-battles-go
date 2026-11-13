@@ -27,9 +27,16 @@ if [[ ${#missing[@]} -gt 0 ]]; then
   echo "Your .env lacks ${missing[*]}, which the lobby's own process needs. Copy them from .env.example." >&2
   exit 1
 fi
+# The lobby has its own database (#229).
+if [[ "$LOBBY_DATABASE_URL" == "$ISLAND_BATTLES_DATABASE_URL" ]]; then
+  echo "Your .env's LOBBY_DATABASE_URL names the backend's database, but the lobby has its own now. Copy LOBBY_DATABASE_URL from .env.example." >&2
+  exit 1
+fi
 
 if command -v docker >/dev/null && docker compose version >/dev/null 2>&1; then
   docker compose up -d --wait db centrifugo
+  # The lobby's own database, also in a volume made before it.
+  docker compose exec -T db psql --quiet -v ON_ERROR_STOP=1 -U islandBattles -d islandBattles <scripts/postgres-init/lobby-database.sql
 elif command -v podman >/dev/null && [[ "$(uname -s)" == Linux ]]; then
   # Native Podman needs no Compose provider. Match the local Compose database
   # settings and retain its data across script/backend restarts.
@@ -56,6 +63,8 @@ elif command -v podman >/dev/null && [[ "$(uname -s)" == Linux ]]; then
     echo "PostgreSQL did not become ready. Check: podman logs island-battles-dev-db" >&2
     exit 1
   fi
+  # The lobby's own database.
+  podman exec -i island-battles-dev-db psql --quiet -v ON_ERROR_STOP=1 -U islandBattles -d islandBattles <scripts/postgres-init/lobby-database.sql
 
   # Recreate only this stateless development service to pick up .env changes.
   # Centrifugo is the lobby's: it takes the lobby's secrets and sends its
@@ -77,9 +86,10 @@ else
   exit 1
 fi
 
-# The backend only connects, so bring the schema up to date first, as a
-# deploy does. It migrates the lobby's tables too, which share its database
-# for now.
+# The backend only connects, so bring both schemas up to date first, as a
+# deploy does: the lobby's database, then the backend's, which drops the
+# lobby's tables that older builds left there.
+go run ./lobby/cmd/migrate
 go run ./backend/cmd/migrate
 
 # The lobby calls Island Battles' hooks on the backend's port, and lists the

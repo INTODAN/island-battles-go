@@ -4,6 +4,9 @@ services:
     volumes:
       # PostgreSQL 18 stores data under /var/lib/postgresql/18/docker.
       - postgres_data:/var/lib/postgresql
+      # A new volume also gets the lobby's own role and database (#229);
+      # scripts/dev.sh makes them in an older volume.
+      - ./scripts/postgres-init:/docker-entrypoint-initdb.d:ro,Z
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "islandBattles", "-d", "islandBattles"]
       interval: 1s
