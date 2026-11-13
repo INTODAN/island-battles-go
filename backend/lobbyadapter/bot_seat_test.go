@@ -78,8 +78,11 @@ func TestTheHostPlaysAloneAgainstABotSeat(t *testing.T) {
 		t.Fatalf("frozen players = %+v, %v", players, err)
 	}
 	for _, player := range players {
-		if player.PlayerID == seat.PlayerID && (player.BotLevel == nil || *player.BotLevel != 2 || player.DisplayName != "Bot (level 2)") {
+		if player.PlayerID == seat.PlayerID && (player.BotKind != models.DefaultBot || player.BotLevel == nil || *player.BotLevel != 2 || player.DisplayName != "Bot (level 2)") {
 			t.Fatalf("the seat's frozen player = %+v", player)
+		}
+		if player.PlayerID == alice.playerID && (player.BotKind != models.LocalhostBot || player.BotLevel != nil || player.BotURL != nil || player.BotPackageID != nil) {
+			t.Fatalf("Alice's frozen player = %+v", player)
 		}
 	}
 	inputs, err := dal.LoadGenerationInputs(stack.database, state.GenerationID)

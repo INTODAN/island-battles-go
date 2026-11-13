@@ -108,6 +108,27 @@ test("a default bot's player delivers and reports nothing", async (context) => {
   assert.deepEqual(statuses, []);
 });
 
+test("a hosted or uploaded bot's player delivers nothing and says that the server plays", async (context) => {
+  for (const [bot, detail] of [
+    [{ kind: "hosted", host: "bot.example.com" }, /your hosted bot at bot\.example\.com; this page relays nothing/],
+    [{ kind: "uploaded" }, /your uploaded bot each turn; this page relays nothing/],
+  ]) {
+    const { player, deliveries, requests, statuses } = relay(context);
+    player.receive(stateOf({ bot }));
+    await delay(30);
+    assert.equal(deliveries.length, 0);
+    assert.deepEqual(requests, []);
+    assert.equal(statuses.at(-1).title, "Played by the server");
+    assert.match(statuses.at(-1).detail, detail);
+  }
+});
+
+test("a server-played bot's player still asks for the deadline", async (context) => {
+  const { player, deadlines } = relay(context, { now: () => Date.parse(DEADLINE) + 5000 });
+  player.receive(stateOf({ bot: { kind: "uploaded" }, turn_deadline_at: DEADLINE }));
+  await until(() => deadlines().length === 1);
+});
+
 test("a default bot's player still asks for the deadline", async (context) => {
   const { player, deadlines } = relay(context, { now: () => Date.parse(DEADLINE) + 5000 });
   player.receive(stateOf({ bot: { kind: "default", level: 2 }, turn_deadline_at: DEADLINE }));

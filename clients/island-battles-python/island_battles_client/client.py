@@ -18,6 +18,7 @@ import httpx
 from pydantic import ValidationError
 
 from ._generated import (
+    BotChoice,
     BotTurn,
     ConnectionToken,
     GameEndedEvent,
@@ -66,6 +67,20 @@ def _is_lobby_path(path: str) -> bool:
     """The lobby's own routes take the guest credential; the game's take a
     player token."""
     return path.startswith("/lobby/")
+
+
+def played_by_server(bot: BotChoice) -> str:
+    """Says which bot the server plays a seat with, for a seat whose bot is
+    not the player's localhost bot, and how to play it with this client."""
+    instead = (
+        "; to play it with your own bot here, choose your localhost bot "
+        "in the lobby before getting ready"
+    )
+    if bot.kind == "default":
+        return f"the backend plays this seat with its level {bot.level} default bot{instead}"
+    if bot.kind == "hosted":
+        return f"the server plays this seat with your hosted bot at {bot.host}{instead}"
+    return f"the server plays this seat with your uploaded bot{instead}"
 
 
 def _parse_state(data: object) -> GenerationState:
@@ -496,12 +511,8 @@ class IslandBattlesClient:
                 initial = _parse_state(discovery)
                 self._validate_identity(initial)
                 if initial.bot.kind != "localhost":
-                    # The backend plays this seat and completes its turns itself.
-                    raise GameError(
-                        f"the backend plays this seat with its level {initial.bot.level} "
-                        "default bot; to play it with your own bot, choose your "
-                        "localhost bot in the lobby before getting ready"
-                    )
+                    # The server plays this seat and completes its turns itself.
+                    raise GameError(played_by_server(initial.bot))
                 self._expected_identity = (
                     initial.game_id,
                     initial.player_id,

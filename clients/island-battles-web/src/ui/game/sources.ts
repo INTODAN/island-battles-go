@@ -3,6 +3,7 @@
 
 import { createApiClients } from "../../api/client";
 import { ApiError } from "../../api/errors";
+import type { BotChoice } from "../../bots/kinds";
 import type { Realtime, RealtimeProblem } from "../../realtime";
 import type { Demo } from "./demoFile";
 import type { GameOutcome, Generation } from "./history";
@@ -14,6 +15,9 @@ export interface LiveTurn {
   game_id: number;
   generation: Generation;
   outcome?: GameOutcome | null;
+  /** A roster player's team and the bot that plays their seat; a watcher's turns have neither. */
+  team_color?: number;
+  bot?: BotChoice;
 }
 
 export interface LiveSource {

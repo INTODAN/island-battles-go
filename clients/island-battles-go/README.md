@@ -4,6 +4,8 @@ Write a bot for [Island Battles](../../README.md) in Go. Island Battles is a rea
 
 **This is a rule change, and it breaks bots that count on neutral castles growing.** A neutral castle no longer gains a soldier each turn; it keeps its soldiers until a team captures it and grows from the next turn on, like any castle a team owns. The API is the same, but a bot that forecasts a neutral castle's defenders with growth overestimates them. What to do: count growth only for castles with a team (the default bots in `examples/defaultbots` show the forecast).
 
+**Two more bot kinds that the server plays, `hosted` and `uploaded` (#222).** Where the server offers them (`server_bots` in `GET /bots/defaults`), a player's bot, and a bot seat's, can also be their own bot server at a public URL, `{"bot": {"kind": "hosted", "url": "https://…"}}`, or one of their bot packages in the lobby, `{"bot": {"kind": "uploaded", "package_id": "…"}}`. `GenerationState.bot.kind` can then be `hosted`, with the URL's `host`, or `uploaded`. `run` refuses those seats, as it does a default bot's, and says which bot the server plays. An older SDK stops on such a seat with a protocol error instead; nothing changes for a localhost bot's seat.
+
 **Turn deliveries are a breaking change for `serve`; upgrade the SDK.** `POST /turn` now takes a `TurnDelivery` (the turn plus a one-turn submit token), answers `202` at once, and submits the bot's answer to the game itself; it no longer answers a `BotTurnResult`. The 3D web client and the lobby page deliver turns this way, so an older SDK's `serve` doesn't work with them, and this one's doesn't work with older game clients. A bot that returns an error or runs out of time now passes its turn instead of leaving it open. What to do: upgrade the module and rebuild your bot; your `Play` function doesn't change.
 
 With this SDK, a bot is **one Go function**: it gets the turn (the board, your team, the upgrade cost table and what it remembered last turn) and returns its commands, a few game log lines and what it wants to remember. Your program's `main` hands that function to `islandbattles.Main`, which gives the program five subcommands:
@@ -73,7 +75,7 @@ go run . serve
 ### Play it in a game
 
 1. Start `go run . serve` and leave it running.
-2. Open the game's lobby page in Chrome, Edge or Firefox (Safari can't reach a bot on `127.0.0.1` from an HTTPS page), join a lobby and, in the bot picker, choose **your localhost bot** before you get ready. The [backend README](../../backend/README.md#choosing-a-bot) explains the choice; a player who picks a default level is played by the server instead.
+2. Open the game's lobby page in Chrome, Edge or Firefox (Safari can't reach a bot on `127.0.0.1` from an HTTPS page), join a lobby and, in the bot picker, choose **your localhost bot** before you get ready. The [backend README](../../backend/README.md#choosing-a-bot) explains the choice; a player who picks a default level, a hosted bot or an uploaded bot is played by the server instead.
 3. When the game starts, your browser tab delivers each turn to your bot, which submits its answer to the game itself. Keep the tab open: it delivers the turns. If your bot fails, it passes the turn, and the game's **Bot logs** show the error.
 
 A turn has a deadline (30 seconds unless the lobby's host chose another): a bot that doesn't answer in time makes its whole team lose.

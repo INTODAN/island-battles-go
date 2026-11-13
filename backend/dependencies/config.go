@@ -31,6 +31,7 @@ const (
 	AdminAPIKeyEnv                   = "ISLAND_BATTLES_ADMIN_API_KEY"
 	GameRetentionPeriodEnv           = "ISLAND_BATTLES_GAME_RETENTION_PERIOD"
 	BotPackagesBucketEnv             = "ISLAND_BATTLES_BOT_PACKAGES_BUCKET"
+	ServerBotsEnv                    = "ISLAND_BATTLES_SERVER_BOTS"
 	// BotPackagesDirEnv is read by the local server host alone; see
 	// LoadBotPackagesDir.
 	BotPackagesDirEnv = "ISLAND_BATTLES_BOT_PACKAGES_DIR"
@@ -103,6 +104,11 @@ type Config struct {
 	// means none: the local server host then keeps them on disk, and the
 	// Lambda host refuses uploads.
 	BotPackagesBucket string
+	// ServerBots offers the bots that the server plays without a player's
+	// tab, hosted and uploaded, as a player's own bot and for bot seats:
+	// ISLAND_BATTLES_SERVER_BOTS=on. Off, the default, players see the
+	// localhost and default bots only.
+	ServerBots bool
 	// PlayerTokenKeys are the lobby's player token keys, kid:seed pairs; the
 	// first signs. See playertoken.ParseKeySet.
 	PlayerTokenKeys *playertoken.KeySet
@@ -152,6 +158,14 @@ func LoadConfigFromLookup(lookup func(string) (string, bool)) (Config, error) {
 			return Config{}, fmt.Errorf("%s must be a duration from 1m to 15m", PlayerTokenLifetimeEnv)
 		}
 	}
+	var serverBots bool
+	switch readEnvironment(lookup, ServerBotsEnv) {
+	case "", "off":
+	case "on":
+		serverBots = true
+	default:
+		return Config{}, fmt.Errorf("%s must be on or off", ServerBotsEnv)
+	}
 	config := Config{
 		Database:                  database,
 		CentrifugoPublicURL:       readEnvironment(lookup, CentrifugoPublicURLEnv),
@@ -164,6 +178,7 @@ func LoadConfigFromLookup(lookup func(string) (string, bool)) (Config, error) {
 		AdminAPIKey:               readEnvironment(lookup, AdminAPIKeyEnv),
 		GameRetentionPeriod:       gameRetentionPeriod,
 		BotPackagesBucket:         readEnvironment(lookup, BotPackagesBucketEnv),
+		ServerBots:                serverBots,
 		PlayerTokenKeys:           playerTokenKeys,
 		PlayerTokenLifetime:       playerTokenLifetime,
 	}

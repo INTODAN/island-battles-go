@@ -14,7 +14,7 @@ import (
 func AssignGoBotForTest(t *testing.T, database *gorm.DB, gameID uint, playerID string, level uint) {
 	t.Helper()
 	result := database.Model(&models.FrozenGamePlayer{}).Where(&models.FrozenGamePlayer{GameID: gameID, PlayerID: playerID}).
-		Select("BotLevel").Updates(&models.FrozenGamePlayer{BotLevel: &level})
+		Select("BotKind", "BotLevel").Updates(&models.FrozenGamePlayer{BotKind: models.DefaultBot, BotLevel: &level})
 	if result.Error != nil {
 		t.Fatal(result.Error)
 	}

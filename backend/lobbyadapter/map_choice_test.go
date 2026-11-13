@@ -14,6 +14,7 @@ import (
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/models"
+	"islandBattles/backend/services"
 	"islandBattles/lobby/domain"
 
 	gormpostgres "gorm.io/driver/postgres"
@@ -40,7 +41,7 @@ func storeTemplate(t *testing.T, database *gorm.DB, mapFile string) uint {
 func TestRegistrationValidatesTheMapChoice(t *testing.T) {
 	database := testutils.InitTestDB(t)
 	templateID := storeTemplate(t, database, twoTeamMapFile)
-	policy := domain.DefaultPolicy(lobbyadapter.Registration(database))
+	policy := domain.DefaultPolicy(lobbyadapter.Registration(database, services.ServerBots{}, nil))
 	twoTeams := []domain.TeamDefinition{{Name: "Blue"}, {Name: "Red"}}
 	threeTeams := slices.Concat(twoTeams, []domain.TeamDefinition{{Name: "Green"}})
 	ctx := context.Background()
@@ -138,7 +139,7 @@ func TestRegistrationReportsAnUnreachableDatabaseAsUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy := domain.DefaultPolicy(lobbyadapter.Registration(unreachable))
+	policy := domain.DefaultPolicy(lobbyadapter.Registration(unreachable, services.ServerBots{}, nil))
 	teams := []domain.TeamDefinition{{Name: "Blue"}, {Name: "Red"}}
 	_, err = policy.ValidateGameSettings(context.Background(), lobbyadapter.GameKey, "", json.RawMessage(`{"map_template_id":1}`), teams)
 	if !errors.Is(err, domain.ErrUnavailable) || domain.ErrorCodeOf(err) == domain.CodeInvalidGameSettings {

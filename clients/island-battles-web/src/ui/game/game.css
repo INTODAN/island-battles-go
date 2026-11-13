@@ -150,6 +150,12 @@
   color: #53627a;
 }
 
+.gv-team-bot {
+  font-size: 12px;
+  font-style: italic;
+  color: #53627a;
+}
+
 .gv-team-counts {
   display: flex;
   gap: 12px;

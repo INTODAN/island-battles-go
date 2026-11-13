@@ -7,6 +7,7 @@
 // holds. A turn that arrives while the history loads is kept and merged after it.
 
 import { ApiError } from "../../api/errors";
+import { describeGameBot } from "../../bots/kinds";
 import type { Realtime } from "../../realtime";
 import type { GameController } from "./controller";
 import { type Demo, DemoFileError, readDemoFile } from "./demoFile";
@@ -135,6 +136,13 @@ export function mountLive(
     }
   }
 
+  /** Names the bot that plays your seat under your team, from a roster player's turn. */
+  function showYourBot(turn: LiveTurn | null): void {
+    if (turn?.bot && turn.team_color !== undefined) {
+      screen.setYourBot(turn.team_color, describeGameBot(turn.bot));
+    }
+  }
+
   function installTurn(turn: LiveTurn): void {
     if (gameId === undefined) {
       pending.push(turn);
@@ -169,6 +177,7 @@ export function mountLive(
         watching ? `Watching game ${demo.game_id}` : `Game ${demo.game_id}`,
       );
       controller = screen.start(demo.teams, frames, outcome);
+      showYourBot(held);
       endedResync = demo.outcome !== null;
       screen.hideOverlay();
     } catch (error) {
@@ -215,6 +224,7 @@ export function mountLive(
     source.subscribe((turn) => {
       if (!turn) return;
       installTurn(turn);
+      showYourBot(turn);
       // A watcher may arrive before the game starts: its first turn loads the view.
       if (gameId === undefined && !loading) void load();
     }),

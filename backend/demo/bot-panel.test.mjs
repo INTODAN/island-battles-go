@@ -22,6 +22,11 @@ class FakeElement {
       this.children.push(node);
     }
   }
+  replaceChildren(...nodes) {
+    this.children = [];
+    this.append(...nodes);
+  }
+  focus() {}
   setAttribute(name, value) { this.attributes[name] = value; }
   addEventListener(type, listener) { this.listeners[type] = listener; }
   set textContent(value) { this.text = value; }
@@ -43,13 +48,15 @@ const { serveCommand } = await import("./localhost-bot.mjs");
 // A lobby snapshot whose one member, the player, has settings.
 const snapshotWith = (settings) => ({ members: [{ player_id: "me", display_name: "Alex", kind: "human", seat_settings: null, member_settings: settings }] });
 
-function panel({ health = async () => true, refuse = null } = {}) {
+function panel({ health = async () => true, refuse = null, serverBots = undefined, refreshSeatOptions = undefined } = {}) {
   const container = new FakeElement("div");
   const saved = [];
   const copied = [];
   const checks = { count: 0 };
   const instance = new RoomPanel({
     container, lobbyID: "lobby", playerID: "me",
+    ...(serverBots === undefined ? {} : { options: async () => ({ levels: [1], serverBots }) }),
+    ...(refreshSeatOptions ? { refreshSeatOptions } : {}),
     saveMemberSettings: async (settings) => {
       saved.push(settings);
       if (refuse) throw new Error(refuse);
@@ -125,4 +132,64 @@ test("a refused choice shows the lobby's detail and keeps the saved choice", asy
   assert.equal(instance.summary.textContent, "kind default needs a level that GET /bots/defaults lists: 1, 2, 3");
   assert.equal(instance.select.value, "");
   assert.equal(instance.select.disabled, false);
+});
+
+// The lobby's packages, as the packages panel lists them.
+const packages = [
+  { package_id: "p-mine", owner_player_id: "me", owner_name: "Alex", language: "python", entry_or_command: "bot:play", size_bytes: 1048576 },
+  { package_id: "p-sam", owner_player_id: "sam", owner_name: "Sam", language: "native", entry_or_command: "./bot worker", size_bytes: 2097152 },
+];
+
+test("without server bots the select offers no hosted or uploaded bot", async () => {
+  const { instance } = panel({ serverBots: false });
+  await delay(10);
+  instance.listed(packages);
+  assert.deepEqual(instance.select.children.map((option) => option.value), ["", "localhost", "level-1"]);
+  instance.stopPolling();
+});
+
+test("with server bots the select offers your hosted bot and your own packages", async () => {
+  let refreshed = 0;
+  const { instance, saved } = panel({ serverBots: true, refreshSeatOptions: () => { refreshed++; } });
+  await delay(10);
+  instance.listed(packages);
+  assert.deepEqual(instance.select.children.map((option) => [option.text, option.value]), [
+    ["Choose your bot", ""], ["My localhost bot", "localhost"], ["Default bot, level 1", "level-1"],
+    ["My hosted bot (URL)", "hosted"], ["Uploaded: python · bot:play · 1.0 MiB", "package-p-mine"],
+  ]);
+  // The host's Add bot is told that the lobby's packages changed, once.
+  instance.listed(packages);
+  assert.equal(refreshed, 1);
+
+  await instance.save("package-p-mine");
+  assert.deepEqual(saved, [{ bot: { kind: "uploaded", package_id: "p-mine" } }]);
+  assert.match(instance.summary.textContent, /Alex \(you\): uploaded bot/);
+
+  // A hosted bot needs its URL first, then saves it.
+  instance.url.value = "";
+  await instance.save("hosted");
+  assert.equal(saved.length, 1);
+  assert.match(instance.summary.textContent, /Type your bot's URL first/);
+  instance.url.value = " https://bot.example.com/turn ";
+  await instance.save("hosted");
+  assert.deepEqual(saved[1], { bot: { kind: "hosted", url: "https://bot.example.com/turn" } });
+  assert.equal(instance.hosted.hidden, false);
+  assert.equal(instance.local.hidden, true);
+  assert.equal(instance.select.value, "hosted");
+  assert.match(instance.summary.textContent, /Alex \(you\): hosted bot \(bot\.example\.com\)/);
+  // The same URL again sends nothing; another one is saved.
+  await instance.save("hosted");
+  assert.equal(saved.length, 2);
+  instance.url.value = "https://other.example.com/turn";
+  await instance.save("hosted");
+  assert.deepEqual(saved[2], { bot: { kind: "hosted", url: "https://other.example.com/turn" } });
+});
+
+test("a chosen package that was replaced stays shown until you choose again", async () => {
+  const { instance } = panel({ serverBots: true });
+  await delay(10);
+  instance.listed(packages);
+  instance.update(snapshotWith({ bot: { kind: "uploaded", package_id: "p-old" } }));
+  assert.equal(instance.select.value, "package-p-old");
+  assert.match(instance.select.children.at(-1).text, /replaced or deleted/);
 });

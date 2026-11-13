@@ -8,13 +8,13 @@ import {
 } from "../../bots/packages";
 import { apiBaseUrl } from "../../platform";
 import { copyText, h } from "../dom";
-import type { BotChoice, DefaultBot, LobbyActions } from "./actions";
+import type { DefaultBot, LobbyActions, MemberBot } from "./actions";
 import { choiceFromValue, choiceValue } from "./roomModel";
 
 export interface BotPicker {
   el: HTMLElement;
   /** Shows the saved choice, from the server, and whether choosing is still possible. */
-  update(chosen: BotChoice | undefined, locked: boolean): void;
+  update(chosen: MemberBot | undefined, locked: boolean): void;
   dispose(): void;
 }
 
@@ -43,12 +43,18 @@ export function mountBotPicker(options: {
   /** Replaces the upload to storage; tests use it. */
   post?: StoragePost;
   packagesIntervalMs?: number;
+  /** Gets the lobby's packages each time they are read, for the host's Add bot. */
+  onPackages?(items: BotPackage[]): void;
 }): BotPicker {
   const { actions } = options;
-  let chosen: BotChoice | undefined;
+  let chosen: MemberBot | undefined;
   let locked = false;
   let saving = false;
   let disposed = false;
+  /** The server offers hosted and uploaded bots (`GET /bots/defaults`). */
+  let serverBots = false;
+  /** Your own packages in the lobby, which you may choose as your bot. */
+  let ownPackages: BotPackage[] = [];
 
   const status = h(
     "span",
@@ -100,12 +106,64 @@ export function mountBotPicker(options: {
     h("span", { class: "hint" }, safariNote),
   );
   const defaults = h("div", { class: "bot-defaults" });
+  // The bots that the server plays without this tab, shown when it offers them.
+  const hostedUrl = h("input", {
+    type: "url",
+    class: "bot-url",
+    placeholder: "https://bot.example.com/turn",
+    attrs: { "aria-label": "Your hosted bot's URL", maxlength: "2048" },
+  });
+  const useUrl = h(
+    "button",
+    { type: "button", class: "secondary small" },
+    "Use this URL",
+  );
+  const hostedLabel = h(
+    "label",
+    { class: "bot-option", htmlFor: "bot-hosted" },
+    h("input", {
+      type: "radio",
+      name: "bot",
+      value: "hosted",
+      id: "bot-hosted",
+    }),
+    h(
+      "span",
+      { class: "bot-text" },
+      h("strong", {}, "My hosted bot (URL)"),
+      h(
+        "span",
+        { class: "hint" },
+        "Your own bot server at a public https:// URL. The server sends it each turn; this tab relays nothing.",
+      ),
+    ),
+  );
+  const hostedHelp = h("div", { class: "bot-help" }, hostedUrl, useUrl);
+  const uploaded = h("div", { class: "bot-uploaded" });
+  const serverOptions = h(
+    "div",
+    { class: "bot-server", hidden: true },
+    h(
+      "p",
+      { class: "hint" },
+      "Or let the server play your own bot, without this tab:",
+    ),
+    hostedLabel,
+    hostedHelp,
+    uploaded,
+  );
   const packages = mountPackages({
     actions,
     playerId: options.playerId ?? (() => undefined),
     gameUrl: options.gameUrl ?? apiBaseUrl(),
     post: options.post,
     refreshIntervalMs: options.packagesIntervalMs ?? 10000,
+    onList(items) {
+      const you = options.playerId?.();
+      ownPackages = items.filter((item) => item.owner_player_id === you);
+      showUploaded();
+      options.onPackages?.(items);
+    },
   });
   const el = h(
     "section",
@@ -119,6 +177,7 @@ export function mountBotPicker(options: {
       "Or let the server play for you with a default bot:",
     ),
     defaults,
+    serverOptions,
     packages.el,
   );
 
@@ -132,12 +191,78 @@ export function mountBotPicker(options: {
       radio.checked = radio.value === value;
       radio.disabled = locked || saving;
     }
+    hostedUrl.disabled = locked || saving;
+    useUrl.disabled = locked || saving;
+    if (chosen?.kind === "hosted" && document.activeElement !== hostedUrl) {
+      hostedUrl.value = chosen.url ?? "";
+    }
     el.classList.toggle("saving", saving);
   }
 
+  /** Your packages as choices, "Uploaded: <package>", and the one you chose if it is gone. */
+  function showUploaded(): void {
+    const items: HTMLElement[] = ownPackages.map((item) => {
+      const id = `bot-package-${item.package_id}`;
+      return h(
+        "label",
+        { class: "bot-option", htmlFor: id },
+        h("input", {
+          type: "radio",
+          name: "bot",
+          value: `package-${item.package_id}`,
+          id,
+        }),
+        h(
+          "span",
+          { class: "bot-text" },
+          h("strong", {}, `Uploaded: ${describePackage(item)}`),
+          h(
+            "span",
+            { class: "hint" },
+            "Your package in this lobby. The server runs it; this tab relays nothing.",
+          ),
+        ),
+      );
+    });
+    if (
+      chosen?.kind === "uploaded" &&
+      !ownPackages.some((item) => item.package_id === chosen?.package_id)
+    ) {
+      items.push(
+        h(
+          "p",
+          { class: "field-error" },
+          "Your uploaded bot was replaced or deleted. Choose a package again.",
+        ),
+      );
+    }
+    uploaded.replaceChildren(
+      ...(items.length > 0
+        ? items
+        : [
+            h(
+              "p",
+              { class: "hint" },
+              "Upload a package below to choose it as your bot.",
+            ),
+          ]),
+    );
+    sync();
+  }
+
   async function choose(value: string): Promise<void> {
-    const choice = choiceFromValue(value);
-    if (!choice || saving || locked || value === choiceValue(chosen)) {
+    const choice = choiceFromValue(value, hostedUrl.value);
+    const same =
+      value === choiceValue(chosen) &&
+      (choice?.kind !== "hosted" ||
+        (chosen?.kind === "hosted" && chosen.url === choice.url));
+    if (!choice || saving || locked || same) {
+      if (value === "hosted" && !choice) {
+        options.onError(
+          "Type your bot's URL first, such as https://bot.example.com/turn.",
+        );
+        hostedUrl.focus();
+      }
       sync();
       return;
     }
@@ -159,6 +284,10 @@ export function mountBotPicker(options: {
     if (target instanceof HTMLInputElement && target.name === "bot") {
       void choose(target.value);
     }
+  });
+  useUrl.addEventListener("click", () => void choose("hosted"));
+  hostedUrl.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") void choose("hosted");
   });
 
   function showDefaults(bots: DefaultBot[]): void {
@@ -193,9 +322,14 @@ export function mountBotPicker(options: {
   }
   showDefaults(fallbackBots);
   void actions
-    .defaultBots()
-    .then((bots) => {
-      if (!disposed && bots.length > 0) showDefaults(bots);
+    .botOptions()
+    .then((offered) => {
+      if (disposed) return;
+      if (offered.bots.length > 0) showDefaults(offered.bots);
+      serverBots = offered.serverBots;
+      serverOptions.hidden = !serverBots;
+      packages.setChoosable(serverBots);
+      sync();
     })
     .catch(() => undefined);
 
@@ -217,7 +351,8 @@ export function mountBotPicker(options: {
     update(next, isLocked) {
       chosen = next;
       locked = isLocked;
-      sync();
+      if (serverBots) showUploaded();
+      else sync();
     },
     dispose() {
       disposed = true;
@@ -242,6 +377,8 @@ interface PackagesOptions {
   gameUrl: string;
   post?: StoragePost | undefined;
   refreshIntervalMs: number;
+  /** Gets the list each time it is read. */
+  onList?(items: BotPackage[]): void;
 }
 
 const messageOf = (cause: unknown): string =>
@@ -257,6 +394,8 @@ const messageOf = (cause: unknown): string =>
  */
 export function mountPackages(options: PackagesOptions): {
   el: HTMLElement;
+  /** Says whether a package can be chosen as a bot, as the server offers. */
+  setChoosable(on: boolean): void;
   /** Reads the list again; resolves once it is shown. */
   refresh(): Promise<void>;
   /** Uploads a file, as choosing it in the file picker does. */
@@ -290,14 +429,19 @@ export function mountPackages(options: PackagesOptions): {
     hidden: true,
   });
   const list = h("ul", { class: "bot-packages" });
+  const about = h("p", { class: "hint" });
+  const setChoosable = (on: boolean) => {
+    about.textContent = `Bot packages of this lobby: the zip that island-battles-bot package or island-battles-package builds. ${
+      on
+        ? "Choose one of yours above as your bot; the host can seat anyone's as a bot."
+        : "Choosing one as your bot comes later."
+    }`;
+  };
+  setChoosable(false);
   const el = h(
     "div",
     { class: "bot-packages-panel" },
-    h(
-      "p",
-      { class: "hint" },
-      "Bot packages of this lobby: the zip that island-battles-bot package or island-battles-package builds. Choosing one as your bot comes later.",
-    ),
+    about,
     h("div", { class: "bot-help" }, uploadButton, commandButton, fileInput),
     progress,
     status,
@@ -343,7 +487,10 @@ export function mountPackages(options: PackagesOptions): {
   async function refresh(): Promise<void> {
     try {
       const items = await actions.listBotPackages();
-      if (!disposed) show(items);
+      if (!disposed) {
+        show(items);
+        options.onList?.(items);
+      }
     } catch (cause) {
       if (!disposed) status.textContent = messageOf(cause);
     }
@@ -450,6 +597,7 @@ export function mountPackages(options: PackagesOptions): {
 
   return {
     el,
+    setChoosable,
     refresh,
     upload,
     dispose() {

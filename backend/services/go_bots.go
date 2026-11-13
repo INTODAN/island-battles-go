@@ -19,7 +19,7 @@ import (
 )
 
 // Go bots are the default bots of the bots package, which the backend plays
-// itself for the roster players whose FrozenGamePlayer.BotLevel is set. A Go
+// itself for the roster players whose FrozenGamePlayer.BotKind is default. A Go
 // bot plays each generation's turn in the transaction that creates the
 // generation, and completes it at once, so it never times out.
 
@@ -44,7 +44,9 @@ const goBotRequestMargin = 2 * time.Second
 const GoBotLogger = "island_battles.bots"
 
 // isGoBot reports whether the backend plays the player.
-func isGoBot(player models.FrozenGamePlayer) bool { return player.BotLevel != nil }
+func isGoBot(player models.FrozenGamePlayer) bool {
+	return player.BotKind == models.DefaultBot && player.BotLevel != nil
+}
 
 // goBotTurn is a Go bot's checked answer: the commands to store, as
 // POST /generation/commands would store them, its log lines and its memory.

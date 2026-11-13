@@ -352,12 +352,8 @@ func (client *Client) start(ctx context.Context) (Generation, error) {
 		return Generation{}, err
 	}
 	if initial.Bot.Kind != "localhost" {
-		level := uint(0)
-		if initial.Bot.Level != nil {
-			level = *initial.Bot.Level
-		}
-		// The backend plays this seat and completes its turns itself.
-		return Generation{}, newGameError(ErrRejected, 0, fmt.Sprintf("the backend plays this seat with its level %d default bot; to play it with your own bot, choose your localhost bot in the lobby before getting ready", level))
+		// The server plays this seat and completes its turns itself.
+		return Generation{}, newGameError(ErrRejected, 0, initial.Bot.playedByServer())
 	}
 	client.mutex.Lock()
 	client.identity = &stateIdentity{gameID: initial.GameID, playerID: initial.PlayerID, channel: initial.Channel, teamColor: initial.TeamColor}

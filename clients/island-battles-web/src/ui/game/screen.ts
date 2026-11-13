@@ -107,6 +107,8 @@ export class GameScreen {
   private readonly overlayText = element("p");
   private readonly overlayAction = button("Try again", "Try again");
   private readonly teamsBox = element("div", "gv-teams");
+  /** The bot that plays your seat, for your team's card; a watcher has none. */
+  private yourBot: { teamColor: number; text: string } | undefined;
   private readonly banner = element("div", "gv-outcome");
   private readonly bannerText = element("span");
   private readonly slider = element("input", "gv-slider");
@@ -405,6 +407,29 @@ export class GameScreen {
     this.running = undefined;
   }
 
+  /**
+   * Names the bot that plays your seat, as the game copied it at the start, under your team in
+   * the player list: who plays it, and for a hosted or uploaded bot that the server does.
+   */
+  setYourBot(teamColor: number, text: string): void {
+    if (this.yourBot?.teamColor === teamColor && this.yourBot.text === text) {
+      return;
+    }
+    this.yourBot = { teamColor, text };
+    this.showYourBot();
+  }
+
+  private showYourBot(): void {
+    for (const card of this.teamsBox.querySelectorAll<HTMLElement>(
+      ".gv-team",
+    )) {
+      const line = card.querySelector<HTMLElement>(".gv-team-bot");
+      const yours = this.yourBot?.teamColor === Number(card.dataset.team);
+      if (line) line.hidden = !yours;
+      if (line && yours) line.textContent = this.yourBot?.text ?? "";
+    }
+  }
+
   private buildTeams(teams: readonly GameTeam[]): void {
     this.teamRows = new Map();
     const rows: HTMLElement[] = [];
@@ -418,15 +443,18 @@ export class GameScreen {
         "gv-team-players",
         team.players.join(", "),
       );
+      const bot = element("div", "gv-team-bot");
+      bot.hidden = true;
       const soldiers = element("span", "gv-count");
       const castles = element("span", "gv-count");
       const counts = element("div", "gv-team-counts");
       counts.append(soldiers, castles);
-      card.append(name, players, counts);
+      card.append(name, players, bot, counts);
       this.teamRows.set(team.color, { soldiers, castles });
       rows.push(card);
     }
     this.teamsBox.replaceChildren(...rows);
+    this.showYourBot();
   }
 
   private render(state: ViewState): void {

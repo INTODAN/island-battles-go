@@ -11,6 +11,7 @@ import (
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	gormlogger "gorm.io/gorm/logger"
 	gormtracing "gorm.io/plugin/opentelemetry/tracing"
 )
@@ -107,10 +108,21 @@ func MigrateSchema(ctx context.Context, db *gorm.DB) error {
 	if err := db.WithContext(ctx).Exec(`DROP INDEX IF EXISTS idx_games_lobby_id`).Error; err != nil {
 		return fmt.Errorf("drop the games lobby index: %w", err)
 	}
+	// Frozen players name their bot's kind since hosted and uploaded bots;
+	// before, a NULL bot level meant the localhost bot. AutoMigrate adds the
+	// column with the localhost default, and the rows from before it gain
+	// their kind once, below.
+	migrator := db.WithContext(ctx).Migrator()
+	backfillBotKinds := migrator.HasTable(&models.FrozenGamePlayer{}) && !migrator.HasColumn(&models.FrozenGamePlayer{}, "bot_kind")
 	err := db.WithContext(ctx).AutoMigrate(&models.Game{}, &models.Map{}, &models.Castle{},
 		&models.Generation{}, &models.SoldierGroup{}, &models.Command{}, &models.TeamBindingRecord{}, &models.FrozenGamePlayer{}, &models.GenerationInput{}, &models.GenerationRequest{}, &models.GenerationLog{}, &models.GamePlayerBotMemory{}, &models.BotPackage{})
 	if err != nil {
 		return fmt.Errorf("initialize game schema: %w", err)
+	}
+	if backfillBotKinds {
+		if err := backfillFrozenBotKinds(ctx, db); err != nil {
+			return err
+		}
 	}
 	// Each person's bot is in their lobby member settings now, so the table
 	// of bot choices, with its foreign key to the lobby's memberships, is
@@ -124,6 +136,18 @@ func MigrateSchema(ctx context.Context, db *gorm.DB) error {
 		return fmt.Errorf("drop generation_notifications: %w", err)
 	}
 	return dropGameReplayColumn(ctx, db)
+}
+
+// backfillFrozenBotKinds gives the frozen players stored before bot kinds
+// their kind: default where they have a default bot's level, and localhost,
+// the column's default, otherwise.
+func backfillFrozenBotKinds(ctx context.Context, db *gorm.DB) error {
+	err := db.WithContext(ctx).Model(&models.FrozenGamePlayer{}).Where(clause.Neq{Column: clause.Column{Name: "bot_level"}, Value: nil}).
+		Update("bot_kind", models.DefaultBot).Error
+	if err != nil {
+		return fmt.Errorf("backfill the frozen players' bot kinds: %w", err)
+	}
+	return nil
 }
 
 // dropGameReplayColumn removes the replay blob that games no longer store,

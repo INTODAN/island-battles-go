@@ -38,10 +38,18 @@ type lobbyStack struct {
 
 func newLobbyStack(t *testing.T) *lobbyStack {
 	t.Helper()
+	return newLobbyStackWith(t, services.ServerBots{})
+}
+
+// newLobbyStackWith is newLobbyStack with the server's bots configured, as
+// ISLAND_BATTLES_SERVER_BOTS does.
+func newLobbyStackWith(t *testing.T, serverBots services.ServerBots) *lobbyStack {
+	t.Helper()
 	database := testutils.InitTestDB(t)
 	clock := domain.SystemClock{}
 	identifiers := domain.CryptoIdentifiers{}
-	policy := domain.DefaultPolicy(lobbyadapter.Registration(database),
+	readLobbies := &lobbyadapter.Lobbies{}
+	policy := domain.DefaultPolicy(lobbyadapter.Registration(database, serverBots, readLobbies),
 		domain.GameRegistration{Key: "quiz-demo", ValidateSettings: func(context.Context, string, json.RawMessage, []domain.TeamDefinition) error { return nil }})
 	store, err := lobbypostgres.NewStore(database, clock)
 	if err != nil {
@@ -59,6 +67,7 @@ func newLobbyStack(t *testing.T) *lobbyStack {
 	if err != nil {
 		t.Fatal(err)
 	}
+	readLobbies.API = lobbies
 	publisher := &testutils.RecordedPublisher{}
 	binding, err := lobbyadapter.NewService(database, lobbies, publisher)
 	if err != nil {
@@ -80,6 +89,7 @@ func newLobbyStack(t *testing.T) *lobbyStack {
 	_, api := humatest.New(t, routes.NewAPIConfig("test", "1.0.0"))
 	routes.SetupLobbyRoutes(api, lobbies, authentication, playerTokens, binding, nil,
 		&handlers.LobbyGame{Database: database, Players: handlers.PlayerTokens{Verifier: verifier}, Publisher: publisher})
+	routes.SetupRoutes(api, &handlers.Env{DB: database, ServerBots: serverBots.Enabled}, "")
 	return &lobbyStack{t: t, database: database, api: api}
 }
 
@@ -159,8 +169,8 @@ func (stack *lobbyStack) snapshot(room domain.Snapshot, member guest) domain.Sna
 	return snapshot
 }
 
-// bots are the bots in the members' member settings, by player ID; a member
-// without one is absent.
+// bots are the bots in the members' member settings, by player ID, as
+// GenerationState.bot reports them; a member without one is absent.
 func (stack *lobbyStack) bots(snapshot domain.Snapshot) map[string]*models.BotChoiceView {
 	stack.t.Helper()
 	bots := map[string]*models.BotChoiceView{}
@@ -169,11 +179,11 @@ func (stack *lobbyStack) bots(snapshot domain.Snapshot) map[string]*models.BotCh
 		if member.MemberSettings == nil || string(member.MemberSettings) == "null" {
 			continue
 		}
-		bot, err := services.MemberBot(member.MemberSettings)
+		bot, err := services.MemberBot(member.MemberSettings, true)
 		if err != nil {
 			stack.t.Fatalf("%s's member settings %s: %v", member.DisplayName, member.MemberSettings, err)
 		}
-		bots[member.PlayerID] = &bot
+		bots[member.PlayerID] = &models.BotChoiceView{Kind: bot.Kind, Level: bot.Level, Host: models.URLHost(bot.URL)}
 	}
 	return bots
 }
@@ -186,7 +196,7 @@ func (stack *lobbyStack) state(snapshot domain.Snapshot, member guest) models.Ge
 }
 
 func botChoice(kind models.BotKind, level uint) *models.BotChoiceView {
-	if kind == models.LocalhostBot {
+	if kind != models.DefaultBot {
 		return &models.BotChoiceView{Kind: kind}
 	}
 	return &models.BotChoiceView{Kind: kind, Level: &level}
@@ -196,7 +206,7 @@ func sameBot(got, want *models.BotChoiceView) bool {
 	if got == nil || want == nil {
 		return got == want
 	}
-	return got.Kind == want.Kind && (got.Level == nil) == (want.Level == nil) && (got.Level == nil || *got.Level == *want.Level)
+	return got.Kind == want.Kind && got.Host == want.Host && (got.Level == nil) == (want.Level == nil) && (got.Level == nil || *got.Level == *want.Level)
 }
 
 func TestEveryMemberChoosesABotBeforeGettingReady(t *testing.T) {

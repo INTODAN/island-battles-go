@@ -3,8 +3,9 @@
 // from the command line, and everyone sees the lobby's packages. The page
 // calls the game's bot package endpoints through the lobby page's room
 // requests, which add the player's token for the game, and posts the zip itself
-// straight to storage with the presigned POST, which needs none. Choosing a
-// package as a bot comes later; here it is only uploaded, listed and deleted.
+// straight to storage with the presigned POST, which needs none. While the
+// server offers uploaded bots, bot-choice.mjs offers each of your packages as
+// your bot, and the host's Add bot each of the lobby's.
 
 // The zip's limit, in binary units as the SDKs' package commands check it.
 export const maxZipBytes = 250 * 1024 * 1024;
@@ -89,7 +90,7 @@ export async function uploadPackage({ lobbyID, file, request, post = postToStora
 
 // The list of the lobby's packages, with the upload controls above it.
 export class PackagesPanel {
-  constructor({ container, lobbyID, playerID, request, gameURL = globalThis.location?.origin ?? "", post = postToStorage, copy = (text) => navigator.clipboard.writeText(text) }) {
+  constructor({ container, lobbyID, playerID, request, gameURL = globalThis.location?.origin ?? "", post = postToStorage, copy = (text) => navigator.clipboard.writeText(text), onList = () => {} }) {
     this.container = container;
     this.lobbyID = lobbyID;
     this.playerID = playerID;
@@ -97,15 +98,16 @@ export class PackagesPanel {
     this.gameURL = gameURL;
     this.post = post;
     this.copy = copy;
+    this.onList = onList;
     this.packages = [];
     this.busy = false;
     this.timer = null;
 
     const box = document.createElement("div");
     box.className = "local-bot bot-packages";
-    const title = document.createElement("p");
-    title.className = "hint";
-    title.textContent = "Bot packages of this lobby: the zip that island-battles-bot package or island-battles-package builds. Choosing one as your bot comes later.";
+    this.title = document.createElement("p");
+    this.title.className = "hint";
+    this.setChoosable(false);
     this.file = document.createElement("input");
     this.file.type = "file";
     this.file.accept = ".zip,application/zip";
@@ -136,13 +138,19 @@ export class PackagesPanel {
     this.command.hidden = true;
     this.list = document.createElement("ul");
     this.list.className = "bot-package-list";
-    box.append(title, actions, this.progress, this.status, this.command, this.list);
+    box.append(this.title, actions, this.progress, this.status, this.command, this.list);
     container.append(box);
     void this.refresh();
   }
 
   setStatus(text) {
     this.status.textContent = text;
+  }
+
+  // Says whether a package can be chosen as a bot, as the server offers.
+  setChoosable(choosable) {
+    this.title.textContent = `Bot packages of this lobby: the zip that island-battles-bot package or island-battles-package builds. ${
+      choosable ? "Choose one of yours above as your bot; the host can seat anyone's as a bot." : "Choosing one as your bot comes later."}`;
   }
 
   // Reads the lobby's packages again and shows them, newest first.
@@ -159,6 +167,7 @@ export class PackagesPanel {
 
   show(packages) {
     this.packages = packages;
+    this.onList(packages);
     const items = packages.map((item) => {
       const entry = document.createElement("li");
       const mine = item.owner_player_id === this.playerID;

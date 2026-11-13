@@ -3,7 +3,13 @@ import { ApiError } from "../../api/errors";
 import type { Realtime, Snapshot } from "../../realtime";
 import { createLobbyActions, retryTransport } from "./actions";
 import { describeProblem } from "./problems";
-import { buildRoom, countPeople, seatBody, seatLevel } from "./roomModel";
+import {
+  buildRoom,
+  countPeople,
+  seatBody,
+  seatLevel,
+  seatSettingsFromValue,
+} from "./roomModel";
 
 const member = (
   id: string,
@@ -108,6 +114,33 @@ describe("seats in the room model", () => {
     ).toBe(0);
   });
 
+  test("a hosted or uploaded bot's seat shows its bot", () => {
+    const room = buildRoom(
+      {
+        ...snapshot,
+        members: [
+          member("h", "t-red", {
+            kind: "seat",
+            display_name: "Hosted bot",
+            seat_settings: { bot_url: "https://bot.example.com/turn" },
+          }),
+          member("u", "t-green", {
+            kind: "seat",
+            display_name: "Alex's bot",
+            seat_settings: { bot_package_id: "pkg-1" },
+          }),
+        ],
+      } as unknown as Snapshot,
+      "p1",
+    );
+    expect(
+      room.teams.flatMap((team) => team.members.map((m) => m.bot)),
+    ).toEqual([
+      { kind: "hosted", url: "https://bot.example.com/turn" },
+      { kind: "uploaded", package_id: "pkg-1" },
+    ]);
+  });
+
   test("seat levels come from the settings", () => {
     expect(seatLevel({ bot_level: 3 })).toBe(3);
     expect(seatLevel({ bot_level: "3" })).toBeUndefined();
@@ -115,9 +148,25 @@ describe("seats in the room model", () => {
   });
 });
 
+describe("the Add bot select", () => {
+  test("stands for a level, a package or a hosted bot's URL", () => {
+    expect(seatSettingsFromValue("level-3", "")).toEqual({ bot_level: 3 });
+    expect(seatSettingsFromValue("package-pkg-1", "")).toEqual({
+      bot_package_id: "pkg-1",
+    });
+    expect(
+      seatSettingsFromValue("hosted", "  https://bot.example.com/turn "),
+    ).toEqual({ bot_url: "https://bot.example.com/turn" });
+    // A hosted bot needs its URL first.
+    expect(seatSettingsFromValue("hosted", "  ")).toBeNull();
+    expect(seatSettingsFromValue("package-", "")).toBeNull();
+    expect(seatSettingsFromValue("level-0", "")).toBeNull();
+  });
+});
+
 describe("the add-seat request", () => {
   test("carries the team, the level and the request ID", () => {
-    expect(seatBody("t-red", 2, "req-1")).toEqual({
+    expect(seatBody("t-red", { bot_level: 2 }, "req-1")).toEqual({
       request_id: "req-1",
       team_id: "t-red",
       seat_settings: { bot_level: 2 },
@@ -215,7 +264,7 @@ function withLocation<T>(origin: string, make: () => T): T {
 describe("the add and remove calls", () => {
   test("adding posts the body and adopts the snapshot it returns", async () => {
     const { actions, requests, adopted, ok } = actionsWith(() => ok());
-    await actions.addSeat(seatBody("t-red", 2, "req-1"));
+    await actions.addSeat(seatBody("t-red", { bot_level: 2 }, "req-1"));
     expect(requests).toEqual([
       {
         method: "POST",
@@ -250,7 +299,7 @@ describe("the add and remove calls", () => {
       if (attempts === 1) throw new TypeError("connection reset");
       return ok();
     });
-    const body = seatBody("t-red", 1, "req-9");
+    const body = seatBody("t-red", { bot_level: 1 }, "req-9");
     await retryTransport(() => actions.addSeat(body), {
       delayMs: 0,
       sleep: async () => undefined,

@@ -34,3 +34,18 @@ func TestListDefaultBotsHTTP(t *testing.T) {
 		}
 	}
 }
+
+// server_bots reports ISLAND_BATTLES_SERVER_BOTS, which is off by default.
+func TestListDefaultBotsSaysWhetherServerBotsAreOffered(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		_, api := humatest.New(t)
+		routes.SetupRoutes(api, &handlers.Env{ServerBots: enabled}, "")
+		var body struct {
+			ServerBots *bool `json:"server_bots"`
+		}
+		response := api.Get("/bots/defaults")
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil || body.ServerBots == nil || *body.ServerBots != enabled {
+			t.Fatalf("enabled %v: %s, %v", enabled, response.Body.String(), err)
+		}
+	}
+}
