@@ -39,7 +39,7 @@ func InitTestDB(t *testing.T) *gorm.DB {
 func InitTestDatabases(t *testing.T) (game, lobby *gorm.DB) {
 	gameURL, lobbyURL := StartTestDatabases(t)
 	game = connectTestDatabase(t, gameURL)
-	if err := schema.Migrate(context.Background(), game, schema.Options{SeparateLobbyDatabase: true}); err != nil {
+	if err := schema.Migrate(context.Background(), game); err != nil {
 		t.Fatalf("migrate test database: %v", err)
 	}
 	lobby = connectTestDatabase(t, lobbyURL)

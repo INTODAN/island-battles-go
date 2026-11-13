@@ -1,51 +1,33 @@
 // Package schema migrates Island Battles' database: the map templates and the
 // game tables. The lobby keeps its tables in a database of its own, which the
 // lobby's migrate command (lobby/cmd/migrate) migrates. The map templates'
-// migrations run on the lobby's migration runner, so this package may use
-// lobby/postgres.
+// migrations run on the lobby's migration runner, and the check before the
+// lobby's old tables are dropped reads the lobby's migration history, so this
+// package may use lobby/postgres.
 package schema
 
 import (
 	"context"
 	"fmt"
-	"net"
 
 	"islandBattles/backend/dal"
 	"islandBattles/backend/dependencies"
 	lobbypostgres "islandBattles/lobby/postgres"
 
-	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
-
-// Options say what Migrate does besides migrating.
-type Options struct {
-	// SeparateLobbyDatabase says that the lobby keeps its tables in a
-	// database of its own, so the copies that builds before it left in this
-	// database are dropped. Only then: until the lobby has a database of its
-	// own, its tables here are the only ones it has. See
-	// SeparateLobbyDatabase.
-	SeparateLobbyDatabase bool
-}
 
 // Migrate brings the database to the schema this build expects. The migrate
 // command runs it once per deploy, before any host serves requests. It runs
 // the map template migrations, which keep their rows, and then AutoMigrates
 // the game tables, whose data may be reset. Game tables come last so that
-// they may reference templates. With options.SeparateLobbyDatabase, it then
-// drops the lobby's tables (DropLobbyTables).
-func Migrate(ctx context.Context, db *gorm.DB, options Options) error {
+// they may reference templates.
+func Migrate(ctx context.Context, db *gorm.DB) error {
 	if err := MapTemplateMigrations().Apply(ctx, db); err != nil {
 		return fmt.Errorf("migrate map template schema: %w", err)
 	}
-	if err := dependencies.MigrateGameSchema(ctx, db); err != nil {
-		return err
-	}
-	if options.SeparateLobbyDatabase {
-		return DropLobbyTables(ctx, db)
-	}
-	return nil
+	return dependencies.MigrateGameSchema(ctx, db)
 }
 
 // MapTemplateMigrations is the versioned schema of the map templates,
@@ -55,12 +37,94 @@ func MapTemplateMigrations() lobbypostgres.MigrationSet {
 	return lobbypostgres.MigrationSet{HistoryTable: dal.MapTemplateHistoryTable, Files: dal.MapTemplateMigrationFiles(), Adopt: true}
 }
 
+// LobbyTablesCheck is CheckLobbyTables' answer: whether the lobby's tables in
+// Island Battles' database may be dropped, and why or why not.
+type LobbyTablesCheck struct {
+	Drop   bool
+	Reason string
+}
+
+// databaseIdentity is what a server says about the database a connection
+// reached.
+type databaseIdentity struct {
+	Database string
+	// System is the cluster's system identifier, which pg_control_system()
+	// gives, or empty when it can't be read.
+	System string
+	// Address and Port are the server's, as the connection reached it; empty
+	// over a Unix socket.
+	Address string
+	Port    string
+}
+
+// identify asks the server which database database reaches. The cluster's
+// system identifier needs no superuser on PostgreSQL 10 and newer; without
+// it, the server's address and port say less, and the caller treats what it
+// can't tell as the same database.
+func identify(ctx context.Context, database *gorm.DB) (databaseIdentity, error) {
+	var identity databaseIdentity
+	if err := database.WithContext(ctx).Raw(`SELECT current_database() AS database,
+		coalesce(host(inet_server_addr()), '') AS address, coalesce(inet_server_port()::text, '') AS port`).
+		Scan(&identity).Error; err != nil {
+		return databaseIdentity{}, err
+	}
+	var system []string
+	if err := database.WithContext(ctx).Raw(`SELECT system_identifier::text FROM pg_control_system()`).Scan(&system).Error; err == nil && len(system) == 1 {
+		identity.System = system[0]
+	}
+	return identity, nil
+}
+
+// distinct reports whether two identities are provably two databases: their
+// names differ, or both clusters' system identifiers are known and differ.
+// Everything else, such as one name on two addresses that may be one server,
+// counts as one database.
+func distinct(game, lobby databaseIdentity) bool {
+	if game.Database != lobby.Database {
+		return true
+	}
+	return game.System != "" && lobby.System != "" && game.System != lobby.System
+}
+
+// CheckLobbyTables decides whether DropLobbyTables may run on game, Island
+// Battles' database, now that lobby is the lobby's own (LOBBY_DATABASE_URL).
+// It asks both servers rather than comparing URLs, since two URLs can reach
+// one database (localhost and 127.0.0.1, a name and its address, a pooler).
+// It allows the drop only when the two are provably different databases and
+// the lobby's database has every lobby migration of this build applied, so a
+// lobby migrate command that failed or didn't run is never followed by the
+// drop.
+func CheckLobbyTables(ctx context.Context, game, lobby *gorm.DB) (LobbyTablesCheck, error) {
+	gameIdentity, err := identify(ctx, game)
+	if err != nil {
+		return LobbyTablesCheck{}, fmt.Errorf("identify Island Battles' database: %w", err)
+	}
+	lobbyIdentity, err := identify(ctx, lobby)
+	if err != nil {
+		return LobbyTablesCheck{}, fmt.Errorf("identify the lobby's database: %w", err)
+	}
+	if !distinct(gameIdentity, lobbyIdentity) {
+		return LobbyTablesCheck{Reason: fmt.Sprintf("%s reaches %q, which can't be told apart from Island Battles' database, so the lobby's tables there stay",
+			dependencies.LobbyDatabaseURLEnv, lobbyIdentity.Database)}, nil
+	}
+	current, err := lobbypostgres.Migrations().Current(ctx, lobby)
+	if err != nil {
+		return LobbyTablesCheck{}, fmt.Errorf("read the lobby's migrations: %w", err)
+	}
+	if !current {
+		return LobbyTablesCheck{Reason: fmt.Sprintf("the lobby's database %q lacks this build's lobby migrations, so the lobby's tables in Island Battles' database stay; run lobby/cmd/migrate, then this command again",
+			lobbyIdentity.Database)}, nil
+	}
+	return LobbyTablesCheck{Drop: true, Reason: fmt.Sprintf("the lobby's own database %q is migrated", lobbyIdentity.Database)}, nil
+}
+
 // DropLobbyTables drops the lobby's tables, every lobby_* table with its
 // migration history lobby_schema_migrations, from Island Battles' database,
-// where builds before the lobby's own database kept them. Lobbies open at
-// that moment are dropped with them, as the owner decided (#229); games
-// already started keep their own data. No game table references them. It
-// runs in one transaction, and finds nothing to do the next time.
+// where builds before the lobby's own database kept them. Run it only when
+// CheckLobbyTables allows it. Lobbies open at that moment are dropped with
+// them, as the owner decided (#229); games already started keep their own
+// data. No game table references them. It runs in one transaction, and finds
+// nothing to do the next time.
 func DropLobbyTables(ctx context.Context, db *gorm.DB) error {
 	return db.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
 		var tables []string
@@ -77,37 +141,4 @@ func DropLobbyTables(ctx context.Context, db *gorm.DB) error {
 		}
 		return nil
 	})
-}
-
-// SeparateLobbyDatabase reports whether lobbyURL, the lobby's
-// LOBBY_DATABASE_URL, names another database than gameURL, Island Battles'
-// ISLAND_BATTLES_DATABASE_URL: another database name, host or port. An empty
-// lobbyURL names none, so the lobby's tables stay where they are.
-func SeparateLobbyDatabase(gameURL, lobbyURL string) (bool, error) {
-	if lobbyURL == "" {
-		return false, nil
-	}
-	game, err := pgconn.ParseConfig(gameURL)
-	if err != nil {
-		return false, fmt.Errorf("%s: %w", dependencies.DatabaseURLEnv, err)
-	}
-	lobby, err := pgconn.ParseConfig(lobbyURL)
-	if err != nil {
-		return false, fmt.Errorf("%s: %w", dependencies.LobbyDatabaseURLEnv, err)
-	}
-	sameServer := sameHost(game.Host, lobby.Host) && game.Port == lobby.Port
-	return !sameServer || game.Database != lobby.Database, nil
-}
-
-// sameHost compares host names and addresses; localhost and the loopback
-// addresses are one host.
-func sameHost(first, second string) bool {
-	loopback := func(host string) bool {
-		if host == "localhost" {
-			return true
-		}
-		address := net.ParseIP(host)
-		return address != nil && address.IsLoopback()
-	}
-	return first == second || loopback(first) && loopback(second)
 }

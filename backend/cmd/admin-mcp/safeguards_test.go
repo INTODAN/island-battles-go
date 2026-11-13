@@ -77,7 +77,7 @@ func TestAdvisoryLocksEndWithTheCall(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := schema.Migrate(ctx, owner.game.WithContext(ctx), schema.Options{SeparateLobbyDatabase: true}); err != nil {
+	if err := schema.Migrate(ctx, owner.game.WithContext(ctx)); err != nil {
 		t.Fatalf("the migrations waited for the admin server's lock: %v", err)
 	}
 	if err := lobbypostgres.Migrate(ctx, owner.lobby.WithContext(ctx)); err != nil {

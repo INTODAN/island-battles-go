@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
-	"io"
 	"log/slog"
+	"net/url"
+	"strings"
 	"testing"
 
 	"islandBattles/backend/dependencies"
@@ -14,18 +16,9 @@ import (
 	"gorm.io/gorm"
 )
 
-func discard() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
-
-func lookup(values map[string]string) func(string) (string, bool) {
-	return func(name string) (string, bool) {
-		value, found := values[name]
-		return value, found
-	}
-}
-
-func open(t *testing.T, url string) *gorm.DB {
+func open(t *testing.T, databaseURL string) *gorm.DB {
 	t.Helper()
-	database, err := gorm.Open(postgres.Open(url), &gorm.Config{})
+	database, err := gorm.Open(postgres.Open(databaseURL), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,20 +39,39 @@ func lobbyTables(t *testing.T, database *gorm.DB) []string {
 	return tables
 }
 
-// migrate runs the command as a deploy does, with the environment given.
-func migrate(t *testing.T, environment map[string]string) {
+// migrate runs the command as a deploy does, with Island Battles' database
+// and the lobby's URL, and returns what it logged.
+func migrate(t *testing.T, gameURL, lobbyURL string) string {
 	t.Helper()
-	config, err := dependencies.LoadDatabaseConfigFromLookup(lookup(environment))
+	var output bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&output, nil))
+	if err := run(context.Background(), dependencies.DefaultDatabaseConfig(gameURL), lobbyURL, logger); err != nil {
+		t.Fatal(err)
+	}
+	return output.String()
+}
+
+// migrateLobby runs the lobby's migrations, as lobby/cmd/migrate does.
+func migrateLobby(t *testing.T, database *gorm.DB) {
+	t.Helper()
+	if err := lobbypostgres.Migrate(context.Background(), database); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// withHost returns databaseURL with another host, and a query parameter more,
+// so it reads differently.
+func withHost(t *testing.T, databaseURL, host string) string {
+	t.Helper()
+	parsed, err := url.Parse(databaseURL)
 	if err != nil {
 		t.Fatal(err)
 	}
-	options, err := loadOptions(config, lookup(environment))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := run(context.Background(), config, options, discard()); err != nil {
-		t.Fatal(err)
-	}
+	parsed.Host = host + ":" + parsed.Port()
+	query := parsed.Query()
+	query.Set("application_name", "migrate-test")
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
 }
 
 // Every deploy runs the command, so it must create the schema on an empty
@@ -67,8 +79,9 @@ func migrate(t *testing.T, environment map[string]string) {
 // Island Battles'.
 func TestMigrateCreatesTheSchemaAndRepeats(t *testing.T) {
 	gameURL, lobbyURL := testutils.StartTestDatabases(t)
+	migrateLobby(t, open(t, lobbyURL))
 	for range 2 {
-		migrate(t, map[string]string{dependencies.DatabaseURLEnv: gameURL, dependencies.LobbyDatabaseURLEnv: lobbyURL})
+		migrate(t, gameURL, lobbyURL)
 	}
 	database := open(t, gameURL)
 	for _, table := range []string{"map_template_schema_migrations", "map_templates", "games", "generations"} {
@@ -81,30 +94,35 @@ func TestMigrateCreatesTheSchemaAndRepeats(t *testing.T) {
 	}
 }
 
+// oldGameDatabase gives Island Battles' database what builds before the
+// switch left: the lobby's tables beside the game's, with a player in them.
+func oldGameDatabase(t *testing.T, gameURL string) *gorm.DB {
+	t.Helper()
+	game := open(t, gameURL)
+	migrateLobby(t, game)
+	migrate(t, gameURL, "")
+	if err := game.Exec(`INSERT INTO lobby_players (id, display_name, created_at) VALUES (gen_random_uuid(), 'Player', now())`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(lobbyTables(t, game)) == 0 {
+		t.Fatal("no lobby tables to keep or drop")
+	}
+	return game
+}
+
 // The switch to the lobby's own database (#229): a database that a build
 // before it migrated holds the lobby's tables. Both migrate commands run, each
 // on its own database, and the drop leaves no lobby table in Island Battles'
 // database, and Island Battles' tables and the lobby's in theirs.
 func TestTheSwitchDropsTheLobbysTablesFromTheGameDatabase(t *testing.T) {
 	gameURL, lobbyURL := testutils.StartTestDatabases(t)
-	game, lobby := open(t, gameURL), open(t, lobbyURL)
-	// What builds before the switch left: the lobby's tables beside the
-	// game's, in one database, with a lobby in them.
-	if err := lobbypostgres.Migrate(context.Background(), game); err != nil {
-		t.Fatal(err)
-	}
-	migrate(t, map[string]string{dependencies.DatabaseURLEnv: gameURL})
-	if err := game.Exec(`INSERT INTO lobby_players (id, display_name, created_at) VALUES (gen_random_uuid(), 'Player', now())`).Error; err != nil {
-		t.Fatal(err)
-	}
+	game, lobby := oldGameDatabase(t, gameURL), open(t, lobbyURL)
 
 	// The deploy: the lobby's migrations on the lobby's database, then
 	// Island Battles' with the lobby's database configured.
-	if err := lobbypostgres.Migrate(context.Background(), lobby); err != nil {
-		t.Fatal(err)
-	}
+	migrateLobby(t, lobby)
 	for range 2 {
-		migrate(t, map[string]string{dependencies.DatabaseURLEnv: gameURL, dependencies.LobbyDatabaseURLEnv: lobbyURL})
+		migrate(t, gameURL, lobbyURL)
 	}
 
 	if tables := lobbyTables(t, game); len(tables) != 0 {
@@ -115,10 +133,9 @@ func TestTheSwitchDropsTheLobbysTablesFromTheGameDatabase(t *testing.T) {
 			t.Fatalf("Island Battles' table %s is gone", table)
 		}
 	}
-	tables := lobbyTables(t, lobby)
 	for _, table := range []string{"lobby_schema_migrations", "lobby_rooms", "lobby_sessions"} {
 		if !lobby.Migrator().HasTable(table) {
-			t.Fatalf("the lobby's database lacks %s: %v", table, tables)
+			t.Fatalf("the lobby's database lacks %s", table)
 		}
 	}
 	var others []string
@@ -132,63 +149,94 @@ func TestTheSwitchDropsTheLobbysTablesFromTheGameDatabase(t *testing.T) {
 
 // Without a separate lobby database, the lobby's tables in Island Battles'
 // database are the only ones it has, so they stay: when LOBBY_DATABASE_URL
-// is unset, and when it names Island Battles' database itself.
+// is unset, when it is Island Battles' URL, and when it reaches Island
+// Battles' database through a URL that reads differently.
 func TestTheDropIsSkippedWithoutASeparateLobbyDatabase(t *testing.T) {
 	gameURL, _ := testutils.StartTestDatabases(t)
-	game := open(t, gameURL)
-	if err := lobbypostgres.Migrate(context.Background(), game); err != nil {
-		t.Fatal(err)
-	}
+	game := oldGameDatabase(t, gameURL)
 	before := lobbyTables(t, game)
-	if len(before) == 0 {
-		t.Fatal("no lobby tables to keep")
-	}
-	for _, environment := range []map[string]string{
-		{dependencies.DatabaseURLEnv: gameURL},
-		{dependencies.DatabaseURLEnv: gameURL, dependencies.LobbyDatabaseURLEnv: ""},
-		{dependencies.DatabaseURLEnv: gameURL, dependencies.LobbyDatabaseURLEnv: gameURL},
-	} {
-		migrate(t, environment)
-		if after := lobbyTables(t, game); len(after) != len(before) {
-			t.Fatalf("with %v, the lobby's tables went from %v to %v", environment, before, after)
-		}
-	}
-}
-
-func TestLoadOptionsComparesTheDatabases(t *testing.T) {
-	const game = "postgres://island_battles:secret@vm.example.org:5432/island_battles?sslmode=require"
-	for _, test := range []struct {
-		lobby    string
-		separate bool
-	}{
-		{"", false},
-		{game, false},
-		{"postgres://lobby:other@vm.example.org:5432/island_battles?sslmode=require", false},
-		{"postgres://lobby:secret@vm.example.org:5432/lobby?sslmode=require", true},
-		{"postgres://lobby:secret@vm.example.org/lobby?sslmode=require", true},
-		{"postgres://island_battles:secret@other.example.org:5432/island_battles?sslmode=require", true},
-		{"postgres://island_battles:secret@vm.example.org:5433/island_battles?sslmode=require", true},
-	} {
-		options, err := loadOptions(dependencies.DefaultDatabaseConfig(game), lookup(map[string]string{dependencies.LobbyDatabaseURLEnv: test.lobby}))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if options.SeparateLobbyDatabase != test.separate {
-			t.Errorf("%q: separate = %v, want %v", test.lobby, options.SeparateLobbyDatabase, test.separate)
-		}
-	}
-	if _, err := loadOptions(dependencies.DefaultDatabaseConfig(game), lookup(map[string]string{dependencies.LobbyDatabaseURLEnv: "postgres://%zz"})); err == nil {
-		t.Fatal("accepted an invalid lobby database URL")
-	}
-}
-
-func TestLocalhostIsOneHost(t *testing.T) {
-	options, err := loadOptions(dependencies.DefaultDatabaseConfig("postgres://a:b@localhost:5432/islandBattles"),
-		lookup(map[string]string{dependencies.LobbyDatabaseURLEnv: "postgres://a:b@127.0.0.1:5432/islandBattles"}))
+	parsed, err := url.Parse(gameURL)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if options.SeparateLobbyDatabase {
-		t.Fatal("localhost and 127.0.0.1 counted as two servers")
+	otherHost := "127.0.0.1"
+	if parsed.Hostname() == otherHost {
+		otherHost = "localhost"
 	}
+	for _, lobbyURL := range []string{"", gameURL, withHost(t, gameURL, otherHost)} {
+		output := migrate(t, gameURL, lobbyURL)
+		if after := lobbyTables(t, game); len(after) != len(before) {
+			t.Fatalf("with %q, the lobby's tables went from %v to %v", lobbyURL, before, after)
+		}
+		if lobbyURL != "" && !strings.Contains(output, "can't be told apart from Island Battles' database") {
+			t.Errorf("with %q, the log doesn't say why the tables stay: %s", lobbyURL, output)
+		}
+	}
+}
+
+// A lobby migrate command that failed or didn't run is never followed by the
+// drop: the lobby's database must have every lobby migration first.
+func TestTheDropWaitsForTheLobbysMigrations(t *testing.T) {
+	gameURL, lobbyURL := testutils.StartTestDatabases(t)
+	game, lobby := oldGameDatabase(t, gameURL), open(t, lobbyURL)
+	before := lobbyTables(t, game)
+
+	output := migrate(t, gameURL, lobbyURL)
+	if after := lobbyTables(t, game); len(after) != len(before) {
+		t.Fatalf("without the lobby's migrations, the lobby's tables went from %v to %v", before, after)
+	}
+	if !strings.Contains(output, "lacks this build's lobby migrations") || !strings.Contains(output, "level=WARN") {
+		t.Errorf("the log doesn't warn why the tables stay: %s", output)
+	}
+
+	// Only part of them, such as a lobby migrate command of an older build.
+	migrateLobby(t, lobby)
+	if err := lobby.Exec(`DELETE FROM lobby_schema_migrations WHERE version = (SELECT max(version) FROM lobby_schema_migrations)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	migrate(t, gameURL, lobbyURL)
+	if after := lobbyTables(t, game); len(after) != len(before) {
+		t.Fatalf("with part of the lobby's migrations, the lobby's tables went from %v to %v", before, after)
+	}
+}
+
+// Two servers whose databases have the same name are told apart by their
+// clusters' system identifiers, which a role that is no superuser reads too.
+func TestTheSameNameOnAnotherServerIsAnotherDatabase(t *testing.T) {
+	gameURL, _ := testutils.StartTestDatabases(t)
+	game := oldGameDatabase(t, gameURL)
+	otherServerURL, _ := testutils.StartTestDatabases(t)
+	otherServer := open(t, otherServerURL)
+	migrateLobby(t, otherServer)
+	// The lobby connects as a role of its own, as in production.
+	for _, statement := range []string{
+		`CREATE ROLE lobby_reader LOGIN NOSUPERUSER PASSWORD 'lobby_reader'`,
+		`GRANT SELECT ON lobby_schema_migrations TO lobby_reader`,
+	} {
+		if err := otherServer.Exec(statement).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	parsed, err := url.Parse(otherServerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed.User = url.UserPassword("lobby_reader", "lobby_reader")
+	if gameName, otherName := strings.TrimPrefix(mustParse(t, gameURL).Path, "/"), strings.TrimPrefix(parsed.Path, "/"); gameName != otherName {
+		t.Fatalf("the test needs one name on both servers: %s and %s", gameName, otherName)
+	}
+
+	output := migrate(t, gameURL, parsed.String())
+	if tables := lobbyTables(t, game); len(tables) != 0 {
+		t.Fatalf("the lobby's tables stayed: %v; %s", tables, output)
+	}
+}
+
+func mustParse(t *testing.T, databaseURL string) *url.URL {
+	t.Helper()
+	parsed, err := url.Parse(databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return parsed
 }
