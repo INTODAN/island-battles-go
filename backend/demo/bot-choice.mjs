@@ -86,21 +86,24 @@ export function describeChoices(members, playerID) {
   return members.map((member) => `${member.display_name}${member.player_id === playerID ? " (you)" : ""}: ${describeBot(memberBot(member))}`).join(" · ");
 }
 
-let defaultBots = null;
-
 // The default bots' levels, and whether the server offers hosted and
-// uploaded bots, loaded once per page.
-function loadOptions() {
-  defaultBots ||= (async () => {
-    const response = await fetch("/bots/defaults", { headers: { Accept: "application/json" } });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const body = await response.json();
-    return { levels: body.bots.map((bot) => bot.level), serverBots: body.server_bots === true };
-  })().catch(() => {
-    defaultBots = null;
-    return { levels: fallbackLevels, serverBots: false };
-  });
-  return defaultBots;
+// uploaded bots, loaded once per page from the game's site, gameURL (the
+// page's own origin without one).
+const defaultBots = new Map();
+
+function loadOptions(gameURL = "") {
+  if (!defaultBots.has(gameURL)) {
+    defaultBots.set(gameURL, (async () => {
+      const response = await fetch(`${gameURL}/bots/defaults`, { headers: { Accept: "application/json" } });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const body = await response.json();
+      return { levels: body.bots.map((bot) => bot.level), serverBots: body.server_bots === true };
+    })().catch(() => {
+      defaultBots.delete(gameURL);
+      return { levels: fallbackLevels, serverBots: false };
+    }));
+  }
+  return defaultBots.get(gameURL);
 }
 
 const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -119,9 +122,9 @@ export function computeSpentMessage(compute) {
 // Whether games with uploaded bots may start this month, read when a room is
 // shown; null when it can't be read, which greys out nothing: the start
 // refuses them all the same.
-async function loadCompute() {
+async function loadCompute(gameURL = "") {
   try {
-    const response = await fetch("/game/bot-compute", { headers: { Accept: "application/json" } });
+    const response = await fetch(`${gameURL}/game/bot-compute`, { headers: { Accept: "application/json" } });
     return response.ok ? await response.json() : null;
   } catch {
     return null;
@@ -140,11 +143,11 @@ async function loadPackages(lobbyID, request) {
 // backend plays, and, when the server offers them, any package of the lobby
 // and a hosted bot at the URL that the host types, which the server plays.
 // The packages are greyed out (disabled) once the month's compute is spent.
-export async function seatOptions({ lobbyID, request, options = loadOptions, packages = loadPackages, compute = loadCompute } = {}) {
-  const { levels, serverBots } = await options();
+export async function seatOptions({ lobbyID, request, gameURL = "", options = loadOptions, packages = loadPackages, compute = loadCompute } = {}) {
+  const { levels, serverBots } = await options(gameURL);
   const choices = levels.map((level) => ({ label: `Default bot, level ${level}`, settings: { bot_level: level } }));
   if (serverBots) {
-    const [items, usage] = await Promise.all([packages(lobbyID, request).catch(() => []), compute().catch(() => null)]);
+    const [items, usage] = await Promise.all([packages(lobbyID, request).catch(() => []), compute(gameURL).catch(() => null)]);
     const spent = computeSpentMessage(usage) !== null;
     for (const item of items) {
       choices.push({ label: `Uploaded: ${item.owner_name}'s bot (${item.language})`, settings: { bot_package_id: item.package_id }, ...(spent ? { disabled: true } : {}) });
@@ -172,7 +175,7 @@ export const safariNote = "Safari does not let an https page reach a bot on loca
 // host's Add bot offers them. Once the month's compute is spent, the
 // uploaded choices are greyed out, with the sentence that says why.
 export class RoomPanel {
-  constructor({ container, lobbyID, playerID, saveMemberSettings, request, refreshSeatOptions = () => {}, checkHealth = checkBotHealth, copy = (text) => navigator.clipboard.writeText(text), postToStorage, options = loadOptions, compute = loadCompute }) {
+  constructor({ container, lobbyID, playerID, saveMemberSettings, request, refreshSeatOptions = () => {}, gameURL = globalThis.location?.origin ?? "", checkHealth = checkBotHealth, copy = (text) => navigator.clipboard.writeText(text), postToStorage, options = loadOptions, compute = loadCompute }) {
     this.container = container;
     this.checkHealth = checkHealth;
     this.copy = copy;
@@ -206,7 +209,7 @@ export class RoomPanel {
     this.hosted = this.buildHostedHelp();
     container.append(label, this.spentNote, this.local, this.hosted, this.summary);
     // The lobby's bot packages, which the page's room requests reach.
-    this.packages = request ? new PackagesPanel({ container, lobbyID, playerID, request, copy, onList: (items) => this.listed(items), ...(postToStorage ? { post: postToStorage } : {}) }) : null;
+    this.packages = request ? new PackagesPanel({ container, lobbyID, playerID, request, gameURL, copy, onList: (items) => this.listed(items), ...(postToStorage ? { post: postToStorage } : {}) }) : null;
     this.select.addEventListener("change", () => {
       if (this.select.value === "hosted") {
         this.typingURL = true;
@@ -217,13 +220,13 @@ export class RoomPanel {
       this.typingURL = false;
       void this.save(this.select.value);
     });
-    void options().then(({ levels, serverBots }) => {
+    void options(gameURL).then(({ levels, serverBots }) => {
       this.levelOptions = levels.map((level) => new Option(`Default bot, level ${level}`, `level-${level}`));
       this.serverBots = serverBots;
       this.packages?.setChoosable(serverBots);
       this.fillSelect();
       if (serverBots) {
-        void compute().catch(() => null).then((usage) => {
+        void compute(gameURL).catch(() => null).then((usage) => {
           this.computeSpent = computeSpentMessage(usage);
           this.spentNote.textContent = this.computeSpent ?? "";
           this.spentNote.hidden = this.computeSpent === null;

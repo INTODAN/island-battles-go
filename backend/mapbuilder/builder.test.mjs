@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  checkMap, describeProblems, downloadGate, dragPosition, fileName, freeSpot, lobbyGate, lobbyMessage, lobbyPageFromMessage, mapFile, missingTeams, newMap,
+  builderHello, checkMap, describeProblems, downloadGate, dragPosition, fileName, freeSpot, lobbyGate, lobbyMessage, lobbyPageFromMessage, mapFile, missingTeams, newMap,
   openerState, openMapFile, placeProblems, problemsFor, serialize, withoutCastle,
 } from "./builder.mjs";
 
@@ -192,10 +192,22 @@ test("a reloaded lobby form names itself to the builder, from the builder's own 
   const form = {};
   const self = {};
   const message = (overrides = {}) => ({ origin, source: form, data: { type: "island-battles.lobby-page" }, ...overrides });
-  assert.equal(lobbyPageFromMessage(message(), origin, self), form);
-  assert.equal(lobbyPageFromMessage(message({ origin: "https://evil.example" }), origin, self), null);
-  assert.equal(lobbyPageFromMessage(message({ source: self }), origin, self), null);
-  assert.equal(lobbyPageFromMessage(message({ source: null }), origin, self), null);
-  assert.equal(lobbyPageFromMessage(message({ data: { type: "island-battles.map-file" } }), origin, self), null);
-  assert.equal(lobbyPageFromMessage(message({ data: null }), origin, self), null);
+  assert.equal(lobbyPageFromMessage(message(), [origin], self), form);
+  assert.equal(lobbyPageFromMessage(message({ origin: "https://evil.example" }), [origin], self), null);
+  assert.equal(lobbyPageFromMessage(message({ source: self }), [origin], self), null);
+  assert.equal(lobbyPageFromMessage(message({ source: null }), [origin], self), null);
+  assert.equal(lobbyPageFromMessage(message({ data: { type: "island-battles.map-file" } }), [origin], self), null);
+  assert.equal(lobbyPageFromMessage(message({ data: null }), [origin], self), null);
+});
+
+test("a lobby page on an allowed lobby origin names itself in answer to the builder's hello", () => {
+  const game = "https://game.example";
+  const lobby = "https://lobby.example";
+  const form = {};
+  const self = {};
+  const message = (overrides = {}) => ({ origin: lobby, source: form, data: { type: "island-battles.lobby-page" }, ...overrides });
+  assert.equal(lobbyPageFromMessage(message(), [game, lobby], self), form);
+  assert.equal(lobbyPageFromMessage(message(), [game], self), null);
+  assert.equal(lobbyPageFromMessage(message({ origin: "https://evil.example" }), [game, lobby], self), null);
+  assert.deepEqual(builderHello, { type: "island-battles.map-builder" });
 });
