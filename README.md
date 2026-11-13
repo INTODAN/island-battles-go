@@ -51,7 +51,7 @@ Teams and readiness belong to the generic lobby. Starting freezes a roster. The 
 *   **Lint/Verify (Go):** `go vet ./... ./lobby/... ./clients/island-battles-go/...` and `golangci-lint run --timeout=5m ./... ./lobby/... ./clients/island-battles-go/...`
 *   **Format:** `go fmt ./... && go -C lobby fmt ./... && go -C clients/island-battles-go fmt ./...` (`go fmt` doesn't read `go.work`)
 *   **Test (disposable PostgreSQL containers):** `go test ./... ./lobby/... ./clients/island-battles-go/...`. On rootless Podman, enable the Podman socket and disable Ryuk first; see [database tests on rootless Podman](backend/README.md#database-tests-on-rootless-podman).
-*   **Check OpenAPI:** `go run ./lobby/cmd/export-lobby-openapi --output lobby/api/openapi.json --events-output lobby/api/events.json --check` and `go run ./backend/cmd/export-openapi --output backend/api/openapi.json --check`
+*   **Check OpenAPI:** `go run ./lobby/cmd/export-lobby-openapi --output lobby/api/openapi.json --events-output lobby/api/events.json --game-api-output lobby/api/game-api.openapi.json --check` and `go run ./backend/cmd/export-openapi --output backend/api/openapi.json --check`
 *   **Check generated gameplay models:** `uv run --project clients/island-battles-python/tools --locked python clients/island-battles-python/scripts/generate.py --check`
 *   **Regenerate the web client's API types:** `bun run generate` in `clients/island-battles-web/` (`bun run generate --check` verifies they are current; `web-client.yml` runs it on any change to `lobby/api/` or `backend/api/`)
 *   **Python unit tests:** `uv run --project lobby/clients/lobby-python --locked pytest lobby/clients/lobby-python/tests`

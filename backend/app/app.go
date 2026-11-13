@@ -79,7 +79,7 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 		// quiz-demo only shows that a second game can share the lobby. With no
 		// game behind it to read settings, it accepts any object. It has no
 		// seats, so it refuses every seat the host tries to add.
-		domain.GameRegistration{Key: "quiz-demo", ValidateSettings: func(context.Context, json.RawMessage, []domain.TeamDefinition) error { return nil }},
+		domain.GameRegistration{Key: "quiz-demo", ValidateSettings: func(context.Context, string, json.RawMessage, []domain.TeamDefinition) error { return nil }},
 	)
 	// Requests push their own committed changes, so nothing runs between requests.
 	publisher, err := realtime.NewPublisher(dependencies.ConnectCentrifugoClient(config), logger, realtime.DefaultPushRetry())

@@ -725,6 +725,7 @@ class Problem(GameModel):
         "invalid_member_settings",
         "game_requirement",
         "game_running",
+        "game_unavailable",
         "watcher_kicked",
         "watchers_full",
         "unavailable",

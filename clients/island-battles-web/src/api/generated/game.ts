@@ -861,7 +861,7 @@ export interface components {
         };
         Problem: {
             /** @enum {string} */
-            code: "unauthenticated" | "not_found" | "not_host" | "lobby_full" | "team_full" | "phase_conflict" | "not_ready" | "empty_teams" | "stale_membership" | "idempotency_conflict" | "invalid_input" | "invalid_game_settings" | "invalid_seat_settings" | "invalid_member_settings" | "game_requirement" | "game_running" | "watcher_kicked" | "watchers_full" | "unavailable" | "internal_error";
+            code: "unauthenticated" | "not_found" | "not_host" | "lobby_full" | "team_full" | "phase_conflict" | "not_ready" | "empty_teams" | "stale_membership" | "idempotency_conflict" | "invalid_input" | "invalid_game_settings" | "invalid_seat_settings" | "invalid_member_settings" | "game_requirement" | "game_running" | "game_unavailable" | "watcher_kicked" | "watchers_full" | "unavailable" | "internal_error";
             detail: string;
             /** Format: int64 */
             status: number;
