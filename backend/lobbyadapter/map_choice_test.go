@@ -45,7 +45,7 @@ func TestRegistrationValidatesTheMapChoice(t *testing.T) {
 	threeTeams := slices.Concat(twoTeams, []domain.TeamDefinition{{Name: "Green"}})
 	ctx := context.Background()
 	for _, settings := range []string{``, `{}`, fmt.Sprintf(`{"map_template_id":%d}`, templateID), `{"map":` + twoTeamMapFile + `}`, `{"turn_timeout_seconds":null}`, fmt.Sprintf(`{"map_template_id":%d,"turn_timeout_seconds":600}`, templateID)} {
-		if _, err := policy.ValidateGameSettings(ctx, lobbyadapter.GameKey, json.RawMessage(settings), twoTeams); err != nil {
+		if _, err := policy.ValidateGameSettings(ctx, lobbyadapter.GameKey, "", json.RawMessage(settings), twoTeams); err != nil {
 			t.Errorf("settings %s rejected: %v", settings, err)
 		}
 	}
@@ -63,14 +63,14 @@ func TestRegistrationValidatesTheMapChoice(t *testing.T) {
 		{`{"turn_timeout_seconds":3}`, twoTeams, "game_settings.turn_timeout_seconds: must be a whole number of seconds from 5 to 600, or null for no limit"},
 	}
 	for _, rejection := range rejections {
-		_, err := policy.ValidateGameSettings(ctx, lobbyadapter.GameKey, json.RawMessage(rejection.settings), rejection.teams)
+		_, err := policy.ValidateGameSettings(ctx, lobbyadapter.GameKey, "", json.RawMessage(rejection.settings), rejection.teams)
 		if domain.ErrorCodeOf(err) != domain.CodeInvalidGameSettings || !strings.HasPrefix(err.Error(), rejection.message) {
 			t.Errorf("settings %.60s with %d teams: error = %v, want prefix %q", rejection.settings, len(rejection.teams), err, rejection.message)
 		}
 	}
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
-	if _, err := policy.ValidateGameSettings(canceled, lobbyadapter.GameKey, json.RawMessage(fmt.Sprintf(`{"map_template_id":%d}`, templateID)), twoTeams); !errors.Is(err, context.Canceled) {
+	if _, err := policy.ValidateGameSettings(canceled, lobbyadapter.GameKey, "", json.RawMessage(fmt.Sprintf(`{"map_template_id":%d}`, templateID)), twoTeams); !errors.Is(err, context.Canceled) {
 		t.Fatalf("a check that could not run = %v", err)
 	}
 }
@@ -140,12 +140,12 @@ func TestRegistrationReportsAnUnreachableDatabaseAsUnavailable(t *testing.T) {
 	}
 	policy := domain.DefaultPolicy(lobbyadapter.Registration(unreachable))
 	teams := []domain.TeamDefinition{{Name: "Blue"}, {Name: "Red"}}
-	_, err = policy.ValidateGameSettings(context.Background(), lobbyadapter.GameKey, json.RawMessage(`{"map_template_id":1}`), teams)
+	_, err = policy.ValidateGameSettings(context.Background(), lobbyadapter.GameKey, "", json.RawMessage(`{"map_template_id":1}`), teams)
 	if !errors.Is(err, domain.ErrUnavailable) || domain.ErrorCodeOf(err) == domain.CodeInvalidGameSettings {
 		t.Fatalf("unreachable database = %v", err)
 	}
 	// Choices that need no lookup are still checked without the database.
-	if _, err := policy.ValidateGameSettings(context.Background(), lobbyadapter.GameKey, json.RawMessage(`{"map":`+twoTeamMapFile+`}`), teams); err != nil {
+	if _, err := policy.ValidateGameSettings(context.Background(), lobbyadapter.GameKey, "", json.RawMessage(`{"map":`+twoTeamMapFile+`}`), teams); err != nil {
 		t.Fatalf("inline map = %v", err)
 	}
 }

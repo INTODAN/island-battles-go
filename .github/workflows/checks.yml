@@ -86,7 +86,7 @@ jobs:
           cache-dependency-glob: clients/island-battles-python/tools/uv.lock
 
       - name: Lobby OpenAPI document and event schema are current
-        run: go run ./lobby/cmd/export-lobby-openapi --output lobby/api/openapi.json --events-output lobby/api/events.json --check
+        run: go run ./lobby/cmd/export-lobby-openapi --output lobby/api/openapi.json --events-output lobby/api/events.json --game-api-output lobby/api/game-api.openapi.json --check
 
       - name: Player OpenAPI document is current
         run: go run ./backend/cmd/export-openapi --output backend/api/openapi.json --check

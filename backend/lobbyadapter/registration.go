@@ -30,14 +30,14 @@ const GameKey = models.LobbyGameKey
 func Registration(database *gorm.DB) domain.GameRegistration {
 	return domain.GameRegistration{
 		Key: GameKey,
-		ValidateSettings: func(ctx context.Context, settings json.RawMessage, teams []domain.TeamDefinition) error {
+		ValidateSettings: func(ctx context.Context, _ string, settings json.RawMessage, teams []domain.TeamDefinition) error {
 			return validateSettings(ctx, database, settings, teams)
 		},
 		StartRules: domain.StartRules{EveryTeamNeedsMember: true},
 		ReadyGate: func(context.Context, string) (domain.ReadyCheck, error) {
 			return services.BotReadyCheck, nil
 		},
-		ValidateSeat: func(_ context.Context, settings json.RawMessage) (string, error) {
+		ValidateSeat: func(_ context.Context, _ string, settings json.RawMessage) (string, error) {
 			return services.ValidateBotSeat(settings)
 		},
 		ValidateMemberSettings: func(_ context.Context, _ string, settings json.RawMessage) error {
