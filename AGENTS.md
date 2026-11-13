@@ -28,7 +28,7 @@ Each issue is written to be implemented on its own: read the whole issue, plus t
   - `breaking-changes`: any change to the player or lobby API, events, stored data or client SDKs
   - `browser-testing`: checking the lobby page, demo or replay in a browser
   - `game-state-testing`: generation, command and game-state tests
-- Keep `lobby/` game-neutral. Island Battles specifics belong in `backend/`.
+- The lobby lives in [`INTODAN/mpl`](https://github.com/INTODAN/mpl); lobby changes go there first. This repository uses it at the version that README.md's [The lobby's version](README.md#the-lobbys-version) names, and changes the pin only to take a lobby change that is merged there. Island Battles specifics belong in `backend/`.
 - After changing an API, re-export the OpenAPI documents and regenerate the clients in the same change. On a rebase conflict in generated files, regenerate them instead of merging by hand.
 
 ## Deploying
