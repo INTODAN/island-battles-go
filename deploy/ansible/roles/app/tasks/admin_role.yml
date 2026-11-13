@@ -1,22 +1,42 @@
 ---
 # The read-only role that the admin MCP server connects as (#79). Deploys and
-# restores run this after the backend's role and database exist. It runs on
-# every run, so the grants cover the tables that migrations added since.
-# The SQL goes through stdin, so the password never appears in a command line.
-- name: Create the read-only admin role and grant it read access
+# restores run this after the roles and databases exist. It runs on every
+# run, so the grants cover the tables that migrations added since. The SQL
+# goes through stdin, so the password never appears in a command line.
+- name: Create the read-only admin role
   ansible.builtin.command:
-    argv: "{{ app_superuser_psql + ['--dbname', postgres_database, '--set', 'ON_ERROR_STOP=1', '--quiet', '--single-transaction'] }}"
+    argv: "{{ app_superuser_psql + ['--dbname', 'postgres', '--set', 'ON_ERROR_STOP=1', '--quiet', '--single-transaction'] }}"
     chdir: "{{ vm_app_dir }}"
     stdin: "{{ lookup('ansible.builtin.template', 'admin-role.sql.j2') }}"
-  # The same grants on every run.
+  # The same role on every run.
   changed_when: false
   no_log: true
 
+# The admin role SQL is split per database (#229): each database's grants run
+# in that database, in one transaction.
+- name: Grant the admin role read access to each database
+  ansible.builtin.command:
+    argv: "{{ app_superuser_psql + ['--dbname', item.name, '--set', 'ON_ERROR_STOP=1', '--quiet', '--single-transaction'] }}"
+    chdir: "{{ vm_app_dir }}"
+    stdin: "{{ lookup('ansible.builtin.template', item.grants) }}"
+  loop:
+    - { name: "{{ postgres_database }}", grants: admin-grants-game.sql.j2 }
+    - { name: "{{ lobby_database }}", grants: admin-grants-lobby.sql.j2 }
+  loop_control:
+    label: "{{ item.name }}"
+  # The same grants on every run.
+  changed_when: false
+
 - name: Check that the admin role logs in over TLS and can't read bearer hashes
   ansible.builtin.command:
-    argv: "{{ app_backend_psql + ['--tuples-only', '--no-align', app_admin_conninfo ~ ' sslmode=require', '--command', app_admin_check_query] }}"
+    argv: "{{ app_backend_psql + ['--tuples-only', '--no-align', app_conninfo ~ ' sslmode=require', '--command', app_admin_check_query] }}"
     chdir: "{{ vm_app_dir }}"
     stdin: "{{ postgres_admin_password }}"
+  vars:
+    app_conninfo: host=127.0.0.1 port=5432 dbname={{ item.name }} user={{ postgres_admin_role }}
+  loop: "{{ app_databases }}"
+  loop_control:
+    label: "{{ item.name }}"
   no_log: true
   register: app_admin_login
   changed_when: false

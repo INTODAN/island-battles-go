@@ -9,7 +9,7 @@ import httpx
 import pytest
 from lobby_client import LobbyError, Scope
 
-from integration.test_live import BASE, create, control_backend, guests, sql
+from integration.test_live import BASE, create, control_backend, game_sql, guests, sql
 
 pytestmark = pytest.mark.asyncio
 
@@ -59,20 +59,20 @@ async def started_lobby(guests, game_key, game_settings=None, bots=(LOCALHOST_BO
 async def test_start_initializes_one_generation_and_binding_is_idempotent(guests):
     alice, bob, scope = await started_lobby(guests, "island-battles")
     assert (await alice.snapshot(scope)).lobby.game_settings.to_dict() == {}
-    assert await sql(f"SELECT count(*) FROM games WHERE lobby_id='{scope.lobby_id}' AND jsonb_array_length(teams) = 2 AND outcome IS NULL") == "1"
+    assert await game_sql(f"SELECT count(*) FROM games WHERE lobby_id='{scope.lobby_id}' AND jsonb_array_length(teams) = 2 AND outcome IS NULL") == "1"
     # Starting a started lobby again returns it and binds nothing new: the
     # game bound the round once, through the lobby's start hook.
     started = await alice.snapshot(scope)
     again = await alice.start(scope)
     assert (again.lobby.phase, again.lobby.round_, again.lobby.version) == ("started", 1, started.lobby.version)
-    assert await sql(f"SELECT count(*) FROM games WHERE lobby_id='{scope.lobby_id}'") == "1"
-    game_id = await sql(f"SELECT id FROM games WHERE lobby_id='{scope.lobby_id}'")
+    assert await game_sql(f"SELECT count(*) FROM games WHERE lobby_id='{scope.lobby_id}'") == "1"
+    game_id = await game_sql(f"SELECT id FROM games WHERE lobby_id='{scope.lobby_id}'")
     async with httpx.AsyncClient(base_url=BASE) as http:
         # The retry route of the game is gone; the lobby's start retries.
         gone = await http.post("/game/from-lobby", json={"game_key": scope.game_key, "lobby_id": scope.lobby_id},
                                headers={"Authorization": f"Bearer {alice.credential}"})
     assert gone.status_code in (404, 405)
-    assert await sql(f"SELECT count(*) FROM generations WHERE game_id={game_id}") == "1"
+    assert await game_sql(f"SELECT count(*) FROM generations WHERE game_id={game_id}") == "1"
     result_path = f"/game/from-lobby/{scope.lobby_id}/replay"
     async with httpx.AsyncClient(base_url=BASE) as client:
         bob_auth = await game_auth(bob)
@@ -171,12 +171,12 @@ async def test_roster_keeps_game_access_after_lobby_is_deleted(guests):
             assert "Alice" in replay.text and "Bob" in replay.text
             # One frame per stored generation, derived when the page is read.
             assert replay.text.count('"castles":') == 2
-    assert await sql(f"SELECT count(*) FROM generations JOIN games ON games.id = generations.game_id WHERE games.lobby_id='{scope.lobby_id}'") == "2"
+    assert await game_sql(f"SELECT count(*) FROM generations JOIN games ON games.id = generations.game_id WHERE games.lobby_id='{scope.lobby_id}'") == "2"
 
 
 async def test_other_game_never_creates_island_state(guests):
     _, _, scope = await started_lobby(guests, "mock-game")
-    assert await sql(f"SELECT count(*) FROM games WHERE lobby_id='{scope.lobby_id}'") == "0"
+    assert await game_sql(f"SELECT count(*) FROM games WHERE lobby_id='{scope.lobby_id}'") == "0"
 
 
 async def test_game_settings_reach_the_started_snapshot(guests):
@@ -207,7 +207,7 @@ def strait_map(name):
 
 
 async def started_map(lobby_id):
-    return await sql(
+    return await game_sql(
         "SELECT m.map_name || ':' || string_agg(c.team_color || '/' || c.soldier_amount, ',' ORDER BY c.persistent_castle_id) "
         "FROM games g JOIN generations ge ON ge.game_id = g.id JOIN maps m ON m.id = ge.map_id "
         f"JOIN castles c ON c.map_id = m.id WHERE g.lobby_id = '{lobby_id}' GROUP BY m.map_name"
@@ -262,21 +262,25 @@ async def test_island_battles_rejects_a_bad_map_choice(guests):
 
 
 async def test_island_schema_survives_restart():
-    tables = await sql("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")
-    lobby_tables = {table for table in tables.splitlines() if table.startswith("lobby_")}
-    # Postgres holds only state: no table holds game events waiting to be sent.
-    assert set(tables.splitlines()) == lobby_tables | {
+    tables = await game_sql("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")
+    # The lobby's tables are in the lobby's own database (#229), and only
+    # there. Postgres holds only state: no table holds game events waiting to
+    # be sent.
+    lobby_tables = await sql("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")
+    assert lobby_tables and all(table.startswith("lobby_") for table in lobby_tables.splitlines()), lobby_tables
+    assert set(tables.splitlines()) == {
         "games", "maps", "castles", "castle_templates", "map_templates", "map_template_schema_migrations",
         "generations", "soldier_groups", "commands", "island_game_team_bindings",
         "frozen_game_players", "generation_inputs", "generation_requests", "generation_logs",
         "game_player_bot_memory", "island_bot_packages", "island_bot_compute_usage",
     }
-    columns = await sql("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='games' ORDER BY ordinal_position")
+    columns = await game_sql("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='games' ORDER BY ordinal_position")
     assert set(columns.splitlines()) == {"id", "created_at", "updated_at", "deleted_at", "lobby_id", "lobby_round", "teams", "outcome", "next_soldier_group_id", "turn_timeout_seconds"}
     # A lobby plays one game per round: the games are unique by lobby and
     # round, and the old index on the lobby alone is gone.
-    indexes = await sql("SELECT indexname FROM pg_indexes WHERE schemaname='public' AND tablename='games' AND indexname LIKE 'idx_games_lobby%' ORDER BY indexname")
+    indexes = await game_sql("SELECT indexname FROM pg_indexes WHERE schemaname='public' AND tablename='games' AND indexname LIKE 'idx_games_lobby%' ORDER BY indexname")
     assert indexes.splitlines() == ["idx_games_lobby_round"]
-    assert "UNIQUE" in await sql("SELECT indexdef FROM pg_indexes WHERE indexname='idx_games_lobby_round'")
+    assert "UNIQUE" in await game_sql("SELECT indexdef FROM pg_indexes WHERE indexname='idx_games_lobby_round'")
     await control_backend(signal.SIGUSR1)
-    assert await sql("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename") == tables
+    assert await game_sql("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename") == tables
+    assert await sql("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename") == lobby_tables

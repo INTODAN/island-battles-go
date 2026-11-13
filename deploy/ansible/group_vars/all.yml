@@ -29,8 +29,14 @@ vm_deploy_user: deploy
 postgres_database: island_battles
 postgres_app_role: island_battles
 postgres_port: 5432
+# The lobby's own database and the role it connects as (#229), on the same
+# server: no join, foreign key or transaction spans the two databases. The
+# role owns its database, like the backend's.
+lobby_database: lobby
+lobby_app_role: lobby
 # The read-only role that the admin MCP server connects as, from the operator's
-# machine (#79). It may read every table, but not lobby_sessions.bearer_hash.
+# machine (#79). It may read every table of both databases, but not
+# lobby_sessions.bearer_hash.
 postgres_admin_role: island_battles_admin
 
 # Secrets are generated once on the developer machine and reused on every deploy
@@ -41,6 +47,9 @@ postgres_superuser_password: >-
      length=48, chars=['ascii_letters', 'digits']) }}
 postgres_app_password: >-
   {{ lookup('ansible.builtin.password', deploy_secrets_dir ~ '/postgres_app_password',
+     length=48, chars=['ascii_letters', 'digits']) }}
+lobby_app_password: >-
+  {{ lookup('ansible.builtin.password', deploy_secrets_dir ~ '/postgres_lobby_password',
      length=48, chars=['ascii_letters', 'digits']) }}
 postgres_admin_password: >-
   {{ lookup('ansible.builtin.password', deploy_secrets_dir ~ '/postgres_admin_password',

@@ -120,66 +120,110 @@
     wait: true
     wait_timeout: 180
 
-- name: Check whether the backend's role can log in over TLS
+- name: Check whether each database's role can log in over TLS
   ansible.builtin.command:
-    argv: "{{ app_backend_psql + ['--tuples-only', '--no-align', app_backend_conninfo ~ ' sslmode=require', '--command', app_backend_ssl_query] }}"
+    argv: "{{ app_backend_psql + ['--tuples-only', '--no-align', app_conninfo ~ ' sslmode=require', '--command', app_backend_ssl_query] }}"
     chdir: "{{ vm_app_dir }}"
-    stdin: "{{ postgres_app_password }}"
+    stdin: "{{ item.password }}"
+  vars:
+    app_conninfo: host=127.0.0.1 port=5432 dbname={{ item.name }} user={{ item.role }}
+  loop: "{{ app_databases }}"
+  loop_control:
+    label: "{{ item.name }}"
   no_log: true
-  register: app_backend_login
+  register: app_database_login
   changed_when: false
   failed_when: false
 
-# The SQL goes through stdin, so the password never appears in a command line.
-- name: Create the backend's role and database
+# The backend's database, and the lobby's own (#229). The SQL goes through
+# stdin, so the password never appears in a command line.
+- name: Create the roles and databases that can't log in yet
   ansible.builtin.command:
     argv: "{{ app_superuser_psql + ['--dbname', 'postgres', '--set', 'ON_ERROR_STOP=1', '--quiet'] }}"
     chdir: "{{ vm_app_dir }}"
     stdin: "{{ lookup('ansible.builtin.template', 'create-database.sql.j2') }}"
-  when: app_backend_login.stdout != 't'
+  vars:
+    app_database: "{{ app_database_check.item }}"
+  loop: "{{ app_database_login.results }}"
+  loop_control:
+    loop_var: app_database_check
+    label: "{{ app_database_check.item.name }}"
+  when: app_database_check.stdout != 't'
   changed_when: true
   no_log: true
 
-- name: Check that the backend's role logs in over TLS
+- name: Check that each database's role logs in over TLS
   ansible.builtin.command:
-    argv: "{{ app_backend_psql + ['--tuples-only', '--no-align', app_backend_conninfo ~ ' sslmode=require', '--command', app_backend_ssl_query] }}"
+    argv: "{{ app_backend_psql + ['--tuples-only', '--no-align', app_conninfo ~ ' sslmode=require', '--command', app_backend_ssl_query] }}"
     chdir: "{{ vm_app_dir }}"
-    stdin: "{{ postgres_app_password }}"
+    stdin: "{{ item.password }}"
+  vars:
+    app_conninfo: host=127.0.0.1 port=5432 dbname={{ item.name }} user={{ item.role }}
+  loop: "{{ app_databases }}"
+  loop_control:
+    label: "{{ item.name }}"
   no_log: true
-  register: app_backend_login_after_setup
+  register: app_database_login_after_setup
   changed_when: false
   failed_when: false
-  when: app_backend_login.stdout != 't'
 
-- name: Stop unless the backend's role logs in
+- name: Stop unless each database's role logs in
+  vars:
+    app_databases_refused: >-
+      {{ app_database_login_after_setup.results | rejectattr('stdout', 'equalto', 't')
+         | map(attribute='item.name') | list }}
   ansible.builtin.assert:
     that:
-      - app_backend_login.stdout == 't' or app_backend_login_after_setup.stdout == 't'
+      - app_databases_refused | length == 0
     fail_msg: >-
-      The backend's role can't log in to {{ postgres_database }} over TLS. If the role was locked
+      The roles of {{ app_databases_refused | join(', ') }} can't log in over TLS. If a role was locked
       out by a move (`ALTER ROLE ... NOLOGIN`) and you want this VM to serve the backend again, pass
       -e app_unlock_after_move=true. Otherwise read `docker compose logs db` in {{ vm_app_dir }}.
     quiet: true
 
+# The lobby's schema (#229), from this machine with the lobby's migrate
+# command, as the backend deploy migrates. It runs before the admin role's
+# grants, which only let the role read the lobby's tables once lobby_sessions
+# exists. It connects to the VM being deployed by its address, because
+# vm.<domain> may still point at another VM, such as during a move.
+- name: Bring the lobby's schema up to date
+  ansible.builtin.command:
+    argv: [go, run, ./lobby/cmd/migrate]
+    chdir: "{{ app_repository_root }}"
+  environment:
+    LOBBY_DATABASE_URL: >-
+      postgres://{{ lobby_app_role }}:{{ lobby_app_password }}@{{ inventory_hostname }}:{{ app_postgres_published_port }}/{{ lobby_database }}?sslmode=require
+  delegate_to: localhost
+  become: false
+  no_log: true
+  # The command doesn't say whether it applied a migration; most deploys
+  # find nothing to do.
+  changed_when: false
+
 - name: Set up the admin MCP server's read-only role
   ansible.builtin.include_tasks: admin_role.yml
 
-# The role logs in again, so this VM serves the backend.
+# The roles log in again, so this VM serves the backend.
 - name: Remove the moved-away marker
   ansible.builtin.file:
     path: "{{ app_moved_away_marker }}"
     state: absent
   when: app_unlock_after_move | bool
 
-- name: Check that Postgres refuses the backend's role without TLS
+- name: Check that Postgres refuses each database's role without TLS
   ansible.builtin.command:
-    argv: "{{ app_backend_psql + [app_backend_conninfo ~ ' sslmode=disable', '--command', 'SELECT 1'] }}"
+    argv: "{{ app_backend_psql + [app_conninfo ~ ' sslmode=disable', '--command', 'SELECT 1'] }}"
     chdir: "{{ vm_app_dir }}"
-    stdin: "{{ postgres_app_password }}"
+    stdin: "{{ item.password }}"
+  vars:
+    app_conninfo: host=127.0.0.1 port=5432 dbname={{ item.name }} user={{ item.role }}
+  loop: "{{ app_databases }}"
+  loop_control:
+    label: "{{ item.name }}"
   no_log: true
-  register: app_backend_plain_login
+  register: app_database_plain_login
   changed_when: false
-  failed_when: app_backend_plain_login.rc == 0 or 'no encryption' not in app_backend_plain_login.stderr
+  failed_when: app_database_plain_login.rc == 0 or 'no encryption' not in app_database_plain_login.stderr
 
 - name: Check Centrifugo's API through https://vm.<domain>
   when: app_check_public_tls | bool and inventory_hostname == vm_static_ip
@@ -227,5 +271,5 @@
   become: false
   no_log: true
 
-- name: Back the database up every day
+- name: Back both databases up every day
   ansible.builtin.include_tasks: backups.yml

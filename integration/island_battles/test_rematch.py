@@ -5,7 +5,7 @@ import httpx
 import pytest
 from lobby_client import LobbyError, Scope
 
-from integration.test_live import BASE, create, guests, latest, sql
+from integration.test_live import BASE, create, game_sql, guests, latest
 from test_lobby_binding import LOCALHOST_BOT, choose_bot, game_auth
 
 pytestmark = pytest.mark.asyncio
@@ -88,7 +88,7 @@ async def test_a_lobby_plays_a_second_game_after_the_first_ends(guests):
         replay = await http.get(f"/game/from-lobby/{scope.lobby_id}/replay?lobby_round=1",
                                 headers=await game_auth(alice))
         assert replay.status_code == 404
-        assert await sql(f"SELECT string_agg(lobby_round::text, ',' ORDER BY lobby_round) FROM games WHERE lobby_id='{scope.lobby_id}'") == "1,2"
+        assert await game_sql(f"SELECT string_agg(lobby_round::text, ',' ORDER BY lobby_round) FROM games WHERE lobby_id='{scope.lobby_id}'") == "1,2"
 
         # The second game plays to its end too, and the lobby can be reopened again.
         ended = await play_until_timeout(http, carol, scope.lobby_id)

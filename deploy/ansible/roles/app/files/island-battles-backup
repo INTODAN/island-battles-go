@@ -1,19 +1,21 @@
 #!/usr/bin/python3
-"""Back the database up to S3: dump it in the db container and upload the dump.
+"""Back the databases up to S3: dump each in the db container and upload the dumps.
 
-The island-battles-backup timer runs this every day, and the VM deploy runs it
-once (deploy/README.md, "Backups"). systemd passes its settings in the
-environment, from /etc/island-battles/backup.env, which only root can read.
+The databases are the backend's and the lobby's own (#229), named in
+ISLAND_BATTLES_DATABASES, separated by spaces. The island-battles-backup timer
+runs this every day, and the VM deploy runs it once (deploy/README.md,
+"Backups"). systemd passes its settings in the environment, from
+/etc/island-battles/backup.env, which only root can read.
 
 The AWS key can only upload under the bucket's prefix and publish the backup
 metric. It can't list, read or delete earlier backups, and S3's lifecycle
 rules expire them. Each successful backup adds 1 to the metric; an alarm emails
-when none did for 26 hours.
+when none did for 26 hours. A run counts only when no database failed.
 
-A VM that a move left behind (its moved-away marker exists), or a database
-without tables yet, is skipped without failing and without counting a backup.
-The dump is the same as `scripts/vm.sh dump` makes, so `scripts/vm.sh restore`
-takes it as it is.
+A VM that a move left behind (its moved-away marker exists) is skipped, and so
+is a database without tables yet, without failing; a run that backed nothing
+up counts no backup. Each dump is the same as `scripts/vm.sh dump` makes, so
+`scripts/vm.sh restore` takes it as it is.
 """
 
 import datetime
@@ -23,7 +25,7 @@ import sys
 
 SETTINGS = (
     "ISLAND_BATTLES_APP_DIR",
-    "ISLAND_BATTLES_DATABASE",
+    "ISLAND_BATTLES_DATABASES",
     "ISLAND_BATTLES_MOVED_AWAY_MARKER",
     "ISLAND_BATTLES_BACKUP_BUCKET",
     "ISLAND_BATTLES_BACKUP_PREFIX",
@@ -63,22 +65,47 @@ def main(environ=None, run=subprocess.run, clients=aws_clients, now=None):
         log(f"Missing settings: {', '.join(missing)}. Run the VM deploy again (deploy/README.md).")
         return 1
     app_dir = environ["ISLAND_BATTLES_APP_DIR"]
-    database = environ["ISLAND_BATTLES_DATABASE"]
 
     if os.path.exists(environ["ISLAND_BATTLES_MOVED_AWAY_MARKER"]):
-        log("Skipped: this VM was moved away from, so its database is no longer the live one.")
-        return 0
-
-    try:
-        tables = table_count(run, app_dir, database)
-    except (subprocess.CalledProcessError, ValueError) as error:
-        log(f"Couldn't count {database}'s tables, so nothing was backed up: {error}")
-        return 1
-    if tables == 0:
-        log(f"Skipped: {database} has no tables yet.")
+        log("Skipped: this VM was moved away from, so its databases are no longer the live ones.")
         return 0
 
     now = now or datetime.datetime.now(datetime.timezone.utc)
+    backed_up, failed = 0, False
+    for database in environ["ISLAND_BATTLES_DATABASES"].split():
+        result = back_up(environ, run, clients, now, app_dir, database)
+        if result is None:
+            failed = True
+        elif result:
+            backed_up += 1
+    if failed:
+        return 1
+    if backed_up == 0:
+        return 0
+
+    _, cloudwatch = clients(environ["ISLAND_BATTLES_BACKUP_REGION"])
+    try:
+        cloudwatch.put_metric_data(
+            Namespace=environ["ISLAND_BATTLES_BACKUP_METRIC_NAMESPACE"],
+            MetricData=[{"MetricName": environ["ISLAND_BATTLES_BACKUP_METRIC_NAME"], "Value": 1, "Unit": "Count"}],
+        )
+    except Exception as error:  # noqa: BLE001
+        log(f"The backup is in S3, but counting it failed, so the backup alarm may email: {error}")
+        return 1
+    return 0
+
+
+def back_up(environ, run, clients, now, app_dir, database):
+    """Dump one database and upload it. True when backed up, False when skipped, None when failed."""
+    try:
+        tables = table_count(run, app_dir, database)
+    except (subprocess.CalledProcessError, ValueError) as error:
+        log(f"Couldn't count {database}'s tables, so it wasn't backed up: {error}")
+        return None
+    if tables == 0:
+        log(f"Skipped: {database} has no tables yet.")
+        return False
+
     name = f"{database}-{now.strftime('%Y%m%dT%H%M%SZ')}.dump"
     key = environ["ISLAND_BATTLES_BACKUP_PREFIX"] + name
     bucket = environ["ISLAND_BATTLES_BACKUP_BUCKET"]
@@ -90,29 +117,20 @@ def main(environ=None, run=subprocess.run, clients=aws_clients, now=None):
                        "--format", "custom", "--no-owner", "--no-privileges", "--file", f"/dumps/{name}"],
             cwd=app_dir, check=True)
         size = os.path.getsize(path)
-        s3, cloudwatch = clients(environ["ISLAND_BATTLES_BACKUP_REGION"])
+        s3, _ = clients(environ["ISLAND_BATTLES_BACKUP_REGION"])
         with open(path, "rb") as dump:
             s3.put_object(Bucket=bucket, Key=key, Body=dump, ContentType="application/octet-stream")
     except subprocess.CalledProcessError as error:
-        log(f"pg_dump failed, so nothing was backed up: {error}")
-        return 1
+        log(f"pg_dump failed, so {database} wasn't backed up: {error}")
+        return None
     except Exception as error:  # noqa: BLE001 - boto3's errors share no narrower base.
-        log(f"The backup didn't reach s3://{bucket}/{key}: {error}")
-        return 1
+        log(f"The backup of {database} didn't reach s3://{bucket}/{key}: {error}")
+        return None
     finally:
         if os.path.exists(path):
             os.remove(path)
     log(f"Backed up {database} to s3://{bucket}/{key} ({size} bytes).")
-
-    try:
-        cloudwatch.put_metric_data(
-            Namespace=environ["ISLAND_BATTLES_BACKUP_METRIC_NAMESPACE"],
-            MetricData=[{"MetricName": environ["ISLAND_BATTLES_BACKUP_METRIC_NAME"], "Value": 1, "Unit": "Count"}],
-        )
-    except Exception as error:  # noqa: BLE001
-        log(f"The backup is in S3, but counting it failed, so the backup alarm may email: {error}")
-        return 1
-    return 0
+    return True
 
 
 if __name__ == "__main__":

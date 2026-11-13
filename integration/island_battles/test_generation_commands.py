@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from integration.test_live import BASE, control_backend, sql
+from integration.test_live import BASE, control_backend, game_sql
 from integration.test_live import guests as guests_fixture
 from island_battles_client import IslandBattlesClient, send_soldier_group, turn_result
 from test_lobby_binding import game_auth, started_lobby
@@ -70,7 +70,7 @@ async def test_commands_wait_for_every_player_and_push_next_generation(guests):
         await first.bot.orders.put((origin.id, target.id, 5))
         await submitted(first)
         assert (
-            await sql(
+            await game_sql(
                 f"SELECT count(*) FROM generations WHERE game_id={first._state.game_id}"
             )
             == "1"
@@ -82,7 +82,7 @@ async def test_commands_wait_for_every_player_and_push_next_generation(guests):
         )
         assert advanced.id == other_advanced.id > initial.id
         assert (
-            await sql(
+            await game_sql(
                 f"SELECT count(*) FROM generations WHERE game_id={first._state.game_id}"
             )
             == "2"
@@ -215,7 +215,7 @@ async def test_rejection_retry_restart_and_public_migration_bypass(guests):
         )
         assert stale.status_code == 409
         assert (
-            await sql(
+            await game_sql(
                 f"SELECT count(*) FROM generations WHERE game_id={initial['game_id']}"
             )
             == "2"
@@ -266,10 +266,10 @@ async def test_a_player_who_never_plays_loses_at_the_turn_deadline(guests):
         await client.close()
     game_id = first.game_id
     assert (
-        await sql(f"SELECT count(*) FROM generations WHERE game_id={game_id}") == "1"
+        await game_sql(f"SELECT count(*) FROM generations WHERE game_id={game_id}") == "1"
     )
     assert (
-        await sql(f"SELECT outcome->>'reason' FROM games WHERE id={game_id}")
+        await game_sql(f"SELECT outcome->>'reason' FROM games WHERE id={game_id}")
         == "turn_timeout"
     )
     headers = await game_auth(bob)

@@ -1,10 +1,18 @@
 ---
-# Dumps the database on the VM and copies the dump to the developer machine
-# (#31). Pass -e app_dump_file=<path> to choose where it goes.
+# Dumps a database on the VM and copies the dump to the developer machine
+# (#31): the backend's, or with -e app_database=lobby the lobby's (#229).
+# Pass -e app_dump_file=<path> to choose where it goes.
+- name: Check the database to dump
+  ansible.builtin.assert:
+    that:
+      - app_database in (app_database_owners | map(attribute='name'))
+    fail_msg: "app_database must be one of {{ app_database_owners | map(attribute='name') | join(', ') }}, not {{ app_database }}."
+    quiet: true
+
 - name: Choose the dump's path on the developer machine
   ansible.builtin.set_fact:
     app_dump_local_path: >-
-      {{ app_dump_file | default(deploy_dumps_dir ~ '/' ~ postgres_database ~ '-'
+      {{ app_dump_file | default(deploy_dumps_dir ~ '/' ~ app_database ~ '-'
          ~ now(utc=true, fmt='%Y%m%dT%H%M%SZ') ~ '.dump', true) }}
 
 - name: Create the dumps directory on the developer machine
@@ -16,8 +24,8 @@
   become: false
 
 # When moving to a new VM, nothing may write after the dump. Locking the
-# backend's role out stops the Lambda without touching AWS: its requests fail
-# until vm.<domain> points at the new VM. The marker keeps the lock through
+# roles of both databases out stops the Lambda without touching AWS: its
+# requests fail until vm.<domain> points at the new VM. The marker keeps the lock through
 # redeploys, until `scripts/vm.sh deploy <ip> -e app_unlock_after_move=true`.
 - name: Lock the backend out of the database
   when: app_dump_lock_writes | bool
@@ -34,8 +42,9 @@
         force: false
 
     # Waits up to 5 seconds for each backend connection to exit, so none is
-    # still writing when the dump starts.
-    - name: Stop the backend from writing to the database
+    # still writing when the dump starts. Both databases' roles are locked
+    # out, the backend's and the lobby's, whichever one this dumps.
+    - name: Stop the backend from writing to the databases
       ansible.builtin.command:
         argv: "{{ app_superuser_psql + ['--dbname', 'postgres', '--set', 'ON_ERROR_STOP=1', '--quiet', '--tuples-only'] }}"
         chdir: "{{ vm_app_dir }}"
@@ -43,7 +52,15 @@
         # reads the old VM's data by mistake. A deploy that unlocks the VM
         # lets both log in again.
         stdin: |
-          ALTER ROLE "{{ postgres_app_role }}" NOLOGIN;
+          {% for app_locked in app_database_owners %}
+          DO $$
+          BEGIN
+            IF EXISTS (SELECT FROM pg_roles WHERE rolname = '{{ app_locked.role }}') THEN
+              ALTER ROLE "{{ app_locked.role }}" NOLOGIN;
+            END IF;
+          END
+          $$;
+          {% endfor %}
           DO $$
           BEGIN
             IF EXISTS (SELECT FROM pg_roles WHERE rolname = '{{ postgres_admin_role }}') THEN
@@ -52,7 +69,7 @@
           END
           $$;
           SELECT count(pg_terminate_backend(pid, 5000)) FROM pg_stat_activity
-            WHERE usename IN ('{{ postgres_app_role }}', '{{ postgres_admin_role }}');
+            WHERE usename IN ('{{ app_database_owners | map(attribute='role') | join("', '") }}', '{{ postgres_admin_role }}');
       changed_when: true
 
 # Custom format is compressed and lets pg_restore run in one transaction.
@@ -61,7 +78,7 @@
 - name: Dump the database
   ansible.builtin.command:
     argv: >-
-      {{ app_db_exec + ['pg_dump', '--username', 'postgres', '--dbname', postgres_database,
+      {{ app_db_exec + ['pg_dump', '--username', 'postgres', '--dbname', app_database,
          '--format', 'custom', '--no-owner', '--no-privileges',
          '--file', '/dumps/' ~ (app_dump_local_path | ansible.builtin.basename)] }}
     chdir: "{{ vm_app_dir }}"
@@ -89,4 +106,4 @@
 
 - name: Show where the dump is
   ansible.builtin.debug:
-    msg: "Dumped {{ postgres_database }} from {{ inventory_hostname }} to {{ app_dump_local_path }}"
+    msg: "Dumped {{ app_database }} from {{ inventory_hostname }} to {{ app_dump_local_path }}"
