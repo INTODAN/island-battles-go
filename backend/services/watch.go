@@ -10,7 +10,6 @@ import (
 	"islandBattles/backend/models"
 	"islandBattles/backend/observability"
 	"islandBattles/lobby/domain"
-	"islandBattles/lobby/realtime"
 )
 
 // Watchers are people outside the roster who watch a lobby's game with its
@@ -36,10 +35,10 @@ func watchState(game *models.Game, generation *models.Generation) (models.WatchS
 
 // watchEvent is the watch channel's event for a generation, which the turn
 // that created it pushes with the players' events.
-func watchEvent(game *models.Game, generation *models.Generation) (realtime.Publication, error) {
+func watchEvent(game *models.Game, generation *models.Generation) (Publication, error) {
 	state, err := watchState(game, generation)
 	if err != nil {
-		return realtime.Publication{}, err
+		return Publication{}, err
 	}
 	var event any = models.WatchGenerationEvent{SchemaVersion: models.GenerationEventSchemaVersion, Type: models.GenerationEventType, State: state}
 	if state.Outcome != nil {
@@ -47,9 +46,9 @@ func watchEvent(game *models.Game, generation *models.Generation) (realtime.Publ
 	}
 	payload, err := json.Marshal(event)
 	if err != nil {
-		return realtime.Publication{}, err
+		return Publication{}, err
 	}
-	return realtime.Publication{Channel: state.Channel, Data: payload}, nil
+	return Publication{Channel: state.Channel, Data: payload}, nil
 }
 
 // authorizeWatcher admits the game's roster players, whose lobby may be

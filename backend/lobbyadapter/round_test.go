@@ -8,6 +8,7 @@ import (
 	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/models"
 	"islandBattles/lobby/domain"
+	"islandBattles/lobby/gamehooks"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -119,6 +120,17 @@ func TestALobbyPlaysASecondGameAfterTheFirstEnds(t *testing.T) {
 	reopen(bob, http.StatusConflict, &refusal)
 	if refusal.Code != "game_running" {
 		t.Fatalf("reopen during the second game = %+v", refusal)
+	}
+	// The lobby reached the game only through its signed hooks: the start
+	// bound each round's game once, and the reopens asked whether a round
+	// had ended.
+	for _, hook := range gamehooks.Hooks {
+		if stack.hookCalls[hook] == 0 {
+			t.Errorf("the lobby never called %s", hook)
+		}
+	}
+	if stack.hookCalls[gamehooks.HookStart] != 2 {
+		t.Errorf("start was called %d times, want once per round", stack.hookCalls[gamehooks.HookStart])
 	}
 }
 

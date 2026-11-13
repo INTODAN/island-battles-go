@@ -114,9 +114,9 @@ async def test_only_the_host_changes_seats_and_seats_alone_never_start(guests):
     assert (response.status_code, response.json()["code"]) == (404, "not_found")
 
 
-async def test_a_quiz_demo_lobby_refuses_seats(guests):
+async def test_a_lobby_of_another_game_refuses_island_battles_seats(guests):
     alice = await guests("Alice")
-    room = await create(alice, "quiz-demo")
+    room = await create(alice, "mock-game")
     scope = Scope.from_snapshot(room)
     with pytest.raises(LobbyError) as refused:
         await alice.add_seat(scope, str(room.teams[1].id), {"bot_level": 2})

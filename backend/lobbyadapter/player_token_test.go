@@ -36,7 +36,7 @@ func TestGameRoutesTakePlayerTokensAndRefuseTheGuestCredential(t *testing.T) {
 	}
 	for name, header := range map[string]string{
 		"the guest credential":         alice.header,
-		"a token for another game":     stack.playerToken(alice, "quiz-demo"),
+		"a token for another game":     stack.playerToken(alice, mockGameKey),
 		"an altered token":             altered,
 		"no credential":                "Accept: application/json",
 		"a token without its scheme":   "Authorization: " + strings.TrimPrefix(token, "Authorization: Bearer "),

@@ -320,6 +320,20 @@ export function mountLobbyApp(options: {
           });
         }
       },
+      // A start whose game failed (502 game_unavailable) leaves the lobby
+      // started without a game; the host's screen starts it again.
+      async restart() {
+        const snapshot = realtime.lobby.get();
+        if (
+          snapshot?.lobby.id !== lobbyId ||
+          snapshot.lobby.round !== round ||
+          snapshot.lobby.phase !== "started" ||
+          snapshot.lobby.host_player_id !== realtime.session.get()?.playerId
+        ) {
+          return;
+        }
+        await actions.start();
+      },
       onReady() {
         if (!realtime.game.get()) realtime.refreshGame();
         showView();

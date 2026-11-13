@@ -11,7 +11,6 @@ import (
 	"islandBattles/backend/observability"
 	"islandBattles/backend/submittoken"
 	"islandBattles/lobby/domain"
-	"islandBattles/lobby/realtime"
 
 	"gorm.io/gorm"
 )
@@ -48,7 +47,7 @@ func (service *GenerationService) TurnDelivery(ctx context.Context, principal do
 		}
 	}
 	var delivery models.TurnDelivery
-	var events []realtime.Publication
+	var events []Publication
 	// A turn that ends the game here still commits the ending.
 	var nothingToPlay error
 	err = dal.WithLockedGame(database, game.ID, func(transaction *gorm.DB, locked *models.Game) error {

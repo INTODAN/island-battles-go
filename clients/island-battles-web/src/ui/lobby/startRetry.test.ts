@@ -47,7 +47,7 @@ describe("the start retry decision", () => {
 });
 
 describe("watching for the game", () => {
-  function setup(results: (ApiError | "ok")[]) {
+  function setup(results: (ApiError | "ok")[], host = false) {
     const events: string[] = [];
     const timers: { run: () => void; ms: number; cancelled: boolean }[] = [];
     let call = 0;
@@ -57,6 +57,14 @@ describe("watching for the game", () => {
         events.push(result === "ok" ? "probe ok" : `probe ${result.status}`);
         if (result !== "ok") throw result;
       },
+      ...(host
+        ? {
+            async restart() {
+              events.push("restart");
+              throw problem(502);
+            },
+          }
+        : {}),
       onReady: () => events.push("ready"),
       onFatal: (error) => events.push(`fatal ${(error as ApiError).status}`),
       schedule(run, ms) {
@@ -83,6 +91,28 @@ describe("watching for the game", () => {
     timers[1]?.run();
     await flush();
     expect(events).toEqual(["probe 404", "probe 409", "probe ok", "ready"]);
+  });
+
+  test("the host starts the game again after each read that finds none", async () => {
+    const { events, timers, flush } = setup(
+      [problem(404), problem(409), "ok"],
+      true,
+    );
+    await flush();
+    expect(timers.map((timer) => timer.ms)).toEqual([1000]);
+    timers[0]?.run();
+    await flush();
+    timers[1]?.run();
+    await flush();
+    // A failed restart, such as 502 game_unavailable, waits for the next read;
+    // a game being made (409) needs no restart.
+    expect(events).toEqual([
+      "probe 404",
+      "restart",
+      "probe 409",
+      "probe ok",
+      "ready",
+    ]);
   });
 
   test("stops reading when the lobby changes", async () => {

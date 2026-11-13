@@ -22,6 +22,14 @@ import (
 // BotPackageUploadWindow is how long a presigned upload is valid.
 const BotPackageUploadWindow = 15 * time.Minute
 
+// LobbyReader reads a lobby of Island Battles as the game does, through the
+// lobby's game API (gamehooks.GameAPIClient): its snapshot with every active
+// member. A lobby that is gone, or isn't Island Battles', is
+// domain.ErrNotFound.
+type LobbyReader interface {
+	Snapshot(ctx context.Context, lobbyID string) (domain.Snapshot, error)
+}
+
 // BotPackages keeps the bot packages that members upload to an Island
 // Battles lobby. A package belongs to one lobby; any active member may
 // upload one, and has at most one: completing a new upload replaces their
@@ -31,11 +39,9 @@ const BotPackageUploadWindow = 15 * time.Minute
 type BotPackages struct {
 	Database *gorm.DB
 	// Lobbies reads the lobby, whose active members may use its packages, and
-	// their names. The caller comes from a player token, which names no
-	// session, so the game reads the lobby as a game does.
-	Lobbies domain.GameAPI
-	// GameKey is the lobby game key of Island Battles.
-	GameKey string
+	// their names, through the lobby's game API. The caller comes from a
+	// player token, which names no session.
+	Lobbies LobbyReader
 	// Store keeps the zips. Nil refuses every request with 503: the host has
 	// no bucket.
 	Store packagestore.Store
@@ -67,7 +73,7 @@ func (service BotPackages) member(ctx context.Context, principal domain.Principa
 		return domain.Member{}, domain.ErrUnauthenticated
 	}
 	// A game snapshot lists the active members only.
-	snapshot, err := service.Lobbies.GameSnapshot(ctx, domain.Scope{GameKey: service.GameKey, LobbyID: lobbyID})
+	snapshot, err := service.Lobbies.Snapshot(ctx, lobbyID)
 	if err != nil {
 		return domain.Member{}, err
 	}

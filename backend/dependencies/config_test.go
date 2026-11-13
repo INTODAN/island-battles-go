@@ -1,6 +1,8 @@
 package dependencies
 
 import (
+	"encoding/json"
+	"islandBattles/backend/lobbyadapter"
 	"strings"
 	"testing"
 	"time"
@@ -295,8 +297,13 @@ func validConfigurationEnvironment() map[string]string {
 		LobbyProxySecretEnv:          "proxy-secret",
 		SubmitTokenSecretEnv:         "submit-token-secret",
 		PlayerTokenKeysEnv:           "k1:" + testSeed,
+		LobbyHookSecretEnv:           testHookSecret,
+		lobbyadapter.SecretEnv:       testHookSecret,
 	}
 }
+
+// testHookSecret is a shared secret of the lobby's hooks of 32 bytes.
+const testHookSecret = "hook-secret-of-thirty-two-bytes!"
 
 // testSeed is an Ed25519 seed of 32 bytes in base64url: 32 times "s".
 const testSeed = "c3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3M"
@@ -305,5 +312,80 @@ func mapLookup(values map[string]string) func(string) (string, bool) {
 	return func(name string) (string, bool) {
 		value, ok := values[name]
 		return value, ok
+	}
+}
+
+func TestLoadConfigBindsTheLobbyToIslandBattles(t *testing.T) {
+	config, err := LoadConfigFromLookup(mapLookup(validConfigurationEnvironment()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(config.LobbyHookSecret) != testHookSecret || config.LobbyURL != "" || config.LobbyGameSecrets[lobbyadapter.SecretEnv] != testHookSecret {
+		t.Fatalf("config = %+v", config)
+	}
+	// Without LOBBY_GAMES, the lobby calls Island Battles alone, in this
+	// process.
+	games, err := config.LobbyGamesConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entries []struct {
+		Key      string `json:"key"`
+		HooksURL string `json:"hooks_url"`
+	}
+	if err := json.Unmarshal([]byte(games), &entries); err != nil || len(entries) != 1 || entries[0].Key != lobbyadapter.GameKey || entries[0].HooksURL != "http://localhost"+lobbyadapter.HooksPath {
+		t.Fatalf("LOBBY_GAMES = %s, %v", games, err)
+	}
+
+	// Another game is added to Island Battles; a public URL names the hooks.
+	values := validConfigurationEnvironment()
+	values[PublicURLEnv] = "https://island-battles.example.test"
+	values[LobbyGamesEnv] = `[{"key":"mock-game","name":"Mock game","hooks_url":"https://mock.example.test/hooks","secret_env":"MOCK_SECRET"}]`
+	values["MOCK_SECRET"] = strings.Repeat("m", 32)
+	config, err = LoadConfigFromLookup(mapLookup(values))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if games, err = config.LobbyGamesConfig(); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(games), &entries); err != nil || len(entries) != 2 || entries[0].Key != "mock-game" || entries[1].HooksURL != "https://island-battles.example.test"+lobbyadapter.HooksPath {
+		t.Fatalf("LOBBY_GAMES = %s, %v", games, err)
+	}
+
+	// LOBBY_GAMES that lists Island Battles is taken as it is.
+	values[LobbyGamesEnv] = `[{"key":"island-battles","name":"Island Battles","hooks_url":"https://game.example.test/game/lobby-hooks","secret_env":"` + lobbyadapter.SecretEnv + `"}]`
+	if config, err = LoadConfigFromLookup(mapLookup(values)); err != nil {
+		t.Fatal(err)
+	}
+	if games, err = config.LobbyGamesConfig(); err != nil || games != values[LobbyGamesEnv] {
+		t.Fatalf("LOBBY_GAMES = %s, %v", games, err)
+	}
+
+	for name, change := range map[string]func(map[string]string){
+		"no hook secret":              func(values map[string]string) { delete(values, LobbyHookSecretEnv) },
+		"a short hook secret":         func(values map[string]string) { values[LobbyHookSecretEnv] = "short" },
+		"no lobby secret":             func(values map[string]string) { delete(values, lobbyadapter.SecretEnv) },
+		"secrets that differ":         func(values map[string]string) { values[LobbyHookSecretEnv] = strings.Repeat("x", 32) },
+		"LOBBY_GAMES that isn't JSON": func(values map[string]string) { values[LobbyGamesEnv] = "island-battles" },
+		"a game without its secret": func(values map[string]string) {
+			values[LobbyGamesEnv] = `[{"key":"mock-game","name":"Mock game","hooks_url":"https://mock.example.test/hooks","secret_env":"MOCK_SECRET"}]`
+		},
+		"a lobby URL over http": func(values map[string]string) { values[LobbyURLEnv] = "http://lobby.example.test" },
+	} {
+		values := validConfigurationEnvironment()
+		change(values)
+		if _, err := LoadConfigFromLookup(mapLookup(values)); err == nil {
+			t.Errorf("%s: no error", name)
+		}
+	}
+
+	// A lobby of its own may have its own secret for Island Battles.
+	values = validConfigurationEnvironment()
+	values[LobbyURLEnv] = "https://lobby.example.test/"
+	values[LobbyHookSecretEnv] = strings.Repeat("x", 32)
+	values[PublicURLEnv] = "https://island-battles.example.test"
+	if config, err = LoadConfigFromLookup(mapLookup(values)); err != nil || config.LobbyURL != "https://lobby.example.test" {
+		t.Fatalf("lobby URL = %q, %v", config.LobbyURL, err)
 	}
 }

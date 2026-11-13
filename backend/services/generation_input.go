@@ -15,7 +15,6 @@ import (
 	"islandBattles/backend/models"
 	"islandBattles/backend/observability"
 	"islandBattles/lobby/domain"
-	"islandBattles/lobby/realtime"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -54,10 +53,17 @@ const (
 const MaxGenerations = 300
 
 // Publisher pushes committed game events to Centrifugo right after their
-// transaction. realtime.Publisher retries briefly and logs what still fails;
-// clients recover a missed event by re-reading their state over HTTP.
+// transaction. The host's publisher retries briefly and logs what still
+// fails; clients recover a missed event by re-reading their state over HTTP.
 type Publisher interface {
-	Publish(context.Context, ...realtime.Publication) error
+	Publish(context.Context, ...Publication) error
+}
+
+// Publication is one event for one Centrifugo channel: a player's channel or
+// a lobby's watch channel.
+type Publication struct {
+	Channel string
+	Data    []byte
 }
 
 type GenerationService struct {
@@ -97,7 +103,7 @@ func (service *GenerationService) current(ctx context.Context, principal domain.
 		}
 	}
 	var state models.GenerationState
-	var events []realtime.Publication
+	var events []Publication
 	err = dal.WithLockedGame(database, game.ID, func(transaction *gorm.DB, locked *models.Game) error {
 		players, err := dal.LoadFrozenPlayers(transaction, locked.ID)
 		if err != nil {
@@ -191,7 +197,7 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 		}
 	}
 	var state models.GenerationState
-	var events []realtime.Publication
+	var events []Publication
 	var turns []turnToSend
 	// A batch that comes after its turn's deadline is rejected, but the
 	// transaction that applied the deadline still commits.
@@ -401,8 +407,8 @@ func generationState(game *models.Game, generation *models.Generation, player mo
 // game.ended instead. memories holds each player's stored memory by player
 // ID. The lobby's watch channel gets the same event with the watchers'
 // WatchState, in the same push.
-func generationEvents(game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer, inputs []models.GenerationInput, memories map[string]models.BotMemory) ([]realtime.Publication, error) {
-	events := make([]realtime.Publication, 0, len(players)+1)
+func generationEvents(game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer, inputs []models.GenerationInput, memories map[string]models.BotMemory) ([]Publication, error) {
+	events := make([]Publication, 0, len(players)+1)
 	if game.LobbyID != nil {
 		watch, err := watchEvent(game, generation)
 		if err != nil {
@@ -427,7 +433,7 @@ func generationEvents(game *models.Game, generation *models.Generation, players 
 		if err != nil {
 			return nil, err
 		}
-		events = append(events, realtime.Publication{Channel: channel, Data: payload})
+		events = append(events, Publication{Channel: channel, Data: payload})
 	}
 	return events, nil
 }

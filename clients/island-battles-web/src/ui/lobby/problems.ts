@@ -45,6 +45,7 @@ const sentences: Record<string, string> = {
   idempotency_conflict:
     "That create request was already used for a different lobby. Try again.",
   game_running: "The game is still running. Its lobby opens once it ends.",
+  game_unavailable: "The game didn't start. It is started again until it does.",
 };
 
 /** The sentences for adding or removing a bot seat, which replace the lobby's where they differ. */

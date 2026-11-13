@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"islandBattles/backend/schema"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -43,7 +44,7 @@ func run(ctx context.Context, config dependencies.DatabaseConfig, logger *slog.L
 		return err
 	}
 	defer func() { _ = sqlDatabase.Close() }()
-	if err := dependencies.MigrateSchema(ctx, database); err != nil {
+	if err := schema.Migrate(ctx, database); err != nil {
 		return err
 	}
 	logger.Info("Database schema is up to date")

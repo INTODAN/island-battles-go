@@ -14,7 +14,6 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/jackc/pgx/v5/pgtype"
 	"islandBattles/lobby/domain"
-	"islandBattles/lobby/httpapi"
 )
 
 // MapTemplateView is the map file format, published as MapTemplate. The same
@@ -99,7 +98,7 @@ func DecodeMapTemplate(data []byte) (MapTemplateView, error) {
 		// Huma sets the value of some errors, such as an unexpected property,
 		// to the whole enclosing object. LimitErrorDetails drops those values,
 		// so the file isn't copied once per problem.
-		return MapTemplateView{}, &MapTemplateError{Details: httpapi.LimitErrorDetails(details)}
+		return MapTemplateView{}, &MapTemplateError{Details: LimitErrorDetails(details)}
 	}
 	var template MapTemplateView
 	if err := json.Unmarshal(data, &template); err != nil {
@@ -114,8 +113,8 @@ func DecodeMapTemplate(data []byte) (MapTemplateView, error) {
 // MaxMapTemplateProblems is how many problems a *MapTemplateError lists. A
 // final detail counts the rest, "and N more problems", so a large invalid file
 // can't produce an equally large list of errors. With that detail the list
-// fills httpapi.MaxErrorDetails, the bound on every problem response.
-const MaxMapTemplateProblems = httpapi.MaxErrorDetails - 1
+// fills MaxErrorDetails, the bound on every problem response.
+const MaxMapTemplateProblems = MaxErrorDetails - 1
 
 // ValidateMapTemplate checks a map file without storing it: its name and
 // sizes, that player_amount is a team count a lobby can have, that every castle
@@ -175,7 +174,7 @@ func ValidateMapTemplate(template MapTemplateView) error {
 		}
 	}
 	if len(details) > 0 {
-		return &MapTemplateError{Details: httpapi.LimitErrorDetails(details)}
+		return &MapTemplateError{Details: LimitErrorDetails(details)}
 	}
 	return nil
 }

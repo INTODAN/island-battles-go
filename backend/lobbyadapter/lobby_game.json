@@ -1,0 +1,25 @@
+{
+  "key": "island-battles",
+  "name": "Island Battles",
+  "secret_env": "LOBBY_GAME_SECRET_ISLAND_BATTLES",
+  "start_rules": {"every_team_needs_member": true},
+  "frontend": {
+    "result_url": "/game/from-lobby/{lobby_id}/replay?lobby_round={round}",
+    "started_hint": "A default bot is played by the backend; a localhost bot is played by its player, whose open lobby tab relays each turn to the bot on their machine. The board follows recorded generations live.",
+    "data_url_prefix": "/game/from-lobby/{lobby_id}/",
+    "watch_result_url": "/game/from-lobby/{lobby_id}/watch/replay",
+    "watch_data_url_prefix": "/game/from-lobby/{lobby_id}/watch/",
+    "settings_module": "/game/demo/lobby-settings.mjs",
+    "room_module": "/game/demo/bot-choice.mjs",
+    "room_api_prefix": "/game/lobbies/{lobby_id}/",
+    "links": [
+      {"label": "Watch a saved demo", "url": "/game/demo-viewer/"},
+      {"label": "Play in 3D", "url": "/play/"}
+    ],
+    "example_player": {
+      "module": "/game/demo/example-player.mjs",
+      "strategy": "One soldier",
+      "summary": "Each player sends one soldier to the first enemy castle, then finishes the turn."
+    }
+  }
+}

@@ -11,7 +11,6 @@ import (
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
 	"islandBattles/backend/simulation"
-	"islandBattles/lobby/realtime"
 
 	"gorm.io/gorm"
 )
@@ -44,7 +43,7 @@ func (service *GenerationService) now() time.Time {
 // simulation.TimeoutOutcome on generation's board, which stays the final
 // generation. It returns the game.ended events to push once the transaction
 // commits, or none when the game goes on.
-func expireTurn(transaction *gorm.DB, game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer, now time.Time) ([]realtime.Publication, error) {
+func expireTurn(transaction *gorm.DB, game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer, now time.Time) ([]Publication, error) {
 	deadline := turnDeadline(game, generation)
 	if deadline == nil || now.Before(*deadline) {
 		return nil, nil
@@ -136,7 +135,7 @@ func (service *GenerationService) applyOverdueDeadline(ctx context.Context, game
 	if err != nil || !found || service.now().Before(*turnDeadline(game, &models.Generation{Model: gorm.Model{CreatedAt: createdAt}})) {
 		return game, err
 	}
-	var events []realtime.Publication
+	var events []Publication
 	err = dal.WithLockedGame(database, game.ID, func(transaction *gorm.DB, locked *models.Game) error {
 		game = locked
 		players, err := dal.LoadFrozenPlayers(transaction, locked.ID)
@@ -159,7 +158,7 @@ func (service *GenerationService) applyOverdueDeadline(ctx context.Context, game
 
 // publish pushes committed game events. A failed push is logged by the
 // publisher and does not fail the request; clients recover over HTTP.
-func (service *GenerationService) publish(ctx context.Context, events []realtime.Publication) {
+func (service *GenerationService) publish(ctx context.Context, events []Publication) {
 	if len(events) > 0 && service.Publisher != nil {
 		_ = service.Publisher.Publish(ctx, events...)
 	}

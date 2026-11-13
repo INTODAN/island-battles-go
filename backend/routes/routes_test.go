@@ -137,7 +137,7 @@ func (rejectEveryone) AuthenticatePlayer(context.Context, string) (domain.Princi
 // the roster learns nothing from a 422. From the review of PR #86.
 func TestTheLogsReadAuthenticatesBeforeCheckingTheGeneration(t *testing.T) {
 	_, api := humatest.New(t, routes.NewAPIConfig("test", "1.0.0"))
-	routes.SetupLobbyRoutes(api, nil, nil, nil, nil, nil, &handlers.LobbyGame{Players: rejectEveryone{}})
+	routes.SetupGameRoutes(api, &handlers.LobbyGame{Players: rejectEveryone{}})
 	path := "/game/from-lobby/4a0f1a52-7f4e-4d5c-9a8e-2f3b6c1d0e9a/logs"
 	for _, query := range []string{"?generation_id=0", ""} {
 		if response := api.Get(path+query, "Authorization: Bearer stranger"); response.Code != http.StatusUnauthorized {

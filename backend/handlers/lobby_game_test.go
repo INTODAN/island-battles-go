@@ -137,7 +137,7 @@ func TestStartedGameServesItsRosterWithoutTheLobby(t *testing.T) {
 	_, api := humatest.New(t)
 	huma.Register(api, huma.Operation{OperationID: "replay", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/replay"}, handler.Replay)
 	huma.Register(api, huma.Operation{OperationID: "current", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/generation"}, handler.CurrentGeneration)
-	// The service validates the body itself, as routes.SetupLobbyRoutes registers it.
+	// The service validates the body itself, as routes.SetupGameRoutes registers it.
 	huma.Register(api, huma.Operation{OperationID: "commands", Method: http.MethodPost, Path: "/generation/commands", SkipValidateBody: true}, handler.RegisterGenerationCommands)
 	huma.Register(api, huma.Operation{OperationID: "logs", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/logs"}, handler.GenerationLogs)
 	huma.Register(api, huma.Operation{OperationID: "demo", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/demo"}, handler.Demo)

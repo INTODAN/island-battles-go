@@ -13,7 +13,6 @@ import (
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
 	"islandBattles/backend/simulation"
-	"islandBattles/lobby/realtime"
 
 	"gorm.io/gorm"
 )
@@ -272,7 +271,7 @@ func turnComplete(game *models.Game, generation *models.Generation, players []mo
 // the new generation, its inputs, which are the Go bots', and what to do once
 // the transaction commits: push the events and send the turns of the hosted
 // and uploaded bots with sender.
-func playTurn(ctx context.Context, transaction *gorm.DB, game *models.Game, players []models.FrozenGamePlayer, inputs []models.GenerationInput, sender *TurnSender) (*models.Generation, []models.GenerationInput, []realtime.Publication, []turnToSend, error) {
+func playTurn(ctx context.Context, transaction *gorm.DB, game *models.Game, players []models.FrozenGamePlayer, inputs []models.GenerationInput, sender *TurnSender) (*models.Generation, []models.GenerationInput, []Publication, []turnToSend, error) {
 	allCommands := []models.CommandFields{}
 	for _, input := range inputs {
 		var playerCommands []models.CommandFields
@@ -344,7 +343,7 @@ func (service *GenerationService) playGoBotTurns(ctx context.Context, gameID uin
 	}
 	played := false
 	for ctx.Err() == nil {
-		var events []realtime.Publication
+		var events []Publication
 		var turns []turnToSend
 		next := false
 		err := dal.WithLockedGame(database, gameID, func(transaction *gorm.DB, game *models.Game) error {

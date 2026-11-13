@@ -12,7 +12,6 @@ import (
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
 	"islandBattles/lobby/adminmcp"
-	lobbypostgres "islandBattles/lobby/postgres"
 
 	"github.com/google/uuid"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -102,7 +101,7 @@ type GameTeam struct {
 // RosterPlayer is a player on a game's frozen roster.
 type RosterPlayer struct {
 	PlayerID    string  `json:"player_id"`
-	DisplayName *string `json:"display_name" jsonschema:"The player's name, or null once lobby retention deleted the player."`
+	DisplayName *string `json:"display_name" jsonschema:"The name the player had in the lobby when the game started, or null for a roster without names."`
 	TeamColor   uint    `json:"team_color"`
 }
 
@@ -359,30 +358,19 @@ func (reader gameReader) summarizeGames(transaction *gorm.DB, games []models.Gam
 }
 
 // loadRosters returns the frozen rosters of the games inGames matches, with
-// the players' display names, which the lobby keeps until its retention
-// deletes the players.
+// the display names that the players had in the lobby at the start, which the
+// game keeps with its roster.
 func loadRosters(transaction *gorm.DB, inGames clause.Expression) (map[uint][]RosterPlayer, error) {
 	var players []models.FrozenGamePlayer
 	if err := transaction.Where(inGames).Order(clause.OrderByColumn{Column: clause.Column{Name: "team_color"}}).
 		Order(clause.OrderByColumn{Column: clause.Column{Name: "player_id"}}).Find(&players).Error; err != nil {
 		return nil, fmt.Errorf("read rosters: %w", err)
 	}
-	playerIDs := make([]any, len(players))
-	for index, player := range players {
-		playerIDs[index] = player.PlayerID
-	}
-	var records []lobbypostgres.PlayerRecord
-	if err := transaction.Select("ID", "DisplayName").Where(clause.IN{Column: idColumn, Values: playerIDs}).Find(&records).Error; err != nil {
-		return nil, fmt.Errorf("read players: %w", err)
-	}
-	names := make(map[string]string, len(records))
-	for _, record := range records {
-		names[record.ID] = record.DisplayName
-	}
 	rosters := map[uint][]RosterPlayer{}
 	for _, player := range players {
 		rosterPlayer := RosterPlayer{PlayerID: player.PlayerID, TeamColor: player.TeamColor}
-		if name, found := names[player.PlayerID]; found {
+		if player.DisplayName != "" {
+			name := player.DisplayName
 			rosterPlayer.DisplayName = &name
 		}
 		rosters[player.GameID] = append(rosters[player.GameID], rosterPlayer)

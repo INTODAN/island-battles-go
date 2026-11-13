@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"islandBattles/backend/handlers"
+	"islandBattles/backend/models"
 	"islandBattles/backend/routes"
 	"islandBattles/lobby/httpapi"
 	"net/http"
@@ -80,10 +81,10 @@ func unknownKeysBody(fields string) string {
 // counts every problem it leaves out.
 func checkCount(t *testing.T, answer problem, total int) {
 	t.Helper()
-	if len(answer.Errors) != httpapi.MaxErrorDetails {
-		t.Fatalf("%d errors, want %d", len(answer.Errors), httpapi.MaxErrorDetails)
+	if len(answer.Errors) != models.MaxErrorDetails {
+		t.Fatalf("%d errors, want %d", len(answer.Errors), models.MaxErrorDetails)
 	}
-	listed := answer.Errors[:httpapi.MaxErrorDetails-1]
+	listed := answer.Errors[:models.MaxErrorDetails-1]
 	for index, detail := range listed {
 		if detail.Value != nil {
 			t.Fatalf("detail echoes a value: %+v", detail)
@@ -92,7 +93,7 @@ func checkCount(t *testing.T, answer problem, total int) {
 			t.Fatalf("problem %+v is listed after an unknown key", detail)
 		}
 	}
-	if last := answer.Errors[httpapi.MaxErrorDetails-1]; last.Location != "" || last.Message != fmt.Sprintf("and %d more problems", total-len(listed)) {
+	if last := answer.Errors[models.MaxErrorDetails-1]; last.Location != "" || last.Message != fmt.Sprintf("and %d more problems", total-len(listed)) {
 		t.Fatalf("last detail = %+v, want and %d more problems", last, total-len(listed))
 	}
 }
@@ -125,10 +126,10 @@ func TestMapCreateCountsHandlerProblemsPastTheCap(t *testing.T) {
 	if status != http.StatusUnprocessableEntity || answer.Errors[0].Location != "body.castles[0].x" {
 		t.Fatalf("status=%d first=%+v", status, answer.Errors[0])
 	}
-	if len(answer.Errors) != httpapi.MaxErrorDetails {
+	if len(answer.Errors) != models.MaxErrorDetails {
 		t.Fatalf("%d errors", len(answer.Errors))
 	}
-	if last := answer.Errors[httpapi.MaxErrorDetails-1]; last.Message != fmt.Sprintf("and %d more problems", farCastles-(httpapi.MaxErrorDetails-1)) {
+	if last := answer.Errors[models.MaxErrorDetails-1]; last.Message != fmt.Sprintf("and %d more problems", farCastles-(models.MaxErrorDetails-1)) {
 		t.Fatalf("last detail = %+v", last)
 	}
 }

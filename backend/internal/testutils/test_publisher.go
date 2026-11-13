@@ -8,18 +8,18 @@ import (
 	"testing"
 
 	"islandBattles/backend/models"
-	"islandBattles/lobby/realtime"
+	"islandBattles/backend/services"
 )
 
 // RecordedPublisher keeps what services push to Centrifugo after a commit.
 // Err makes every push fail, as an unreachable Centrifugo would.
 type RecordedPublisher struct {
 	mutex        sync.Mutex
-	publications []realtime.Publication
+	publications []services.Publication
 	Err          error
 }
 
-func (publisher *RecordedPublisher) Publish(_ context.Context, publications ...realtime.Publication) error {
+func (publisher *RecordedPublisher) Publish(_ context.Context, publications ...services.Publication) error {
 	publisher.mutex.Lock()
 	defer publisher.mutex.Unlock()
 	publisher.publications = append(publisher.publications, publications...)
@@ -28,19 +28,19 @@ func (publisher *RecordedPublisher) Publish(_ context.Context, publications ...r
 
 // Publications returns what was pushed to players' channels, in order.
 // WatchEvents returns what went to watch channels.
-func (publisher *RecordedPublisher) Publications() []realtime.Publication {
+func (publisher *RecordedPublisher) Publications() []services.Publication {
 	return publisher.filter(func(channel string) bool { return !strings.HasPrefix(channel, "watch:") })
 }
 
 // Pushes returns every push, watch channels included, in order.
-func (publisher *RecordedPublisher) Pushes() []realtime.Publication {
+func (publisher *RecordedPublisher) Pushes() []services.Publication {
 	return publisher.filter(func(string) bool { return true })
 }
 
-func (publisher *RecordedPublisher) filter(keep func(channel string) bool) []realtime.Publication {
+func (publisher *RecordedPublisher) filter(keep func(channel string) bool) []services.Publication {
 	publisher.mutex.Lock()
 	defer publisher.mutex.Unlock()
-	kept := []realtime.Publication{}
+	kept := []services.Publication{}
 	for _, publication := range publisher.publications {
 		if keep(publication.Channel) {
 			kept = append(kept, publication)

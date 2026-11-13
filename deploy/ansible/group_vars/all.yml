@@ -64,6 +64,12 @@ admin_api_key: >-
 submit_token_secret: >-
   {{ lookup('ansible.builtin.password', deploy_secrets_dir ~ '/submit_token_secret',
      length=64, chars=['ascii_letters', 'digits']) }}
+# The shared secret of the lobby and Island Battles (#224): the lobby signs
+# its calls of the game's hooks with it, and the game its calls of the lobby's
+# game API. Only the Lambda reads it, by two names.
+lobby_game_secret_island_battles: >-
+  {{ lookup('ansible.builtin.password', deploy_secrets_dir ~ '/lobby_game_secret_island_battles',
+     length=64, chars=['ascii_letters', 'digits']) }}
 # The lobby's player token key (#218): an Ed25519 seed of 32 bytes in base64url.
 # 43 letters and digits are a valid base64url encoding of 32 bytes, with about
 # 256 bits of randomness. Only the Lambda reads it.

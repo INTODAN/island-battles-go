@@ -157,7 +157,7 @@
       },
       "BotSeatSettings": {
         "additionalProperties": false,
-        "description": "Island Battles seat_settings for a bot seat that the host adds with POST …/seats: exactly one of bot_level, bot_url and bot_package_id.",
+        "description": "Island Battles seat_settings for a bot seat that the host adds with POST …/seats: exactly one of bot_level, bot_url and bot_package_id. {\"bot_level\": N}, with a level that GET /bots/defaults lists, is a default bot that the backend plays, named \"Bot (level N)\". When GET /bots/defaults says server_bots, also {\"bot_url\": \"https://…\"}, a hosted bot under the rules of MemberBot's url, named \"Hosted bot\", or {\"bot_package_id\": \"…\"}, any ready bot package of the lobby, named after its owner, such as \"Alex's bot\"; the server plays both. A seat whose package is gone by the start stops it with game_requirement of type urn:island-battles:problem:bot-package-gone.",
         "properties": {
           "bot_level": {
             "description": "A default bot of this level, one that GET /bots/defaults lists, which the backend plays. The seat is named \"Bot (level N)\".",
@@ -1095,7 +1095,7 @@
       },
       "LobbySettings": {
         "additionalProperties": false,
-        "description": "Island Battles game_settings for a lobby create request. Choose at most one map: map_template_id or map. The map must be made for exactly the lobby's teams: player_amount equal to the team count, and castle team colours exactly 1 to that count, in team order, with 0 for neutral castles. Without a map the game starts on a generated map. turn_timeout_seconds sets how long each turn lasts, from 5 to 600 seconds, 30 when left out, or null for no limit. An invalid choice fails lobby creation with invalid_game_settings, and its detail names each invalid field, such as game_settings.map.castles[0].x.",
+        "description": "Island Battles game_settings for a lobby create request. Choose at most one map: map_template_id or map. The map must be made for exactly the lobby's teams: player_amount equal to the team count, and castle team colours exactly 1 to that count, in team order, with 0 for neutral castles. Without a map the game starts on a generated map. turn_timeout_seconds sets how long each turn lasts, from 5 to 600 seconds, 30 when left out, or null for no limit. An invalid choice fails lobby creation with invalid_game_settings, and its detail names each invalid field, such as game_settings.map.castles[0].x. The host can change them while the lobby waits, with the lobby's changeLobbySettings (PUT …/settings), which checks them as on create: send one team per colour of the new map. The start uses the map and turn timeout set last.",
         "properties": {
           "map": {
             "$ref": "#/components/schemas/MapTemplate",
@@ -1254,7 +1254,7 @@
       },
       "MemberSettings": {
         "additionalProperties": false,
-        "description": "Island Battles member_settings for setLobbyMemberSettings: the bot that plays for you.",
+        "description": "Island Battles member_settings for setLobbyMemberSettings: the bot that plays for you. {\"bot\": {\"kind\": \"localhost\"}} is your own bot, which island-battles-bot serve runs on your machine and your game client relays each turn to, and {\"bot\": {\"kind\": \"default\", \"level\": N}} a default bot of a level that GET /bots/defaults lists, which the backend plays itself. When GET /bots/defaults says server_bots, also {\"bot\": {\"kind\": \"hosted\", \"url\": \"https://…\"}}, your own bot server at a public URL, or {\"bot\": {\"kind\": \"uploaded\", \"package_id\": \"…\"}}, one of your bot packages in the lobby; the server plays both, without your game client. Anything else is invalid_member_settings. You choose a bot before getting ready, and can change it while the lobby waits: getting ready without one is refused with game_requirement of type urn:island-battles:problem:bot-not-chosen, and an uploaded bot that is no longer a ready package of yours in the lobby, replaced, deleted or someone else's, with type urn:island-battles:problem:bot-package-gone. The start checks every roster player and bot seat the same way. It then initializes one playable generation, which waits for every frozen roster player to complete their turn, and copies each roster player's bot, and each bot seat's, which GenerationState.bot reports from then on.",
         "properties": {
           "bot": {
             "$ref": "#/components/schemas/MemberBot"

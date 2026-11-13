@@ -1,6 +1,7 @@
 package dependencies
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/url"
@@ -11,7 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/retention"
+	"islandBattles/lobby/gamehooks"
 	"islandBattles/lobby/playertoken"
 )
 
@@ -37,6 +40,13 @@ const (
 	// LocalBotPythonEnv is read by the local server host alone; see
 	// LoadLocalBotPython.
 	LocalBotPythonEnv = "ISLAND_BATTLES_LOCAL_BOT_PYTHON"
+	// LobbyHookSecretEnv is the secret that signs the lobby's calls of the
+	// game's hooks and the game's calls of the lobby's game API: the lobby's
+	// LOBBY_GAME_SECRET_ISLAND_BATTLES, by the game's name for it.
+	LobbyHookSecretEnv = "ISLAND_BATTLES_LOBBY_HOOK_SECRET"
+	// LobbyURLEnv is the lobby's URL, whose game API the game reads. Empty,
+	// the lobby runs in this process and the two call each other in memory.
+	LobbyURLEnv = "ISLAND_BATTLES_LOBBY_URL"
 	// BotPackagesDirEnv is read by the local server host alone; see
 	// LoadBotPackagesDir.
 	BotPackagesDirEnv = "ISLAND_BATTLES_BOT_PACKAGES_DIR"
@@ -44,6 +54,9 @@ const (
 	// becomes its own service (#118).
 	PlayerTokenKeysEnv     = "LOBBY_PLAYER_TOKEN_KEYS"
 	PlayerTokenLifetimeEnv = "LOBBY_PLAYER_TOKEN_LIFETIME"
+	// LobbyGamesEnv lists the games that the lobby calls over HTTP; see
+	// Config.LobbyGames.
+	LobbyGamesEnv = gamehooks.GamesEnv
 )
 
 // LocalLobbyIssuer is the iss of player tokens when ISLAND_BATTLES_PUBLIC_URL
@@ -128,6 +141,108 @@ type Config struct {
 	// PlayerTokenLifetime is how long a player token lasts:
 	// playertoken.MaxLifetime unless a development setup shortens it.
 	PlayerTokenLifetime time.Duration
+	// LobbyHookSecret signs the lobby's calls of Island Battles' hooks and
+	// Island Battles' calls of the lobby's game API, at least
+	// gamehooks.MinSecretBytes bytes.
+	LobbyHookSecret []byte
+	// LobbyURL is where the game reads the lobby's game API. Empty, the
+	// lobby runs in this process, and the lobby's hook calls and the game's
+	// game API calls reach the other side's handler in memory.
+	LobbyURL string
+	// LobbyGames is the lobby's LOBBY_GAMES: the games it calls over HTTP,
+	// as a JSON array of gamehooks.GameConfig. Island Battles is added, as
+	// lobbyadapter.LobbyGame, unless it lists island-battles itself; see
+	// LobbyGamesConfig.
+	LobbyGames string
+	// LobbyGameSecrets are the values of the variables that the lobby's games
+	// name as their secret_env, by name.
+	LobbyGameSecrets map[string]string
+}
+
+// LobbyGamesConfig returns the lobby's LOBBY_GAMES with Island Battles in
+// it: LobbyGames, plus lobbyadapter.LobbyGame unless LobbyGames lists
+// island-battles itself. That entry's hooks_url is the public URL's
+// lobbyadapter.HooksPath, or http://localhost's without a public URL, which
+// suits a lobby in this process: its hook calls never leave it.
+func (config Config) LobbyGamesConfig() (string, error) {
+	entries := []json.RawMessage{}
+	if strings.TrimSpace(config.LobbyGames) != "" {
+		if err := json.Unmarshal([]byte(config.LobbyGames), &entries); err != nil {
+			return "", fmt.Errorf("%s must be a JSON array: %w", LobbyGamesEnv, err)
+		}
+	}
+	for _, entry := range entries {
+		var game struct {
+			Key string `json:"key"`
+		}
+		if err := json.Unmarshal(entry, &game); err == nil && game.Key == lobbyadapter.GameKey {
+			return config.LobbyGames, nil
+		}
+	}
+	origin := config.PublicURL
+	if origin == "" {
+		origin = "http://localhost"
+	}
+	islandBattles, err := lobbyadapter.LobbyGame(origin + lobbyadapter.HooksPath)
+	if err != nil {
+		return "", err
+	}
+	games, err := json.Marshal(append(entries, islandBattles))
+	return string(games), err
+}
+
+// LookupLobbyGameSecret reads a game's shared secret by the variable that
+// its secret_env names.
+func (config Config) LookupLobbyGameSecret(name string) (string, bool) {
+	secret, found := config.LobbyGameSecrets[name]
+	return secret, found
+}
+
+// loadLobbyGames reads the secrets of the lobby's games and checks the
+// lobby's binding to Island Battles: LOBBY_GAMES must parse, with Island
+// Battles added, and ISLAND_BATTLES_LOBBY_HOOK_SECRET must equal the lobby's
+// secret for Island Battles while the lobby runs in this process.
+func (config *Config) loadLobbyGames(lookup func(string) (string, bool)) error {
+	if len(config.LobbyHookSecret) < gamehooks.MinSecretBytes {
+		return fmt.Errorf("%s must hold a secret of at least %d bytes", LobbyHookSecretEnv, gamehooks.MinSecretBytes)
+	}
+	if config.LobbyURL != "" {
+		if _, err := gamehooks.ParseServiceURL(config.LobbyURL); err != nil {
+			return fmt.Errorf("%s: %w", LobbyURLEnv, err)
+		}
+	}
+	var listed []struct {
+		SecretEnv string `json:"secret_env"`
+	}
+	if strings.TrimSpace(config.LobbyGames) != "" {
+		if err := json.Unmarshal([]byte(config.LobbyGames), &listed); err != nil {
+			return fmt.Errorf("%s must be a JSON array: %w", LobbyGamesEnv, err)
+		}
+	}
+	names := []string{lobbyadapter.SecretEnv}
+	for _, game := range listed {
+		names = append(names, game.SecretEnv)
+	}
+	config.LobbyGameSecrets = map[string]string{}
+	for _, name := range names {
+		if secret, found := lookup(name); found && name != "" {
+			config.LobbyGameSecrets[name] = secret
+		}
+	}
+	games, err := config.LobbyGamesConfig()
+	if err != nil {
+		return err
+	}
+	configured, err := gamehooks.ParseGames(games, config.LookupLobbyGameSecret)
+	if err != nil {
+		return err
+	}
+	for _, game := range configured {
+		if game.Registration.Key == lobbyadapter.GameKey && config.LobbyURL == "" && string(game.Secret) != string(config.LobbyHookSecret) {
+			return fmt.Errorf("%s must equal the lobby's secret for island-battles while the lobby runs in this process", LobbyHookSecretEnv)
+		}
+	}
+	return nil
 }
 
 // LobbyIssuer is the iss of the lobby's player tokens: the public URL, which
@@ -148,7 +263,7 @@ func LoadConfig() (Config, error) {
 // LoadConfigFromLookup makes configuration validation deterministic in tests.
 func LoadConfigFromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if err := requireEnvironment(lookup, DatabaseURLEnv, CentrifugoPublicURLEnv, CentrifugoAPIURLEnv,
-		CentrifugoAPIKeyEnv, ConnectionTokenHMACSecretEnv, LobbyProxySecretEnv, SubmitTokenSecretEnv, PlayerTokenKeysEnv); err != nil {
+		CentrifugoAPIKeyEnv, ConnectionTokenHMACSecretEnv, LobbyProxySecretEnv, SubmitTokenSecretEnv, PlayerTokenKeysEnv, LobbyHookSecretEnv); err != nil {
 		return Config{}, err
 	}
 	database, err := LoadDatabaseConfigFromLookup(lookup)
@@ -200,6 +315,9 @@ func LoadConfigFromLookup(lookup func(string) (string, bool)) (Config, error) {
 		BotRunnerNative:           botRunnerNative,
 		PlayerTokenKeys:           playerTokenKeys,
 		PlayerTokenLifetime:       playerTokenLifetime,
+		LobbyHookSecret:           []byte(readEnvironment(lookup, LobbyHookSecretEnv)),
+		LobbyURL:                  strings.TrimRight(readEnvironment(lookup, LobbyURLEnv), "/"),
+		LobbyGames:                readEnvironment(lookup, LobbyGamesEnv),
 	}
 	if err := validateURL(CentrifugoPublicURLEnv, config.CentrifugoPublicURL, "ws", "wss"); err != nil {
 		return Config{}, err
@@ -214,6 +332,9 @@ func LoadConfigFromLookup(lookup func(string) (string, bool)) (Config, error) {
 		if parsed, _ := url.Parse(config.PublicURL); parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
 			return Config{}, fmt.Errorf("%s must be an origin, such as https://island-battles.example.org, without a path", PublicURLEnv)
 		}
+	}
+	if err := config.loadLobbyGames(lookup); err != nil {
+		return Config{}, err
 	}
 	return config, nil
 }

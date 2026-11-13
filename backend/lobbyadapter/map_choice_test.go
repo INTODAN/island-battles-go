@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"islandBattles/lobby/gamehooks"
 	"reflect"
 	"slices"
 	"strings"
@@ -41,7 +42,7 @@ func storeTemplate(t *testing.T, database *gorm.DB, mapFile string) uint {
 func TestRegistrationValidatesTheMapChoice(t *testing.T) {
 	database := testutils.InitTestDB(t)
 	templateID := storeTemplate(t, database, twoTeamMapFile)
-	policy := domain.DefaultPolicy(lobbyadapter.Registration(database, services.ServerBots{}, nil))
+	policy := hookedPolicy(t, lobbyadapter.Registration(database, &testutils.RecordedPublisher{}, nil, services.ServerBots{}, nil))
 	twoTeams := []domain.TeamDefinition{{Name: "Blue"}, {Name: "Red"}}
 	threeTeams := slices.Concat(twoTeams, []domain.TeamDefinition{{Name: "Green"}})
 	ctx := context.Background()
@@ -88,13 +89,13 @@ func TestStartedLobbyPlaysOnTheChosenMap(t *testing.T) {
 		"map file":    `{"map":` + twoTeamMapFile + `}`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			principal, scope, snapshot := startedSnapshot()
+			snapshot := startedSnapshot()
 			snapshot.Lobby.GameSettings = json.RawMessage(settings)
-			result, err := newGameBinding(t, database, snapshot).Bind(context.Background(), principal, scope)
+			gameID, err := start(t, hooksClient(t, database, &testutils.RecordedPublisher{}), snapshot)
 			if err != nil {
 				t.Fatal(err)
 			}
-			game, err := dal.GetGameByID(database, result.GameID)
+			game, err := dal.GetGameByID(database, gameID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -116,13 +117,13 @@ func TestStartedLobbyPlaysOnTheChosenMap(t *testing.T) {
 
 func TestStartWithoutAMapChoiceUsesTheGeneratedMap(t *testing.T) {
 	database := testutils.InitTestDB(t)
-	principal, scope, snapshot := startedSnapshot()
+	snapshot := startedSnapshot()
 	snapshot.Lobby.GameSettings = json.RawMessage(domain.EmptyGameSettings)
-	result, err := newGameBinding(t, database, snapshot).Bind(context.Background(), principal, scope)
+	gameID, err := start(t, hooksClient(t, database, &testutils.RecordedPublisher{}), snapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	game, err := dal.GetGameByID(database, result.GameID)
+	game, err := dal.GetGameByID(database, gameID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +140,7 @@ func TestRegistrationReportsAnUnreachableDatabaseAsUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy := domain.DefaultPolicy(lobbyadapter.Registration(unreachable, services.ServerBots{}, nil))
+	policy := hookedPolicy(t, lobbyadapter.Registration(unreachable, &testutils.RecordedPublisher{}, nil, services.ServerBots{}, nil))
 	teams := []domain.TeamDefinition{{Name: "Blue"}, {Name: "Red"}}
 	_, err = policy.ValidateGameSettings(context.Background(), lobbyadapter.GameKey, "", json.RawMessage(`{"map_template_id":1}`), teams)
 	if !errors.Is(err, domain.ErrUnavailable) || domain.ErrorCodeOf(err) == domain.CodeInvalidGameSettings {
@@ -149,4 +150,15 @@ func TestRegistrationReportsAnUnreachableDatabaseAsUnavailable(t *testing.T) {
 	if _, err := policy.ValidateGameSettings(context.Background(), lobbyadapter.GameKey, "", json.RawMessage(`{"map":`+twoTeamMapFile+`}`), teams); err != nil {
 		t.Fatalf("inline map = %v", err)
 	}
+}
+
+// hookedPolicy is a lobby policy that calls registration's hooks over HTTP,
+// signed, as the lobby calls Island Battles.
+func hookedPolicy(t *testing.T, registration domain.GameRegistration) domain.Policy {
+	t.Helper()
+	client, err := gamehooks.NewClient(lobbyadapter.GameKey, hooksServer(t, registration), hookSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return domain.DefaultPolicy(client.Registration(configuredGames(t)[0].Registration.StartRules, domain.LobbyRetention{}))
 }

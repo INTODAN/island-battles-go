@@ -52,9 +52,9 @@ async def test_a_watcher_outside_the_roster_follows_the_game_until_the_host_kick
     code = (await alice.snapshot(scope)).lobby.join_code
 
     # A wrong code, and a code of another game, find no lobby.
-    other = await create(stranger, "quiz-demo")
+    other = await create(stranger, "mock-game")
     for game_key, join_code in (("island-battles", "ABCDEFGH" if code != "ABCDEFGH" else "HGFEDCBA"),
-                                ("island-battles", other.lobby.join_code), ("quiz-demo", code)):
+                                ("island-battles", other.lobby.join_code), ("mock-game", code)):
         with pytest.raises(LobbyError) as refused:
             await robin.watch(game_key=game_key, join_code=join_code)
         assert (refused.value.code, refused.value.status) == ("not_found", 404)
