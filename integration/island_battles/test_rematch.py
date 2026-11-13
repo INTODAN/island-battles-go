@@ -5,8 +5,8 @@ import httpx
 import pytest
 from lobby_client import LobbyError, Scope
 
-from integration.test_live import BASE, create, guests, latest, sql
-from test_lobby_binding import LOCALHOST_BOT, choose_bot, game_auth
+from integration.test_live import create, guests, latest, sql
+from test_lobby_binding import GAME, LOCALHOST_BOT, choose_bot, game_auth
 
 pytestmark = pytest.mark.asyncio
 
@@ -47,7 +47,7 @@ async def test_a_lobby_plays_a_second_game_after_the_first_ends(guests):
         await bob.reopen(scope)
     assert (running.value.code, running.value.status) == ("game_running", 409)
 
-    async with httpx.AsyncClient(base_url=BASE) as http:
+    async with httpx.AsyncClient(base_url=GAME) as http:
         ended = await play_until_timeout(http, alice, scope.lobby_id)
         assert ended["outcome"]["reason"] == "turn_timeout" and ended["lobby_round"] == 1
         first_game = ended["game_id"]

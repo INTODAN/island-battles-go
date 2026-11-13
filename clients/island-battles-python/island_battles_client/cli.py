@@ -43,6 +43,9 @@ from .game_log import ClientLogging
 from .upload import run as upload
 
 DEFAULT_PORT = 41414
+# Where run finds the game's and the lobby's addresses when no flag names them.
+GAME_URL_ENV = "ISLAND_BATTLES_GAME_URL"
+LOBBY_URL_ENV = "ISLAND_BATTLES_LOBBY_URL"
 HOST = "127.0.0.1"
 # The game clients that may relay turns by default: the local backend's lobby
 # page and the web client's dev server, the deployed game, and the desktop app
@@ -662,8 +665,24 @@ def check(args: argparse.Namespace) -> int:
     return 0
 
 
+def seat_urls(args: argparse.Namespace) -> tuple[str, str]:
+    """The game's and the lobby's addresses for run: from --game-url and
+    --lobby-url, from --base-url, which sets both, or from the environment."""
+    if args.base_url and (args.game_url or args.lobby_url):
+        raise SystemExit("--base-url sets both addresses; give it, or --game-url and --lobby-url")
+    game_url = args.game_url or args.base_url or os.environ.get(GAME_URL_ENV, "")
+    lobby_url = args.lobby_url or args.base_url or os.environ.get(LOBBY_URL_ENV, "")
+    if not game_url or not lobby_url:
+        raise SystemExit(
+            f"the game's and the lobby's addresses are required: --game-url and --lobby-url, "
+            f"${GAME_URL_ENV} and ${LOBBY_URL_ENV}, or --base-url for both"
+        )
+    return game_url, lobby_url
+
+
 def run(args: argparse.Namespace) -> int:
     """Play one seat of a lobby's game to its end, without a browser."""
+    game_url, lobby_url = seat_urls(args)
     play = load_play(args.bot)
 
     def ended(outcome: GameOutcome, generation: Generation) -> None:
@@ -671,10 +690,11 @@ def run(args: argparse.Namespace) -> int:
 
     async def main() -> None:
         client = IslandBattlesClient(
-            args.base_url,
             args.token,
             args.lobby_id,
             play=play,
+            game_url=game_url,
+            lobby_url=lobby_url,
             on_game_ended=ended,
             log_level=getattr(logging, args.log_level.upper()),
             log_file=args.log_file,
@@ -790,7 +810,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     running = commands.add_parser("run", help="play a seat without a browser")
     running.add_argument("bot", help="module:function")
-    running.add_argument("--base-url", required=True)
+    running.add_argument(
+        "--game-url",
+        metavar="URL",
+        help="the game's address, such as https://island-battles.example.org "
+        f"(default ${GAME_URL_ENV})",
+    )
+    running.add_argument(
+        "--lobby-url",
+        metavar="URL",
+        help=f"the lobby's address, such as https://lobby.example.org (default ${LOBBY_URL_ENV})",
+    )
+    running.add_argument(
+        "--base-url",
+        metavar="URL",
+        help="sets both addresses to one server's, such as http://localhost:8888",
+    )
     running.add_argument("--token", required=True, help="the guest bearer credential")
     running.add_argument("--lobby-id", required=True)
     running.add_argument("--log-file")

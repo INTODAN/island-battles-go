@@ -27,12 +27,11 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from integration.test_live import BASE
 from integration.test_live import guests as guests_fixture
 from lobby_api_client.models import TeamDefinition
 from lobby_client import Scope
 from test_bot_packages import command, upload_token
-from test_lobby_binding import choose_bot, game_auth
+from test_lobby_binding import GAME, choose_bot, game_auth
 
 guests = guests_fixture
 pytestmark = pytest.mark.asyncio
@@ -149,11 +148,11 @@ async def test_uploaded_and_hosted_bots_play_a_whole_game_with_no_client(guests,
     scope = Scope.from_snapshot(room)
     red, blue, green = (str(team.id) for team in room.teams)
 
-    async with httpx.AsyncClient(base_url=BASE, timeout=30) as http:
+    async with httpx.AsyncClient(base_url=GAME, timeout=30) as http:
         # Alice uploads the packaged template and plays Red with it.
         token = await upload_token(http, alice, scope.lobby_id)
         status, output, error = await command(
-            sys.executable, "-m", "island_battles_client.cli", "upload", "--game-url", BASE, f"--token={token}",
+            sys.executable, "-m", "island_battles_client.cli", "upload", "--game-url", GAME, f"--token={token}",
             str(packaged), cwd=PYTHON_CLIENT)
         assert status == 0, error
         listed = (await http.get(f"/game/lobbies/{scope.lobby_id}/bot-packages", headers=await game_auth(alice))).json()

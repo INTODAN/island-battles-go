@@ -40,7 +40,7 @@ import (
 // the turn's log lines; the turn stays open. Start the client again for the
 // same turn after fixing the bot.
 type Client struct {
-	baseURL    string
+	urls       URLs
 	credential string
 	lobbyID    string
 	play       Play
@@ -188,24 +188,43 @@ func WithGameEnded(ended func(ctx context.Context, outcome GameOutcome, generati
 	return func(client *Client) { client.gameEnded = ended }
 }
 
-// NewClient makes a client that plays a seat with play: baseURL is the
-// server, such as http://localhost:8888, credential the player's guest
-// credential, and lobbyID the lobby whose game it plays. Start it with Run,
-// or with Start and Wait.
-func NewClient(baseURL, credential, lobbyID string, play Play, options ...ClientOption) (*Client, error) {
+// URLs are where a client reaches Island Battles: Game, the game's site,
+// for its routes under /game/ and /generation/, such as
+// https://island-battles.example.org, and Lobby, the lobby's, for its routes
+// under /lobby/v1/, such as https://lobby.example.org. Where one server
+// serves both, as a local one may, BaseURL sets both to its URL.
+type URLs struct {
+	Game  string
+	Lobby string
+}
+
+// BaseURL is the shorthand for URLs whose game and lobby are both at
+// baseURL, such as http://localhost:8888.
+func BaseURL(baseURL string) URLs {
+	return URLs{Game: baseURL, Lobby: baseURL}
+}
+
+// NewClient makes a client that plays a seat with play: urls are the game's
+// and the lobby's URLs, credential the player's guest credential with the
+// lobby, and lobbyID the lobby whose game it plays. Start it with Run, or
+// with Start and Wait.
+func NewClient(urls URLs, credential, lobbyID string, play Play, options ...ClientOption) (*Client, error) {
 	canonicalLobbyID, err := canonicalUUID(strings.TrimSpace(lobbyID))
 	if err != nil {
 		return nil, fmt.Errorf("lobby ID: %w", err)
 	}
-	if _, err := url.ParseRequestURI(baseURL); err != nil {
-		return nil, fmt.Errorf("base URL: %w", err)
+	if _, err := url.ParseRequestURI(urls.Game); err != nil {
+		return nil, fmt.Errorf("game URL: %w", err)
+	}
+	if _, err := url.ParseRequestURI(urls.Lobby); err != nil {
+		return nil, fmt.Errorf("lobby URL: %w", err)
 	}
 	if play == nil {
 		return nil, errors.New("play is nil")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	client := &Client{
-		baseURL:    strings.TrimRight(baseURL, "/"),
+		urls:       URLs{Game: strings.TrimRight(urls.Game, "/"), Lobby: strings.TrimRight(urls.Lobby, "/")},
 		credential: credential,
 		lobbyID:    canonicalLobbyID,
 		play:       play,
@@ -600,7 +619,7 @@ func (client *Client) request(ctx context.Context, method, path string, payload 
 
 // authorized sends a request with the credential its route takes.
 func (client *Client) authorized(ctx context.Context, method, path string, body []byte, retryTransport bool) ([]byte, error) {
-	if strings.HasPrefix(path, "/lobby/") {
+	if isLobbyPath(path) {
 		return client.attempt(ctx, method, path, body, client.credential, retryTransport)
 	}
 	token, err := client.gameToken(ctx, "")
@@ -676,13 +695,24 @@ func (client *Client) attempt(ctx context.Context, method, path string, body []b
 	}
 }
 
-// send sends one request with credential, and reads the whole response.
+// isLobbyPath tells whether a path is the lobby's, which the client sends to
+// the lobby's URL with the guest credential; every other path is the game's.
+func isLobbyPath(path string) bool {
+	return strings.HasPrefix(path, "/lobby/")
+}
+
+// send sends one request with credential, to the lobby's URL or the game's
+// by its path, and reads the whole response.
 func (client *Client) send(ctx context.Context, method, path string, body []byte, credential string) (int, []byte, error) {
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
 	}
-	request, err := http.NewRequestWithContext(ctx, method, client.baseURL+path, reader)
+	base := client.urls.Game
+	if isLobbyPath(path) {
+		base = client.urls.Lobby
+	}
+	request, err := http.NewRequestWithContext(ctx, method, base+path, reader)
 	if err != nil {
 		return 0, nil, err
 	}

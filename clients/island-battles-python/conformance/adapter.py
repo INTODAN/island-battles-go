@@ -163,10 +163,11 @@ class Adapter:
     async def run(self, message: dict[str, Any]) -> None:
         """Run the client until it is closed or fails."""
         self.client = IslandBattlesClient(
-            message["base_url"],
             message["credential"],
             message["lobby_id"],
             play=self.play,
+            game_url=message["game_url"],
+            lobby_url=message["lobby_url"],
             on_game_ended=self.on_game_ended,
             # Stdout carries the protocol; the adapter logs to stderr instead.
             log_level=logging.DEBUG,

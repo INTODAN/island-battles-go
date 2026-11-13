@@ -41,7 +41,8 @@ type message struct {
 	Type       string            `json:"type"`
 	ID         json.RawMessage   `json:"id"`
 	Generation json.RawMessage   `json:"generation"`
-	BaseURL    string            `json:"base_url"`
+	GameURL    string            `json:"game_url"`
+	LobbyURL   string            `json:"lobby_url"`
 	Credential string            `json:"credential"`
 	LobbyID    string            `json:"lobby_id"`
 	LogFile    string            `json:"log_file"`
@@ -174,7 +175,7 @@ func (adapter *adapter) run(received message) {
 	if received.LogFile != "" {
 		options = append(options, islandbattles.WithLogFile(received.LogFile))
 	}
-	client, err := islandbattles.NewClient(received.BaseURL, received.Credential, received.LobbyID, adapter.play, options...)
+	client, err := islandbattles.NewClient(islandbattles.URLs{Game: received.GameURL, Lobby: received.LobbyURL}, received.Credential, received.LobbyID, adapter.play, options...)
 	if err != nil {
 		adapter.emit(map[string]any{"type": "stopped", "error": describe(err)})
 		return

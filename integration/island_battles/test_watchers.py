@@ -10,7 +10,7 @@ from integration.test_live import BASE, create
 from integration.test_live import guests as guests_fixture
 from integration.test_protocol import Publications, connection_client, denied_subscription, disconnect
 from lobby_client import LobbyError, Scope
-from test_lobby_binding import game_auth, started_lobby
+from test_lobby_binding import GAME, game_auth, started_lobby
 
 guests = guests_fixture
 pytestmark = pytest.mark.asyncio
@@ -82,7 +82,7 @@ async def test_a_watcher_outside_the_roster_follows_the_game_until_the_host_kick
         await denied_subscription(outsider, access.channel)
         await denied_subscription(watcher, snapshot.channel)
 
-        async with httpx.AsyncClient(base_url=BASE) as http:
+        async with httpx.AsyncClient(base_url=GAME) as http:
             watched = await http.get(f"/game/from-lobby/{scope.lobby_id}/watch", headers=await bearer(robin))
             assert watched.status_code == 200, watched.text
             state = watched.json()

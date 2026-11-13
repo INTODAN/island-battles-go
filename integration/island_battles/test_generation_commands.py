@@ -9,7 +9,7 @@ import pytest
 from integration.test_live import BASE, control_backend, sql
 from integration.test_live import guests as guests_fixture
 from island_battles_client import IslandBattlesClient, send_soldier_group, turn_result
-from test_lobby_binding import game_auth, started_lobby
+from test_lobby_binding import GAME, game_auth, started_lobby
 
 guests = guests_fixture
 pytestmark = pytest.mark.asyncio
@@ -31,7 +31,7 @@ class ObservingBot:
 def observing_client(credential, lobby_id):
     """A client playing an ObservingBot, which it keeps as ``client.bot``."""
     bot = ObservingBot()
-    client = IslandBattlesClient(BASE, credential, lobby_id, play=bot.play)
+    client = IslandBattlesClient(credential, lobby_id, play=bot.play, game_url=GAME, lobby_url=BASE)
     client.bot = bot
     return client
 
@@ -99,7 +99,7 @@ async def test_commands_wait_for_every_player_and_push_next_generation(guests):
 async def test_rejection_retry_restart_and_public_migration_bypass(guests):
     alice, bob, scope = await started_lobby(guests, "island-battles")
     path = f"/game/from-lobby/{scope.lobby_id}/generation"
-    async with httpx.AsyncClient(base_url=BASE) as http:
+    async with httpx.AsyncClient(base_url=GAME) as http:
 
         async def read(player):
             response = await http.get(
@@ -244,10 +244,11 @@ async def test_a_player_who_never_plays_loses_at_the_turn_deadline(guests):
     # after it, and the game ends with Bob's team, Blue, losing.
     bot = EndingBot()
     client = IslandBattlesClient(
-        BASE,
         alice.credential,
         scope.lobby_id,
         play=bot.play,
+        game_url=GAME,
+        lobby_url=BASE,
         on_game_ended=bot.on_game_ended,
     )
     try:
@@ -273,7 +274,7 @@ async def test_a_player_who_never_plays_loses_at_the_turn_deadline(guests):
         == "turn_timeout"
     )
     headers = await game_auth(bob)
-    async with httpx.AsyncClient(base_url=BASE) as http:
+    async with httpx.AsyncClient(base_url=GAME) as http:
         # Bob's late batch for the expired generation conflicts.
         late = await http.post(
             "/generation/commands",

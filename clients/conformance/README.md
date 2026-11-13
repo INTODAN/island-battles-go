@@ -39,7 +39,7 @@ Messages from the runner:
 | Type | Fields | Effect |
 | --- | --- | --- |
 | `evaluate` | `id`, `generation` (wire `Generation`) | Parse it with the client's public model and reply `evaluation`. Needs no server. |
-| `start` | `base_url`, `credential` (the guest credential; the client gets its player tokens for the game's routes itself), `lobby_id`, optional `log_file` | Start the client, with its log written to `log_file` when given, and to no stdout output. The bot reports each turn and waits for `log`, `finish` or `fail`. |
+| `start` | `game_url` (the game's site, for its routes under `/game/` and `/generation/`), `lobby_url` (the lobby's, for `/lobby/v1/`), `credential` (the guest credential; the client gets its player tokens for the game's routes from the lobby itself), `lobby_id`, optional `log_file` | Start the client, with its log written to `log_file` when given, and to no stdout output. The bot reports each turn and waits for `log`, `finish` or `fail`. |
 | `log` | `level` (`debug`, `info`, `warning` or `error`), `message` | Log the message with the bot's logger during the current turn, or the next one when none runs, and reply `logged`. |
 | `finish` | optional `commands`, `logs`, `memory` | Return a result from the current turn. Each command is `{"type": "send_soldier_group", "origin_castle_id", "destination_castle_id", "soldier_amount"}` or `{"type": "upgrade_castle", "castle_id", "upgrade_type"}`, built with the client's helpers with the values as given, which may be invalid or missing. Each log is `{"level", "message"}`; `memory` is a JSON object, or absent for none. |
 | `fail` | | Raise from the current turn. |
@@ -72,7 +72,7 @@ Run it with:
 uv run --project clients/conformance --locked pytest clients/conformance/tests/test_models.py
 ```
 
-The live tier builds the backend and starts disposable PostgreSQL and Centrifugo containers. The client under test plays one seat behind a proxy that drops responses, injects server errors and delays reads; the runner plays the other seat over HTTP and stops Centrifugo or publishes foreign events where a test needs it. Both tiers run with:
+The live tier builds the lobby and the backend, runs them as separate processes on separate origins, and starts disposable PostgreSQL and Centrifugo containers. The client under test gets both URLs and plays one seat, its game's routes behind a proxy that drops responses, injects server errors and delays reads; the runner plays the other seat over HTTP and stops Centrifugo or publishes foreign events where a test needs it. Both tiers run with:
 
 ```sh
 ./scripts/test-client-conformance.sh                       # the Python client

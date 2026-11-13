@@ -11,10 +11,10 @@ from pathlib import Path
 
 import httpx
 import pytest
-from integration.test_live import BASE, create
+from integration.test_live import create
 from integration.test_live import guests as guests_fixture
 from lobby_client import Scope
-from test_lobby_binding import game_auth
+from test_lobby_binding import GAME, game_auth
 
 guests = guests_fixture
 pytestmark = pytest.mark.asyncio
@@ -59,11 +59,11 @@ async def test_members_upload_from_both_command_lines_and_everyone_sees_them(gue
     for name, data in {"python.zip": PYTHON_ZIP, "native.zip": NATIVE_ZIP, "bad.zip": BAD_ZIP}.items():
         (tmp_path / name).write_bytes(data)
 
-    async with httpx.AsyncClient(base_url=BASE) as http:
+    async with httpx.AsyncClient(base_url=GAME) as http:
         # Alice uploads a Python package with the Python SDK.
         token = await upload_token(http, alice, scope.lobby_id)
         status, output, error = await command(
-            sys.executable, "-m", "island_battles_client.cli", "upload", "--game-url", BASE, f"--token={token}",
+            sys.executable, "-m", "island_battles_client.cli", "upload", "--game-url", GAME, f"--token={token}",
             str(tmp_path / "python.zip"), cwd=PYTHON_CLIENT)
         assert status == 0, error
         assert "python, entry bot:play" in output, output
@@ -71,14 +71,14 @@ async def test_members_upload_from_both_command_lines_and_everyone_sees_them(gue
         # Bob uploads a native package with the Go SDK.
         token = await upload_token(http, bob, scope.lobby_id)
         status, output, error = await command(
-            "go", "run", "./clients/island-battles-go/cmd/island-battles-package", "upload", "--game-url", BASE,
+            "go", "run", "./clients/island-battles-go/cmd/island-battles-package", "upload", "--game-url", GAME,
             f"--token={token}", str(tmp_path / "native.zip"), cwd=ROOT)
         assert status == 0, error
         assert "native, command ./bot worker" in output, output
 
         # A bad package is refused with what is wrong, and changes nothing.
         status, _, error = await command(
-            sys.executable, "-m", "island_battles_client.cli", "upload", "--game-url", BASE, f"--token={token}",
+            sys.executable, "-m", "island_battles_client.cli", "upload", "--game-url", GAME, f"--token={token}",
             str(tmp_path / "bad.zip"), cwd=PYTHON_CLIENT)
         assert status == 1
         assert 'the entry "bot" must be module:function' in error, error
