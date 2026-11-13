@@ -47,12 +47,14 @@ DEFAULT_PORT = 41414
 GAME_URL_ENV = "ISLAND_BATTLES_GAME_URL"
 LOBBY_URL_ENV = "ISLAND_BATTLES_LOBBY_URL"
 HOST = "127.0.0.1"
-# The game clients that may relay turns by default: the local backend's lobby
-# page and the web client's dev server, the deployed game, and the desktop app
-# (#105), whose web view sends its own origin: `tauri://localhost` on macOS and
-# Linux, `http://tauri.localhost` on Windows. Add more with --allow-origin.
+# The game clients that may relay turns by default: the local backend's pages,
+# the local lobby's page (on its own origin since #228), the web client's dev
+# server, the deployed game, and the desktop app (#105), whose web view sends
+# its own origin: `tauri://localhost` on macOS and Linux,
+# `http://tauri.localhost` on Windows. Add more with --allow-origin.
 DEFAULT_ORIGINS = (
     "http://localhost:8888",
+    "http://localhost:8890",
     "http://localhost:3000",
     "https://island-battles.elidan.org",
     "tauri://localhost",

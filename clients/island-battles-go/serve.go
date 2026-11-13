@@ -39,11 +39,13 @@ const OfficialSubmitHost = "island-battles.elidan.org"
 const BotsLogger = "island_battles.bots"
 
 // DefaultOrigins are the browser origins that may always relay turns to
-// serve: the local backend's lobby page, the web client's dev server, the
-// deployed game, and the desktop app's web view (tauri://localhost on macOS
-// and Linux, http://tauri.localhost on Windows).
+// serve: the local backend's pages, the local lobby's page (on its own
+// origin since #228), the web client's dev server, the deployed game, and
+// the desktop app's web view (tauri://localhost on macOS and Linux,
+// http://tauri.localhost on Windows).
 var DefaultOrigins = []string{
 	"http://localhost:8888",
+	"http://localhost:8890",
 	"http://localhost:3000",
 	"https://island-battles.elidan.org",
 	"tauri://localhost",

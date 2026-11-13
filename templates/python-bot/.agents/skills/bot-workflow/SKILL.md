@@ -12,18 +12,18 @@ All scripts are in `scripts/`, run from any directory, and use `uv`. Install fir
 | `scripts/check.sh` | Format check, lint, types, tests and a fixture turn. **Run it before you finish and before you play.** |
 | `scripts/format.sh` | Fix formatting and safe lint errors, then run `check.sh`. |
 | `scripts/serve.sh` | Serve the bot on `http://127.0.0.1:41414` for a browser game. |
-| `scripts/run.sh` | Play a seat of a started lobby without a browser (needs a base URL, token and lobby id). |
+| `scripts/run.sh` | Play a seat of a started lobby without a browser (needs the game's and the lobby's URLs, a token and a lobby id). |
 | `scripts/fixture.sh [file]` | Write the fixture turn (default `turn.json`) to edit and replay. |
 | `scripts/build.sh` | Build the package (wheel and source archive) into `dist/`. |
 
 ## Playing against the default bots
 
 1. `scripts/serve.sh` and leave it running. Saving a `.py` file reloads the bot.
-2. Open the lobby page (`https://island-battles.elidan.org`, or `http://localhost:8888/lobby/ui/` for a local backend). Create a lobby, pick a team, add a **bot seat** (default bot level 1 is the easiest) to the other team, and pick **localhost bot** as your bot.
+2. Open the lobby page (`https://island-battles.elidan.org`, or `http://localhost:8890/lobby/ui/` for a local lobby and backend). Create a lobby, pick a team, add a **bot seat** (default bot level 1 is the easiest) to the other team, and pick **localhost bot** as your bot.
 3. Get ready and start. The page delivers each turn to your bot, which submits its answer itself, so keep the tab open. A turn where `play` raises or runs out of time is passed, with an `error` line from `island_battles.bots` in the game log; the terminal shows the traceback.
 4. `curl http://127.0.0.1:41414/health` answers `{"name": "bot:play", "ok": true}` when the bot is up.
 
-Without a browser: `scripts/run.sh BASE_URL TOKEN LOBBY_ID` (the guest token and lobby id come from the lobby flow). The player must have picked the localhost bot before getting ready.
+Without a browser: `scripts/run.sh TOKEN LOBBY_ID` (the guest token and lobby id come from the lobby flow), with `ISLAND_BATTLES_GAME_URL` and `ISLAND_BATTLES_LOBBY_URL` set (locally `http://localhost:8888` and `http://localhost:8890`), or `ISLAND_BATTLES_BASE_URL` for one server that serves both. The player must have picked the localhost bot before getting ready.
 
 ## Reading a failed check
 
@@ -40,7 +40,7 @@ Without a browser: `scripts/run.sh BASE_URL TOKEN LOBBY_ID` (the guest token and
 
 - **Fixture turn:** `scripts/fixture.sh` writes `turn.json`. Edit it (move a castle, set `memory`, add a group), then `uv run island-battles-bot check bot:play --turn turn.json`. In tests, `from island_battles_client.fixture import fixture_turn, fixture_turn_data` gives the same turn as a model or as a dict to change before `BotTurn.model_validate`.
 - **A saved demo:** the lobby page's replay has **Save demo**, which downloads the game as a JSON file. Its `frames` list is every generation's board (`castles`, `soldier_groups`, `clashes`). Pick a frame and wrap it in a `BotTurn` (`game_id`, `team_color`, the `upgrades` table from `fixture.sh`, `memory`, `turn_deadline_at: null`, `generation`), then run it with `--turn`.
-- **Deliver a turn by hand:** `/turn` takes a turn delivery from the game, not a bare `BotTurn`, and submits the answer itself. With a local backend, your guest credential and a started lobby, get a player token for the game first, since the game's routes refuse the guest credential: `PLAYER_TOKEN=$(curl -s -X POST localhost:8888/lobby/v1/player-tokens -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"game_key": "island-battles"}' | jq -r .token)`, then `curl -s -H "Authorization: Bearer $PLAYER_TOKEN" localhost:8888/game/from-lobby/$LOBBY_ID/turn-delivery | curl -X POST localhost:41414/turn -H 'Content-Type: application/json' -d @-` while `serve.sh` runs. For a bare `BotTurn`, use `island-battles-bot check bot:play --turn turn.json`.
+- **Deliver a turn by hand:** `/turn` takes a turn delivery from the game, not a bare `BotTurn`, and submits the answer itself. With a local backend, your guest credential and a started lobby, get a player token for the game first, since the game's routes refuse the guest credential: `PLAYER_TOKEN=$(curl -s -X POST localhost:8890/lobby/v1/player-tokens -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"game_key": "island-battles"}' | jq -r .token)`, then `curl -s -H "Authorization: Bearer $PLAYER_TOKEN" localhost:8888/game/from-lobby/$LOBBY_ID/turn-delivery | curl -X POST localhost:41414/turn -H 'Content-Type: application/json' -d @-` while `serve.sh` runs. For a bare `BotTurn`, use `island-battles-bot check bot:play --turn turn.json`.
 
 ## Building
 
