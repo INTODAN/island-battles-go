@@ -24,6 +24,7 @@ import (
 	"islandBattles/backend/services"
 	"islandBattles/backend/uploadtoken"
 	"islandBattles/lobby/domain"
+	"islandBattles/lobby/playertoken"
 
 	"github.com/danielgtaylor/huma/v2/humatest"
 	"github.com/google/uuid"
@@ -31,26 +32,31 @@ import (
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
 )
 
-// packageLobbies is a lobby service that knows each lobby's active members.
-// Like the lobby's own, it refuses a principal without a session.
+// packageLobbies is a lobby service that knows each lobby's members. Like the
+// lobby's game API, its snapshots list the active members only.
 type packageLobbies struct {
 	mutex   sync.Mutex
 	members map[string][]domain.Member
 }
 
-func (lobbies *packageLobbies) Snapshot(_ context.Context, principal domain.Principal, scope domain.Scope) (domain.Snapshot, error) {
+func (lobbies *packageLobbies) GameSnapshot(_ context.Context, scope domain.Scope) (domain.Snapshot, error) {
 	lobbies.mutex.Lock()
 	defer lobbies.mutex.Unlock()
-	if principal.PlayerID == "" || principal.SessionID == "" {
-		return domain.Snapshot{}, domain.ErrUnauthenticated
+	members, found := lobbies.members[scope.LobbyID]
+	if !found {
+		return domain.Snapshot{}, domain.ErrNotFound
 	}
-	members := lobbies.members[scope.LobbyID]
+	active := []domain.Member{}
 	for _, member := range members {
-		if member.PlayerID == principal.PlayerID && member.Active {
-			return domain.Snapshot{Lobby: domain.Lobby{ID: scope.LobbyID, GameKey: scope.GameKey}, Members: members}, nil
+		if member.Active {
+			active = append(active, member)
 		}
 	}
-	return domain.Snapshot{}, domain.ErrNotFound
+	return domain.Snapshot{Lobby: domain.Lobby{ID: scope.LobbyID, GameKey: scope.GameKey}, Members: active}, nil
+}
+
+func (*packageLobbies) AuthorizeGameWatch(context.Context, domain.Scope, string) error {
+	return domain.ErrNotFound
 }
 
 func (lobbies *packageLobbies) leave(lobbyID, playerID string) {
@@ -63,21 +69,17 @@ func (lobbies *packageLobbies) leave(lobbyID, playerID string) {
 	}
 }
 
-// sessionAuthentication accepts "Bearer <player ID>" for each player, with a
-// session of their own.
+// sessionAuthentication accepts "Bearer <player ID>" for each player, as
+// player tokens stand for them.
 type sessionAuthentication struct{ players []string }
 
-func (sessionAuthentication) CreateGuest(context.Context, domain.CreateGuestRequest) (domain.GuestSession, error) {
-	return domain.GuestSession{}, domain.ErrUnauthenticated
-}
-
-func (authentication sessionAuthentication) Authenticate(_ context.Context, authorization string) (domain.SessionVerification, error) {
+func (authentication sessionAuthentication) AuthenticatePlayer(_ context.Context, authorization string) (domain.Principal, error) {
 	for _, player := range authentication.players {
 		if authorization == "Bearer "+player {
-			return domain.SessionVerification{Principal: domain.Principal{PlayerID: player, SessionID: "session-" + player}}, nil
+			return domain.Principal{PlayerID: player}, nil
 		}
 	}
-	return domain.SessionVerification{}, domain.ErrUnauthenticated
+	return domain.Principal{}, playertoken.ErrInvalid
 }
 
 type packageWorld struct {
@@ -113,7 +115,7 @@ func newPackageWorld(t *testing.T) *packageWorld {
 	world.signer = signer
 	now := time.Now()
 	world.clock = &now
-	handler := &handlers.BotPackages{Authenticator: sessionAuthentication{[]string{world.alex, world.sam, world.outsider}}, Service: services.BotPackages{
+	handler := &handlers.BotPackages{Players: sessionAuthentication{[]string{world.alex, world.sam, world.outsider}}, Service: services.BotPackages{
 		Database: testutils.InitTestDB(t), Lobbies: world.lobbies, GameKey: "island-battles", Store: world.store, Tokens: signer, Now: func() time.Time { return *world.clock }}}
 	_, world.api = humatest.New(t)
 	routes.SetupBotPackageRoutes(world.api, handler)
@@ -264,7 +266,7 @@ func TestTheCommandLineUploadsANativePackageWithAnUploadToken(t *testing.T) {
 		t.Fatalf("token = %+v", issued)
 	}
 	claims, err := world.signer.Verify(issued.Token, *world.clock)
-	if err != nil || claims.LobbyID != world.lobbyID || claims.PlayerID != world.sam || claims.SessionID != "session-"+world.sam {
+	if err != nil || claims.LobbyID != world.lobbyID || claims.PlayerID != world.sam {
 		t.Fatalf("claims = %+v, %v", claims, err)
 	}
 	uploaded := world.upload(t, issued.Token, nativeZip(t))
@@ -460,7 +462,7 @@ func TestTheFileNameMustBeAZip(t *testing.T) {
 func TestAServerWithoutStorageAnswers503(t *testing.T) {
 	_, api := humatest.New(t)
 	player := uuid.NewString()
-	routes.SetupBotPackageRoutes(api, &handlers.BotPackages{Authenticator: sessionAuthentication{[]string{player}},
+	routes.SetupBotPackageRoutes(api, &handlers.BotPackages{Players: sessionAuthentication{[]string{player}},
 		Service: services.BotPackages{Lobbies: &packageLobbies{}, GameKey: "island-battles"}})
 	lobby := "/game/lobbies/" + uuid.NewString() + "/bot-packages"
 	for name, response := range map[string]*httptest.ResponseRecorder{

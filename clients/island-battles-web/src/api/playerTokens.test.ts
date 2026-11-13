@@ -105,6 +105,14 @@ describe("player tokens", () => {
     ]);
   });
 
+  test("a lobby's bot packages take a player token too", async () => {
+    const server = serverFor();
+    await server.gameApi.GET("/game/lobbies/{lobby_id}/bot-packages", {
+      params: { path: { lobby_id: LOBBY_ID } },
+    });
+    expect(server.gameAuthorizations()).toEqual(["Bearer token-1"]);
+  });
+
   test("the game's public routes need no token", async () => {
     const server = serverFor();
     await server.gameApi.GET("/game/upgrades");

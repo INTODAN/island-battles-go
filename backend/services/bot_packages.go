@@ -30,8 +30,10 @@ const BotPackageUploadWindow = 15 * time.Minute
 // range requests.
 type BotPackages struct {
 	Database *gorm.DB
-	// Lobbies authorizes the caller's membership and reads their name.
-	Lobbies domain.SnapshotReader
+	// Lobbies reads the lobby, whose active members may use its packages, and
+	// their names. The caller comes from a player token, which names no
+	// session, so the game reads the lobby as a game does.
+	Lobbies domain.GameAPI
 	// GameKey is the lobby game key of Island Battles.
 	GameKey string
 	// Store keeps the zips. Nil refuses every request with 503: the host has
@@ -58,10 +60,14 @@ func (service BotPackages) notConfigured() error {
 	return nil
 }
 
-// member returns the caller's membership of the lobby, which the lobby
-// authorizes: an active member, or ErrNotFound.
+// member returns the caller's membership of the lobby: an active member, or
+// ErrNotFound.
 func (service BotPackages) member(ctx context.Context, principal domain.Principal, lobbyID string) (domain.Member, error) {
-	snapshot, err := service.Lobbies.Snapshot(ctx, principal, domain.Scope{GameKey: service.GameKey, LobbyID: lobbyID})
+	if principal.PlayerID == "" {
+		return domain.Member{}, domain.ErrUnauthenticated
+	}
+	// A game snapshot lists the active members only.
+	snapshot, err := service.Lobbies.GameSnapshot(ctx, domain.Scope{GameKey: service.GameKey, LobbyID: lobbyID})
 	if err != nil {
 		return domain.Member{}, err
 	}
@@ -86,7 +92,7 @@ func (service BotPackages) TokenPrincipal(token, lobbyID string) (domain.Princip
 	if claims.LobbyID != lobbyID {
 		return domain.Principal{}, uploadtoken.ErrInvalid
 	}
-	return domain.Principal{PlayerID: claims.PlayerID, SessionID: claims.SessionID}, nil
+	return domain.Principal{PlayerID: claims.PlayerID}, nil
 }
 
 // IssueUploadToken issues an upload token for the caller and the lobby,
@@ -102,7 +108,7 @@ func (service BotPackages) IssueUploadToken(ctx context.Context, principal domai
 		return models.BotUploadTokenView{}, err
 	}
 	expires := service.now().Add(uploadtoken.Lifetime).Truncate(time.Second)
-	token, err := service.Tokens.Issue(uploadtoken.Claims{LobbyID: lobbyID, PlayerID: principal.PlayerID, SessionID: principal.SessionID, Expires: expires})
+	token, err := service.Tokens.Issue(uploadtoken.Claims{LobbyID: lobbyID, PlayerID: principal.PlayerID, Expires: expires})
 	if err != nil {
 		return models.BotUploadTokenView{}, err
 	}

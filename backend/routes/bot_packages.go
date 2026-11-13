@@ -23,11 +23,11 @@ func SetupBotPackageRoutes(api huma.API, handler *handlers.BotPackages) {
 	api.OpenAPI().Components.SecuritySchemes[UploadTokenScheme] = &huma.SecurityScheme{Type: "http", Scheme: "bearer", BearerFormat: "ibut1",
 		Description: "An upload token from POST /game/lobbies/{lobby_id}/bot-packages/upload-token, which starts with ibut1. It stands for its player in POST /game/lobbies/{lobby_id}/bot-packages and its complete, for that lobby only, for 15 minutes. " +
 			"Its payload, the base64url JSON between its two dots, names the lobby as lobby_id, which the command line reads."}
-	const membership = "Requires an active membership of the Island Battles lobby, in any phase; anyone else gets 404. "
-	const uploader = "Requires an active membership of the Island Battles lobby, in any phase, with your session or an upload token for this lobby (Authorization: Bearer ibut1.…); anyone else gets 404, and a token for another lobby, or an expired one, 401. "
+	const membership = "Requires an active membership of the Island Battles lobby, in any phase, with your player token (PlayerToken); anyone else gets 404. "
+	const uploader = "Requires an active membership of the Island Battles lobby, in any phase, with your player token (PlayerToken) or an upload token for this lobby (Authorization: Bearer ibut1.…); anyone else gets 404, and an upload token for another lobby, or an expired one, 401. "
 	const storage = " A server without storage for packages answers 503."
-	uploaders := []map[string][]string{{"LobbyBearer": {}}, {UploadTokenScheme: {}}}
-	members := []map[string][]string{{"LobbyBearer": {}}}
+	uploaders := []map[string][]string{{PlayerTokenScheme: {}}, {UploadTokenScheme: {}}}
+	members := playerTokenSecurity
 	huma.Register(api, huma.Operation{
 		OperationID: "startIslandBotPackageUpload", Path: "/game/lobbies/{lobby_id}/bot-packages", Method: http.MethodPost, DefaultStatus: http.StatusCreated,
 		Summary: "Start uploading a bot package to a lobby",
@@ -70,7 +70,7 @@ func SetupBotPackageRoutes(api huma.API, handler *handlers.BotPackages) {
 		Summary: "Get an upload token for uploading a bot package from the command line",
 		Description: membership + "Returns an upload token for you and this lobby, valid for 15 minutes, for a command line that doesn't hold your session: " +
 			"island-battles-bot upload --game-url <url> --token <token> dist/island-battles-bot.zip, or the Go SDK's island-battles-package upload with the same arguments. " +
-			"The two upload endpoints, POST /game/lobbies/{lobby_id}/bot-packages and its complete, accept it as Authorization: Bearer <token> in place of your session; nothing else does. The command line reads the lobby from the token." + storage,
+			"The two upload endpoints, POST /game/lobbies/{lobby_id}/bot-packages and its complete, accept it as Authorization: Bearer <token> in place of your player token; nothing else does. The command line reads the lobby from the token." + storage,
 		Tags: []string{"Island Battles"}, Security: members,
 	}, handler.UploadToken)
 }

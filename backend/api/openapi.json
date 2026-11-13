@@ -2267,7 +2267,7 @@
     },
     "/game/lobbies/{lobby_id}/bot-packages": {
       "get": {
-        "description": "Requires an active membership of the Island Battles lobby, in any phase; anyone else gets 404. Lists every package that a member uploaded and completed, newest first, with who uploaded it, its language, its entry or command and its size. A member has at most one. Packages are deleted 8 days after their upload, with their zips. A server without storage for packages answers 503.",
+        "description": "Requires an active membership of the Island Battles lobby, in any phase, with your player token (PlayerToken); anyone else gets 404. Lists every package that a member uploaded and completed, newest first, with who uploaded it, its language, its entry or command and its size. A member has at most one. Packages are deleted 8 days after their upload, with their zips. A server without storage for packages answers 503.",
         "operationId": "listIslandBotPackages",
         "parameters": [
           {
@@ -2311,7 +2311,7 @@
         },
         "security": [
           {
-            "LobbyBearer": []
+            "PlayerToken": []
           }
         ],
         "summary": "List a lobby's bot packages",
@@ -2320,7 +2320,7 @@
         ]
       },
       "post": {
-        "description": "Requires an active membership of the Island Battles lobby, in any phase, with your session or an upload token for this lobby (Authorization: Bearer ibut1.…); anyone else gets 404, and a token for another lobby, or an expired one, 401. A bot package is the zip that the SDKs' package command builds: island-battles-bot package in Python, or the Go SDK's island-battles-package. A package belongs to the lobby, and anyone in it may upload one. This stores a pending package and returns its package_id and a presigned POST: send a multipart/form-data POST to upload.url with every field of upload.fields, unchanged, and the zip last, in a field named file. The zip goes straight to storage, never through this server, so it may be up to 250 MiB (262,144,000 bytes); the presigned POST refuses an empty or larger file, and expires after 15 minutes. Then call POST /game/lobbies/{lobby_id}/bot-packages/{package_id}/complete. file_name must end in .zip, or this is 422. A server without storage for packages answers 503.",
+        "description": "Requires an active membership of the Island Battles lobby, in any phase, with your player token (PlayerToken) or an upload token for this lobby (Authorization: Bearer ibut1.…); anyone else gets 404, and an upload token for another lobby, or an expired one, 401. A bot package is the zip that the SDKs' package command builds: island-battles-bot package in Python, or the Go SDK's island-battles-package. A package belongs to the lobby, and anyone in it may upload one. This stores a pending package and returns its package_id and a presigned POST: send a multipart/form-data POST to upload.url with every field of upload.fields, unchanged, and the zip last, in a field named file. The zip goes straight to storage, never through this server, so it may be up to 250 MiB (262,144,000 bytes); the presigned POST refuses an empty or larger file, and expires after 15 minutes. Then call POST /game/lobbies/{lobby_id}/bot-packages/{package_id}/complete. file_name must end in .zip, or this is 422. A server without storage for packages answers 503.",
         "operationId": "startIslandBotPackageUpload",
         "parameters": [
           {
@@ -2374,7 +2374,7 @@
         },
         "security": [
           {
-            "LobbyBearer": []
+            "PlayerToken": []
           },
           {
             "UploadToken": []
@@ -2388,7 +2388,7 @@
     },
     "/game/lobbies/{lobby_id}/bot-packages/upload-token": {
       "post": {
-        "description": "Requires an active membership of the Island Battles lobby, in any phase; anyone else gets 404. Returns an upload token for you and this lobby, valid for 15 minutes, for a command line that doesn't hold your session: island-battles-bot upload --game-url \u003curl\u003e --token \u003ctoken\u003e dist/island-battles-bot.zip, or the Go SDK's island-battles-package upload with the same arguments. The two upload endpoints, POST /game/lobbies/{lobby_id}/bot-packages and its complete, accept it as Authorization: Bearer \u003ctoken\u003e in place of your session; nothing else does. The command line reads the lobby from the token. A server without storage for packages answers 503.",
+        "description": "Requires an active membership of the Island Battles lobby, in any phase, with your player token (PlayerToken); anyone else gets 404. Returns an upload token for you and this lobby, valid for 15 minutes, for a command line that doesn't hold your session: island-battles-bot upload --game-url \u003curl\u003e --token \u003ctoken\u003e dist/island-battles-bot.zip, or the Go SDK's island-battles-package upload with the same arguments. The two upload endpoints, POST /game/lobbies/{lobby_id}/bot-packages and its complete, accept it as Authorization: Bearer \u003ctoken\u003e in place of your player token; nothing else does. The command line reads the lobby from the token. A server without storage for packages answers 503.",
         "operationId": "createIslandBotUploadToken",
         "parameters": [
           {
@@ -2432,7 +2432,7 @@
         },
         "security": [
           {
-            "LobbyBearer": []
+            "PlayerToken": []
           }
         ],
         "summary": "Get an upload token for uploading a bot package from the command line",
@@ -2443,7 +2443,7 @@
     },
     "/game/lobbies/{lobby_id}/bot-packages/{package_id}": {
       "delete": {
-        "description": "Requires an active membership of the Island Battles lobby, in any phase; anyone else gets 404. Deletes the package and its zip. Only the member who uploaded it can: anyone else gets 403. A package that the lobby doesn't have is 404. A server without storage for packages answers 503.",
+        "description": "Requires an active membership of the Island Battles lobby, in any phase, with your player token (PlayerToken); anyone else gets 404. Deletes the package and its zip. Only the member who uploaded it can: anyone else gets 403. A package that the lobby doesn't have is 404. A server without storage for packages answers 503.",
         "operationId": "deleteIslandBotPackage",
         "parameters": [
           {
@@ -2489,7 +2489,7 @@
         },
         "security": [
           {
-            "LobbyBearer": []
+            "PlayerToken": []
           }
         ],
         "summary": "Delete your bot package from a lobby",
@@ -2500,7 +2500,7 @@
     },
     "/game/lobbies/{lobby_id}/bot-packages/{package_id}/complete": {
       "post": {
-        "description": "Requires an active membership of the Island Battles lobby, in any phase, with your session or an upload token for this lobby (Authorization: Bearer ibut1.…); anyone else gets 404, and a token for another lobby, or an expired one, 401. Only the member who started the upload can complete it; for anyone else the package is 404. It reads the zip's central directory and island-battles-bot.json with range requests, without downloading the zip, and checks that: the manifest is format 1, either python with python \"3.14\" and a module:function entry, or native with a command whose program is a file in the zip; the files come to at most 1 GiB (1,073,741,824 bytes) unpacked; and no path leaves the package (.., absolute paths or symbolic links). A package that fails a check is 422 with a detail that says what is wrong, and is deleted with its zip: start another upload. Before the zip is uploaded this is 409, and nothing changes. A valid package is the member's package in the lobby from then on, and every member sees it in GET /game/lobbies/{lobby_id}/bot-packages. A member has one package per lobby: completing a new one deletes their previous one. Completing it again returns it. A server without storage for packages answers 503.",
+        "description": "Requires an active membership of the Island Battles lobby, in any phase, with your player token (PlayerToken) or an upload token for this lobby (Authorization: Bearer ibut1.…); anyone else gets 404, and an upload token for another lobby, or an expired one, 401. Only the member who started the upload can complete it; for anyone else the package is 404. It reads the zip's central directory and island-battles-bot.json with range requests, without downloading the zip, and checks that: the manifest is format 1, either python with python \"3.14\" and a module:function entry, or native with a command whose program is a file in the zip; the files come to at most 1 GiB (1,073,741,824 bytes) unpacked; and no path leaves the package (.., absolute paths or symbolic links). A package that fails a check is 422 with a detail that says what is wrong, and is deleted with its zip: start another upload. Before the zip is uploaded this is 409, and nothing changes. A valid package is the member's package in the lobby from then on, and every member sees it in GET /game/lobbies/{lobby_id}/bot-packages. A member has one package per lobby: completing a new one deletes their previous one. Completing it again returns it. A server without storage for packages answers 503.",
         "operationId": "completeIslandBotPackageUpload",
         "parameters": [
           {
@@ -2553,7 +2553,7 @@
         },
         "security": [
           {
-            "LobbyBearer": []
+            "PlayerToken": []
           },
           {
             "UploadToken": []

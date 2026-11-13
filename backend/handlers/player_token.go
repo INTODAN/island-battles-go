@@ -44,10 +44,15 @@ func (tokens PlayerTokens) AuthenticatePlayer(ctx context.Context, authorization
 // 401 for a missing, expired or invalid token, and 503 when the lobby's keys
 // can't be read, whose cause goes on the request's error line.
 func (handler *LobbyGame) authenticate(ctx context.Context, authorization string) (domain.Principal, error) {
-	if handler.Players == nil {
+	return authenticatePlayer(ctx, handler.Players, authorization)
+}
+
+// authenticatePlayer is authenticate for any game route.
+func authenticatePlayer(ctx context.Context, players PlayerAuthenticator, authorization string) (domain.Principal, error) {
+	if players == nil {
 		return domain.Principal{}, huma.Error401Unauthorized("authentication required")
 	}
-	principal, err := handler.Players.AuthenticatePlayer(ctx, authorization)
+	principal, err := players.AuthenticatePlayer(ctx, authorization)
 	if errors.Is(err, playertoken.ErrInvalid) {
 		return domain.Principal{}, huma.Error401Unauthorized("authentication required")
 	}

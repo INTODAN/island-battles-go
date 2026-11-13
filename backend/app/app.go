@@ -193,7 +193,7 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	}
 	routes.SetupLobbyRoutes(api, lobbyService, authenticated, playerTokens, gameBinding, lobbyRetention, &handlers.LobbyGame{Database: database, Players: handlers.PlayerTokens{Verifier: playerVerifier}, Publisher: publisher, Retention: gameRetention, Watchers: lobbyService,
 		SubmitTokens: submitTokens, PublicURL: config.PublicURL})
-	routes.SetupBotPackageRoutes(api, &handlers.BotPackages{Authenticator: authenticated, Service: services.BotPackages{
+	routes.SetupBotPackageRoutes(api, &handlers.BotPackages{Players: handlers.PlayerTokens{Verifier: playerVerifier}, Service: services.BotPackages{
 		Database: database, Lobbies: lobbyService, GameKey: lobbyadapter.GameKey, Store: packages, Tokens: uploadTokens}})
 	if config.BotPackagesBucket == "" && selected.localPackagesHandler != nil {
 		router.Handle(selected.localPackagesPrefix+"/*", selected.localPackagesHandler)

@@ -18,7 +18,7 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	expires := time.Unix(2_000_000_000, 0)
-	claims := Claims{LobbyID: "lobby", PlayerID: "player", SessionID: "session", Expires: expires}
+	claims := Claims{LobbyID: "lobby", PlayerID: "player", Expires: expires}
 	token, err := signer.Issue(claims)
 	if err != nil {
 		t.Fatal(err)
@@ -27,7 +27,7 @@ func TestRoundTrip(t *testing.T) {
 		t.Fatalf("token %q is not ibut1.<base64url>.<base64url>", token)
 	}
 	payload, _ := base64.RawURLEncoding.DecodeString(strings.Split(token, ".")[1])
-	if string(payload) != `{"lobby_id":"lobby","player_id":"player","session_id":"session","exp":2000000000}` {
+	if string(payload) != `{"lobby_id":"lobby","player_id":"player","exp":2000000000}` {
 		t.Fatalf("payload %s", payload)
 	}
 	verified, err := signer.Verify(token, expires.Add(-time.Second))
@@ -40,12 +40,12 @@ func TestRefusals(t *testing.T) {
 	signer, _ := New([]byte("secret"))
 	other, _ := New([]byte("another secret"))
 	now := time.Unix(1_000, 0)
-	claims := Claims{LobbyID: "l", PlayerID: "p", SessionID: "s", Expires: now.Add(time.Minute)}
+	claims := Claims{LobbyID: "l", PlayerID: "p", Expires: now.Add(time.Minute)}
 	token, _ := signer.Issue(claims)
 	parts := strings.Split(token, ".")
-	forged := base64.RawURLEncoding.EncodeToString([]byte(`{"lobby_id":"other","player_id":"p","session_id":"s","exp":9999999999}`))
+	forged := base64.RawURLEncoding.EncodeToString([]byte(`{"lobby_id":"other","player_id":"p","exp":9999999999}`))
 	otherToken, _ := other.Issue(claims)
-	empty, _ := signer.Issue(Claims{LobbyID: "l", SessionID: "s", Expires: now.Add(time.Minute)})
+	empty, _ := signer.Issue(Claims{LobbyID: "l", Expires: now.Add(time.Minute)})
 	// A MAC over the payload alone, as a submit token's is, isn't an upload
 	// token's.
 	unprefixed := hmac.New(sha256.New, []byte("secret"))
@@ -92,7 +92,7 @@ func TestASubmitTokenWithTheSameSecretIsNotAnUploadToken(t *testing.T) {
 	if _, err := upload.Verify(Prefix+strings.TrimPrefix(token, submittoken.Prefix), now); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("a submit token with the upload prefix verified: %v", err)
 	}
-	uploadToken, _ := upload.Issue(Claims{LobbyID: "l", PlayerID: "p", SessionID: "s", Expires: now.Add(time.Minute)})
+	uploadToken, _ := upload.Issue(Claims{LobbyID: "l", PlayerID: "p", Expires: now.Add(time.Minute)})
 	if _, err := submit.Verify(submittoken.Prefix+strings.TrimPrefix(uploadToken, Prefix), now); !errors.Is(err, submittoken.ErrInvalid) {
 		t.Fatalf("an upload token verified as a submit token: %v", err)
 	}

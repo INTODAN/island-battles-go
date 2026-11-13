@@ -14,6 +14,7 @@ import pytest
 from integration.test_live import BASE, create
 from integration.test_live import guests as guests_fixture
 from lobby_client import Scope
+from test_lobby_binding import game_auth
 
 guests = guests_fixture
 pytestmark = pytest.mark.asyncio
@@ -45,7 +46,7 @@ async def command(*arguments: str, cwd: Path) -> tuple[int, str, str]:
 
 async def upload_token(http: httpx.AsyncClient, player, lobby_id: str) -> str:
     response = await http.post(f"/game/lobbies/{lobby_id}/bot-packages/upload-token",
-                               headers={"Authorization": f"Bearer {player.credential}"})
+                               headers=await game_auth(player))
     assert response.status_code == 200, response.text
     return response.json()["token"]
 
@@ -84,11 +85,15 @@ async def test_members_upload_from_both_command_lines_and_everyone_sees_them(gue
 
         for player in (alice, bob):
             response = await http.get(f"/game/lobbies/{scope.lobby_id}/bot-packages",
-                                      headers={"Authorization": f"Bearer {player.credential}"})
+                                      headers=await game_auth(player))
             assert response.status_code == 200, response.text
             listed = response.json()["packages"]
             assert [(item["owner_name"], item["language"], item["entry_or_command"]) for item in listed] == [
                 ("Bob", "native", "./bot worker"), ("Alice", "python", "bot:play")]
         response = await http.get(f"/game/lobbies/{scope.lobby_id}/bot-packages",
-                                  headers={"Authorization": f"Bearer {stranger.credential}"})
+                                  headers=await game_auth(stranger))
         assert response.status_code == 404
+        # The game's routes take player tokens, not the guest credential.
+        response = await http.get(f"/game/lobbies/{scope.lobby_id}/bot-packages",
+                                  headers={"Authorization": f"Bearer {alice.credential}"})
+        assert response.status_code == 401
