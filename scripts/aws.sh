@@ -219,7 +219,7 @@ migrate_database() {
     exit 1
   fi
   echo "Migrating the lobby's database..."
-  (cd "$repository_root" && LOBBY_DATABASE_URL="$lobby_database_url" go run ./lobby/cmd/migrate)
+  (cd "$repository_root" && LOBBY_DATABASE_URL="$lobby_database_url" go run github.com/INTODAN/mpl/cmd/migrate)
   echo "Migrating the backend's database..."
   (cd "$repository_root" && ISLAND_BATTLES_DATABASE_URL="$database_url" LOBBY_DATABASE_URL="$lobby_database_url" go run ./backend/cmd/migrate)
 }

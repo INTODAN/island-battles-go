@@ -26,18 +26,18 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # go.mod names the version. The host, lobby and Go SDK modules each
-      # have a go.sum, so the module cache is keyed on all three.
+      # go.mod names the version. The host and Go SDK modules each have a
+      # go.sum, so the module cache is keyed on both. The lobby is a module
+      # dependency, github.com/INTODAN/mpl, at the version go.mod pins.
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache-dependency-path: |
             go.sum
-            lobby/go.sum
             clients/island-battles-go/go.sum
 
       - name: go vet
-        run: go vet ./... ./lobby/... ./clients/island-battles-go/...
+        run: go vet ./... ./clients/island-battles-go/...
 
       # Installs the binary only. The next step runs the README's command.
       # Keep this version in step with the one the README names.
@@ -47,16 +47,16 @@ jobs:
           install-only: true
 
       - name: golangci-lint
-        run: golangci-lint run --timeout=5m ./... ./lobby/... ./clients/island-battles-go/...
+        run: golangci-lint run --timeout=5m ./... ./clients/island-battles-go/...
 
       # `go fmt` rewrites files and doesn't read go.work. gofmt -l lists the
-      # files that need formatting, from all three modules, and the step fails if
+      # files that need formatting, from both modules, and the step fails if
       # there are any.
       - name: gofmt
         run: |
           unformatted="$(gofmt -l .)"
           if [ -n "$unformatted" ]; then
-            echo "These files need gofmt (run: go fmt ./... && go -C lobby fmt ./... && go -C clients/island-battles-go fmt ./...):"
+            echo "These files need gofmt (run: go fmt ./... && go -C clients/island-battles-go fmt ./...):"
             echo "$unformatted"
             exit 1
           fi
@@ -64,7 +64,7 @@ jobs:
       # The database tests start disposable PostgreSQL containers through
       # Testcontainers, with the Docker that the runner has.
       - name: go test
-        run: go test ./... ./lobby/... ./clients/island-battles-go/...
+        run: go test ./... ./clients/island-battles-go/...
 
   api-contract:
     name: API contract
@@ -76,17 +76,17 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache-dependency-path: |
-            go.sum
-            lobby/go.sum
+          cache-dependency-path: go.sum
 
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
           cache-dependency-glob: clients/island-battles-python/tools/uv.lock
 
-      - name: Lobby OpenAPI document and event schema are current
-        run: go run ./lobby/cmd/export-lobby-openapi --output lobby/api/openapi.json --events-output lobby/api/events.json --game-api-output lobby/api/game-api.openapi.json --check
+      # The lobby's documents in api/lobby/ are copies from the lobby module
+      # that go.mod pins, which the lobby's own CI checks against its code.
+      - name: Lobby API documents match the pinned lobby module
+        run: scripts/sync-lobby-api.sh --check
 
       - name: Player OpenAPI document is current
         run: go run ./backend/cmd/export-openapi --output backend/api/openapi.json --check
@@ -106,13 +106,9 @@ jobs:
         with:
           enable-cache: true
           cache-dependency-glob: |
-            lobby/clients/lobby-python/uv.lock
             clients/conformance/uv.lock
             clients/island-battles-python/uv.lock
             templates/python-bot/uv.lock
-
-      - name: Lobby client unit tests
-        run: uv run --project lobby/clients/lobby-python --locked pytest lobby/clients/lobby-python/tests
 
       - name: Gameplay client bot tests
         run: uv run --project clients/island-battles-python --locked pytest clients/island-battles-python/tests
@@ -132,7 +128,6 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: |
             go.sum
-            lobby/go.sum
             clients/island-battles-go/go.sum
 
       # Built first: the suite gives an adapter 20 seconds to answer, and
@@ -176,7 +171,7 @@ jobs:
 
       # The pages are plain modules with no package.json and no dependencies.
       - name: node --test
-        run: node --test backend/demo/*.test.mjs backend/demoviewer/*.test.mjs backend/mapbuilder/*.test.mjs lobby/frontend/*.test.mjs
+        run: node --test backend/demo/*.test.mjs backend/demoviewer/*.test.mjs backend/mapbuilder/*.test.mjs
 
   deploy:
     name: Deploy

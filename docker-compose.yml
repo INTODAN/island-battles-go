@@ -25,7 +25,9 @@ services:
     image: centrifugo/centrifugo:v6.9.6
     restart: unless-stopped
     volumes:
-      - ./lobby/centrifugo:/centrifugo:ro,Z
+      # The lobby's configuration, which scripts/dev.sh copies here from the
+      # lobby module that go.mod pins (github.com/INTODAN/mpl).
+      - ./.lobby-centrifugo:/centrifugo:ro,Z
     command: centrifugo -c /centrifugo/centrifugo-config.toml
     ports:
       - "8000:8000"

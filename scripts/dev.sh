@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Start local dependencies, then run the lobby and the backend as separate
 # processes on separate origins, as in production: the lobby
-# (lobby/cmd/lobby) on :8890, and the backend on ISLAND_BATTLES_HTTP_ADDR,
+# (cmd/lobby of github.com/INTODAN/mpl, the version go.mod pins) on :8890, and the backend on ISLAND_BATTLES_HTTP_ADDR,
 # which reaches the lobby at ISLAND_BATTLES_LOBBY_URL. The lobby page,
 # http://localhost:8890/lobby/ui/, loads Island Battles' screens from the
 # backend; the 3D client's dev server (clients/island-battles-web: bun run
@@ -33,6 +33,14 @@ if [[ "$LOBBY_DATABASE_URL" == "$ISLAND_BATTLES_DATABASE_URL" ]]; then
   echo "Your .env's LOBBY_DATABASE_URL names the backend's database, but the lobby has its own now. Copy LOBBY_DATABASE_URL from .env.example." >&2
   exit 1
 fi
+
+# Centrifugo is the lobby's, and so is its configuration: copy it from the
+# lobby module that go.mod pins, whose module cache is read-only, to the
+# directory that Compose and Podman mount (ignored by git).
+lobby_module_dir="$(scripts/lobby-module.sh)"
+mkdir -p .lobby-centrifugo
+cp "$lobby_module_dir/centrifugo/centrifugo-config.toml" .lobby-centrifugo/centrifugo-config.toml
+chmod u+w .lobby-centrifugo/centrifugo-config.toml
 
 if command -v docker >/dev/null && docker compose version >/dev/null 2>&1; then
   docker compose up -d --wait db centrifugo
@@ -75,7 +83,7 @@ elif command -v podman >/dev/null && [[ "$(uname -s)" == Linux ]]; then
   fi
   podman run -d --name island-battles-dev-centrifugo \
     --network host --add-host host.docker.internal:127.0.0.1 \
-    -v "$repository_root/lobby/centrifugo:/centrifugo:ro,Z" \
+    -v "$repository_root/.lobby-centrifugo:/centrifugo:ro,Z" \
     -e CENTRIFUGO_CLIENT_TOKEN_HMAC_SECRET_KEY="$LOBBY_CONNECTION_TOKEN_HMAC_SECRET" \
     -e CENTRIFUGO_HTTP_API_KEY="$LOBBY_CENTRIFUGO_API_KEY" \
     -e CENTRIFUGO_VAR_LOBBY_PROXY_SECRET="$LOBBY_PROXY_SECRET" \
@@ -90,7 +98,7 @@ fi
 # The backend only connects, so bring both schemas up to date first, as a
 # deploy does: the lobby's database, then the backend's, which drops the
 # lobby's tables that older builds left there.
-go run ./lobby/cmd/migrate
+go run github.com/INTODAN/mpl/cmd/migrate
 go run ./backend/cmd/migrate
 
 # The lobby calls Island Battles' hooks on the backend's port, and its page
@@ -100,7 +108,7 @@ backend_origin="http://localhost:${ISLAND_BATTLES_HTTP_ADDR##*:}"
 LOBBY_GAMES="$(go run ./backend/cmd/lobby-games "$backend_origin")"
 export LOBBY_GAMES
 
-go build -o "${TMPDIR:-/tmp}/island-battles-dev-lobby" ./lobby/cmd/lobby
+go build -o "${TMPDIR:-/tmp}/island-battles-dev-lobby" github.com/INTODAN/mpl/cmd/lobby
 "${TMPDIR:-/tmp}/island-battles-dev-lobby" &
 lobby_pid=$!
 trap 'kill "$lobby_pid" 2>/dev/null || true' EXIT

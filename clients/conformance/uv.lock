@@ -293,7 +293,7 @@ dev = [
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.12,<4" },
     { name = "httpx", specifier = ">=0.27,<1" },
-    { name = "mpl-lobby-client", editable = "../../lobby/clients/lobby-python" },
+    { name = "mpl-lobby-client", git = "https://github.com/INTODAN/mpl?subdirectory=clients%2Flobby-python&rev=1892a86d801ed42e8f41988cf40196152a6cdfb9" },
     { name = "pytest", specifier = ">=8.0,<9" },
     { name = "pytest-asyncio", specifier = ">=0.24,<1" },
 ]
@@ -304,24 +304,11 @@ dev = [{ name = "ruff", specifier = ">=0.16.9" }]
 [[package]]
 name = "mpl-lobby-client"
 version = "0.0.0.dev0"
-source = { editable = "../../lobby/clients/lobby-python" }
+source = { git = "https://github.com/INTODAN/mpl?subdirectory=clients%2Flobby-python&rev=1892a86d801ed42e8f41988cf40196152a6cdfb9#1892a86d801ed42e8f41988cf40196152a6cdfb9" }
 dependencies = [
     { name = "attrs" },
     { name = "centrifuge-python" },
     { name = "httpx" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "attrs", specifier = ">=22.2.0" },
-    { name = "centrifuge-python", specifier = "==0.6.0" },
-    { name = "httpx", specifier = ">=0.27,<1" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=8.0,<9" },
-    { name = "pytest-asyncio", specifier = ">=0.24,<1" },
 ]
 
 [[package]]

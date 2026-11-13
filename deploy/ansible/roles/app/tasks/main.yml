@@ -188,7 +188,7 @@
 # vm.<domain> may still point at another VM, such as during a move.
 - name: Bring the lobby's schema up to date
   ansible.builtin.command:
-    argv: [go, run, ./lobby/cmd/migrate]
+    argv: [go, run, github.com/INTODAN/mpl/cmd/migrate]
     chdir: "{{ app_repository_root }}"
   environment:
     LOBBY_DATABASE_URL: >-

@@ -26,6 +26,10 @@ go.work.sum
 # env file
 .env
 
+# The lobby's Centrifugo configuration, which scripts/dev.sh copies from the
+# lobby module
+.lobby-centrifugo/
+
 # Editor/IDE
 .idea/
 # .vscode/

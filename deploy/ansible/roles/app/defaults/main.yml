@@ -13,8 +13,8 @@ app_centrifugo_published_port: 443
 # (#75), so Centrifugo accepts connections from its origin only. Centrifugo
 # calls the subscribe and sub-refresh proxy endpoints on the Lambda Function
 # URL directly. A proxy call can push with a retry (about 1.2 s, see
-# lobby/centrifugo/centrifugo-config.toml), and on Lambda it can also wait for
-# a cold start and a new TLS connection to Postgres.
+# centrifugo/centrifugo-config.toml in github.com/INTODAN/mpl), and on Lambda
+# it can also wait for a cold start and a new TLS connection to Postgres.
 app_game_origin: "{{ game_url | regex_replace('/+$', '') }}"
 # The desktop app (Tauri, #105) runs at tauri://localhost on macOS and Linux and
 # at http://tauri.localhost on Windows. Its HTTP calls go through Tauri's HTTP
