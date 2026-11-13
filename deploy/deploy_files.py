@@ -22,11 +22,19 @@ pushed, so a sync can tell which side changed a file:
 Nothing is ever deleted from the bucket. Its versioning keeps every earlier
 copy.
 
+INTODAN/mpl, the lobby's repository, shares the bucket under `mpl/` and takes
+the VM over (deploy/README.md, "The VM belongs to INTODAN/mpl"). From then on
+its marker `mpl/vm-owner` names it, and this repository's VM deploy refuses
+to run: `vm-owner` prints the owner the marker names, if any, and
+`check-vm-owner` fails with the reason unless ISLAND_BATTLES_OVERRIDE_VM_OWNER
+names that owner too.
+
 Usage, from the repository root:
 
     python3 -I deploy/deploy_files.py bootstrap --region <region>
     python3 -I deploy/deploy_files.py status|pull|push [--force]
     python3 -I deploy/deploy_files.py bucket|has-state|require-secrets
+    python3 -I deploy/deploy_files.py vm-owner|check-vm-owner
 
 The bucket is `island-battles-deploy-<account ID>`, in the account of the
 current AWS credentials, unless ISLAND_BATTLES_DEPLOY_BUCKET names another.
@@ -36,6 +44,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -55,6 +64,12 @@ BUCKET_ENVIRONMENT_VARIABLE = "ISLAND_BATTLES_DEPLOY_BUCKET"
 # Noncurrent copies are kept for 90 days, and the last 10 of each file always.
 NONCURRENT_DAYS = 90
 NONCURRENT_KEPT = 10
+# INTODAN/mpl writes this when it takes the VM over (#256). Its content names
+# the repository whose Ansible owns the VM's Compose project from then on.
+VM_OWNER_KEY = "mpl/vm-owner"
+VM_OWNER_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
+VM_OWNER_REPOSITORIES = {"mpl": "INTODAN/mpl"}
+VM_OWNER_OVERRIDE_VARIABLE = "ISLAND_BATTLES_OVERRIDE_VM_OWNER"
 
 
 class AwsError(Exception):
@@ -107,6 +122,16 @@ class S3Store:
     def has_state(self):
         listing = aws_json("s3api", "list-objects-v2", "--bucket", self.bucket, "--prefix", STATE_KEY)
         return any(item["Key"] == STATE_KEY for item in listing.get("Contents", []))
+
+    def vm_owner_marker(self):
+        """Return the VM owner marker's content, or None when the bucket has none."""
+        listing = aws_json("s3api", "list-objects-v2", "--bucket", self.bucket, "--prefix", VM_OWNER_KEY)
+        if not any(item["Key"] == VM_OWNER_KEY for item in listing.get("Contents", [])):
+            return None
+        with tempfile.TemporaryDirectory() as directory:
+            destination = pathlib.Path(directory) / "vm-owner"
+            aws_json("s3api", "get-object", "--bucket", self.bucket, "--key", VM_OWNER_KEY, str(destination))
+            return destination.read_bytes()[:256].decode("utf-8", errors="replace")
 
 
 def aws(*arguments):
@@ -281,6 +306,40 @@ def require_secrets(store, bucket):
     return not store.has_state()
 
 
+def vm_owner(store, bucket):
+    """Return the repository that owns the VM by the bucket's marker, or None for this one.
+
+    A marker that names no owner stops the deploy instead of being ignored.
+    """
+    content = store.vm_owner_marker()
+    if content is None:
+        return None
+    owner = content.strip()
+    if not VM_OWNER_PATTERN.fullmatch(owner):
+        raise AwsError(f"s3://{bucket}/{VM_OWNER_KEY} exists, so another repository owns the VM, but it names "
+                       "none: it should hold a name such as `mpl`. Fix the marker, or delete it only if this "
+                       "repository deploys the VM again.")
+    return owner
+
+
+def vm_owner_refusal(owner, bucket, override=None):
+    """Return why this repository mustn't deploy the VM, or None when it may.
+
+    override is ISLAND_BATTLES_OVERRIDE_VM_OWNER: naming the owner deploys
+    anyway, for an emergency.
+    """
+    if owner is None or override == owner:
+        return None
+    repository = VM_OWNER_REPOSITORIES.get(owner, f"the repository `{owner}`")
+    return (f"The VM is deployed from {repository} now, so this repository's VM deploy stops here and changes "
+            f"nothing. s3://{bucket}/{VM_OWNER_KEY} says `{owner}`: {repository} took the VM over, and its Ansible "
+            "owns the VM's Compose project, Postgres's pg_hba.conf and Centrifugo's configuration. This "
+            "repository's playbooks would write their own templates over them. Deploy the VM from "
+            f"{repository} instead, with its Deploy workflow's vm target. Only in an emergency, set "
+            f"{VM_OWNER_OVERRIDE_VARIABLE}={owner} to deploy anyway, then run {repository}'s VM deploy again "
+            "(deploy/README.md, \"The VM belongs to INTODAN/mpl\").")
+
+
 def bootstrap(bucket, region):
     """Create the deploy bucket, or bring an existing one's settings up to date."""
     location = [] if region == "us-east-1" else ["--create-bucket-configuration", f"LocationConstraint={region}"]
@@ -332,16 +391,21 @@ def bootstrap(bucket, region):
 
 
 def main(arguments):
-    commands = ("bootstrap", "status", "pull", "push", "bucket", "has-state", "require-secrets")
+    commands = ("bootstrap", "status", "pull", "push", "bucket", "has-state", "require-secrets", "vm-owner",
+                "check-vm-owner")
     if not arguments or arguments[0] not in commands:
         print(f"Usage: deploy_files.py {'|'.join(commands)} [--force] [--region <region>]", file=sys.stderr)
         return 2
     command, options = arguments[0], arguments[1:]
     force = "--force" in options
 
-    # stdout is only for `bucket` and `has-state`, which scripts/aws.sh reads.
+    # stdout is only for `bucket` and `has-state`, which scripts/aws.sh reads,
+    # and `vm-owner`, which the release workflow reads.
     def log(message):
         print(message, file=sys.stderr)
+
+    # In a GitHub Actions run, an error also shows as an annotation.
+    annotate = "::error::" if os.environ.get("GITHUB_ACTIONS") == "true" else ""
 
     try:
         bucket = bucket_name()
@@ -366,13 +430,26 @@ def main(arguments):
             log(f"s3://{bucket} has the deployment's Terraform state but no secrets. Push deploy/local/ "
                 "from the machine that has them (scripts/deploy-files.sh push) before deploying the VM.")
             return 1
+        if command == "vm-owner":
+            print(vm_owner(store, bucket) or "")
+            return 0
+        if command == "check-vm-owner":
+            owner = vm_owner(store, bucket)
+            refusal = vm_owner_refusal(owner, bucket, os.environ.get(VM_OWNER_OVERRIDE_VARIABLE) or None)
+            if refusal:
+                log(annotate + refusal)
+                return 1
+            if owner is not None:
+                log(f"{VM_OWNER_OVERRIDE_VARIABLE}={owner}: deploying the VM although s3://{bucket}/{VM_OWNER_KEY} "
+                    f"says {owner} owns it. Run {owner}'s VM deploy again afterwards.")
+            return 0
         if command == "status":
             status(store, LOCAL_DIRECTORY, bucket, log)
             return 0
         sync = pull if command == "pull" else push
         conflicts = sync(store, LOCAL_DIRECTORY, bucket, force, log)
     except AwsError as error:
-        log(f"The deploy bucket: {error}")
+        log(f"{annotate}The deploy bucket: {error}")
         return 1
     if conflicts:
         log(conflict_message(conflicts, bucket))

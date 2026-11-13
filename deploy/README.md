@@ -182,6 +182,7 @@ It holds:
 
 - `terraform/`: Terraform's state and its lock.
 - `files/`: a copy of `deploy/local/`: `aws.tfvars`, `vm.yml`, `secrets/`, `lambda.env` and `smoke-session.json`, and any other file there, except `terraform/` (plans and an old local state), `lambda/` (the build) and `dumps/`.
+- `mpl/`: INTODAN/mpl's own part, which this repository only reads: `mpl/vm-owner` ([The VM belongs to INTODAN/mpl](#the-vm-belongs-to-intodanmpl)).
 
 `scripts/aws.sh apply` and `deploy`, and every `scripts/vm.sh` command, **pull** the files first and **push** them back when they end, even after a failure, so new secrets and a new `lambda.env` never stay on one machine. A new machine or worktree needs nothing but the AWS credentials. To change a setting, edit it in `deploy/local/` and run a script, or `scripts/deploy-files.sh push`.
 
@@ -352,6 +353,8 @@ scripts/vm.sh deploy <static IP> -e app_pull=always   # also pull newer image pa
 
 A Centrifugo restart drops every WebSocket connection together with its in-memory history. Clients reconnect on their own and re-read their state over HTTP.
 
+Once INTODAN/mpl has taken the VM over, this command refuses: [The VM belongs to INTODAN/mpl](#the-vm-belongs-to-intodanmpl).
+
 ### The backend
 
 Run `scripts/aws.sh deploy` from the commit you want to publish. See [Deploying the backend](#deploying-the-backend).
@@ -363,6 +366,28 @@ Change `deploy/local/aws.tfvars` or `deploy/terraform/`, then run `scripts/aws.s
 - **Read the plan.** Changing an instance's zone, image or plan replaces it, and replacing an instance deletes its disk, and with it everything since the last [backup](#backups). Add a new instance and [move to it](#moving-to-a-new-vm) instead.
 - **Destroying needs the name.** When the plan deletes or replaces an instance, the static IP, a disk or the distribution, the apply lists them and asks you to type each one's name before the usual `yes`. For the distribution, that's its domain, `<id>.cloudfront.net`: a new distribution gets a new one, and the `island-battles` CNAME must follow it. A wrong answer applies nothing. If you didn't mean to destroy it, `aws.tfvars` probably doesn't match the instances that run. Without a terminal, list the names in `ISLAND_BATTLES_ALLOW_DESTROY`, separated by commas.
 - **It may publish the backend too.** When the plan changes the function, the apply first runs the migrations and then publishes the backend built from your checkout, so run it from the commit you last deployed or a newer one. A plan that leaves the function alone, such as moving the static IP, runs no migrations: in the middle of a move, the old VM refuses the backend.
+
+## The VM belongs to INTODAN/mpl
+
+The lobby's repository, [`INTODAN/mpl`](https://github.com/INTODAN/mpl), takes the VM over (#231): from the first `vm` run of its own Deploy workflow, step 8 of its runbook ([its `deploy/README.md`](https://github.com/INTODAN/mpl/blob/main/deploy/README.md#taking-over-a-running-vm)), its Ansible owns the VM's Compose project, Postgres with the `lobby` and tenant databases, `pg_hba.conf` and Centrifugo's configuration. From then on until the cutover (#232), this repository's VM deploy must not run: its playbooks would write this repository's templates over `mpl`'s.
+
+**The marker.** `s3://<deploy bucket>/mpl/vm-owner`, in the deploy bucket that both repositories share, holds `mpl` once `mpl` has taken the VM over. `mpl`'s VM deploy is to write it at the takeover, before it changes anything on the VM ([INTODAN/mpl#4](https://github.com/INTODAN/mpl/issues/4)). Until it does, write it by hand, with administrator credentials, right before `mpl`'s first `vm` run:
+
+```sh
+printf 'mpl\n' | aws s3 cp - "s3://$(python3 -I deploy/deploy_files.py bucket | cut -d' ' -f1)/mpl/vm-owner"
+python3 -I deploy/deploy_files.py vm-owner   # prints mpl
+```
+
+While the marker is there:
+
+- **`scripts/vm.sh deploy` refuses** before it touches the VM, and says why: the VM is deployed from `INTODAN/mpl` now.
+- **The Deploy workflow's `vm` target** fails at its start with the same message, `release_tag` or not.
+- **A release leaves the VM alone.** Its `vm_owner` job reads the marker with the deploy role; the plan then doesn't deploy the VM, shows why in the run's summary and as a notice, and doesn't make the bump major because the VM's inputs changed ([Releasing](#releasing)). The rest of the release runs as usual, and its notes say the VM is deployed from `INTODAN/mpl`.
+- **A marker that names no owner** (empty, or not a plain name such as `mpl`) stops all three too: fix it rather than delete it.
+
+**The override, for an emergency only:** `ISLAND_BATTLES_OVERRIDE_VM_OWNER=mpl scripts/vm.sh deploy <static IP>`, from a person's machine. The variable must name the owner the marker names; any other value refuses as before. It writes this repository's configuration over `mpl`'s, so run `mpl`'s `vm` target right after. The workflows have no override.
+
+`dump`, `restore`, `move-data` and `smoke` aren't checked: they don't write the VM's configuration. After the takeover, take dumps and move the VM with `mpl`'s scripts, as its runbook describes. Its GitHub roles, `mpl-github-deploy` and `mpl-github-apply`, may read the account through `ReadOnlyAccess`, so the [backups](#backups) bucket's policy keeps the dumps from them as well (`backup_denied_roles`).
 
 ## Switching the lobby to its own database
 
@@ -402,7 +427,7 @@ The Deploy workflow, `.github/workflows/deploy.yml`, runs the same scripts on a 
 | Target | Runs | Role |
 |---|---|---|
 | `backend` | `scripts/aws.sh deploy` | deploy |
-| `vm` | `scripts/vm.sh deploy "$(scripts/aws.sh output static_ip)"`, with Go for the lobby's migrations | deploy |
+| `vm` | `scripts/vm.sh deploy "$(scripts/aws.sh output static_ip)"`, with Go for the lobby's migrations; fails at once after INTODAN/mpl's takeover ([The VM belongs to INTODAN/mpl](#the-vm-belongs-to-intodanmpl)) | deploy |
 | `web` | `scripts/deploy-web-client.sh`: builds the 3D web client and publishes it at `/play/` ([The web client](#the-web-client)) | deploy |
 | `smoke` | `scripts/vm.sh smoke` | deploy |
 | `plan` | `scripts/aws.sh plan`: plans every AWS resource, like `scripts/aws.sh apply`, and saves the plan | deploy |
@@ -420,7 +445,7 @@ The Deploy workflow, `.github/workflows/deploy.yml`, runs the same scripts on a 
 
 - **Deploy role**, `island-battles-github-deploy` (`deploy/terraform/github.tf`): reads the account (`ReadOnlyAccess`), which every plan needs, and writes only what a deploy writes: the backend function's code and settings, the [bot runners'](#bot-runners) code, the deploy bucket's state, files and plans, the web client's files under `play/` in its bucket (it may put them, and list the bucket), invalidations of the game's distribution, and a temporary SSH key for the VM. In the deploy bucket it deletes nothing but the state's lock.
 - **Apply role**, `island-battles-github-apply` (`deploy/github_apply_role.py`): reads the account, and changes what `deploy/terraform/` manages: Lightsail, Lambda, CloudWatch logs and alarms, SNS, Budgets, ACM and CloudFront, buckets named `island-battles-*`, and IAM roles and users named `island-battles-*`. It can't change its own role. Because it can write IAM policies for `island-battles-*` roles, treat it as close to an administrator of the account: reviewing what merges to `main` is the control. It isn't part of the Terraform configuration, so an apply can't widen it.
-- Neither role can read the [backups](#backups). GitHub stores no AWS keys: each run gets credentials for an hour.
+- Neither role can read the [backups](#backups), nor can INTODAN/mpl's two. GitHub stores no AWS keys: each run gets credentials for an hour.
 
 **Deploying from an agent:** an agent in the cloud has no AWS credentials of its own. Once you've merged its pull request, it starts a `plan` run on `main`, reads the plan from the run's log and tells you what it changes. When you say so, it starts the `apply` run for that plan, then any `vm`, `backend` or `smoke` runs the change needs, and checks the result.
 
@@ -460,13 +485,15 @@ Or use the **Actions** tab, **Release**, **Run workflow** on `main`.
 **What it does,** in order. A failure anywhere stops the rest and leaves no tag and no release:
 
 1. **Checks** the commit with the same checks as a pull request (`checks.yml`).
-2. **Plans** the version. The previous release is the highest `vX.Y.Z` tag. The first release, with no tag yet, is `v0.1.0`, whatever `bump` says. The run's summary shows the version, the previous release and why the VM is or isn't deployed.
+2. **Plans** the version. The previous release is the highest `vX.Y.Z` tag. The first release, with no tag yet, is `v0.1.0`, whatever `bump` says. The run's summary shows the version, the previous release and why the VM is or isn't deployed. Beside the checks, the `vm_owner` job reads the deploy bucket's [VM owner marker](#the-vm-belongs-to-intodanmpl) with the deploy role.
 3. **Deploys the VM** when the plan says so, then **the backend**, then **the web client** (`web` target, below), then runs the **smoke test**, each one a call of the Deploy workflow, one at a time. The backend is built with the version, and the smoke test fails unless `/healthz` reports it. The web client is built from the same commit and uploaded to `/play/`, so the backend and the client that talks to it go live together; the smoke test then fails unless `/play/` returns 200 and loads the script that was just uploaded.
 4. **Releases:** creates the annotated tags `vX.Y.Z` and `clients/island-battles-go/vX.Y.Z` on the deployed commit, and a GitHub release with generated notes that say whether the VM was redeployed. Releases up to `v0.2.0` also tagged `lobby/vX.Y.Z` for the lobby module, which now has its own versions in `INTODAN/mpl`, continuing from `v0.3.0`. The `clients/island-battles-go/vX.Y.Z` tag is the version of the [Go SDK](../clients/island-battles-go/README.md), whose module path `github.com/INTODAN/island-battles-go/clients/island-battles-go` is go-gettable: `go get github.com/INTODAN/island-battles-go/clients/island-battles-go@vX.Y.Z` resolves that tag. The plan fails if either tag already exists.
 
 If the tags were pushed but `gh release create` failed, re-running fails at the tag push. Create the release by hand with `gh release create vX.Y.Z --verify-tag --generate-notes`.
 
 **The VM deploy is automatic.** If anything `scripts/vm.sh deploy` uses changed since the previous release, the release redeploys the VM first and **the bump is major**, whatever you asked for, so nobody has to remember. Those inputs are `deploy/ansible/` (playbooks, roles and variables), `deploy/vm.example.yml`, `scripts/vm.sh` and `deploy/deploy_files.py`; the list is `vm_inputs` in `scripts/release-plan.sh`. The first release has nothing to compare with, so it deploys the VM too. Redeploying is safe: the playbooks are idempotent. Anything the VM deploy needs that isn't in the repository, such as `-e app_generate_secrets=true`, still needs your machine.
+
+**Once INTODAN/mpl has taken the VM over,** the release never deploys the VM: the deploy bucket's `mpl/vm-owner` says so ([The VM belongs to INTODAN/mpl](#the-vm-belongs-to-intodanmpl)). The run's summary says why, with a notice, and a change to the VM's inputs no longer makes the bump major: you get the bump you asked for. Everything else is released as usual.
 
 **The web client** is uploaded by every release, after the backend deploy and before the smoke test, with `scripts/deploy-web-client.sh` ([The web client](#the-web-client)). The `web` target sets up Bun at the version pinned in `clients/island-battles-web/package.json`, and passes the entry script of the build it uploaded (such as `assets/index-1a2b3c4d.js`) to the smoke step. To upload a client on its own, start the Deploy workflow with `target` `web` (`gh workflow run deploy.yml --ref main -f target=web`). The upload is not tied to the version tag: a rollback of the client is `web` with `release_tag` set to an earlier release, which builds that tag's client. That works only for releases that include `scripts/deploy-web-client.sh` and the client's `packageManager` pin (from this change on); an earlier release has neither, so roll back the client by hand, as described below.
 
@@ -657,7 +684,7 @@ Postgres's data is the only state on the VM that can't be rebuilt: the playbooks
 - **Skipped:** a VM that a [move](#moving-to-a-new-vm) left behind, which has the moved-away marker, and a database without tables yet, such as a new VM before its restore or its first migration. A run that backed nothing up counts as no backup.
 - **The alarm:** each successful run adds 1 to the `DatabaseBackups` metric; a run where either database failed adds nothing, though the other database's dump is in S3. When none did for 26 hours, the `<name>-database-backups` alarm emails `alert_email`: the run failed, the VM was down, or the key stopped working. Read the run's log on the VM: `sudo journalctl -u island-battles-backup`. `systemctl list-timers island-battles-backup` shows the next run.
 - **What it costs:** a few MB of dumps and one upload a day, well under a cent a month. S3 has no always-free allowance, so this shows up in the zero-spend budget. The metric and the alarm are inside CloudWatch's free ones ([The budget](#the-budget)).
-- **What it doesn't cover:** the backups live in the same account and region as the VM, and a restore loses everything written since the last one, up to a day. The GitHub deploy role can't read them; reading them takes the account's own credentials.
+- **What it doesn't cover:** the backups live in the same account and region as the VM, and a restore loses everything written since the last one, up to a day. The GitHub roles can't read them: this repository's two and those in `backup_denied_roles`, by default INTODAN/mpl's `mpl-github-deploy` and `mpl-github-apply`, which share the account. Reading them takes the account's own credentials.
 
 ### Listing and restoring backups
 
@@ -903,5 +930,5 @@ terraform -chdir=deploy/terraform init -backend=false
 terraform -chdir=deploy/terraform fmt -check -recursive
 terraform -chdir=deploy/terraform validate
 terraform -chdir=deploy/terraform test
-python3 -I -m unittest discover -s deploy -p 'test_*.py'   # the plan checks, the deploy bucket, the backup script and the apply role, offline
+python3 -I -m unittest discover -s deploy -p 'test_*.py'   # the plan checks, the deploy bucket, the VM owner check, the backup script and the apply role, offline
 ```

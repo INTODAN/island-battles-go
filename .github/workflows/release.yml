@@ -4,7 +4,8 @@
 # Starting this workflow is the approval: only people with write access can,
 # only from main, and the deploy jobs run in the `production` environment,
 # which is limited to main. It runs the checks, deploys (the VM first when its
-# inputs changed since the last release, then the backend, then the web client
+# inputs changed since the last release, unless INTODAN/mpl has taken the VM
+# over, then the backend, then the web client
 # in /play/, then the smoke test), and only after all of that creates the tags
 # and the GitHub release. A failed check or deploy leaves no tag and no release.
 name: Release
@@ -44,13 +45,40 @@ jobs:
     needs: guard
     uses: ./.github/workflows/checks.yml
 
+  # Who deploys the VM: once INTODAN/mpl has taken it over, the deploy
+  # bucket's mpl/vm-owner names it, and the release leaves the VM alone
+  # (deploy/README.md, "The VM belongs to INTODAN/mpl"). Reading the bucket
+  # needs the deploy role, which trusts only the production environment.
+  vm_owner:
+    needs: guard
+    runs-on: ubuntu-24.04
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      owner: ${{ steps.owner.outputs.owner }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - id: owner
+        run: |
+          owner="$(python3 -I deploy/deploy_files.py vm-owner)"
+          echo "owner=$owner" >>"$GITHUB_OUTPUT"
+
   plan:
-    needs: check
+    needs: [check, vm_owner]
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.plan.outputs.version }}
       previous: ${{ steps.plan.outputs.previous }}
       vm: ${{ steps.plan.outputs.vm }}
+      vm_owner: ${{ steps.plan.outputs.vm_owner }}
     steps:
       # All history and tags, to find the previous release and diff against it.
       - uses: actions/checkout@v5
@@ -61,6 +89,7 @@ jobs:
       - id: plan
         env:
           BUMP: ${{ inputs.bump }}
+          ISLAND_BATTLES_VM_OWNER: ${{ needs.vm_owner.outputs.owner }}
         run: |
           scripts/release-plan.sh "$BUMP" "$GITHUB_SHA" >"$RUNNER_TEMP/outputs" 2>"$RUNNER_TEMP/summary" || {
             cat "$RUNNER_TEMP/summary"
@@ -69,6 +98,9 @@ jobs:
           }
           cat "$RUNNER_TEMP/summary" >>"$GITHUB_STEP_SUMMARY"
           cat "$RUNNER_TEMP/outputs" >>"$GITHUB_OUTPUT"
+          if [[ -n "$ISLAND_BATTLES_VM_OWNER" ]]; then
+            echo "::notice::The release doesn't deploy the VM: the deploy bucket's mpl/vm-owner says $ISLAND_BATTLES_VM_OWNER deploys it now."
+          fi
 
   # Each deploy is a call of the Deploy workflow, whose job runs in the
   # `production` environment (an environment can't be set on a calling job),
@@ -132,6 +164,7 @@ jobs:
       VERSION: ${{ needs.plan.outputs.version }}
       PREVIOUS: ${{ needs.plan.outputs.previous }}
       VM: ${{ needs.plan.outputs.vm }}
+      VM_OWNER: ${{ needs.plan.outputs.vm_owner }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
@@ -153,6 +186,8 @@ jobs:
         run: |
           if [[ "$VM" == true ]]; then
             note="The VM was redeployed too: something its deploy uses changed since ${PREVIOUS:-the start}."
+          elif [[ -n "$VM_OWNER" ]]; then
+            note="The VM was not redeployed: it is deployed from INTODAN/$VM_OWNER now."
           else
             note="The VM was not redeployed: nothing its deploy uses changed since $PREVIOUS."
           fi
@@ -218,7 +253,7 @@ jobs:
 
   # Says why nothing was tagged. The failed job above is the cause.
   not_released:
-    needs: [guard, check, plan, deploy_vm, deploy_backend, deploy_web, smoke, release]
+    needs: [guard, check, vm_owner, plan, deploy_vm, deploy_backend, deploy_web, smoke, release]
     if: ${{ always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
     runs-on: ubuntu-24.04
     steps:

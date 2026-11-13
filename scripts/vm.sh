@@ -16,7 +16,10 @@ end, and logs in to the VM with a temporary key from Lightsail.
 Usage:
   scripts/vm.sh deploy <ip> [ansible-playbook options]
       Provision the VM, or update it. Safe to re-run. The first deploy needs
-      -e app_generate_secrets=true to create deploy/local/secrets/.
+      -e app_generate_secrets=true to create deploy/local/secrets/. Refuses
+      once INTODAN/mpl has taken the VM over (the deploy bucket's
+      mpl/vm-owner), unless ISLAND_BATTLES_OVERRIDE_VM_OWNER=mpl is set for an
+      emergency.
   scripts/vm.sh dump <ip> [ansible-playbook options]
       Dump the backend's database to deploy/local/dumps/, or the lobby's with
       -e app_database=lobby.
@@ -149,6 +152,9 @@ case "$command" in
     [[ $# -ge 1 ]] || usage
     host="$1"
     shift
+    # After INTODAN/mpl's takeover, its Ansible owns the VM's configuration,
+    # and these playbooks would write over it (deploy/README.md).
+    deploy_files check-vm-owner
     deploy_files require-secrets
     run_playbook "$host" site.yml "$@"
     ;;
