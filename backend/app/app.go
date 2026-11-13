@@ -7,7 +7,6 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -28,17 +27,12 @@ import (
 	"islandBattles/backend/services"
 	"islandBattles/backend/submittoken"
 	"islandBattles/backend/uploadtoken"
-	"islandBattles/lobby/application"
-	"islandBattles/lobby/auth"
-	"islandBattles/lobby/domain"
-	"islandBattles/lobby/frontend"
+	lobbyapp "islandBattles/lobby/app"
 	"islandBattles/lobby/gamehooks"
-	"islandBattles/lobby/httpapi"
 	"islandBattles/lobby/playertoken"
-	lobbypostgres "islandBattles/lobby/postgres"
 	"islandBattles/lobby/realtime"
 
-	"github.com/danielgtaylor/huma/v2"
+	"github.com/centrifugal/gocent/v3"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 	"gorm.io/gorm"
@@ -87,96 +81,46 @@ func WithLocalBotRunners(runners services.BotRunners, origin string) Option {
 // New wires the stores and services to a router. It starts no goroutines and
 // holds nothing that outlives a request besides the database pool, which the
 // host owns and closes. Without options it serves only what is safe in public.
+//
+// Without config.LobbyURL, the lobby runs in this process, built by lobby/app
+// as the lobby's own hosts build it, and New serves its routes too. With it,
+// the lobby is a server of its own (lobby/cmd/lobby): New serves none of the
+// lobby's routes, reads the lobby's game API over the network, and verifies
+// player tokens with the lobby's JWKS. Either way the game serves its hooks.
 func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opts ...Option) (http.Handler, error) {
 	var selected options
 	for _, option := range opts {
 		option(&selected)
 	}
-	clock := domain.SystemClock{}
-	identifiers := domain.CryptoIdentifiers{}
+	centrifugo := dependencies.ConnectCentrifugoClient(config)
+	// Requests push their own committed changes, so nothing runs between requests.
+	publisher, err := realtime.NewPublisher(centrifugo, logger, realtime.DefaultPushRetry())
+	if err != nil {
+		return nil, err
+	}
+	gamePublisher := publications{publisher}
 	// The lobby and the game talk HTTP. While the lobby runs in this process,
 	// the lobby's hook calls and the game's game API calls reach the other
-	// side's handler in memory, through loopback; both handlers are set below.
-	var hooks, gameAPI http.Handler
+	// side's handler in memory, through loopback; the hooks are set below.
+	var hooks http.Handler
 	loopback := &Loopback{}
+	var lobby *lobbyapp.Lobby
+	var playerKeys playertoken.KeySource
 	gameAPIURL := config.LobbyURL
-	var hookOptions []gamehooks.Option
 	if config.LobbyURL == "" {
-		gameAPIURL = LoopbackOrigin
-		loopback.Handle(LoopbackOrigin+gamehooks.GameAPIPath, func() http.Handler { return gameAPI })
-		hookOptions = append(hookOptions, gamehooks.WithHTTPClient(loopback.Client()))
-	}
-	lobbyGames, err := config.LobbyGamesConfig()
-	if err != nil {
-		return nil, err
-	}
-	games, err := gamehooks.ParseGames(lobbyGames, config.LookupLobbyGameSecret, hookOptions...)
-	if err != nil {
-		return nil, err
-	}
-	catalog := make([]frontend.Game, 0, len(games))
-	for _, game := range games {
-		catalog = append(catalog, game.Frontend)
-	}
-	if config.LobbyURL == "" {
-		hooksURL, err := islandBattlesHooksURL(lobbyGames)
+		lobby, err = inProcessLobby(config, database, centrifugo, logger, loopback, func() http.Handler { return hooks })
 		if err != nil {
 			return nil, err
 		}
-		loopback.Handle(hooksURL, func() http.Handler { return hooks })
+		gameAPIURL = LoopbackOrigin
+		playerKeys = lobby.PlayerTokenKeys()
+	} else {
+		playerKeys, err = playertoken.NewJWKSSource(config.LobbyURL + playertoken.JWKSPath)
+		if err != nil {
+			return nil, err
+		}
 	}
-	policy := domain.DefaultPolicy(gamehooks.Registrations(games)...)
 	lobbyClient, err := gamehooks.NewGameAPIClient(lobbyadapter.GameKey, gameAPIURL, config.LobbyHookSecret, gamehooks.WithHTTPClient(loopback.Client()))
-	if err != nil {
-		return nil, err
-	}
-	// Requests push their own committed changes, so nothing runs between requests.
-	publisher, err := realtime.NewPublisher(dependencies.ConnectCentrifugoClient(config), logger, realtime.DefaultPushRetry())
-	if err != nil {
-		return nil, err
-	}
-	postgresStore, err := lobbypostgres.NewStore(database, clock)
-	if err != nil {
-		return nil, err
-	}
-	store, err := application.NewPublishingStore(postgresStore, publisher)
-	if err != nil {
-		return nil, err
-	}
-	identities, err := lobbypostgres.NewIdentityStore(database)
-	if err != nil {
-		return nil, err
-	}
-	authentication, err := auth.NewService(identities, clock, policy, identifiers, []byte(config.ConnectionTokenHMACSecret), config.CentrifugoPublicURL)
-	if err != nil {
-		return nil, err
-	}
-	lobbyService, err := application.NewService(store, clock, identifiers, policy)
-	if err != nil {
-		return nil, err
-	}
-	gameAPIRouter := chi.NewMux()
-	httpapi.RegisterGameAPI(humachi.New(gameAPIRouter, undocumented("Lobby game API")), lobbyService, gamehooks.Secrets(games))
-	gameAPI = gameAPIRouter
-	// The game publishes its events with the lobby's publisher, until the
-	// game has a Centrifugo client of its own.
-	gamePublisher := publications{publisher}
-	retentionStore, err := lobbypostgres.NewRetentionStore(database)
-	if err != nil {
-		return nil, err
-	}
-	// Lobby requests delete expired lobby data in small batches as they end.
-	lobbyRetention, err := application.NewRetention(retentionStore, clock, policy, logger)
-	if err != nil {
-		return nil, err
-	}
-	authorizer, err := realtime.NewAuthorizer(identities, store, clock, policy)
-	if err != nil {
-		return nil, err
-	}
-	// The proxy answers an outage with a bare 503, so its cause goes on the
-	// request's error line.
-	proxy, err := realtime.NewProxy(authorizer, config.LobbyProxySecret, realtime.WithErrorReporter(observability.RecordError))
 	if err != nil {
 		return nil, err
 	}
@@ -220,22 +164,12 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	if err != nil {
 		return nil, err
 	}
-	if config.PlayerTokenKeys == nil {
-		return nil, errors.New("app: no player token keys")
-	}
-	playerTokens, err := auth.NewPlayerTokens(config.PlayerTokenKeys, config.LobbyIssuer(), config.PlayerTokenLifetime, clock, policy)
+	// The game verifies player tokens with the lobby's keys: in this
+	// process while the lobby runs here, and otherwise from its JWKS.
+	playerVerifier, err := playertoken.NewVerifier(config.LobbyIssuer(), playerKeys)
 	if err != nil {
 		return nil, err
 	}
-	// The game verifies player tokens with the lobby's keys in this process,
-	// until the lobby is a service of its own and the game reads its JWKS.
-	playerVerifier, err := playertoken.NewVerifier(config.LobbyIssuer(), config.PlayerTokenKeys)
-	if err != nil {
-		return nil, err
-	}
-
-	// The authenticated player goes on a failed request's error line.
-	authenticated := annotatingAuthentication{authentication}
 
 	router := chi.NewMux()
 	router.Use(observability.Requests(logger))
@@ -250,24 +184,72 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	if selected.gameGraph {
 		routes.SetupGameGraphRoute(api, &environment)
 	}
-	httpapi.Register(api, lobbyService, authenticated, authenticated, playerTokens, lobbyRetention)
+	if lobby != nil {
+		// The lobby's player API, game API, Centrifugo proxy and page, which
+		// / opens.
+		if err := lobby.Register(router, api); err != nil {
+			return nil, err
+		}
+		router.Get("/", func(response http.ResponseWriter, request *http.Request) {
+			http.Redirect(response, request, lobbyapp.UIPath, http.StatusTemporaryRedirect)
+		})
+	}
 	routes.SetupGameRoutes(api, &handlers.LobbyGame{Database: database, Players: handlers.PlayerTokens{Verifier: playerVerifier}, Publisher: gamePublisher, Retention: gameRetention, Watchers: lobbyClient,
 		SubmitTokens: submitTokens, PublicURL: config.PublicURL, Bots: bots})
 	routes.SetupBotPackageRoutes(api, &handlers.BotPackages{Players: handlers.PlayerTokens{Verifier: playerVerifier}, Service: services.BotPackages{
 		Database: database, Lobbies: lobbyClient, Store: packages, Tokens: uploadTokens}})
-	// The lobby's game API, which games sign their calls of, and the game's
-	// hooks, which the lobby signs its calls of.
-	router.Handle(gamehooks.GameAPIPath+"/*", gameAPI)
+	// The game's hooks, which the lobby signs its calls of.
 	router.Handle(lobbyadapter.HooksPath+"/*", hooks)
 	if config.BotPackagesBucket == "" && selected.localPackagesHandler != nil {
 		router.Handle(selected.localPackagesPrefix+"/*", selected.localPackagesHandler)
 	}
-	proxy.Register(router)
-	if err := registerPages(router, catalog); err != nil {
+	if err := registerPages(router); err != nil {
 		return nil, err
 	}
 	router.Get("/healthz", healthz(Version))
 	return router, nil
+}
+
+// inProcessLobby builds the lobby in this process with lobby/app, from the
+// backend's settings, as the lobby's own hosts build it from LOBBY_*. Its
+// LOBBY_GAMES lists Island Battles, whose hooks it calls through loopback,
+// which also carries the game's calls of its game API to it. The lobby's
+// authenticated players, and the causes that its answers leave out, go on
+// the request's error line.
+func inProcessLobby(config dependencies.Config, database *gorm.DB, centrifugo *gocent.Client, logger *slog.Logger, loopback *Loopback, hooks func() http.Handler) (*lobbyapp.Lobby, error) {
+	games, err := config.LobbyGamesConfig()
+	if err != nil {
+		return nil, err
+	}
+	hooksURL, err := islandBattlesHooksURL(games)
+	if err != nil {
+		return nil, err
+	}
+	loopback.Handle(hooksURL, hooks)
+	lobby, err := lobbyapp.New(lobbyapp.Config{
+		PublicURL:             config.LobbyIssuer(),
+		CentrifugoAPIURL:      config.CentrifugoAPIURL,
+		CentrifugoAPIKey:      config.CentrifugoAPIKey,
+		CentrifugoPublicURL:   config.CentrifugoPublicURL,
+		ConnectionTokenSecret: config.ConnectionTokenHMACSecret,
+		ProxySecret:           config.LobbyProxySecret,
+		PlayerTokenKeys:       config.PlayerTokenKeys,
+		PlayerTokenLifetime:   config.PlayerTokenLifetime,
+		Games:                 games,
+		GameSecrets:           config.LobbyGameSecrets,
+	}, database, centrifugo, logger,
+		lobbyapp.WithHookOptions(gamehooks.WithHTTPClient(loopback.Client())),
+		lobbyapp.WithObserver(lobbyapp.Observer{
+			Authenticated: func(ctx context.Context, playerID string) {
+				observability.Annotate(ctx, slog.String("player_id", playerID))
+			},
+			Error: observability.RecordError,
+		}))
+	if err != nil {
+		return nil, err
+	}
+	loopback.Handle(LoopbackOrigin+gamehooks.GameAPIPath, lobby.GameAPI)
+	return lobby, nil
 }
 
 // turnSender sends hosted and uploaded bots' turns (#225) while the
@@ -307,37 +289,10 @@ func turnSender(config dependencies.Config, selected options, packages packagest
 	return sender, nil
 }
 
-// annotatingAuthentication adds the player of each verified session to the
-// request's error line. The lobby's routes authenticate with it; the game's
-// take player tokens instead.
-type annotatingAuthentication struct{ *auth.Service }
-
-func (authentication annotatingAuthentication) Authenticate(ctx context.Context, authorization string) (domain.SessionVerification, error) {
-	verified, err := authentication.Service.Authenticate(ctx, authorization)
-	switch {
-	case err == nil:
-		observability.Annotate(ctx, slog.String("player_id", verified.Principal.PlayerID))
-	case !errors.Is(err, domain.ErrUnauthenticated):
-		// The lobby's authentication answers with its own problem, which
-		// leaves the cause out, such as an unreachable database.
-		observability.RecordError(ctx, err)
-	}
-	return verified, err
-}
-
-// registerPages serves the embedded browser pages, which need no files beside
-// the binary. The bare name opens the lobby.
-func registerPages(router chi.Router, games []frontend.Game) error {
-	toLobby := func(response http.ResponseWriter, request *http.Request) {
-		http.Redirect(response, request, "/lobby/ui/", http.StatusTemporaryRedirect)
-	}
-	router.Get("/", toLobby)
-	router.Get("/lobby/ui", toLobby)
-	lobbyFrontend, err := frontend.Handler(games)
-	if err != nil {
-		return err
-	}
-	router.Handle("/lobby/ui/*", http.StripPrefix("/lobby/ui/", lobbyFrontend))
+// registerPages serves the game's embedded browser pages, which need no files
+// beside the binary: the lobby page's game modules, the map builder and the
+// demo viewer.
+func registerPages(router chi.Router) error {
 	router.Handle("/game/demo/*", http.StripPrefix("/game/demo/", demo.Handler()))
 	mapBuilder, err := mapbuilder.Handler()
 	if err != nil {
@@ -356,14 +311,6 @@ func registerPages(router chi.Router, games []frontend.Game) error {
 	})
 	router.Handle("/game/demo-viewer/*", http.StripPrefix("/game/demo-viewer/", demoViewer))
 	return nil
-}
-
-// undocumented is an API's configuration without documentation routes, for
-// an API that shares a router with another.
-func undocumented(title string) huma.Config {
-	config := huma.DefaultConfig(title, "1.0.0")
-	config.OpenAPIPath, config.DocsPath, config.SchemasPath = "", "", ""
-	return config
 }
 
 // publications publishes the game's events with the lobby's publisher.
