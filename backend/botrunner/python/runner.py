@@ -28,7 +28,9 @@ The submit URL must be on ``GAME_SUBMIT_HOST``. The worker gets no AWS
 credentials or other settings of the runner's: only a few plain variables.
 
 ``python runner.py --local …`` plays one turn of a local game instead
-(``backend/README.md``, "Bot runners").
+(``backend/README.md``, "Bot runners"). ``python runner.py --events`` is
+the local server host's runner (#225): it takes one event per line on
+stdin, like one Lambda instance, and answers each with its outcome.
 """
 
 from __future__ import annotations
@@ -751,20 +753,53 @@ def serve_zip(data: bytes) -> http.server.ThreadingHTTPServer:
     return server
 
 
+def serve_events(lines: Any, output: Any, submit_host: str, timeout: float = 20) -> None:
+    """Handle one JSON event per line, as one Lambda instance handles its
+    invocations, keeping the loaded package between them, and write one JSON
+    line for each: the outcome, or ``{"error": …}`` for an event that can't be
+    played. The local server host runs this when no runner functions are
+    configured, with packages it serves itself over http."""
+    directory = Path(tempfile.mkdtemp(prefix="bot-runner-python-"))
+    events_runner = Runner(directory, submit_host, allow_http_packages=True)
+    try:
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                answer = events_runner.handle(json.loads(line), time.monotonic() + timeout)
+            except (EventError, ValueError) as error:
+                answer = {"error": str(error)}
+            output.write(json.dumps(answer) + "\n")
+            output.flush()
+    finally:
+        events_runner.unload()
+
+
 def main(arguments: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="runner.py",
         description="Plays the player's current turn of a local game with a package, as the "
-        "runner Lambda does, and submits it. The package must run on this machine.",
+        "runner Lambda does, and submits it. The package must run on this machine. With --events, "
+        "plays the events on stdin instead, one per line, for the local server host.",
     )
-    parser.add_argument("--local", action="store_true", required=True, help="play one turn of a local game")
-    parser.add_argument("--package", required=True, type=Path, help="the package's zip")
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--local", action="store_true", help="play one turn of a local game")
+    mode.add_argument(
+        "--events", action="store_true", help="play the events on stdin, one per line; GAME_SUBMIT_HOST is required"
+    )
+    parser.add_argument("--package", type=Path, help="the package's zip")
     parser.add_argument("--game-url", default="http://localhost:8888", help="the game's URL")
-    parser.add_argument("--lobby-id", required=True, help="the lobby whose game to play")
-    parser.add_argument("--token", required=True, help="a player token of a player in the game")
+    parser.add_argument("--lobby-id", help="the lobby whose game to play")
+    parser.add_argument("--token", help="a player token of a player in the game")
     parser.add_argument("--load-seconds", type=float, default=10)
     parser.add_argument("--play-seconds", type=float, default=2)
     options = parser.parse_args(arguments)
+    if options.events:
+        logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(message)s")
+        serve_events(sys.stdin, sys.stdout, os.environ.get("GAME_SUBMIT_HOST", ""))
+        return 0
+    if options.package is None or options.lobby_id is None or options.token is None:
+        parser.error("--local needs --package, --lobby-id and --token")
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     game_url = options.game_url.rstrip("/")
     data = options.package.read_bytes()

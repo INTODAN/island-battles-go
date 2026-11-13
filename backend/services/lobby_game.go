@@ -22,20 +22,21 @@ import (
 // roster player keeps the bot in their member settings, as the start's
 // snapshot shows them, and each bot seat that the host added the bot in its
 // seat settings: the backend plays the default bots, the players' own
-// clients relay their localhost bots, and the server plays hosted and
-// uploaded bots. Repeated and concurrent starts reuse the committed state.
-func RunLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, snapshot domain.Snapshot) (models.BindingResult, error) {
+// clients relay their localhost bots, and sender sends the turns of hosted
+// and uploaded bots, once the start has committed. Repeated and concurrent
+// starts reuse the committed state.
+func RunLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, sender *TurnSender, snapshot domain.Snapshot) (models.BindingResult, error) {
 	chosen, err := lobbyBots(snapshot)
 	if err != nil {
 		return models.BindingResult{}, err
 	}
-	return runLobbyGame(ctx, database, publisher, snapshot, chosen)
+	return runLobbyGame(ctx, database, publisher, sender, snapshot, chosen)
 }
 
 // runLobbyGame is RunLobbyGame, with the bots that the server plays for some
 // roster players, by player ID; the others relay their localhost bots. Go
 // bots play the first generation before it is pushed.
-func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, snapshot domain.Snapshot, chosen map[string]frozenBot) (models.BindingResult, error) {
+func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, sender *TurnSender, snapshot domain.Snapshot, chosen map[string]frozenBot) (models.BindingResult, error) {
 	database = database.WithContext(ctx)
 	// A team has one player. The check comes before the binding, which creates the game.
 	teamsWithPlayers := map[string]bool{}
@@ -50,6 +51,7 @@ func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 		return models.BindingResult{}, err
 	}
 	var events []realtime.Publication
+	var turns []turnToSend
 	// goBotsOnly is set when Go bots alone play the first turn, and have
 	// completed it.
 	goBotsOnly := false
@@ -120,7 +122,10 @@ func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 		if err != nil {
 			return err
 		}
-		events, err = generationEvents(game, current, players, inputs, memories)
+		if events, err = generationEvents(game, current, players, inputs, memories); err != nil {
+			return err
+		}
+		turns, err = sender.sentTurns(game, current, players, inputs, memories)
 		return err
 	})
 	if err != nil {
@@ -130,10 +135,11 @@ func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 		// The game has committed. A failed push is logged and does not fail the start.
 		_ = publisher.Publish(ctx, events...)
 	}
+	sender.send(ctx, database, turns)
 	if goBotsOnly {
 		// The game has started, so a failure here only stops the Go bots
 		// until the next game request.
-		service := GenerationService{Database: database, Publisher: publisher}
+		service := GenerationService{Database: database, Publisher: publisher, Bots: sender}
 		if _, err := service.playGoBotTurns(ctx, binding.GameID, goBotWriteBudget); err != nil {
 			observability.RecordError(ctx, fmt.Errorf("play Go bot turns: %w", err))
 		}

@@ -27,7 +27,7 @@ func newLogFixture(t *testing.T) turnFixture {
 	lobbyID, blue, red := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	alice, bob := domain.Principal{PlayerID: uuid.NewString()}, domain.Principal{PlayerID: uuid.NewString()}
 	publisher := &testutils.RecordedPublisher{}
-	if _, err := services.RunLobbyGame(context.Background(), database, publisher, domain.Snapshot{
+	if _, err := services.RunLobbyGame(context.Background(), database, publisher, nil, domain.Snapshot{
 		Lobby:       domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted},
 		Teams:       []domain.Team{{ID: blue, Order: 1, Name: "Blue"}, {ID: red, Order: 2, Name: "Red"}},
 		StartRoster: domain.StartRoster{{PlayerID: alice.PlayerID, TeamID: blue}, {PlayerID: bob.PlayerID, TeamID: red}},
@@ -248,7 +248,7 @@ func TestGameLogsNeedTheRosterAndAGenerationOfTheGame(t *testing.T) {
 	// Another game in the same database, whose generation Alice can't read
 	// through her lobby.
 	otherLobby, otherTeam, otherPlayer := uuid.NewString(), uuid.NewString(), domain.Principal{PlayerID: uuid.NewString()}
-	if _, err := services.RunLobbyGame(ctx, fixture.database, fixture.publisher, domain.Snapshot{
+	if _, err := services.RunLobbyGame(ctx, fixture.database, fixture.publisher, nil, domain.Snapshot{
 		Lobby: domain.Lobby{ID: otherLobby, GameKey: "island-battles", Phase: domain.PhaseStarted},
 		Teams: []domain.Team{{ID: otherTeam, Order: 1}}, StartRoster: domain.StartRoster{{PlayerID: otherPlayer.PlayerID, TeamID: otherTeam}},
 	}); err != nil {

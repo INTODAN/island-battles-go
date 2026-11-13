@@ -1,4 +1,10 @@
-package main
+// Package native is the native bot runner's code (#223): it plays one turn
+// of one uploaded native bot package, such as a Go bot, per event, and
+// submits it with the turn's submit token, or delivers a hosted bot's turn
+// to the bot's own server. Its event is models.BotRunnerEvent. The Lambda
+// function is backend/cmd/bot-runner-native; the local server host runs the
+// same Runner in process when no runner functions are configured (#225).
+package native
 
 import (
 	"bytes"
@@ -14,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"islandBattles/backend/hostedbot"
 	"islandBattles/backend/models"
 
 	"github.com/google/uuid"
@@ -72,6 +79,10 @@ type Runner struct {
 	// Client downloads packages and submits batches. Nil uses a client that
 	// follows no redirects.
 	Client *http.Client
+	// AllowLoopbackHosted lets a hosted bot's URL name this machine over
+	// http or https (hostedbot.Loopback), for the local server host's runner
+	// and tests. On Lambda a hosted bot's URL must pass hostedbot's rules.
+	AllowLoopbackHosted bool
 	// Logger gets one line for each turn a bot passes.
 	Logger *slog.Logger
 
@@ -261,11 +272,17 @@ func (runner *Runner) logger() *slog.Logger {
 }
 
 // deliver posts a hosted bot's delivery to its URL, and does nothing more:
-// the bot submits its answer itself.
+// the bot submits its answer itself. The URL must pass hostedbot's rules
+// again, and the post goes through hostedbot.Client, which connects only to
+// public addresses on port 443, checking the address it really connects to,
+// so a name that resolves elsewhere since the bot was chosen reaches nothing
+// on a private network. It follows no redirects.
 func (runner *Runner) deliver(ctx context.Context, hostedURL string, delivery json.RawMessage) (Outcome, error) {
-	parsed, err := url.Parse(hostedURL)
-	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" {
-		return Outcome{}, fmt.Errorf("the hosted bot's URL %q is not an http or https URL", hostedURL)
+	client := hostedbot.Client(deliveryTimeout)
+	if runner.AllowLoopbackHosted && hostedbot.Loopback(hostedURL) {
+		client = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	} else if _, err := hostedbot.CheckSyntax(hostedURL); err != nil {
+		return Outcome{}, fmt.Errorf("the hosted bot's URL is refused: %w", err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, deliveryTimeout)
 	defer cancel()
@@ -275,7 +292,7 @@ func (runner *Runner) deliver(ctx context.Context, hostedURL string, delivery js
 	}
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("User-Agent", deliveryUserAgent)
-	response, err := runner.client().Do(request)
+	response, err := client.Do(request)
 	if err != nil {
 		runner.logger().WarnContext(ctx, "The hosted bot's delivery failed", "error", err)
 		return Outcome{Outcome: "undelivered", Reason: err.Error()}, nil

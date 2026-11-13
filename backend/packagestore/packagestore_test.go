@@ -253,6 +253,20 @@ func TestTheLocalBucketKeepsPackagesOnDisk(t *testing.T) {
 	if _, err := botpackage.Inspect(packagestore.ReaderAt(ctx, store, "lobbies/l/p.zip", size), size); err != nil {
 		t.Fatal(err)
 	}
+	// A bot runner downloads it with a presigned GET (#225).
+	link, err := store.PresignDownload(ctx, "lobbies/l/p.zip", time.Hour)
+	if err != nil || !strings.HasPrefix(link, server.URL+locals3.Prefix+"/"+locals3.Bucket+"/lobbies/l/p.zip?") || !strings.Contains(link, "X-Amz-Expires=3600") {
+		t.Fatalf("presigned GET = %s, %v", link, err)
+	}
+	response, err := http.Get(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	downloaded, _ := io.ReadAll(response.Body)
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK || !bytes.Equal(downloaded, data) {
+		t.Fatalf("the presigned GET answered %d with %d bytes", response.StatusCode, len(downloaded))
+	}
 	// A second store on the same folder, as after a restart, finds it.
 	again, _, err := locals3.New(directory, server.URL)
 	if err != nil {

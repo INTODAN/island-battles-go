@@ -1,5 +1,7 @@
 package models
 
+import "time"
+
 // BotRunnerEvent is what the backend invokes a bot runner Lambda with, as
 // JSON: one turn of one bot (#223). The runners are
 // backend/botrunner/python (Python packages) and
@@ -48,3 +50,16 @@ type BotRunnerLimits struct {
 // DefaultBotRunnerLimits are the owner's budget for a turn (#112): 2 seconds
 // of play, and up to 10 seconds to load a package.
 var DefaultBotRunnerLimits = BotRunnerLimits{LoadSeconds: 10, PlaySeconds: 2}
+
+// BotRunnerName names one of the two runners: python plays python packages,
+// and native plays native packages and delivers hosted bots' turns.
+type BotRunnerName string
+
+const (
+	BotRunnerPython BotRunnerName = "python"
+	BotRunnerNative BotRunnerName = "native"
+)
+
+// BotRunnerPackageExpiry is how long a package's presigned GET in a
+// BotRunnerEvent stays valid.
+const BotRunnerPackageExpiry = time.Hour

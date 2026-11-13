@@ -17,6 +17,7 @@ package main
 import (
 	"os"
 
+	"islandBattles/backend/botrunner/native"
 	"islandBattles/backend/observability"
 
 	"github.com/aws/aws-lambda-go/lambda"
@@ -29,6 +30,6 @@ func main() {
 	// Warnings and errors only, as JSON lines that Lambda's level filter
 	// reads, within the backend's per-instance log limits.
 	logger, _ := observability.NewLambdaLogger(os.Stdout, observability.DefaultSettings())
-	runner := &Runner{Directory: "/tmp/bot", SubmitHost: os.Getenv("GAME_SUBMIT_HOST"), Logger: logger}
+	runner := &native.Runner{Directory: "/tmp/bot", SubmitHost: os.Getenv("GAME_SUBMIT_HOST"), Logger: logger}
 	lambda.Start(runner.Handle)
 }

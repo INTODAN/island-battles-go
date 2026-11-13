@@ -32,6 +32,11 @@ const (
 	GameRetentionPeriodEnv           = "ISLAND_BATTLES_GAME_RETENTION_PERIOD"
 	BotPackagesBucketEnv             = "ISLAND_BATTLES_BOT_PACKAGES_BUCKET"
 	ServerBotsEnv                    = "ISLAND_BATTLES_SERVER_BOTS"
+	BotRunnerPythonEnv               = "ISLAND_BATTLES_BOT_RUNNER_PYTHON"
+	BotRunnerNativeEnv               = "ISLAND_BATTLES_BOT_RUNNER_NATIVE"
+	// LocalBotPythonEnv is read by the local server host alone; see
+	// LoadLocalBotPython.
+	LocalBotPythonEnv = "ISLAND_BATTLES_LOCAL_BOT_PYTHON"
 	// BotPackagesDirEnv is read by the local server host alone; see
 	// LoadBotPackagesDir.
 	BotPackagesDirEnv = "ISLAND_BATTLES_BOT_PACKAGES_DIR"
@@ -105,10 +110,18 @@ type Config struct {
 	// Lambda host refuses uploads.
 	BotPackagesBucket string
 	// ServerBots offers the bots that the server plays without a player's
-	// tab, hosted and uploaded, as a player's own bot and for bot seats:
-	// ISLAND_BATTLES_SERVER_BOTS=on. Off, the default, players see the
-	// localhost and default bots only.
+	// tab, hosted and uploaded, as a player's own bot and for bot seats, and
+	// sends them their turns: ISLAND_BATTLES_SERVER_BOTS=on, the default.
+	// Off, players see the localhost and default bots only, and no turn is
+	// sent.
 	ServerBots bool
+	// BotRunnerPython and BotRunnerNative name the bot runner functions
+	// that play hosted and uploaded bots' turns, invoked in the region and
+	// with the credentials of the environment. Both or neither are set.
+	// Neither means none: the local server host then runs the runners in
+	// its own process, and the Lambda host sends no turns.
+	BotRunnerPython string
+	BotRunnerNative string
 	// PlayerTokenKeys are the lobby's player token keys, kid:seed pairs; the
 	// first signs. See playertoken.ParseKeySet.
 	PlayerTokenKeys *playertoken.KeySet
@@ -158,13 +171,17 @@ func LoadConfigFromLookup(lookup func(string) (string, bool)) (Config, error) {
 			return Config{}, fmt.Errorf("%s must be a duration from 1m to 15m", PlayerTokenLifetimeEnv)
 		}
 	}
-	var serverBots bool
+	serverBots := true
 	switch readEnvironment(lookup, ServerBotsEnv) {
-	case "", "off":
-	case "on":
-		serverBots = true
+	case "", "on":
+	case "off":
+		serverBots = false
 	default:
 		return Config{}, fmt.Errorf("%s must be on or off", ServerBotsEnv)
+	}
+	botRunnerPython, botRunnerNative := readEnvironment(lookup, BotRunnerPythonEnv), readEnvironment(lookup, BotRunnerNativeEnv)
+	if (botRunnerPython == "") != (botRunnerNative == "") {
+		return Config{}, fmt.Errorf("set both %s and %s, or neither", BotRunnerPythonEnv, BotRunnerNativeEnv)
 	}
 	config := Config{
 		Database:                  database,
@@ -179,6 +196,8 @@ func LoadConfigFromLookup(lookup func(string) (string, bool)) (Config, error) {
 		GameRetentionPeriod:       gameRetentionPeriod,
 		BotPackagesBucket:         readEnvironment(lookup, BotPackagesBucketEnv),
 		ServerBots:                serverBots,
+		BotRunnerPython:           botRunnerPython,
+		BotRunnerNative:           botRunnerNative,
 		PlayerTokenKeys:           playerTokenKeys,
 		PlayerTokenLifetime:       playerTokenLifetime,
 	}
@@ -257,6 +276,18 @@ func LoadBotPackagesDir(lookup func(string) (string, bool)) string {
 		return directory
 	}
 	return filepath.Join(os.TempDir(), "island-battles-bot-packages")
+}
+
+// LoadLocalBotPython reads the command that runs Python 3.14 for the local
+// server host's Python bot runner, which runs uploaded Python bots when no
+// runner functions are configured: python3.14 by default, or
+// ISLAND_BATTLES_LOCAL_BOT_PYTHON split at spaces, such as
+// "uv run --no-project --python 3.14 python".
+func LoadLocalBotPython(lookup func(string) (string, bool)) []string {
+	if command := strings.Fields(readEnvironment(lookup, LocalBotPythonEnv)); len(command) > 0 {
+		return command
+	}
+	return []string{"python3.14"}
 }
 
 // LoadHTTPAddr reads the address the HTTP server host listens on.

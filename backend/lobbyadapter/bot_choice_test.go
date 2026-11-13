@@ -69,7 +69,7 @@ func newLobbyStackWith(t *testing.T, serverBots services.ServerBots) *lobbyStack
 	}
 	readLobbies.API = lobbies
 	publisher := &testutils.RecordedPublisher{}
-	binding, err := lobbyadapter.NewService(database, lobbies, publisher)
+	binding, err := lobbyadapter.NewService(database, lobbies, publisher, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

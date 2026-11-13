@@ -32,7 +32,7 @@ func (handler *LobbyGame) CurrentGeneration(ctx context.Context, input *struct {
 	if err != nil {
 		return nil, err
 	}
-	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher}
+	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher, Bots: handler.Bots}
 	state, err := service.Current(ctx, principal, input.LobbyID)
 	if err != nil {
 		return nil, generationHTTPError(ctx, err)
@@ -51,7 +51,7 @@ func (handler *LobbyGame) ApplyTurnDeadline(ctx context.Context, input *struct {
 	if err != nil {
 		return nil, err
 	}
-	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher}
+	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher, Bots: handler.Bots}
 	state, err := service.ApplyDeadline(ctx, principal, input.LobbyID)
 	if err != nil {
 		return nil, generationHTTPError(ctx, err)
@@ -61,7 +61,7 @@ func (handler *LobbyGame) ApplyTurnDeadline(ctx context.Context, input *struct {
 
 func (handler *LobbyGame) RegisterGenerationCommands(ctx context.Context, input *RegisterGenerationCommandsRequest) (*GenerationStateResponse, error) {
 	defer handler.runRetention(ctx)
-	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher}
+	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher, Bots: handler.Bots}
 	var principal domain.Principal
 	if token, found := submittoken.FromAuthorization(input.Authorization); found {
 		// A submit token stands for its player, for its game and generation
@@ -142,7 +142,7 @@ func (handler *LobbyGame) TurnDelivery(ctx context.Context, input *TurnDeliveryR
 	if origin == "" {
 		origin = input.origin
 	}
-	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher}
+	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher, Bots: handler.Bots}
 	delivery, err := service.TurnDelivery(ctx, principal, input.LobbyID, handler.SubmitTokens, origin+"/generation/commands")
 	if err != nil {
 		return nil, generationHTTPError(ctx, err)

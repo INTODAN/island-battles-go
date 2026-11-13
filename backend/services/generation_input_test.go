@@ -32,7 +32,7 @@ func newTurnFixture(t *testing.T) turnFixture {
 	players := []domain.Principal{{PlayerID: uuid.NewString()}, {PlayerID: uuid.NewString()}}
 	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted}, Teams: []domain.Team{{ID: teamOne, Order: 1, Name: "Blue"}, {ID: teamTwo, Order: 2, Name: "Red"}}, StartRoster: domain.StartRoster{{PlayerID: players[0].PlayerID, TeamID: teamOne}, {PlayerID: players[1].PlayerID, TeamID: teamTwo}}}
 	publisher := &testutils.RecordedPublisher{}
-	if _, err := services.RunLobbyGame(context.Background(), database, publisher, snapshot); err != nil {
+	if _, err := services.RunLobbyGame(context.Background(), database, publisher, nil, snapshot); err != nil {
 		t.Fatal(err)
 	}
 	service := &services.GenerationService{Database: database, Publisher: publisher}
@@ -209,7 +209,7 @@ func TestGenerationRejectsAnotherGamesRoster(t *testing.T) {
 	otherLobby, teamOne, teamTwo := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	elsewhere := domain.Principal{PlayerID: uuid.NewString()}
 	other := domain.Snapshot{Lobby: domain.Lobby{ID: otherLobby, GameKey: "island-battles", Phase: domain.PhaseStarted}, Teams: []domain.Team{{ID: teamOne, Order: 1}, {ID: teamTwo, Order: 2}}, StartRoster: domain.StartRoster{{PlayerID: elsewhere.PlayerID, TeamID: teamOne}, {PlayerID: uuid.NewString(), TeamID: teamTwo}}}
-	if _, err := services.RunLobbyGame(ctx, fixture.database, fixture.publisher, other); err != nil {
+	if _, err := services.RunLobbyGame(ctx, fixture.database, fixture.publisher, nil, other); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := fixture.service.Current(ctx, elsewhere, otherLobby); err != nil {
@@ -371,7 +371,7 @@ func TestStartingARosterWithTwoPlayersOnOneTeamFails(t *testing.T) {
 		Teams:       []domain.Team{{ID: team, Order: 1, Name: "Blue"}},
 		StartRoster: domain.StartRoster{{PlayerID: uuid.NewString(), TeamID: team}, {PlayerID: uuid.NewString(), TeamID: team}},
 	}
-	if _, err := services.RunLobbyGame(context.Background(), database, &testutils.RecordedPublisher{}, snapshot); err == nil {
+	if _, err := services.RunLobbyGame(context.Background(), database, &testutils.RecordedPublisher{}, nil, snapshot); err == nil {
 		t.Fatal("started a game with two players on one team")
 	}
 	for _, model := range []any{&models.Game{}, &models.Generation{}, &models.FrozenGamePlayer{}} {

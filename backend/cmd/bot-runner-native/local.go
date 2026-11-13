@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"islandBattles/backend/botrunner/native"
 	"islandBattles/backend/models"
 )
 
@@ -58,18 +59,18 @@ func runLocal(arguments []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func playLocal(ctx context.Context, packagePath, gameURL, lobbyID, token string, limits models.BotRunnerLimits, stderr io.Writer) (Outcome, error) {
+func playLocal(ctx context.Context, packagePath, gameURL, lobbyID, token string, limits models.BotRunnerLimits, stderr io.Writer) (native.Outcome, error) {
 	zipData, err := os.ReadFile(packagePath)
 	if err != nil {
-		return Outcome{}, err
+		return native.Outcome{}, err
 	}
 	delivery, err := readDelivery(ctx, gameURL, lobbyID, token)
 	if err != nil {
-		return Outcome{}, err
+		return native.Outcome{}, err
 	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return Outcome{}, err
+		return native.Outcome{}, err
 	}
 	server := &http.Server{ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		response.Header().Set("Content-Type", "application/zip")
@@ -85,21 +86,21 @@ func playLocal(ctx context.Context, packagePath, gameURL, lobbyID, token string,
 		"limits":   limits,
 	})
 	if err != nil {
-		return Outcome{}, err
+		return native.Outcome{}, err
 	}
 	submitHost := os.Getenv("GAME_SUBMIT_HOST")
 	if submitHost == "" {
 		parsed, err := url.Parse(gameURL)
 		if err != nil {
-			return Outcome{}, err
+			return native.Outcome{}, err
 		}
 		submitHost = parsed.Host
 	}
 	directory, err := os.MkdirTemp("", "bot-runner-native-")
 	if err != nil {
-		return Outcome{}, err
+		return native.Outcome{}, err
 	}
-	runner := &Runner{Directory: directory, SubmitHost: submitHost, AllowHTTPPackages: true,
+	runner := &native.Runner{Directory: directory, SubmitHost: submitHost, AllowHTTPPackages: true,
 		Logger: slog.New(slog.NewTextHandler(stderr, nil))}
 	defer runner.Unload()
 	return runner.Handle(ctx, payload)

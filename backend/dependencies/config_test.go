@@ -102,11 +102,12 @@ func TestLoadConfigReadsThePublicURL(t *testing.T) {
 	}
 }
 
-// Hosted and uploaded bots are off unless ISLAND_BATTLES_SERVER_BOTS is on.
+// Hosted and uploaded bots are on unless ISLAND_BATTLES_SERVER_BOTS is off
+// (#225).
 func TestLoadConfigReadsTheServerBotsFlag(t *testing.T) {
 	t.Parallel()
 
-	for value, want := range map[string]bool{"": false, "off": false, "on": true} {
+	for value, want := range map[string]bool{"": true, "off": false, "on": true} {
 		values := validConfigurationEnvironment()
 		if value != "" {
 			values[ServerBotsEnv] = value
@@ -121,6 +122,40 @@ func TestLoadConfigReadsTheServerBotsFlag(t *testing.T) {
 		if _, err := LoadConfigFromLookup(mapLookup(values)); err == nil || !strings.Contains(err.Error(), ServerBotsEnv) {
 			t.Errorf("%s=%q: error = %v", ServerBotsEnv, invalid, err)
 		}
+	}
+}
+
+func TestLoadConfigReadsBothBotRunnerFunctionsOrNeither(t *testing.T) {
+	t.Parallel()
+
+	config, err := LoadConfigFromLookup(mapLookup(validConfigurationEnvironment()))
+	if err != nil || config.BotRunnerPython != "" || config.BotRunnerNative != "" {
+		t.Fatalf("without the settings: %+v, %v", config, err)
+	}
+	values := validConfigurationEnvironment()
+	values[BotRunnerPythonEnv], values[BotRunnerNativeEnv] = "island-battles-bot-runner-python", "island-battles-bot-runner-native"
+	config, err = LoadConfigFromLookup(mapLookup(values))
+	if err != nil || config.BotRunnerPython != "island-battles-bot-runner-python" || config.BotRunnerNative != "island-battles-bot-runner-native" {
+		t.Fatalf("with both: python %q, native %q, %v", config.BotRunnerPython, config.BotRunnerNative, err)
+	}
+	for _, name := range []string{BotRunnerPythonEnv, BotRunnerNativeEnv} {
+		values := validConfigurationEnvironment()
+		values[name] = "one-runner"
+		if _, err := LoadConfigFromLookup(mapLookup(values)); err == nil || !strings.Contains(err.Error(), "or neither") {
+			t.Errorf("only %s: error = %v", name, err)
+		}
+	}
+}
+
+func TestLoadLocalBotPythonSplitsTheCommand(t *testing.T) {
+	t.Parallel()
+
+	if command := LoadLocalBotPython(mapLookup(map[string]string{})); len(command) != 1 || command[0] != "python3.14" {
+		t.Errorf("default = %q", command)
+	}
+	command := LoadLocalBotPython(mapLookup(map[string]string{LocalBotPythonEnv: " uv run --python 3.14 python "}))
+	if strings.Join(command, "|") != "uv|run|--python|3.14|python" {
+		t.Errorf("command = %q", command)
 	}
 }
 

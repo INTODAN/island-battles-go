@@ -10,12 +10,15 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"islandBattles/backend/app"
+	"islandBattles/backend/botrunner"
 	"islandBattles/backend/dependencies"
 	"islandBattles/backend/observability"
 	"islandBattles/backend/packagestore/locals3"
@@ -89,6 +92,23 @@ func run(ctx context.Context, config dependencies.Config, address string, logger
 		}
 		options = append(options, app.WithLocalBotPackages(store, locals3.Prefix, storage))
 		logger.Info("Keeping uploaded bot packages on disk", "directory", directory)
+	}
+	// Without runner functions, the runners play hosted and uploaded bots
+	// in this process (#225).
+	if config.ServerBots && config.BotRunnerPython == "" {
+		origin := localOrigin(config, address)
+		parsed, err := url.Parse(origin)
+		if err != nil {
+			return err
+		}
+		directory, err := os.MkdirTemp("", "island-battles-bot-runners-")
+		if err != nil {
+			return err
+		}
+		runners := &botrunner.Local{SubmitHost: parsed.Host, Python: dependencies.LoadLocalBotPython(os.LookupEnv), Directory: directory, Logger: logger}
+		defer runners.Close()
+		options = append(options, app.WithLocalBotRunners(runners, origin))
+		logger.Info("Playing hosted and uploaded bots with the local bot runners", "python", strings.Join(runners.Python, " "))
 	}
 	handler, err := app.New(config, database, logger, options...)
 	if err != nil {

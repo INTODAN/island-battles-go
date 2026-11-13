@@ -88,22 +88,8 @@ func (service *GenerationService) TurnDelivery(ctx context.Context, principal do
 		if err != nil {
 			return err
 		}
-		turn := newGoBotTurn(locked, generation, player.TeamColor, memory)
-		// The board as a Go bot sees it: the team's castles show what the
-		// player's earlier batches this turn left unreserved.
-		if turn.Generation, err = goBotGeneration(generation, player.TeamColor, inputs); err != nil {
-			return err
-		}
-		expires := generation.CreatedAt.Add(submitTokenNoLimit)
-		if turn.TurnDeadlineAt != nil {
-			expires = turn.TurnDeadlineAt.Add(submitTokenGrace)
-		}
-		token, err := tokens.Issue(submittoken.Claims{GameID: locked.ID, PlayerID: player.PlayerID, GenerationID: generation.ID, Expires: expires})
-		if err != nil {
-			return err
-		}
-		delivery = models.TurnDelivery{Turn: turn, Submit: models.TurnSubmit{URL: submitURL, Token: token, DeadlineAt: turn.TurnDeadlineAt}}
-		return nil
+		delivery, err = newTurnDelivery(locked, generation, player, inputs, memory, tokens, submitURL)
+		return err
 	})
 	if err != nil {
 		return models.TurnDelivery{}, err

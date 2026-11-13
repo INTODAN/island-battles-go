@@ -68,6 +68,9 @@ type GenerationService struct {
 	// Watchers authorizes the watcher reads, Watch and WatchDemo, against
 	// the lobby's watcher rows. Nil lets only roster players read them.
 	Watchers domain.WatchAuthorizer
+	// Bots sends the turns of hosted and uploaded bots that requests
+	// create. Nil sends none, and those bots play only through the deadline.
+	Bots *TurnSender
 }
 
 // Current returns the caller's state of the lobby's game, after applying an
@@ -189,6 +192,7 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 	}
 	var state models.GenerationState
 	var events []realtime.Publication
+	var turns []turnToSend
 	// A batch that comes after its turn's deadline is rejected, but the
 	// transaction that applied the deadline still commits.
 	var late error
@@ -296,7 +300,7 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 			return err
 		}
 		if turnComplete(locked, generation, players, inputs) {
-			if generation, inputs, events, err = playTurn(ctx, transaction, locked, players, inputs); err != nil {
+			if generation, inputs, events, turns, err = playTurn(ctx, transaction, locked, players, inputs, service.Bots); err != nil {
 				return err
 			}
 			// When only Go bots are left to play, they play on after this
@@ -313,6 +317,7 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 	}
 	// The turn, or the deadline, has committed.
 	service.publish(ctx, events)
+	service.Bots.send(ctx, database, turns)
 	if late != nil {
 		return models.GenerationState{}, late
 	}
