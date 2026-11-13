@@ -40,7 +40,7 @@ func newLobbyStack(t *testing.T) *lobbyStack {
 	clock := domain.SystemClock{}
 	identifiers := domain.CryptoIdentifiers{}
 	policy := domain.DefaultPolicy(lobbyadapter.Registration(database),
-		domain.GameRegistration{Key: "quiz-demo", ValidateSettings: func(context.Context, json.RawMessage, []domain.TeamDefinition) error { return nil }})
+		domain.GameRegistration{Key: "quiz-demo", ValidateSettings: func(context.Context, string, json.RawMessage, []domain.TeamDefinition) error { return nil }})
 	store, err := lobbypostgres.NewStore(database, clock)
 	if err != nil {
 		t.Fatal(err)
