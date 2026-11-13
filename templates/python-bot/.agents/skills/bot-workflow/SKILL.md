@@ -44,4 +44,4 @@ Without a browser: `scripts/run.sh BASE_URL TOKEN LOBBY_ID` (the guest token and
 
 ## Building
 
-`scripts/build.sh` makes a standard Python package in `dist/`. There is no way to upload a bot to the server yet; the bot always runs on your machine.
+`scripts/build.sh` makes a standard Python package in `dist/`. `scripts/package.sh` makes `dist/island-battles-bot.zip` for the server's runners, which a player can upload to a lobby from the bot picker, or with the command the picker's **Upload from the command line** shows (`uv run island-battles-bot upload --game-url <url> --token <token> dist/island-battles-bot.zip`). The server doesn't run uploaded bots yet; the bot always runs on your machine.

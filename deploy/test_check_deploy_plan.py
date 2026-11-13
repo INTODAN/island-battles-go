@@ -60,6 +60,24 @@ class DeployModeTest(unittest.TestCase):
         code, _, stderr = run("deploy", FUNCTION_UPDATE, LOG_GROUP_CREATE, INSTANCE_NO_OP)
         self.assertEqual(code, 0, stderr)
 
+    def test_allows_creating_the_bot_package_bucket_with_the_function_update(self):
+        # The plan of #221: the bucket and its settings, the role's policy,
+        # and the function's new setting.
+        created = [change(address, ["create"]) for address in (
+            "aws_s3_bucket.bot_packages", "aws_s3_bucket_public_access_block.bot_packages",
+            "aws_s3_bucket_server_side_encryption_configuration.bot_packages",
+            "aws_s3_bucket_ownership_controls.bot_packages", "aws_s3_bucket_lifecycle_configuration.bot_packages",
+            "aws_s3_bucket_cors_configuration.bot_packages", "aws_s3_bucket_policy.bot_packages",
+            "aws_iam_role_policy.lambda_bot_packages")]
+        code, _, stderr = run("deploy", FUNCTION_UPDATE, *created)
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(run("publishes-backend", FUNCTION_UPDATE, *created)[1], "yes\n")
+
+    def test_refuses_deleting_the_bot_package_bucket(self):
+        code, _, stderr = run("deploy", change("aws_s3_bucket.bot_packages", ["delete"], "island-battles-bot-packages"))
+        self.assertEqual(code, 1)
+        self.assertIn("aws_s3_bucket.bot_packages: delete", stderr)
+
     def test_refuses_any_lightsail_change(self):
         code, _, stderr = run("deploy", FUNCTION_UPDATE, PORTS_UPDATE)
         self.assertEqual(code, 1)

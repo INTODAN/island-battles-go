@@ -40,6 +40,8 @@ locals {
     ISLAND_BATTLES_LOG_LINES_PER_MINUTE          = tostring(var.log_lines_per_minute)
     ISLAND_BATTLES_LOG_LINE_BYTES                = tostring(var.log_line_bytes)
     ISLAND_BATTLES_TRACE_INTERVAL                = "${var.trace_interval_seconds}s"
+    # The bucket that this configuration creates (bot_packages.tf).
+    ISLAND_BATTLES_BOT_PACKAGES_BUCKET = local.bot_packages_bucket
   }
   lambda_settings_overridden = sort([
     for key in concat(keys(local.lambda_settings), keys(var.extra_lambda_environment)) : key
@@ -62,8 +64,9 @@ data "archive_file" "backend" {
 }
 
 # The function writes its logs, and its collector layer sends traces to X-Ray
-# (observability.tf). It calls nothing else in AWS: it reaches Postgres and
-# Centrifugo over the internet.
+# (observability.tf). In S3 it presigns uploads to, reads and deletes the zips
+# of the bot package bucket, and only that bucket (bot_packages.tf). It calls
+# nothing else in AWS: it reaches Postgres and Centrifugo over the internet.
 resource "aws_iam_role" "lambda" {
   name = "${var.name}-lambda"
   assume_role_policy = jsonencode({

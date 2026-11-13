@@ -18,6 +18,8 @@ A bot is a **function**: it gets a `BotTurn` (the board, your team and the `memo
 - `island-battles-bot check` calls it once on a fixture turn,
 - `island-battles-bot run` and `IslandBattlesClient` play a seat on their own, without a browser.
 
+`island-battles-bot package` zips the bot for the server's runners, and `island-battles-bot upload` uploads that zip to a lobby.
+
 **This is a breaking change, and `BotTurn` now has a required `upgrades` field.** The `Player` class, `player_factory`, `CommandReceiver`, `UpgradeTable` and `client.upgrades` are gone: a strategy is now `play(turn)`. Pass it to `IslandBattlesClient(..., play=play)`. Port a strategy by moving `on_generation(generation, commands)` into `play(turn)` (the board is `turn.generation`, your team `turn.team_color`), returning the commands instead of sending them, and keeping state in `memory` instead of attributes. Update your bots before you upgrade the client.
 
 **Turn deliveries are a breaking change for `serve`; upgrade the SDK.** `POST /turn` now takes a `TurnDelivery` (the turn plus a one-turn submit token), answers `202` at once, and submits the bot's answer to the game itself; it no longer answers a `BotTurnResult`. The 3D web client and the lobby page deliver turns this way, so an older SDK's `serve` doesn't work with them, and this SDK's `serve` doesn't work with older game clients. A bot that raises or runs out of time now passes its turn instead of leaving it open. What to do: upgrade `island-battles-python` (and the Go SDK, for Go bots); your `play` function doesn't change.
@@ -121,6 +123,20 @@ Try it on the fixture turn after unzipping (on Linux arm64; elsewhere use a buil
 uv run island-battles-bot fixture | python -c 'import json,sys; print(json.dumps({"turn": json.load(sys.stdin)}))' > request.jsonl
 PYTHONPATH=unpacked/site python -m island_battles_client.worker bot:play < request.jsonl
 ```
+
+### Upload your package to a lobby
+
+```sh
+uv run island-battles-bot upload --game-url <url> --token <token> dist/island-battles-bot.zip
+```
+
+uploads the zip that `package` wrote to a lobby (#221), where everyone in it sees it in the bot picker. Copy the command from the bot picker's **Upload from the command line**, in the lobby page or the 3D client: it fills in the game's address and an **upload token**, which stands for you in that lobby for 15 minutes, so the command line needs no session of yours. The zip goes straight to the game's storage, never through the game server; then the game checks it.
+
+- **One package per member and lobby:** uploading a new one replaces your previous one. Any member may upload, and a package belongs to its lobby. Packages are deleted 8 days after their upload.
+- **The checks** are those of `package`: the manifest (format 1, Python 3.14, a `module:function` entry), at most 250 MiB zipped and 1 GiB unpacked, and no path outside the package (`..`, absolute paths, symbolic links). A package that fails one is refused, and the command prints the game's reason and exits with status 1.
+- An expired token, or one for another lobby, is refused: copy the command again. The browser pickers can also upload the zip themselves with **Upload bot (.zip)**.
+
+Choosing an uploaded package as your bot comes later; for now it is only uploaded and listed.
 
 ### Run a seat without a browser
 

@@ -39,6 +39,83 @@ class BotChoice(GameModel):
     """
 
 
+class BotPackage(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    field_schema: Annotated[
+        AnyUrl | None,
+        Field(alias="$schema", examples=["https://example.com/BotPackage.json"]),
+    ] = None
+    """
+    A URL to the JSON Schema for this object.
+    """
+    entry_or_command: StrictStr
+    """
+    A python package's module:function entry, such as bot:play, or a native package's command, its arguments joined with spaces, such as ./bot worker.
+    """
+    language: Literal["python", "native"]
+    """
+    python: a Python bot for the python3.14 runtime. native: a program for Linux arm64, such as a Go bot.
+    """
+    owner_name: StrictStr
+    """
+    Their display name when they uploaded it.
+    """
+    owner_player_id: UUID
+    """
+    The member who uploaded it. Only they can delete it.
+    """
+    package_id: UUID
+    size_bytes: Annotated[StrictInt, Field(ge=1)]
+    """
+    The zip's size in bytes.
+    """
+    uploaded_at: AwareDatetime
+
+
+class BotPackageUpload(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    field_schema: Annotated[
+        AnyUrl | None,
+        Field(alias="$schema", examples=["https://example.com/BotPackageUpload.json"]),
+    ] = None
+    """
+    A URL to the JSON Schema for this object.
+    """
+    package_id: UUID
+    upload: PresignedBotUpload
+
+
+class BotPackageUploadRequest(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    file_name: Annotated[StrictStr, Field(max_length=255, min_length=1)]
+    """
+    The zip's file name, such as island-battles-bot.zip. It must end in .zip.
+    """
+
+
+class BotPackages(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    field_schema: Annotated[
+        AnyUrl | None,
+        Field(alias="$schema", examples=["https://example.com/BotPackages.json"]),
+    ] = None
+    """
+    A URL to the JSON Schema for this object.
+    """
+    packages: Sequence[BotPackage]
+    """
+    Every checked package of the lobby, newest first, at most one per member.
+    """
+
+
 class BotTurn(GameModel):
     model_config = ConfigDict(
         extra="ignore",
@@ -72,6 +149,24 @@ class BotTurnResult(GameModel):
     memory: Mapping[str, Any] | None
     """
     Any JSON object of at most 64 KiB as compact JSON, given back as BotTurn.memory next turn, or null for none.
+    """
+
+
+class BotUploadToken(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    field_schema: Annotated[
+        AnyUrl | None,
+        Field(alias="$schema", examples=["https://example.com/BotUploadToken.json"]),
+    ] = None
+    """
+    A URL to the JSON Schema for this object.
+    """
+    expires_at: AwareDatetime
+    token: StrictStr
+    """
+    An upload token, ibut1.…: send it as Authorization: Bearer <token> to the two upload endpoints of this lobby, in place of a session.
     """
 
 
@@ -593,6 +688,20 @@ class PlayerGenerationLogs(GameModel):
     display_name: StrictStr
     lines: Sequence[GenerationLogLine]
     team_color: Annotated[StrictInt, Field(ge=1)]
+
+
+class PresignedBotUpload(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    fields: Mapping[str, StrictStr]
+    """
+    The form fields to send before the file, unchanged.
+    """
+    url: StrictStr
+    """
+    POST a multipart/form-data body here: every field of fields, then the zip as the last field, named file.
+    """
 
 
 class Problem(GameModel):

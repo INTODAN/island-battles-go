@@ -4,6 +4,7 @@ Run with: python3 -I -m unittest discover -s deploy -p 'test_*.py'
 """
 
 import contextlib
+import fnmatch
 import io
 import json
 import unittest
@@ -73,6 +74,9 @@ class PolicyTest(unittest.TestCase):
             "lightsail:*", "lambda:*", "logs:*", "cloudwatch:*", "sns:*", "budgets:*", "acm:*", "cloudfront:*"})
         self.assertEqual(statements["ManageItsBuckets"]["Resource"],
                          ["arn:aws:s3:::island-battles-*", "arn:aws:s3:::island-battles-*/*"])
+        # deploy/terraform/bot_packages.tf names its bucket <name>-bot-packages.
+        self.assertTrue(fnmatch.fnmatchcase("arn:aws:s3:::island-battles-bot-packages",
+                                            statements["ManageItsBuckets"]["Resource"][0]))
         self.assertEqual(statements["ManageItsRolesAndUsers"]["Resource"], [
             f"arn:aws:iam::{ACCOUNT}:role/island-battles-*",
             f"arn:aws:iam::{ACCOUNT}:user/island-battles-*",

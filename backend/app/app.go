@@ -19,9 +19,12 @@ import (
 	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/mapbuilder"
 	"islandBattles/backend/observability"
+	"islandBattles/backend/packagestore"
 	"islandBattles/backend/retention"
 	"islandBattles/backend/routes"
+	"islandBattles/backend/services"
 	"islandBattles/backend/submittoken"
+	"islandBattles/backend/uploadtoken"
 	"islandBattles/lobby/application"
 	"islandBattles/lobby/auth"
 	"islandBattles/lobby/domain"
@@ -39,12 +42,26 @@ type Option func(*options)
 
 type options struct {
 	gameGraph bool
+	// localPackages keeps bot packages when no bucket is configured, and
+	// localPackagesHandler serves its storage at localPackagesPrefix.
+	localPackages        packagestore.Store
+	localPackagesPrefix  string
+	localPackagesHandler http.Handler
 }
 
 // WithGameGraph serves GET /game/{id}/graph, which reads any game without
 // authentication. Only the local server host passes it.
 func WithGameGraph() Option {
 	return func(options *options) { options.gameGraph = true }
+}
+
+// WithLocalBotPackages keeps bot packages in store when the configuration
+// names no bucket, and serves handler, the store's S3-compatible server, at
+// prefix. Only the local server host passes it.
+func WithLocalBotPackages(store packagestore.Store, prefix string, handler http.Handler) Option {
+	return func(options *options) {
+		options.localPackages, options.localPackagesPrefix, options.localPackagesHandler = store, prefix, handler
+	}
 }
 
 // New wires the stores and services to a router. It starts no goroutines and
@@ -124,6 +141,25 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	if err != nil {
 		return nil, err
 	}
+	// Upload tokens share the submit tokens' secret; their MAC covers their
+	// own prefix, so neither kind passes for the other.
+	uploadTokens, err := uploadtoken.New([]byte(config.SubmitTokenSecret))
+	if err != nil {
+		return nil, err
+	}
+	var packages packagestore.Store
+	switch {
+	case config.BotPackagesBucket != "":
+		bucket, err := packagestore.FromEnvironment(context.Background(), config.BotPackagesBucket)
+		if err != nil {
+			return nil, err
+		}
+		packages = bucket
+	case selected.localPackages != nil:
+		packages = selected.localPackages
+	default:
+		logger.Warn("Bot package uploads answer 503 because " + dependencies.BotPackagesBucketEnv + " is not set")
+	}
 
 	// The authenticated player goes on a failed request's error line.
 	authenticated := annotatingAuthentication{authentication}
@@ -143,6 +179,11 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	}
 	routes.SetupLobbyRoutes(api, lobbyService, authenticated, gameBinding, lobbyRetention, &handlers.LobbyGame{Database: database, Authenticator: authenticated, Publisher: publisher, Retention: gameRetention, Watchers: lobbyService,
 		SubmitTokens: submitTokens, PublicURL: config.PublicURL})
+	routes.SetupBotPackageRoutes(api, &handlers.BotPackages{Authenticator: authenticated, Service: services.BotPackages{
+		Database: database, Lobbies: lobbyService, GameKey: lobbyadapter.GameKey, Store: packages, Tokens: uploadTokens}})
+	if config.BotPackagesBucket == "" && selected.localPackagesHandler != nil {
+		router.Handle(selected.localPackagesPrefix+"/*", selected.localPackagesHandler)
+	}
 	proxy.Register(router)
 	if err := registerPages(router); err != nil {
 		return nil, err

@@ -10,7 +10,7 @@ import (
 	"islandBattles/lobby/frontend"
 )
 
-//go:embed example-player.mjs lobby-settings.mjs bot-choice.mjs localhost-bot.mjs
+//go:embed example-player.mjs lobby-settings.mjs bot-choice.mjs bot-packages.mjs localhost-bot.mjs
 var assets embed.FS
 
 func Handler() http.Handler {

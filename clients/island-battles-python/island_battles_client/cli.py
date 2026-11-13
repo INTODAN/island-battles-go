@@ -2,8 +2,8 @@
 
 ``serve`` is the bot's HTTP server, which takes turn deliveries and submits
 its answers itself, ``check`` calls the bot once on a fixture turn,
-``package`` zips the bot for the server's runners, and ``run`` plays a seat
-without a browser.
+``package`` zips the bot for the server's runners, ``upload`` uploads that zip
+to a lobby, and ``run`` plays a seat without a browser.
 """
 
 from __future__ import annotations
@@ -40,6 +40,7 @@ from .client import IslandBattlesClient
 from .errors import BotMemoryTooLargeError, GameError, InvalidBotResultError
 from .fixture import fixture_turn, fixture_turn_data
 from .game_log import ClientLogging
+from .upload import run as upload
 
 DEFAULT_PORT = 41414
 HOST = "127.0.0.1"
@@ -762,6 +763,30 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"the zip to write (default {DEFAULT_OUTPUT})",
     )
     packaging.set_defaults(handler=package)
+
+    uploading = commands.add_parser(
+        "upload",
+        help="upload a package zip to a lobby, with the upload token that the "
+        "bot picker's Upload from the command line shows",
+    )
+    uploading.add_argument(
+        "--game-url",
+        required=True,
+        metavar="URL",
+        help="the game's address, such as https://island-battles.example.org",
+    )
+    uploading.add_argument(
+        "--token",
+        required=True,
+        help="the upload token from the bot picker, valid for 15 minutes",
+    )
+    uploading.add_argument(
+        "zip",
+        nargs="?",
+        default=DEFAULT_OUTPUT,
+        help=f"the zip that package wrote (default {DEFAULT_OUTPUT})",
+    )
+    uploading.set_defaults(handler=upload)
 
     running = commands.add_parser("run", help="play a seat without a browser")
     running.add_argument("bot", help="module:function")

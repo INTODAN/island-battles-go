@@ -38,8 +38,9 @@ run "passes_every_lambda_setting" {
       ISLAND_BATTLES_LOG_LINES_PER_MINUTE          = "5"
       ISLAND_BATTLES_LOG_LINE_BYTES                = "1024"
       ISLAND_BATTLES_TRACE_INTERVAL                = "180s"
+      ISLAND_BATTLES_BOT_PACKAGES_BUCKET           = "island-battles-bot-packages"
     })
-    error_message = "The function must get every lambda.env setting, the last value of a repeated key, the pool size, and the log and trace limits with C from the reserved concurrency."
+    error_message = "The function must get every lambda.env setting, the last value of a repeated key, the pool size, the log and trace limits with C from the reserved concurrency, and the bot package bucket."
   }
 
   assert {
@@ -919,4 +920,73 @@ run "rejects_backups_kept_under_a_day" {
   }
 
   expect_failures = [var.database_backup_retention_days]
+}
+
+run "keeps_bot_packages_in_a_private_bucket_for_8_days" {
+  command = plan
+
+  # AWS assigns these on creation.
+  override_resource {
+    target          = aws_s3_bucket.bot_packages
+    override_during = plan
+    values = {
+      arn = "arn:aws:s3:::island-battles-bot-packages"
+    }
+  }
+
+  override_resource {
+    target          = aws_iam_role.lambda
+    override_during = plan
+    values = {
+      id  = "island-battles-lambda"
+      arn = "arn:aws:iam::123456789012:role/island-battles-lambda"
+    }
+  }
+
+  assert {
+    condition     = aws_s3_bucket.bot_packages.bucket == "island-battles-bot-packages"
+    error_message = "The bucket must be <name>-bot-packages, which the apply role may change."
+  }
+
+  assert {
+    condition = (
+      aws_s3_bucket_public_access_block.bot_packages.block_public_acls &&
+      aws_s3_bucket_public_access_block.bot_packages.block_public_policy &&
+      aws_s3_bucket_public_access_block.bot_packages.ignore_public_acls &&
+      aws_s3_bucket_public_access_block.bot_packages.restrict_public_buckets &&
+      one(one(aws_s3_bucket_server_side_encryption_configuration.bot_packages.rule).apply_server_side_encryption_by_default).sse_algorithm == "AES256" &&
+      one(aws_s3_bucket_ownership_controls.bot_packages.rule).object_ownership == "BucketOwnerEnforced"
+    )
+    error_message = "The bucket must block all public access, encrypt objects with SSE-S3 and have no ACLs."
+  }
+
+  assert {
+    condition = (
+      one(aws_s3_bucket_lifecycle_configuration.bot_packages.rule).status == "Enabled" &&
+      one(one(aws_s3_bucket_lifecycle_configuration.bot_packages.rule).expiration).days == 8
+    )
+    error_message = "Every package must be deleted 8 days after its upload."
+  }
+
+  assert {
+    condition = (
+      toset(one(aws_s3_bucket_cors_configuration.bot_packages.cors_rule).allowed_methods) == toset(["POST"]) &&
+      toset(one(aws_s3_bucket_cors_configuration.bot_packages.cors_rule).allowed_origins) == toset(["https://island-battles.example.org"])
+    )
+    error_message = "Browsers must upload only with POST, and only from the game's origin, where the lobby page is too."
+  }
+
+  assert {
+    condition = (
+      [for statement in jsondecode(aws_iam_role_policy.lambda_bot_packages.policy).Statement : statement.Resource] == ["arn:aws:s3:::island-battles-bot-packages/*"] &&
+      toset(one(jsondecode(aws_iam_role_policy.lambda_bot_packages.policy).Statement).Action) == toset(["s3:PutObject", "s3:GetObject", "s3:DeleteObject"]) &&
+      aws_iam_role_policy.lambda_bot_packages.role == aws_iam_role.lambda.id
+    )
+    error_message = "The backend's role must reach this bucket's objects only."
+  }
+
+  assert {
+    condition     = [for statement in jsondecode(aws_s3_bucket_policy.bot_packages.policy).Statement : statement.Sid] == ["RequireTls"]
+    error_message = "The bucket policy must require TLS."
+  }
 }

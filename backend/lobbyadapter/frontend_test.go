@@ -31,6 +31,18 @@ func TestFrontendGameModulesAreServed(t *testing.T) {
 	}
 }
 
+// The room module reaches the lobby's bot packages, and nothing of the game
+// that a roster player reads.
+func TestFrontendGameRoomReachesTheBotPackages(t *testing.T) {
+	prefix := lobbyadapter.FrontendGame().RoomAPIPrefix
+	if prefix != "/game/lobbies/{lobby_id}/" || !strings.HasPrefix("/game/lobbies/{lobby_id}/bot-packages", prefix) {
+		t.Fatalf("room API prefix = %q", prefix)
+	}
+	if strings.HasPrefix("/game/from-lobby/{lobby_id}/generation", prefix) {
+		t.Fatal("the room module reaches the game's reads")
+	}
+}
+
 // The catalog links the demo viewer where app.go mounts it.
 func TestFrontendGameLinksTheDemoViewer(t *testing.T) {
 	links := lobbyadapter.FrontendGame().Links

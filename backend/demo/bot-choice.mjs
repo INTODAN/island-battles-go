@@ -6,8 +6,10 @@
 // bot level that the backend plays itself. The room lists every member's
 // choice from the snapshot's member_settings, and each bot seat's level from
 // its seat_settings. The host can also seat a default bot on a team, through
-// the lobby page's seat controls, which seatOptions fills.
+// the lobby page's seat controls, which seatOptions fills. Below the choice,
+// bot-packages.mjs lists the lobby's bot packages and uploads the player's.
 
+import { PackagesPanel } from "./bot-packages.mjs";
 import { checkBotHealth, serveCommand } from "./localhost-bot.mjs";
 
 // How often the room asks the localhost bot's server whether it is running
@@ -92,7 +94,7 @@ export const safariNote = "Safari does not let an https page reach a bot on loca
 // through the page and resolves to the snapshot. With the localhost bot
 // chosen, it also shows whether that bot is running.
 export class RoomPanel {
-  constructor({ container, lobbyID, playerID, saveMemberSettings, checkHealth = checkBotHealth, copy = (text) => navigator.clipboard.writeText(text) }) {
+  constructor({ container, lobbyID, playerID, saveMemberSettings, request, checkHealth = checkBotHealth, copy = (text) => navigator.clipboard.writeText(text), postToStorage }) {
     this.container = container;
     this.checkHealth = checkHealth;
     this.copy = copy;
@@ -111,6 +113,8 @@ export class RoomPanel {
     this.summary.setAttribute("role", "status");
     this.local = this.buildLocalHelp();
     container.append(label, this.local, this.summary);
+    // The lobby's bot packages, which the page's room requests reach.
+    this.packages = request ? new PackagesPanel({ container, lobbyID, playerID, request, copy, ...(postToStorage ? { post: postToStorage } : {}) }) : null;
     this.select.addEventListener("change", () => void this.save(this.select.value));
     void loadLevels().then((levels) => {
       this.select.append(...levels.map((level) => new Option(`Default bot, level ${level}`, `level-${level}`)));
@@ -193,7 +197,12 @@ export class RoomPanel {
     // The page hides the panel once the lobby starts, and the bot is then
     // the page's concern; it asks again if the panel is shown.
     this.show(snapshot);
-    if (this.container.closest("[hidden]")) this.stopPolling();
+    if (this.container.closest("[hidden]")) {
+      this.stopPolling();
+      this.packages?.stop();
+    } else {
+      this.packages?.follow();
+    }
   }
 
   async save(value) {

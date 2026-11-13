@@ -194,8 +194,10 @@ func assertNoGameData(t *testing.T, database *gorm.DB) {
 			t.Errorf("game table %s still has %d rows", table, count)
 		}
 	}
-	if checked != 12 {
-		t.Errorf("checked %d game tables, want the 12 that MigrateSchema creates; update countGameRows for a new one", checked)
+	// The 12 tables of games, and island_bot_packages, which belongs to
+	// lobbies rather than games and is deleted on its own schedule.
+	if checked != 13 {
+		t.Errorf("checked %d game tables, want the 13 that MigrateSchema creates; update countGameRows for a new one", checked)
 	}
 }
 
@@ -676,7 +678,8 @@ func TestAPassMakesFewDatabaseRoundTrips(t *testing.T) {
 	statements := countStatements(t, database)
 
 	// Retiring all 6 games, and deleting the first 3 small games whole: one
-	// transaction to retire, and one per game.
+	// transaction to retire, and one per game. Deleting old bot packages is
+	// one statement more.
 	result, err := runner.Pass(context.Background(), time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -684,8 +687,8 @@ func TestAPassMakesFewDatabaseRoundTrips(t *testing.T) {
 	if result.RetiredGames != 6 || result.Games != retention.MaxPurgedGames || result.Generations != 2*retention.MaxPurgedGames {
 		t.Fatalf("first pass = %+v", result)
 	}
-	if *statements > 48 {
-		t.Fatalf("the pass sent %d statements, want at most 48", *statements)
+	if *statements > 49 {
+		t.Fatalf("the pass sent %d statements, want at most 49", *statements)
 	}
 	t.Logf("a pass that deletes 3 small games sends %d statements in 4 transactions", *statements)
 	drain(t, runner, 10)
@@ -694,7 +697,49 @@ func TestAPassMakesFewDatabaseRoundTrips(t *testing.T) {
 	if result, err := runner.Pass(context.Background(), time.Now()); err != nil || result != (retention.Result{}) {
 		t.Fatalf("idle pass = %+v, %v", result, err)
 	}
-	if *statements != 2 {
-		t.Fatalf("a pass with nothing to delete sent %d statements, want 2", *statements)
+	// One to find games to retire, one to find retired games, and one to
+	// delete old bot packages.
+	if *statements != 3 {
+		t.Fatalf("a pass with nothing to delete sent %d statements, want 3", *statements)
+	}
+}
+
+func TestOldBotPackageRowsAreDeleted(t *testing.T) {
+	database := testutils.InitTestDB(t)
+	now := time.Now()
+	lobbyID := uuid.NewString()
+	ages := map[string]time.Duration{"fresh": time.Hour, "a week": 7 * 24 * time.Hour, "just over 8 days": 8*24*time.Hour + time.Minute, "a month": 30 * 24 * time.Hour}
+	ids := map[string]string{}
+	for name, age := range ages {
+		ids[name] = uuid.NewString()
+		uploaded := now.Add(-age)
+		if err := dal.CreateBotPackage(database, models.BotPackage{PackageID: ids[name], LobbyID: lobbyID, OwnerPlayerID: uuid.NewString(), OwnerName: name,
+			Status: models.BotPackageReady, S3Key: "lobbies/" + lobbyID + "/" + ids[name] + ".zip", Language: "native", EntryOrCommand: "./bot worker", SizeBytes: 1, UploadedAt: &uploaded, CreatedAt: uploaded}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := newDatabaseRetention(t, database, 10).Pass(context.Background(), now)
+	if err != nil || result.BotPackages != 2 {
+		t.Fatalf("result = %+v, %v; want the 2 packages older than 8 days deleted", result, err)
+	}
+	for name := range ages {
+		found, err := dal.FindBotPackage(database, lobbyID, ids[name])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if kept := found != nil; kept != (ages[name] < retention.BotPackagePeriod) {
+			t.Errorf("%s: kept = %v", name, kept)
+		}
+	}
+	// A batch is bounded, oldest first.
+	for range 3 {
+		old := now.Add(-20 * 24 * time.Hour)
+		if err := dal.CreateBotPackage(database, models.BotPackage{PackageID: uuid.NewString(), LobbyID: lobbyID, OwnerPlayerID: uuid.NewString(),
+			Status: models.BotPackagePending, S3Key: "k", CreatedAt: old}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if deleted, err := dal.DeleteExpiredBotPackages(database, now.Add(-retention.BotPackagePeriod), 2); err != nil || deleted != 2 {
+		t.Fatalf("deleted = %d, %v; want a batch of 2", deleted, err)
 	}
 }
