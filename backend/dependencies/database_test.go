@@ -54,7 +54,7 @@ func TestMigrateSchemaDropsTheGenerationNotificationQueue(t *testing.T) {
 	if err := db.Exec(`CREATE TABLE generation_notifications (id bigserial PRIMARY KEY, payload jsonb)`).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := schema.Migrate(context.Background(), db); err != nil {
+	if err := schema.Migrate(context.Background(), db, schema.Options{SeparateLobbyDatabase: true}); err != nil {
 		t.Fatal(err)
 	}
 	if db.Migrator().HasTable("generation_notifications") {
@@ -64,15 +64,17 @@ func TestMigrateSchemaDropsTheGenerationNotificationQueue(t *testing.T) {
 
 // Each person's bot is in their lobby member settings, so migrating drops the
 // table of bot choices, with its foreign key to the lobby's memberships, and
-// its choices, in databases created before.
+// its choices, in databases created before, which also held the lobby's
+// tables.
 func TestMigrateSchemaDropsTheBotChoiceTable(t *testing.T) {
 	db := testutils.InitTestDB(t)
+	testutils.AddLobbyTablesForTest(t, db)
 	err := db.Exec(`CREATE TABLE island_lobby_bot_choices (lobby_id uuid, player_id uuid, kind text NOT NULL, level bigint, created_at timestamptz, updated_at timestamptz, PRIMARY KEY (lobby_id, player_id),
 CONSTRAINT fk_island_lobby_bot_choices_membership FOREIGN KEY (lobby_id, player_id) REFERENCES lobby_memberships (lobby_id, player_id) ON DELETE CASCADE)`).Error
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := schema.Migrate(context.Background(), db); err != nil {
+	if err := schema.Migrate(context.Background(), db, schema.Options{}); err != nil {
 		t.Fatal(err)
 	}
 	if db.Migrator().HasTable("island_lobby_bot_choices") {
@@ -109,7 +111,7 @@ func TestMigrateSchemaBackfillsTheFrozenPlayersBotKinds(t *testing.T) {
 	if err := db.Create(&[]frozenPlayerBeforeBotKinds{{GameID: 1, PlayerID: localhostPlayer, TeamColor: 1}, {GameID: 1, PlayerID: defaultPlayer, TeamColor: 2, BotLevel: &level}}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := schema.Migrate(context.Background(), db); err != nil {
+	if err := schema.Migrate(context.Background(), db, schema.Options{SeparateLobbyDatabase: true}); err != nil {
 		t.Fatal(err)
 	}
 	// A game started since stores a hosted bot, which another run keeps.
@@ -117,7 +119,7 @@ func TestMigrateSchemaBackfillsTheFrozenPlayersBotKinds(t *testing.T) {
 	if err := db.Create(&models.FrozenGamePlayer{GameID: 2, PlayerID: localhostPlayer, TeamColor: 1, BotKind: models.HostedBot, BotURL: &url}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := schema.Migrate(context.Background(), db); err != nil {
+	if err := schema.Migrate(context.Background(), db, schema.Options{SeparateLobbyDatabase: true}); err != nil {
 		t.Fatal(err)
 	}
 	players, err := dal.LoadFrozenPlayers(db, 1)
@@ -163,7 +165,7 @@ func TestMigrateSchemaDropsTheOldReplayColumn(t *testing.T) {
 	}
 	// The second run finds the column already gone.
 	for range 2 {
-		if err := schema.Migrate(context.Background(), db); err != nil {
+		if err := schema.Migrate(context.Background(), db, schema.Options{SeparateLobbyDatabase: true}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -305,10 +307,10 @@ func TestInitDBTracesQueriesInsideSampledTraces(t *testing.T) {
 // Migrating twice is safe, as every deploy runs the migrate command again.
 func TestMigrateSchemaIsRepeatable(t *testing.T) {
 	db := testutils.InitTestDB(t)
-	if err := schema.Migrate(context.Background(), connect(t, dependencies.DefaultDatabaseConfig(databaseURL(t, db)), slog.Default())); err != nil {
+	if err := schema.Migrate(context.Background(), connect(t, dependencies.DefaultDatabaseConfig(databaseURL(t, db)), slog.Default()), schema.Options{SeparateLobbyDatabase: true}); err != nil {
 		t.Fatal(err)
 	}
-	for _, table := range []string{"lobby_rooms", "map_templates", "games", "generations"} {
+	for _, table := range []string{"map_templates", "games", "generations"} {
 		if !db.Migrator().HasTable(table) {
 			t.Fatalf("missing table %s", table)
 		}

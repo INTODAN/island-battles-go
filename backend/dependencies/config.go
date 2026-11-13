@@ -62,6 +62,11 @@ const (
 	// becomes its own service (#118).
 	PlayerTokenKeysEnv     = "LOBBY_PLAYER_TOKEN_KEYS"
 	PlayerTokenLifetimeEnv = "LOBBY_PLAYER_TOKEN_LIFETIME"
+	// LobbyDatabaseURLEnv is the lobby's own database (#229), on the same
+	// server as Island Battles' or another: the lobby in this process keeps
+	// its tables there, and the migrate command drops the lobby's tables from
+	// Island Battles' database once it names another database.
+	LobbyDatabaseURLEnv = "LOBBY_DATABASE_URL"
 	// LobbyGamesEnv lists the games that the lobby calls over HTTP; see
 	// Config.LobbyGames.
 	LobbyGamesEnv = gamehooks.GamesEnv
@@ -104,7 +109,7 @@ func DefaultDatabaseConfig(url string) DatabaseConfig {
 // which admin operations refuse every request, and the public URL, which
 // defaults to each request's own. With LobbyURL set, the lobby runs on its
 // own, and the settings that only the lobby reads are neither required nor
-// read: the Centrifugo public URL, the connection token and proxy secrets,
+// read: the lobby's database, the Centrifugo public URL, the connection token and proxy secrets,
 // the player token keys and lifetime, and LOBBY_GAMES. Values are loaded
 // only by executables, never by package init.
 // The listen address belongs to the HTTP server host alone; see LoadHTTPAddr.
@@ -173,6 +178,10 @@ type Config struct {
 	// process, and the lobby's hook calls and the game's game API calls reach
 	// the other side's handler in memory.
 	LobbyURL string
+	// LobbyDatabaseURL is the lobby's own database, LOBBY_DATABASE_URL,
+	// which the lobby in this process keeps its tables in. Required while
+	// the lobby runs in this process, and not read otherwise.
+	LobbyDatabaseURL string
 	// LobbyGames is the lobby's LOBBY_GAMES: the games it calls over HTTP,
 	// as a JSON array of gamehooks.GameConfig. Island Battles is added, as
 	// lobbyadapter.LobbyGame, unless it lists island-battles itself; see
@@ -275,6 +284,15 @@ func (config *Config) loadLobbyGames(lookup func(string) (string, bool)) error {
 	return nil
 }
 
+// LobbyDatabaseConfig is the lobby's own database, for the lobby in this
+// process, with the pool limits of Island Battles' database: each host keeps
+// one pool of each.
+func (config Config) LobbyDatabaseConfig() DatabaseConfig {
+	lobby := config.Database
+	lobby.URL = config.LobbyDatabaseURL
+	return lobby
+}
+
 // LobbyIssuer is the iss of the lobby's player tokens: the URL of a lobby
 // that runs on its own; or, while the lobby runs in this process, the public
 // URL, which the two share, or LocalLobbyIssuer without one.
@@ -299,7 +317,7 @@ func LoadConfigFromLookup(lookup func(string) (string, bool)) (Config, error) {
 	required := []string{DatabaseURLEnv, CentrifugoAPIURLEnv, CentrifugoAPIKeyEnv, SubmitTokenSecretEnv, LobbyHookSecretEnv}
 	if lobbyURL == "" {
 		// The lobby in this process reads these too.
-		required = append(required, CentrifugoPublicURLEnv, ConnectionTokenHMACSecretEnv, LobbyProxySecretEnv, PlayerTokenKeysEnv)
+		required = append(required, LobbyDatabaseURLEnv, CentrifugoPublicURLEnv, ConnectionTokenHMACSecretEnv, LobbyProxySecretEnv, PlayerTokenKeysEnv)
 	}
 	if err := requireEnvironment(lookup, required...); err != nil {
 		return Config{}, err
@@ -378,6 +396,10 @@ func LoadConfigFromLookup(lookup func(string) (string, bool)) (Config, error) {
 		config.ConnectionTokenHMACSecret = readEnvironment(lookup, ConnectionTokenHMACSecretEnv)
 		config.LobbyProxySecret = readEnvironment(lookup, LobbyProxySecretEnv)
 		config.LobbyGames = readEnvironment(lookup, LobbyGamesEnv)
+		config.LobbyDatabaseURL = readEnvironment(lookup, LobbyDatabaseURLEnv)
+		if err := validateURL(LobbyDatabaseURLEnv, config.LobbyDatabaseURL, "postgres", "postgresql"); err != nil {
+			return Config{}, err
+		}
 		if err := validateURL(CentrifugoPublicURLEnv, config.CentrifugoPublicURL, "ws", "wss"); err != nil {
 			return Config{}, err
 		}

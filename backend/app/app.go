@@ -7,6 +7,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -84,11 +85,13 @@ func WithLocalBotRunners(runners services.BotRunners, origin string) Option {
 // host owns and closes. Without options it serves only what is safe in public.
 //
 // Without config.LobbyURL, the lobby runs in this process, built by lobby/app
-// as the lobby's own hosts build it, and New serves its routes too. With it,
+// as the lobby's own hosts build it, with its tables in lobbyDatabase, its own
+// database (dependencies.InitLobbyDB), and New serves its routes too. With it,
 // the lobby is a server of its own (lobby/cmd/lobby): New serves none of the
 // lobby's routes, reads the lobby's game API over the network, and verifies
-// player tokens with the lobby's JWKS. Either way the game serves its hooks.
-func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opts ...Option) (http.Handler, error) {
+// player tokens with the lobby's JWKS, and lobbyDatabase is nil. Either way
+// the game serves its hooks. The host owns both pools.
+func New(config dependencies.Config, database, lobbyDatabase *gorm.DB, logger *slog.Logger, opts ...Option) (http.Handler, error) {
 	var selected options
 	for _, option := range opts {
 		option(&selected)
@@ -109,7 +112,10 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	var playerKeys playertoken.KeySource
 	gameAPIURL := config.LobbyURL
 	if config.LobbyURL == "" {
-		lobby, err = inProcessLobby(config, database, centrifugo, logger, loopback, func() http.Handler { return hooks })
+		if lobbyDatabase == nil {
+			return nil, errors.New("the lobby in this process needs its own database")
+		}
+		lobby, err = inProcessLobby(config, lobbyDatabase, centrifugo, logger, loopback, func() http.Handler { return hooks })
 		if err != nil {
 			return nil, err
 		}
@@ -215,8 +221,8 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	return router, nil
 }
 
-// inProcessLobby builds the lobby in this process with lobby/app, from the
-// backend's settings, as the lobby's own hosts build it from LOBBY_*. Its
+// inProcessLobby builds the lobby in this process with lobby/app, on its own
+// database, from the backend's settings, as the lobby's own hosts build it from LOBBY_*. Its
 // LOBBY_GAMES lists Island Battles, whose hooks it calls through loopback,
 // which also carries the game's calls of its game API to it. The lobby's
 // authenticated players, and the causes that its answers leave out, go on

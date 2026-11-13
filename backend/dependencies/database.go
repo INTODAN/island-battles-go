@@ -67,6 +67,20 @@ func InitDB(config DatabaseConfig, logger *slog.Logger) (*gorm.DB, error) {
 	return db, nil
 }
 
+// InitLobbyDB connects to the lobby's own database, for the lobby in this
+// process, as InitDB connects to Island Battles'. It returns no database
+// while the lobby runs on its own (config.LobbyURL).
+func InitLobbyDB(config Config, logger *slog.Logger) (*gorm.DB, error) {
+	if config.LobbyURL != "" {
+		return nil, nil
+	}
+	database, err := InitDB(config.LobbyDatabaseConfig(), logger)
+	if err != nil {
+		return nil, fmt.Errorf("the lobby's database: %w", err)
+	}
+	return database, nil
+}
+
 // warningsAtMost writes errors as warnings.
 type warningsAtMost struct{ slog.Handler }
 
@@ -88,8 +102,8 @@ func (handler warningsAtMost) WithGroup(name string) slog.Handler {
 }
 
 // MigrateGameSchema AutoMigrates the game tables, whose data may be reset.
-// schema.Migrate runs it last, after the lobby's and the map templates'
-// migrations, so that game tables may reference templates.
+// schema.Migrate runs it after the map templates' migrations, so that game
+// tables may reference templates.
 func MigrateGameSchema(ctx context.Context, db *gorm.DB) error {
 	// A lobby plays one game per round, so the unique index on a game's
 	// lobby alone gives way to one on its lobby and round. AutoMigrate never

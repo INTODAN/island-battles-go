@@ -117,8 +117,8 @@ func testPlayerTokenKeys(t *testing.T) *playertoken.KeySet {
 }
 
 func TestReplayOverSixMegabytesStreamsThroughTheFunctionURL(t *testing.T) {
-	database := testutils.InitTestDB(t)
-	handler, err := newHandler(testConfig(t, database), database, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	database, lobbyDatabase := testutils.InitTestDatabases(t)
+	handler, err := newHandler(testConfig(t, database), database, lobbyDatabase, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,10 +243,10 @@ var signedMounts = map[string][]string{
 // Every other route must refuse a request without credentials: no bearer
 // token, no admin key, no proxy secret and no Lobby-Signature.
 func TestTheLambdaHostServesOnlyListedRoutesWithoutAuthentication(t *testing.T) {
-	database := testutils.InitTestDB(t)
+	database, lobbyDatabase := testutils.InitTestDatabases(t)
 	config := testConfig(t, database)
 	config.AdminAPIKey = "test-admin-api-key"
-	handler, err := newHandler(config, database, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	handler, err := newHandler(config, database, lobbyDatabase, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +302,7 @@ func TestTheLambdaHostServesOnlyListedRoutesWithoutAuthentication(t *testing.T) 
 		t.Fatalf("/=%d to %q %s", response.StatusCode, response.Headers["Location"], content)
 	}
 
-	local, err := app.New(config, database, slog.New(slog.NewTextHandler(io.Discard, nil)), app.WithGameGraph())
+	local, err := app.New(config, database, lobbyDatabase, slog.New(slog.NewTextHandler(io.Discard, nil)), app.WithGameGraph())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -420,11 +420,11 @@ func TestRequestsEndBeforeTheLambdaTimeout(t *testing.T) {
 // That covers the answers that leave Huma's transformers out: the lobby's
 // authentication writes its own problem, and the Centrifugo proxy its own 503.
 func TestAFailedRequestLogsOneErrorLineWithItsCause(t *testing.T) {
-	database := testutils.InitTestDB(t)
+	database, lobbyDatabase := testutils.InitTestDatabases(t)
 	var output bytes.Buffer
 	logger, _ := observability.NewLambdaLogger(&output, observability.DefaultSettings())
 	config := testConfig(t, database)
-	handler, err := newHandler(config, database, logger)
+	handler, err := newHandler(config, database, lobbyDatabase, logger)
 	if err != nil {
 		t.Fatal(err)
 	}

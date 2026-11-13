@@ -29,6 +29,36 @@ func TestLoadConfigRejectsMissingSecretsWithoutEchoingValues(t *testing.T) {
 	}
 }
 
+// The lobby in this process keeps its tables in its own database (#229), with
+// Island Battles' pool limits; a lobby that runs on its own reads its database
+// itself.
+func TestTheLobbyInThisProcessNeedsItsOwnDatabase(t *testing.T) {
+	t.Parallel()
+
+	values := validConfigurationEnvironment()
+	values[DatabaseMaxOpenConnectionsEnv] = "3"
+	config, err := LoadConfigFromLookup(mapLookup(values))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lobby := config.LobbyDatabaseConfig()
+	if lobby.URL != values[LobbyDatabaseURLEnv] || lobby.MaxOpenConnections != 3 || config.Database.URL != values[DatabaseURLEnv] {
+		t.Fatalf("the lobby's database = %+v", lobby)
+	}
+	delete(values, LobbyDatabaseURLEnv)
+	if _, err := LoadConfigFromLookup(mapLookup(values)); err == nil || !strings.Contains(err.Error(), LobbyDatabaseURLEnv) {
+		t.Fatalf("without the lobby's database: %v", err)
+	}
+	values[LobbyDatabaseURLEnv] = "mysql://lobby@localhost/lobby"
+	if _, err := LoadConfigFromLookup(mapLookup(values)); err == nil || !strings.Contains(err.Error(), LobbyDatabaseURLEnv) {
+		t.Fatalf("with another scheme: %v", err)
+	}
+	values[LobbyURLEnv] = "http://localhost:8890"
+	if config, err := LoadConfigFromLookup(mapLookup(values)); err != nil || config.LobbyDatabaseURL != "" {
+		t.Fatalf("with a lobby of its own: %+v, %v", config.LobbyDatabaseURL, err)
+	}
+}
+
 func TestLoadConfigAcceptsExplicitValidConfiguration(t *testing.T) {
 	t.Parallel()
 
@@ -320,6 +350,7 @@ func TestHTTPAddrIsOnlyNeededByTheServerHost(t *testing.T) {
 func validConfigurationEnvironment() map[string]string {
 	return map[string]string{
 		DatabaseURLEnv:               "postgres://user:password@localhost:5432/island_battles?sslmode=disable",
+		LobbyDatabaseURLEnv:          "postgres://lobby:password@localhost:5432/lobby?sslmode=disable",
 		CentrifugoPublicURLEnv:       "ws://localhost:8000/connection/websocket",
 		CentrifugoAPIURLEnv:          "http://localhost:8000/api",
 		CentrifugoAPIKeyEnv:          "api-key",
