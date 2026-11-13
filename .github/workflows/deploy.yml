@@ -27,7 +27,7 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: "backend: scripts/aws.sh deploy. vm: scripts/vm.sh deploy to the static IP. web: scripts/deploy-web-client.sh, which builds the 3D client and publishes it at /play/. smoke: scripts/vm.sh smoke. plan: plan every AWS resource and save the plan. apply: apply the plan that plan_run_id saved."
+        description: "backend: scripts/aws.sh deploy. vm: scripts/vm.sh deploy to the static IP, refused once INTODAN/mpl has taken the VM over. web: scripts/deploy-web-client.sh, which builds the 3D client and publishes it at /play/. smoke: scripts/vm.sh smoke. plan: plan every AWS resource and save the plan. apply: apply the plan that plan_run_id saved."
         type: choice
         options: [backend, vm, web, smoke, plan, apply]
         default: backend
@@ -150,6 +150,17 @@ jobs:
         with:
           role-to-assume: ${{ steps.role.outputs.arn }}
           aws-region: ${{ vars.AWS_REGION }}
+
+      # Once INTODAN/mpl has taken the VM over, its Ansible owns the VM's
+      # configuration: fail before anything is set up, with the message
+      # scripts/vm.sh deploy gives (deploy/README.md, "The VM belongs to
+      # INTODAN/mpl"). The check is main's, so a release_tag from before it
+      # can't skip it; scripts/vm.sh checks again itself.
+      - if: inputs.target == 'vm'
+        name: Check that this repository still deploys the VM
+        run: |
+          git show "$GITHUB_SHA:deploy/deploy_files.py" >"$RUNNER_TEMP/deploy_files.py"
+          python3 -I "$RUNNER_TEMP/deploy_files.py" check-vm-owner
 
       # Builds the backend and the native bot runner, and runs the migrations
       # with `go run`: the backend deploy both databases', and the VM deploy

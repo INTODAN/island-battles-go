@@ -107,6 +107,21 @@ variable "database_backup_retention_days" {
   }
 }
 
+variable "backup_denied_roles" {
+  description = <<-EOT
+    Names of further IAM roles that may never download a database backup
+    (backups.tf), whose ReadOnlyAccess would otherwise let them read the dumps.
+    By default INTODAN/mpl's GitHub roles, which share the account (#256).
+  EOT
+  type        = list(string)
+  default     = ["mpl-github-deploy", "mpl-github-apply"]
+
+  validation {
+    condition     = alltrue([for role in var.backup_denied_roles : can(regex("^[A-Za-z0-9+=,.@_-]{1,64}$", role))])
+    error_message = "backup_denied_roles must hold IAM role names, such as mpl-github-deploy, not ARNs."
+  }
+}
+
 # The Lambda (#38) -------------------------------------------------------------
 
 variable "lambda_memory_mb" {

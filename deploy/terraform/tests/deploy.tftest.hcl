@@ -930,9 +930,19 @@ run "backs_the_database_up_to_s3" {
       one([for statement in jsondecode(aws_s3_bucket_policy.backups.policy).Statement : statement.Condition.ArnEquals["aws:PrincipalArn"] if statement.Sid == "KeepDumpsFromGitHubRoles" && statement.Effect == "Deny"]) == [
         "arn:aws:iam::123456789012:role/island-battles-github-deploy",
         "arn:aws:iam::123456789012:role/island-battles-github-apply",
+        "arn:aws:iam::123456789012:role/mpl-github-deploy",
+        "arn:aws:iam::123456789012:role/mpl-github-apply",
       ]
     )
-    error_message = "The bucket must refuse plain HTTP, and keep the dumps from both GitHub roles."
+    error_message = "The bucket must refuse plain HTTP, and keep the dumps from both GitHub roles and from INTODAN/mpl's two (#256)."
+  }
+
+  assert {
+    condition = (
+      one([for statement in jsondecode(aws_s3_bucket_policy.backups.policy).Statement : statement.Action if statement.Sid == "KeepDumpsFromGitHubRoles"]) == ["s3:GetObject", "s3:GetObjectVersion"] &&
+      one([for statement in jsondecode(aws_s3_bucket_policy.backups.policy).Statement : statement.Resource if statement.Sid == "KeepDumpsFromGitHubRoles"]) == "arn:aws:s3:::island-battles-backups-123456789012/*"
+    )
+    error_message = "The denied roles may download no dump, nor an earlier version of one."
   }
 
   assert {
@@ -951,6 +961,10 @@ run "backs_the_database_up_to_s3" {
 run "keeps_the_backups_without_a_github_role" {
   command = plan
 
+  variables {
+    backup_denied_roles = []
+  }
+
   override_resource {
     target          = aws_s3_bucket.backups
     override_during = plan
@@ -961,8 +975,46 @@ run "keeps_the_backups_without_a_github_role" {
 
   assert {
     condition     = [for statement in jsondecode(aws_s3_bucket_policy.backups.policy).Statement : statement.Sid] == ["RequireTls"]
-    error_message = "Without the GitHub role, the bucket policy must only require TLS."
+    error_message = "Without the GitHub role or other denied roles, the bucket policy must only require TLS."
   }
+}
+
+run "keeps_the_backups_from_mpls_roles_without_a_github_role" {
+  command = plan
+
+  override_data {
+    target          = data.aws_caller_identity.current
+    override_during = plan
+    values = {
+      account_id = "123456789012"
+    }
+  }
+
+  override_resource {
+    target          = aws_s3_bucket.backups
+    override_during = plan
+    values = {
+      arn = "arn:aws:s3:::island-battles-backups-123456789012"
+    }
+  }
+
+  assert {
+    condition = one([for statement in jsondecode(aws_s3_bucket_policy.backups.policy).Statement : statement.Condition.ArnEquals["aws:PrincipalArn"] if statement.Sid == "KeepDumpsFromGitHubRoles" && statement.Effect == "Deny"]) == [
+      "arn:aws:iam::123456789012:role/mpl-github-deploy",
+      "arn:aws:iam::123456789012:role/mpl-github-apply",
+    ]
+    error_message = "INTODAN/mpl's GitHub roles, which share the account, must never download a dump, even without this repository's GitHub role."
+  }
+}
+
+run "rejects_a_denied_role_given_as_an_arn" {
+  command = plan
+
+  variables {
+    backup_denied_roles = ["arn:aws:iam::123456789012:role/mpl-github-deploy"]
+  }
+
+  expect_failures = [var.backup_denied_roles]
 }
 
 run "rejects_backups_kept_under_a_day" {

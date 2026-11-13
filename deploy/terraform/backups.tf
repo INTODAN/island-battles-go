@@ -13,6 +13,12 @@ locals {
   backup_prefix           = "postgres/"
   backup_metric_namespace = "IslandBattles/VM"
   backup_metric_name      = "DatabaseBackups"
+  # This repository's GitHub roles, when it has them, and the ones named, such
+  # as INTODAN/mpl's.
+  backup_denied_roles = distinct(concat(
+    local.github_deploy ? ["${var.name}-github-deploy", "${var.name}-github-apply"] : [],
+    var.backup_denied_roles,
+  ))
 }
 
 resource "aws_s3_bucket" "backups" {
@@ -71,7 +77,8 @@ resource "aws_s3_bucket_lifecycle_configuration" "backups" {
 # Dumps hold player data. The bucket refuses plain HTTP, and keeps them from
 # the GitHub roles, whose ReadOnlyAccess would otherwise let a workflow run
 # download them: the deploy role (github.tf) and the apply role
-# (deploy/github_apply_role.py). A condition on the caller's ARN, unlike a
+# (deploy/github_apply_role.py), and INTODAN/mpl's two, which share the
+# account (var.backup_denied_roles). A condition on the caller's ARN, unlike a
 # principal, may name a role that doesn't exist yet.
 resource "aws_s3_bucket_policy" "backups" {
   bucket = aws_s3_bucket.backups.id
@@ -86,7 +93,7 @@ resource "aws_s3_bucket_policy" "backups" {
         Resource  = [aws_s3_bucket.backups.arn, "${aws_s3_bucket.backups.arn}/*"]
         Condition = { Bool = { "aws:SecureTransport" = "false" } }
       }],
-      local.github_deploy ? [{
+      length(local.backup_denied_roles) > 0 ? [{
         Sid       = "KeepDumpsFromGitHubRoles"
         Effect    = "Deny"
         Principal = "*"
@@ -94,10 +101,7 @@ resource "aws_s3_bucket_policy" "backups" {
         Resource  = "${aws_s3_bucket.backups.arn}/*"
         Condition = {
           ArnEquals = {
-            "aws:PrincipalArn" = [
-              "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.name}-github-deploy",
-              "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.name}-github-apply",
-            ]
+            "aws:PrincipalArn" = [for role in local.backup_denied_roles : "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${role}"]
           }
         }
       }] : [],
