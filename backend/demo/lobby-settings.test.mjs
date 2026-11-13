@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { builderWindowAction, changeSettingsLabel, describeSettings, describeTurnTimeout, loadDefaultMaps, mapFromBuilderMessage, readMapFile, settingsSelection, teamNames, turnTimeouts } from "./lobby-settings.mjs";
+import { builderHello, builderWindowAction, changeSettingsLabel, describeSettings, describeTurnTimeout, loadDefaultMaps, mapFromBuilderMessage, readMapFile, settingsSelection, teamNames, turnTimeouts } from "./lobby-settings.mjs";
 
 test("a map's teams are named after the board's team colours", () => {
   assert.deepEqual(teamNames(2), ["Blue", "Red"]);
@@ -76,6 +76,32 @@ test("a builder window that is already open is kept, and anything else is sent t
   assert.equal(builderWindowAction(at("https://other.example", "/map/builder/"), origin), "navigate");
   const crossOrigin = { get location() { throw new DOMException("blocked", "SecurityError"); } };
   assert.equal(builderWindowAction(crossOrigin, origin), "navigate");
+  // A builder on the game's own site, which is not the lobby page's origin,
+  // can't be read from the page, and is kept.
+  const game = "https://game.example";
+  assert.equal(builderWindowAction(crossOrigin, game, origin), "keep");
+  assert.equal(builderWindowAction(at(origin, "blank"), game, origin), "navigate");
+});
+
+test("a builder on the game's site says hello, and only the form's own builder counts", () => {
+  const builder = {};
+  const origin = "https://game.example";
+  const hello = (overrides = {}) => ({ origin, source: builder, data: { type: "island-battles.map-builder" }, ...overrides });
+  assert.equal(builderHello(hello(), { origin, builder }), true);
+  assert.equal(builderHello(hello({ origin: "https://evil.example" }), { origin, builder }), false);
+  assert.equal(builderHello(hello({ source: {} }), { origin, builder }), false);
+  assert.equal(builderHello(hello(), { origin, builder: null }), false);
+  assert.equal(builderHello(hello({ data: { type: "island-battles.map-file" } }), { origin, builder }), false);
+});
+
+test("the room reads the default maps from the game's site", async (context) => {
+  const urls = [];
+  context.mock.method(globalThis, "fetch", async (url) => {
+    urls.push(url);
+    return Response.json({ maps: [{ map_template_id: 7, map_name: "Bay", team_count: 2, plane_size_x: 10, plane_size_y: 6, castle_count: 3 }] });
+  });
+  assert.equal(await describeSettings({ map_template_id: 7 }, { gameURL: "https://game.example" }), "Map: Bay · Turn limit: 30 s");
+  assert.deepEqual(urls, ["https://game.example/map/templates"]);
 });
 
 test("the room's form shows the lobby's current map and turn timeout", () => {

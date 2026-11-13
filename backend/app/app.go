@@ -184,6 +184,9 @@ func New(config dependencies.Config, database, lobbyDatabase *gorm.DB, logger *s
 
 	router := chi.NewMux()
 	router.Use(observability.Requests(logger))
+	// The lobby's sites load the game's modules and call its API from
+	// another origin.
+	router.Use(lobbyCORS(config.LobbyOrigins))
 	api := humachi.New(router, routes.NewAPIConfig("Island Battles Go Backend", "1.0.0"))
 	// Before any operation is registered, so every operation gets it.
 	api.UseMiddleware(observability.NameOperations)
@@ -214,7 +217,7 @@ func New(config dependencies.Config, database, lobbyDatabase *gorm.DB, logger *s
 	if config.BotPackagesBucket == "" && selected.localPackagesHandler != nil {
 		router.Handle(selected.localPackagesPrefix+"/*", selected.localPackagesHandler)
 	}
-	if err := registerPages(router); err != nil {
+	if err := registerPages(router, config.LobbyOrigins); err != nil {
 		return nil, err
 	}
 	router.Get("/healthz", healthz(Version))
@@ -228,7 +231,8 @@ func New(config dependencies.Config, database, lobbyDatabase *gorm.DB, logger *s
 // authenticated players, and the causes that its answers leave out, go on
 // the request's error line.
 func inProcessLobby(config dependencies.Config, database *gorm.DB, centrifugo *gocent.Client, logger *slog.Logger, loopback *Loopback, hooks func() http.Handler) (*lobbyapp.Lobby, error) {
-	games, err := config.LobbyGamesConfig()
+	// The lobby page is on the game's origin, so its catalog has paths.
+	games, err := config.LobbyGamesConfig("")
 	if err != nil {
 		return nil, err
 	}
@@ -322,11 +326,12 @@ func botComputeGuard(config dependencies.Config, database *gorm.DB) (*services.B
 }
 
 // registerPages serves the game's embedded browser pages, which need no files
-// beside the binary: the lobby page's game modules, the map builder and the
-// demo viewer.
-func registerPages(router chi.Router) error {
+// beside the binary: the lobby page's game modules, the map builder, which
+// hands its map to a lobby page on the game's origin or one of
+// lobbyOrigins, and the demo viewer.
+func registerPages(router chi.Router, lobbyOrigins []string) error {
 	router.Handle("/game/demo/*", http.StripPrefix("/game/demo/", demo.Handler()))
-	mapBuilder, err := mapbuilder.Handler()
+	mapBuilder, err := mapbuilder.Handler(lobbyOrigins)
 	if err != nil {
 		return err
 	}

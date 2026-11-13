@@ -34,7 +34,11 @@ export interface RealtimeProblem {
 }
 
 export interface RealtimeOptions {
-  /** Server origin for the HTTP API. Defaults to the page's own origin. */
+  /** The lobby's origin. Defaults to `lobbyBaseUrl()`. */
+  lobbyUrl?: string;
+  /** The game's origin. Defaults to `gameBaseUrl()`. */
+  gameUrl?: string;
+  /** Shorthand for one server that serves both, such as a test's. */
   baseUrl?: string;
   /** Replaces `fetch`; tests use it. */
   fetch?: typeof fetch;
@@ -163,6 +167,8 @@ export function createRealtime(options: RealtimeOptions = {}): Realtime {
 
   const { lobbyApi, gameApi } = createApiClients({
     ...(options.baseUrl === undefined ? {} : { baseUrl: options.baseUrl }),
+    ...(options.lobbyUrl === undefined ? {} : { lobbyUrl: options.lobbyUrl }),
+    ...(options.gameUrl === undefined ? {} : { gameUrl: options.gameUrl }),
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     getAccessToken: () => session.get()?.accessToken,
   });

@@ -11,7 +11,7 @@ import pytest
 from integration.test_live import BASE, create
 from integration.test_live import guests as guests_fixture
 from lobby_client import LobbyError, Scope
-from test_lobby_binding import choose_bot, game_auth, member_settings_path
+from test_lobby_binding import GAME, choose_bot, game_auth, member_settings_path
 
 guests = guests_fixture
 pytestmark = pytest.mark.asyncio
@@ -23,7 +23,7 @@ async def run_bot(player, lobby_id, timeout):
     """Play a seat with ``island-battles-bot run`` and the example bot."""
     process = await asyncio.create_subprocess_exec(
         sys.executable, "-m", "island_battles_client.cli", "run", "examples.bot:play",
-        "--base-url", BASE, f"--token={player.credential}", "--lobby-id", lobby_id,
+        "--game-url", GAME, "--lobby-url", BASE, f"--token={player.credential}", "--lobby-id", lobby_id,
         cwd=PYTHON_CLIENT, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
     try:
@@ -69,7 +69,7 @@ async def test_a_localhost_bot_plays_a_default_level_to_the_end(guests):
     assert status == 0, error
     assert "game ended at generation" in output, output
 
-    async with httpx.AsyncClient(base_url=BASE) as http:
+    async with httpx.AsyncClient(base_url=GAME) as http:
         states = []
         for player in (alice, bob):
             response = await http.get(
@@ -80,7 +80,7 @@ async def test_a_localhost_bot_plays_a_default_level_to_the_end(guests):
             states.append(response.json())
         # Choosing conflicts once the lobby has started.
         late = await http.put(
-            member_settings_path(scope.lobby_id), json={"member_settings": {"bot": {"kind": "localhost"}}},
+            BASE + member_settings_path(scope.lobby_id), json={"member_settings": {"bot": {"kind": "localhost"}}},
             headers={"Authorization": f"Bearer {bob.credential}"},
         )
         assert (late.status_code, late.json()["code"]) == (409, "phase_conflict"), late.text

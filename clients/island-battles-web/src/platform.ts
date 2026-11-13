@@ -1,20 +1,99 @@
 /**
- * Where the client runs. The browser build is served by the game itself, so it
- * talks to its own origin. The desktop build (Tauri, see `src-tauri/`) is a
- * different build of the same code: `build.ts --desktop` replaces
- * `__DESKTOP_API_BASE__` with the game server it talks to.
+ * Where the client runs, and the two servers it talks to: the lobby, for
+ * `/lobby/v1/*`, player tokens and the Centrifugo connection token, and the
+ * game, for `/game/*` and `/generation/*`. They can be separate origins.
+ *
+ * The browser build is served by the game itself, at `/play/`, and reads both
+ * URLs from its runtime config, `config.json` beside the page (`loadServerUrls`);
+ * without one, both are the page's own origin. The desktop build (Tauri, see
+ * `src-tauri/`) is a different build of the same code: `build.ts --desktop`
+ * replaces `__DESKTOP_API_BASE__` with the game server it talks to and
+ * `__DESKTOP_LOBBY_BASE__` with the lobby.
  */
 declare const __DESKTOP_API_BASE__: string | undefined;
+declare const __DESKTOP_LOBBY_BASE__: string | undefined;
 
 /** The game server of a desktop build, or undefined in the browser. */
 export const desktopBaseUrl: string | undefined =
   typeof __DESKTOP_API_BASE__ === "string" ? __DESKTOP_API_BASE__ : undefined;
 
+/** The lobby of a desktop build, or undefined in the browser. */
+export const desktopLobbyUrl: string | undefined =
+  typeof __DESKTOP_LOBBY_BASE__ === "string"
+    ? __DESKTOP_LOBBY_BASE__
+    : undefined;
+
 export const isDesktop = desktopBaseUrl !== undefined;
 
-/** The server origin API calls go to: the desktop build's game, else the page's own origin. */
-export const apiBaseUrl = (): string =>
-  desktopBaseUrl ?? globalThis.location?.origin ?? "";
+/** The browser build's runtime config: `config.json` beside the page. */
+export interface RuntimeConfig {
+  /** The lobby's URL, such as https://lobby.example.org. */
+  lobby_url?: string;
+  /** The game's URL, such as https://island-battles.example.org. */
+  game_url?: string;
+}
+
+let configured: { lobby?: string; game?: string } = {};
+
+/** An http(s) URL as an origin without a trailing slash, or undefined. */
+function serverUrl(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:"
+      ? url.origin
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Uses a runtime config's URLs; an absent or invalid one keeps the default. Tests pass `{}` to undo it. */
+export function setServerUrls(config: RuntimeConfig): void {
+  const lobby = serverUrl(config.lobby_url);
+  const game = serverUrl(config.game_url);
+  configured = {
+    ...(lobby === undefined ? {} : { lobby }),
+    ...(game === undefined ? {} : { game }),
+  };
+}
+
+/**
+ * Reads the browser build's runtime config, `config.json` beside the page,
+ * before the app makes its API clients. A missing or unreadable file leaves
+ * both servers at the page's own origin, as a deployment that serves the lobby
+ * with the game has them. The desktop build has its URLs built in.
+ */
+export async function loadServerUrls(
+  fetchConfig: typeof fetch = globalThis.fetch,
+): Promise<void> {
+  if (isDesktop || globalThis.document === undefined) return;
+  try {
+    const response = await fetchConfig(
+      new URL("config.json", document.baseURI),
+      { headers: { Accept: "application/json" }, cache: "no-store" },
+    );
+    if (!response.ok) return;
+    const config: unknown = await response.json();
+    if (config !== null && typeof config === "object") {
+      setServerUrls(config as RuntimeConfig);
+    }
+  } catch {
+    // Without a config, the page's origin serves both.
+  }
+}
+
+/** Where the game's API calls go: the runtime config's game, the desktop build's, else the page's own origin. */
+export const gameBaseUrl = (): string =>
+  configured.game ?? desktopBaseUrl ?? globalThis.location?.origin ?? "";
+
+/** Where the lobby's API calls go: the runtime config's lobby, the desktop build's, else the page's own origin. */
+export const lobbyBaseUrl = (): string =>
+  configured.lobby ??
+  desktopLobbyUrl ??
+  desktopBaseUrl ??
+  globalThis.location?.origin ??
+  "";
 
 /**
  * Where a link that others open in a browser points: the web client of the

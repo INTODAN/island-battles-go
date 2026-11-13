@@ -74,9 +74,10 @@ def client_for(credential: str = "guest"):
         transport=httpx.MockTransport(server.handle), base_url="http://game.test"
     )
     client = IslandBattlesClient(
-        "http://game.test",
         credential,
         LOBBY_ID,
+        game_url="http://game.test",
+        lobby_url="http://lobby.test",
         play=lambda turn: turn_result(),
         http_client=http,
         clock=lambda: now[0],

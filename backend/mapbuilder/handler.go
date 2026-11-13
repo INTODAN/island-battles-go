@@ -22,27 +22,44 @@ var assets embed.FS
 // serves; the page reads each type and max_level.
 const upgradesPath = "upgrades.json"
 
+// lobbyOriginsPath is the file, relative to the page, that lists the lobby
+// sites whose lobby page may open the builder and take its map, besides the
+// builder's own origin: the game's ISLAND_BATTLES_LOBBY_ORIGINS.
+const lobbyOriginsPath = "lobby-origins.json"
+
 // Handler serves the page. Mount it with its prefix stripped, on the same
-// origin as POST /map/validate.
-func Handler() (http.Handler, error) {
+// origin as POST /map/validate. A lobby page on one of lobbyOrigins, as well
+// as one on the builder's own origin, can take the builder's map.
+func Handler(lobbyOrigins []string) (http.Handler, error) {
 	upgrades, err := json.Marshal(models.UpgradeTable())
+	if err != nil {
+		return nil, err
+	}
+	if lobbyOrigins == nil {
+		lobbyOrigins = []string{}
+	}
+	origins, err := json.Marshal(lobbyOrigins)
 	if err != nil {
 		return nil, err
 	}
 	files := http.FileServer(http.FS(assets))
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		// The page and the upgrade list are rebuilt with the backend, so nothing
-		// may keep an old copy. The scripts and the style may be cached for a
+		// The page, the upgrade list and the lobby origins are rebuilt with the
+		// backend, so nothing may keep an old copy. The scripts and the style may be cached for a
 		// few minutes.
 		name := strings.TrimPrefix(request.URL.Path, "/")
-		if name == "" || name == "index.html" || name == upgradesPath {
+		if name == "" || name == "index.html" || name == upgradesPath || name == lobbyOriginsPath {
 			response.Header().Set("Cache-Control", "no-store")
 		} else {
 			response.Header().Set("Cache-Control", staticAssetCacheControl)
 		}
-		if name == upgradesPath {
+		if name == upgradesPath || name == lobbyOriginsPath {
+			body := upgrades
+			if name == lobbyOriginsPath {
+				body = origins
+			}
 			response.Header().Set("Content-Type", "application/json")
-			http.ServeContent(response, request, upgradesPath, time.Time{}, bytes.NewReader(upgrades))
+			http.ServeContent(response, request, name, time.Time{}, bytes.NewReader(body))
 			return
 		}
 		files.ServeHTTP(response, request)

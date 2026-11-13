@@ -7,9 +7,15 @@ import { rm } from "node:fs/promises";
 const desktop = process.argv.includes("--desktop");
 const dev = process.argv.includes("--dev");
 const productionServer = "https://island-battles.elidan.org";
-// The dev server (bun run dev), which forwards to the lobby and the backend
-// that ./scripts/dev.sh runs, on one origin.
+// The production lobby: still served with the game until the cutover (#232),
+// which points it at lobby.<domain>, and the CSP and the HTTP scope in
+// src-tauri/ with it.
+const productionLobby = productionServer;
+// The dev server (bun run dev), which forwards the game's paths to the
+// backend that ./scripts/dev.sh runs, and the lobby, which it runs on its own
+// origin.
 const localServer = "http://localhost:3000";
+const localLobby = "http://localhost:8890";
 if (dev && !desktop) {
   console.error("--dev only applies to --desktop");
   process.exit(1);
@@ -26,6 +32,9 @@ const result = await Bun.build({
   define: {
     __DESKTOP_API_BASE__: desktop
       ? JSON.stringify(dev ? localServer : productionServer)
+      : "undefined",
+    __DESKTOP_LOBBY_BASE__: desktop
+      ? JSON.stringify(dev ? localLobby : productionLobby)
       : "undefined",
   },
   // The page keeps a stable name; everything it loads is hashed for caching.

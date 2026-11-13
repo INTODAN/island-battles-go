@@ -15,6 +15,9 @@ pytestmark = pytest.mark.asyncio
 
 
 LOCALHOST_BOT = {"kind": "localhost"}
+# The lobby and the game are separate sites (#228): BASE is the lobby's URL,
+# and GAME the game's, where Island Battles' routes are.
+GAME = os.environ["LOBBY_TEST_GAME_URL"]
 
 
 async def game_auth(player):
@@ -67,14 +70,14 @@ async def test_start_initializes_one_generation_and_binding_is_idempotent(guests
     assert (again.lobby.phase, again.lobby.round_, again.lobby.version) == ("started", 1, started.lobby.version)
     assert await game_sql(f"SELECT count(*) FROM games WHERE lobby_id='{scope.lobby_id}'") == "1"
     game_id = await game_sql(f"SELECT id FROM games WHERE lobby_id='{scope.lobby_id}'")
-    async with httpx.AsyncClient(base_url=BASE) as http:
+    async with httpx.AsyncClient(base_url=GAME) as http:
         # The retry route of the game is gone; the lobby's start retries.
         gone = await http.post("/game/from-lobby", json={"game_key": scope.game_key, "lobby_id": scope.lobby_id},
                                headers={"Authorization": f"Bearer {alice.credential}"})
     assert gone.status_code in (404, 405)
     assert await game_sql(f"SELECT count(*) FROM generations WHERE game_id={game_id}") == "1"
     result_path = f"/game/from-lobby/{scope.lobby_id}/replay"
-    async with httpx.AsyncClient(base_url=BASE) as client:
+    async with httpx.AsyncClient(base_url=GAME) as client:
         bob_auth = await game_auth(bob)
         host_result = await client.get(result_path, headers=await game_auth(alice))
         guest_result = await client.get(result_path, headers=bob_auth)
@@ -140,8 +143,8 @@ async def test_roster_keeps_game_access_after_lobby_is_deleted(guests):
     def bearer(player):
         return tokens[player.credential]
 
-    async with httpx.AsyncClient(base_url=BASE) as http:
-        lobby = await http.get(f"/lobby/v1/games/{scope.game_key}/lobbies/{scope.lobby_id}", headers={"Authorization": f"Bearer {alice.credential}"})
+    async with httpx.AsyncClient(base_url=GAME) as http:
+        lobby = await http.get(f"{BASE}/lobby/v1/games/{scope.game_key}/lobbies/{scope.lobby_id}", headers={"Authorization": f"Bearer {alice.credential}"})
         assert lobby.status_code == 404, lobby.text
         response = await http.get(state_path, headers=bearer(alice))
         assert response.status_code == 200, response.text
@@ -216,7 +219,7 @@ async def started_map(lobby_id):
 
 async def test_lobby_starts_on_a_chosen_default_map(guests):
     name = f"Strait {uuid4()}"
-    async with httpx.AsyncClient(base_url=BASE) as client:
+    async with httpx.AsyncClient(base_url=GAME) as client:
         refused = await client.post("/map/create", json=strait_map(name))
         assert refused.status_code == 401, refused.text
         created = await client.post("/map/create", json=strait_map(name),

@@ -105,3 +105,14 @@ test("the spent sentence names the first of the next month, as the server's refu
   assert.equal(computeSpentMessage({ month: "2026-12", available: true }), null);
   assert.equal(computeSpentMessage(null), null);
 });
+
+test("the seat choices are read from the game's site", async () => {
+  const asked = [];
+  await seatOptions({
+    gameURL: "https://game.example",
+    options: async (gameURL) => { asked.push(["options", gameURL]); return { levels: [1], serverBots: true }; },
+    packages: async () => [],
+    compute: async (gameURL) => { asked.push(["compute", gameURL]); return null; },
+  });
+  assert.deepEqual(asked, [["options", "https://game.example"], ["compute", "https://game.example"]]);
+});

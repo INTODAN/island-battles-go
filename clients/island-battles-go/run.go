@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 )
 
 // logLevels are the --log-level flag's values.
@@ -15,10 +16,19 @@ var logLevels = map[string]slog.Level{
 	"error":   slog.LevelError,
 }
 
+// The environment variables that run reads the game's and the lobby's URLs
+// from, when no flag names them.
+const (
+	GameURLEnv  = "ISLAND_BATTLES_GAME_URL"
+	LobbyURLEnv = "ISLAND_BATTLES_LOBBY_URL"
+)
+
 // runSeat plays one seat of a lobby's game to its end with a Client.
 func runSeat(ctx context.Context, program invocation, arguments []string) int {
 	flags := newFlags(program, "run", "Plays one seat of a lobby's game to its end, straight against the server, without a\nbrowser. Choose your localhost bot in the lobby before getting ready.")
-	baseURL := flags.String("base-url", "", "the game server's `URL`, such as http://localhost:8888 (required)")
+	gameURL := flags.String("game-url", "", "the game's `URL`, such as https://island-battles.example.org (default $"+GameURLEnv+")")
+	lobbyURL := flags.String("lobby-url", "", "the lobby's `URL`, such as https://lobby.example.org (default $"+LobbyURLEnv+")")
+	baseURL := flags.String("base-url", "", "sets both URLs to one server's `URL`, such as http://localhost:8888")
 	token := flags.String("token", "", "the player's guest bearer `credential` (required)")
 	lobbyID := flags.String("lobby-id", "", "the `ID` of the lobby whose game to play (required)")
 	logFile := flags.String("log-file", "", "also append the log to this `file`")
@@ -27,8 +37,28 @@ func runSeat(ctx context.Context, program invocation, arguments []string) int {
 		return status
 	}
 	level, found := logLevels[*logLevel]
-	if *baseURL == "" || *token == "" || *lobbyID == "" || !found {
-		_, _ = fmt.Fprintln(program.stderr, "--base-url, --token and --lobby-id are required, and --log-level is debug, info, warning or error")
+	if *baseURL != "" && (*gameURL != "" || *lobbyURL != "") {
+		_, _ = fmt.Fprintln(program.stderr, "--base-url sets both URLs; give it, or --game-url and --lobby-url")
+		flags.Usage()
+		return 2
+	}
+	urls := URLs{Game: *gameURL, Lobby: *lobbyURL}
+	if *baseURL != "" {
+		urls = BaseURL(*baseURL)
+	}
+	lookup := program.lookupEnv
+	if lookup == nil {
+		lookup = os.LookupEnv
+	}
+	if urls.Game == "" {
+		urls.Game, _ = lookup(GameURLEnv)
+	}
+	if urls.Lobby == "" {
+		urls.Lobby, _ = lookup(LobbyURLEnv)
+	}
+	if urls.Game == "" || urls.Lobby == "" || *token == "" || *lobbyID == "" || !found {
+		_, _ = fmt.Fprintln(program.stderr, "the game's and the lobby's URLs (--game-url and --lobby-url, $"+GameURLEnv+" and $"+LobbyURLEnv+
+			", or --base-url for both), --token and --lobby-id are required, and --log-level is debug, info, warning or error")
 		flags.Usage()
 		return 2
 	}
@@ -43,7 +73,7 @@ func runSeat(ctx context.Context, program invocation, arguments []string) int {
 		options = append(options, WithLogFile(*logFile))
 	}
 	options = append(options, program.clientOptions...)
-	client, err := NewClient(*baseURL, *token, *lobbyID, program.play, options...)
+	client, err := NewClient(urls, *token, *lobbyID, program.play, options...)
 	if err != nil {
 		_, _ = fmt.Fprintf(program.stderr, "%v\n", err)
 		return 2

@@ -55,6 +55,10 @@ const (
 	// whose game API and JWKS the game reads. Empty, the lobby runs in this
 	// process and the two call each other in memory.
 	LobbyURLEnv = "ISLAND_BATTLES_LOBBY_URL"
+	// LobbyOriginsEnv lists the lobby's sites whose lobby page loads the
+	// game's modules and calls its API from another origin; see
+	// Config.LobbyOrigins.
+	LobbyOriginsEnv = "ISLAND_BATTLES_LOBBY_ORIGINS"
 	// BotPackagesDirEnv is read by the local server host alone; see
 	// LoadBotPackagesDir.
 	BotPackagesDirEnv = "ISLAND_BATTLES_BOT_PACKAGES_DIR"
@@ -190,6 +194,13 @@ type Config struct {
 	// LobbyGameSecrets are the values of the variables that the lobby's games
 	// name as their secret_env, by name.
 	LobbyGameSecrets map[string]string
+	// LobbyOrigins are the lobby's sites, such as https://lobby.example.org,
+	// whose lobby page loads Island Battles' modules and documents and calls
+	// its API from another origin: the game answers them with CORS, and the
+	// map builder hands its map to a lobby page there. Empty, as while the
+	// lobby runs in this process and its page is on the game's own origin,
+	// no other site may.
+	LobbyOrigins []string
 }
 
 // LobbyGamesConfig returns the lobby's LOBBY_GAMES with Island Battles in
@@ -197,7 +208,12 @@ type Config struct {
 // island-battles itself. That entry's hooks_url is the public URL's
 // lobbyadapter.HooksPath, or http://localhost's without a public URL, which
 // suits a lobby in this process: its hook calls never leave it.
-func (config Config) LobbyGamesConfig() (string, error) {
+//
+// frontendOrigin is where browsers reach the game, for a lobby page on
+// another origin: the entry's catalog then has absolute URLs there, with
+// frontendOrigin as its origin. Empty, as for the lobby in this process,
+// whose page is on the game's origin, the catalog has paths.
+func (config Config) LobbyGamesConfig(frontendOrigin string) (string, error) {
 	entries := []json.RawMessage{}
 	if strings.TrimSpace(config.LobbyGames) != "" {
 		if err := json.Unmarshal([]byte(config.LobbyGames), &entries); err != nil {
@@ -216,7 +232,7 @@ func (config Config) LobbyGamesConfig() (string, error) {
 	if origin == "" {
 		origin = "http://localhost"
 	}
-	islandBattles, err := lobbyadapter.LobbyGame(origin + lobbyadapter.HooksPath)
+	islandBattles, err := lobbyadapter.LobbyGame(origin+lobbyadapter.HooksPath, frontendOrigin)
 	if err != nil {
 		return "", err
 	}
@@ -268,7 +284,7 @@ func (config *Config) loadLobbyGames(lookup func(string) (string, bool)) error {
 			config.LobbyGameSecrets[name] = secret
 		}
 	}
-	games, err := config.LobbyGamesConfig()
+	games, err := config.LobbyGamesConfig("")
 	if err != nil {
 		return err
 	}
@@ -357,6 +373,10 @@ func LoadConfigFromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if (botRunnerPython == "") != (botRunnerNative == "") {
 		return Config{}, fmt.Errorf("set both %s and %s, or neither", BotRunnerPythonEnv, BotRunnerNativeEnv)
 	}
+	lobbyOrigins, err := parseOrigins(readEnvironment(lookup, LobbyOriginsEnv))
+	if err != nil {
+		return Config{}, fmt.Errorf("%s: %w", LobbyOriginsEnv, err)
+	}
 	budget, err := readGBSeconds(lookup, BotComputeBudgetEnv)
 	if err != nil {
 		return Config{}, err
@@ -390,6 +410,7 @@ func LoadConfigFromLookup(lookup func(string) (string, bool)) (Config, error) {
 		PlayerTokenLifetime:       playerTokenLifetime,
 		LobbyHookSecret:           []byte(readEnvironment(lookup, LobbyHookSecretEnv)),
 		LobbyURL:                  lobbyURL,
+		LobbyOrigins:              lobbyOrigins,
 	}
 	if lobbyURL == "" {
 		config.CentrifugoPublicURL = readEnvironment(lookup, CentrifugoPublicURLEnv)
@@ -531,6 +552,28 @@ func requireEnvironment(lookup func(string) (string, bool), names ...string) err
 	}
 	sort.Strings(missing)
 	return fmt.Errorf("missing required environment variables: %s", strings.Join(missing, ", "))
+}
+
+// parseOrigins reads a list of origins separated by commas, such as
+// "https://lobby.example.org, http://localhost:8890": each an http or https
+// origin as browsers send it in the Origin header, in lower case, without a
+// path, a trailing slash or a default port. Empty, it lists none.
+func parseOrigins(value string) ([]string, error) {
+	var origins []string
+	for item := range strings.SplitSeq(value, ",") {
+		origin := strings.TrimSpace(item)
+		if origin == "" {
+			continue
+		}
+		parsed, err := url.Parse(origin)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" ||
+			origin != strings.ToLower(parsed.Scheme+"://"+parsed.Host) ||
+			(parsed.Scheme == "https" && parsed.Port() == "443") || (parsed.Scheme == "http" && parsed.Port() == "80") {
+			return nil, fmt.Errorf("%q is not an origin such as https://lobby.example.org, without a path", origin)
+		}
+		origins = append(origins, origin)
+	}
+	return origins, nil
 }
 
 // readGBSeconds reads an optional number of GB-seconds, nil when unset.

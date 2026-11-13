@@ -20,6 +20,8 @@ A bot is a **function**: it gets a `BotTurn` (the board, your team and the `memo
 
 `island-battles-bot package` zips the bot for the server's runners, and `island-battles-bot upload` uploads that zip to a lobby.
 
+**The lobby and the game are separate sites, a breaking change for the client's configuration (#228).** The lobby gets its own address (such as `https://lobby.example.org`), apart from the game's (such as `https://island-battles.example.org`). `IslandBattlesClient(credential, lobby_id, play=..., game_url=..., lobby_url=...)` sends the lobby's routes (`/lobby/v1/*`: player tokens and the Centrifugo connection token) to `lobby_url`, and the game's (`/game/*`, `/generation/*`) to `game_url`. `base_url=...` stays as the shorthand that sets both, for a server that serves both, such as a local one or the production game until the lobby moves. `island-battles-bot run` takes `--game-url` and `--lobby-url`, or reads `ISLAND_BATTLES_GAME_URL` and `ISLAND_BATTLES_LOBBY_URL`, and `--base-url` stays as the shorthand. What to do: upgrade the SDK, and pass the URLs as keywords: the first positional argument is now the credential.
+
 **Two more bot kinds that the server plays, `hosted` and `uploaded` (#222).** Where the server offers them (`server_bots` in `GET /bots/defaults`), a player's bot, and a bot seat's, can also be their own bot server at a public URL, `{"bot": {"kind": "hosted", "url": "https://…"}}`, or one of their bot packages in the lobby, `{"bot": {"kind": "uploaded", "package_id": "…"}}`. `GenerationState.bot.kind` can then be `hosted`, with the URL's `host`, or `uploaded`. `run` refuses those seats, as it does a default bot's, and says which bot the server plays. An older SDK stops on such a seat with a protocol error instead; nothing changes for a localhost bot's seat.
 
 **The game's routes take a player token, a breaking change for every client of the game API (#218).** `GET /game/from-lobby/…`, `POST /game/from-lobby/…/deadline` and `POST /generation/commands` refuse the guest credential (401): they take `Authorization: Bearer <player token>`, a short-lived token from the lobby's `POST /lobby/v1/player-tokens` with `{"game_key": "island-battles"}` (`issue_player_token` in the lobby client). `IslandBattlesClient` still takes the guest credential: it gets the player token itself, renews it at 80 % of its life, and once more when the game answers 401. What to do: upgrade the client; code that calls the game's routes itself gets a player token first.
@@ -82,12 +84,12 @@ serves the bot on `http://127.0.0.1:41414`, the Island Battles bot port (`--port
 - **Where it submits:** only to `https://island-battles.elidan.org`, the official game, and to `http://localhost` and `http://127.0.0.1` on any port, for a local backend. `--allow-submit-host game.example.org` (repeatable; a name, or `name:port`) adds an `https` host, such as your own deployment. A delivery for any other `submit.url` answers `400` with the reason, and nothing is played or sent, so a page can't make your bot send its token elsewhere.
 - `GET /health` answers `{"name": "mybot:play", "ok": true}`, so a client can show "bot connected".
 - **The server reloads the module when a `.py` file in its directory changes**: edit, save, and the next turn uses the new code. It re-imports the bot module and the other modules in the same directory (never the standard library or site-packages), so keep a bot in its own directory rather than a shared one. A file that doesn't load passes each turn, with the error in the line, until it is fixed.
-- **Browsers:** the server answers CORS preflights, with `Access-Control-Allow-Private-Network: true` for Chrome's Private Network Access, only for the game's origins: `http://localhost:8888` (the local backend), `http://localhost:3000` (the web client's dev server) and `https://island-battles.elidan.org` (the deployed game), and `tauri://localhost` and `http://tauri.localhost` (the desktop app, whose requests go through Tauri's HTTP plugin and carry its web view's origin) always, and any other with `--allow-origin https://game.example.org` (repeatable). Requests from other origins, a `Host` other than `127.0.0.1:<port>` or `localhost:<port>` (DNS rebinding) get `403`, a POST that isn't `application/json` gets `415`, and a body that isn't a `TurnDelivery` gets `422`; the bot doesn't run, and the connection is closed after every refusal. Chrome, Edge and Firefox can reach `http://127.0.0.1` from an HTTPS page; Safari can't.
+- **Browsers:** the server answers CORS preflights, with `Access-Control-Allow-Private-Network: true` for Chrome's Private Network Access, only for the game's origins: `http://localhost:8888` (the local backend), `http://localhost:8890` (the local lobby's page), `http://localhost:3000` (the web client's dev server) and `https://island-battles.elidan.org` (the deployed game), and `tauri://localhost` and `http://tauri.localhost` (the desktop app, whose requests go through Tauri's HTTP plugin and carry its web view's origin) always, and any other with `--allow-origin https://game.example.org` (repeatable). Requests from other origins, a `Host` other than `127.0.0.1:<port>` or `localhost:<port>` (DNS rebinding) get `403`, a POST that isn't `application/json` gets `415`, and a body that isn't a `TurnDelivery` gets `422`; the bot doesn't run, and the connection is closed after every refusal. Chrome, Edge and Firefox can reach `http://127.0.0.1` from an HTTPS page; Safari can't.
 
 Deliver a turn by hand with curl, with your guest credential and a started lobby against a local backend. The game's routes take a player token from the lobby, not the guest credential:
 
 ```sh
-PLAYER_TOKEN=$(curl -s -X POST localhost:8888/lobby/v1/player-tokens -H "Authorization: Bearer $TOKEN" \
+PLAYER_TOKEN=$(curl -s -X POST localhost:8890/lobby/v1/player-tokens -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"game_key": "island-battles"}' | jq -r .token)
 curl -s -H "Authorization: Bearer $PLAYER_TOKEN" localhost:8888/game/from-lobby/$LOBBY_ID/turn-delivery \
   | curl -X POST localhost:41414/turn -H 'Content-Type: application/json' -d @-
@@ -147,10 +149,10 @@ Choosing an uploaded package as your bot comes later; for now it is only uploade
 ### Run a seat without a browser
 
 ```sh
-uv run island-battles-bot run mybot:play --base-url http://localhost:8888 --token=GUEST_BEARER_TOKEN --lobby-id LOBBY_UUID
+uv run island-battles-bot run mybot:play --game-url http://localhost:8888 --lobby-url http://localhost:8890 --token=GUEST_BEARER_TOKEN --lobby-id LOBBY_UUID
 ```
 
-plays one seat of a started lobby until the game ends, for CI and headless testing. `--log-file` and `--log-level` set the log output. The seat's player must have chosen their localhost bot in the lobby before getting ready (their lobby member settings `{"bot": {"kind": "localhost"}}`, set with `PUT /lobby/v1/games/island-battles/lobbies/{lobby_id}/member-settings`; see the [backend README](../../backend/README.md#choosing-a-bot)): a player who chose a default level, a hosted bot or an uploaded bot is played by the server, and the client stops at once with a `GameError` that says so. `GenerationState.bot` reports which bot a seat plays with. The same in code:
+plays one seat of a started lobby until the game ends, for CI and headless testing. `--game-url` is the game's address and `--lobby-url` the lobby's, which issued the guest credential; without the flags, `run` reads `ISLAND_BATTLES_GAME_URL` and `ISLAND_BATTLES_LOBBY_URL`. `--base-url` sets both, for one server that serves both. `--log-file` and `--log-level` set the log output. The seat's player must have chosen their localhost bot in the lobby before getting ready (their lobby member settings `{"bot": {"kind": "localhost"}}`, set with `PUT /lobby/v1/games/island-battles/lobbies/{lobby_id}/member-settings`; see the [backend README](../../backend/README.md#choosing-a-bot)): a player who chose a default level, a hosted bot or an uploaded bot is played by the server, and the client stops at once with a `GameError` that says so. `GenerationState.bot` reports which bot a seat plays with. The same in code:
 
 ```python
 import asyncio
@@ -160,7 +162,11 @@ from mybot import play
 
 async def main() -> None:
     client = IslandBattlesClient(
-        "http://localhost:8888", "guest-bearer-token", "lobby-uuid", play=play
+        "guest-bearer-token",
+        "lobby-uuid",
+        play=play,
+        game_url="http://localhost:8888",
+        lobby_url="http://localhost:8890",
     )
     await client.run()
 
@@ -215,8 +221,10 @@ Helper modules can use child loggers, such as `logging.getLogger("island_battles
 
 ```python
 client = IslandBattlesClient(
-    base_url, credential, lobby_id,
+    credential, lobby_id,
     play=play,
+    game_url=game_url,
+    lobby_url=lobby_url,
     log_level=logging.DEBUG,  # the default is logging.INFO
     log_file="bot.log",
 )

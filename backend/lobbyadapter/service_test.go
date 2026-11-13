@@ -400,7 +400,7 @@ func TestLobbyGameRequiresEveryTeamFilled(t *testing.T) {
 // configuredGames reads LobbyGame as the lobby reads LOBBY_GAMES.
 func configuredGames(t *testing.T) []gamehooks.ConfiguredGame {
 	t.Helper()
-	entry, err := lobbyadapter.LobbyGame("https://island-battles.example.test" + lobbyadapter.HooksPath)
+	entry, err := lobbyadapter.LobbyGame("https://island-battles.example.test"+lobbyadapter.HooksPath, "")
 	if err != nil {
 		t.Fatal(err)
 	}

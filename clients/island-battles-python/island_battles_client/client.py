@@ -139,6 +139,15 @@ class _SubscriptionEvents(centrifuge.SubscriptionEventHandler):
 class IslandBattlesClient:
     """One authenticated player's generation-turn client.
 
+    The lobby and the game are separate sites: ``lobby_url`` is the lobby's,
+    such as ``https://lobby.example.org``, which issues the player tokens and
+    the Centrifugo connection token for ``credential``, the guest credential,
+    and ``game_url`` the game's, such as
+    ``https://island-battles.example.org``, for its routes under ``/game/``
+    and ``/generation/``. ``base_url`` is the shorthand for one server that
+    serves both, such as ``http://localhost:8888``; give it, or both of the
+    others.
+
     The client owns an injected ``http_client`` and closes it. ``play`` is the
     bot, a function (sync or async) from ``BotTurn`` to ``BotTurnResult``. The
     client calls it once per generation, serially, and sends its result as the
@@ -159,11 +168,13 @@ class IslandBattlesClient:
 
     def __init__(
         self,
-        base_url: str,
         credential: str,
         lobby_id: str,
         *,
         play: Play,
+        game_url: str | None = None,
+        lobby_url: str | None = None,
+        base_url: str | None = None,
         on_game_ended: Callable[[GameOutcome, Generation], Awaitable[None] | None]
         | None = None,
         http_client: httpx.AsyncClient | None = None,
@@ -177,7 +188,14 @@ class IslandBattlesClient:
         log_to_stdout: bool = True,
         log_file: str | PathLike[str] | None = None,
     ) -> None:
-        self.base_url = base_url.rstrip("/")
+        if base_url is not None and (game_url is not None or lobby_url is not None):
+            raise ValueError("base_url sets both URLs; give it, or game_url and lobby_url")
+        if base_url is not None:
+            game_url = lobby_url = base_url
+        if not game_url or not lobby_url:
+            raise ValueError("the game's and the lobby's URLs are required")
+        self.game_url = game_url.rstrip("/")
+        self.lobby_url = lobby_url.rstrip("/")
         self.credential = credential
         self.lobby_id = str(UUID(str(lobby_id)))
         self._play = play
@@ -190,9 +208,7 @@ class IslandBattlesClient:
             raise ValueError(
                 "interval, attempts, and subscription timeout must be positive"
             )
-        self._http = http_client or httpx.AsyncClient(
-            base_url=self.base_url, timeout=10
-        )
+        self._http = http_client or httpx.AsyncClient(timeout=10)
         self._sdk_factory = sdk_factory
         self._sleep = sleep
         self._clock = clock
@@ -347,14 +363,16 @@ class IslandBattlesClient:
         payload: dict[str, Any] | None,
         retry_transport: bool,
     ) -> Any:
-        """Send one request with ``credential`` and return its JSON body."""
+        """Send one request with ``credential``, to the lobby's URL or the
+        game's by its path, and return its JSON body."""
+        base = self.lobby_url if _is_lobby_path(path) else self.game_url
         attempts = self._retry_attempts if retry_transport else 1
         for attempt in range(attempts):
             self._check_open()
             try:
                 response = await self._http.request(
                     method,
-                    f"{self.base_url}{path}",
+                    f"{base}{path}",
                     headers={"Authorization": f"Bearer {credential}"},
                     json=payload,
                 )

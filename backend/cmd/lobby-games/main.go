@@ -8,7 +8,11 @@
 //	LOBBY_GAMES="$(go run ./backend/cmd/lobby-games http://localhost:8888)"
 //
 // The backend's origin is where the lobby reaches it, such as
-// http://localhost:8888; the hooks are at its /game/lobby-hooks.
+// http://localhost:8888; the hooks are at its /game/lobby-hooks. It is also
+// where browsers reach the game: the lobby page, on the lobby's own origin,
+// loads Island Battles' modules and documents from it, so the entry's
+// catalog has absolute URLs there, with that origin as its origin. The
+// lobby accepts such an origin when it is https, or http on localhost.
 package main
 
 import (
@@ -41,7 +45,7 @@ func run(args []string, lookup func(string) (string, bool), output io.Writer) er
 		return fmt.Errorf("%q must be an origin, without a path", origin)
 	}
 	existing, _ := lookup(dependencies.LobbyGamesEnv)
-	games, err := dependencies.Config{PublicURL: origin, LobbyGames: existing}.LobbyGamesConfig()
+	games, err := dependencies.Config{PublicURL: origin, LobbyGames: existing}.LobbyGamesConfig(origin)
 	if err != nil {
 		return err
 	}

@@ -183,7 +183,7 @@ func TestTheBackendUsesALobbyOfItsOwnAtTheLobbyURL(t *testing.T) {
 	}))
 	t.Cleanup(backend.Close)
 
-	games, err := (dependencies.Config{PublicURL: backend.URL}).LobbyGamesConfig()
+	games, err := (dependencies.Config{PublicURL: backend.URL}).LobbyGamesConfig("")
 	if err != nil {
 		t.Fatal(err)
 	}

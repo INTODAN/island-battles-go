@@ -21,7 +21,7 @@ func get(t *testing.T, handler http.Handler, path string) *http.Response {
 }
 
 func TestHandlerServesThePage(t *testing.T) {
-	handler, err := mapbuilder.Handler()
+	handler, err := mapbuilder.Handler(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestHandlerServesThePage(t *testing.T) {
 }
 
 func TestHandlerListsTheGamesUpgrades(t *testing.T) {
-	handler, err := mapbuilder.Handler()
+	handler, err := mapbuilder.Handler(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestHandlerListsTheGamesUpgrades(t *testing.T) {
 }
 
 func TestHandlerCachesOnlyTheScriptsAndTheStyle(t *testing.T) {
-	handler, err := mapbuilder.Handler()
+	handler, err := mapbuilder.Handler(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,6 +89,24 @@ func TestHandlerCachesOnlyTheScriptsAndTheStyle(t *testing.T) {
 	} {
 		if got := get(t, handler, path).Header.Get("Cache-Control"); got != want {
 			t.Errorf("%s: Cache-Control %q, want %q", path, got, want)
+		}
+	}
+}
+
+func TestHandlerListsTheLobbyOriginsThatMayTakeItsMap(t *testing.T) {
+	for _, test := range []struct {
+		origins []string
+		want    string
+	}{{nil, "[]"}, {[]string{"https://lobby.example.org", "http://localhost:8890"}, `["https://lobby.example.org","http://localhost:8890"]`}} {
+		handler, err := mapbuilder.Handler(test.origins)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response := get(t, handler, "/lobby-origins.json")
+		body, _ := io.ReadAll(response.Body)
+		if response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != "application/json" ||
+			response.Header.Get("Cache-Control") != "no-store" || string(body) != test.want {
+			t.Fatalf("status=%d type=%q cache=%q body=%s", response.StatusCode, response.Header.Get("Content-Type"), response.Header.Get("Cache-Control"), body)
 		}
 	}
 }
