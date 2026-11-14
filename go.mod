@@ -132,7 +132,7 @@ require (
 
 require (
 	github.com/INTODAN/island-battles-go/clients/island-battles-go v0.0.0
-	github.com/INTODAN/mpl v0.0.0-20261113212428-1892a86d801e
+	github.com/INTODAN/mpl v0.3.0
 	github.com/aws/aws-lambda-go v1.54.0
 	github.com/aws/aws-sdk-go-v2 v1.48.0
 	github.com/aws/aws-sdk-go-v2/config v1.33.18

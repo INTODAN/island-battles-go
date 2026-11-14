@@ -88,7 +88,7 @@ The lobby comes from [`INTODAN/mpl`](https://github.com/INTODAN/mpl) at one vers
 - **Python:** the `mpl-lobby-client` requirement in `clients/island-battles-python/pyproject.toml` (its `integration` group) and in `clients/conformance/pyproject.toml`, each with its `uv.lock`.
 - **API documents:** `api/lobby/`, copied from the Go module by `scripts/sync-lobby-api.sh`, whose `--check` fails in CI when they differ.
 
-**Today the pin is a commit,** `1892a86d801ed42e8f41988cf40196152a6cdfb9` (the pseudo-version `v0.0.0-20261113212428-1892a86d801e`, and a git dependency for Python), because the lobby has no release yet. Once `INTODAN/mpl` releases `v0.3.0`, move it with a one-line change each: `go get github.com/INTODAN/mpl@v0.3.0 && go mod tidy`, and `"mpl-lobby-client==0.3.0"` in place of the git URL in the two `pyproject.toml` files, then `uv lock` in both projects. After any move of the pin, also run `scripts/sync-lobby-api.sh` and `bun run generate` in `clients/island-battles-web` (both change nothing while the lobby's API is the same), and commit what changed.
+**Today the pin is `v0.3.0`,** the lobby's first release from `INTODAN/mpl`. To move it to a newer release `vX.Y.Z`, change the three together: `go get github.com/INTODAN/mpl@vX.Y.Z && go mod tidy`, and `"mpl-lobby-client==X.Y.Z"` in the two `pyproject.toml` files, then `uv lock` in both projects. After any move of the pin, also run `scripts/sync-lobby-api.sh` and `bun run generate` in `clients/island-battles-web` (both change nothing while the lobby's API is the same), and commit what changed.
 
 ## Testing & Visualization
 
