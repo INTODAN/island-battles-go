@@ -7,11 +7,12 @@
 
 locals {
   bot_packages_bucket = "${var.name}-bot-packages"
-  # The origins that upload from a browser: the game's 3D client at /play/
-  # and the lobby page at /lobby/ui/, which are both on game_hostname.
+  # The origins that upload from a browser: the game's 3D client at /play/,
+  # on game_hostname, and the lobby page at /lobby/ui/, on lobby_hostname
+  # (#232).
   bot_package_upload_origins = distinct([
-    "https://${var.game_hostname}", # the game
-    "https://${var.game_hostname}", # the lobby page
+    "https://${var.game_hostname}",  # the game
+    "https://${var.lobby_hostname}", # the lobby page
   ])
 }
 

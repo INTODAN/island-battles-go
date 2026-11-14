@@ -125,12 +125,12 @@ func TestALobbyPlaysASecondGameAfterTheFirstEnds(t *testing.T) {
 	// bound each round's game once, and the reopens asked whether a round
 	// had ended.
 	for _, hook := range gamehooks.Hooks {
-		if stack.hookCalls[hook] == 0 {
+		if stack.hookCallCount(hook) == 0 {
 			t.Errorf("the lobby never called %s", hook)
 		}
 	}
-	if stack.hookCalls[gamehooks.HookStart] != 2 {
-		t.Errorf("start was called %d times, want once per round", stack.hookCalls[gamehooks.HookStart])
+	if stack.hookCallCount(gamehooks.HookStart) != 2 {
+		t.Errorf("start was called %d times, want once per round", stack.hookCallCount(gamehooks.HookStart))
 	}
 }
 

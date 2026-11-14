@@ -1,0 +1,11 @@
+---
+# Writes deploy/local/lambda.env, the backend Lambda's settings, from the
+# settings INTODAN/mpl publishes for the tenant island-battles and this
+# repository's own secrets. It runs on this machine only: the VM is
+# INTODAN/mpl's (#232). Usage: scripts/lambda-env.sh
+- name: Write the backend Lambda's settings
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - lambda_env

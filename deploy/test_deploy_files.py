@@ -173,13 +173,42 @@ class SyncTest(unittest.TestCase):
         self.assertEqual(conflicts, ["vm.yml"])
 
 
-class RequireSecretsTest(unittest.TestCase):
-    def test_a_new_deployment_may_generate_its_secrets(self):
-        self.assertTrue(deploy_files.require_secrets(FakeStore(), BUCKET))
+class TenantTest(unittest.TestCase):
+    """`tenant` copies INTODAN/mpl's settings for Island Battles (#232)."""
 
-    def test_a_running_deployment_needs_its_secrets_in_the_bucket(self):
-        self.assertFalse(deploy_files.require_secrets(FakeStore({"vm.yml": "a"}, state=True), BUCKET))
-        self.assertTrue(deploy_files.require_secrets(FakeStore({"secrets/admin_api_key": "k"}, state=True), BUCKET))
+    class TenantStore(FakeStore):
+        def __init__(self, tenant=None, **kwargs):
+            super().__init__(**kwargs)
+            self.tenant = tenant
+
+        def has_tenant(self):
+            return self.tenant is not None
+
+        def download_tenant(self, destination):
+            pathlib.Path(destination).write_text(self.tenant)
+
+    def setUp(self):
+        self.directory = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.directory)
+
+    def test_copies_the_tenants_settings_readable_by_their_owner_only(self):
+        deploy_files.fetch_tenant(self.TenantStore("LOBBY_URL=https://lobby.example.org\n"), self.directory, BUCKET)
+        tenant = self.directory / "tenant.env"
+        self.assertEqual(tenant.read_text(), "LOBBY_URL=https://lobby.example.org\n")
+        self.assertEqual(tenant.stat().st_mode & 0o777, 0o600)
+        self.assertEqual([path.name for path in self.directory.iterdir()], ["tenant.env"])
+
+    def test_says_who_writes_them_when_they_are_missing(self):
+        with self.assertRaisesRegex(deploy_files.AwsError, "mpl/tenants/island-battles/tenant.env.*INTODAN/mpl's VM deploy"):
+            deploy_files.fetch_tenant(self.TenantStore(), self.directory, BUCKET)
+        self.assertFalse((self.directory / "tenant.env").exists())
+
+    def test_the_copy_is_never_pushed(self):
+        (self.directory / "tenant.env").write_text("LOBBY_URL=https://lobby.example.org\n")
+        (self.directory / "lambda.env").write_text("ISLAND_BATTLES_LOBBY_URL=https://lobby.example.org\n")
+        store = FakeStore()
+        self.assertEqual(deploy_files.push(store, self.directory, BUCKET, log=lambda _: None), [])
+        self.assertEqual(store.uploads, ["lambda.env"])
 
 
 if __name__ == "__main__":

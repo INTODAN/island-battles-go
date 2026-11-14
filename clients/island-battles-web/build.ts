@@ -1,21 +1,15 @@
 import { rm } from "node:fs/promises";
+import { devServers, productionServers } from "./desktopServers";
 
 // The browser build is served at /play/ in production, so asset URLs carry that prefix.
+// It reads the lobby's URL from config.json beside the page at run time (src/platform.ts).
 // `--desktop` builds the same code for the Tauri app (src-tauri/): the window serves it
-// from its own root, and the build is told which game server it talks to. `--dev` points
-// that at a backend on this machine (`./scripts/dev.sh`).
+// from its own root, and the build is told which game and lobby it talks to, the
+// official ones (desktopServers.ts). `--dev` points them at the dev server and the lobby
+// on this machine (`./scripts/dev.sh`).
 const desktop = process.argv.includes("--desktop");
 const dev = process.argv.includes("--dev");
-const productionServer = "https://island-battles.elidan.org";
-// The production lobby: still served with the game until the cutover (#232),
-// which points it at lobby.<domain>, and the CSP and the HTTP scope in
-// src-tauri/ with it.
-const productionLobby = productionServer;
-// The dev server (bun run dev), which forwards the game's paths to the
-// backend that ./scripts/dev.sh runs, and the lobby, which it runs on its own
-// origin.
-const localServer = "http://localhost:3000";
-const localLobby = "http://localhost:8890";
+const servers = dev ? devServers : productionServers;
 if (dev && !desktop) {
   console.error("--dev only applies to --desktop");
   process.exit(1);
@@ -30,11 +24,9 @@ const result = await Bun.build({
   minify: true,
   splitting: true,
   define: {
-    __DESKTOP_API_BASE__: desktop
-      ? JSON.stringify(dev ? localServer : productionServer)
-      : "undefined",
+    __DESKTOP_API_BASE__: desktop ? JSON.stringify(servers.game) : "undefined",
     __DESKTOP_LOBBY_BASE__: desktop
-      ? JSON.stringify(dev ? localLobby : productionLobby)
+      ? JSON.stringify(servers.lobby)
       : "undefined",
   },
   // The page keeps a stable name; everything it loads is hashed for caching.

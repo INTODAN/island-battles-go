@@ -49,14 +49,16 @@ LOBBY_URL_ENV = "ISLAND_BATTLES_LOBBY_URL"
 HOST = "127.0.0.1"
 # The game clients that may relay turns by default: the local backend's pages,
 # the local lobby's page (on its own origin since #228), the web client's dev
-# server, the deployed game, and the desktop app (#105), whose web view sends
-# its own origin: `tauri://localhost` on macOS and Linux,
+# server, the deployed game (the 3D client at /play/), the deployed lobby's
+# page (on its own subdomain since #232), and the desktop app (#105), whose web
+# view sends its own origin: `tauri://localhost` on macOS and Linux,
 # `http://tauri.localhost` on Windows. Add more with --allow-origin.
 DEFAULT_ORIGINS = (
     "http://localhost:8888",
     "http://localhost:8890",
     "http://localhost:3000",
     "https://island-battles.elidan.org",
+    "https://lobby.elidan.org",
     "tauri://localhost",
     "http://tauri.localhost",
 )
@@ -815,18 +817,19 @@ def build_parser() -> argparse.ArgumentParser:
     running.add_argument(
         "--game-url",
         metavar="URL",
-        help="the game's address, such as https://island-battles.example.org "
+        help="the game's address, such as https://island-battles.elidan.org "
         f"(default ${GAME_URL_ENV})",
     )
     running.add_argument(
         "--lobby-url",
         metavar="URL",
-        help=f"the lobby's address, such as https://lobby.example.org (default ${LOBBY_URL_ENV})",
+        help=f"the lobby's address, such as https://lobby.elidan.org (default ${LOBBY_URL_ENV})",
     )
     running.add_argument(
         "--base-url",
         metavar="URL",
-        help="sets both addresses to one server's, such as http://localhost:8888",
+        help="sets both addresses to one, for a server that serves the game and the lobby "
+        "together (the official game's are two: give --game-url and --lobby-url)",
     )
     running.add_argument("--token", required=True, help="the guest bearer credential")
     running.add_argument("--lobby-id", required=True)

@@ -1,5 +1,3 @@
 ---
 # Run from deploy/ansible: ansible-lint
 profile: production
-exclude_paths:
-  - .collections/

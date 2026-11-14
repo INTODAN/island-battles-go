@@ -98,18 +98,16 @@ func Registration(database *gorm.DB, publisher services.Publisher, sender *servi
 // checked the start, and sends a snapshot of an Island Battles lobby with
 // ordered teams and a frozen roster; anything else is refused.
 //
-// The start answers within the lobby's hook timeout, gamehooks.DefaultTimeout,
-// whichever way the hook was called. When Go bots alone play the first turn,
-// RunLobbyGame keeps playing their turns until shortly before ctx's deadline,
-// and later game requests play the rest. In the backend's own process ctx
-// carries the deadline of the lobby's call; a request that came over the
-// network carries none, so startGame sets the same one from the time the
-// request arrived, and the start answers in about as long in both modes.
+// The start answers within the lobby's hook timeout, gamehooks.DefaultTimeout.
+// When Go bots alone play the first turn, RunLobbyGame keeps playing their
+// turns until shortly before ctx's deadline, and later game requests play the
+// rest. A request that came over the network carries no deadline, so
+// startGame sets the lobby's from the time the request arrived.
 func startGame(ctx context.Context, database *gorm.DB, publisher services.Publisher, sender *services.TurnSender, snapshot domain.Snapshot) (string, error) {
 	if err := checkStarted(snapshot); err != nil {
 		return "", err
 	}
-	// An earlier deadline, the in-process call's, stays.
+	// An earlier deadline, such as a test's, stays.
 	ctx, cancel := context.WithTimeout(ctx, startHookTimeout)
 	defer cancel()
 	result, err := services.RunLobbyGame(ctx, database, publisher, sender, snapshot)

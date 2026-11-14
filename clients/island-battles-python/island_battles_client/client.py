@@ -140,13 +140,13 @@ class IslandBattlesClient:
     """One authenticated player's generation-turn client.
 
     The lobby and the game are separate sites: ``lobby_url`` is the lobby's,
-    such as ``https://lobby.example.org``, which issues the player tokens and
+    such as ``https://lobby.elidan.org``, which issues the player tokens and
     the Centrifugo connection token for ``credential``, the guest credential,
     and ``game_url`` the game's, such as
-    ``https://island-battles.example.org``, for its routes under ``/game/``
+    ``https://island-battles.elidan.org``, for its routes under ``/game/``
     and ``/generation/``. ``base_url`` is the shorthand for one server that
-    serves both, such as ``http://localhost:8888``; give it, or both of the
-    others.
+    serves both; give it, or both of the others. The official game's are two
+    sites, so it takes both.
 
     The client owns an injected ``http_client`` and closes it. ``play`` is the
     bot, a function (sync or async) from ``BotTurn`` to ``BotTurnResult``. The

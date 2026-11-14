@@ -6,23 +6,26 @@ of three modes:
 `deploy` refuses a plan that a backend deploy must not apply. `scripts/aws.sh
 deploy` applies its plan without asking, so it allows only creating or
 updating resources other than Lightsail's, ACM's and CloudFront's. A deploy
-then never touches the VM, its firewall or its static IP, or the game's
-certificate and distribution, and never deletes or replaces anything, such as
-the Function URL that Centrifugo and CloudFront call. Creating the
-certificate would wait for a DNS record that only a person can add. Anything
-else goes through `scripts/aws.sh apply`, which shows the plan and asks.
+then never touches the VM, or the game's certificate and distribution, and
+never deletes or replaces anything, such as the Function URL that CloudFront
+calls. Creating the certificate would wait for a DNS record that only a person
+can add. Anything else goes through `scripts/aws.sh apply`, which shows the
+plan and asks.
 
-`apply` prints, one per line, the name of every Lightsail instance, static IP
-or disk, and every CloudFront distribution, the plan deletes or replaces, and
-describes them on stderr. `scripts/aws.sh apply` then asks for each name to be
-typed, because deleting an instance deletes its disk and its database,
-and a new distribution has a new domain for the game's CNAME.
+`apply` refuses, with exit status 1, a plan that destroys anything
+INTODAN/mpl owns since the cutover (#232): a Lightsail resource of the VM,
+which this configuration removes from its state with `removed` blocks and
+never destroys, or the account's GitHub OIDC provider, which INTODAN/mpl's
+roles trust too. Nothing allows that: such a plan is a mistake in the
+configuration or in aws.tfvars. Otherwise it prints, one per line, the name
+of every CloudFront distribution the plan deletes or replaces, and describes
+them on stderr: a new distribution has a new domain for the game's CNAME.
+`scripts/aws.sh apply` then asks for each name to be typed, and the Deploy
+workflow's apply needs each one in allow_destroy.
 
 `publishes-backend` prints `yes` when the plan creates or updates the backend
 function, so `scripts/aws.sh apply` runs the migrations first, and `no`
-otherwise. An apply that only moves the static IP, for example, must not
-migrate: in the middle of a move, vm.<domain> still points at the old VM,
-which refuses the backend's logins.
+otherwise.
 """
 
 import json
@@ -32,15 +35,18 @@ ALLOWED_ACTIONS = (["create"], ["update"])
 BACKEND_FUNCTION = "aws_lambda_function.backend"
 # A deploy changes none of these: the VM and the game's name.
 REFUSED_TYPE_PREFIXES = {
-    "aws_lightsail_": "a Lightsail resource",
+    "aws_lightsail_": "a Lightsail resource, which INTODAN/mpl owns",
     "aws_acm_": "the game's certificate",
     "aws_cloudfront_": "the game's distribution",
 }
-# Deleting one of these loses data, or an address that DNS points at.
+# INTODAN/mpl owns these since the cutover (#232); no plan here may destroy
+# them.
+MPL_OWNED_TYPE_PREFIXES = {
+    "aws_lightsail_": "the VM's Lightsail resources, which INTODAN/mpl owns",
+    "aws_iam_openid_connect_provider": "the account's GitHub OIDC provider, which INTODAN/mpl's roles trust too",
+}
+# Deleting one of these loses an address that DNS points at.
 DESTRUCTIVE_TYPES = {
-    "aws_lightsail_instance": "instance, with its disk and its database",
-    "aws_lightsail_static_ip": "static IP, which vm.<domain> points at",
-    "aws_lightsail_disk": "disk",
     "aws_cloudfront_distribution": "distribution, whose domain the game's CNAME points at",
 }
 MODES = ("deploy", "apply", "publishes-backend")
@@ -67,6 +73,17 @@ def refused_changes(plan):
             refused.append(f"{address}: {'/'.join(actions)} ({kind})")
         elif actions not in ALLOWED_ACTIONS:
             refused.append(f"{address}: {'/'.join(actions)}")
+    return refused
+
+
+def mpl_owned_destroys(plan):
+    """Return a description of every change that destroys what INTODAN/mpl owns."""
+    refused = []
+    for change in managed_changes(plan):
+        actions = change["change"]["actions"]
+        kind = next((kind for prefix, kind in MPL_OWNED_TYPE_PREFIXES.items() if change["type"].startswith(prefix)), None)
+        if kind is not None and "delete" in actions:
+            refused.append(f"{change['address']}: {'/'.join(actions)} ({kind})")
     return refused
 
 
@@ -101,6 +118,15 @@ def main(arguments):
         print("yes" if publishes_backend(plan) else "no")
         return 0
     if mode == "apply":
+        refused = mpl_owned_destroys(plan)
+        if refused:
+            print("This plan destroys what INTODAN/mpl owns, so nothing is applied:", file=sys.stderr)
+            for line in refused:
+                print(f"  {line}", file=sys.stderr)
+            print("Take Lightsail resources out of the state with a removed block (lifecycle { destroy = false }), "
+                  "and keep github_repository set, so the OIDC provider stays (deploy/README.md, \"The cutover\").",
+                  file=sys.stderr)
+            return 1
         destroyed = destroyed_resources(plan)
         if destroyed:
             print("This plan destroys resources that are hard to get back:", file=sys.stderr)

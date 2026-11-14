@@ -14,14 +14,12 @@ import (
 	lobbyapp "github.com/INTODAN/mpl/app"
 	"github.com/INTODAN/mpl/domain"
 	"github.com/INTODAN/mpl/gamehooks"
-	"github.com/INTODAN/mpl/playertoken"
 	"islandBattles/backend/app"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/dependencies"
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/models"
-	"islandBattles/backend/retention"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -46,44 +44,16 @@ func slowCentrifugo(t *testing.T) string {
 	return server.URL + "/api"
 }
 
-// startStack is a lobby and Island Battles, at lobbyURL and gameURL, which
-// are the same URL while the lobby runs in the backend's process, with the
+// startStack is a lobby and Island Battles, at lobbyURL and gameURL, with the
 // game's database and the lobby's.
 type startStack struct {
 	lobbyURL, gameURL string
 	game, lobby       *gorm.DB
 }
 
-// inProcessStack runs the lobby in the backend's process, as production does
-// until the cutover: the lobby calls the hooks in memory.
-func inProcessStack(t *testing.T) startStack {
-	t.Helper()
-	database, lobbyDatabase := testutils.InitTestDatabases(t)
-	handler, err := app.New(dependencies.Config{
-		Database:                  dependencies.DefaultDatabaseConfig(databaseURL(t, database)),
-		CentrifugoPublicURL:       "ws://127.0.0.1:9/connection/websocket",
-		CentrifugoAPIURL:          slowCentrifugo(t),
-		CentrifugoAPIKey:          "test-centrifugo-api-key",
-		ConnectionTokenHMACSecret: "test-connection-token-secret-of-sufficient-length",
-		LobbyProxySecret:          "test-lobby-proxy-secret",
-		SubmitTokenSecret:         "test-submit-token-secret",
-		GameRetentionPeriod:       retention.DefaultPeriod,
-		PlayerTokenKeys:           playerTokenKeys(t),
-		PlayerTokenLifetime:       playertoken.MaxLifetime,
-		LobbyHookSecret:           []byte(hookSecret),
-		LobbyGameSecrets:          map[string]string{lobbyadapter.SecretEnv: hookSecret},
-	}, database, lobbyDatabase, discard)
-	if err != nil {
-		t.Fatal(err)
-	}
-	backend := httptest.NewServer(handler)
-	t.Cleanup(backend.Close)
-	return startStack{lobbyURL: backend.URL, gameURL: backend.URL, game: database, lobby: lobbyDatabase}
-}
-
 // splitStack runs the lobby as a server of its own, which calls the
-// backend's hooks over the network, as local development and the live tests
-// do. wrap, if not nil, wraps the backend's handler.
+// backend's hooks over the network, as production, local development and the
+// live tests do. wrap, if not nil, wraps the backend's handler.
 func splitStack(t *testing.T, wrap func(http.Handler) http.Handler) startStack {
 	t.Helper()
 	database, lobbyTestDatabase := testutils.InitTestDatabases(t)
@@ -98,10 +68,11 @@ func splitStack(t *testing.T, wrap func(http.Handler) http.Handler) startStack {
 	}))
 	t.Cleanup(lobbyServer.Close)
 
-	games, err := (dependencies.Config{PublicURL: backend.URL}).LobbyGamesConfig("")
+	islandBattles, err := lobbyadapter.LobbyGame(backend.URL+lobbyadapter.HooksPath, "")
 	if err != nil {
 		t.Fatal(err)
 	}
+	games := "[" + string(islandBattles) + "]"
 	lobbyDatabase, err := lobbyapp.OpenDatabase(lobbyapp.DatabaseConfig{URL: databaseURL(t, lobbyTestDatabase), MaxOpenConnections: 10, MaxIdleConnections: 2}, discard)
 	if err != nil {
 		t.Fatal(err)
@@ -140,7 +111,7 @@ func splitStack(t *testing.T, wrap func(http.Handler) http.Handler) startStack {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gameHandler, err := app.New(config, database, nil, discard)
+	gameHandler, err := app.New(config, database, discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,37 +195,27 @@ func (stack startStack) readState(t *testing.T, lobby botLobby) {
 }
 
 // The start hook plays the Go bots of a game that only they play for a few
-// seconds at most, in both modes, so the lobby gets its answer within the
-// hook's timeout; later game requests play the rest, a few seconds each.
+// seconds at most, so the lobby gets its answer within the hook's timeout;
+// later game requests play the rest, a few seconds each.
 func TestAnAllDefaultBotStartAnswersWithinTheHookTimeout(t *testing.T) {
-	for _, mode := range []struct {
-		name  string
-		stack func(*testing.T) startStack
-	}{
-		{"in process", inProcessStack},
-		{"split", func(t *testing.T) startStack { return splitStack(t, nil) }},
-	} {
-		t.Run(mode.name, func(t *testing.T) {
-			stack := mode.stack(t)
-			for level := 1; level <= 3; level++ {
-				lobby := stack.allDefaultBotLobby(t, level)
-				began := time.Now()
-				status, content := stack.start(t, lobby)
-				took := time.Since(began)
-				// A hook that takes longer than its timeout is a 502.
-				if status != http.StatusOK || took >= gamehooks.DefaultTimeout {
-					t.Fatalf("level %d: start = %d after %v: %s", level, status, took, content)
-				}
-				generations, ended := stack.played(t, lobby.room.Lobby.ID)
-				if ended || generations < 2 {
-					t.Fatalf("level %d: the start played %d generations, ended %v", level, generations, ended)
-				}
-				stack.readState(t, lobby)
-				if after, _ := stack.played(t, lobby.room.Lobby.ID); after <= generations {
-					t.Fatalf("level %d: a game request played no turn: %d generations, then %d", level, generations, after)
-				}
-			}
-		})
+	stack := splitStack(t, nil)
+	for level := 1; level <= 3; level++ {
+		lobby := stack.allDefaultBotLobby(t, level)
+		began := time.Now()
+		status, content := stack.start(t, lobby)
+		took := time.Since(began)
+		// A hook that takes longer than its timeout is a 502.
+		if status != http.StatusOK || took >= gamehooks.DefaultTimeout {
+			t.Fatalf("level %d: start = %d after %v: %s", level, status, took, content)
+		}
+		generations, ended := stack.played(t, lobby.room.Lobby.ID)
+		if ended || generations < 2 {
+			t.Fatalf("level %d: the start played %d generations, ended %v", level, generations, ended)
+		}
+		stack.readState(t, lobby)
+		if after, _ := stack.played(t, lobby.room.Lobby.ID); after <= generations {
+			t.Fatalf("level %d: a game request played no turn: %d generations, then %d", level, generations, after)
+		}
 	}
 }
 

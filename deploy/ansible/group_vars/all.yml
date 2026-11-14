@@ -1,97 +1,27 @@
 ---
-# Shared by every VM playbook. The developer's own settings (the domain, the
-# Lambda Function URL, the game's URL) come from deploy/local/vm.yml, which
-# scripts/vm.sh passes with -e. See deploy/vm.example.yml.
+# Shared by the playbook. scripts/lambda-env.sh runs it.
 
-# Lightsail's Ubuntu images log in as `ubuntu`, with passwordless sudo.
-ansible_user: ubuntu
-
-# Gitignored directory on the developer machine for the settings, the generated
-# secrets, the Lambda environment and database dumps.
+# Gitignored directory on the developer machine for the settings, this
+# repository's secrets and the Lambda's settings.
 deploy_local_dir: "{{ (playbook_dir ~ '/../local') | ansible.builtin.realpath }}"
 deploy_secrets_dir: "{{ deploy_local_dir }}/secrets"
-deploy_dumps_dir: "{{ deploy_local_dir }}/dumps"
 
-# The single DNS record (#30): an A record from vm.<domain> to the static IP.
-vm_hostname: "vm.{{ deploy_domain }}"
-# The address vm_hostname must resolve to. It defaults to the VM being deployed.
-# When preparing a replacement VM before the static IP moves to it, pass the
-# static IP here instead.
-vm_static_ip: "{{ inventory_hostname }}"
+# What INTODAN/mpl's VM deploy publishes for Island Battles, its tenant, under
+# mpl/tenants/island-battles/ in the deploy bucket, and scripts/lambda-env.sh
+# downloads here (deploy/README.md, "The backend's settings"): its database,
+# the lobby's URL and the hooks' shared secret, and Centrifugo's API.
+lambda_env_tenant_file: "{{ deploy_local_dir }}/tenant.env"
+lambda_env_tenant_key: island-battles
 
-# Where the Compose project lives on the VM, and who owns it.
-vm_app_dir: /opt/island-battles
-vm_deploy_user: deploy
-
-# The database and the role the backend connects as. The role owns the database
-# but is not a superuser. The `postgres` superuser only connects through the
-# container's local socket.
-postgres_database: island_battles
-postgres_app_role: island_battles
-postgres_port: 5432
-# The lobby's own database and the role it connects as (#229), on the same
-# server: no join, foreign key or transaction spans the two databases. The
-# role owns its database, like the backend's.
-lobby_database: lobby
-lobby_app_role: lobby
-# The read-only role that the admin MCP server connects as, from the operator's
-# machine (#79). It may read every table of both databases, but not
-# lobby_sessions.bearer_hash.
-postgres_admin_role: island_battles_admin
-
-# Secrets are generated once on the developer machine and reused on every deploy
-# and on every replacement VM, so issued connection tokens stay valid. Letters
-# and digits only, so they are safe in URLs, env files and TOML.
-postgres_superuser_password: >-
-  {{ lookup('ansible.builtin.password', deploy_secrets_dir ~ '/postgres_superuser_password',
-     length=48, chars=['ascii_letters', 'digits']) }}
-postgres_app_password: >-
-  {{ lookup('ansible.builtin.password', deploy_secrets_dir ~ '/postgres_app_password',
-     length=48, chars=['ascii_letters', 'digits']) }}
-lobby_app_password: >-
-  {{ lookup('ansible.builtin.password', deploy_secrets_dir ~ '/postgres_lobby_password',
-     length=48, chars=['ascii_letters', 'digits']) }}
-postgres_admin_password: >-
-  {{ lookup('ansible.builtin.password', deploy_secrets_dir ~ '/postgres_admin_password',
-     length=48, chars=['ascii_letters', 'digits']) }}
-centrifugo_api_key: >-
-  {{ lookup('ansible.builtin.password', deploy_secrets_dir ~ '/centrifugo_api_key',
-     length=48, chars=['ascii_letters', 'digits']) }}
-connection_token_hmac_secret: >-
-  {{ lookup('ansible.builtin.password', deploy_secrets_dir ~ '/connection_token_hmac_secret',
-     length=64, chars=['ascii_letters', 'digits']) }}
-lobby_proxy_secret: >-
-  {{ lookup('ansible.builtin.password', deploy_secrets_dir ~ '/lobby_proxy_secret',
-     length=48, chars=['ascii_letters', 'digits']) }}
+# This repository's own secrets, which only the Lambda reads. Generated once on
+# the first deploy (-e app_generate_secrets=true) and kept in the deploy
+# bucket; letters and digits only, so they are safe in env files.
 # The backend's admin API key, sent as X-Admin-API-Key to POST /map/create.
-# Only the Lambda reads it; nothing on the VM does.
 admin_api_key: >-
   {{ lookup('ansible.builtin.password', deploy_secrets_dir ~ '/admin_api_key',
      length=48, chars=['ascii_letters', 'digits']) }}
 # Signs the one-turn submit tokens that bots submit their commands with
-# (#215). Only the Lambda reads it.
+# (#215).
 submit_token_secret: >-
   {{ lookup('ansible.builtin.password', deploy_secrets_dir ~ '/submit_token_secret',
      length=64, chars=['ascii_letters', 'digits']) }}
-# The shared secret of the lobby and Island Battles (#224): the lobby signs
-# its calls of the game's hooks with it, and the game its calls of the lobby's
-# game API. Only the Lambda reads it, by two names.
-lobby_game_secret_island_battles: >-
-  {{ lookup('ansible.builtin.password', deploy_secrets_dir ~ '/lobby_game_secret_island_battles',
-     length=64, chars=['ascii_letters', 'digits']) }}
-# The lobby's player token key (#218): an Ed25519 seed of 32 bytes in base64url.
-# 43 letters and digits are a valid base64url encoding of 32 bytes, with about
-# 256 bits of randomness. Only the Lambda reads it.
-lobby_player_token_key: >-
-  {{ lookup('ansible.builtin.password', deploy_secrets_dir ~ '/lobby_player_token_key',
-     length=43, chars=['ascii_letters', 'digits']) }}
-# The key's ID, named in each token's header, comes from the key, so a new key
-# gets a new ID.
-lobby_player_token_key_id: "{{ (lobby_player_token_key | ansible.builtin.hash('sha256'))[:12] }}"
-# Keys that still verify tokens but no longer sign, as kid:seed, during a
-# rotation (deploy/README.md, "Rotating the player token key"). Pass them with
-# -e for 15 minutes after the new key starts signing.
-lobby_player_token_previous_keys: []
-# LOBBY_PLAYER_TOKEN_KEYS: the key that signs first, then the previous ones.
-lobby_player_token_keys: >-
-  {{ ([lobby_player_token_key_id ~ ':' ~ lobby_player_token_key] + lobby_player_token_previous_keys) | join(',') }}

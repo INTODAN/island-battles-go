@@ -2,24 +2,16 @@
 # is gitignored, and replace the placeholders. Every variable is described in
 # deploy/terraform/variables.tf. See deploy/README.md.
 
-# The AWS region for the VM and the Lambda.
+# The AWS region for the Lambda. The VM is INTODAN/mpl's (#232).
 region = "<region, e.g. eu-central-1>"
-
-# The OpenSSH public key that logs in to the instance as `ubuntu`.
-ssh_public_key = "<contents of your public key, e.g. ~/.ssh/id_ed25519.pub>"
-
-# The Lightsail instances, by name, and the one the static IP points at.
-# Moving to a new VM adds a second instance here (deploy/README.md). Keep this
-# file in step with what runs: Terraform replaces or deletes any instance that
-# isn't listed as it is.
-vm_instances = {
-  "island-battles-1" = {}
-}
-static_ip_instance = "island-battles-1"
 
 # Where players open the game. CloudFront serves it with an ACM certificate,
 # and its DNS records are added by hand (deploy/README.md).
 game_hostname = "island-battles.<your-domain>"
+
+# Where INTODAN/mpl deploys the lobby. The game's clients use it, and old
+# links to the lobby's page on game_hostname redirect there.
+lobby_hostname = "lobby.<your-domain>"
 
 # Where the error alarms and the zero-spend budget send their emails.
 alert_email = "<your email address>"
@@ -34,7 +26,8 @@ alert_email = "<your email address>"
 
 # Optional: how many Lambda instances may run at once. Every one keeps up to
 # database_max_open_connections (2) connections to Postgres, and together they
-# must leave postgres_spare_connections (10) of Postgres's 100 free. Every one
+# must fit the tenant_database_connections (20) that INTODAN/mpl reserves for
+# the game on the VM's Postgres. Every one
 # also logs and traces up to its own limits, which must fit the free tier for
 # all of them (deploy/README.md). Set it to null if the account's concurrency
 # limit is too low to reserve any, and set account_concurrency_limit to that

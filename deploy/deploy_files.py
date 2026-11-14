@@ -7,7 +7,8 @@ file in deploy/local/ that a deploy needs under `files/`: the settings, the gene
 smoke test's guest credential. The build, plans, dumps and the old local state
 stay on the machine.
 
-scripts/aws.sh and scripts/vm.sh pull before they run and push when they end.
+scripts/aws.sh, scripts/lambda-env.sh and scripts/smoke.sh pull before they
+run and push when they end.
 Each machine records in deploy/local/.sync-base.json what it last pulled or
 pushed, so a sync can tell which side changed a file:
 
@@ -22,19 +23,18 @@ pushed, so a sync can tell which side changed a file:
 Nothing is ever deleted from the bucket. Its versioning keeps every earlier
 copy.
 
-INTODAN/mpl, the lobby's repository, shares the bucket under `mpl/` and takes
-the VM over (deploy/README.md, "The VM belongs to INTODAN/mpl"). From then on
-its marker `mpl/vm-owner` names it, and this repository's VM deploy refuses
-to run: `vm-owner` prints the owner the marker names, if any, and
-`check-vm-owner` fails with the reason unless ISLAND_BATTLES_OVERRIDE_VM_OWNER
-names that owner too.
+INTODAN/mpl, the lobby's repository, shares the bucket under `mpl/` and owns
+the VM since the cutover (#232). Its VM deploy publishes what Island Battles,
+its tenant, needs as `mpl/tenants/island-battles/tenant.env`: `tenant` copies
+that to deploy/local/tenant.env, which stays on the machine and is never
+pushed, for scripts/lambda-env.sh (deploy/README.md, "The backend's
+settings").
 
 Usage, from the repository root:
 
     python3 -I deploy/deploy_files.py bootstrap --region <region>
     python3 -I deploy/deploy_files.py status|pull|push [--force]
-    python3 -I deploy/deploy_files.py bucket|has-state|require-secrets
-    python3 -I deploy/deploy_files.py vm-owner|check-vm-owner
+    python3 -I deploy/deploy_files.py bucket|has-state|tenant
 
 The bucket is `island-battles-deploy-<account ID>`, in the account of the
 current AWS credentials, unless ISLAND_BATTLES_DEPLOY_BUCKET names another.
@@ -44,7 +44,6 @@ import hashlib
 import json
 import os
 import pathlib
-import re
 import shutil
 import subprocess
 import sys
@@ -57,19 +56,18 @@ STATE_KEY = "terraform/terraform.tfstate"
 # The Deploy workflow's apply target saves its plan here between its two jobs.
 PLANS_PREFIX = "plans/"
 SAVED_PLAN_DAYS = 3
+# INTODAN/mpl's settings for Island Battles, its tenant, and where `tenant`
+# copies them.
+TENANT_KEY = "mpl/tenants/island-battles/tenant.env"
+TENANT_FILE = "tenant.env"
 # Top-level entries of deploy/local/ that stay on the machine: Terraform's
-# plans and its old local state, the built Lambda, and database dumps.
-LOCAL_ONLY = {"terraform", "lambda", "dumps", BASE_FILE}
+# plans and its old local state, the built Lambda, database dumps, and
+# INTODAN/mpl's settings for the tenant, which are its own.
+LOCAL_ONLY = {"terraform", "lambda", "dumps", TENANT_FILE, BASE_FILE}
 BUCKET_ENVIRONMENT_VARIABLE = "ISLAND_BATTLES_DEPLOY_BUCKET"
 # Noncurrent copies are kept for 90 days, and the last 10 of each file always.
 NONCURRENT_DAYS = 90
 NONCURRENT_KEPT = 10
-# INTODAN/mpl writes this when it takes the VM over (#256). Its content names
-# the repository whose Ansible owns the VM's Compose project from then on.
-VM_OWNER_KEY = "mpl/vm-owner"
-VM_OWNER_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]{0,63}")
-VM_OWNER_REPOSITORIES = {"mpl": "INTODAN/mpl"}
-VM_OWNER_OVERRIDE_VARIABLE = "ISLAND_BATTLES_OVERRIDE_VM_OWNER"
 
 
 class AwsError(Exception):
@@ -123,15 +121,12 @@ class S3Store:
         listing = aws_json("s3api", "list-objects-v2", "--bucket", self.bucket, "--prefix", STATE_KEY)
         return any(item["Key"] == STATE_KEY for item in listing.get("Contents", []))
 
-    def vm_owner_marker(self):
-        """Return the VM owner marker's content, or None when the bucket has none."""
-        listing = aws_json("s3api", "list-objects-v2", "--bucket", self.bucket, "--prefix", VM_OWNER_KEY)
-        if not any(item["Key"] == VM_OWNER_KEY for item in listing.get("Contents", [])):
-            return None
-        with tempfile.TemporaryDirectory() as directory:
-            destination = pathlib.Path(directory) / "vm-owner"
-            aws_json("s3api", "get-object", "--bucket", self.bucket, "--key", VM_OWNER_KEY, str(destination))
-            return destination.read_bytes()[:256].decode("utf-8", errors="replace")
+    def has_tenant(self):
+        listing = aws_json("s3api", "list-objects-v2", "--bucket", self.bucket, "--prefix", TENANT_KEY)
+        return any(item["Key"] == TENANT_KEY for item in listing.get("Contents", []))
+
+    def download_tenant(self, destination):
+        aws_json("s3api", "get-object", "--bucket", self.bucket, "--key", TENANT_KEY, str(destination))
 
 
 def aws(*arguments):
@@ -294,50 +289,25 @@ def status(store, directory, bucket, log=print):
         log(f"{state}: {path}")
 
 
-def require_secrets(store, bucket):
-    """Refuse a VM deploy that would generate a running deployment's secrets again.
+def fetch_tenant(store, directory, bucket):
+    """Copy INTODAN/mpl's settings for the tenant to directory's tenant.env.
 
-    Once Terraform's state is in the bucket, a deployment exists, and its
-    secrets must be too. Without them the VM deploy would stop, or with
-    app_generate_secrets=true replace every password and key.
+    The copy is readable by its owner only, and replaces the old one only once
+    it is whole.
     """
-    if any(path.startswith("secrets/") for path in store.list()):
-        return True
-    return not store.has_state()
-
-
-def vm_owner(store, bucket):
-    """Return the repository that owns the VM by the bucket's marker, or None for this one.
-
-    A marker that names no owner stops the deploy instead of being ignored.
-    """
-    content = store.vm_owner_marker()
-    if content is None:
-        return None
-    owner = content.strip()
-    if not VM_OWNER_PATTERN.fullmatch(owner):
-        raise AwsError(f"s3://{bucket}/{VM_OWNER_KEY} exists, so another repository owns the VM, but it names "
-                       "none: it should hold a name such as `mpl`. Fix the marker, or delete it only if this "
-                       "repository deploys the VM again.")
-    return owner
-
-
-def vm_owner_refusal(owner, bucket, override=None):
-    """Return why this repository mustn't deploy the VM, or None when it may.
-
-    override is ISLAND_BATTLES_OVERRIDE_VM_OWNER: naming the owner deploys
-    anyway, for an emergency.
-    """
-    if owner is None or override == owner:
-        return None
-    repository = VM_OWNER_REPOSITORIES.get(owner, f"the repository `{owner}`")
-    return (f"The VM is deployed from {repository} now, so this repository's VM deploy stops here and changes "
-            f"nothing. s3://{bucket}/{VM_OWNER_KEY} says `{owner}`: {repository} took the VM over, and its Ansible "
-            "owns the VM's Compose project, Postgres's pg_hba.conf and Centrifugo's configuration. This "
-            "repository's playbooks would write their own templates over them. Deploy the VM from "
-            f"{repository} instead, with its Deploy workflow's vm target. Only in an emergency, set "
-            f"{VM_OWNER_OVERRIDE_VARIABLE}={owner} to deploy anyway, then run {repository}'s VM deploy again "
-            "(deploy/README.md, \"The VM belongs to INTODAN/mpl\").")
+    if not store.has_tenant():
+        raise AwsError(f"s3://{bucket}/{TENANT_KEY} doesn't exist yet. INTODAN/mpl's VM deploy writes it "
+                       "(deploy/README.md, \"The backend's settings\").")
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(dir=directory, prefix=".tenant-")
+    os.close(descriptor)
+    try:
+        store.download_tenant(temporary)
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, directory / TENANT_FILE)
+    finally:
+        if os.path.exists(temporary):
+            os.remove(temporary)
 
 
 def bootstrap(bucket, region):
@@ -391,16 +361,14 @@ def bootstrap(bucket, region):
 
 
 def main(arguments):
-    commands = ("bootstrap", "status", "pull", "push", "bucket", "has-state", "require-secrets", "vm-owner",
-                "check-vm-owner")
+    commands = ("bootstrap", "status", "pull", "push", "bucket", "has-state", "tenant")
     if not arguments or arguments[0] not in commands:
         print(f"Usage: deploy_files.py {'|'.join(commands)} [--force] [--region <region>]", file=sys.stderr)
         return 2
     command, options = arguments[0], arguments[1:]
     force = "--force" in options
 
-    # stdout is only for `bucket` and `has-state`, which scripts/aws.sh reads,
-    # and `vm-owner`, which the release workflow reads.
+    # stdout is only for `bucket` and `has-state`, which scripts/aws.sh reads.
     def log(message):
         print(message, file=sys.stderr)
 
@@ -424,24 +392,9 @@ def main(arguments):
         if command == "has-state":
             print("yes" if store.has_state() else "no")
             return 0
-        if command == "require-secrets":
-            if require_secrets(store, bucket):
-                return 0
-            log(f"s3://{bucket} has the deployment's Terraform state but no secrets. Push deploy/local/ "
-                "from the machine that has them (scripts/deploy-files.sh push) before deploying the VM.")
-            return 1
-        if command == "vm-owner":
-            print(vm_owner(store, bucket) or "")
-            return 0
-        if command == "check-vm-owner":
-            owner = vm_owner(store, bucket)
-            refusal = vm_owner_refusal(owner, bucket, os.environ.get(VM_OWNER_OVERRIDE_VARIABLE) or None)
-            if refusal:
-                log(annotate + refusal)
-                return 1
-            if owner is not None:
-                log(f"{VM_OWNER_OVERRIDE_VARIABLE}={owner}: deploying the VM although s3://{bucket}/{VM_OWNER_KEY} "
-                    f"says {owner} owns it. Run {owner}'s VM deploy again afterwards.")
+        if command == "tenant":
+            fetch_tenant(store, LOCAL_DIRECTORY, bucket)
+            log(f"Copied s3://{bucket}/{TENANT_KEY} to deploy/local/{TENANT_FILE}.")
             return 0
         if command == "status":
             status(store, LOCAL_DIRECTORY, bucket, log)

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/INTODAN/mpl/application"
@@ -16,7 +17,6 @@ import (
 	"github.com/INTODAN/mpl/mockgame"
 	"github.com/INTODAN/mpl/playertoken"
 	lobbypostgres "github.com/INTODAN/mpl/postgres"
-	"islandBattles/backend/app"
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/lobbyadapter"
@@ -37,8 +37,8 @@ const mockGameKey = "mock-game"
 // database, as the backend does, without Centrifugo. The lobby is configured
 // with Island Battles as an HTTP game, as LOBBY_GAMES configures it: it calls
 // Island Battles' signed hooks, and Island Battles reads it through its game
-// API, both in memory through app.Loopback, as in the backend's process. The
-// lobby's mock game, at a server of its own, is a second game.
+// API, both over HTTP, each at a test server of its own. The lobby's mock
+// game, at a server of its own, is a second game.
 type lobbyStack struct {
 	t        *testing.T
 	database *gorm.DB
@@ -47,8 +47,18 @@ type lobbyStack struct {
 	api           humatest.TestAPI
 	// publisher keeps what the game pushed.
 	publisher *testutils.RecordedPublisher
-	// hookCalls counts the lobby's calls of each Island Battles hook.
-	hookCalls map[string]int
+	// hookCalls counts the lobby's calls of each Island Battles hook, which
+	// the hooks' server writes from its own goroutines; read it with
+	// hookCallCount.
+	hookCalls     map[string]int
+	hookCallsLock sync.Mutex
+}
+
+// hookCallCount is how many times the lobby called hook.
+func (stack *lobbyStack) hookCallCount(hook string) int {
+	stack.hookCallsLock.Lock()
+	defer stack.hookCallsLock.Unlock()
+	return stack.hookCalls[hook]
 }
 
 func newLobbyStack(t *testing.T) *lobbyStack {
@@ -69,16 +79,20 @@ func newLobbyStackWith(t *testing.T, serverBots services.ServerBots) *lobbyStack
 	mockServer := httptest.NewServer(mock)
 	t.Cleanup(mockServer.Close)
 
+	// The two sides each need the other, so their servers start first.
 	var hooks, gameAPI http.Handler
-	loopback := &app.Loopback{}
-	loopback.Handle(app.LoopbackOrigin+gamehooks.GameAPIPath, func() http.Handler { return gameAPI })
-	loopback.Handle(app.LoopbackOrigin+lobbyadapter.HooksPath, func() http.Handler {
-		return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-			stack.hookCalls[request.URL.Path[len(lobbyadapter.HooksPath)+1:]]++
-			hooks.ServeHTTP(response, request)
-		})
-	})
-	islandBattles, err := lobbyadapter.LobbyGame(app.LoopbackOrigin+lobbyadapter.HooksPath, "")
+	hooksServer := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		stack.hookCallsLock.Lock()
+		stack.hookCalls[request.URL.Path[len(lobbyadapter.HooksPath)+1:]]++
+		stack.hookCallsLock.Unlock()
+		hooks.ServeHTTP(response, request)
+	}))
+	t.Cleanup(hooksServer.Close)
+	gameAPIServer := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		gameAPI.ServeHTTP(response, request)
+	}))
+	t.Cleanup(gameAPIServer.Close)
+	islandBattles, err := lobbyadapter.LobbyGame(hooksServer.URL+lobbyadapter.HooksPath, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +104,7 @@ func newLobbyStackWith(t *testing.T, serverBots services.ServerBots) *lobbyStack
 	games, err := gamehooks.ParseGames("["+string(islandBattles)+","+string(mockEntry)+"]", func(name string) (string, bool) {
 		secret, found := secrets[name]
 		return secret, found
-	}, gamehooks.WithHTTPClient(loopback.Client()))
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,14 +132,15 @@ func newLobbyStackWith(t *testing.T, serverBots services.ServerBots) *lobbyStack
 	gameAPIConfig.OpenAPIPath, gameAPIConfig.DocsPath, gameAPIConfig.SchemasPath = "", "", ""
 	httpapi.RegisterGameAPI(humachi.New(gameAPIRouter, gameAPIConfig), lobbies, gamehooks.Secrets(games))
 	gameAPI = gameAPIRouter
-	lobbyClient, err := gamehooks.NewGameAPIClient(lobbyadapter.GameKey, app.LoopbackOrigin, hookSecret, gamehooks.WithHTTPClient(loopback.Client()))
+	lobbyClient, err := gamehooks.NewGameAPIClient(lobbyadapter.GameKey, gameAPIServer.URL, hookSecret)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if hooks, err = lobbyadapter.Hooks(hookSecret, lobbyadapter.Registration(database, stack.publisher, nil, serverBots, lobbyClient)); err != nil {
 		t.Fatal(err)
 	}
-	// The game verifies the lobby's player tokens in process, as the backend does.
+	// The game verifies the lobby's player tokens with the lobby's keys, as the
+	// backend does with the lobby's JWKS.
 	keys, err := playertoken.ParseKeySet("test:" + base64.RawURLEncoding.EncodeToString([]byte(strings.Repeat("k", 32))))
 	if err != nil {
 		t.Fatal(err)

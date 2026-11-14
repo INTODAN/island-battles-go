@@ -6,15 +6,11 @@ package app
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
-	lobbyapp "github.com/INTODAN/mpl/app"
 	"github.com/INTODAN/mpl/gamehooks"
 	"github.com/INTODAN/mpl/playertoken"
 	"github.com/INTODAN/mpl/realtime"
@@ -34,7 +30,6 @@ import (
 	"islandBattles/backend/submittoken"
 	"islandBattles/backend/uploadtoken"
 
-	"github.com/centrifugal/gocent/v3"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 	"gorm.io/gorm"
@@ -84,15 +79,12 @@ func WithLocalBotRunners(runners services.BotRunners, origin string) Option {
 // holds nothing that outlives a request besides the database pool, which the
 // host owns and closes. Without options it serves only what is safe in public.
 //
-// Without config.LobbyURL, the lobby runs in this process, built by the
-// lobby's package app (github.com/INTODAN/mpl/app) as the lobby's own hosts
-// build it, with its tables in lobbyDatabase, its own database
-// (dependencies.InitLobbyDB), and New serves its routes too. With it, the
-// lobby is a server of its own (github.com/INTODAN/mpl/cmd/lobby): New serves
-// none of the lobby's routes, reads the lobby's game API over the network, and verifies
-// player tokens with the lobby's JWKS, and lobbyDatabase is nil. Either way
-// the game serves its hooks. The host owns both pools.
-func New(config dependencies.Config, database, lobbyDatabase *gorm.DB, logger *slog.Logger, opts ...Option) (http.Handler, error) {
+// The lobby is a service of its own (github.com/INTODAN/mpl) at
+// config.LobbyURL. The game serves the hooks that the lobby calls, reads the
+// lobby's game API over the network, and verifies player tokens with the
+// lobby's JWKS. It serves none of the lobby's routes: / redirects to the
+// lobby's page, and anything under /lobby answers 410 Gone (lobbyGone).
+func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opts ...Option) (http.Handler, error) {
 	var selected options
 	for _, option := range opts {
 		option(&selected)
@@ -104,31 +96,11 @@ func New(config dependencies.Config, database, lobbyDatabase *gorm.DB, logger *s
 		return nil, err
 	}
 	gamePublisher := publications{publisher}
-	// The lobby and the game talk HTTP. While the lobby runs in this process,
-	// the lobby's hook calls and the game's game API calls reach the other
-	// side's handler in memory, through loopback; the hooks are set below.
-	var hooks http.Handler
-	loopback := &Loopback{}
-	var lobby *lobbyapp.Lobby
-	var playerKeys playertoken.KeySource
-	gameAPIURL := config.LobbyURL
-	if config.LobbyURL == "" {
-		if lobbyDatabase == nil {
-			return nil, errors.New("the lobby in this process needs its own database")
-		}
-		lobby, err = inProcessLobby(config, lobbyDatabase, centrifugo, logger, loopback, func() http.Handler { return hooks })
-		if err != nil {
-			return nil, err
-		}
-		gameAPIURL = LoopbackOrigin
-		playerKeys = lobby.PlayerTokenKeys()
-	} else {
-		playerKeys, err = playertoken.NewJWKSSource(config.LobbyURL + playertoken.JWKSPath)
-		if err != nil {
-			return nil, err
-		}
+	playerKeys, err := playertoken.NewJWKSSource(config.LobbyURL + playertoken.JWKSPath)
+	if err != nil {
+		return nil, err
 	}
-	lobbyClient, err := gamehooks.NewGameAPIClient(lobbyadapter.GameKey, gameAPIURL, config.LobbyHookSecret, gamehooks.WithHTTPClient(loopback.Client()))
+	lobbyClient, err := gamehooks.NewGameAPIClient(lobbyadapter.GameKey, config.LobbyURL, config.LobbyHookSecret)
 	if err != nil {
 		return nil, err
 	}
@@ -172,13 +144,12 @@ func New(config dependencies.Config, database, lobbyDatabase *gorm.DB, logger *s
 		return nil, err
 	}
 	serverBots := services.ServerBots{Enabled: config.ServerBots, LoopbackHosts: selected.localRunners != nil, Compute: compute}
-	hooks, err = lobbyadapter.Hooks(config.LobbyHookSecret, lobbyadapter.Registration(database, gamePublisher, bots, serverBots, lobbyClient))
+	hooks, err := lobbyadapter.Hooks(config.LobbyHookSecret, lobbyadapter.Registration(database, gamePublisher, bots, serverBots, lobbyClient))
 	if err != nil {
 		return nil, err
 	}
-	// The game verifies player tokens with the lobby's keys: in this
-	// process while the lobby runs here, and otherwise from its JWKS.
-	playerVerifier, err := playertoken.NewVerifier(config.LobbyIssuer(), playerKeys)
+	// The game verifies player tokens with the lobby's keys, from its JWKS.
+	playerVerifier, err := playertoken.NewVerifier(config.LobbyURL, playerKeys)
 	if err != nil {
 		return nil, err
 	}
@@ -199,16 +170,13 @@ func New(config dependencies.Config, database, lobbyDatabase *gorm.DB, logger *s
 	if selected.gameGraph {
 		routes.SetupGameGraphRoute(api, &environment)
 	}
-	if lobby != nil {
-		// The lobby's player API, game API, Centrifugo proxy and page, which
-		// / opens.
-		if err := lobby.Register(router, api); err != nil {
-			return nil, err
-		}
-		router.Get("/", func(response http.ResponseWriter, request *http.Request) {
-			http.Redirect(response, request, lobbyapp.UIPath, http.StatusTemporaryRedirect)
-		})
-	}
+	// / opens the lobby's page, which lists the game. The lobby's old
+	// routes on this origin are gone.
+	router.Get("/", func(response http.ResponseWriter, request *http.Request) {
+		http.Redirect(response, request, config.LobbyURL+LobbyPagePath, http.StatusTemporaryRedirect)
+	})
+	router.Handle("/lobby", lobbyGone(config.LobbyURL))
+	router.Handle("/lobby/*", lobbyGone(config.LobbyURL))
 	routes.SetupGameRoutes(api, &handlers.LobbyGame{Database: database, Players: handlers.PlayerTokens{Verifier: playerVerifier}, Publisher: gamePublisher, Retention: gameRetention, Watchers: lobbyClient,
 		SubmitTokens: submitTokens, PublicURL: config.PublicURL, Bots: bots})
 	routes.SetupBotPackageRoutes(api, &handlers.BotPackages{Players: handlers.PlayerTokens{Verifier: playerVerifier}, Service: services.BotPackages{
@@ -223,49 +191,6 @@ func New(config dependencies.Config, database, lobbyDatabase *gorm.DB, logger *s
 	}
 	router.Get("/healthz", healthz(Version))
 	return router, nil
-}
-
-// inProcessLobby builds the lobby in this process with the lobby's package app, on its own
-// database, from the backend's settings, as the lobby's own hosts build it from LOBBY_*. Its
-// LOBBY_GAMES lists Island Battles, whose hooks it calls through loopback,
-// which also carries the game's calls of its game API to it. The lobby's
-// authenticated players, and the causes that its answers leave out, go on
-// the request's error line.
-func inProcessLobby(config dependencies.Config, database *gorm.DB, centrifugo *gocent.Client, logger *slog.Logger, loopback *Loopback, hooks func() http.Handler) (*lobbyapp.Lobby, error) {
-	// The lobby page is on the game's origin, so its catalog has paths.
-	games, err := config.LobbyGamesConfig("")
-	if err != nil {
-		return nil, err
-	}
-	hooksURL, err := islandBattlesHooksURL(games)
-	if err != nil {
-		return nil, err
-	}
-	loopback.Handle(hooksURL, hooks)
-	lobby, err := lobbyapp.New(lobbyapp.Config{
-		PublicURL:             config.LobbyIssuer(),
-		CentrifugoAPIURL:      config.CentrifugoAPIURL,
-		CentrifugoAPIKey:      config.CentrifugoAPIKey,
-		CentrifugoPublicURL:   config.CentrifugoPublicURL,
-		ConnectionTokenSecret: config.ConnectionTokenHMACSecret,
-		ProxySecret:           config.LobbyProxySecret,
-		PlayerTokenKeys:       config.PlayerTokenKeys,
-		PlayerTokenLifetime:   config.PlayerTokenLifetime,
-		Games:                 games,
-		GameSecrets:           config.LobbyGameSecrets,
-	}, database, centrifugo, logger,
-		lobbyapp.WithHookOptions(gamehooks.WithHTTPClient(loopback.Client())),
-		lobbyapp.WithObserver(lobbyapp.Observer{
-			Authenticated: func(ctx context.Context, playerID string) {
-				observability.Annotate(ctx, slog.String("player_id", playerID))
-			},
-			Error: observability.RecordError,
-		}))
-	if err != nil {
-		return nil, err
-	}
-	loopback.Handle(LoopbackOrigin+gamehooks.GameAPIPath, lobby.GameAPI)
-	return lobby, nil
 }
 
 // turnSender sends hosted and uploaded bots' turns (#225) while the
@@ -360,26 +285,4 @@ func (publisher publications) Publish(ctx context.Context, events ...services.Pu
 		converted[index] = realtime.Publication{Channel: event.Channel, Data: event.Data}
 	}
 	return publisher.Publisher.Publish(ctx, converted...)
-}
-
-// islandBattlesHooksURL returns the hooks_url of island-battles in a
-// LOBBY_GAMES value, whose calls the loopback serves in this process.
-func islandBattlesHooksURL(lobbyGames string) (string, error) {
-	var entries []struct {
-		Key      string `json:"key"`
-		HooksURL string `json:"hooks_url"`
-	}
-	if err := json.Unmarshal([]byte(lobbyGames), &entries); err != nil {
-		return "", err
-	}
-	for _, entry := range entries {
-		if entry.Key == lobbyadapter.GameKey {
-			parsed, err := gamehooks.ParseServiceURL(entry.HooksURL)
-			if err != nil {
-				return "", err
-			}
-			return parsed.String(), nil
-		}
-	}
-	return "", fmt.Errorf("%s lists no %s", gamehooks.GamesEnv, lobbyadapter.GameKey)
 }

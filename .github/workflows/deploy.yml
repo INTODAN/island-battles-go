@@ -10,13 +10,13 @@
 # these runs on main.
 #
 # The release workflow (release.yml) calls this one with workflow_call, once
-# each for vm, backend, web and smoke, and passes the release's version. A person can
-# deploy an earlier release again with release_tag, to roll back.
+# each for backend, web and smoke, and passes the release's version. A person can
+# deploy an earlier release again with release_tag, to roll back. The VM is
+# deployed from INTODAN/mpl since the cutover (#232), never from here.
 #
-# - backend, vm, web, smoke and plan use the deploy role
+# - backend, lambda-env, web, smoke and plan use the deploy role
 #   (deploy/terraform/github.tf), which can only publish the backend and the
-#   bot runners' code, upload the web client, log in to the VM and use the
-#   deploy bucket.
+#   bot runners' code, upload the web client and use the deploy bucket.
 # - plan saves a plan under plans/<run ID>/ in the deploy bucket and posts it
 #   to the run's summary. apply applies one saved plan, by that run ID, with
 #   the apply role (deploy/github_apply_role.py), so what was read is what's
@@ -27,26 +27,26 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: "backend: scripts/aws.sh deploy. vm: scripts/vm.sh deploy to the static IP, refused once INTODAN/mpl has taken the VM over. web: scripts/deploy-web-client.sh, which builds the 3D client and publishes it at /play/. smoke: scripts/vm.sh smoke. plan: plan every AWS resource and save the plan. apply: apply the plan that plan_run_id saved."
+        description: "backend: scripts/aws.sh deploy. lambda-env: scripts/lambda-env.sh, which writes the Lambda's settings from INTODAN/mpl's settings for the tenant (publish them with backend). web: scripts/deploy-web-client.sh, which builds the 3D client and publishes it at /play/. smoke: scripts/smoke.sh. plan: plan every AWS resource and save the plan. apply: apply the plan that plan_run_id saved."
         type: choice
-        options: [backend, vm, web, smoke, plan, apply]
+        options: [backend, lambda-env, web, smoke, plan, apply]
         default: backend
       plan_run_id:
         description: "apply only: the ID of the plan run whose plan to apply."
         type: string
         default: ""
       allow_destroy:
-        description: "apply only: comma-separated names of the instances, static IP, disks or distribution the plan may delete or replace."
+        description: "apply only: comma-separated domains of the distributions the plan may delete or replace. Nothing allows destroying what INTODAN/mpl owns."
         type: string
         default: ""
       release_tag:
-        description: "backend, vm, web or smoke only: deploy this release (such as v0.1.0) instead of main, to roll back. The tag must be on main. The backend then reports that version, and smoke expects it."
+        description: "backend, web or smoke only: deploy this release (such as v1.1.0) instead of main, to roll back. The tag must be on main. The backend then reports that version, and smoke expects it."
         type: string
         default: ""
   workflow_call:
     inputs:
       target:
-        description: "backend, vm, web or smoke (plan and apply are for people)."
+        description: "backend, web or smoke (lambda-env, plan and apply are for people)."
         type: string
         required: true
       version:
@@ -107,8 +107,8 @@ jobs:
             echo "::error::release_tag must look like v0.1.0."
             exit 1
           fi
-          if [[ "$TARGET" != backend && "$TARGET" != vm && "$TARGET" != web && "$TARGET" != smoke ]]; then
-            echo "::error::release_tag works with the backend, vm, web and smoke targets. plan and apply always use main."
+          if [[ "$TARGET" != backend && "$TARGET" != web && "$TARGET" != smoke ]]; then
+            echo "::error::release_tag works with the backend, web and smoke targets. lambda-env, plan and apply always use main."
             exit 1
           fi
 
@@ -151,21 +151,9 @@ jobs:
           role-to-assume: ${{ steps.role.outputs.arn }}
           aws-region: ${{ vars.AWS_REGION }}
 
-      # Once INTODAN/mpl has taken the VM over, its Ansible owns the VM's
-      # configuration: fail before anything is set up, with the message
-      # scripts/vm.sh deploy gives (deploy/README.md, "The VM belongs to
-      # INTODAN/mpl"). The check is main's, so a release_tag from before it
-      # can't skip it; scripts/vm.sh checks again itself.
-      - if: inputs.target == 'vm'
-        name: Check that this repository still deploys the VM
-        run: |
-          git show "$GITHUB_SHA:deploy/deploy_files.py" >"$RUNNER_TEMP/deploy_files.py"
-          python3 -I "$RUNNER_TEMP/deploy_files.py" check-vm-owner
-
-      # Builds the backend and the native bot runner, and runs the migrations
-      # with `go run`: the backend deploy both databases', and the VM deploy
-      # the lobby's (#229).
-      - if: contains(fromJSON('["backend", "vm", "plan", "apply"]'), inputs.target)
+      # Builds the backend and the native bot runner, and runs the game
+      # database's migrations with `go run`.
+      - if: contains(fromJSON('["backend", "plan", "apply"]'), inputs.target)
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -180,23 +168,23 @@ jobs:
         with:
           bun-version: ${{ steps.bun.outputs.version }}
 
-      # The wrapper would add its own lines to `scripts/aws.sh output static_ip`.
-      - if: inputs.target != 'smoke'
+      # The wrapper would add its own lines to `scripts/aws.sh output game_url`.
+      - if: inputs.target != 'lambda-env'
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false
 
-      - if: inputs.target == 'vm' || inputs.target == 'smoke'
+      - if: inputs.target == 'lambda-env' || inputs.target == 'smoke'
         uses: astral-sh/setup-uv@v6
 
-      - if: inputs.target == 'vm'
+      - if: inputs.target == 'lambda-env'
         run: uv tool install ansible-core
 
       - if: inputs.target == 'backend'
         run: scripts/aws.sh deploy
 
-      - if: inputs.target == 'vm'
-        run: scripts/vm.sh deploy "$(scripts/aws.sh output static_ip)"
+      - if: inputs.target == 'lambda-env'
+        run: scripts/lambda-env.sh
 
       # Reads the bucket and the distribution from Terraform's outputs (set up
       # above), builds the client, uploads it and invalidates /play/.
@@ -209,7 +197,7 @@ jobs:
           echo "bundle=$(cat "$ISLAND_BATTLES_WEB_BUNDLE_FILE")" >>"$GITHUB_OUTPUT"
 
       - if: inputs.target == 'smoke'
-        run: scripts/vm.sh smoke
+        run: scripts/smoke.sh
 
       - if: inputs.target == 'plan'
         run: |

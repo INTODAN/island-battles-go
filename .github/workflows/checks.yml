@@ -180,6 +180,17 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # The Lambda settings' playbook runs on this machine only, so its tests
+      # run it here (deploy/test_lambda_env.py).
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Install Ansible
+        run: uv tool install ansible-core
+
+      - name: Ansible syntax check
+        working-directory: deploy/ansible
+        run: ansible-playbook --syntax-check lambda-env.yml
+
       # The plan checks run on synthetic plans, so they need no AWS credentials
       # and no Terraform.
       - name: Deploy plan checks

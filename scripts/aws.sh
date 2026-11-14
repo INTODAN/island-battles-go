@@ -10,7 +10,6 @@ lambda_settings_file="$local_directory/lambda.env"
 build_directory="$local_directory/lambda"
 plan_file="$local_directory/terraform/scripts-aws.tfplan"
 local_state_file="$local_directory/terraform/terraform.tfstate"
-backup_settings_file="$local_directory/secrets/database_backups.json"
 
 usage() {
   cat >&2 <<'EOF'
@@ -20,15 +19,14 @@ from the bucket first and push it back at the end.
 Usage:
   scripts/aws.sh apply [terraform plan options]
       Build the backend and the native bot runner, then create or update
-      every AWS resource: the Lightsail VM, its static IP and firewall, the
-      Lambda, the bot runners (deploy/terraform/bot_runners.tf), the game's
-      certificate and CloudFront distribution, and the database backups'
-      bucket and key. Shows the plan and asks first. Writes the backups' key
-      to deploy/local/secrets/database_backups.json for the VM deploy.
-      A plan that deletes or replaces an instance, the static IP, a disk or
-      the distribution also needs each one's name typed, or listed in
-      ISLAND_BATTLES_ALLOW_DESTROY, comma-separated. Runs the migrations before
-      publishing new code, once the VM deploy has written
+      every AWS resource: the Lambda, the bot runners
+      (deploy/terraform/bot_runners.tf), the game's certificate and
+      CloudFront distribution, and the old database backups' bucket. The VM
+      is INTODAN/mpl's. Shows the plan and asks first. A plan that deletes or
+      replaces the distribution also needs its domain typed, or listed in
+      ISLAND_BATTLES_ALLOW_DESTROY, comma-separated; a plan that destroys
+      anything INTODAN/mpl owns is refused. Runs the migrations before
+      publishing new code, once scripts/lambda-env.sh has written
       deploy/local/lambda.env. The first apply with game_hostname set needs
       its certificate alone, -target=aws_acm_certificate.game, so its
       validation record can be added before the full apply waits for it. The
@@ -38,7 +36,7 @@ Usage:
       new code and deploy/local/lambda.env's settings to the Lambda, and the
       bot runners' new code to theirs. Doesn't
       ask, and refuses a plan that changes Lightsail resources or the game's
-      certificate or distribution, or deletes anything. Never touches the VM.
+      certificate or distribution, or deletes anything.
       ISLAND_BATTLES_VERSION=v0.1.0 embeds that version in any build here;
       /healthz reports it in the X-Island-Battles-Version header ("dev" if unset).
   scripts/aws.sh plan <directory>
@@ -48,16 +46,18 @@ Usage:
       plan target runs it.
   scripts/aws.sh apply-plan <directory>
       Apply a plan that plan saved, without asking: the Deploy workflow's
-      apply target runs it on main, once someone has read the plan. Refuses a plan that destroys an instance, the static IP, a
-      disk or the distribution unless ISLAND_BATTLES_ALLOW_DESTROY lists it.
+      apply target runs it on main, once someone has read the plan. Refuses
+      a plan that destroys the distribution unless
+      ISLAND_BATTLES_ALLOW_DESTROY lists it, and one that destroys anything
+      INTODAN/mpl owns.
       Runs the migrations first when the plan publishes the backend.
       The apply, deploy and plan targets first read the account's Lambda
       concurrency limit, and refuse to plan when reserved_concurrency is null
       and account_concurrency_limit in aws.tfvars is below it
       (deploy/README.md, "The concurrency cap").
   scripts/aws.sh output [name]
-      Print Terraform's outputs, or one of them, e.g. static_ip,
-      function_url, game_url, certificate_validation_record,
+      Print Terraform's outputs, or one of them, e.g. function_url,
+      game_url, lobby_url, certificate_validation_record,
       distribution_domain, distribution_id or web_client_bucket (the bucket
       scripts/deploy-web-client.sh uploads the /play/ web client to).
   scripts/aws.sh migrate-state
@@ -105,7 +105,7 @@ initialize_terraform() {
 backend = json.load(open(sys.argv[1])).get("backend") or {}
 sys.exit(0 if backend.get("type") == "s3" and backend["config"].get("bucket") == sys.argv[2] else 1)' \
     "$terraform_directory/.terraform/terraform.tfstate" "$bucket" 2>/dev/null; then
-    # To stderr, so "$(scripts/aws.sh output static_ip)" captures only the IP.
+    # To stderr, so "$(scripts/aws.sh output game_url)" captures only the URL.
     run_terraform init -input=false -reconfigure \
       -backend-config="bucket=$bucket" -backend-config="region=$region" >&2
   fi
@@ -206,33 +206,27 @@ lambda_setting() {
 }
 
 # Migrations run from this machine, straight against Postgres over TLS, before
-# the new code is published. A cold start runs no DDL. Both databases (#229):
-# the lobby's first, with the lobby's migrate command, then the backend's,
-# which drops the lobby's tables that older builds left in the backend's
-# database once LOBBY_DATABASE_URL names the lobby's own.
+# the new code is published. A cold start runs no DDL. Only Island Battles'
+# database: the lobby's is INTODAN/mpl's, whose lobby deploy migrates it.
 migrate_database() {
-  local database_url lobby_database_url
+  local database_url
   database_url="$(lambda_setting ISLAND_BATTLES_DATABASE_URL)"
-  lobby_database_url="$(lambda_setting LOBBY_DATABASE_URL)"
-  if [[ -z "$database_url" ]] || [[ -z "$lobby_database_url" ]]; then
-    echo "$lambda_settings_file lacks ISLAND_BATTLES_DATABASE_URL or LOBBY_DATABASE_URL. Run the VM deploy again to rewrite it." >&2
+  if [[ -z "$database_url" ]]; then
+    echo "$lambda_settings_file lacks ISLAND_BATTLES_DATABASE_URL. Run scripts/lambda-env.sh to write it again." >&2
     exit 1
   fi
-  echo "Migrating the lobby's database..."
-  (cd "$repository_root" && LOBBY_DATABASE_URL="$lobby_database_url" go run github.com/INTODAN/mpl/cmd/migrate)
   echo "Migrating the backend's database..."
-  (cd "$repository_root" && ISLAND_BATTLES_DATABASE_URL="$database_url" LOBBY_DATABASE_URL="$lobby_database_url" go run ./backend/cmd/migrate)
+  (cd "$repository_root" && ISLAND_BATTLES_DATABASE_URL="$database_url" go run ./backend/cmd/migrate)
 }
 
 check_plan() {
   run_terraform show -json "$plan_file" | python3 -I "$repository_root/deploy/check_deploy_plan.py" "$1"
 }
 
-# Deleting or replacing an instance deletes its disk and everything written
-# since the last backup, releasing the static IP gives vm.<domain>'s address away, and a
-# new distribution has a new domain for the game's CNAME. A generic yes isn't
-# enough for that: each one's name must be typed, or listed in
-# ISLAND_BATTLES_ALLOW_DESTROY.
+# A new distribution has a new domain for the game's CNAME. A generic yes
+# isn't enough for that: its domain must be typed, or listed in
+# ISLAND_BATTLES_ALLOW_DESTROY. A plan that destroys anything INTODAN/mpl owns
+# fails the check itself, so nothing allows it.
 confirm_destruction() {
   local destroyed name answer
   local names=()
@@ -253,19 +247,6 @@ confirm_destruction() {
       exit 1
     fi
   done
-}
-
-# The VM deploy installs the daily backup's bucket and upload-only key on the
-# VM (deploy/README.md, "Backups"). Only Terraform's state has the key, so
-# every apply copies it to deploy/local/secrets/, which the deploy bucket
-# shares. An apply of the certificate alone has no such output yet.
-save_backup_settings() {
-  local settings
-  if ! settings="$(run_terraform output -json database_backups 2>/dev/null)" || [[ -z "$settings" ]] || [[ "$settings" == null ]]; then
-    return 0
-  fi
-  mkdir -p "$(dirname -- "$backup_settings_file")"
-  (umask 077 && printf '%s\n' "$settings" >"$backup_settings_file")
 }
 
 # The Deploy workflow's plan target saves a plan, and its apply target applies
@@ -325,7 +306,6 @@ apply_saved_plan() {
     fi
   fi
   run_terraform apply -input=false "$plan_file"
-  save_backup_settings
 }
 
 # Plans, checks the plan, migrates and applies exactly the plan that was
@@ -351,8 +331,7 @@ plan_and_apply() {
       echo "Nothing applied." >&2
       exit 1
     fi
-    # Only migrate when this apply publishes the backend. Moving the static IP
-    # in the middle of a move must work while the old VM refuses the backend.
+    # Only migrate when this apply publishes the backend.
     migrate="$(check_plan publishes-backend)"
   fi
 
@@ -360,11 +339,10 @@ plan_and_apply() {
     if [[ -f "$lambda_settings_file" ]]; then
       migrate_database
     else
-      echo "No $lambda_settings_file yet, so no migrations: the Lambda gets its settings on the first scripts/aws.sh deploy."
+      echo "No $lambda_settings_file yet, so no migrations: write it with scripts/lambda-env.sh, then scripts/aws.sh deploy."
     fi
   fi
   run_terraform apply -input=false "$plan_file"
-  save_backup_settings
   # The certificate's apply on its own leaves the rest for later.
   local function_url
   if function_url="$(run_terraform output -raw function_url 2>/dev/null)"; then
@@ -384,7 +362,7 @@ case "$command" in
     [[ $# -eq 0 ]] || usage
     sync_deploy_files
     if [[ ! -f "$lambda_settings_file" ]]; then
-      echo "$lambda_settings_file is missing. Push deploy/local/ from the machine that has it, or run scripts/vm.sh deploy, which writes it." >&2
+      echo "$lambda_settings_file is missing. Push deploy/local/ from the machine that has it, or run scripts/lambda-env.sh, which writes it." >&2
       exit 1
     fi
     plan_and_apply deploy

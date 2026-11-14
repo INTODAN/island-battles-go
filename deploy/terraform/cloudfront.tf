@@ -74,7 +74,8 @@ data "aws_cloudfront_origin_request_policy" "all_viewer_except_host_header" {
 }
 
 # Except for /play/ (the web client, from S3) and the static files of the
-# Lambda's pages (below), nothing is cached: every request reaches the Lambda
+# Lambda's pages (below), nothing is cached, and /lobby/ui/ redirects to the
+# lobby: every request reaches the Lambda
 # as if it came straight to the Function URL. There's no origin access
 # control. For a Function URL it
 # would need clients to send a SHA-256 of every POST body, and the Function
@@ -134,13 +135,34 @@ resource "aws_cloudfront_distribution" "game" {
     }
   }
 
-  # The pages the Lambda serves besides the API (#162): the lobby page, the
-  # game's modules, the demo viewer and the map builder. Their handlers say in
-  # Cache-Control what may be kept: scripts and styles for five minutes, the
-  # HTML and the game catalog not at all, so this policy obeys the origin.
-  # No API route lies under these prefixes, so API answers stay uncached.
+  # The lobby's page moved to lobby_hostname (#232). Old links to it, such as
+  # invitations, reach the lobby_redirect function below and never the
+  # backend, which answers 410 for the rest of /lobby/*.
   dynamic "ordered_cache_behavior" {
-    for_each = ["/lobby/ui/*", "/game/demo/*", "/game/demo-viewer/*", "/map/builder/*"]
+    for_each = ["/lobby/ui/*", "/lobby/ui"]
+
+    content {
+      path_pattern           = ordered_cache_behavior.value
+      target_origin_id       = "backend"
+      viewer_protocol_policy = "redirect-to-https"
+      allowed_methods        = ["GET", "HEAD", "OPTIONS"]
+      cached_methods         = ["GET", "HEAD"]
+      cache_policy_id        = data.aws_cloudfront_cache_policy.caching_disabled.id
+
+      function_association {
+        event_type   = "viewer-request"
+        function_arn = aws_cloudfront_function.lobby_redirect.arn
+      }
+    }
+  }
+
+  # The pages the Lambda serves besides the API (#162): the game's modules,
+  # the demo viewer and the map builder. Their handlers say in Cache-Control
+  # what may be kept: scripts and styles for five minutes, the HTML not at
+  # all, so this policy obeys the origin. No API route lies under these
+  # prefixes, so API answers stay uncached.
+  dynamic "ordered_cache_behavior" {
+    for_each = ["/game/demo/*", "/game/demo-viewer/*", "/map/builder/*"]
 
     content {
       path_pattern             = ordered_cache_behavior.value
@@ -174,4 +196,59 @@ resource "aws_cloudfront_distribution" "game" {
     ssl_support_method       = "sni-only"
     minimum_protocol_version = "TLSv1.2_2021"
   }
+}
+
+# The lobby's page moved to its own name (#232). A request for /lobby/ui or
+# under it, such as an old invitation link, gets a permanent redirect to the
+# same path and query string on lobby_hostname; an invitation's code is in the
+# URL's fragment, which the browser keeps across the redirect. Redirects come
+# from the function, so neither CloudFront nor the backend sees them.
+# deploy/test_lobby_redirect_function.py runs this code in node.
+resource "aws_cloudfront_function" "lobby_redirect" {
+  name    = "${var.name}-lobby-redirect"
+  runtime = "cloudfront-js-2.0"
+  comment = "Redirects the lobby's old page to the lobby's own name."
+  publish = true
+  code    = <<-EOT
+    var lobby = "https://${var.lobby_hostname}";
+
+    function handler(event) {
+      var request = event.request;
+      var parts = [];
+      var query = request.querystring || {};
+      function decode(text) {
+        try {
+          return decodeURIComponent(text);
+        } catch (e) {
+          return text;
+        }
+      }
+      function add(key, value) {
+        var pair = encodeURIComponent(decode(key));
+        if (value !== undefined && value !== "") {
+          pair += "=" + encodeURIComponent(decode(value));
+        }
+        parts.push(pair);
+      }
+      Object.keys(query).forEach(function (key) {
+        var entry = query[key];
+        if (entry.multiValue) {
+          entry.multiValue.forEach(function (item) {
+            add(key, item.value);
+          });
+        } else {
+          add(key, entry.value);
+        }
+      });
+      var path = request.uri === "/lobby/ui" ? "/lobby/ui/" : request.uri;
+      return {
+        statusCode: 301,
+        statusDescription: "Moved Permanently",
+        headers: {
+          location: { value: lobby + path + (parts.length ? "?" + parts.join("&") : "") },
+          "cache-control": { value: "max-age=86400" },
+        },
+      };
+    }
+  EOT
 }
