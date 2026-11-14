@@ -20,6 +20,7 @@ ANSIBLE = pathlib.Path(__file__).parent / "ansible"
 TENANT = """# Written by INTODAN/mpl's VM deploy.
 DATABASE_URL=postgres://island_battles:database-password@vm.example.org:5432/island_battles?sslmode=require
 DATABASE_HOST=vm.example.org
+DATABASE_NAME=island_battles
 LOBBY_URL=https://lobby.example.org
 LOBBY_GAME_KEY=island-battles
 LOBBY_GAME_SECRET=game-secret-of-at-least-thirty-two-bytes
@@ -89,6 +90,14 @@ class LambdaEnvPlaybookTest(unittest.TestCase):
         result = self.run_playbook()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("isn't the settings of the tenant island-battles", result.stdout)
+        self.assertFalse((self.local / "lambda.env").exists())
+
+    def test_refuses_another_database(self):
+        (self.local / "tenant.env").write_text(TENANT.replace("island_battles?", "empty_game?").replace(
+            "DATABASE_NAME=island_battles", "DATABASE_NAME=empty_game"))
+        result = self.run_playbook()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("on its database island_battles", result.stdout)
         self.assertFalse((self.local / "lambda.env").exists())
 
     def test_names_what_the_tenants_settings_lack(self):

@@ -12,6 +12,11 @@ deploy_secrets_dir: "{{ deploy_local_dir }}/secrets"
 # the lobby's URL and the hooks' shared secret, and Centrifugo's API.
 lambda_env_tenant_file: "{{ deploy_local_dir }}/tenant.env"
 lambda_env_tenant_key: island-battles
+# The game's database, which holds its maps and games. INTODAN/mpl's tenant
+# entry names it, so the cutover moves no data (deploy/README.md, "The
+# cutover"); settings that name another database would start the game on an
+# empty one.
+lambda_env_database_name: island_battles
 
 # This repository's own secrets, which only the Lambda reads. Generated once on
 # the first deploy (-e app_generate_secrets=true) and kept in the deploy

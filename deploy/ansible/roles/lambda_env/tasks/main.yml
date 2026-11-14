@@ -25,13 +25,16 @@
     that:
       - lambda_env_missing | length == 0
       - lambda_env_tenant.LOBBY_GAME_KEY == lambda_env_tenant_key
+      - lambda_env_tenant.DATABASE_NAME | default('') == lambda_env_database_name
+      - lambda_env_tenant.DATABASE_URL is search('/' ~ lambda_env_database_name ~ '([?]|$)')
       - lambda_env_tenant.DATABASE_URL is match('postgres(ql)?://')
       - lambda_env_tenant.LOBBY_URL is match('https://[^/]+/?$')
       - lambda_env_tenant.CENTRIFUGO_API_URL is match('https://')
       - lambda_env_tenant.LOBBY_GAME_SECRET | length >= 32
     fail_msg: >-
       {{ lambda_env_tenant_file }} isn't the settings of the tenant {{ lambda_env_tenant_key }}
-      as INTODAN/mpl writes them (its deploy/README.md, "Tenants"). Missing:
+      on its database {{ lambda_env_database_name }}, as INTODAN/mpl writes them (its
+      deploy/README.md, "Tenants"). Missing:
       {{ lambda_env_missing | join(', ') if lambda_env_missing else 'nothing, but a value is malformed' }}.
     quiet: true
   vars:

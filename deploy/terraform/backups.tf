@@ -10,7 +10,6 @@
 
 locals {
   backup_bucket = "${var.name}-backups-${data.aws_caller_identity.current.account_id}"
-  backup_prefix = "postgres/"
   # This repository's GitHub roles, when it has them, and the ones named, such
   # as INTODAN/mpl's.
   backup_denied_roles = distinct(concat(
