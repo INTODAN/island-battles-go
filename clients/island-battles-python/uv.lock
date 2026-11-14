@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.14"
 
 [[package]]
@@ -155,19 +155,23 @@ dev = [
     { name = "ty", specifier = ">=0.0.84" },
 ]
 integration = [
-    { name = "mpl-lobby-client", git = "https://github.com/INTODAN/mpl?subdirectory=clients%2Flobby-python&rev=1892a86d801ed42e8f41988cf40196152a6cdfb9" },
+    { name = "mpl-lobby-client", specifier = "==0.3.0" },
     { name = "pytest", specifier = ">=8.0,<9" },
     { name = "pytest-asyncio", specifier = ">=0.24,<1" },
 ]
 
 [[package]]
 name = "mpl-lobby-client"
-version = "0.0.0.dev0"
-source = { git = "https://github.com/INTODAN/mpl?subdirectory=clients%2Flobby-python&rev=1892a86d801ed42e8f41988cf40196152a6cdfb9#1892a86d801ed42e8f41988cf40196152a6cdfb9" }
+version = "0.3.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
     { name = "centrifuge-python" },
     { name = "httpx" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b7/f9/3ff703f47898869aaa8ae4bcaf30326681a537b069ee52486a42fffd08b7/mpl_lobby_client-0.3.0.tar.gz", hash = "sha256:bef0dd4676527a44c897bb405c4c19dfcc3f94ee7e5ffaa5049d2b076d49b8b2", size = 38438, upload-time = "2026-11-14T10:33:36.884Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d0/60/db894cc8b9b3946990bac2c77b23209b9f9835358a0d945a25fb5ef48272/mpl_lobby_client-0.3.0-py3-none-any.whl", hash = "sha256:bf62663a607fd0eb5dbc9e1bb5c4798da6ea445423521432f72ff4402af7e446", size = 86576, upload-time = "2026-11-14T10:33:35.646Z" },
 ]
 
 [[package]]
