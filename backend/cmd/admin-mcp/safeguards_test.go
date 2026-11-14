@@ -14,9 +14,9 @@ import (
 	"gorm.io/gorm"
 )
 
-// grantAdminRole runs the Ansible SQL for the production read-only role, as
-// the VM deploy does: the role, then each database's grants, each in one
-// transaction. It returns the role's URLs.
+// grantAdminRole runs INTODAN/mpl's Ansible SQL for the production read-only
+// role, as its VM deploy does: the role, then each database's grants, each in
+// one transaction. It returns the role's URLs.
 func grantAdminRole(t *testing.T, owners testDatabases) databaseURLs {
 	t.Helper()
 	ownerURLs := urlsOf(t, owners)
@@ -28,21 +28,22 @@ func grantAdminRole(t *testing.T, owners testDatabases) databaseURLs {
 	if err != nil {
 		t.Fatal(err)
 	}
-	variables := map[string]string{
-		"postgres_admin_role": "island_battles_admin", "postgres_admin_password": "adminPassword123",
-		"postgres_app_role": gameURL.User.Username(), "postgres_database": strings.TrimPrefix(gameURL.Path, "/"),
-		"lobby_app_role": lobbyURL.User.Username(), "lobby_database": strings.TrimPrefix(lobbyURL.Path, "/"),
+	admin := map[string]string{"postgres_admin_role": "island_battles_admin", "postgres_admin_password": "adminPassword123"}
+	gameDatabase, lobbyDatabase := strings.TrimPrefix(gameURL.Path, "/"), strings.TrimPrefix(lobbyURL.Path, "/")
+	grants := func(role string) map[string]string {
+		return map[string]string{"postgres_admin_role": admin["postgres_admin_role"], "item.role": role}
 	}
 	for _, step := range []struct {
 		template string
 		database *gorm.DB
+		script   string
 	}{
-		{"admin-role.sql.j2", owners.game},
-		{"admin-grants-game.sql.j2", owners.game},
-		{"admin-grants-lobby.sql.j2", owners.lobby},
+		{"admin-role.sql.j2", owners.game, adminSQL(t, "admin-role.sql.j2", admin, []string{gameDatabase, lobbyDatabase}, false)},
+		// Island Battles' database is a tenant's, and the lobby's its own.
+		{"admin-grants.sql.j2", owners.game, adminSQL(t, "admin-grants.sql.j2", grants(gameURL.User.Username()), nil, false)},
+		{"admin-grants.sql.j2", owners.lobby, adminSQL(t, "admin-grants.sql.j2", grants(lobbyURL.User.Username()), nil, true)},
 	} {
-		script := adminSQL(t, step.template, variables)
-		if err := step.database.Transaction(func(transaction *gorm.DB) error { return transaction.Exec(script).Error }); err != nil {
+		if err := step.database.Transaction(func(transaction *gorm.DB) error { return transaction.Exec(step.script).Error }); err != nil {
 			t.Fatalf("%s: %v", step.template, err)
 		}
 	}
@@ -214,7 +215,7 @@ func TestQueryIsRefusedWhenBearerHashIsRenamed(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := connect(t, openBothAs(t, urlsOf(t, owner)))
-	if message := callFailing(t, client, "query", map[string]any{"database": LobbyDatabase, "sql": "SELECT 1"}); !strings.Contains(message, "admin-grants-lobby.sql.j2") {
+	if message := callFailing(t, client, "query", map[string]any{"database": LobbyDatabase, "sql": "SELECT 1"}); !strings.Contains(message, "INTODAN/mpl's deploy/ansible/roles/app/templates/admin-grants.sql.j2") {
 		t.Errorf("query without bearer_hash: %s", message)
 	}
 }

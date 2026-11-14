@@ -228,9 +228,9 @@ func describeSchema(transaction *gorm.DB, table string) (Schema, error) {
 func credentialsError(err error) error {
 	switch {
 	case errors.Is(err, adminmcp.ErrCredentialsReadable):
-		return fmt.Errorf("%w. Run the VM deploy, which grants them again: see \"The admin MCP server\" in deploy/README.md", err)
+		return fmt.Errorf("%w. Run INTODAN/mpl's VM deploy, which owns the role and grants them again: see \"The admin MCP server\" in deploy/README.md", err)
 	case errors.Is(err, adminmcp.ErrCredentialsColumnChanged):
-		return fmt.Errorf("%w. Update the lobby_sessions column grants in deploy/ansible/roles/app/templates/admin-grants-lobby.sql.j2 and run the VM deploy", err)
+		return fmt.Errorf("%w. Update the lobby_sessions column grants in INTODAN/mpl's deploy/ansible/roles/app/templates/admin-grants.sql.j2 and run its VM deploy", err)
 	}
 	return err
 }
