@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -79,8 +80,9 @@ class EndToEndTest(unittest.TestCase):
         project = work / "bot"
         shutil.copytree(TEMPLATE, project, ignore=shutil.ignore_patterns(".venv", "dist", "__pycache__", "uv.lock"))
         pyproject = project / "pyproject.toml"
-        text = pyproject.read_text().replace('"island-battles-python>=0.2.0"', '"island-battles-python"')
-        self.assertIn('"island-battles-python"', text)
+        # Whatever version the template asks for, take the wheel built above.
+        text, replaced = re.subn(r'"island-battles-python[^"]*"', '"island-battles-python"', pyproject.read_text())
+        self.assertEqual(replaced, 1, "the template should depend on island-battles-python once")
         pyproject.write_text(text + f'\n[tool.uv.sources]\nisland-battles-python = {{ path = "{wheel.as_posix()}" }}\n')
         run(["uv", "lock"], project)
         packaged = work / "island-battles-bot.zip"
