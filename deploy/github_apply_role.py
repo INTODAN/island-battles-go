@@ -21,7 +21,10 @@ INTODAN/mpl shares the deploy bucket under mpl/. There the role may list the
 bucket and use only the keys that an apply uses: Terraform's state and its
 lock, deploy/local/'s files under files/, and the saved plans under plans/. It
 writes nothing under mpl/, and can't change the bucket itself, which
-deploy/deploy_files.py's bootstrap manages.
+deploy/deploy_files.py's bootstrap manages. Nor can it read mpl's files, with
+their secrets, its state, its plans or its VM owner marker (#264): an explicit
+Deny overrides ReadOnlyAccess there. Only mpl/tenants/ stays readable, for
+Island Battles' settings there.
 
 A new bucket in deploy/terraform/ needs its name in MANAGED_BUCKETS, which
 ManageItsBuckets allows, and a new run of this script before the apply that
@@ -66,6 +69,16 @@ MANAGED_SERVICES = ["lambda", "logs", "cloudwatch", "sns", "budgets", "acm", "cl
 MANAGED_BUCKETS = [f"{NAME_PREFIX}backups-*", f"{NAME_PREFIX}web-client-*", f"{NAME_PREFIX}bot-packages*"]
 # The S3 backend's lock file (deploy/terraform/versions.tf, use_lockfile).
 LOCK_KEY = f"{STATE_KEY}.tflock"
+# INTODAN/mpl's part of the deploy bucket that neither GitHub role may read
+# (#264): its files with its secrets, its Terraform state and lock, its saved
+# plans, and the VM owner marker. They are the keys of mpl's
+# deploy/deploy_files.py (FILES_PREFIX, STATE_KEY, PLANS_PREFIX and
+# VM_OWNER_KEY), so a new key there needs adding here. mpl/tenants/ isn't
+# listed, because Island Battles reads its settings there (TENANT_KEY), and IAM
+# can't deny "mpl/* except mpl/tenants/island-battles/*" (deploy/terraform/
+# github.tf, mpl_unreadable_keys, explains why; it denies the deploy role the
+# same keys).
+MPL_UNREADABLE_KEYS = ["mpl/files/*", "mpl/terraform/*", "mpl/plans/*", "mpl/vm-owner"]
 
 
 def oidc_provider_arn(account):
@@ -150,6 +163,18 @@ def permissions_policy(account, deploy_bucket):
                 "Effect": "Allow",
                 "Action": "iam:*",
                 "Resource": [f"{iam}:role/{NAME_PREFIX}*", oidc_provider_arn(account)],
+            },
+            {
+                # ReadOnlyAccess reads every bucket, so an explicit Deny keeps
+                # INTODAN/mpl's secrets, state and plans from this role.
+                # s3:GetObject* is every read of an object: its content, the
+                # earlier versions that the bucket keeps (GetObjectVersion),
+                # tags and ACLs. Listing the keys stays allowed, and shows each
+                # object's ETag, its MD5 for these uploads.
+                "Sid": "KeepOutOfMplsPart",
+                "Effect": "Deny",
+                "Action": "s3:GetObject*",
+                "Resource": [f"{deploy}/{key}" for key in MPL_UNREADABLE_KEYS],
             },
             {
                 "Sid": "LeaveThisRoleAlone",

@@ -4,10 +4,11 @@ Run with: python3 -I -m unittest discover -s deploy -p 'test_*.py'
 """
 
 import contextlib
-import fnmatch
 import io
 import json
 import os
+import pathlib
+import re
 import unittest
 from unittest import mock
 
@@ -37,21 +38,64 @@ S3_ACTIONS = [
 ]
 
 
+# Every action that reads an object, which ReadOnlyAccess allows with s3:Get*:
+# its content, earlier versions, checksums, tags, ACLs and locks.
+OBJECT_READS = [
+    "s3:GetObject", "s3:GetObjectVersion", "s3:GetObjectAttributes", "s3:GetObjectVersionAttributes",
+    "s3:GetObjectTorrent", "s3:GetObjectVersionTorrent", "s3:GetObjectVersionForReplication",
+    "s3:GetObjectTagging", "s3:GetObjectVersionTagging", "s3:GetObjectAcl", "s3:GetObjectVersionAcl",
+    "s3:GetObjectRetention", "s3:GetObjectLegalHold",
+]
+# ReadOnlyAccess's S3 part, which the role has besides its inline policy.
+READ_ONLY_ACCESS_S3 = {"Sid": "ReadOnlyAccess", "Effect": "Allow", "Action": ["s3:Get*", "s3:List*"], "Resource": "*"}
+
+
 def listed(value):
     return value if isinstance(value, list) else [value]
 
 
+def wildcard_matches(pattern, value, ignore_case=False):
+    """Whether value matches pattern as IAM matches them: * is any run of
+    characters, / included, ? is any one character, and nothing else is
+    special. Actions ignore case; resources don't."""
+    expression = "".join(".*" if character == "*" else "." if character == "?" else re.escape(character)
+                         for character in pattern)
+    return re.fullmatch(expression, value, re.DOTALL | (re.IGNORECASE if ignore_case else 0)) is not None
+
+
 def matches(statement, action, resource):
-    return (any(fnmatch.fnmatchcase(action, pattern) for pattern in listed(statement["Action"]))
-            and any(fnmatch.fnmatchcase(resource, pattern) for pattern in listed(statement["Resource"])))
+    """Whether statement applies to action on resource, with Action or
+    NotAction and Resource or NotResource. It refuses a Condition, which it
+    can't evaluate: a conditional Deny taken as unconditional would make a
+    test pass that shouldn't."""
+    if "Condition" in statement:
+        raise ValueError(f"{statement.get('Sid')}: these tests can't evaluate a Condition")
+    if ("Action" in statement) == ("NotAction" in statement) or \
+            ("Resource" in statement) == ("NotResource" in statement):
+        raise ValueError(f"{statement.get('Sid')} needs one of Action and NotAction, and one of Resource and NotResource")
+    if "Action" in statement:
+        action_matches = any(wildcard_matches(pattern, action, True) for pattern in listed(statement["Action"]))
+    else:
+        action_matches = not any(wildcard_matches(pattern, action, True) for pattern in listed(statement["NotAction"]))
+    if "Resource" in statement:
+        resource_matches = any(wildcard_matches(pattern, resource) for pattern in listed(statement["Resource"]))
+    else:
+        resource_matches = not any(wildcard_matches(pattern, resource) for pattern in listed(statement["NotResource"]))
+    return action_matches and resource_matches
 
 
 def allows(policy, action, resource):
-    """Whether the inline policy, without ReadOnlyAccess, allows action on resource."""
+    """Whether the policy allows action on resource: an Allow names it, and
+    no Deny does. Without with_read_only_access, that's the inline policy alone."""
     statements = policy["Statement"]
     return (any(statement["Effect"] == "Allow" and matches(statement, action, resource) for statement in statements)
             and not any(statement["Effect"] == "Deny" and matches(statement, action, resource)
                         for statement in statements))
+
+
+def with_read_only_access(policy):
+    """The role's whole S3 permissions: the inline policy and ReadOnlyAccess."""
+    return {**policy, "Statement": [*policy["Statement"], READ_ONLY_ACCESS_S3]}
 
 
 def allowed_s3_actions(policy, resource):
@@ -155,22 +199,90 @@ class PolicyTest(unittest.TestCase):
         self.assertEqual(self.statements["ManageItsBuckets"]["Action"], "s3:*")
         for bucket in TERRAFORM_BUCKETS:
             for resource in (f"arn:aws:s3:::{bucket}", f"arn:aws:s3:::{bucket}/some/object"):
-                self.assertTrue(any(fnmatch.fnmatchcase(resource, pattern) for pattern in patterns), resource)
+                self.assertTrue(any(wildcard_matches(pattern, resource) for pattern in patterns), resource)
                 self.assertEqual(allowed_s3_actions(self.policy, resource), set(S3_ACTIONS), resource)
         for resource in (DEPLOY, f"{DEPLOY}/terraform/terraform.tfstate"):
-            self.assertFalse(any(fnmatch.fnmatchcase(resource, pattern) for pattern in patterns), resource)
+            self.assertFalse(any(wildcard_matches(pattern, resource) for pattern in patterns), resource)
 
     def test_writes_nothing_of_mpls_in_the_deploy_bucket(self):
         # ManageTheDeployment's "*" is for other services' actions only.
         s3 = [statement for statement in self.policy["Statement"] if statement["Effect"] == "Allow"
-              and any(fnmatch.fnmatchcase("s3:GetObject", action) or action.startswith("s3:")
+              and any(wildcard_matches(action, "s3:GetObject", True) or action.startswith("s3:")
                       for action in listed(statement["Action"]))]
         self.assertNotIn("ManageTheDeployment", [statement["Sid"] for statement in s3])
         for key in MPL_KEYS:
             resource = f"{DEPLOY}/{key}"
-            self.assertFalse(any(fnmatch.fnmatchcase(resource, pattern)
+            self.assertFalse(any(wildcard_matches(pattern, resource)
                                  for statement in s3 for pattern in listed(statement["Resource"])), key)
             self.assertEqual(allowed_s3_actions(self.policy, resource), set(), key)
+
+    def test_reads_nothing_of_mpls_but_its_tenants_settings(self):
+        self.assertEqual(self.statements["KeepOutOfMplsPart"], {
+            "Sid": "KeepOutOfMplsPart", "Effect": "Deny", "Action": "s3:GetObject*",
+            "Resource": [f"{DEPLOY}/mpl/files/*", f"{DEPLOY}/mpl/terraform/*", f"{DEPLOY}/mpl/plans/*",
+                         f"{DEPLOY}/mpl/vm-owner"]})
+        self.assertEqual([statement["Sid"] for statement in self.policy["Statement"] if statement["Effect"] == "Deny"],
+                         ["KeepOutOfMplsPart", "LeaveThisRoleAlone"])
+        role = with_read_only_access(self.policy)
+        # With ReadOnlyAccess, whether the role may read each key, in every
+        # way: mpl's settings, secrets, state, lock, plans and VM owner marker
+        # are denied, in every version the bucket keeps. Island Battles'
+        # settings under mpl/tenants/, and the deployment's own keys, aren't.
+        expected = {
+            "mpl/files/vm.yml": False,
+            "mpl/files/lambda.env": False,
+            "mpl/files/secrets/postgres_admin_password": False,
+            "mpl/files/secrets/tenants/island-battles/postgres_password": False,
+            "mpl/terraform/terraform.tfstate": False,
+            "mpl/terraform/terraform.tfstate.tflock": False,
+            "mpl/plans/123/tfplan": False,
+            "mpl/vm-owner": False,
+            "mpl/tenants/island-battles/tenant.env": True,
+            "terraform/terraform.tfstate": True,
+            "terraform/terraform.tfstate.tflock": True,
+            "files/aws.tfvars": True,
+            "files/secrets/admin_api_key": True,
+            "plans/123/tfplan": True,
+        }
+        for key, readable in expected.items():
+            for action in OBJECT_READS:
+                self.assertEqual(allows(role, action, f"{DEPLOY}/{key}"), readable, f"{action} {key}")
+        # Listing the bucket stays allowed, and so does reading other buckets.
+        for action in ("s3:ListBucket", "s3:ListBucketVersions"):
+            self.assertTrue(allows(role, action, DEPLOY), action)
+        for bucket in TERRAFORM_BUCKETS:
+            self.assertTrue(allows(role, "s3:GetObject", f"arn:aws:s3:::{bucket}/mpl/files/x"), bucket)
+        # The limit: an IAM Deny can't name every tenant but Island Battles,
+        # so another tenant's settings stay readable (#264).
+        self.assertTrue(allows(role, "s3:GetObject", f"{DEPLOY}/mpl/tenants/another-game/tenant.env"))
+
+    def test_denies_the_deploy_role_the_same_keys(self):
+        terraform = (pathlib.Path(__file__).resolve().parent / "terraform" / "github.tf").read_text()
+        keys = re.search(r"^  mpl_unreadable_keys = (\[.*\])$", terraform, re.MULTILINE)
+        self.assertIsNotNone(keys, "github.tf must define mpl_unreadable_keys on one line")
+        self.assertEqual(json.loads(keys.group(1)), github_apply_role.MPL_UNREADABLE_KEYS)
+
+    def test_matches_like_iam(self):
+        # IAM's wildcards span slashes, and [ ] aren't special as in fnmatch.
+        self.assertTrue(wildcard_matches("arn:aws:s3:::b/mpl/files/*", "arn:aws:s3:::b/mpl/files/secrets/x"))
+        self.assertFalse(wildcard_matches("arn:aws:s3:::b/mpl/files/*", "arn:aws:s3:::b/mpl/filesx"))
+        self.assertFalse(wildcard_matches("arn:aws:s3:::b/mpl/vm-owner", "arn:aws:s3:::b/mpl/vm-owner2"))
+        self.assertFalse(wildcard_matches("arn:aws:s3:::b/[m]pl", "arn:aws:s3:::b/mpl"))
+        self.assertTrue(wildcard_matches("arn:aws:s3:::b/m?l", "arn:aws:s3:::b/mpl"))
+        self.assertFalse(wildcard_matches("arn:aws:s3:::B/*", "arn:aws:s3:::b/x"))
+        self.assertTrue(wildcard_matches("s3:GetObject*", "S3:GETOBJECTVERSION", True))
+        self.assertFalse(wildcard_matches("s3:GetObject*", "s3:PutObject", True))
+        # NotResource and NotAction apply to everything they don't name, and a
+        # Condition is refused rather than ignored.
+        statement = {"Effect": "Deny", "Action": "s3:GetObject", "NotResource": "arn:aws:s3:::b/mpl/tenants/*"}
+        self.assertTrue(matches(statement, "s3:GetObject", "arn:aws:s3:::other/x"))
+        self.assertFalse(matches(statement, "s3:GetObject", "arn:aws:s3:::b/mpl/tenants/x"))
+        statement = {"Effect": "Deny", "NotAction": "s3:List*", "Resource": "*"}
+        self.assertTrue(matches(statement, "s3:GetObject", "arn:aws:s3:::b/x"))
+        self.assertFalse(matches(statement, "s3:ListBucket", "arn:aws:s3:::b"))
+        with self.assertRaises(ValueError):
+            matches({"Effect": "Deny", "Action": "s3:*", "Resource": "*",
+                     "Condition": {"Bool": {"aws:SecureTransport": "false"}}}, "s3:GetObject", "arn:aws:s3:::b/x")
 
     def test_uses_only_what_an_apply_uses_in_the_deploy_bucket(self):
         expected = {
