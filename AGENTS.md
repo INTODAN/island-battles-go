@@ -23,6 +23,7 @@ Each issue is written to be implemented on its own: read the whole issue, plus t
 ## Steps after a merge
 
 When your change needs a step after it merges (a plan and apply, an apply-role script, a setting, a release, a check), write it in the PR. Name who does it, and assume an agent does it with the owner's `gh` login and `aws login`, asking in chat before an apply, a release, or anything irreversible. Only these go to #119, the owner's checklist:
+
 - sign-ins an agent can't make: GitHub's `user` scope, PyPI's website, DNS in Squarespace, the owner's inbox;
 - checks on real devices;
 - decisions.
@@ -40,7 +41,7 @@ When your change needs a step after it merges (a plan and apply, an apply-role s
 
 ## Deploying
 
-Only merged code deploys. When the user asks you to deploy or apply a change, use the Deploy workflow (`.github/workflows/deploy.yml`) on `main`, as [deploy/README.md](deploy/README.md#deploying-from-github-actions) describes. In a session where the owner has run `aws login`, you may also read AWS, edit the deploy bucket's settings files, and, when the owner says, run the apply-role scripts or log in to the VM with Lightsail's temporary keys.
+Only merged code deploys. When the user asks you to deploy or apply a change, use the Deploy workflow (`.github/workflows/deploy.yml`) on `main`, as [deploy/README.md](deploy/README.md#deploying-from-github-actions) describes. In a session where the owner has run `aws login`, you may also read AWS, edit the deploy bucket's settings files, and, when the owner says, run the apply-role script (`deploy/github_apply_role.py`). The VM is INTODAN/mpl's: see its AGENTS.md. A step that a PR names for an agent still needs the owner's go-ahead before an `apply` or a release.
 
 1. The change must be merged first: by the owner, or by you when the owner told your session to merge.
 2. For AWS resources, start a `plan` run on `main`. Read the plan from its log or summary, and tell the user what it creates, changes and destroys.
