@@ -11,9 +11,6 @@
 name: Board
 
 on:
-  push:
-    branches: [claude/awesome-cerf-r5wq76]
-    paths: [.github/workflows/board.yml]
   workflow_dispatch:
     inputs:
       command:
