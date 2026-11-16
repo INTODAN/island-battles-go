@@ -1,7 +1,8 @@
 # Reads and edits the Island Battles project board (AGENTS.md, "Where the
 # work is") for agents in sessions that can't reach GitHub's project API
 # themselves. It uses the PROJECT_TOKEN secret, the owner's classic token with
-# the project scope, and touches nothing but the board.
+# the project scope, and touches nothing but the board. The board is INTODAN's
+# own, so commands name it as @me.
 #
 # - list: prints every item, its Status and its labels to the log and the
 #   run's summary.
@@ -43,7 +44,7 @@ jobs:
     timeout-minutes: 10
     env:
       GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
-      OWNER: INTODAN
+      OWNER: "@me"
       NUMBER: "1"
       COMMAND: ${{ inputs.command || 'list' }}
       URLS: ${{ inputs.urls }}
@@ -55,9 +56,13 @@ jobs:
             echo "::error::The PROJECT_TOKEN secret is not set."
             exit 1
           fi
-          echo "Scopes: $(gh api -i user 2>/dev/null | grep -i '^x-oauth-scopes:' || echo none)"
-          echo "Token user: $(gh api user --jq .login || true)"
-          gh api graphql -f query='{ viewer { login } user(login: "INTODAN") { projectV2(number: 1) { title } } }' || true
+          # gh can't tell a user from an organization without read:org, so
+          # the board is named as the token owner's own: @me must be INTODAN.
+          login=$(gh api user --jq .login)
+          if [ "$login" != "INTODAN" ]; then
+            echo "::error::PROJECT_TOKEN belongs to $login, not to INTODAN, the board's owner."
+            exit 1
+          fi
       - name: List
         if: env.COMMAND == 'list'
         run: |
