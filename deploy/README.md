@@ -145,7 +145,7 @@ Terraform's state is `terraform/terraform.tfstate` in the [deploy bucket](#the-d
 It holds:
 
 - `terraform/`: Terraform's state and its lock.
-- `files/`: a copy of `deploy/local/`: `aws.tfvars`, `secrets/`, `lambda.env` and `smoke-session.json`, and any other file there, except `terraform/` (plans and an old local state), `lambda/` (the build), `dumps/` and `tenant.env`. `vm.yml` and most of `secrets/` are left from before the cutover and unused ([The backend's settings](#the-backends-settings)).
+- `files/`: a copy of `deploy/local/`: `aws.tfvars`, `secrets/`, `lambda.env` and `smoke-session.json`, and any other file there, except `terraform/` (plans and an old local state), `lambda/` (the build), `dumps/` and `tenant.env`. `secrets/` holds only this repository's two secrets ([The backend's settings](#the-backends-settings)).
 - `plans/`: the plans that the Deploy workflow's `plan` target saved, deleted after 3 days.
 - `mpl/`: INTODAN/mpl's own part ([its "The deploy bucket"](https://github.com/INTODAN/mpl/blob/main/deploy/README.md#the-deploy-bucket)). This repository only reads `mpl/tenants/island-battles/tenant.env` from it ([The backend's settings](#the-backends-settings)), and its GitHub roles can't read mpl's files, state or plans ([Deploying from GitHub Actions](#deploying-from-github-actions)).
 
@@ -216,7 +216,7 @@ Terraform adds the rest of the function's settings: `ISLAND_BATTLES_PUBLIC_URL`,
 - **The URLs use the hostnames,** not an IP, so they stay the same when INTODAN/mpl moves to a new VM.
 - **`sslmode=require`** encrypts the connection but doesn't check the server's certificate, a self-signed one for `vm.<domain>` that INTODAN/mpl keeps with its secrets (`postgres-tls/server.crt`).
 - **The player token key** that signs the lobby's player tokens, and its rotation, are INTODAN/mpl's ([its "Rotating the player token key"](https://github.com/INTODAN/mpl/blob/main/deploy/README.md#rotating-the-player-token-key)). The game reads the keys from the lobby's JWKS at `ISLAND_BATTLES_LOBBY_URL`.
-- **The other files in `deploy/local/secrets/`,** from before the cutover, are INTODAN/mpl's now: the Postgres passwords and TLS files, Centrifugo's API key, the connection token secret, the proxy secret, the player token key and the lobby's game secret. INTODAN/mpl copied them to its own part of the bucket when it took the VM over ([its "Taking over a running VM"](https://github.com/INTODAN/mpl/blob/main/deploy/README.md#taking-over-a-running-vm), step 2). Their copies here, and `secrets/database_backups.json` with the old backup key, stay in this repository's part of the bucket, unused.
+- **The VM's secrets are INTODAN/mpl's:** the Postgres passwords and TLS files, Centrifugo's API key, the connection token secret, the proxy secret, the player token key and the lobby's game secret. INTODAN/mpl copied them to its own part of the bucket when it took the VM over ([its "Taking over a running VM"](https://github.com/INTODAN/mpl/blob/main/deploy/README.md#taking-over-a-running-vm), step 2). On 2026-11-16 their copies here, with every earlier version, the old backup key, `vm.yml`, and the versions of `lambda.env`, the state and the saved plans from before the cutover were deleted (#264), so neither of this repository's roles can read them. A machine that still has one of those files in `deploy/local/` gets a conflict on its next push: delete the file there.
 
 Nothing secret is committed. Never copy anything from `deploy/local/` into the repo.
 
