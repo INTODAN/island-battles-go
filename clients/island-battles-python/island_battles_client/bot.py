@@ -20,6 +20,8 @@ from pydantic import ValidationError
 from ._generated import (
     BotTurn,
     BotTurnResult,
+    BurstCastleCommand,
+    BurstCastleParameters,
     GenerationLogLine,
     PublicGenerationCommand,
     SendSoldierGroupCommand,
@@ -77,6 +79,66 @@ def upgrade_castle(
             ),
         )
     )
+
+
+def burst_castle(castle_id: int, soldier_amount: int) -> PublicGenerationCommand:
+    """Build a ``burst_castle`` command; raises ``ValidationError`` if invalid.
+
+    The burst orders ``soldier_amount`` soldiers, from 1 up to the castle's
+    ``burst_potential``, for a castle that ``can_burst``. It is the castle's
+    ``pending_burst`` in the next generation; the generation after adds it to
+    the castle on top of its production and makes it the castle's
+    ``burst_debt``, which later production repays before the castle grows.
+    """
+    return PublicGenerationCommand(
+        BurstCastleCommand(
+            command_type="burst_castle",
+            parameters=BurstCastleParameters(
+                castle_id=castle_id, soldier_amount=soldier_amount
+            ),
+        )
+    )
+
+
+def can_burst(castle: Castle) -> bool:
+    """Whether the castle has no burst debt and no pending burst.
+
+    Its team must also own it, and its ``burst_potential`` must be above 0.
+    """
+    return castle.burst_debt == 0 and castle.pending_burst == 0
+
+
+def _level_value(
+    turn: BotTurn, castle: Castle, upgrade_type: UpgradeType
+) -> float | None:
+    level = castle.upgrades.get(upgrade_type, 1)
+    for upgrade in turn.upgrades:
+        if upgrade.type == upgrade_type:
+            return next(
+                (entry.value for entry in upgrade.levels if entry.level == level),
+                None,
+            )
+    return None
+
+
+def production(turn: BotTurn, castle: Castle) -> int:
+    """Soldiers the castle produces each generation while a team owns it.
+
+    Read from ``turn.upgrades``: its ``generation_amount`` value, and 1 when
+    the table lacks the castle's level.
+    """
+    value = _level_value(turn, castle, UpgradeType.generation_amount)
+    return 1 if value is None else int(value)
+
+
+def burst_potential(turn: BotTurn, castle: Castle) -> int:
+    """The most soldiers one ``burst_castle`` of the castle may order.
+
+    Read from ``turn.upgrades``, and 0 when the table lacks the castle's
+    level. Upgrades bought earlier in the same result are not counted.
+    """
+    value = _level_value(turn, castle, UpgradeType.burst_potential)
+    return 0 if value is None else int(value)
 
 
 def next_upgrade_cost(

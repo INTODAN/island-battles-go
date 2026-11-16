@@ -48,6 +48,8 @@ const (
 var rejectionTypes = map[string]bool{
 	"urn:island-battles:problem:upgrade-max-level":     true,
 	"urn:island-battles:problem:insufficient-soldiers": true,
+	"urn:island-battles:problem:burst-unavailable":     true,
+	"urn:island-battles:problem:burst-above-potential": true,
 }
 
 // Outcome is what an invocation did, as the function returns it.

@@ -1,7 +1,18 @@
 """The upgrade cost table in a ``BotTurn``, and the example bot that reads it."""
 
+import pytest
+from pydantic import ValidationError
+
 from examples.bot import play
-from island_battles_client import BotTurn, UpgradeType, next_upgrade_cost
+from island_battles_client import (
+    BotTurn,
+    UpgradeType,
+    burst_castle,
+    burst_potential,
+    can_burst,
+    next_upgrade_cost,
+    production,
+)
 from island_battles_client.fixture import fixture_turn, fixture_turn_data
 
 
@@ -39,3 +50,33 @@ def test_the_example_bot_buys_upgrades_at_the_costs_in_its_turn() -> None:
                 level["soldier_cost"] = 20
     # The table changed, so castle 3 can no longer afford it.
     assert upgrades_bought(BotTurn.model_validate(data)) == {0}
+
+
+def test_production_and_burst_potential_read_the_turns_table() -> None:
+    turn = fixture_turn()
+    castle = turn.generation.castles[0]
+    assert production(turn, castle) == 1
+    assert burst_potential(turn, castle) == 0
+    assert can_burst(castle)
+    upgraded = castle.model_copy(
+        update={
+            "upgrades": {
+                UpgradeType.generation_amount: 4,
+                UpgradeType.burst_potential: 3,
+            }
+        }
+    )
+    assert production(turn, upgraded) == 4
+    assert burst_potential(turn, upgraded) == 8
+    assert not can_burst(castle.model_copy(update={"burst_debt": 1}))
+    assert not can_burst(castle.model_copy(update={"pending_burst": 4}))
+
+
+def test_burst_castle_builds_the_command() -> None:
+    command = burst_castle(3, 8)
+    assert command.model_dump(mode="json") == {
+        "command_type": "burst_castle",
+        "parameters": {"castle_id": 3, "soldier_amount": 8},
+    }
+    with pytest.raises(ValidationError):
+        burst_castle(3, 0)

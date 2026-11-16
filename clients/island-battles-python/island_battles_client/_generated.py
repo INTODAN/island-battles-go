@@ -223,13 +223,43 @@ class BotUploadToken(GameModel):
     """
 
 
+class BurstCastleCommand(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    command_type: Literal["burst_castle"]
+    parameters: BurstCastleParameters
+
+
+class BurstCastleParameters(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    castle_id: Annotated[StrictInt, Field(ge=0)]
+    """
+    Castle your team owns, with no burst_debt and no pending_burst, and no other burst this turn.
+    """
+    soldier_amount: Annotated[StrictInt, Field(ge=1)]
+    """
+    Soldiers the burst adds, at most the castle's burst_potential value from GET /game/upgrades, counting the upgrades accepted before it this turn. The castle gets them at the generation after next, with its production, and repays them from its later production.
+    """
+
+
 class Castle(BoardEntity):
     model_config = ConfigDict(
         extra="ignore",
     )
+    burst_debt: Annotated[StrictInt, Field(ge=0)]
+    """
+    Soldiers the castle still owes for its last burst. Each generation its production repays the debt first, and only what is left over grows the castle. A castle with debt can't burst. A capture clears it.
+    """
     id: Annotated[StrictInt, Field(ge=0)]
     """
     Castle ID, stable for the whole game.
+    """
+    pending_burst: Annotated[StrictInt, Field(ge=0)]
+    """
+    Soldiers of a burst ordered in an earlier turn, which the next generation adds to the castle on top of its production and turns into burst_debt. A castle with a pending burst can't burst again. A capture clears it.
     """
     soldiers: Annotated[StrictInt, Field(ge=0)]
     team_color: Annotated[StrictInt, Field(ge=0)]
@@ -979,10 +1009,10 @@ class UpgradeCastleCommand(GameModel):
 
 
 class PublicGenerationCommand(
-    RootModel[SendSoldierGroupCommand | UpgradeCastleCommand]
+    RootModel[SendSoldierGroupCommand | UpgradeCastleCommand | BurstCastleCommand]
 ):
     root: Annotated[
-        SendSoldierGroupCommand | UpgradeCastleCommand,
+        SendSoldierGroupCommand | UpgradeCastleCommand | BurstCastleCommand,
         Field(discriminator="command_type"),
     ]
 
@@ -1017,7 +1047,9 @@ class UpgradeLevel(GameModel):
 
 
 class UpgradeType(StrEnum):
+    burst_potential = "burst_potential"
     clash_stop_generations = "clash_stop_generations"
+    generation_amount = "generation_amount"
     speed = "speed"
 
 

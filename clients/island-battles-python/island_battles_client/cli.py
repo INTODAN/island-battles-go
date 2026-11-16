@@ -85,7 +85,12 @@ BOTS_LOGGER = "island_battles.bots"
 # than leave it open.
 REJECTION_TYPES = frozenset(
     f"urn:island-battles:problem:{name}"
-    for name in ("upgrade-max-level", "insufficient-soldiers")
+    for name in (
+        "upgrade-max-level",
+        "insufficient-soldiers",
+        "burst-unavailable",
+        "burst-above-potential",
+    )
 )
 # A TurnDelivery of a busy 6-team generation with 64 KiB of memory is a few
 # hundred KiB; 2 MiB leaves headroom.
