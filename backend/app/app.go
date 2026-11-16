@@ -170,10 +170,12 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	if selected.gameGraph {
 		routes.SetupGameGraphRoute(api, &environment)
 	}
-	// / opens the lobby's page, which lists the game. The lobby's old
-	// routes on this origin are gone.
+	// / opens the 3D client, which the deployment serves at /play/ (#279).
+	// The target is relative, so it stays on whichever host was asked: in
+	// production CloudFront sends /play/* to the web client's bucket. The
+	// lobby's old routes on this origin are gone.
 	router.Get("/", func(response http.ResponseWriter, request *http.Request) {
-		http.Redirect(response, request, config.LobbyURL+LobbyPagePath, http.StatusTemporaryRedirect)
+		http.Redirect(response, request, PlayPagePath, http.StatusTemporaryRedirect)
 	})
 	router.Handle("/lobby", lobbyGone(config.LobbyURL))
 	router.Handle("/lobby/*", lobbyGone(config.LobbyURL))

@@ -223,7 +223,7 @@ func TestReplayOverSixMegabytesStreamsThroughTheFunctionURL(t *testing.T) {
 // A route listed without a method allows every method, for static mounts.
 var publicRoutes = map[string]string{
 	"GET /healthz":          "readiness",
-	"GET /":                 "redirect to the lobby's page, on the lobby's origin",
+	"GET /":                 "redirect to the 3D client at /play/",
 	"/lobby":                "410 Gone: the lobby moved to its own origin",
 	"/lobby/*":              "410 Gone: the lobby moved to its own origin",
 	"GET /map/templates":    "lists default map templates, which are not game data",
@@ -311,9 +311,8 @@ func TestTheLambdaHostServesOnlyListedRoutesWithoutAuthentication(t *testing.T) 
 	if response, content := call(t, invoke, http.MethodPost, "/map/create", `{}`, ""); response.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("map creation without the admin key=%d %s", response.StatusCode, content)
 	}
-	// The game's bare name opens the lobby's page (#75), on the lobby's
-	// origin (#232).
-	if response, content := call(t, invoke, http.MethodGet, "/", "", ""); response.StatusCode != http.StatusTemporaryRedirect || response.Headers["Location"] != config.LobbyURL+"/lobby/ui/" {
+	// The game's bare name opens the 3D client at /play/ (#279).
+	if response, content := call(t, invoke, http.MethodGet, "/", "", ""); response.StatusCode != http.StatusTemporaryRedirect || response.Headers["Location"] != "/play/" {
 		t.Fatalf("/=%d to %q %s", response.StatusCode, response.Headers["Location"], content)
 	}
 	// The lobby's old routes are gone from the game's origin.

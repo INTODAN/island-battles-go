@@ -185,8 +185,8 @@ func TestTheBackendUsesALobbyOfItsOwnAtTheLobbyURL(t *testing.T) {
 	if status, content, _ := send(t, http.MethodPost, backend.URL+"/internal/lobby/centrifugo/subscribe", "", map[string]string{}); status != http.StatusNotFound && status != http.StatusMethodNotAllowed {
 		t.Errorf("the backend serves the lobby's Centrifugo proxy: %d %s", status, content)
 	}
-	// / opens the lobby's page, which lists the game.
-	if status, _, header := send(t, http.MethodGet, backend.URL+"/", "", nil); status != http.StatusTemporaryRedirect || header.Get("Location") != lobbyURL+app.LobbyPagePath {
+	// / opens the 3D client at /play/ (#279).
+	if status, _, header := send(t, http.MethodGet, backend.URL+"/", "", nil); status != http.StatusTemporaryRedirect || header.Get("Location") != app.PlayPagePath {
 		t.Fatalf("/ = %d to %q", status, header.Get("Location"))
 	}
 	status, content, _ := send(t, http.MethodPost, lobbyURL+"/lobby/v1/sessions", "", map[string]string{"display_name": "Alice"})

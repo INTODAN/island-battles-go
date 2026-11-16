@@ -2,7 +2,7 @@
 
 Island Battles runs in one AWS region:
 
-- **Backend:** the Go backend runs on AWS Lambda behind its Function URL. Players open the game at `https://island-battles.<domain>`, which a CloudFront distribution serves from the Function URL with an ACM certificate (#75). `/` redirects to the lobby's page at `https://lobby.<domain>/lobby/ui/`.
+- **Backend:** the Go backend runs on AWS Lambda behind its Function URL. Players open the game at `https://island-battles.<domain>`, which a CloudFront distribution serves from the Function URL with an ACM certificate (#75). `/` redirects to the 3D client at `/play/` (#279); the lobby's page is at `https://lobby.<domain>/lobby/ui/`.
 - **The lobby and the VM** are [`INTODAN/mpl`](https://github.com/INTODAN/mpl)'s (#231, #232). It deploys the lobby at `https://lobby.<domain>`, and runs the Lightsail VM, `vm.<domain>`, with Postgres and Centrifugo in Docker Compose. Island Battles is a tenant there: its database `island_battles`, with its own role, and Centrifugo's HTTP API, which the game publishes its events with ([The lobby and the VM](#the-lobby-and-the-vm)).
 - **Network:** there is no VPC or peering. The Lambda reaches Postgres and Centrifugo's HTTP API over the internet:
   - Postgres accepts only TLS (`hostssl`) logins, with scram and a generated password.
@@ -226,7 +226,7 @@ Nothing secret is committed. Never copy anything from `deploy/local/` into the r
 
 The lobby runs at `https://<lobby_hostname>`, and the game's origin serves none of its routes (#232):
 
-- **`/`** on the game's name redirects (307) to the lobby's page, `https://<lobby_hostname>/lobby/ui/`. The backend answers it, from `ISLAND_BATTLES_LOBBY_URL`.
+- **`/`** on the game's name redirects (307) to `/play/`, the 3D client (#279). The backend answers it, through the distribution's default behaviour, and the target is relative, so it needs no setting and no infrastructure change; `/play/*` then goes to the web client's bucket. The lobby's own page stays at `https://<lobby_hostname>/lobby/ui/`.
 - **`/lobby/ui` and `/lobby/ui/*`,** the lobby page's old address, such as an old invitation link: the distribution sends them to the CloudFront Function `<name>-lobby-redirect` (`aws_cloudfront_function.lobby_redirect`, at the viewer request, uncached), which answers 301 to the same path and query string on the lobby's name, with `Cache-Control: max-age=86400`, so browsers keep the redirect for a day. `/lobby/ui` goes to `/lobby/ui/`. An invitation's code is in the URL's fragment, which the browser keeps across the redirect. Neither the Lambda nor CloudFront's cache sees these requests. `deploy/test_lobby_redirect_function.py` runs the function in node.
 - **Anything else under `/lobby`,** such as an old client's `POST /lobby/v1/sessions`, reaches the backend, which answers **410 Gone** with an `application/problem+json` problem whose `lobby_url` names the lobby, so an old page or SDK fails clearly ([backend/README.md](../backend/README.md#binding-to-the-lobby)).
 - **The lobby page** loads the game's modules from the game's name and calls its API: the backend answers `ISLAND_BATTLES_LOBBY_ORIGINS` with CORS, and the [bot packages'](#bot-packages) bucket admits uploads from the lobby's origin as well as the game's.
@@ -520,7 +520,7 @@ scripts/smoke.sh
 It reads `game_url` and `lobby_url` from Terraform's outputs and runs `deploy/smoke.py`, with the Python SDK's locked dependencies through uv, which checks the game, the lobby and the VM together, through both names' CloudFront distributions:
 
 1. The game's `/healthz` returns 204, with a valid certificate for the game's name. With `ISLAND_BATTLES_EXPECTED_VERSION` set, its `X-Island-Battles-Version` header must name that version ([Releasing](#releasing)).
-2. The game's `/` leads to the lobby's page, on the lobby's URL.
+2. The game's `/` redirects (307) to `/play/`, the 3D client (#279). The backend answers it, so this holds without the web client uploaded; `ISLAND_BATTLES_EXPECTED_WEB_BUNDLE` checks `/play/` itself.
 3. The lobby's old routes on the game's URL say where it went: `/lobby/ui/?join=SMOKE` redirects (301) to the same path and query on the lobby's URL, and `POST /lobby/v1/sessions` answers 410 with a problem that names the lobby ([The lobby on its own origin](#the-lobby-on-its-own-origin)).
 4. A guest credential works at the lobby.
 5. The lobby issues a connection token for it, so it reaches its Postgres.
