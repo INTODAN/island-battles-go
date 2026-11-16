@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"fmt"
-	"math"
 	"slices"
 
 	"github.com/INTODAN/mpl/domain"
@@ -11,13 +10,12 @@ import (
 	"islandBattles/backend/models"
 	"islandBattles/backend/observability"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"gorm.io/gorm"
 )
 
 // RunLobbyGame initializes one playable generation for the frozen roster and
 // pushes it to every roster player. The generation starts on the map that the
-// lobby's settings choose, or on the generated map without a choice. Each
+// lobby's settings choose: a default map or a map file. Each
 // roster player keeps the bot in their member settings, as the start's
 // snapshot shows them, and each bot seat that the host added the bot in its
 // seat settings: the backend plays the default bots, the players' own
@@ -62,19 +60,12 @@ func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 		if len(snapshot.StartRoster) == 0 {
 			return fmt.Errorf("cannot initialize an empty roster")
 		}
-		teams, gameMap := prepareLobbyGame(binding, snapshot)
-		// The lobby checked the settings at creation; a default map is loaded
-		// from its template here.
-		chosenMap, err := LobbyMap(transaction, snapshot.Lobby.GameSettings, len(snapshot.Teams))
+		teams := lobbyGameTeams(binding, snapshot)
+		// The lobby checked the settings when they were set; a default map is
+		// loaded from its template here.
+		chosenMap, turnTimeout, err := LobbyGameSettings(transaction, snapshot.Lobby.GameSettings, len(snapshot.Teams))
 		if err != nil {
-			return fmt.Errorf("lobby map: %w", err)
-		}
-		if chosenMap != nil {
-			gameMap = models.BuildMap(*chosenMap)
-		}
-		turnTimeout, err := LobbyTurnTimeout(snapshot.Lobby.GameSettings)
-		if err != nil {
-			return fmt.Errorf("lobby turn timeout: %w", err)
+			return fmt.Errorf("lobby settings: %w", err)
 		}
 		players := make([]models.FrozenGamePlayer, 0, len(snapshot.StartRoster))
 		for index, entry := range snapshot.StartRoster {
@@ -100,7 +91,7 @@ func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 		if err := dal.StoreFrozenPlayers(transaction, players); err != nil {
 			return err
 		}
-		generation := models.Generation{GameID: binding.GameID, Map: gameMap}
+		generation := models.Generation{GameID: binding.GameID, Map: models.BuildMap(chosenMap)}
 		generationID, err := dal.CreateGeneration(transaction, &generation)
 		if err != nil {
 			return err
@@ -146,11 +137,10 @@ func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 	return binding, nil
 }
 
-// prepareLobbyGame copies the replay's teams out of the lobby, which the game
-// never reads again, and places one castle per team.
-func prepareLobbyGame(binding models.BindingResult, snapshot domain.Snapshot) ([]models.GameTeam, models.Map) {
+// lobbyGameTeams copies the replay's teams out of the lobby, which the game
+// never reads again.
+func lobbyGameTeams(binding models.BindingResult, snapshot domain.Snapshot) []models.GameTeam {
 	teams := []models.GameTeam{}
-	gameMap := models.Map{MapFields: models.MapFields{MapName: "Lobby battle", PlayerAmount: uint(len(snapshot.Teams)), PlaneSizeX: 8, PlaneSizeY: 6}}
 	for _, team := range binding.Teams {
 		players := []string{}
 		for index, entry := range snapshot.StartRoster {
@@ -167,14 +157,7 @@ func prepareLobbyGame(binding models.BindingResult, snapshot domain.Snapshot) ([
 		}
 		teams = append(teams, models.GameTeam{Color: team.TeamColor, Name: name, Players: players})
 	}
-	for index, team := range teams {
-		angle := math.Pi + 2*math.Pi*float64(index)/float64(len(teams))
-		gameMap.Castles = append(gameMap.Castles, models.Castle{
-			CastleFields:  models.CastleFields{TeamColor: team.Color, PersistentCastleID: uint(index), Position: pgtype.Point{P: pgtype.Vec2{X: 2 * math.Cos(angle), Y: 2 * math.Sin(angle)}, Valid: true}, Upgrades: models.Upgrades{}.Clone()},
-			SoldierAmount: 30,
-		})
-	}
-	return teams, gameMap
+	return teams
 }
 
 // startDisplayName is the lobby display name of the roster's player at index
