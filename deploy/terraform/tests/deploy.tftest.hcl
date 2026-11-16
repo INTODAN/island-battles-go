@@ -818,6 +818,56 @@ run "lets_only_the_repositorys_production_jobs_deploy" {
     condition     = one([for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : statement.Resource if statement.Sid == "ReleaseTheStateLock"]) == "arn:aws:s3:::island-battles-deploy-123456789012/terraform/terraform.tfstate.tflock"
     error_message = "The role may delete nothing but the state's lock."
   }
+
+  # The deploy bucket is shared with INTODAN/mpl, under mpl/ (#263).
+  assert {
+    condition = (
+      toset(one([for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : statement.Resource if statement.Sid == "SyncItsPartOfTheDeployBucket"])) == toset([
+        "arn:aws:s3:::island-battles-deploy-123456789012/terraform/terraform.tfstate",
+        "arn:aws:s3:::island-battles-deploy-123456789012/terraform/terraform.tfstate.tflock",
+        "arn:aws:s3:::island-battles-deploy-123456789012/files/*",
+      ])
+      && toset(one([for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : statement.Action if statement.Sid == "SyncItsPartOfTheDeployBucket"])) == toset(["s3:GetObject", "s3:PutObject"])
+    )
+    error_message = "The role may read and write only the state, its lock and files/ in the deploy bucket."
+  }
+
+  assert {
+    condition = (
+      one([for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : statement.Resource if statement.Sid == "SaveThePlans"]) == "arn:aws:s3:::island-battles-deploy-123456789012/plans/*"
+      && one([for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : statement.Action if statement.Sid == "SaveThePlans"]) == "s3:PutObject"
+    )
+    error_message = "The role may only put the saved plans under plans/."
+  }
+
+  assert {
+    condition = (
+      one([for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : statement.Resource if statement.Sid == "ReadTheTenantSettings"]) == "arn:aws:s3:::island-battles-deploy-123456789012/mpl/tenants/island-battles/tenant.env"
+      && one([for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : statement.Action if statement.Sid == "ReadTheTenantSettings"]) == "s3:GetObject"
+    )
+    error_message = "The role may only read Island Battles' tenant settings under mpl/."
+  }
+
+  # A resource that ends in a wildcard covers mpl/ too when what comes before
+  # the wildcard is a prefix of it, as the whole bucket's /* is.
+  assert {
+    condition = alltrue(flatten([
+      for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : [
+        for resource in flatten([statement.Resource]) : !(
+          startswith(resource, "arn:aws:s3:::island-battles-deploy-123456789012/mpl/")
+          || (endswith(resource, "*") && startswith("arn:aws:s3:::island-battles-deploy-123456789012/mpl/", trimsuffix(resource, "*")))
+        )
+      ] if statement.Effect == "Allow" && length(setintersection(toset(flatten([statement.Action])), toset(["s3:PutObject", "s3:DeleteObject"]))) > 0
+    ]))
+    error_message = "The role may write and delete nothing under mpl/, INTODAN/mpl's part of the deploy bucket."
+  }
+
+  assert {
+    condition = alltrue([
+      for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : !contains(flatten([statement.Resource]), "arn:aws:s3:::island-battles-deploy-123456789012/*")
+    ])
+    error_message = "No statement may name the whole deploy bucket: INTODAN/mpl shares it."
+  }
 }
 
 run "needs_the_deploy_bucket_for_the_github_role" {
