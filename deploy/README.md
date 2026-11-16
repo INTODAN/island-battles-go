@@ -135,7 +135,7 @@ Terraform's state is `terraform/terraform.tfstate` in the [deploy bucket](#the-d
 
 - **The state holds the Lambda's secrets:** its environment, with the database password, Centrifugo's API key, the hooks' shared secret, the admin API key and the submit token secret. Never commit a copy.
 - **One apply at a time.** Terraform locks the state with `terraform/terraform.tfstate.tflock` in the bucket while it plans and applies. A plan on another machine meanwhile fails with `Error acquiring the state lock`. If a run was killed and left the lock behind, `terraform -chdir=deploy/terraform force-unlock <lock ID>` removes it, once you're sure nothing else is applying.
-- **Every earlier state is kept:** the bucket is versioned. To go back to one, find it in the S3 console's versions of the object.
+- **Earlier states are kept:** the bucket is versioned. To go back to one, find it in the S3 console's versions of the object. The states from before the cutover were deleted on 2026-11-16 (#264).
 - **If the state is lost,** the resources keep running, but Terraform no longer knows them. Bring each back with `terraform import` before applying again, or Terraform tries to create them a second time.
 
 ### The deploy bucket
@@ -145,7 +145,7 @@ Terraform's state is `terraform/terraform.tfstate` in the [deploy bucket](#the-d
 It holds:
 
 - `terraform/`: Terraform's state and its lock.
-- `files/`: a copy of `deploy/local/`: `aws.tfvars`, `secrets/`, `lambda.env` and `smoke-session.json`, and any other file there, except `terraform/` (plans and an old local state), `lambda/` (the build), `dumps/` and `tenant.env`. `vm.yml` and most of `secrets/` are left from before the cutover and unused ([The backend's settings](#the-backends-settings)).
+- `files/`: a copy of `deploy/local/`: `aws.tfvars`, `secrets/`, `lambda.env` and `smoke-session.json`, and any other file there, except `terraform/` (plans and an old local state), `lambda/` (the build), `dumps/` and `tenant.env`. `secrets/` holds only this repository's two secrets ([The backend's settings](#the-backends-settings)).
 - `plans/`: the plans that the Deploy workflow's `plan` target saved, deleted after 3 days.
 - `mpl/`: INTODAN/mpl's own part ([its "The deploy bucket"](https://github.com/INTODAN/mpl/blob/main/deploy/README.md#the-deploy-bucket)). This repository only reads `mpl/tenants/island-battles/tenant.env` from it ([The backend's settings](#the-backends-settings)), and its GitHub roles can't read mpl's files, state or plans ([Deploying from GitHub Actions](#deploying-from-github-actions)).
 
@@ -156,7 +156,7 @@ Each machine remembers what it last pulled or pushed, in `deploy/local/.sync-bas
 - **Changed only in the bucket**, or missing here: a pull takes the bucket's copy.
 - **Changed only here:** a push sends it. The upload only succeeds while the bucket still has the copy it compared against, so two machines can't overwrite each other.
 - **Changed on both sides:** a conflict, and the script stops before deploying. `scripts/deploy-files.sh status` lists the differences. Keep one: `scripts/deploy-files.sh pull --force` takes the bucket's copies, `push --force` sends this machine's.
-- **Deleted:** nothing is ever deleted from the bucket, and a pull brings back a file deleted here. Delete a file in the S3 console to remove it everywhere; versioning keeps its earlier copies.
+- **Deleted:** the scripts never delete from the bucket, and a pull brings back a file deleted here. A file deleted in the S3 console is gone from the bucket, but a machine that still has it, recorded in `.sync-base.json`, gets a conflict on its next push and doesn't upload it: delete the file there too. Versioning keeps a deleted file's earlier copies unless they're deleted as well.
 
 #### Moving an existing deployment to the bucket
 
@@ -216,7 +216,7 @@ Terraform adds the rest of the function's settings: `ISLAND_BATTLES_PUBLIC_URL`,
 - **The URLs use the hostnames,** not an IP, so they stay the same when INTODAN/mpl moves to a new VM.
 - **`sslmode=require`** encrypts the connection but doesn't check the server's certificate, a self-signed one for `vm.<domain>` that INTODAN/mpl keeps with its secrets (`postgres-tls/server.crt`).
 - **The player token key** that signs the lobby's player tokens, and its rotation, are INTODAN/mpl's ([its "Rotating the player token key"](https://github.com/INTODAN/mpl/blob/main/deploy/README.md#rotating-the-player-token-key)). The game reads the keys from the lobby's JWKS at `ISLAND_BATTLES_LOBBY_URL`.
-- **The other files in `deploy/local/secrets/`,** from before the cutover, are INTODAN/mpl's now: the Postgres passwords and TLS files, Centrifugo's API key, the connection token secret, the proxy secret, the player token key and the lobby's game secret. INTODAN/mpl copied them to its own part of the bucket when it took the VM over ([its "Taking over a running VM"](https://github.com/INTODAN/mpl/blob/main/deploy/README.md#taking-over-a-running-vm), step 2). Their copies here, and `secrets/database_backups.json` with the old backup key, stay in this repository's part of the bucket, unused.
+- **The VM's secrets are INTODAN/mpl's:** the Postgres passwords and TLS files, Centrifugo's API key, the connection token secret, the proxy secret, the player token key and the lobby's game secret. INTODAN/mpl copied them to its own part of the bucket when it took the VM over ([its "Taking over a running VM"](https://github.com/INTODAN/mpl/blob/main/deploy/README.md#taking-over-a-running-vm), step 2). On 2026-11-16 their copies here, with every earlier version, the old backup key, `vm.yml`, and the versions of `lambda.env`, the state and the saved plans from before the cutover were deleted (#264). A machine that still has one of those files in `deploy/local/` gets a conflict on its next push ("Deleted" in [The deploy bucket](#the-deploy-bucket)): delete the file there.
 
 Nothing secret is committed. Never copy anything from `deploy/local/` into the repo.
 
@@ -305,7 +305,7 @@ The cutover (#232) moves Island Battles off the VM and off its own lobby: its cl
 
 - **The web client and the redirects** come back with a revert: a Deploy `web` run of the earlier commit restores `/play/`. Its `config.json` stays, and is ignored. Browsers keep the 301 of `/lobby/ui/` for a day (`max-age=86400`).
 - **Centrifugo's proxy** switches back in INTODAN/mpl: `centrifugo_proxy_url` to this backend's `function_url`, then its `vm` target.
-- **The backend's own lobby can't come back with a Deploy run.** `v1.0.0`'s Terraform declares the VM, which this state no longer holds, so a `backend` run with `release_tag: v1.0.0` stops at its plan check. Going back is a revert of #232 on `main` and a new pull request: restore the earlier `deploy/local/lambda.env` from the deploy bucket's versions of `files/lambda.env`, then `plan` and `apply`. The lobby's data is safe either way: both lobbies use the same `lobby` database.
+- **The backend's own lobby can't come back with a Deploy run.** `v1.0.0`'s Terraform declares the VM, which this state no longer holds, so a `backend` run with `release_tag: v1.0.0` stops at its plan check. Going back is a revert of #232 on `main` and a new pull request: rebuild the earlier `deploy/local/lambda.env`, whose lobby settings come from INTODAN/mpl's secrets (its versions from before the cutover were deleted on 2026-11-16, #264), then `plan` and `apply`. The lobby's data is safe either way: both lobbies use the same `lobby` database.
 - **The old backup key** is gone for good; a revert creates a new one. INTODAN/mpl backs up every database on the VM, Island Battles' too.
 
 ## Deploying from GitHub Actions
