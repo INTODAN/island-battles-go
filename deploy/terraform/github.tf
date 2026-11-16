@@ -7,16 +7,33 @@
 # (bot_runners.tf), its own part of the deploy bucket (the state and its lock,
 # files/ and plans/), and the web client's files under play/ and their cache
 # invalidation. It writes nothing under mpl/, INTODAN/mpl's part of the deploy
-# bucket, and reads only mpl/tenants/island-battles/tenant.env there for the
-# lambda-env target. The VM is INTODAN/mpl's (#232). Anything else,
-# such as new alarms, goes through `scripts/aws.sh apply`: on a person's machine, or in
-# the Deploy workflow's apply target, which applies a saved plan from main
-# with the apply role from deploy/github_apply_role.py.
+# bucket, and reads only mpl/tenants/island-battles/tenant.env there, for the
+# lambda-env target: a Deny keeps it out of mpl's files, state and plans
+# (#264). The VM is INTODAN/mpl's (#232). Anything else, such as new alarms,
+# goes through `scripts/aws.sh apply`: on a person's machine, or in the Deploy
+# workflow's apply target, which applies a saved plan from main with the apply
+# role from deploy/github_apply_role.py.
 
 data "aws_caller_identity" "current" {}
 
 locals {
   github_deploy = var.github_repository != null
+  # INTODAN/mpl's part of the deploy bucket that neither GitHub role may read
+  # (#264): its files with its secrets, its Terraform state and lock, its
+  # saved plans, and the VM owner marker. They are the keys of mpl's
+  # deploy/deploy_files.py (FILES_PREFIX, STATE_KEY, PLANS_PREFIX and
+  # VM_OWNER_KEY), so a new key there needs adding here.
+  #
+  # mpl/tenants/ isn't listed, because the lambda-env target reads
+  # mpl/tenants/island-battles/tenant.env. A Deny on all of mpl/* would deny
+  # that file too, and no Allow overrides a Deny. IAM can't name "mpl/*
+  # except mpl/tenants/island-battles/*" either: Resource has only the * and
+  # ? wildcards, no S3 condition key holds an object's key, and a Deny with
+  # NotResource would deny reading every other bucket's objects too.
+  #
+  # deploy/github_apply_role.py denies the apply role the same keys
+  # (MPL_UNREADABLE_KEYS).
+  mpl_unreadable_keys = ["mpl/files/*", "mpl/terraform/*", "mpl/plans/*", "mpl/vm-owner"]
 }
 
 resource "aws_iam_openid_connect_provider" "github" {
@@ -97,7 +114,8 @@ resource "aws_iam_role_policy" "github_deploy" {
       # The deploy bucket is shared: INTODAN/mpl keeps its state, files,
       # plans and tenants' settings under mpl/. So the grants below name this
       # repository's keys, never the whole bucket. ReadOnlyAccess already
-      # allows s3:GetObject everywhere, so what they limit is the writes.
+      # allows s3:GetObject everywhere, so what they limit is the writes, and
+      # KeepOutOfMplsPart the reads.
       # Each key comes from elsewhere, and a change there must change this
       # policy too: the state's from the S3 backend's key in versions.tf
       # (STATE_KEY in deploy/deploy_files.py), the others from FILES_PREFIX,
@@ -129,6 +147,17 @@ resource "aws_iam_role_policy" "github_deploy" {
         Effect   = "Allow"
         Action   = "s3:GetObject"
         Resource = "arn:aws:s3:::${var.deploy_bucket}/mpl/tenants/island-battles/tenant.env"
+      },
+      {
+        # ReadOnlyAccess reads every bucket, so an explicit Deny keeps
+        # INTODAN/mpl's secrets, state and plans from this role.
+        # s3:GetObject* is every read of an object: its content, the earlier
+        # versions that the bucket keeps (GetObjectVersion), their checksums
+        # (GetObjectAttributes), tags and ACLs. Listing the keys stays allowed.
+        Sid      = "KeepOutOfMplsPart"
+        Effect   = "Deny"
+        Action   = "s3:GetObject*"
+        Resource = [for key in local.mpl_unreadable_keys : "arn:aws:s3:::${var.deploy_bucket}/${key}"]
       },
       {
         # Nothing else is deleted: Terraform only removes its lock.

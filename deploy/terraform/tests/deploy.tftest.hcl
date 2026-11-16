@@ -775,9 +775,14 @@ run "lets_only_the_repositorys_production_jobs_deploy" {
     condition = toset(flatten([for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : statement.Action])) == toset([
       "lambda:UpdateFunctionCode", "lambda:UpdateFunctionConfiguration", "lambda:TagResource", "lambda:UntagResource",
       "iam:PassRole", "s3:ListBucket", "s3:GetObject", "s3:PutObject", "s3:DeleteObject",
-      "cloudfront:CreateInvalidation",
+      "cloudfront:CreateInvalidation", "s3:GetObject*",
     ])
-    error_message = "The role may write only the function, the deploy bucket and the web client: the VM is INTODAN/mpl's."
+    error_message = "The role may write only the function, the deploy bucket and the web client: the VM is INTODAN/mpl's. Its one Deny is of reads (s3:GetObject*)."
+  }
+
+  assert {
+    condition     = toset(flatten([for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : statement.Action if statement.Effect == "Deny"])) == toset(["s3:GetObject*"])
+    error_message = "The role's only Deny is of object reads: anything else it may not do, it's simply not allowed."
   }
 
   assert {
@@ -848,6 +853,66 @@ run "lets_only_the_repositorys_production_jobs_deploy" {
     error_message = "The role may only read Island Battles' tenant settings under mpl/."
   }
 
+  # ReadOnlyAccess reads every bucket, so a Deny keeps INTODAN/mpl's part of
+  # the deploy bucket from the role, except the tenant's settings (#264).
+  assert {
+    condition = (
+      one([for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : statement if statement.Sid == "KeepOutOfMplsPart"]) == {
+        Sid    = "KeepOutOfMplsPart"
+        Effect = "Deny"
+        Action = "s3:GetObject*"
+        Resource = [
+          "arn:aws:s3:::island-battles-deploy-123456789012/mpl/files/*",
+          "arn:aws:s3:::island-battles-deploy-123456789012/mpl/terraform/*",
+          "arn:aws:s3:::island-battles-deploy-123456789012/mpl/plans/*",
+          "arn:aws:s3:::island-battles-deploy-123456789012/mpl/vm-owner",
+        ]
+      }
+    )
+    error_message = "The role must be denied every read (s3:GetObject*) of INTODAN/mpl's files, state, plans and VM owner marker."
+  }
+
+  # The Deny as IAM evaluates it, for each key and each object read: whether a
+  # Deny statement names both. Each pattern becomes a regular expression: a .
+  # is itself, * any run of characters, / included, and ? any one character.
+  # Actions ignore case, resources don't. Everything that isn't denied stays
+  # readable through ReadOnlyAccess.
+  assert {
+    condition = alltrue(flatten([
+      for key, denied in {
+        "mpl/files/vm.yml"                                           = true
+        "mpl/files/lambda.env"                                       = true
+        "mpl/files/secrets/postgres_admin_password"                  = true
+        "mpl/files/secrets/tenants/island-battles/postgres_password" = true
+        "mpl/terraform/terraform.tfstate"                            = true
+        "mpl/terraform/terraform.tfstate.tflock"                     = true
+        "mpl/plans/123/tfplan"                                       = true
+        "mpl/vm-owner"                                               = true
+        "mpl/tenants/island-battles/tenant.env"                      = false
+        "mpl/tenants/island-battles/another.env"                     = false
+        "terraform/terraform.tfstate"                                = false
+        "terraform/terraform.tfstate.tflock"                         = false
+        "files/aws.tfvars"                                           = false
+        "files/secrets/admin_api_key"                                = false
+        "plans/123/tfplan"                                           = false
+        } : [
+        for action in [
+          "s3:GetObject", "s3:GetObjectVersion", "s3:GetObjectAttributes", "s3:GetObjectVersionAttributes",
+          "s3:GetObjectTorrent", "s3:GetObjectVersionTorrent", "s3:GetObjectVersionForReplication",
+          "s3:GetObjectTagging", "s3:GetObjectVersionTagging", "s3:GetObjectAcl", "s3:GetObjectVersionAcl",
+          "s3:GetObjectRetention", "s3:GetObjectLegalHold",
+          ] : denied == anytrue([
+            for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : (
+              statement.Effect == "Deny"
+              && anytrue([for pattern in flatten([statement.Action]) : can(regex("(?i)^${replace(replace(replace(pattern, ".", "\\."), "*", ".*"), "?", ".")}$", action))])
+              && anytrue([for pattern in flatten([statement.Resource]) : can(regex("^${replace(replace(replace(pattern, ".", "\\."), "*", ".*"), "?", ".")}$", "arn:aws:s3:::island-battles-deploy-123456789012/${key}"))])
+            )
+        ])
+      ]
+    ]))
+    error_message = "Every object read must be denied on INTODAN/mpl's files, state, plans and VM owner marker, and none on Island Battles' tenant settings or the repository's own keys."
+  }
+
   # A resource that ends in a wildcard covers mpl/ too when what comes before
   # the wildcard is a prefix of it, as the whole bucket's /* is.
   assert {
@@ -864,7 +929,7 @@ run "lets_only_the_repositorys_production_jobs_deploy" {
 
   assert {
     condition = alltrue([
-      for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : !contains(flatten([statement.Resource]), "arn:aws:s3:::island-battles-deploy-123456789012/*")
+      for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : !contains(flatten([try(statement.Resource, []), try(statement.NotResource, [])]), "arn:aws:s3:::island-battles-deploy-123456789012/*")
     ])
     error_message = "No statement may name the whole deploy bucket: INTODAN/mpl shares it."
   }
