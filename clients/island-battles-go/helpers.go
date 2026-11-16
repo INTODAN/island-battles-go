@@ -48,8 +48,18 @@ func UpgradeCastle(castleID uint, upgradeType UpgradeType) Command {
 	return newCommand(UpgradeCastleCommand, UpgradeCastleParameters{CastleID: castleID, UpgradeType: upgradeType})
 }
 
+// BurstCastle builds a command that orders a burst of soldierAmount soldiers,
+// from 1 up to the castle's burst potential (BurstPotential), for a castle
+// your team owns that can burst (Castle.CanBurst). The burst is the castle's
+// PendingBurst in the next generation; the generation after adds it to the
+// castle on top of its production and makes it the castle's BurstDebt, which
+// later production repays before the castle grows again.
+func BurstCastle(castleID, soldierAmount uint) Command {
+	return newCommand(BurstCastleCommand, BurstCastleParameters{CastleID: castleID, SoldierAmount: soldierAmount})
+}
+
 func newCommand(commandType CommandType, parameters any) Command {
-	// Both parameter types are plain structs, which always encode.
+	// Every parameter type is a plain struct, which always encodes.
 	encoded, _ := json.Marshal(parameters)
 	return Command{CommandType: commandType, Parameters: encoded}
 }
@@ -61,6 +71,29 @@ func newCommand(commandType CommandType, parameters any) Command {
 func NextUpgradeCost(turn Turn, castle Castle, upgradeType UpgradeType) (uint, bool) {
 	level, found := turn.UpgradeLevel(upgradeType, castle.Upgrades.Level(upgradeType)+1)
 	return level.SoldierCost, found
+}
+
+// Production is how many soldiers the castle produces each generation while
+// a team owns it, its generation_amount from the turn's upgrade table. It is
+// 1 when the table lacks the castle's level.
+func Production(turn Turn, castle Castle) uint {
+	level, found := turn.UpgradeLevel(GenerationAmountUpgrade, castle.Upgrades.Level(GenerationAmountUpgrade))
+	if !found {
+		return 1
+	}
+	return uint(level.Value)
+}
+
+// BurstPotential is the most soldiers one BurstCastle command of the castle
+// may order, from the turn's upgrade table, and 0 when the table lacks the
+// castle's level. Upgrades bought earlier in the same result are not
+// counted: look up the castle's new level with Turn.UpgradeLevel.
+func BurstPotential(turn Turn, castle Castle) uint {
+	level, found := turn.UpgradeLevel(BurstPotentialUpgrade, castle.Upgrades.Level(BurstPotentialUpgrade))
+	if !found {
+		return 0
+	}
+	return uint(level.Value)
 }
 
 // UpgradeLevel looks up one level of an upgrade type in the turn's upgrade

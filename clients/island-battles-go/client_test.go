@@ -680,6 +680,8 @@ func TestResponseErrorsMapOntoKinds(t *testing.T) {
 		{403, "urn:island-battles:problem:castle-not-owned", ErrCastleNotOwned},
 		{409, "urn:island-battles:problem:upgrade-max-level", ErrUpgradeMaxLevel},
 		{409, "urn:island-battles:problem:insufficient-soldiers", ErrInsufficientSoldiers},
+		{409, "urn:island-battles:problem:burst-unavailable", ErrBurstUnavailable},
+		{409, "urn:island-battles:problem:burst-above-potential", ErrBurstAbovePotential},
 		{409, "urn:island-battles:problem:game-ended", ErrGameEnded},
 		{422, "urn:island-battles:problem:game-log-limit", ErrGameLogLimit},
 		{422, "urn:island-battles:problem:bot-memory-too-large", ErrMemoryTooLarge},

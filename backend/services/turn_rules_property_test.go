@@ -19,6 +19,8 @@ type modelCastle struct {
 	teamColor  uint
 	unreserved uint
 	levels     map[models.UpgradeType]int
+	// busy is a castle with burst debt, a pending burst, or a burst this turn.
+	busy bool
 }
 
 type modelRejection struct {
@@ -29,7 +31,7 @@ type modelRejection struct {
 // missingCastleID is never on the board.
 const missingCastleID = 99
 
-// Random batches of sends and upgrades, from two players on two teams, must
+// Random batches of sends, upgrades and bursts, from two players on two teams, must
 // be accepted or rejected exactly as an independent model of the rules says,
 // and every turn of accepted batches must apply, retries included.
 func TestRandomTurnsFollowTheRulesAndAlwaysApply(t *testing.T) {
@@ -43,9 +45,13 @@ func playRandomTurns(t *testing.T, seed int64) {
 	ctx := context.Background()
 	random := rand.New(rand.NewSource(seed))
 	costs := map[models.UpgradeType][]uint{}
+	potentials := []uint{}
 	for _, upgrade := range models.UpgradeTable() {
 		for _, level := range upgrade.Levels {
 			costs[upgrade.Type] = append(costs[upgrade.Type], level.SoldierCost)
+			if upgrade.Type == models.BurstPotentialUpgrade {
+				potentials = append(potentials, uint(level.Value))
+			}
 		}
 	}
 	teamColors := map[string]uint{}
@@ -62,7 +68,7 @@ func playRandomTurns(t *testing.T, seed int64) {
 		board := map[uint]*modelCastle{}
 		castleIDs := []uint{missingCastleID}
 		for _, castle := range state.Generation.Castles {
-			board[castle.ID] = &modelCastle{teamColor: castle.TeamColor, unreserved: castle.Soldiers, levels: maps.Clone(castle.Upgrades)}
+			board[castle.ID] = &modelCastle{teamColor: castle.TeamColor, unreserved: castle.Soldiers, levels: maps.Clone(castle.Upgrades), busy: castle.BurstDebt > 0 || castle.PendingBurst > 0}
 			castleIDs = append(castleIDs, castle.ID)
 		}
 		type acceptedRequest struct {
@@ -76,7 +82,7 @@ func playRandomTurns(t *testing.T, seed int64) {
 			// A rejected batch leaves the model unchanged.
 			trial := map[uint]*modelCastle{}
 			for castleID, castle := range board {
-				trial[castleID] = &modelCastle{castle.teamColor, castle.unreserved, maps.Clone(castle.levels)}
+				trial[castleID] = &modelCastle{castle.teamColor, castle.unreserved, maps.Clone(castle.levels), castle.busy}
 			}
 			// Mostly castles the player's team owns, so most batches can pass.
 			pickCastle := func() uint {
@@ -120,8 +126,31 @@ func playRandomTurns(t *testing.T, seed int64) {
 					}
 					continue
 				}
+				if random.Intn(4) == 0 {
+					castleID, amount := pickCastle(), uint(random.Intn(10))
+					commands = append(commands, burst(castleID, amount))
+					if expected != nil {
+						continue
+					}
+					castle := trial[castleID]
+					switch {
+					case amount == 0:
+						expected = &modelRejection{422, ""}
+					case castle == nil:
+						expected = &modelRejection{422, services.CastleNotFoundProblemType}
+					case castle.teamColor != teamColor:
+						expected = &modelRejection{403, services.CastleNotOwnedProblemType}
+					case amount > potentials[castle.levels[models.BurstPotentialUpgrade]-1]:
+						expected = &modelRejection{409, services.BurstAbovePotentialProblemType}
+					case castle.busy:
+						expected = &modelRejection{409, services.BurstUnavailableProblemType}
+					default:
+						castle.busy = true
+					}
+					continue
+				}
 				castleID := pickCastle()
-				upgradeType := []models.UpgradeType{models.SpeedUpgrade, models.ClashStopGenerationsUpgrade}[random.Intn(2)]
+				upgradeType := models.UpgradeTypes()[random.Intn(len(models.UpgradeTypes()))]
 				if random.Intn(10) == 0 {
 					upgradeType = "armor"
 				}

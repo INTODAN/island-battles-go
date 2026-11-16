@@ -139,19 +139,43 @@ func (board board) arrivals(castle islandbattles.Castle) []arrival {
 	return arrivals
 }
 
+// growth follows what a castle that a team owns grows by each turn: its
+// production, plus its pending burst in the first turn, less what repays its
+// burst debt.
+type growth struct {
+	production, debt, pending uint
+}
+
+func (board board) growth(castle islandbattles.Castle) growth {
+	return growth{production: islandbattles.Production(board.turn, castle), debt: castle.BurstDebt, pending: castle.PendingBurst}
+}
+
+// next is what the castle grows by in the next turn.
+func (growth *growth) next() uint {
+	if growth.pending > 0 {
+		grown := growth.production + growth.pending
+		growth.debt, growth.pending = growth.pending, 0
+		return grown
+	}
+	repaid := min(growth.debt, growth.production)
+	growth.debt -= repaid
+	return growth.production - repaid
+}
+
 // forecast follows a castle to the end of a turn, counting this one as 1, as
-// the simulation plays it: every turn a castle that a team owns grows by one
-// soldier, a neutral one doesn't, then the turn's arrivals land in order. A
-// castle captured by an arrival grows from the next turn on. A friendly group
-// reinforces the castle, and a hostile one takes it when it has more soldiers
-// than the castle.
-func forecast(castle islandbattles.Castle, arrivals []arrival, turns int) (owner, soldiers uint) {
+// the simulation plays it: every turn a castle that a team owns grows (see
+// growth), a neutral one doesn't, then the turn's arrivals land in order. A
+// castle captured by an arrival loses its burst debt and pending burst, and
+// grows from the next turn on. A friendly group reinforces the castle, and a
+// hostile one takes it when it has more soldiers than the castle.
+func (board board) forecast(castle islandbattles.Castle, arrivals []arrival, turns int) (owner, soldiers uint) {
 	owner, soldiers = castle.TeamColor, castle.Soldiers
+	grows := board.growth(castle)
 	arrivals = slices.SortedFunc(slices.Values(arrivals), compareArrivals)
 	next := 0
 	for turn := 1; turn <= turns; turn++ {
 		if owner != islandbattles.NeutralTeamColor {
-			soldiers++
+			soldiers += grows.next()
 		}
 		for ; next < len(arrivals) && arrivals[next].turn <= turn; next++ {
 			landing := arrivals[next]
@@ -160,6 +184,7 @@ func forecast(castle islandbattles.Castle, arrivals []arrival, turns int) (owner
 				soldiers += landing.soldiers
 			case landing.soldiers > soldiers:
 				owner, soldiers = landing.team, landing.soldiers-soldiers
+				grows.debt, grows.pending = 0, 0
 			default:
 				soldiers -= landing.soldiers
 			}
@@ -170,12 +195,18 @@ func forecast(castle islandbattles.Castle, arrivals []arrival, turns int) (owner
 
 // garrisonToHold is how many of its soldiers a castle of team must keep this
 // turn so that none of the arrivals takes it, counting the soldiers it grows
-// (it is a castle a team owns, so it grows every turn) and the friendly groups that land before each hostile one. It is 0 when the
-// castle holds even with none.
-func garrisonToHold(arrivals []arrival, team uint) uint {
+// (it is a castle a team owns, so it grows every turn) and the friendly
+// groups that land before each hostile one. It is 0 when the castle holds
+// even with none.
+func (board board) garrisonToHold(castle islandbattles.Castle, arrivals []arrival, team uint) uint {
+	// grownBy[turn] is what the castle has grown by at the end of turn.
+	grows, grownBy := board.growth(castle), []int{0}
 	balance, needed := 0, 0
 	for _, landing := range slices.SortedFunc(slices.Values(arrivals), compareArrivals) {
-		grown := balance + landing.turn
+		for len(grownBy) <= landing.turn {
+			grownBy = append(grownBy, grownBy[len(grownBy)-1]+int(grows.next()))
+		}
+		grown := balance + grownBy[landing.turn]
 		if landing.team == team {
 			balance += int(landing.soldiers)
 			continue

@@ -14,8 +14,8 @@ import (
 const openAPIDocument = "../../backend/api/openapi.json"
 
 // schemaTypes are the SDK's types for the schemas that BotTurn and
-// BotTurnResult reference. PublicGenerationCommand is a oneOf of the two
-// command schemas, which Command carries both of.
+// BotTurnResult reference. PublicGenerationCommand is a oneOf of the three
+// command schemas, which Command carries all of.
 var schemaTypes = map[string]reflect.Type{
 	"BotTurn":                    reflect.TypeFor[Turn](),
 	"Generation":                 reflect.TypeFor[Generation](),
@@ -28,8 +28,10 @@ var schemaTypes = map[string]reflect.Type{
 	"BotTurnResult":              reflect.TypeFor[Result](),
 	"SendSoldierGroupCommand":    reflect.TypeFor[Command](),
 	"UpgradeCastleCommand":       reflect.TypeFor[Command](),
+	"BurstCastleCommand":         reflect.TypeFor[Command](),
 	"SendSoldierGroupParameters": reflect.TypeFor[SendSoldierGroupParameters](),
 	"UpgradeCastleParameters":    reflect.TypeFor[UpgradeCastleParameters](),
+	"BurstCastleParameters":      reflect.TypeFor[BurstCastleParameters](),
 	"GenerationLogLine":          reflect.TypeFor[LogLine](),
 }
 
@@ -145,8 +147,8 @@ func TestTypesMatchTheOpenAPIDocument(t *testing.T) {
 			t.Errorf("schemaTypes lists %s, which BotTurn and BotTurnResult don't reach", name)
 		}
 	}
-	if _, found := schemas["PublicGenerationCommand"]; !found || len(schemas["PublicGenerationCommand"].OneOf) != 2 {
-		t.Error("PublicGenerationCommand is no longer one of two command schemas")
+	if _, found := schemas["PublicGenerationCommand"]; !found || len(schemas["PublicGenerationCommand"].OneOf) != 3 {
+		t.Error("PublicGenerationCommand is no longer one of three command schemas")
 	}
 }
 
@@ -194,7 +196,7 @@ func TestEnumsMatchTheOpenAPIDocument(t *testing.T) {
 	if !slices.Equal(level.Enum, levels) {
 		t.Errorf("GenerationLogLine.level is %v in the document, %v in the SDK", level.Enum, levels)
 	}
-	for name, commandType := range map[string]CommandType{"SendSoldierGroupCommand": SendSoldierGroupCommand, "UpgradeCastleCommand": UpgradeCastleCommand} {
+	for name, commandType := range map[string]CommandType{"SendSoldierGroupCommand": SendSoldierGroupCommand, "UpgradeCastleCommand": UpgradeCastleCommand, "BurstCastleCommand": BurstCastleCommand} {
 		var property struct {
 			Enum []string `json:"enum"`
 		}

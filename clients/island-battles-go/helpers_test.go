@@ -15,6 +15,7 @@ func TestCommandsHaveTheContractsJSON(t *testing.T) {
 	}{
 		{SendSoldierGroup(0, 3, 12), `{"command_type":"send_soldier_group","parameters":{"origin_castle_id":0,"destination_castle_id":3,"soldier_amount":12}}`},
 		{UpgradeCastle(2, SpeedUpgrade), `{"command_type":"upgrade_castle","parameters":{"castle_id":2,"upgrade_type":"speed"}}`},
+		{BurstCastle(3, 8), `{"command_type":"burst_castle","parameters":{"castle_id":3,"soldier_amount":8}}`},
 	} {
 		if encoded, err := json.Marshal(test.command); err != nil || string(encoded) != test.want {
 			t.Errorf("got %s (%v), want %s", encoded, err, test.want)
@@ -149,8 +150,28 @@ func TestResultsWriteEmptyListsAsArrays(t *testing.T) {
 	}
 }
 
+func TestProductionAndBurstPotentialReadTheTurnsTable(t *testing.T) {
+	turn := FixtureTurn()
+	castle := turn.Generation.Castles[0]
+	if production, potential := Production(turn, castle), BurstPotential(turn, castle); production != 1 || potential != 0 {
+		t.Fatalf("level 1 produces %d and bursts %d", production, potential)
+	}
+	castle.Upgrades = Upgrades{GenerationAmountUpgrade: 4, BurstPotentialUpgrade: 3}
+	if production, potential := Production(turn, castle), BurstPotential(turn, castle); production != 4 || potential != 8 {
+		t.Fatalf("levels 4 and 3 produce %d and burst %d", production, potential)
+	}
+	if !castle.CanBurst() {
+		t.Fatal("a castle without debt can't burst")
+	}
+	for _, busy := range []Castle{{BurstDebt: 1}, {PendingBurst: 4}} {
+		if busy.CanBurst() {
+			t.Fatalf("%+v can burst", busy)
+		}
+	}
+}
+
 func TestValidateResult(t *testing.T) {
-	valid := Result{Commands: []Command{SendSoldierGroup(0, 1, 1), UpgradeCastle(0, ClashStopGenerationsUpgrade)}, Logs: []LogLine{Log("ok")}, Memory: Memory(`{"a":1}`)}
+	valid := Result{Commands: []Command{SendSoldierGroup(0, 1, 1), UpgradeCastle(0, ClashStopGenerationsUpgrade), BurstCastle(0, 4)}, Logs: []LogLine{Log("ok")}, Memory: Memory(`{"a":1}`)}
 	if err := ValidateResult(valid); err != nil {
 		t.Fatal(err)
 	}
@@ -165,22 +186,24 @@ func TestValidateResult(t *testing.T) {
 		return lines
 	}
 	for name, result := range map[string]Result{
-		"zero soldiers":     {Commands: []Command{SendSoldierGroup(0, 1, 0)}},
-		"unknown upgrade":   {Commands: []Command{UpgradeCastle(0, "armour")}},
-		"unknown command":   {Commands: []Command{{CommandType: "build", Parameters: json.RawMessage(`{}`)}}},
-		"missing parameter": {Commands: []Command{{CommandType: SendSoldierGroupCommand, Parameters: json.RawMessage(`{"origin_castle_id":0,"destination_castle_id":1}`)}}},
-		"null parameter":    {Commands: []Command{{CommandType: UpgradeCastleCommand, Parameters: json.RawMessage(`{"castle_id":null,"upgrade_type":"speed"}`)}}},
-		"unknown parameter": {Commands: []Command{{CommandType: UpgradeCastleCommand, Parameters: json.RawMessage(`{"castle_id":0,"upgrade_type":"speed","level":2}`)}}},
-		"no parameters":     {Commands: []Command{{CommandType: UpgradeCastleCommand}}},
-		"too many commands": {Commands: make([]Command, MaxCommands+1)},
-		"too many lines":    {Logs: tooMany(MaxLogLines+1, Log("x"))},
-		"empty message":     {Logs: []LogLine{Log("")}},
-		"long message":      {Logs: []LogLine{{Level: LogInfo, Logger: PlayerLogger, Message: strings.Repeat("x", 501)}}},
-		"long logger":       {Logs: []LogLine{{Level: LogInfo, Logger: strings.Repeat("x", 101), Message: "x"}}},
-		"unknown level":     {Logs: []LogLine{{Level: "fatal", Logger: PlayerLogger, Message: "x"}}},
-		"invalid UTF-8":     {Logs: []LogLine{{Level: LogInfo, Logger: PlayerLogger, Message: "\xff"}}},
-		"memory not object": {Memory: Memory(`[1]`)},
-		"memory not JSON":   {Memory: Memory(`{`)},
+		"zero soldiers":        {Commands: []Command{SendSoldierGroup(0, 1, 0)}},
+		"empty burst":          {Commands: []Command{BurstCastle(0, 0)}},
+		"burst without castle": {Commands: []Command{{CommandType: BurstCastleCommand, Parameters: json.RawMessage(`{"soldier_amount":2}`)}}},
+		"unknown upgrade":      {Commands: []Command{UpgradeCastle(0, "armour")}},
+		"unknown command":      {Commands: []Command{{CommandType: "build", Parameters: json.RawMessage(`{}`)}}},
+		"missing parameter":    {Commands: []Command{{CommandType: SendSoldierGroupCommand, Parameters: json.RawMessage(`{"origin_castle_id":0,"destination_castle_id":1}`)}}},
+		"null parameter":       {Commands: []Command{{CommandType: UpgradeCastleCommand, Parameters: json.RawMessage(`{"castle_id":null,"upgrade_type":"speed"}`)}}},
+		"unknown parameter":    {Commands: []Command{{CommandType: UpgradeCastleCommand, Parameters: json.RawMessage(`{"castle_id":0,"upgrade_type":"speed","level":2}`)}}},
+		"no parameters":        {Commands: []Command{{CommandType: UpgradeCastleCommand}}},
+		"too many commands":    {Commands: make([]Command, MaxCommands+1)},
+		"too many lines":       {Logs: tooMany(MaxLogLines+1, Log("x"))},
+		"empty message":        {Logs: []LogLine{Log("")}},
+		"long message":         {Logs: []LogLine{{Level: LogInfo, Logger: PlayerLogger, Message: strings.Repeat("x", 501)}}},
+		"long logger":          {Logs: []LogLine{{Level: LogInfo, Logger: strings.Repeat("x", 101), Message: "x"}}},
+		"unknown level":        {Logs: []LogLine{{Level: "fatal", Logger: PlayerLogger, Message: "x"}}},
+		"invalid UTF-8":        {Logs: []LogLine{{Level: LogInfo, Logger: PlayerLogger, Message: "\xff"}}},
+		"memory not object":    {Memory: Memory(`[1]`)},
+		"memory not JSON":      {Memory: Memory(`{`)},
 	} {
 		if err := ValidateResult(result); !errors.Is(err, ErrInvalidResult) {
 			t.Errorf("%s: got %v", name, err)

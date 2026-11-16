@@ -124,7 +124,32 @@ func TestUpgradeTableMatchesTheLevels(t *testing.T) {
 			}
 		}
 	}
-	if speed := table[1].Levels; speed[1].SoldierCost != 10 || speed[3].SoldierCost != 30 || speed[3].Value != 2 {
+	if speed := table[3].Levels; speed[1].SoldierCost != 10 || speed[3].SoldierCost != 30 || speed[3].Value != 2 {
 		t.Fatalf("speed levels = %+v", speed)
+	}
+}
+
+// generation_amount produces 1 to 4 soldiers, and burst_potential allows
+// bursts of 0, 4, 8 and 16; both cost 10, 20 and 30 for levels 2 to 4.
+func TestGenerationAmountAndBurstPotentialLevels(t *testing.T) {
+	for upgradeType, values := range map[UpgradeType][]float64{GenerationAmountUpgrade: {1, 2, 3, 4}, BurstPotentialUpgrade: {0, 4, 8, 16}} {
+		var upgrades Upgrades
+		for index, want := range values {
+			value, err := upgrades.Value(upgradeType)
+			if err != nil || value != want {
+				t.Fatalf("%s level %d = %v, %v; want %v", upgradeType, index+1, value, err, want)
+			}
+			if cost, err := upgrades.Cost(upgradeType); err != nil || cost != []uint{0, 10, 20, 30}[index] {
+				t.Fatalf("%s level %d costs %d, %v", upgradeType, index+1, cost, err)
+			}
+			if index < len(values)-1 {
+				if upgrades, err = upgrades.Upgraded(upgradeType); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		if _, err := upgrades.Upgraded(upgradeType); !errors.Is(err, ErrUpgradeMaxLevel) {
+			t.Fatalf("%s goes past level 4: %v", upgradeType, err)
+		}
 	}
 }

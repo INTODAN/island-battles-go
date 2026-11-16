@@ -73,6 +73,21 @@ type Castle struct {
 	Y         float64 `json:"y"`
 	// Upgrades is the level of every upgrade type.
 	Upgrades Upgrades `json:"upgrades"`
+	// BurstDebt is what the castle still owes for its last burst. Each
+	// generation its production repays the debt first, and only what is
+	// left over grows the castle. A capture clears it.
+	BurstDebt uint `json:"burst_debt"`
+	// PendingBurst is a burst ordered in an earlier turn, which the next
+	// generation adds to the castle on top of its production and turns into
+	// BurstDebt. A capture clears it.
+	PendingBurst uint `json:"pending_burst"`
+}
+
+// CanBurst says whether the castle may burst: it has no burst debt and no
+// pending burst. Its team must own it, and its burst potential must be
+// above 0; BurstPotential says how much it is.
+func (castle Castle) CanBurst() bool {
+	return castle.BurstDebt == 0 && castle.PendingBurst == 0
 }
 
 // SoldierGroup is a group of soldiers marching from one castle to another.
@@ -125,11 +140,17 @@ const (
 	// ClashStopGenerationsUpgrade sets how many turns a group stays stopped
 	// after a clash.
 	ClashStopGenerationsUpgrade UpgradeType = "clash_stop_generations"
+	// GenerationAmountUpgrade sets how many soldiers a castle that a team
+	// owns produces each generation.
+	GenerationAmountUpgrade UpgradeType = "generation_amount"
+	// BurstPotentialUpgrade sets the most soldiers one BurstCastle command
+	// may order.
+	BurstPotentialUpgrade UpgradeType = "burst_potential"
 )
 
 // UpgradeTypes lists every upgrade type, sorted by name.
 func UpgradeTypes() []UpgradeType {
-	return []UpgradeType{ClashStopGenerationsUpgrade, SpeedUpgrade}
+	return []UpgradeType{BurstPotentialUpgrade, ClashStopGenerationsUpgrade, GenerationAmountUpgrade, SpeedUpgrade}
 }
 
 // Upgrades maps upgrade types to levels. Every castle starts at level 1.
@@ -173,11 +194,12 @@ type CommandType string
 const (
 	SendSoldierGroupCommand CommandType = "send_soldier_group"
 	UpgradeCastleCommand    CommandType = "upgrade_castle"
+	BurstCastleCommand      CommandType = "burst_castle"
 )
 
-// Command is one order of a turn's result. Build it with SendSoldierGroup or
-// UpgradeCastle. Parameters are SendSoldierGroupParameters or
-// UpgradeCastleParameters as JSON, by CommandType.
+// Command is one order of a turn's result. Build it with SendSoldierGroup,
+// UpgradeCastle or BurstCastle. Parameters are SendSoldierGroupParameters,
+// UpgradeCastleParameters or BurstCastleParameters as JSON, by CommandType.
 type Command struct {
 	CommandType CommandType     `json:"command_type"`
 	Parameters  json.RawMessage `json:"parameters"`
@@ -198,6 +220,15 @@ type SendSoldierGroupParameters struct {
 type UpgradeCastleParameters struct {
 	CastleID    uint        `json:"castle_id"`
 	UpgradeType UpgradeType `json:"upgrade_type"`
+}
+
+// BurstCastleParameters orders a burst for a castle the bot's team owns,
+// which has no burst debt and no pending burst.
+type BurstCastleParameters struct {
+	CastleID uint `json:"castle_id"`
+	// SoldierAmount is at least 1 and at most the castle's burst potential,
+	// counting the upgrades bought before it this turn.
+	SoldierAmount uint `json:"soldier_amount"`
 }
 
 // LogLevel is the severity of a game log line.

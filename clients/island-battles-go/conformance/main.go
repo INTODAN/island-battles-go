@@ -272,6 +272,13 @@ func order(raw json.RawMessage) (islandbattles.Command, error) {
 		}
 		return islandbattles.SendSoldierGroup(origin, destination, amount), nil
 	}
+	if orderType == "burst_castle" {
+		var castleID, amount uint
+		if err := errors.Join(field(fields, "castle_id", &castleID), field(fields, "soldier_amount", &amount)); err != nil {
+			return islandbattles.Command{}, err
+		}
+		return islandbattles.BurstCastle(castleID, amount), nil
+	}
 	var castleID uint
 	var upgradeType string
 	if err := errors.Join(field(fields, "castle_id", &castleID), field(fields, "upgrade_type", &upgradeType)); err != nil {
@@ -315,6 +322,8 @@ func describe(err error) map[string]any {
 		{islandbattles.ErrCastleNotOwned, "not_owned"},
 		{islandbattles.ErrUpgradeMaxLevel, "max_level"},
 		{islandbattles.ErrInsufficientSoldiers, "insufficient_soldiers"},
+		{islandbattles.ErrBurstUnavailable, "burst_unavailable"},
+		{islandbattles.ErrBurstAbovePotential, "burst_above_potential"},
 	} {
 		if errors.Is(err, candidate.target) {
 			kind = candidate.kind

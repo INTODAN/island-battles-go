@@ -114,7 +114,7 @@ func TestAcceptedSendsAndUpgradesInEarlierBatchesAlwaysApply(t *testing.T) {
 	sent := uint(0)
 	for _, group := range next.Generation.SoldierGroups {
 		sent += group.Soldiers
-		if len(group.Upgrades) != 2 {
+		if len(group.Upgrades) != len(models.UpgradeTypes()) {
 			t.Fatalf("group %d does not list every upgrade type: %v", group.ID, group.Upgrades)
 		}
 	}
