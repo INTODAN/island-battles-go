@@ -39,7 +39,8 @@ code { font-size: .9em; }
 .plane-panel { container-type: inline-size; }
 .plane-toolbar { display: flex; justify-content: flex-end; margin-bottom: 8px; }
 .plane-toolbar button { padding: 6px 12px; font-size: .87rem; }
-.plane-toolbar button[aria-pressed="true"] { background: #3464e0; color: #fff; }
+.plane-toolbar .secondary[aria-pressed="true"] { background: #3464e0; color: #fff; }
+.plane-toolbar .secondary[aria-pressed="true"]:not(:disabled):hover { background: #2854c5; }
 .views { display: grid; gap: 12px; }
 .views.with-preview { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .preview { position: relative; height: min(70vh, 640px); border-radius: 8px; overflow: hidden; background: #10202b; }

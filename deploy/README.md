@@ -447,8 +447,8 @@ It reads the bucket, the distribution and the lobby's URL from Terraform's outpu
 1. runs `bun run build` in `clients/island-battles-web/`, which builds for `/play/` with hashed files under `dist/assets/`;
 2. uploads `dist/assets/` to `s3://<bucket>/play/assets/` with `Cache-Control: public, max-age=31536000, immutable`;
 3. writes the runtime config, `play/config.json`, `{"lobby_url": "<lobby_url>"}`, with `Cache-Control: no-cache`;
-4. uploads `index.html` last, with `Cache-Control: no-cache`, so a page never names a file that isn't there yet;
-5. invalidates `/play/`, `/play/index.html` and `/play/config.json`, so the new build shows as soon as the script ends.
+4. uploads the pages last, `map-preview.html` (the [map builder's](../backend/README.md#map-builder) 3D preview, #278) and then `index.html`, with `Cache-Control: no-cache`, so a page never names a file that isn't there yet;
+5. invalidates `/play/`, `/play/index.html`, `/play/map-preview.html` and `/play/config.json`, so the new build shows as soon as the script ends.
 
 It never deletes files, so the hashed files of earlier builds stay and tabs that are open keep working. They are small; remove old ones from the bucket by hand if they ever matter. It needs `bun`, the AWS CLI and Terraform, and the credentials that `scripts/aws.sh` uses. Every release uploads it ([Releasing](#releasing)), and the Deploy workflow's `web` target does it on its own. If `ISLAND_BATTLES_WEB_BUNDLE_FILE` names a file, the script writes the build's entry script there, which is what the workflow hands to the smoke test.
 
