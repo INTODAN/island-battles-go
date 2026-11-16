@@ -1,7 +1,7 @@
 # Reads and edits the Island Battles project board (AGENTS.md, "Where the
 # work is") for agents in sessions that can't reach GitHub's project API
 # themselves. It uses the PROJECT_TOKEN secret, the owner's classic token with
-# the project scope, and touches nothing but the board. The board is INTODAN's
+# the project and repo scopes, and touches nothing but the board. The board is INTODAN's
 # own, so commands name it as @me.
 #
 # - list: prints every item, its Status and its labels to the log and the
@@ -37,6 +37,8 @@ concurrency:
 
 jobs:
   board:
+    # Only the reviewed copy on main gets the token's work done.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -89,8 +91,9 @@ jobs:
             exit 1
           fi
           gh project item-list "$NUMBER" --owner "$OWNER" --format json -L 500 > items.json
-          for url in $URLS; do
-            item_id=$(jq -r --arg url "$url" '.items[] | select(.content.url == $url) | .id' items.json | head -n 1)
+          read -ra urls <<< "$URLS"
+          for url in "${urls[@]}"; do
+            item_id=$(jq -r --arg url "$url" '[.items[] | select(.content.url == $url) | .id][0] // empty' items.json)
             if [ -z "$item_id" ]; then
               item_id=$(gh project item-add "$NUMBER" --owner "$OWNER" --url "$url" --format json --jq .id)
               echo "Added $url"
