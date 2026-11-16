@@ -2,12 +2,17 @@
 
 ## Where the work is
 
-The open work lives in GitHub issues on `INTODAN/island-battles-go`, and **issue #120 is the work queue**. When asked to start implementing, continue, or "do the next issues", don't pick issues yourself:
+Open work in this repository and in its sibling (INTODAN/mpl, the lobby) is tracked on one project board, [**Island Battles**](https://github.com/users/INTODAN/projects/1). Its Status column is **Parked** (ideas: don't start them unless the owner says), **Todo**, **In progress**, **In review** (a pull request waits) and **Done**. Steps only the owner can do are in INTODAN/island-battles-go#119. When asked to start implementing, continue, or "do the next issues":
 
-1. Read #120. Find the first wave with unticked items, and the items in it whose **needs** are all closed and that nobody has claimed.
-2. Claim each item you take by editing #120, as it describes.
-3. Implement one issue per pull request, with `Closes #N` in its body. Items marked ∥ can run in parallel in separate branches, worktrees or subagents. Items marked → wait for the item named.
-4. Don't merge, unless the owner told your session to. Then merge only after an independent review, with the branch up to date and its checks green, and tick the item in #120.
+1. Take **Todo** items whose *Blocked by* issues are all closed. Check with `gh api repos/INTODAN/island-battles-go/issues/N/dependencies/blocked_by`.
+2. Move the item to **In progress** before you start, so parallel sessions don't take it too, and to **In review** when its pull request is open. `gh project` needs the `project` scope; if `gh` reports it missing, ask the owner.
+   ```sh
+   gh project item-list 1 --owner INTODAN --format json -L 200 --query "status:Todo"   # what's ready
+   gh project item-edit 1 --owner INTODAN --url <issue URL> --field Status --value "In progress"
+   ```
+3. Implement one issue per pull request, with `Closes #N` in its body (or `Closes INTODAN/mpl#N` for an issue in the sibling repository). Independent items can run in parallel in separate branches, worktrees or subagents.
+4. Don't merge, unless the owner told your session to. Then merge only after an independent review, with the branch up to date and its checks green. Move the item to **Done** once it's merged and its steps after the merge are done.
+5. **Every issue you file goes on the board:** `gh project item-add 1 --owner INTODAN --url <issue URL>`, then set its Status (**Parked** for a `discussion` issue, otherwise **Todo**). When it waits on another issue, add a *Blocked by* relationship on the issue (`gh api -X POST repos/INTODAN/island-battles-go/issues/N/dependencies/blocked_by -F issue_id=<the blocking issue's numeric id>`), rather than writing it in the text.
 
 Each issue is written to be implemented on its own: read the whole issue, plus the decisions and issues it links, before writing code.
 
@@ -37,6 +42,7 @@ When your change needs a step after it merges (a plan and apply, an apply-role s
   - `browser-testing`: checking the lobby page, demo or replay in a browser
   - `game-state-testing`: generation, command and game-state tests
 - The lobby lives in [`INTODAN/mpl`](https://github.com/INTODAN/mpl); lobby changes go there first. This repository uses it at the version that README.md's [The lobby's version](README.md#the-lobbys-version) names, and changes the pin only to take a lobby change that is merged there. Island Battles specifics belong in `backend/`.
+- **The repository is public.** Never commit a secret, not even for local development: `.env.example` holds placeholders only, and production's secrets live in the deploy bucket.
 - After changing an API, re-export the OpenAPI documents and regenerate the clients in the same change. On a rebase conflict in generated files, regenerate them instead of merging by hand.
 
 ## Deploying
