@@ -20,6 +20,7 @@ type CommandType string
 
 const (
 	UpgradeCastle              CommandType = "upgrade_castle"
+	BurstCastle                CommandType = "burst_castle"
 	IncreaseSoldierAmount      CommandType = "increase_soldier_amount"
 	MoveSoldierGroups          CommandType = "move_soldier_groups"
 	SendSoldierGroup           CommandType = "send_soldier_group"

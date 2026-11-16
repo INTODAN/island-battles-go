@@ -62,14 +62,14 @@ func TestPlayerOpenAPIPublishesGeneratableModels(t *testing.T) {
 		t.Fatalf("unexpected operations: %v", operations)
 	}
 	schemas := document.Components.Schemas
-	for _, name := range []string{"Generation", "Castle", "SoldierGroup", "Clash", "ClashParticipant", "GenerationState", "GenerationEvent", "GameEndedEvent", "GameOutcome", "SendSoldierGroupParameters", "UpgradeCastleParameters", "UpgradeType", "Upgrade", "UpgradeLevel", "MapTemplate", "CastleTemplate", "Demo", "GameTeam", "GenerationLogs", "BotTurn", "BotTurnResult"} {
+	for _, name := range []string{"Generation", "Castle", "SoldierGroup", "Clash", "ClashParticipant", "GenerationState", "GenerationEvent", "GameEndedEvent", "GameOutcome", "SendSoldierGroupParameters", "UpgradeCastleParameters", "BurstCastleParameters", "UpgradeType", "Upgrade", "UpgradeLevel", "MapTemplate", "CastleTemplate", "Demo", "GameTeam", "GenerationLogs", "BotTurn", "BotTurnResult"} {
 		if _, exists := schemas[name]; !exists {
 			t.Fatalf("schema %s is missing", name)
 		}
 	}
-	// A player command is one of the two command shapes, chosen by command_type.
+	// A player command is one of the command shapes, chosen by command_type.
 	command := schemas["PublicGenerationCommand"]
-	shapes := map[string]string{"send_soldier_group": "SendSoldierGroup", "upgrade_castle": "UpgradeCastle"}
+	shapes := map[string]string{"send_soldier_group": "SendSoldierGroup", "upgrade_castle": "UpgradeCastle", "burst_castle": "BurstCastle"}
 	if command.Discriminator.PropertyName != "command_type" || len(command.OneOf) != len(shapes) || len(command.Discriminator.Mapping) != len(shapes) {
 		t.Fatalf("player command is not a discriminated union: %+v", command)
 	}
@@ -79,7 +79,7 @@ func TestPlayerOpenAPIPublishesGeneratableModels(t *testing.T) {
 			t.Fatalf("%s is not typed: %+v", commandType, properties)
 		}
 	}
-	if len(schemas["UpgradeType"].Enum) != 2 || schemas["UpgradeCastleParameters"].Properties["upgrade_type"].Ref != schemaRefPrefix+"UpgradeType" {
+	if len(schemas["UpgradeType"].Enum) != 4 || schemas["UpgradeCastleParameters"].Properties["upgrade_type"].Ref != schemaRefPrefix+"UpgradeType" {
 		t.Fatalf("upgrade types are not one enum: %+v", schemas["UpgradeType"])
 	}
 	for _, name := range []string{"Castle", "SoldierGroup"} {
@@ -87,7 +87,7 @@ func TestPlayerOpenAPIPublishesGeneratableModels(t *testing.T) {
 			t.Fatalf("%s.upgrades is not keyed by UpgradeType", name)
 		}
 	}
-	for _, name := range []string{"Generation", "Clash", "SendSoldierGroupParameters", "UpgradeCastleParameters", "Upgrade", "SoldierGroup", "MapTemplate", "CastleTemplate"} {
+	for _, name := range []string{"Generation", "Clash", "SendSoldierGroupParameters", "UpgradeCastleParameters", "BurstCastleParameters", "Upgrade", "SoldierGroup", "MapTemplate", "CastleTemplate"} {
 		for property, schema := range schemas[name].Properties {
 			if types, isList := schema.Type.([]any); isList {
 				t.Fatalf("%s.%s is nullable: %v", name, property, types)

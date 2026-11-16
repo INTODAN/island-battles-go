@@ -102,8 +102,14 @@ func TestClashStopUpgradeLevelsAndCosts(t *testing.T) {
 // same effect and cost that Upgrades applies.
 func TestUpgradeTableMatchesTheLevels(t *testing.T) {
 	table := UpgradeTable()
-	if len(table) != len(upgradeLevels) || table[0].Type != ClashStopGenerationsUpgrade || table[1].Type != SpeedUpgrade {
-		t.Fatalf("table is not every type sorted by type: %+v", table)
+	sorted := []UpgradeType{BurstPotentialUpgrade, ClashStopGenerationsUpgrade, GenerationAmountUpgrade, SpeedUpgrade}
+	if len(table) != len(sorted) || len(upgradeLevels) != len(sorted) {
+		t.Fatalf("table is not every type: %+v", table)
+	}
+	for index, upgradeType := range sorted {
+		if table[index].Type != upgradeType {
+			t.Fatalf("table is not sorted by type: %+v", table)
+		}
 	}
 	for _, upgrade := range table {
 		if upgrade.Description == "" || upgrade.MaxLevel != len(upgrade.Levels) || upgrade.MaxLevel != len(upgradeLevels[upgrade.Type]) {

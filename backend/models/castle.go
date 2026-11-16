@@ -21,6 +21,12 @@ type Castle struct {
 	gorm.Model
 	CastleFields
 	SoldierAmount uint
+	// BurstDebt is what the castle still owes for its last burst. Its
+	// production repays it before the castle grows again.
+	BurstDebt uint `gorm:"not null;default:0"`
+	// PendingBurst is the amount of a burst ordered in an earlier turn, which
+	// the next generation adds to the castle and turns into BurstDebt.
+	PendingBurst uint `gorm:"not null;default:0"`
 
 	MapID uint `gorm:"index"`
 	Map   Map

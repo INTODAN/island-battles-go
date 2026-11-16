@@ -80,6 +80,8 @@ func DecodeCommand(command models.CommandFields) (Command, error) {
 	switch command.CommandType {
 	case models.UpgradeCastle:
 		return decodeParameters[UpgradeCastleParams](command.Parameters)
+	case models.BurstCastle:
+		return decodeParameters[BurstCastleParams](command.Parameters)
 	case models.IncreaseSoldierAmount:
 		return decodeParameters[IncreaseSoldierAmountParams](command.Parameters)
 	case models.MoveSoldierGroups:
