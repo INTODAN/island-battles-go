@@ -5,8 +5,9 @@ import (
 	"net/http"
 )
 
-// LobbyPagePath is where the lobby serves its page, on the lobby's origin.
-const LobbyPagePath = "/lobby/ui/"
+// PlayPagePath is where the deployment serves the 3D web client, on the
+// game's own origin. The game's / redirects to it (#279).
+const PlayPagePath = "/play/"
 
 // lobbyGone answers every request under /lobby on the game's origin, where
 // the lobby ran in the game's process until it moved to its own (#232), with
