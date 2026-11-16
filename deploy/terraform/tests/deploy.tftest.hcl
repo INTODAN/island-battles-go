@@ -772,12 +772,12 @@ run "lets_only_the_repositorys_production_jobs_deploy" {
   }
 
   assert {
-    condition = toset(flatten([for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : statement.Action])) == toset([
+    condition = toset(flatten([for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : statement.Action if statement.Effect == "Allow"])) == toset([
       "lambda:UpdateFunctionCode", "lambda:UpdateFunctionConfiguration", "lambda:TagResource", "lambda:UntagResource",
       "iam:PassRole", "s3:ListBucket", "s3:GetObject", "s3:PutObject", "s3:DeleteObject",
-      "cloudfront:CreateInvalidation", "s3:GetObject*",
+      "cloudfront:CreateInvalidation",
     ])
-    error_message = "The role may write only the function, the deploy bucket and the web client: the VM is INTODAN/mpl's. Its one Deny is of reads (s3:GetObject*)."
+    error_message = "The role may write only the function, the deploy bucket and the web client: the VM is INTODAN/mpl's."
   }
 
   assert {

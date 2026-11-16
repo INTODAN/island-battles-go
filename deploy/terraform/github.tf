@@ -152,8 +152,9 @@ resource "aws_iam_role_policy" "github_deploy" {
         # ReadOnlyAccess reads every bucket, so an explicit Deny keeps
         # INTODAN/mpl's secrets, state and plans from this role.
         # s3:GetObject* is every read of an object: its content, the earlier
-        # versions that the bucket keeps (GetObjectVersion), their checksums
-        # (GetObjectAttributes), tags and ACLs. Listing the keys stays allowed.
+        # versions that the bucket keeps (GetObjectVersion), tags and ACLs.
+        # Listing the keys stays allowed, and shows each object's ETag, its
+        # MD5 for these uploads.
         Sid      = "KeepOutOfMplsPart"
         Effect   = "Deny"
         Action   = "s3:GetObject*"
