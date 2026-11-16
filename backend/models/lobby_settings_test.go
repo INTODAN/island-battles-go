@@ -11,10 +11,7 @@ import (
 
 func TestParseLobbySettingsReadsOneMapChoice(t *testing.T) {
 	defaultTimeout := uint(DefaultTurnTimeoutSeconds)
-	if settings, err := ParseLobbySettings(json.RawMessage(`{}`)); err != nil || !reflect.DeepEqual(settings, LobbySettings{TurnTimeoutSeconds: &defaultTimeout}) {
-		t.Fatalf("empty settings = %+v, %v", settings, err)
-	}
-	if settings, err := ParseLobbySettings(json.RawMessage(`{"map_template_id":7}`)); err != nil || settings.MapTemplateID != 7 || settings.Map != nil {
+	if settings, err := ParseLobbySettings(json.RawMessage(`{"map_template_id":7}`)); err != nil || !reflect.DeepEqual(settings, LobbySettings{MapTemplateID: 7, TurnTimeoutSeconds: &defaultTimeout}) {
 		t.Fatalf("template settings = %+v, %v", settings, err)
 	}
 	settings, err := ParseLobbySettings(json.RawMessage(`{"map":` + exampleMapFile + `}`))
@@ -26,8 +23,8 @@ func TestParseLobbySettingsReadsOneMapChoice(t *testing.T) {
 
 func TestParseLobbySettingsReadsTheTurnTimeout(t *testing.T) {
 	seconds := func(timeout uint) *uint { return &timeout }
-	for settings, want := range map[string]*uint{`{}`: seconds(30), `{"turn_timeout_seconds":5}`: seconds(5), `{"turn_timeout_seconds":600}`: seconds(600),
-		`{"turn_timeout_seconds": 120, "map_template_id": 3}`: seconds(120), `{"turn_timeout_seconds":null}`: nil, `{"turn_timeout_seconds": null }`: nil} {
+	for settings, want := range map[string]*uint{`{"map_template_id":1}`: seconds(30), `{"map_template_id":1,"turn_timeout_seconds":5}`: seconds(5), `{"map_template_id":1,"turn_timeout_seconds":600}`: seconds(600),
+		`{"turn_timeout_seconds": 120, "map_template_id": 3}`: seconds(120), `{"map_template_id":1,"turn_timeout_seconds":null}`: nil, `{"map_template_id":1, "turn_timeout_seconds": null }`: nil} {
 		parsed, err := ParseLobbySettings(json.RawMessage(settings))
 		if err != nil || !reflect.DeepEqual(parsed.TurnTimeoutSeconds, want) {
 			t.Fatalf("%s: timeout = %v, %v", settings, parsed.TurnTimeoutSeconds, err)
@@ -43,6 +40,8 @@ func TestParseLobbySettingsLocatesEveryRejection(t *testing.T) {
 	}{
 		{"not an object", `[1]`, []string{"game_settings"}},
 		{"unknown setting", `{"rounds":3}`, []string{"game_settings.rounds"}},
+		{"no map", `{}`, []string{"game_settings"}},
+		{"only a timeout", `{"turn_timeout_seconds":30}`, []string{"game_settings"}},
 		{"both choices", `{"map_template_id":1,"map":` + exampleMapFile + `}`, []string{"game_settings.map"}},
 		{"zero template", `{"map_template_id":0}`, []string{"game_settings.map_template_id"}},
 		{"negative template", `{"map_template_id":-1}`, []string{"game_settings.map_template_id"}},
@@ -52,12 +51,12 @@ func TestParseLobbySettingsLocatesEveryRejection(t *testing.T) {
 		{"map not an object", `{"map":"archipelago"}`, []string{"game_settings.map"}},
 		{"map missing a field", `{"map":{"map_name":"a","player_amount":2,"plane_size_x":4,"plane_size_y":4,"castles":[{"team_color":1,"x":0,"y":0}]}}`, []string{"game_settings.map"}},
 		{"castles outside the plane", `{"map":` + outsidePlane + `}`, []string{"game_settings.map.castles[0].x", "game_settings.map.castles[1].y"}},
-		{"timeout below the minimum", `{"turn_timeout_seconds":4}`, []string{"game_settings.turn_timeout_seconds"}},
-		{"timeout above the maximum", `{"turn_timeout_seconds":601}`, []string{"game_settings.turn_timeout_seconds"}},
-		{"zero timeout", `{"turn_timeout_seconds":0}`, []string{"game_settings.turn_timeout_seconds"}},
-		{"negative timeout", `{"turn_timeout_seconds":-30}`, []string{"game_settings.turn_timeout_seconds"}},
-		{"fractional timeout", `{"turn_timeout_seconds":30.5}`, []string{"game_settings.turn_timeout_seconds"}},
-		{"string timeout", `{"turn_timeout_seconds":"30"}`, []string{"game_settings.turn_timeout_seconds"}},
+		{"timeout below the minimum", `{"map_template_id":1,"turn_timeout_seconds":4}`, []string{"game_settings.turn_timeout_seconds"}},
+		{"timeout above the maximum", `{"map_template_id":1,"turn_timeout_seconds":601}`, []string{"game_settings.turn_timeout_seconds"}},
+		{"zero timeout", `{"map_template_id":1,"turn_timeout_seconds":0}`, []string{"game_settings.turn_timeout_seconds"}},
+		{"negative timeout", `{"map_template_id":1,"turn_timeout_seconds":-30}`, []string{"game_settings.turn_timeout_seconds"}},
+		{"fractional timeout", `{"map_template_id":1,"turn_timeout_seconds":30.5}`, []string{"game_settings.turn_timeout_seconds"}},
+		{"string timeout", `{"map_template_id":1,"turn_timeout_seconds":"30"}`, []string{"game_settings.turn_timeout_seconds"}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

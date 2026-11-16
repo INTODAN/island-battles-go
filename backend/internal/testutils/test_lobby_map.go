@@ -21,12 +21,24 @@ func CircleMap(teams int) models.MapTemplateView {
 	return template
 }
 
-// CircleMapSettings are a lobby's game settings that start its teams on
-// CircleMap(teams), with the default turn timeout.
-func CircleMapSettings(teams int) json.RawMessage {
-	settings, err := json.Marshal(map[string]any{"map": CircleMap(teams)})
+// CircleMapSettings are a lobby's game settings for teams teams: settings, a
+// JSON object or empty for none, with CircleMap(teams) as their map unless
+// they choose one.
+func CircleMapSettings(teams int, settings string) json.RawMessage {
+	fields := map[string]any{}
+	if settings != "" {
+		if err := json.Unmarshal([]byte(settings), &fields); err != nil {
+			panic(err)
+		}
+	}
+	_, hasMap := fields["map"]
+	_, hasTemplate := fields["map_template_id"]
+	if !hasMap && !hasTemplate {
+		fields["map"] = CircleMap(teams)
+	}
+	combined, err := json.Marshal(fields)
 	if err != nil {
 		panic(err)
 	}
-	return settings
+	return combined
 }

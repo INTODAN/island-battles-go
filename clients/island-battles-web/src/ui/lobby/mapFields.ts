@@ -3,10 +3,10 @@ import type { LobbyActions, MapTemplateSummary } from "./actions";
 import {
   defaultTurnTimeout,
   type FormErrors,
-  fixedTeamCount,
   type MapChoice,
   type MapSettingsValues,
   type MapTemplate,
+  mapTeamCount,
   maxTeams,
   minTeams,
   readMapFile,
@@ -44,9 +44,9 @@ export interface MapFields {
 }
 
 /**
- * The map, team count and turn limit fields, which the create form and the
- * room's Change map form share. A map decides the teams, so the team count
- * field follows the map choice.
+ * The map and turn limit fields, which the create form and the room's Change
+ * map form share. The map decides the teams. Without a map to start from, the
+ * first default map is chosen once the default maps load.
  */
 export function mountMapFields(options: MapFieldsOptions): MapFields {
   const { actions } = options;
@@ -67,21 +67,19 @@ export function mountMapFields(options: MapFieldsOptions): MapFields {
   let pendingTemplate =
     initial?.map.kind === "template" ? initial.map.templateId : undefined;
 
-  const teamCount = h("input", {
-    id: id("team-count"),
-    type: "number",
-    min: String(minTeams),
-    max: String(maxTeams),
-    value: String(initial?.teamCount ?? 2),
-  });
+  // Shown until a map is chosen: while the default maps load, or when none could be.
+  const noMap = new Option("Loading the default maps…", "none");
   const mapSelect = h(
     "select",
     { id: id("map-choice") },
-    new Option("Generated map", "generated"),
+    noMap,
     new Option("Load a map file…", "file"),
     ...(mapBuilderAvailable ? [new Option("Build a map…", "builder")] : []),
   );
-  if (file) mapSelect.value = "file";
+  if (file) {
+    mapSelect.value = "file";
+    noMap.remove();
+  }
   const mapFile = h("input", {
     id: id("map-file"),
     type: "file",
@@ -116,7 +114,6 @@ export function mountMapFields(options: MapFieldsOptions): MapFields {
       attrs: { role: "alert", "data-field": field },
     });
   const errors = {
-    teamCount: errorOf("teamCount"),
     map: errorOf("map"),
     turnTimeout: errorOf("turnTimeout"),
   };
@@ -135,17 +132,14 @@ export function mountMapFields(options: MapFieldsOptions): MapFields {
     if (pendingTemplate !== undefined) {
       return { kind: "template", templateId: pendingTemplate };
     }
-    return { kind: "generated" };
+    return { kind: "none" };
   }
 
-  /** Keeps the team count field and the map's note in step with the map choice. */
+  /** Keeps the map's note, which names its teams, in step with the map choice. */
   function refreshMap(): void {
     const choice = mapChoice();
     mapFile.hidden = mapSelect.value !== "file";
-    const fixed = fixedTeamCount(choice, templates);
-    teamCount.disabled = fixed !== null || pendingTemplate !== undefined;
-    if (fixed !== null) teamCount.value = String(fixed);
-    const count = fixed ?? (Number(teamCount.value) || 0);
+    const count = mapTeamCount(choice, templates) ?? 0;
     const names =
       count >= minTeams && count <= maxTeams
         ? Array.from({ length: count }, (_, index) => teamName(index + 1)).join(
@@ -163,6 +157,8 @@ export function mountMapFields(options: MapFieldsOptions): MapFields {
             : "Choose a map file made with the map builder.";
     } else if (pendingTemplate !== undefined) {
       mapStatus.textContent = "Loading the lobby's map…";
+    } else if (choice.kind === "none") {
+      mapStatus.textContent = "";
     } else {
       mapStatus.textContent = names ? `Teams: ${names}.` : "";
     }
@@ -173,6 +169,7 @@ export function mountMapFields(options: MapFieldsOptions): MapFields {
     onMapText(text) {
       pendingTemplate = undefined;
       mapSelect.value = "file";
+      noMap.remove();
       mapFile.value = "";
       errors.map.textContent = "";
       checkMapFile("From the map builder", async () => text);
@@ -181,17 +178,18 @@ export function mountMapFields(options: MapFieldsOptions): MapFields {
       pendingTemplate = undefined;
       file = { name: "", map: null, error: message, checking: null };
       mapSelect.value = "file";
+      noMap.remove();
       refreshMap();
     },
   });
 
   mapSelect.addEventListener("change", () => {
     pendingTemplate = undefined;
+    if (mapSelect.value !== "none") noMap.remove();
     errors.map.textContent = "";
     if (mapSelect.value === "builder") mapBuilder.open();
     refreshMap();
   });
-  teamCount.addEventListener("input", refreshMap);
   mapFile.addEventListener("change", () => {
     const [chosen] = Array.from(mapFile.files ?? []);
     file = null;
@@ -256,7 +254,11 @@ export function mountMapFields(options: MapFieldsOptions): MapFields {
             ),
         ),
       );
-      mapSelect.insertBefore(group, mapSelect.options[1] ?? null);
+      mapSelect.insertBefore(
+        group,
+        noMap.parentNode ? noMap.nextSibling : mapSelect.firstChild,
+      );
+      const [first] = maps;
       if (pendingTemplate !== undefined) {
         const wanted = `template:${pendingTemplate}`;
         // A map that is no longer listed stays chosen, and the check names it.
@@ -264,34 +266,36 @@ export function mountMapFields(options: MapFieldsOptions): MapFields {
           mapSelect.value = wanted;
           pendingTemplate = undefined;
         }
+      } else if (mapSelect.value === "none" && first) {
+        // A new lobby starts on the first default map.
+        mapSelect.value = `template:${first.map_template_id}`;
       }
+      if (mapSelect.value === "none") noMap.text = "Pick a map";
+      else noMap.remove();
       refreshMap();
     })
     .catch(() => {
       if (!disposed) {
+        noMap.text = "Pick a map";
         errors.map.textContent =
-          "Could not load the default maps. You can still use the generated map or a map file.";
+          "Could not load the default maps. You can still load a map file.";
       }
     });
 
   refreshMap();
   return {
     nodes: [
-      h("label", { htmlFor: id("team-count") }, "Teams"),
-      teamCount,
-      h("p", { class: "hint" }, "One player or bot per team."),
-      errors.teamCount,
       h("label", { htmlFor: id("map-choice") }, "Map"),
       mapSelect,
       mapFile,
       mapStatus,
+      h("p", { class: "hint" }, "One player or bot per team."),
       errors.map,
       h("label", { htmlFor: id("turn-timeout") }, "Turn limit"),
       timeoutSelect,
       errors.turnTimeout,
     ],
     values: () => ({
-      teamCount: Number(teamCount.value),
       map: mapChoice(),
       turnTimeoutSeconds:
         timeoutSelect.value === "none" ? null : Number(timeoutSelect.value),

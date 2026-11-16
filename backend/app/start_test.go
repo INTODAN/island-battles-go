@@ -154,7 +154,8 @@ func (stack startStack) allDefaultBotLobby(t *testing.T, level int) botLobby {
 	expectStatus(t, http.StatusCreated, &lobby.host, http.MethodPost, stack.lobbyURL+"/lobby/v1/sessions", "", map[string]string{"display_name": "Alice"})
 	token := lobby.host.AccessToken
 	expectStatus(t, http.StatusCreated, &lobby.room, http.MethodPost, stack.lobbyURL+"/lobby/v1/lobbies", token, map[string]any{"request_id": uuid.NewString(), "game_key": lobbyadapter.GameKey,
-		"name": "Bots", "teams": []map[string]string{{"name": "Red"}, {"name": "Blue"}}, "client_instance_id": uuid.NewString()})
+		"name": "Bots", "teams": []map[string]string{{"name": "Red"}, {"name": "Blue"}}, "client_instance_id": uuid.NewString(),
+		"game_settings": testutils.CircleMapSettings(2, "")})
 	path := stack.lobbyPath(lobby.room)
 	expectStatus(t, http.StatusOK, nil, http.MethodPut, path+"/team", token, map[string]string{"team_id": lobby.room.Teams[0].ID})
 	expectStatus(t, http.StatusOK, nil, http.MethodPost, path+"/seats", token, map[string]any{"team_id": lobby.room.Teams[1].ID, "seat_settings": map[string]int{"bot_level": level}})

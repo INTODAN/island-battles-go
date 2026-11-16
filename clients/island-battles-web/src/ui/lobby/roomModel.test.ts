@@ -235,9 +235,7 @@ describe("bot choices", () => {
 describe("the settings line", () => {
   test("names the map and the turn limit", () => {
     const maps = [{ map_template_id: 4, map_name: "Strait" }] as never;
-    expect(describeSettings({}, maps)).toBe(
-      "Map: generated for the players · Turn limit: 30 s",
-    );
+    expect(describeSettings({}, maps)).toBe("No map chosen · Turn limit: 30 s");
     expect(
       describeSettings({ map_template_id: 4, turn_timeout_seconds: 120 }, maps),
     ).toBe("Map: Strait · Turn limit: 2 min");

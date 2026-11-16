@@ -180,10 +180,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     changeFields = mountMapFields({
       actions,
       idPrefix: "change-",
-      initial: lobbyMapSettings(
-        snapshot.lobby.game_settings,
-        snapshot.teams?.length ?? 2,
-      ),
+      initial: lobbyMapSettings(snapshot.lobby.game_settings),
     });
     changeError.textContent = "";
     const form = h(

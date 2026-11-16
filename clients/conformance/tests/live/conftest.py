@@ -18,12 +18,26 @@ guests = guests_fixture
 # The lobby and the game are separate sites (#228): BASE is the lobby's URL,
 # and GAME the game's.
 GAME = os.environ["LOBBY_TEST_GAME_URL"]
+# Every Island Battles lobby needs a map: here one castle per team, 4 apart.
+TWO_CASTLES = {
+    "map": {
+        "map_name": "Conformance",
+        "player_amount": 2,
+        "plane_size_x": 8,
+        "plane_size_y": 6,
+        "neutral_starting_soldier_amount": 0,
+        "castles": [
+            {"team_color": 1, "x": -2, "y": 0, "starting_soldier_amount": 30},
+            {"team_color": 2, "x": 2, "y": 0, "starting_soldier_amount": 30},
+        ],
+    }
+}
 
 
 @pytest_asyncio.fixture
 async def match(guests):
     alice, bob = await guests("Conformance Alice"), await guests("Conformance Bob")
-    room = await create(alice, "island-battles")
+    room = await create(alice, "island-battles", TWO_CASTLES)
     scope = Scope.from_snapshot(room)
     await bob.join_lobby(game_key=scope.game_key, join_code=room.lobby.join_code)
     await alice.select_team(scope, room.teams[0].id)

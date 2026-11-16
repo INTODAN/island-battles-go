@@ -30,7 +30,7 @@ func (authentication commandAuthentication) AuthenticatePlayer(_ context.Context
 func TestGenerationHTTPAuthenticationValidationAndStatus(t *testing.T) {
 	database := testutils.InitTestDB(t)
 	playerID, lobbyID, teamID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted}, Teams: []domain.Team{{ID: teamID, Order: 1}}, StartRoster: domain.StartRoster{{PlayerID: playerID, TeamID: teamID}}}
+	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted, GameSettings: testutils.CircleMapSettings(2, "")}, Teams: []domain.Team{{ID: teamID, Order: 1}, {ID: uuid.NewString(), Order: 2}}, StartRoster: domain.StartRoster{{PlayerID: playerID, TeamID: teamID}}}
 	publisher := &testutils.RecordedPublisher{}
 	binding, err := services.RunLobbyGame(context.Background(), database, publisher, nil, snapshot)
 	if err != nil {
@@ -120,7 +120,7 @@ func TestGenerationHTTPCarriesBotMemory(t *testing.T) {
 	database := testutils.InitTestDB(t)
 	players := []string{uuid.NewString(), uuid.NewString()}
 	lobbyID, blue, red := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted}, Teams: []domain.Team{{ID: blue, Order: 1}, {ID: red, Order: 2}},
+	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted, GameSettings: testutils.CircleMapSettings(2, "")}, Teams: []domain.Team{{ID: blue, Order: 1}, {ID: red, Order: 2}},
 		StartRoster: domain.StartRoster{{PlayerID: players[0], TeamID: blue}, {PlayerID: players[1], TeamID: red}}}
 	publisher := &testutils.RecordedPublisher{}
 	if _, err := services.RunLobbyGame(context.Background(), database, publisher, nil, snapshot); err != nil {

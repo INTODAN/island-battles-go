@@ -35,13 +35,22 @@ func RunLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 // bots play the first generation before it is pushed.
 func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, sender *TurnSender, snapshot domain.Snapshot, chosen map[string]frozenBot) (models.BindingResult, error) {
 	database = database.WithContext(ctx)
-	// A team has one player. The check comes before the binding, which creates the game.
+	// A team has one player, and the settings choose a map. The checks come
+	// before the binding, which creates the game, so a refused start leaves
+	// the lobby's round without a game, and the lobby can be reopened.
 	teamsWithPlayers := map[string]bool{}
 	for _, entry := range snapshot.StartRoster {
 		if teamsWithPlayers[entry.TeamID] {
 			return models.BindingResult{}, fmt.Errorf("cannot initialize a roster with several players on one team")
 		}
 		teamsWithPlayers[entry.TeamID] = true
+	}
+	// The lobby checked the settings when they were set, under the rules of
+	// that time, so they are checked again. A default map is loaded from its
+	// template here.
+	chosenMap, turnTimeout, err := LobbyGameSettings(database, snapshot.Lobby.GameSettings, len(snapshot.Teams))
+	if err != nil {
+		return models.BindingResult{}, fmt.Errorf("lobby settings: %w", err)
 	}
 	binding, err := dal.BindLobbyGame(database, snapshot)
 	if err != nil {
@@ -61,12 +70,6 @@ func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 			return fmt.Errorf("cannot initialize an empty roster")
 		}
 		teams := lobbyGameTeams(binding, snapshot)
-		// The lobby checked the settings when they were set; a default map is
-		// loaded from its template here.
-		chosenMap, turnTimeout, err := LobbyGameSettings(transaction, snapshot.Lobby.GameSettings, len(snapshot.Teams))
-		if err != nil {
-			return fmt.Errorf("lobby settings: %w", err)
-		}
 		players := make([]models.FrozenGamePlayer, 0, len(snapshot.StartRoster))
 		for index, entry := range snapshot.StartRoster {
 			color := models.NeutralTeamColor
