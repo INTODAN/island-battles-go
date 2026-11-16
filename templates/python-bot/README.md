@@ -7,7 +7,7 @@ A starter project for a bot in the strategy game Island Battles: a working bot, 
 1. Copy this directory (it needs nothing outside itself) and rename the project in `pyproject.toml`.
 2. Install [uv](https://docs.astral.sh/uv/), then `uv sync` (it installs Python 3.14 if needed).
 3. `scripts/check.sh` formats, lints, type-checks, tests and runs the bot once on a sample turn.
-4. `scripts/serve.sh` serves the bot on `http://127.0.0.1:41414`. Open the game at `https://island-battles.elidan.org` (or a local lobby page), create a lobby, add a bot seat for the other team, pick **localhost bot** as your bot, get ready and start. The page delivers each turn to your bot, which submits its answer to the game itself ([how](#how-your-bot-gets-its-turns)). Saving `bot.py` reloads it.
+4. `scripts/serve.sh` serves the bot on `http://127.0.0.1:41414`. Open the lobby page at `https://lobby.elidan.org/lobby/ui/` (or the 3D client at `https://island-battles.elidan.org/play/`, or a local lobby page at `http://localhost:8890/lobby/ui/`), create a lobby, add a bot seat for the other team, pick **localhost bot** as your bot, get ready and start. The page delivers each turn to your bot, which submits its answer to the game itself ([how](#how-your-bot-gets-its-turns)). Saving `bot.py` reloads it.
 
 The bot is in `bot.py`. It buys speed upgrades, attacks the nearest castle that is not its own and keeps a counter in its memory. Replace the strategy; keep the shape.
 
@@ -19,8 +19,8 @@ All run from any directory.
 |---|---|
 | `scripts/check.sh` | `ruff format --check`, `ruff check`, `ty check`, `pytest`, then `island-battles-bot check bot:play`. Run it before playing. |
 | `scripts/format.sh` | `ruff format` and `ruff check --fix`. |
-| `scripts/serve.sh` | The localhost bot a browser tab plays (`island-battles-bot serve bot:play`). |
-| `scripts/run.sh` | Plays a seat of a started lobby without a browser: `scripts/run.sh TOKEN LOBBY_ID`, or set `ISLAND_BATTLES_TOKEN` and `ISLAND_BATTLES_LOBBY_ID`. The lobby and the game are separate sites: set `ISLAND_BATTLES_GAME_URL` and `ISLAND_BATTLES_LOBBY_URL` (they need `island-battles-python` with #228), or `ISLAND_BATTLES_BASE_URL` for one server that serves both. Logs to `bot.log`. |
+| `scripts/serve.sh` | The localhost bot a browser tab plays (`island-battles-bot serve bot:play`), with the lobby page's origin, `https://lobby.elidan.org`, allowed. |
+| `scripts/run.sh` | Plays a seat of a started lobby without a browser: `scripts/run.sh TOKEN LOBBY_ID`, or set `ISLAND_BATTLES_TOKEN` and `ISLAND_BATTLES_LOBBY_ID`. The lobby and the game are separate sites: set `ISLAND_BATTLES_GAME_URL` and `ISLAND_BATTLES_LOBBY_URL` (they need `island-battles-python` with #228), `https://island-battles.elidan.org` and `https://lobby.elidan.org` for the official game, or `http://localhost:8888` and `http://localhost:8890` locally. `ISLAND_BATTLES_BASE_URL` sets both, for a server that serves the game and the lobby together. Logs to `bot.log`. |
 | `scripts/fixture.sh [file]` | Writes the sample turn to `turn.json` for experiments. |
 | `scripts/build.sh` | `uv build`: a wheel and a source archive in `dist/`, and prints their paths. |
 | `scripts/package.sh` | `island-battles-bot package`: `dist/island-battles-bot.zip`, the bot and its dependencies for the server's runners (Linux arm64). Needs a network. |

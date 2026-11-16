@@ -26,9 +26,9 @@ const (
 // runSeat plays one seat of a lobby's game to its end with a Client.
 func runSeat(ctx context.Context, program invocation, arguments []string) int {
 	flags := newFlags(program, "run", "Plays one seat of a lobby's game to its end, straight against the server, without a\nbrowser. Choose your localhost bot in the lobby before getting ready.")
-	gameURL := flags.String("game-url", "", "the game's `URL`, such as https://island-battles.example.org (default $"+GameURLEnv+")")
-	lobbyURL := flags.String("lobby-url", "", "the lobby's `URL`, such as https://lobby.example.org (default $"+LobbyURLEnv+")")
-	baseURL := flags.String("base-url", "", "sets both URLs to one server's `URL`, such as http://localhost:8888")
+	gameURL := flags.String("game-url", "", "the game's `URL`, such as https://island-battles.elidan.org (default $"+GameURLEnv+")")
+	lobbyURL := flags.String("lobby-url", "", "the lobby's `URL`, such as https://lobby.elidan.org (default $"+LobbyURLEnv+")")
+	baseURL := flags.String("base-url", "", "sets both URLs to one `URL`, for a server that serves the game and the lobby together (the official game's are two: give --game-url and --lobby-url)")
 	token := flags.String("token", "", "the player's guest bearer `credential` (required)")
 	lobbyID := flags.String("lobby-id", "", "the `ID` of the lobby whose game to play (required)")
 	logFile := flags.String("log-file", "", "also append the log to this `file`")

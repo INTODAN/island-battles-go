@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Sync deploy/local/ with the deploy bucket, or create the bucket. scripts/aws.sh
-# and scripts/vm.sh pull and push on their own. See deploy/README.md.
+# Sync deploy/local/ with the deploy bucket, or create the bucket. scripts/aws.sh,
+# scripts/lambda-env.sh and scripts/smoke.sh pull and push on their own. See
+# deploy/README.md.
 #
 # Usage:
 #   scripts/deploy-files.sh bootstrap --region <region>

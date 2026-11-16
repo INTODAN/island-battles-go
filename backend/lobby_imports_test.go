@@ -8,30 +8,25 @@ import (
 )
 
 // gameLobbyPackages are the lobby's packages that Island Battles may use: the
-// signed hooks and game API client, the player token verifier, and the
-// lobby's domain types that those two speak, such as its snapshots, errors and
-// channel names.
+// signed hooks and game API client, the player token verifier, the lobby's
+// domain types that those two speak, such as its snapshots, errors and
+// channel names, and the Centrifugo publisher, which games publish their own
+// events with.
 var gameLobbyPackages = []string{
 	"github.com/INTODAN/mpl/gamehooks",
 	"github.com/INTODAN/mpl/playertoken",
 	"github.com/INTODAN/mpl/domain",
+	"github.com/INTODAN/mpl/realtime",
 }
 
-// lobbyHosts build the in-process lobby, which production runs until the
-// lobby is deployed on its own, so they may use any of its packages: the app
-// that builds it with the lobby's package app (and, locally, reaches a lobby of its own at
-// ISLAND_BATTLES_LOBBY_URL instead), the two hosts that serve the app (the
-// local server, this package, and the Lambda),
-// the schema migration, which runs the map templates' migrations on the
-// lobby's migration runner, and the migrate command, which tells whether the
-// lobby has a database of its own, the admin MCP server with the lobby's
-// admin tools, the OpenAPI export, which describes the lobby's connection
-// token route that game clients call, and the test fixtures that build the
-// lobby's own database beside Island Battles'.
+// lobbyHosts may use any of the lobby's packages, since none of them serves
+// the lobby: the schema migration, which runs the map templates' migrations
+// on the lobby's migration runner, and the migrate command that runs it, the
+// admin MCP server with the lobby's admin tools, the OpenAPI export, which
+// describes the lobby's connection token route that game clients call, and
+// the test fixtures that build the lobby's own database beside Island
+// Battles'. The backend's hosts serve no lobby: it runs on its own (#232).
 var lobbyHosts = []string{
-	"islandBattles/backend",
-	"islandBattles/backend/app",
-	"islandBattles/backend/cmd/lambda",
 	"islandBattles/backend/schema",
 	"islandBattles/backend/cmd/migrate",
 	"islandBattles/backend/cmd/admin-mcp",

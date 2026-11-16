@@ -2,12 +2,11 @@
 # assumes through GitHub's OIDC provider, so no AWS keys are stored in GitHub.
 # Only jobs in var.github_environment of var.github_repository may assume it.
 #
-# It can read the account, as a plan must, and write only what a backend or VM
+# It can read the account, as a plan must, and write only what a backend
 # deploy writes: the function's code and settings, the bot runners' code
-# (bot_runners.tf), the deploy bucket, the web
-# client's files under play/ and their cache invalidation, and a temporary SSH
-# key for the VM. Anything else, such as new alarms or a change
-# to the VM, goes through `scripts/aws.sh apply`: on a person's machine, or in
+# (bot_runners.tf), the deploy bucket, and the web client's files under play/
+# and their cache invalidation. The VM is INTODAN/mpl's (#232). Anything else,
+# such as new alarms, goes through `scripts/aws.sh apply`: on a person's machine, or in
 # the Deploy workflow's apply target, which applies a saved plan from main
 # with the apply role from deploy/github_apply_role.py.
 
@@ -42,7 +41,7 @@ resource "aws_iam_role" "github_deploy" {
   })
 }
 
-# Every plan refreshes every resource, across Lightsail, Lambda, IAM, logs,
+# Every plan refreshes every resource, across Lambda, IAM, logs,
 # alarms, SNS, budgets, ACM, CloudFront and the backups bucket. The bucket's
 # policy keeps the backups themselves from this role (backups.tf).
 resource "aws_iam_role_policy_attachment" "github_deploy_read" {
@@ -93,7 +92,9 @@ resource "aws_iam_role_policy" "github_deploy" {
         Resource = "arn:aws:s3:::${var.deploy_bucket}"
       },
       {
-        # The state, its lock file and deploy/local/'s files.
+        # The state, its lock file and deploy/local/'s files, and the
+        # settings that INTODAN/mpl publishes for Island Battles under
+        # mpl/tenants/island-battles/ (scripts/lambda-env.sh).
         Sid      = "SyncTheDeployBucket"
         Effect   = "Allow"
         Action   = ["s3:GetObject", "s3:PutObject"]
@@ -126,12 +127,6 @@ resource "aws_iam_role_policy" "github_deploy" {
         Effect   = "Allow"
         Action   = "cloudfront:CreateInvalidation"
         Resource = aws_cloudfront_distribution.game.arn
-      },
-      {
-        Sid      = "LogInToTheVm"
-        Effect   = "Allow"
-        Action   = "lightsail:GetInstanceAccessDetails"
-        Resource = "*"
       },
     ]
   })

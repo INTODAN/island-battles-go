@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -362,7 +363,7 @@ func TestServeRefusesASubmitHostThatIsNotAllowed(t *testing.T) {
 
 func TestServePreflight(t *testing.T) {
 	server, _ := startBot(t, sender, time.Second, "https://game.example.org/")
-	for _, origin := range []string{"http://localhost:8888", "https://island-battles.elidan.org", "http://tauri.localhost", "https://game.example.org"} {
+	for _, origin := range []string{"http://localhost:8888", "https://island-battles.elidan.org", "https://lobby.elidan.org", "http://tauri.localhost", "https://game.example.org"} {
 		response, body := request(t, server, http.MethodOptions, "/turn", nil, map[string]string{"Origin": origin, "Access-Control-Request-Headers": "content-type, x-trace"})
 		headers := response.Header
 		if response.StatusCode != http.StatusNoContent || body != "" || headers.Get("Access-Control-Allow-Origin") != origin ||
@@ -382,6 +383,16 @@ func TestServePreflight(t *testing.T) {
 	} {
 		if response, body := request(t, server, http.MethodOptions, "/turn", nil, headers); response.StatusCode != http.StatusForbidden || body != "origin or host not allowed\n" {
 			t.Errorf("%s got %d %q", name, response.StatusCode, body)
+		}
+	}
+}
+
+// The deployed lobby page, on its own subdomain since #232, relays turns as
+// the 3D client on the game's origin does, so serve answers both by default.
+func TestDefaultOriginsIncludeTheGameAndTheLobbyPage(t *testing.T) {
+	for _, origin := range []string{"https://island-battles.elidan.org", "https://lobby.elidan.org"} {
+		if !slices.Contains(DefaultOrigins, origin) {
+			t.Errorf("DefaultOrigins lacks %s: %v", origin, DefaultOrigins)
 		}
 	}
 }

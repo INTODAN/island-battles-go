@@ -30,7 +30,7 @@ func TestWatchersAreAuthorizedThroughTheGameAPI(t *testing.T) {
 		t.Helper()
 		return stack.api.Get("/game/from-lobby/"+room.Lobby.ID+"/watch", stack.playerToken(member, lobbyadapter.GameKey)).Code
 	}
-	calls := stack.hookCalls[gamehooks.HookStart]
+	calls := stack.hookCallCount(gamehooks.HookStart)
 	if status := watch(watcher); status != http.StatusOK {
 		t.Fatalf("the watcher's read = %d, want 200", status)
 	}
@@ -41,7 +41,7 @@ func TestWatchersAreAuthorizedThroughTheGameAPI(t *testing.T) {
 	if status := watch(watcher); status != http.StatusForbidden {
 		t.Fatalf("the kicked watcher's read = %d, want 403", status)
 	}
-	if stack.hookCalls[gamehooks.HookStart] != calls {
+	if stack.hookCallCount(gamehooks.HookStart) != calls {
 		t.Fatal("reading the game called the start hook")
 	}
 }

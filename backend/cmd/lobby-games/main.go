@@ -16,13 +16,14 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
 	"github.com/INTODAN/mpl/gamehooks"
-	"islandBattles/backend/dependencies"
+	"islandBattles/backend/lobbyadapter"
 )
 
 func main() {
@@ -44,11 +45,38 @@ func run(args []string, lookup func(string) (string, bool), output io.Writer) er
 	if parsed.Path != "" {
 		return fmt.Errorf("%q must be an origin, without a path", origin)
 	}
-	existing, _ := lookup(dependencies.LobbyGamesEnv)
-	games, err := dependencies.Config{PublicURL: origin, LobbyGames: existing}.LobbyGamesConfig(origin)
+	existing, _ := lookup(gamehooks.GamesEnv)
+	games, err := withIslandBattles(existing, origin)
 	if err != nil {
 		return err
 	}
 	_, err = fmt.Fprintln(output, games)
 	return err
+}
+
+// withIslandBattles returns the LOBBY_GAMES existing with Island Battles in
+// it: its entries, plus lobbyadapter.LobbyGame with its hooks at origin's
+// lobbyadapter.HooksPath and its catalog on origin, unless existing lists
+// island-battles itself.
+func withIslandBattles(existing, origin string) (string, error) {
+	entries := []json.RawMessage{}
+	if strings.TrimSpace(existing) != "" {
+		if err := json.Unmarshal([]byte(existing), &entries); err != nil {
+			return "", fmt.Errorf("%s must be a JSON array: %w", gamehooks.GamesEnv, err)
+		}
+	}
+	for _, entry := range entries {
+		var game struct {
+			Key string `json:"key"`
+		}
+		if err := json.Unmarshal(entry, &game); err == nil && game.Key == lobbyadapter.GameKey {
+			return existing, nil
+		}
+	}
+	islandBattles, err := lobbyadapter.LobbyGame(origin+lobbyadapter.HooksPath, origin)
+	if err != nil {
+		return "", err
+	}
+	games, err := json.Marshal(append(entries, islandBattles))
+	return string(games), err
 }

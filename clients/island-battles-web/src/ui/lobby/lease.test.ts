@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ApiError } from "../../api/errors";
+import { setServerUrls } from "../../platform";
 import { heartbeatIntervalMs, releaseLease, startHeartbeat } from "./lease";
 
 function fakeTimers() {
@@ -96,17 +97,44 @@ describe("releasing the lease", () => {
         clientInstanceId: "tab-1",
         membershipGeneration: 3,
         accessToken: "secret",
+        lobbyUrl: "https://lobby.example.test",
       },
       (async (url: string, init?: RequestInit) => {
         seen = { url, init };
         return new Response(null, { status: 204 });
       }) as unknown as typeof fetch,
     );
+    // The lobby is on its own site, not the page's origin (#232).
     expect(seen?.url).toBe(
-      "/lobby/v1/games/island-battles/lobbies/lobby-1/leases/tab-1?generation=3",
+      "https://lobby.example.test/lobby/v1/games/island-battles/lobbies/lobby-1/leases/tab-1?generation=3",
     );
     expect(seen?.init?.method).toBe("DELETE");
     expect(seen?.init?.keepalive).toBe(true);
     expect(seen?.init?.headers).toEqual({ Authorization: "Bearer secret" });
+  });
+
+  test("goes to the lobby that config.json names, not to the page's origin", () => {
+    let seen = "";
+    setServerUrls({ lobby_url: "https://lobby.example.test" });
+    try {
+      releaseLease(
+        {
+          gameKey: "island-battles",
+          lobbyId: "lobby-1",
+          clientInstanceId: "tab-1",
+          membershipGeneration: 3,
+          accessToken: "secret",
+        },
+        (async (url: string) => {
+          seen = url;
+          return new Response(null, { status: 204 });
+        }) as unknown as typeof fetch,
+      );
+    } finally {
+      setServerUrls({});
+    }
+    expect(seen).toBe(
+      "https://lobby.example.test/lobby/v1/games/island-battles/lobbies/lobby-1/leases/tab-1?generation=3",
+    );
   });
 });

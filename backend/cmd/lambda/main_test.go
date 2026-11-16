@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"islandBattles/backend/lobbyadapter"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -80,7 +79,8 @@ func callWithHeaders(t *testing.T, invoke functionURL, method, path, body, autho
 	return response, content
 }
 
-func testConfig(t *testing.T, database *gorm.DB) dependencies.Config {
+// testConfig configures the backend with testLobby's URL.
+func testConfig(t *testing.T, database *gorm.DB, lobby testLobby) dependencies.Config {
 	t.Helper()
 	dialector, ok := database.Dialector.(*gormpostgres.Dialector)
 	if !ok {
@@ -88,19 +88,48 @@ func testConfig(t *testing.T, database *gorm.DB) dependencies.Config {
 	}
 	// Nothing in this test pushes to Centrifugo, so its address is unused.
 	return dependencies.Config{
-		Database:                  dependencies.DefaultDatabaseConfig(dialector.DSN),
-		CentrifugoPublicURL:       "ws://127.0.0.1:9/connection/websocket",
-		CentrifugoAPIURL:          "http://127.0.0.1:9/api",
-		CentrifugoAPIKey:          "test-centrifugo-api-key",
-		ConnectionTokenHMACSecret: "test-connection-token-secret-of-sufficient-length",
-		LobbyProxySecret:          "test-lobby-proxy-secret",
-		SubmitTokenSecret:         "test-submit-token-secret",
-		GameRetentionPeriod:       retention.DefaultPeriod,
-		PlayerTokenKeys:           testPlayerTokenKeys(t),
-		PlayerTokenLifetime:       playertoken.MaxLifetime,
-		LobbyHookSecret:           []byte(testHookSecret),
-		LobbyGameSecrets:          map[string]string{lobbyadapter.SecretEnv: testHookSecret},
+		Database:            dependencies.DefaultDatabaseConfig(dialector.DSN),
+		CentrifugoAPIURL:    "http://127.0.0.1:9/api",
+		CentrifugoAPIKey:    "test-centrifugo-api-key",
+		SubmitTokenSecret:   "test-submit-token-secret",
+		GameRetentionPeriod: retention.DefaultPeriod,
+		LobbyHookSecret:     []byte(testHookSecret),
+		LobbyURL:            lobby.url,
 	}
+}
+
+// testLobby stands in for the lobby, which runs on its own: it publishes its
+// keys at its JWKS URL, and signs player tokens with them.
+type testLobby struct {
+	url  string
+	keys *playertoken.KeySet
+}
+
+func startTestLobby(t *testing.T) testLobby {
+	t.Helper()
+	keys := testPlayerTokenKeys(t)
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != playertoken.JWKSPath {
+			http.NotFound(response, request)
+			return
+		}
+		response.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(response).Encode(keys.JWKS())
+	}))
+	t.Cleanup(server.Close)
+	return testLobby{url: server.URL, keys: keys}
+}
+
+// playerToken is the lobby's player token for playerID in Island Battles.
+func (lobby testLobby) playerToken(t *testing.T, playerID string) string {
+	t.Helper()
+	now := time.Now()
+	token, err := lobby.keys.Sign(playertoken.Claims{Issuer: lobby.url, Subject: playerID, Audience: "island-battles", Name: "Alice",
+		IssuedAt: now.Unix(), Expires: now.Add(playertoken.MaxLifetime).Unix()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
 }
 
 // testHookSecret signs the lobby's calls of the game's hooks, and the game's
@@ -117,42 +146,33 @@ func testPlayerTokenKeys(t *testing.T) *playertoken.KeySet {
 }
 
 func TestReplayOverSixMegabytesStreamsThroughTheFunctionURL(t *testing.T) {
-	database, lobbyDatabase := testutils.InitTestDatabases(t)
-	handler, err := newHandler(testConfig(t, database), database, lobbyDatabase, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	database := testutils.InitTestDB(t)
+	lobby := startTestLobby(t)
+	handler, err := newHandler(testConfig(t, database, lobby), database, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	invoke := lambdaurl.Wrap(handler)
 
-	response, content := call(t, invoke, http.MethodPost, "/lobby/v1/sessions", `{"display_name":"Alice"}`, "")
-	if response.StatusCode != http.StatusCreated {
-		t.Fatalf("create session=%d %s", response.StatusCode, content)
-	}
-	var alice domain.GuestSession
-	if err := json.Unmarshal(content, &alice); err != nil {
-		t.Fatal(err)
-	}
+	alice := uuid.NewString()
 	lobbyID, red, blue := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	binding, err := services.RunLobbyGame(context.Background(), database, &testutils.RecordedPublisher{}, nil, domain.Snapshot{
 		Lobby:       domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted},
 		Teams:       []domain.Team{{ID: red, Name: "Red", Order: 1}, {ID: blue, Name: "Blue", Order: 2}},
-		StartRoster: domain.StartRoster{{PlayerID: alice.PlayerID, TeamID: red, TeamOrder: 1}, {PlayerID: uuid.NewString(), TeamID: blue, TeamOrder: 2}},
+		StartRoster: domain.StartRoster{{PlayerID: alice, TeamID: red, TeamOrder: 1}, {PlayerID: uuid.NewString(), TeamID: blue, TeamOrder: 2}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	enlargeGame(t, database, binding.GameID)
 
-	// The game's routes take a player token from the lobby, not the session.
-	response, content = call(t, invoke, http.MethodPost, "/lobby/v1/player-tokens", `{"game_key":"island-battles"}`, "Bearer "+alice.AccessToken)
-	var playerToken domain.PlayerToken
-	if response.StatusCode != http.StatusOK || json.Unmarshal(content, &playerToken) != nil {
-		t.Fatalf("player token=%d %s", response.StatusCode, content)
+	// The game's routes take a player token from the lobby, which the game
+	// verifies with the lobby's JWKS.
+	playerToken := lobby.playerToken(t, alice)
+	if response, content := call(t, invoke, http.MethodGet, "/game/from-lobby/"+lobbyID+"/replay", "", "Bearer not-a-player-token"); response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("replay without a player token=%d %.200s", response.StatusCode, content)
 	}
-	if response, content = call(t, invoke, http.MethodGet, "/game/from-lobby/"+lobbyID+"/replay", "", "Bearer "+alice.AccessToken); response.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("replay with the session=%d %.200s", response.StatusCode, content)
-	}
-	response, content = call(t, invoke, http.MethodGet, "/game/from-lobby/"+lobbyID+"/replay", "", "Bearer "+playerToken.Token)
+	response, content := call(t, invoke, http.MethodGet, "/game/from-lobby/"+lobbyID+"/replay", "", "Bearer "+playerToken)
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("replay=%d %.500s", response.StatusCode, content)
 	}
@@ -169,7 +189,7 @@ func TestReplayOverSixMegabytesStreamsThroughTheFunctionURL(t *testing.T) {
 
 	// The demo of the same game streams packed with gzip to a browser, which
 	// asks for it, and unpacks to the whole file.
-	response, content = callWithHeaders(t, invoke, http.MethodGet, "/game/from-lobby/"+lobbyID+"/demo", "", "Bearer "+playerToken.Token,
+	response, content = callWithHeaders(t, invoke, http.MethodGet, "/game/from-lobby/"+lobbyID+"/demo", "", "Bearer "+playerToken,
 		map[string]string{"accept-encoding": "gzip, deflate, br, zstd"})
 	if response.StatusCode != http.StatusOK || response.Headers["Content-Encoding"] != "gzip" || response.Headers["Vary"] != "Accept-Encoding" {
 		t.Fatalf("demo=%d %v", response.StatusCode, response.Headers)
@@ -202,38 +222,32 @@ func TestReplayOverSixMegabytesStreamsThroughTheFunctionURL(t *testing.T) {
 // authentication. None reads game data. Add a route here only on purpose.
 // A route listed without a method allows every method, for static mounts.
 var publicRoutes = map[string]string{
-	"GET /healthz":            "readiness",
-	"GET /":                   "redirect to the embedded lobby UI",
-	"POST /lobby/v1/sessions": "creates a guest credential",
-	"GET /lobby/v1/jwks.json": "the lobby's public keys, which verify player tokens",
-	"GET /map/templates":      "lists default map templates, which are not game data",
-	"GET /game/upgrades":      "lists the static upgrade cost table, which is not game data",
-	"GET /bots/defaults":      "lists the static default bot catalog, which is not game data",
-	"GET /game/bot-compute":   "says whether uploaded bots may start this month, from a 10-minute cache, which is not game data",
-	"POST /map/validate":      "checks a map file and stores nothing",
-	"GET /lobby/ui":           "redirect to the embedded lobby UI",
-	"/lobby/ui/*":             "embedded static lobby UI",
-	"/game/demo/*":            "embedded static browser demo",
-	"GET /map/builder":        "redirect to the embedded map builder",
-	"/map/builder/*":          "embedded static map builder",
-	"GET /game/demo-viewer":   "redirect to the embedded demo viewer",
-	"/game/demo-viewer/*":     "embedded static demo viewer, which reads demo files in the browser",
-	"GET /docs":               "API documentation",
-	"GET /openapi.json":       "API document",
-	"GET /openapi.yaml":       "API document",
-	"GET /openapi-3.0.json":   "API document",
-	"GET /openapi-3.0.yaml":   "API document",
-	"GET /schemas/{schema}":   "API schemas",
+	"GET /healthz":          "readiness",
+	"GET /":                 "redirect to the lobby's page, on the lobby's origin",
+	"/lobby":                "410 Gone: the lobby moved to its own origin",
+	"/lobby/*":              "410 Gone: the lobby moved to its own origin",
+	"GET /map/templates":    "lists default map templates, which are not game data",
+	"GET /game/upgrades":    "lists the static upgrade cost table, which is not game data",
+	"GET /bots/defaults":    "lists the static default bot catalog, which is not game data",
+	"GET /game/bot-compute": "says whether uploaded bots may start this month, from a 10-minute cache, which is not game data",
+	"POST /map/validate":    "checks a map file and stores nothing",
+	"/game/demo/*":          "embedded static browser demo",
+	"GET /map/builder":      "redirect to the embedded map builder",
+	"/map/builder/*":        "embedded static map builder",
+	"GET /game/demo-viewer": "redirect to the embedded demo viewer",
+	"/game/demo-viewer/*":   "embedded static demo viewer, which reads demo files in the browser",
+	"GET /docs":             "API documentation",
+	"GET /openapi.json":     "API document",
+	"GET /openapi.yaml":     "API document",
+	"GET /openapi-3.0.json": "API document",
+	"GET /openapi-3.0.yaml": "API document",
+	"GET /schemas/{schema}": "API schemas",
 }
 
 // signedMounts serve only operations that check a Lobby-Signature: the
-// lobby's game API and the game's hooks. A mount answers a path without an
-// operation with 404, so each is checked with its operations' paths.
+// game's hooks. A mount answers a path without an operation with 404, so
+// each is checked with its operations' paths.
 var signedMounts = map[string][]string{
-	"/lobby/v1/game-api/*": {
-		"GET /lobby/v1/game-api/games/island-battles/lobbies/00000000-0000-4000-8000-000000000001",
-		"POST /lobby/v1/game-api/games/island-battles/lobbies/00000000-0000-4000-8000-000000000001/authorize-watch",
-	},
 	"/game/lobby-hooks/*": {
 		"POST /game/lobby-hooks/validate-settings", "POST /game/lobby-hooks/validate-seat", "POST /game/lobby-hooks/validate-member-settings",
 		"POST /game/lobby-hooks/ready-check", "POST /game/lobby-hooks/start", "POST /game/lobby-hooks/round-ended",
@@ -241,12 +255,12 @@ var signedMounts = map[string][]string{
 }
 
 // Every other route must refuse a request without credentials: no bearer
-// token, no admin key, no proxy secret and no Lobby-Signature.
+// token, no admin key and no Lobby-Signature.
 func TestTheLambdaHostServesOnlyListedRoutesWithoutAuthentication(t *testing.T) {
-	database, lobbyDatabase := testutils.InitTestDatabases(t)
-	config := testConfig(t, database)
+	database := testutils.InitTestDB(t)
+	config := testConfig(t, database, startTestLobby(t))
 	config.AdminAPIKey = "test-admin-api-key"
-	handler, err := newHandler(config, database, lobbyDatabase, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	handler, err := newHandler(config, database, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,12 +311,19 @@ func TestTheLambdaHostServesOnlyListedRoutesWithoutAuthentication(t *testing.T) 
 	if response, content := call(t, invoke, http.MethodPost, "/map/create", `{}`, ""); response.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("map creation without the admin key=%d %s", response.StatusCode, content)
 	}
-	// The game's bare name opens the lobby (#75).
-	if response, content := call(t, invoke, http.MethodGet, "/", "", ""); response.StatusCode != http.StatusTemporaryRedirect || response.Headers["Location"] != "/lobby/ui/" {
+	// The game's bare name opens the lobby's page (#75), on the lobby's
+	// origin (#232).
+	if response, content := call(t, invoke, http.MethodGet, "/", "", ""); response.StatusCode != http.StatusTemporaryRedirect || response.Headers["Location"] != config.LobbyURL+"/lobby/ui/" {
 		t.Fatalf("/=%d to %q %s", response.StatusCode, response.Headers["Location"], content)
 	}
+	// The lobby's old routes are gone from the game's origin.
+	for _, path := range []string{"/lobby/v1/sessions", "/lobby/v1/jwks.json", "/lobby/ui/"} {
+		if response, content := call(t, invoke, http.MethodGet, path, "", ""); response.StatusCode != http.StatusGone || !strings.Contains(string(content), config.LobbyURL) {
+			t.Fatalf("%s=%d %s", path, response.StatusCode, content)
+		}
+	}
 
-	local, err := app.New(config, database, lobbyDatabase, slog.New(slog.NewTextHandler(io.Discard, nil)), app.WithGameGraph())
+	local, err := app.New(config, database, slog.New(slog.NewTextHandler(io.Discard, nil)), app.WithGameGraph())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,63 +438,37 @@ func TestRequestsEndBeforeTheLambdaTimeout(t *testing.T) {
 
 // A request that fails writes one ERROR line, which the error alarm counts,
 // with its operation and the cause that its response leaves out.
-// That covers the answers that leave Huma's transformers out: the lobby's
-// authentication writes its own problem, and the Centrifugo proxy its own 503.
 func TestAFailedRequestLogsOneErrorLineWithItsCause(t *testing.T) {
-	database, lobbyDatabase := testutils.InitTestDatabases(t)
+	database := testutils.InitTestDB(t)
+	lobby := startTestLobby(t)
 	var output bytes.Buffer
 	logger, _ := observability.NewLambdaLogger(&output, observability.DefaultSettings())
-	config := testConfig(t, database)
-	handler, err := newHandler(config, database, lobbyDatabase, logger)
+	handler, err := newHandler(testConfig(t, database, lobby), database, logger)
 	if err != nil {
 		t.Fatal(err)
 	}
 	invoke := lambdaurl.Wrap(handler)
-	response, content := call(t, invoke, http.MethodPost, "/lobby/v1/sessions", `{"display_name":"Alice"}`, "")
-	var alice domain.GuestSession
-	if err := json.Unmarshal(content, &alice); response.StatusCode != http.StatusCreated || err != nil {
-		t.Fatalf("create session=%d %s", response.StatusCode, content)
+	// The database goes away.
+	sqlDatabase, err := database.DB()
+	if err != nil {
+		t.Fatal(err)
 	}
-	// Both databases go away: Island Battles' and the lobby's.
-	for _, pool := range []*gorm.DB{database, lobbyDatabase} {
-		sqlDatabase, err := pool.DB()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := sqlDatabase.Close(); err != nil {
-			t.Fatal(err)
-		}
+	if err := sqlDatabase.Close(); err != nil {
+		t.Fatal(err)
 	}
-	proxyRequest := func(t *testing.T) *events.LambdaFunctionURLStreamingResponse {
-		path := "/internal/lobby/centrifugo/subscribe"
-		response, err := invoke(context.Background(), &events.LambdaFunctionURLRequest{
-			RawPath: path,
-			Headers: map[string]string{"content-type": "application/json", "x-lobby-proxy-secret": config.LobbyProxySecret},
-			Body:    `{"client":"client","user":"` + alice.PlayerID + `","channel":"player:` + alice.PlayerID + `"}`,
-			RequestContext: events.LambdaFunctionURLRequestContext{
-				DomainName: "example.lambda-url.eu-west-1.on.aws",
-				HTTP:       events.LambdaFunctionURLRequestContextHTTPDescription{Method: http.MethodPost, Path: path},
-			},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, _ = io.ReadAll(response.Body)
-		return response
-	}
+	playerToken := lobby.playerToken(t, uuid.NewString())
 	for _, test := range []struct {
 		name, route, operation string
 		send                   func(*testing.T) *events.LambdaFunctionURLStreamingResponse
 	}{
-		{"a Huma operation", "/lobby/v1/sessions", "createLobbySession", func(t *testing.T) *events.LambdaFunctionURLStreamingResponse {
-			response, _ := call(t, invoke, http.MethodPost, "/lobby/v1/sessions", `{"display_name":"Bob"}`, "")
+		{"a public operation", "/map/templates", "listMapTemplates", func(t *testing.T) *events.LambdaFunctionURLStreamingResponse {
+			response, _ := call(t, invoke, http.MethodGet, "/map/templates", "", "")
 			return response
 		}},
-		{"the lobby's authentication", "/lobby/v1/lobbies", "createLobby", func(t *testing.T) *events.LambdaFunctionURLStreamingResponse {
-			response, _ := call(t, invoke, http.MethodPost, "/lobby/v1/lobbies", `{}`, "Bearer "+alice.AccessToken)
+		{"an operation with a player token", "/game/from-lobby/{lobby_id}/generation", "getIslandLobbyGeneration", func(t *testing.T) *events.LambdaFunctionURLStreamingResponse {
+			response, _ := call(t, invoke, http.MethodGet, "/game/from-lobby/"+uuid.NewString()+"/generation", "", "Bearer "+playerToken)
 			return response
 		}},
-		{"the Centrifugo proxy", "/internal/lobby/centrifugo/subscribe", "", proxyRequest},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			output.Reset()
@@ -486,14 +481,14 @@ func TestAFailedRequestLogsOneErrorLineWithItsCause(t *testing.T) {
 				if err := json.Unmarshal([]byte(text), &line); err != nil {
 					t.Fatalf("log line is not JSON: %q", text)
 				}
-				// The lobby retention pass that ends a lobby request fails too,
+				// The game retention pass that ends a game request fails too,
 				// and logs its own line.
-				if line["level"] == "ERROR" && line["msg"] != "Lobby retention pass failed" {
+				if line["level"] == "ERROR" && line["msg"] != "Game retention pass failed" {
 					errorLines = append(errorLines, line)
 				}
 			}
 			if len(errorLines) != 1 || errorLines[0]["route"] != test.route || !strings.Contains(fmt.Sprint(errorLines[0]["errors"]), "database is closed") ||
-				test.operation != "" && errorLines[0]["operation"] != test.operation {
+				errorLines[0]["operation"] != test.operation {
 				t.Fatalf("error lines = %v\nall output: %s", errorLines, output.String())
 			}
 		})

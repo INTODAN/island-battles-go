@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -160,27 +162,83 @@ func TestToolTransactionsRefuseWrites(t *testing.T) {
 	}
 }
 
-// adminSQL renders one of the Ansible templates for the production read-only
-// role: the role itself, or one database's grants. They use only plain
-// substitutions.
-func adminSQL(t *testing.T, name string, variables map[string]string) string {
+// adminTemplates is where the pinned lobby module keeps the Ansible
+// templates of the production read-only role. INTODAN/mpl's VM deploy creates
+// the role since it owns the VM (#232), so the tests run its own SQL.
+func adminTemplates(t *testing.T) string {
 	t.Helper()
-	template, err := os.ReadFile("../../../deploy/ansible/roles/app/templates/" + name)
+	output, err := exec.Command("go", "list", "-m", "-f", "{{.Dir}}", "github.com/INTODAN/mpl").Output()
+	if err != nil {
+		t.Fatalf("go list the lobby module: %v", err)
+	}
+	return filepath.Join(strings.TrimSpace(string(output)), "deploy", "ansible", "roles", "app", "templates")
+}
+
+// adminSQL renders one of INTODAN/mpl's Ansible templates for the production
+// read-only role, admin-role.sql.j2 or admin-grants.sql.j2, as Ansible would:
+// variables are substituted, the loop over databases repeats its lines for
+// each of databases, and the blocks on item.lobby keep their lines only in
+// the lobby's database. Any other Jinja construct fails the test, so a
+// change to the templates shows here.
+func adminSQL(t *testing.T, name string, variables map[string]string, databases []string, lobby bool) string {
+	t.Helper()
+	template, err := os.ReadFile(filepath.Join(adminTemplates(t), name))
 	if err != nil {
 		t.Fatal(err)
 	}
-	rendered := regexp.MustCompile(`\{\{ ([a-z_]+) \}\}`).ReplaceAllStringFunc(string(template), func(placeholder string) string {
-		name := strings.Trim(placeholder, "{} ")
-		value, found := variables[name]
-		if !found {
-			t.Fatalf("the template uses %s, which the test doesn't set", name)
-		}
-		return value
-	})
-	if strings.Contains(rendered, "{{") || strings.Contains(rendered, "{%") {
-		t.Fatalf("the template uses more than plain substitutions: %s", rendered)
+	substitute := func(line string, values map[string]string) string {
+		return regexp.MustCompile(`\{\{ ([a-z_.]+) \}\}`).ReplaceAllStringFunc(line, func(placeholder string) string {
+			variable := strings.Trim(placeholder, "{} ")
+			value, found := values[variable]
+			if !found {
+				t.Fatalf("%s uses %s, which the test doesn't set", name, variable)
+			}
+			return value
+		})
 	}
-	return rendered
+	var rendered, loop []string
+	inLoop := false
+	keep := []bool{true}
+	for line := range strings.Lines(string(template)) {
+		directive := strings.TrimSpace(line)
+		switch directive {
+		case "{% for database in app_databases %}":
+			inLoop = true
+			continue
+		case "{% endfor %}":
+			for _, database := range databases {
+				values := map[string]string{"database.database": database}
+				for name, value := range variables {
+					values[name] = value
+				}
+				for _, body := range loop {
+					rendered = append(rendered, substitute(body, values))
+				}
+			}
+			inLoop, loop = false, nil
+			continue
+		case "{% if item.lobby | default(false) %}":
+			keep = append(keep, keep[len(keep)-1] && lobby)
+			continue
+		case "{% if not (item.lobby | default(false)) %}":
+			keep = append(keep, keep[len(keep)-1] && !lobby)
+			continue
+		case "{% endif %}":
+			keep = keep[:len(keep)-1]
+			continue
+		}
+		if strings.Contains(line, "{%") {
+			t.Fatalf("%s uses %q, which the test doesn't render", name, directive)
+		}
+		switch {
+		case !keep[len(keep)-1]:
+		case inLoop:
+			loop = append(loop, line)
+		default:
+			rendered = append(rendered, substitute(line, variables))
+		}
+	}
+	return strings.Join(rendered, "")
 }
 
 // The production role, as Ansible creates it, reads every table of both

@@ -190,16 +190,17 @@ func WithGameEnded(ended func(ctx context.Context, outcome GameOutcome, generati
 
 // URLs are where a client reaches Island Battles: Game, the game's site,
 // for its routes under /game/ and /generation/, such as
-// https://island-battles.example.org, and Lobby, the lobby's, for its routes
-// under /lobby/v1/, such as https://lobby.example.org. Where one server
-// serves both, as a local one may, BaseURL sets both to its URL.
+// https://island-battles.elidan.org, and Lobby, the lobby's, for its routes
+// under /lobby/v1/, such as https://lobby.elidan.org. Where one server
+// serves both, BaseURL sets both to its URL; the official game's are two
+// sites.
 type URLs struct {
 	Game  string
 	Lobby string
 }
 
 // BaseURL is the shorthand for URLs whose game and lobby are both at
-// baseURL, such as http://localhost:8888.
+// baseURL, for a server that serves the game and the lobby together.
 func BaseURL(baseURL string) URLs {
 	return URLs{Game: baseURL, Lobby: baseURL}
 }

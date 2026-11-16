@@ -1,8 +1,6 @@
 package dependencies
 
 import (
-	"encoding/json"
-	"islandBattles/backend/lobbyadapter"
 	"strings"
 	"testing"
 	"time"
@@ -12,8 +10,8 @@ func TestLoadConfigRejectsMissingSecretsWithoutEchoingValues(t *testing.T) {
 	t.Parallel()
 
 	values := validConfigurationEnvironment()
-	delete(values, ConnectionTokenHMACSecretEnv)
-	delete(values, LobbyProxySecretEnv)
+	delete(values, LobbyHookSecretEnv)
+	delete(values, LobbyURLEnv)
 	delete(values, SubmitTokenSecretEnv)
 	values[CentrifugoAPIKeyEnv] = "do-not-print-api-key"
 
@@ -21,41 +19,11 @@ func TestLoadConfigRejectsMissingSecretsWithoutEchoingValues(t *testing.T) {
 	if err == nil {
 		t.Fatal("LoadConfigFromLookup() error = nil, want missing configuration error")
 	}
-	if !strings.Contains(err.Error(), ConnectionTokenHMACSecretEnv) || !strings.Contains(err.Error(), LobbyProxySecretEnv) || !strings.Contains(err.Error(), SubmitTokenSecretEnv) {
+	if !strings.Contains(err.Error(), LobbyHookSecretEnv) || !strings.Contains(err.Error(), LobbyURLEnv) || !strings.Contains(err.Error(), SubmitTokenSecretEnv) {
 		t.Fatalf("LoadConfigFromLookup() error = %q, want missing secret variable names", err)
 	}
 	if strings.Contains(err.Error(), values[CentrifugoAPIKeyEnv]) {
 		t.Fatalf("LoadConfigFromLookup() error leaked a secret: %q", err)
-	}
-}
-
-// The lobby in this process keeps its tables in its own database (#229), with
-// Island Battles' pool limits; a lobby that runs on its own reads its database
-// itself.
-func TestTheLobbyInThisProcessNeedsItsOwnDatabase(t *testing.T) {
-	t.Parallel()
-
-	values := validConfigurationEnvironment()
-	values[DatabaseMaxOpenConnectionsEnv] = "3"
-	config, err := LoadConfigFromLookup(mapLookup(values))
-	if err != nil {
-		t.Fatal(err)
-	}
-	lobby := config.LobbyDatabaseConfig()
-	if lobby.URL != values[LobbyDatabaseURLEnv] || lobby.MaxOpenConnections != 3 || config.Database.URL != values[DatabaseURLEnv] {
-		t.Fatalf("the lobby's database = %+v", lobby)
-	}
-	delete(values, LobbyDatabaseURLEnv)
-	if _, err := LoadConfigFromLookup(mapLookup(values)); err == nil || !strings.Contains(err.Error(), LobbyDatabaseURLEnv) {
-		t.Fatalf("without the lobby's database: %v", err)
-	}
-	values[LobbyDatabaseURLEnv] = "mysql://lobby@localhost/lobby"
-	if _, err := LoadConfigFromLookup(mapLookup(values)); err == nil || !strings.Contains(err.Error(), LobbyDatabaseURLEnv) {
-		t.Fatalf("with another scheme: %v", err)
-	}
-	values[LobbyURLEnv] = "http://localhost:8890"
-	if config, err := LoadConfigFromLookup(mapLookup(values)); err != nil || config.LobbyDatabaseURL != "" {
-		t.Fatalf("with a lobby of its own: %+v, %v", config.LobbyDatabaseURL, err)
 	}
 }
 
@@ -66,8 +34,8 @@ func TestLoadConfigAcceptsExplicitValidConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfigFromLookup() error = %v", err)
 	}
-	if config.CentrifugoPublicURL != "ws://localhost:8000/connection/websocket" {
-		t.Fatalf("CentrifugoPublicURL = %q", config.CentrifugoPublicURL)
+	if config.CentrifugoAPIURL != "http://localhost:8000/api" || config.LobbyURL != "http://localhost:8890" {
+		t.Fatalf("CentrifugoAPIURL = %q, LobbyURL = %q", config.CentrifugoAPIURL, config.LobbyURL)
 	}
 	if config.AdminAPIKey != "" {
 		t.Fatalf("AdminAPIKey = %q without %s", config.AdminAPIKey, AdminAPIKeyEnv)
@@ -79,42 +47,6 @@ func TestLoadConfigAcceptsExplicitValidConfiguration(t *testing.T) {
 	environment[AdminAPIKeyEnv] = " admin-key "
 	if config, err := LoadConfigFromLookup(mapLookup(environment)); err != nil || config.AdminAPIKey != "admin-key" {
 		t.Fatalf("AdminAPIKey = %q, error = %v", config.AdminAPIKey, err)
-	}
-}
-
-func TestLoadConfigReadsThePlayerTokenKeys(t *testing.T) {
-	t.Parallel()
-
-	values := validConfigurationEnvironment()
-	values[PlayerTokenKeysEnv] = "new:" + testSeed + ",old:" + testSeed
-	config, err := LoadConfigFromLookup(mapLookup(values))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if keys := config.PlayerTokenKeys.JWKS().Keys; len(keys) != 2 || keys[0].KeyID != "new" {
-		t.Fatalf("keys = %+v", keys)
-	}
-	if config.PlayerTokenLifetime != 15*time.Minute || config.LobbyIssuer() != LocalLobbyIssuer {
-		t.Fatalf("lifetime = %v, issuer = %q", config.PlayerTokenLifetime, config.LobbyIssuer())
-	}
-	values[PublicURLEnv] = "https://island-battles.example.org"
-	values[PlayerTokenLifetimeEnv] = "2m"
-	if config, err := LoadConfigFromLookup(mapLookup(values)); err != nil || config.PlayerTokenLifetime != 2*time.Minute || config.LobbyIssuer() != "https://island-battles.example.org" {
-		t.Fatalf("lifetime = %v, issuer = %q, error = %v", config.PlayerTokenLifetime, config.LobbyIssuer(), err)
-	}
-	for _, lifetime := range []string{"30s", "16m", "soon"} {
-		values[PlayerTokenLifetimeEnv] = lifetime
-		if _, err := LoadConfigFromLookup(mapLookup(values)); err == nil || !strings.Contains(err.Error(), PlayerTokenLifetimeEnv) {
-			t.Errorf("lifetime %q: error = %v", lifetime, err)
-		}
-	}
-	delete(values, PlayerTokenLifetimeEnv)
-	for _, keys := range []string{"", "k1", "k1:" + testSeed[:20], "k1:" + testSeed + ",k1:" + testSeed} {
-		values[PlayerTokenKeysEnv] = keys
-		_, err := LoadConfigFromLookup(mapLookup(values))
-		if err == nil || !strings.Contains(err.Error(), PlayerTokenKeysEnv) || (len(keys) > 10 && strings.Contains(err.Error(), keys[3:])) {
-			t.Errorf("keys %q: error = %v", keys, err)
-		}
 	}
 }
 
@@ -260,18 +192,6 @@ func TestLoadConfigReadsTheBotPackageBucket(t *testing.T) {
 	}
 }
 
-func TestLoadConfigRejectsInvalidPublicWebSocketURL(t *testing.T) {
-	t.Parallel()
-
-	values := validConfigurationEnvironment()
-	values[CentrifugoPublicURLEnv] = "http://localhost:8000/connection/websocket"
-
-	_, err := LoadConfigFromLookup(mapLookup(values))
-	if err == nil || !strings.Contains(err.Error(), CentrifugoPublicURLEnv) {
-		t.Fatalf("LoadConfigFromLookup() error = %v, want %s validation error", err, CentrifugoPublicURLEnv)
-	}
-}
-
 func TestLoadConfigDefaultsTheDatabasePool(t *testing.T) {
 	t.Parallel()
 
@@ -369,25 +289,17 @@ func TestHTTPAddrIsOnlyNeededByTheServerHost(t *testing.T) {
 
 func validConfigurationEnvironment() map[string]string {
 	return map[string]string{
-		DatabaseURLEnv:               "postgres://user:password@localhost:5432/island_battles?sslmode=disable",
-		LobbyDatabaseURLEnv:          "postgres://lobby:password@localhost:5432/lobby?sslmode=disable",
-		CentrifugoPublicURLEnv:       "ws://localhost:8000/connection/websocket",
-		CentrifugoAPIURLEnv:          "http://localhost:8000/api",
-		CentrifugoAPIKeyEnv:          "api-key",
-		ConnectionTokenHMACSecretEnv: "connection-token-secret",
-		LobbyProxySecretEnv:          "proxy-secret",
-		SubmitTokenSecretEnv:         "submit-token-secret",
-		PlayerTokenKeysEnv:           "k1:" + testSeed,
-		LobbyHookSecretEnv:           testHookSecret,
-		lobbyadapter.SecretEnv:       testHookSecret,
+		DatabaseURLEnv:       "postgres://user:password@localhost:5432/island_battles?sslmode=disable",
+		CentrifugoAPIURLEnv:  "http://localhost:8000/api",
+		CentrifugoAPIKeyEnv:  "api-key",
+		SubmitTokenSecretEnv: "submit-token-secret",
+		LobbyHookSecretEnv:   testHookSecret,
+		LobbyURLEnv:          "http://localhost:8890",
 	}
 }
 
 // testHookSecret is a shared secret of the lobby's hooks of 32 bytes.
 const testHookSecret = "hook-secret-of-thirty-two-bytes!"
-
-// testSeed is an Ed25519 seed of 32 bytes in base64url: 32 times "s".
-const testSeed = "c3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3M"
 
 func mapLookup(values map[string]string) func(string) (string, bool) {
 	return func(name string) (string, bool) {
@@ -396,77 +308,33 @@ func mapLookup(values map[string]string) func(string) (string, bool) {
 	}
 }
 
-func TestLoadConfigBindsTheLobbyToIslandBattles(t *testing.T) {
-	config, err := LoadConfigFromLookup(mapLookup(validConfigurationEnvironment()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(config.LobbyHookSecret) != testHookSecret || config.LobbyURL != "" || config.LobbyGameSecrets[lobbyadapter.SecretEnv] != testHookSecret {
-		t.Fatalf("config = %+v", config)
-	}
-	// Without LOBBY_GAMES, the lobby calls Island Battles alone, in this
-	// process.
-	games, err := config.LobbyGamesConfig("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var entries []struct {
-		Key      string `json:"key"`
-		HooksURL string `json:"hooks_url"`
-	}
-	if err := json.Unmarshal([]byte(games), &entries); err != nil || len(entries) != 1 || entries[0].Key != lobbyadapter.GameKey || entries[0].HooksURL != "http://localhost"+lobbyadapter.HooksPath {
-		t.Fatalf("LOBBY_GAMES = %s, %v", games, err)
-	}
+// The game reaches the lobby at its URL, an origin, with a hook secret of
+// at least 32 bytes.
+func TestLoadConfigBindsIslandBattlesToTheLobby(t *testing.T) {
+	t.Parallel()
 
-	// Another game is added to Island Battles; a public URL names the hooks.
 	values := validConfigurationEnvironment()
-	values[PublicURLEnv] = "https://island-battles.example.test"
-	values[LobbyGamesEnv] = `[{"key":"mock-game","name":"Mock game","hooks_url":"https://mock.example.test/hooks","secret_env":"MOCK_SECRET"}]`
-	values["MOCK_SECRET"] = strings.Repeat("m", 32)
-	config, err = LoadConfigFromLookup(mapLookup(values))
+	values[LobbyURLEnv] = "https://lobby.example.test/"
+	config, err := LoadConfigFromLookup(mapLookup(values))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if games, err = config.LobbyGamesConfig(""); err != nil {
-		t.Fatal(err)
+	if config.LobbyURL != "https://lobby.example.test" || string(config.LobbyHookSecret) != testHookSecret {
+		t.Fatalf("lobby URL = %q, hook secret = %q", config.LobbyURL, config.LobbyHookSecret)
 	}
-	if err := json.Unmarshal([]byte(games), &entries); err != nil || len(entries) != 2 || entries[0].Key != "mock-game" || entries[1].HooksURL != "https://island-battles.example.test"+lobbyadapter.HooksPath {
-		t.Fatalf("LOBBY_GAMES = %s, %v", games, err)
-	}
-
-	// LOBBY_GAMES that lists Island Battles is taken as it is.
-	values[LobbyGamesEnv] = `[{"key":"island-battles","name":"Island Battles","hooks_url":"https://game.example.test/game/lobby-hooks","secret_env":"` + lobbyadapter.SecretEnv + `"}]`
-	if config, err = LoadConfigFromLookup(mapLookup(values)); err != nil {
-		t.Fatal(err)
-	}
-	if games, err = config.LobbyGamesConfig(""); err != nil || games != values[LobbyGamesEnv] {
-		t.Fatalf("LOBBY_GAMES = %s, %v", games, err)
-	}
-
 	for name, change := range map[string]func(map[string]string){
-		"no hook secret":              func(values map[string]string) { delete(values, LobbyHookSecretEnv) },
-		"a short hook secret":         func(values map[string]string) { values[LobbyHookSecretEnv] = "short" },
-		"no lobby secret":             func(values map[string]string) { delete(values, lobbyadapter.SecretEnv) },
-		"secrets that differ":         func(values map[string]string) { values[LobbyHookSecretEnv] = strings.Repeat("x", 32) },
-		"LOBBY_GAMES that isn't JSON": func(values map[string]string) { values[LobbyGamesEnv] = "island-battles" },
-		"a game without its secret": func(values map[string]string) {
-			values[LobbyGamesEnv] = `[{"key":"mock-game","name":"Mock game","hooks_url":"https://mock.example.test/hooks","secret_env":"MOCK_SECRET"}]`
-		},
+		"no lobby URL":          func(values map[string]string) { delete(values, LobbyURLEnv) },
 		"a lobby URL over http": func(values map[string]string) { values[LobbyURLEnv] = "http://lobby.example.test" },
+		"a lobby URL with a path": func(values map[string]string) {
+			values[LobbyURLEnv] = "https://lobby.example.test/lobby"
+		},
+		"no hook secret":      func(values map[string]string) { delete(values, LobbyHookSecretEnv) },
+		"a short hook secret": func(values map[string]string) { values[LobbyHookSecretEnv] = "short" },
 	} {
 		values := validConfigurationEnvironment()
 		change(values)
 		if _, err := LoadConfigFromLookup(mapLookup(values)); err == nil {
 			t.Errorf("%s: no error", name)
 		}
-	}
-
-	// A lobby of its own may have its own secret for Island Battles.
-	values = validConfigurationEnvironment()
-	values[LobbyURLEnv] = "https://lobby.example.test/"
-	values[LobbyHookSecretEnv] = strings.Repeat("x", 32)
-	values[PublicURLEnv] = "https://island-battles.example.test"
-	if config, err = LoadConfigFromLookup(mapLookup(values)); err != nil || config.LobbyURL != "https://lobby.example.test" {
-		t.Fatalf("lobby URL = %q, %v", config.LobbyURL, err)
 	}
 }

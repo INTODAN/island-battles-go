@@ -46,7 +46,7 @@ var lobbyGame []byte
 // https://island-battles.example.org, for a lobby page on another origin:
 // the catalog entry's URLs are then absolute URLs there, and frontendOrigin
 // is the entry's origin. Empty, they are paths on the lobby page's origin,
-// which is the game's while the lobby runs in the backend's process.
+// which suits a lobby page on the game's own origin, as in tests.
 func LobbyGame(hooksURL, frontendOrigin string) (json.RawMessage, error) {
 	var entry map[string]json.RawMessage
 	if err := json.Unmarshal(lobbyGame, &entry); err != nil {

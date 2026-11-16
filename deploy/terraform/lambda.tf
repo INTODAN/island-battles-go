@@ -6,7 +6,7 @@ locals {
   lambda_bootstrap_file = coalesce(var.lambda_bootstrap_file, "${path.module}/../local/lambda/bootstrap")
   lambda_settings_file  = coalesce(var.lambda_settings_file, "${path.module}/../local/lambda.env")
 
-  # lambda.env holds KEY=value lines, as the VM deploy writes them. Values are
+  # lambda.env holds KEY=value lines, as scripts/lambda-env.sh writes them. Values are
   # taken literally, without quotes or escapes. Blank lines and lines starting
   # with # are skipped. A repeated key keeps its last value.
   lambda_settings_found = fileexists(local.lambda_settings_file)
@@ -26,18 +26,22 @@ locals {
   lambda_settings = { for key, values in local.lambda_settings_values : key => values[length(values) - 1] }
 
   # Without a reservation, the account's own limit caps the function. Each
-  # instance keeps two pools of database_max_open_connections: one to the
-  # backend's database and one to the lobby's own (#229), for the lobby that
-  # runs in its process.
+  # instance keeps one pool of database_max_open_connections, to Island
+  # Battles' database: the lobby runs on its own, with its own (#232).
   lambda_concurrency_cap      = var.reserved_concurrency == null ? var.account_concurrency_limit : var.reserved_concurrency
-  lambda_database_pools       = 2
-  lambda_database_connections = local.lambda_concurrency_cap * local.lambda_database_pools * var.database_max_open_connections
+  lambda_database_connections = local.lambda_concurrency_cap * var.database_max_open_connections
+
+  # The game's and the lobby's addresses, from the hostnames, so lambda.env
+  # needn't repeat them. The lobby's URL itself comes in lambda.env, from
+  # INTODAN/mpl's settings for the tenant, and must name the same host.
+  game_origin  = "https://${var.game_hostname}"
+  lobby_origin = "https://${var.lobby_hostname}"
 
   # Terraform sets these itself, so it can check them against the
-  # concurrency cap: the pool size against Postgres's connections, and the
-  # log and trace limits against the free tier (observability.tf). The
+  # concurrency cap: the pool size against the database's connections, and
+  # the log and trace limits against the free tier (observability.tf). The
   # backend reads the same cap as its concurrency, C, and checks the budget
-  # again when it starts.
+  # again when it starts. It also sets the addresses it knows.
   lambda_terraform_settings = {
     ISLAND_BATTLES_DATABASE_MAX_OPEN_CONNECTIONS = tostring(var.database_max_open_connections)
     ISLAND_BATTLES_CONCURRENCY                   = tostring(local.lambda_concurrency_cap)
@@ -51,6 +55,11 @@ locals {
     # Terraform create them before it updates the backend.
     ISLAND_BATTLES_BOT_RUNNER_PYTHON = aws_lambda_function.bot_runner["python"].function_name
     ISLAND_BATTLES_BOT_RUNNER_NATIVE = aws_lambda_function.bot_runner["native"].function_name
+    # Where bots submit their commands (#215): the game's own name.
+    ISLAND_BATTLES_PUBLIC_URL = local.game_origin
+    # The lobby's site, whose lobby page loads the game's modules and calls
+    # its API from another origin (#228).
+    ISLAND_BATTLES_LOBBY_ORIGINS = local.lobby_origin
   }
   lambda_settings_overridden = sort([
     for key in concat(keys(local.lambda_settings), keys(var.extra_lambda_environment)) : key
@@ -151,7 +160,7 @@ resource "aws_lambda_function" "backend" {
   lifecycle {
     precondition {
       condition     = local.lambda_settings_found || var.allow_missing_lambda_settings
-      error_message = "${local.lambda_settings_file} is missing. Push deploy/local/ to the deploy bucket from the machine that has it, or run the VM deploy, which writes it. Only for the very first apply, pass -var allow_missing_lambda_settings=true."
+      error_message = "${local.lambda_settings_file} is missing. Push deploy/local/ to the deploy bucket from the machine that has it, or run scripts/lambda-env.sh, which writes it. Only for the very first apply, pass -var allow_missing_lambda_settings=true."
     }
     precondition {
       condition     = length(local.lambda_settings_malformed) == 0
@@ -166,14 +175,18 @@ resource "aws_lambda_function" "backend" {
       error_message = "The function's environment comes to ${local.lambda_environment_bytes} bytes, over Lambda's 4 KB."
     }
     precondition {
-      condition     = local.lambda_database_connections <= var.postgres_max_connections - var.postgres_spare_connections
-      error_message = "${var.reserved_concurrency == null ? "account_concurrency_limit (reserved_concurrency is null)" : "reserved_concurrency"} × 2 pools (the backend's database and the lobby's) × database_max_open_connections is ${local.lambda_database_connections}, which leaves fewer than postgres_spare_connections (${var.postgres_spare_connections}) of Postgres's ${var.postgres_max_connections} connections free. Lower one of them."
+      condition     = local.lambda_database_connections <= var.tenant_database_connections
+      error_message = "${var.reserved_concurrency == null ? "account_concurrency_limit (reserved_concurrency is null)" : "reserved_concurrency"} × database_max_open_connections is ${local.lambda_database_connections}, over the ${var.tenant_database_connections} connections that INTODAN/mpl reserves for the game on the VM's Postgres (tenant_database_connections). Lower one of them."
+    }
+    precondition {
+      condition     = !local.lambda_settings_found || try(trimsuffix(local.lambda_settings["ISLAND_BATTLES_LOBBY_URL"], "/") == local.lobby_origin, false)
+      error_message = "${local.lambda_settings_file} must set ISLAND_BATTLES_LOBBY_URL to ${local.lobby_origin}, the lobby at lobby_hostname. Write it again with scripts/lambda-env.sh, or check lobby_hostname against INTODAN/mpl's lobby_url."
     }
   }
 }
 
-# CloudFront serves the game from here (cloudfront.tf), and Centrifugo calls
-# the subscribe proxy here. For auth type NONE, the provider adds the public lambda:InvokeFunctionUrl
+# CloudFront serves the game from here (cloudfront.tf). For auth type NONE,
+# the provider adds the public lambda:InvokeFunctionUrl
 # and lambda:InvokeFunction permissions on creation. The backend serves through
 # lambdaurl, which needs RESPONSE_STREAM.
 resource "aws_lambda_function_url" "backend" {

@@ -1,5 +1,5 @@
 import { ApiError } from "../../api/errors";
-import { platformFetch } from "../../platform";
+import { lobbyBaseUrl, platformFetch } from "../../platform";
 
 export const heartbeatIntervalMs = 15_000;
 
@@ -54,11 +54,13 @@ export interface ReleaseTarget {
   clientInstanceId: string;
   membershipGeneration: number;
   accessToken: string;
+  /** The lobby's URL. Defaults to `lobbyBaseUrl()`, which is not the page's origin when the lobby is on its own site. */
+  lobbyUrl?: string;
 }
 
 /**
- * Releases this tab's lease when the page goes away. `keepalive` lets the
- * request outlive the page; the answer is never read.
+ * Releases this tab's lease when the page goes away, at the lobby. `keepalive`
+ * lets the request outlive the page; the answer is never read.
  */
 export function releaseLease(
   target: ReleaseTarget,
@@ -66,11 +68,15 @@ export function releaseLease(
 ): void {
   const path = `/lobby/v1/games/${encodeURIComponent(target.gameKey)}/lobbies/${encodeURIComponent(target.lobbyId)}/leases/${encodeURIComponent(target.clientInstanceId)}`;
   try {
-    void doFetch(`${path}?generation=${target.membershipGeneration}`, {
-      method: "DELETE",
-      keepalive: true,
-      headers: { Authorization: `Bearer ${target.accessToken}` },
-    }).catch(() => undefined);
+    const lobbyUrl = target.lobbyUrl ?? lobbyBaseUrl();
+    void doFetch(
+      `${lobbyUrl}${path}?generation=${target.membershipGeneration}`,
+      {
+        method: "DELETE",
+        keepalive: true,
+        headers: { Authorization: `Bearer ${target.accessToken}` },
+      },
+    ).catch(() => undefined);
   } catch {
     // The page is going away; there is nothing more to do.
   }

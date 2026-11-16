@@ -53,6 +53,12 @@ func TestALobbyGamesThatListsIslandBattlesIsKept(t *testing.T) {
 	}
 }
 
+func TestALobbyGamesThatIsNotJSONIsRefused(t *testing.T) {
+	if _, err := lobbyGames(t, "island-battles", "http://localhost:8888"); err == nil {
+		t.Fatal("run succeeded")
+	}
+}
+
 func TestTheOriginMustBeAnOrigin(t *testing.T) {
 	for _, args := range [][]string{{}, {"http://example.org"}, {"http://localhost:8888/game"}, {"a", "b"}} {
 		if _, err := lobbyGames(t, "", args...); err == nil {

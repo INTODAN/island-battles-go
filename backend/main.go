@@ -40,11 +40,9 @@ func main() {
 		logger.Error("Invalid configuration", "error", err)
 		os.Exit(1)
 	}
-	// This host serves many requests at once. The lobby holds a connection
-	// and the lobby's lock while it calls a game hook, which may read with a
-	// connection of its own while other requests to the lobby hold theirs,
-	// waiting for the lock; so the pool is wider than Lambda's, where an
-	// instance serves one request at a time.
+	// This host serves many requests at once, such as the lobby's hook calls
+	// while players' requests hold connections, so the pool is wider than
+	// Lambda's, where an instance serves one request at a time.
 	if _, set := os.LookupEnv(dependencies.DatabaseMaxOpenConnectionsEnv); !set {
 		config.Database.MaxOpenConnections = LocalMaxOpenConnections
 	}
@@ -91,18 +89,6 @@ func run(ctx context.Context, config dependencies.Config, address string, logger
 		return err
 	}
 	defer func() { _ = sqlDatabase.Close() }()
-	// The lobby's own database, while the lobby runs in this process.
-	lobbyDatabase, err := dependencies.InitLobbyDB(config, logger)
-	if err != nil {
-		return err
-	}
-	if lobbyDatabase != nil {
-		lobbyPool, err := lobbyDatabase.DB()
-		if err != nil {
-			return err
-		}
-		defer func() { _ = lobbyPool.Close() }()
-	}
 	// The graph page reads any game without authentication, so only this local
 	// host serves it.
 	options := []app.Option{app.WithGameGraph()}
@@ -134,7 +120,7 @@ func run(ctx context.Context, config dependencies.Config, address string, logger
 		options = append(options, app.WithLocalBotRunners(runners, origin))
 		logger.Info("Playing hosted and uploaded bots with the local bot runners", "python", strings.Join(runners.Python, " "))
 	}
-	handler, err := app.New(config, database, lobbyDatabase, logger, options...)
+	handler, err := app.New(config, database, logger, options...)
 	if err != nil {
 		return err
 	}

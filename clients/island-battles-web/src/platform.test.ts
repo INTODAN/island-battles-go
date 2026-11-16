@@ -72,6 +72,33 @@ test("the browser reads config.json beside the page, and keeps its own origin wi
   }
 });
 
+test("production's config.json sends the lobby's calls to its subdomain and the game's to the page's origin", async () => {
+  const saved = {
+    document: (globalThis as { document?: unknown }).document,
+    location: globalThis.location,
+  };
+  (globalThis as { document?: unknown }).document = {
+    baseURI: "https://island-battles.elidan.org/play/",
+  };
+  (globalThis as { location?: unknown }).location = {
+    origin: "https://island-battles.elidan.org",
+    pathname: "/play/",
+  };
+  try {
+    // What the deploy writes to /play/config.json (#232).
+    await loadServerUrls((async () =>
+      Response.json({
+        lobby_url: "https://lobby.elidan.org",
+      })) as unknown as typeof fetch);
+    expect(lobbyBaseUrl()).toBe("https://lobby.elidan.org");
+    expect(gameBaseUrl()).toBe("https://island-battles.elidan.org");
+  } finally {
+    setServerUrls({});
+    (globalThis as { document?: unknown }).document = saved.document;
+    (globalThis as { location?: unknown }).location = saved.location;
+  }
+});
+
 test("the browser keeps its tab's state in sessionStorage", () => {
   const stored = new Map<string, string>();
   const fake = {
@@ -103,8 +130,8 @@ test("a share link points at the page in the browser", () => {
 
 test("paths resolve against the desktop game server and other inputs are left alone", () => {
   const base = "https://island-battles.elidan.org";
-  expect(resolveAgainstBase("/lobby/v1/sessions?x=1", base)).toBe(
-    "https://island-battles.elidan.org/lobby/v1/sessions?x=1",
+  expect(resolveAgainstBase("/game/from-lobby/x/generation?x=1", base)).toBe(
+    "https://island-battles.elidan.org/game/from-lobby/x/generation?x=1",
   );
   expect(resolveAgainstBase("http://127.0.0.1:41414/turn", base)).toBe(
     "http://127.0.0.1:41414/turn",
@@ -140,7 +167,7 @@ test("API clients send the lobby's routes to the lobby and the game's to the gam
 test("API clients use an explicit base URL over the default", async () => {
   let seen = "";
   const { gameApi } = createApiClients({
-    baseUrl: "https://island-battles.elidan.org",
+    baseUrl: "https://game-and-lobby.example.test",
     fetch: (async (input: Request) => {
       seen = input.url;
       return new Response("{}", {
@@ -149,7 +176,7 @@ test("API clients use an explicit base URL over the default", async () => {
     }) as unknown as typeof fetch,
   });
   await gameApi.GET("/healthz" as never);
-  expect(seen).toBe("https://island-battles.elidan.org/healthz");
+  expect(seen).toBe("https://game-and-lobby.example.test/healthz");
 });
 
 test("platformFetch calls the page's fetch as it is at call time, until the desktop one is set", async () => {

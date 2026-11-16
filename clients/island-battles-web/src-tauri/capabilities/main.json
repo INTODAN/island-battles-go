@@ -1,13 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "The game window may call the game's hostname and the localhost bot, nothing else.",
+  "description": "The game window may call the game's and the lobby's hostnames and the localhost bot, nothing else.",
   "windows": ["main"],
   "permissions": [
     {
       "identifier": "http:default",
       "allow": [
         { "url": "https://island-battles.elidan.org/*" },
+        { "url": "https://lobby.elidan.org/*" },
         { "url": "http://127.0.0.1:41414/*" }
       ]
     }

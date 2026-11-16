@@ -115,6 +115,7 @@ class DeployModeTest(unittest.TestCase):
         code, _, stderr = run("deploy", FUNCTION_UPDATE, PORTS_UPDATE)
         self.assertEqual(code, 1)
         self.assertIn("aws_lightsail_instance_public_ports", stderr)
+        self.assertIn("which INTODAN/mpl owns", stderr)
 
     def test_refuses_creating_the_certificate_and_changing_the_distribution(self):
         code, _, stderr = run("deploy", FUNCTION_UPDATE, CERTIFICATE_CREATE, DISTRIBUTION_UPDATE)
@@ -130,20 +131,8 @@ class DeployModeTest(unittest.TestCase):
 
 class ApplyModeTest(unittest.TestCase):
     def test_lists_nothing_without_destruction(self):
-        code, stdout, _ = run("apply", FUNCTION_UPDATE, PORTS_UPDATE, ATTACHMENT_REPLACE, INSTANCE_NO_OP)
+        code, stdout, _ = run("apply", FUNCTION_UPDATE, LOG_GROUP_CREATE, INSTANCE_NO_OP)
         self.assertEqual((code, stdout), (0, ""))
-
-    def test_lists_replaced_and_deleted_instances_by_name(self):
-        code, stdout, stderr = run("apply", INSTANCE_REPLACE, INSTANCE_DELETE, FUNCTION_UPDATE)
-        self.assertEqual(code, 0)
-        self.assertEqual(stdout.splitlines(), ["island-battles-2", "island-battles-1"])
-        self.assertIn("replaces the instance, with its disk and its database", stderr)
-        self.assertIn("deletes the instance", stderr)
-
-    def test_lists_a_deleted_static_ip(self):
-        _, stdout, stderr = run("apply", STATIC_IP_DELETE)
-        self.assertEqual(stdout.splitlines(), ["island-battles-vm"])
-        self.assertIn("static IP", stderr)
 
     def test_lists_a_replaced_distribution_by_its_domain(self):
         _, stdout, stderr = run("apply", DISTRIBUTION_REPLACE, CERTIFICATE_CREATE)
@@ -151,16 +140,56 @@ class ApplyModeTest(unittest.TestCase):
         self.assertIn("replaces the distribution", stderr)
 
     def test_falls_back_to_the_address_without_a_name(self):
-        _, stdout, _ = run("apply", change('aws_lightsail_disk.data["x"]', ["delete"]))
-        self.assertEqual(stdout.splitlines(), ['aws_lightsail_disk.data["x"]'])
+        _, stdout, _ = run("apply", change("aws_cloudfront_distribution.other", ["delete"]))
+        self.assertEqual(stdout.splitlines(), ["aws_cloudfront_distribution.other"])
+
+
+# The cutover (#232) takes the VM out of this configuration's state with
+# removed blocks: the plan forgets each resource, and INTODAN/mpl keeps it.
+class MplOwnedTest(unittest.TestCase):
+    FORGOTTEN = [change(address, ["forget"]) for address in (
+        'aws_lightsail_instance.vm["island-battles-1"]', 'aws_lightsail_instance_public_ports.vm["island-battles-1"]',
+        "aws_lightsail_static_ip.vm", "aws_lightsail_static_ip_attachment.vm", "aws_lightsail_key_pair.vm[0]")]
+
+    def test_the_cutover_forgets_the_vm_and_destroys_nothing(self):
+        backups = [change(address, ["delete"]) for address in (
+            "aws_iam_user.backups", "aws_iam_user_policy.backups", "aws_iam_access_key.backups",
+            "aws_cloudwatch_metric_alarm.database_backups")]
+        code, stdout, stderr = run("apply", FUNCTION_UPDATE, DISTRIBUTION_UPDATE, *self.FORGOTTEN, *backups)
+        self.assertEqual((code, stdout), (0, ""), stderr)
+        self.assertEqual(run("publishes-backend", FUNCTION_UPDATE, *self.FORGOTTEN)[1], "yes\n")
+
+    def test_a_backend_deploy_refuses_to_forget_the_vm(self):
+        code, _, stderr = run("deploy", FUNCTION_UPDATE, *self.FORGOTTEN)
+        self.assertEqual(code, 1)
+        self.assertIn("aws_lightsail_static_ip.vm: forget (a Lightsail resource, which INTODAN/mpl owns)", stderr)
+
+    def test_refuses_destroying_any_lightsail_resource(self):
+        for destroyed in (INSTANCE_DELETE, INSTANCE_REPLACE, STATIC_IP_DELETE, ATTACHMENT_REPLACE,
+                          change('aws_lightsail_instance_public_ports.vm["island-battles-1"]', ["delete"])):
+            with self.subTest(destroyed["address"]):
+                code, stdout, stderr = run("apply", FUNCTION_UPDATE, destroyed)
+                self.assertEqual((code, stdout), (1, ""))
+                self.assertIn(destroyed["address"], stderr)
+                self.assertIn("INTODAN/mpl owns", stderr)
+                self.assertIn("removed block", stderr)
+
+    def test_refuses_destroying_the_github_oidc_provider(self):
+        code, _, stderr = run("apply", change("aws_iam_openid_connect_provider.github[0]", ["delete"]))
+        self.assertEqual(code, 1)
+        self.assertIn("aws_iam_openid_connect_provider.github[0]: delete (the account's GitHub OIDC provider", stderr)
+
+    def test_updating_the_oidc_provider_is_no_destruction(self):
+        code, _, stderr = run("apply", change("aws_iam_openid_connect_provider.github[0]", ["update"]))
+        self.assertEqual(code, 0, stderr)
 
 
 class PublishesBackendModeTest(unittest.TestCase):
     def test_yes_when_the_function_changes(self):
         self.assertEqual(run("publishes-backend", FUNCTION_UPDATE)[1], "yes\n")
 
-    def test_no_when_only_the_static_ip_moves(self):
-        self.assertEqual(run("publishes-backend", ATTACHMENT_REPLACE)[1], "no\n")
+    def test_no_without_the_function(self):
+        self.assertEqual(run("publishes-backend", LOG_GROUP_CREATE, DISTRIBUTION_UPDATE)[1], "no\n")
 
 
 class UsageTest(unittest.TestCase):

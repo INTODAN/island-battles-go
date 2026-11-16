@@ -647,3 +647,13 @@ def test_the_desktop_apps_origins_may_relay_by_default() -> None:
         assert "https://evil.example.com" not in bot_server.origins
     finally:
         bot_server.server_close()
+
+
+def test_the_deployed_game_and_lobby_page_may_relay_by_default() -> None:
+    """The 3D client on the game's origin and the lobby page on its own (#232)."""
+    bot_server = BotServer(("127.0.0.1", 0), ReloadingPlay("x:y"), [*DEFAULT_ORIGINS])
+    try:
+        assert "https://island-battles.elidan.org" in bot_server.origins
+        assert "https://lobby.elidan.org" in bot_server.origins
+    finally:
+        bot_server.server_close()

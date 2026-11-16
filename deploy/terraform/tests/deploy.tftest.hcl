@@ -10,12 +10,9 @@ variables {
   region                = "eu-central-1"
   lambda_settings_file  = "tests/fixtures/lambda.env"
   lambda_bootstrap_file = "tests/fixtures/bootstrap"
-  vm_instances = {
-    "island-battles-1" = {}
-  }
-  static_ip_instance = "island-battles-1"
-  alert_email        = "alerts@example.org"
-  game_hostname      = "island-battles.example.org"
+  alert_email           = "alerts@example.org"
+  game_hostname         = "island-battles.example.org"
+  lobby_hostname        = "lobby.example.org"
 }
 
 run "passes_every_lambda_setting" {
@@ -27,11 +24,10 @@ run "passes_every_lambda_setting" {
       if !contains(keys(local.collector_environment), key)
       }) == tomap({
       ISLAND_BATTLES_DATABASE_URL                  = "postgres://island_battles:not-a-secret@vm.example.org:5432/island_battles?sslmode=require"
-      ISLAND_BATTLES_CENTRIFUGO_PUBLIC_URL         = "wss://vm.example.org/connection/websocket"
       ISLAND_BATTLES_CENTRIFUGO_API_URL            = "https://vm.example.org/api"
       ISLAND_BATTLES_CENTRIFUGO_API_KEY            = "not-a-secret"
-      ISLAND_BATTLES_CONNECTION_TOKEN_HMAC_SECRET  = "not-a-secret"
-      ISLAND_BATTLES_LOBBY_PROXY_SECRET            = "not-a-secret"
+      ISLAND_BATTLES_LOBBY_URL                     = "https://lobby.example.org"
+      ISLAND_BATTLES_LOBBY_HOOK_SECRET             = "not-a-secret"
       ISLAND_BATTLES_SETTING_TERRAFORM_DOESNT_KNOW = "a=b"
       ISLAND_BATTLES_DATABASE_MAX_OPEN_CONNECTIONS = "2"
       ISLAND_BATTLES_CONCURRENCY                   = "5"
@@ -41,8 +37,10 @@ run "passes_every_lambda_setting" {
       ISLAND_BATTLES_BOT_PACKAGES_BUCKET           = "island-battles-bot-packages"
       ISLAND_BATTLES_BOT_RUNNER_PYTHON             = "island-battles-bot-runner-python"
       ISLAND_BATTLES_BOT_RUNNER_NATIVE             = "island-battles-bot-runner-native"
+      ISLAND_BATTLES_PUBLIC_URL                    = "https://island-battles.example.org"
+      ISLAND_BATTLES_LOBBY_ORIGINS                 = "https://lobby.example.org"
     })
-    error_message = "The function must get every lambda.env setting, the last value of a repeated key, the pool size, the log and trace limits with C from the reserved concurrency, the bot package bucket and the bot runners' names."
+    error_message = "The function must get every lambda.env setting, the last value of a repeated key, the pool size, the log and trace limits with C from the reserved concurrency, the bot package bucket, the bot runners' names, the game's URL and the lobby's origin."
   }
 
   assert {
@@ -65,20 +63,6 @@ run "passes_every_lambda_setting" {
     error_message = "The role must have basic execution and X-Ray writes only."
   }
 
-  assert {
-    condition     = toset([for port in aws_lightsail_instance_public_ports.vm["island-battles-1"].port_info : port.from_port]) == toset([22, 443, 5432])
-    error_message = "The firewall must open 22, 443 and Postgres, and nothing else."
-  }
-
-  assert {
-    condition     = one([for add_on in aws_lightsail_instance.vm["island-battles-1"].add_on : add_on if add_on.type == "AutoSnapshot" && add_on.status == "Disabled"]) != null
-    error_message = "The instance's automatic snapshots must be declared off: the database is backed up to S3 instead."
-  }
-
-  assert {
-    condition     = aws_lightsail_static_ip_attachment.vm.instance_name == "island-battles-1"
-    error_message = "The static IP must be attached to the default instance."
-  }
 }
 
 run "takes_extra_settings" {
@@ -100,9 +84,9 @@ run "rejects_too_many_database_connections" {
   command = plan
 
   variables {
-    # 5 × 2 pools × 10 = 100 leaves none of 100 free, fewer than the 10
-    # spare connections.
-    database_max_open_connections = 10
+    # 5 × 5 = 25 is over the 20 connections INTODAN/mpl reserves for the
+    # game.
+    database_max_open_connections = 5
   }
 
   expect_failures = [aws_lambda_function.backend]
@@ -112,12 +96,12 @@ run "allows_the_largest_safe_pool" {
   command = plan
 
   variables {
-    database_max_open_connections = 9
+    database_max_open_connections = 4
   }
 
   assert {
-    condition     = nonsensitive(aws_lambda_function.backend.environment[0].variables["ISLAND_BATTLES_DATABASE_MAX_OPEN_CONNECTIONS"]) == "9"
-    error_message = "5 × 2 pools × 9 = 90 leaves exactly the 10 spare connections."
+    condition     = nonsensitive(aws_lambda_function.backend.environment[0].variables["ISLAND_BATTLES_DATABASE_MAX_OPEN_CONNECTIONS"]) == "4"
+    error_message = "5 × 4 = 20 is exactly the game's 20 connections."
   }
 }
 
@@ -148,11 +132,11 @@ run "checks_the_account_limit_when_concurrency_is_unreserved" {
   command = plan
 
   variables {
-    # Unreserved, the account limit caps the function: 5 × 2 pools × 10 =
-    # 100 leaves none of 100 free, fewer than the 10 spare connections.
+    # Unreserved, the account limit caps the function: 5 × 5 = 25 is over
+    # the game's 20 connections.
     reserved_concurrency          = null
     account_concurrency_limit     = 5
-    database_max_open_connections = 10
+    database_max_open_connections = 5
   }
 
   expect_failures = [aws_lambda_function.backend]
@@ -177,12 +161,12 @@ run "allows_the_largest_safe_account_limit_without_a_reservation" {
   variables {
     reserved_concurrency          = null
     account_concurrency_limit     = 5
-    database_max_open_connections = 9
+    database_max_open_connections = 4
   }
 
   assert {
     condition     = aws_lambda_function.backend.reserved_concurrent_executions == -1
-    error_message = "An account limit of 5 × 2 pools × 9 = 90 leaves exactly the 10 spare connections."
+    error_message = "An account limit of 5 × 4 = 20 is exactly the game's 20 connections."
   }
 }
 
@@ -220,6 +204,14 @@ run "serves_the_game_through_cloudfront" {
     override_during = plan
     values = {
       arn = "arn:aws:acm:us-east-1:123456789012:certificate/00000000-0000-4000-8000-000000000001"
+    }
+  }
+
+  override_resource {
+    target          = aws_cloudfront_function.lobby_redirect
+    override_during = plan
+    values = {
+      arn = "arn:aws:cloudfront::123456789012:function/island-battles-lobby-redirect"
     }
   }
 
@@ -265,8 +257,25 @@ run "serves_the_game_through_cloudfront" {
   }
 
   assert {
-    condition     = output.game_url == "https://island-battles.example.org"
-    error_message = "The game's URL is game_hostname over HTTPS."
+    condition     = output.game_url == "https://island-battles.example.org" && output.lobby_url == "https://lobby.example.org"
+    error_message = "The game's URL is game_hostname over HTTPS, and the lobby's lobby_hostname."
+  }
+
+  # The lobby's page moved to lobby_hostname (#232): the function redirects
+  # /lobby/ui and everything under it there, before the backend.
+  assert {
+    condition = (
+      toset([for behavior in aws_cloudfront_distribution.game.ordered_cache_behavior : behavior.path_pattern if startswith(behavior.path_pattern, "/lobby/")]) == toset(["/lobby/ui/*", "/lobby/ui"]) &&
+      alltrue([for behavior in aws_cloudfront_distribution.game.ordered_cache_behavior : (
+        one(behavior.function_association).function_arn == aws_cloudfront_function.lobby_redirect.arn &&
+        one(behavior.function_association).event_type == "viewer-request" &&
+        behavior.cache_policy_id == data.aws_cloudfront_cache_policy.caching_disabled.id
+      ) if startswith(behavior.path_pattern, "/lobby/")]) &&
+      aws_cloudfront_function.lobby_redirect.runtime == "cloudfront-js-2.0" &&
+      strcontains(aws_cloudfront_function.lobby_redirect.code, "var lobby = \"https://lobby.example.org\";") &&
+      strcontains(aws_cloudfront_function.lobby_redirect.code, "301")
+    )
+    error_message = "/lobby/ui and /lobby/ui/* must redirect to lobby_hostname at the viewer request, uncached."
   }
 }
 
@@ -373,14 +382,14 @@ run "serves_the_web_client_from_a_private_bucket" {
   # kept. No API path may match these patterns.
   assert {
     condition = (
-      toset([for behavior in aws_cloudfront_distribution.game.ordered_cache_behavior : behavior.path_pattern if behavior.target_origin_id == "backend"]) == toset(["/lobby/ui/*", "/game/demo/*", "/game/demo-viewer/*", "/map/builder/*"]) &&
+      toset([for behavior in aws_cloudfront_distribution.game.ordered_cache_behavior : behavior.path_pattern if behavior.target_origin_id == "backend" && !startswith(behavior.path_pattern, "/lobby/")]) == toset(["/game/demo/*", "/game/demo-viewer/*", "/map/builder/*"]) &&
       alltrue([for behavior in aws_cloudfront_distribution.game.ordered_cache_behavior : (
         behavior.viewer_protocol_policy == "redirect-to-https" &&
         toset(behavior.allowed_methods) == toset(["GET", "HEAD", "OPTIONS"]) &&
         behavior.compress &&
         behavior.cache_policy_id == aws_cloudfront_cache_policy.origin_cache_control.id &&
         behavior.origin_request_policy_id == data.aws_cloudfront_origin_request_policy.all_viewer_except_host_header.id
-      ) if behavior.target_origin_id == "backend"])
+      ) if behavior.target_origin_id == "backend" && !startswith(behavior.path_pattern, "/lobby/")])
     )
     error_message = "The Lambda's static pages must follow the origin's Cache-Control, compressed, with GET, HEAD and OPTIONS only, and the default behaviour's origin request policy."
   }
@@ -646,6 +655,16 @@ run "rejects_the_pool_size_in_lambda_settings" {
   expect_failures = [aws_lambda_function.backend]
 }
 
+run "requires_the_lobby_url_at_lobby_hostname" {
+  command = plan
+
+  variables {
+    lambda_settings_file = "tests/fixtures/other-lobby.env"
+  }
+
+  expect_failures = [aws_lambda_function.backend]
+}
+
 run "rejects_malformed_lambda_settings" {
   command = plan
 
@@ -678,33 +697,6 @@ run "creates_the_function_without_settings_on_the_first_apply" {
     condition     = keys(nonsensitive(aws_lambda_function.backend.environment[0].variables)) == sort(concat(keys(local.lambda_terraform_settings), keys(local.collector_environment)))
     error_message = "Without lambda.env, the function only gets what Terraform sets."
   }
-}
-
-run "moves_the_static_ip_to_a_new_instance" {
-  command = plan
-
-  variables {
-    vm_instances = {
-      "island-battles-1" = {}
-      "island-battles-2" = { bundle_id = "small_3_0" }
-    }
-    static_ip_instance = "island-battles-2"
-  }
-
-  assert {
-    condition     = aws_lightsail_static_ip_attachment.vm.instance_name == "island-battles-2" && aws_lightsail_instance.vm["island-battles-2"].bundle_id == "small_3_0" && length(aws_lightsail_instance_public_ports.vm) == 2
-    error_message = "A second instance must get its own plan and firewall, and can take the static IP."
-  }
-}
-
-run "rejects_a_static_ip_instance_that_doesnt_exist" {
-  command = plan
-
-  variables {
-    static_ip_instance = "island-battles-2"
-  }
-
-  expect_failures = [var.static_ip_instance]
 }
 
 # The GitHub deploy role ------------------------------------------------------
@@ -783,9 +775,9 @@ run "lets_only_the_repositorys_production_jobs_deploy" {
     condition = toset(flatten([for statement in jsondecode(aws_iam_role_policy.github_deploy[0].policy).Statement : statement.Action])) == toset([
       "lambda:UpdateFunctionCode", "lambda:UpdateFunctionConfiguration", "lambda:TagResource", "lambda:UntagResource",
       "iam:PassRole", "s3:ListBucket", "s3:GetObject", "s3:PutObject", "s3:DeleteObject",
-      "cloudfront:CreateInvalidation", "lightsail:GetInstanceAccessDetails",
+      "cloudfront:CreateInvalidation",
     ])
-    error_message = "The role may write only the function, the deploy bucket, the web client and a temporary VM key."
+    error_message = "The role may write only the function, the deploy bucket and the web client: the VM is INTODAN/mpl's."
   }
 
   assert {
@@ -851,7 +843,7 @@ run "rejects_a_github_repository_that_isnt_owner_and_name" {
 
 # Database backups ---------------------------------------------------------------
 
-run "backs_the_database_up_to_s3" {
+run "keeps_the_old_backups_in_s3_until_they_expire" {
   command = plan
 
   variables {
@@ -884,8 +876,8 @@ run "backs_the_database_up_to_s3" {
   }
 
   assert {
-    condition     = aws_s3_bucket.backups.bucket == "island-battles-backups-123456789012" && nonsensitive(output.database_backups.bucket) == aws_s3_bucket.backups.bucket && nonsensitive(output.database_backups.region) == "eu-central-1"
-    error_message = "The backups bucket must be named after the account, in the deployment's region."
+    condition     = aws_s3_bucket.backups.bucket == "island-battles-backups-123456789012" && output.database_backup_bucket == aws_s3_bucket.backups.bucket
+    error_message = "The backups bucket must be named after the account."
   }
 
   assert {
@@ -903,25 +895,6 @@ run "backs_the_database_up_to_s3" {
       aws_s3_bucket_lifecycle_configuration.backups.rule[0].noncurrent_version_expiration[0].noncurrent_days == 7
     )
     error_message = "Each backup, and each overwritten one, must be kept for 7 days by default."
-  }
-
-  assert {
-    condition = jsondecode(aws_iam_user_policy.backups.policy).Statement == [
-      {
-        Sid      = "UploadDumps"
-        Effect   = "Allow"
-        Action   = "s3:PutObject"
-        Resource = "arn:aws:s3:::island-battles-backups-123456789012/postgres/*"
-      },
-      {
-        Sid       = "CountBackups"
-        Effect    = "Allow"
-        Action    = "cloudwatch:PutMetricData"
-        Resource  = "*"
-        Condition = { StringEquals = { "cloudwatch:namespace" = "IslandBattles/VM" } }
-      },
-    ]
-    error_message = "The VM's key may only upload dumps and publish the backup metric: no reading, listing or deleting backups."
   }
 
   assert {
@@ -945,17 +918,6 @@ run "backs_the_database_up_to_s3" {
     error_message = "The denied roles may download no dump, nor an earlier version of one."
   }
 
-  assert {
-    condition = (
-      aws_cloudwatch_metric_alarm.database_backups.namespace == nonsensitive(output.database_backups.metric_namespace) &&
-      aws_cloudwatch_metric_alarm.database_backups.metric_name == nonsensitive(output.database_backups.metric_name) &&
-      aws_cloudwatch_metric_alarm.database_backups.period * aws_cloudwatch_metric_alarm.database_backups.evaluation_periods == 26 * 3600 &&
-      aws_cloudwatch_metric_alarm.database_backups.datapoints_to_alarm == aws_cloudwatch_metric_alarm.database_backups.evaluation_periods &&
-      aws_cloudwatch_metric_alarm.database_backups.threshold == 1 && aws_cloudwatch_metric_alarm.database_backups.comparison_operator == "LessThanThreshold" &&
-      aws_cloudwatch_metric_alarm.database_backups.treat_missing_data == "breaching" && length(aws_cloudwatch_metric_alarm.database_backups.alarm_actions) == 1
-    )
-    error_message = "The backup alarm must email when the metric the VM publishes saw no backup for 26 hours."
-  }
 }
 
 run "keeps_the_backups_without_a_github_role" {
@@ -1076,9 +1038,9 @@ run "keeps_bot_packages_in_a_private_bucket_for_8_days" {
   assert {
     condition = (
       toset(one(aws_s3_bucket_cors_configuration.bot_packages.cors_rule).allowed_methods) == toset(["POST"]) &&
-      toset(one(aws_s3_bucket_cors_configuration.bot_packages.cors_rule).allowed_origins) == toset(["https://island-battles.example.org"])
+      toset(one(aws_s3_bucket_cors_configuration.bot_packages.cors_rule).allowed_origins) == toset(["https://island-battles.example.org", "https://lobby.example.org"])
     )
-    error_message = "Browsers must upload only with POST, and only from the game's origin, where the lobby page is too."
+    error_message = "Browsers must upload only with POST, and only from the game's origin and the lobby page's."
   }
 
   assert {

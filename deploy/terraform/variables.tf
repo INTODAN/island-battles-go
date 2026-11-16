@@ -2,7 +2,7 @@
 # -var-file. See deploy/aws.example.tfvars and deploy/README.md.
 
 variable "region" {
-  description = "The AWS region for the VM and the Lambda."
+  description = "The AWS region for the Lambda."
   type        = string
 
   validation {
@@ -12,7 +12,7 @@ variable "region" {
 }
 
 variable "name" {
-  description = "Prefix for the names of the Lambda, its role, the static IP and the key pair."
+  description = "Prefix for the names of the Lambda, its role and the other resources."
   type        = string
   default     = "island-battles"
 }
@@ -32,69 +32,23 @@ variable "game_hostname" {
   }
 }
 
-# The VM (#26, #32) ------------------------------------------------------------
-
-variable "vm_instances" {
+variable "lobby_hostname" {
   description = <<-EOT
-    The Lightsail instances, by name. Normally one. Moving to a new VM adds a
-    second one next to it, moves the static IP and then removes the old one
-    (deploy/README.md). Changing an existing instance's zone, image or plan
-    replaces it and deletes its disk, so add a new instance instead. There's
-    no default, so a lost or stale aws.tfvars can't plan to replace the live
-    instance with a default one.
-  EOT
-  type = map(object({
-    # Defaults to the region's "a" zone.
-    availability_zone = optional(string)
-    # Ubuntu 24.04 LTS. The VM deploy needs 24.04 or newer.
-    blueprint_id = optional(string, "ubuntu_24_04")
-    # 1 GB of memory, 2 vCPUs, 40 GB of disk and a public IPv4 address.
-    bundle_id = optional(string, "micro_3_0")
-  }))
-
-  validation {
-    condition     = length(var.vm_instances) > 0
-    error_message = "List at least one instance in vm_instances."
-  }
-}
-
-variable "static_ip_instance" {
-  description = "The instance in vm_instances the static IP, and so vm.<domain>, points at."
-  type        = string
-
-  validation {
-    condition     = contains(keys(var.vm_instances), var.static_ip_instance)
-    error_message = "static_ip_instance must name an instance in vm_instances."
-  }
-}
-
-variable "ssh_public_key" {
-  description = <<-EOT
-    An OpenSSH public key for the instances' `ubuntu` user, e.g. the contents of
-    ~/.ssh/id_ed25519.pub. Unset, Lightsail uses the region's default key pair,
-    whose private key you download from the Lightsail console. Only new
-    instances pick up a change.
+    The lobby's name, such as lobby.example.org, where INTODAN/mpl deploys the
+    lobby (#232). Old links to the lobby's page on game_hostname redirect
+    there (cloudfront.tf), the bot packages' bucket admits uploads from the
+    lobby page there (bot_packages.tf), and the backend answers its origin
+    with CORS (lambda.tf). The lobby's URL in lambda.env must be the same.
   EOT
   type        = string
-  default     = null
 
   validation {
-    condition     = var.ssh_public_key == null || can(regex("^(ssh-|ecdsa-)", var.ssh_public_key))
-    error_message = "ssh_public_key must be an OpenSSH public key, starting with ssh-ed25519, ssh-rsa or ecdsa-."
+    condition     = can(regex("^([a-z0-9]([a-z0-9-]*[a-z0-9])?\\.)+[a-z]{2,}$", var.lobby_hostname))
+    error_message = "lobby_hostname must be a lowercase hostname, such as lobby.example.org."
   }
 }
 
-variable "ssh_allowed_cidrs" {
-  description = "IPv4 ranges that may reach SSH (22). Deploys log in with Lightsail's temporary keys from wherever they run, a GitHub runner included, so keep it open to all. Password logins are off."
-  type        = list(string)
-  default     = ["0.0.0.0/0"]
-}
-
-variable "postgres_port" {
-  description = "Postgres's public port. It must match the VM deploy's postgres_port."
-  type        = number
-  default     = 5432
-}
+# Database backups ---------------------------------------------------------------
 
 variable "database_backup_retention_days" {
   description = "How many days S3 keeps each daily database backup (backups.tf), and each overwritten one."
@@ -144,10 +98,9 @@ variable "lambda_timeout_seconds" {
 variable "reserved_concurrency" {
   description = <<-EOT
     The most Lambda instances that run at once, C in the free-tier budget.
-    Every instance keeps its own two pools of up to
-    database_max_open_connections, one per database, so the product must
-    leave postgres_spare_connections free under
-    postgres_max_connections. Every instance also writes and traces up to its
+    Every instance keeps its own pool of up to database_max_open_connections,
+    so the product must fit tenant_database_connections. Every instance also
+    writes and traces up to its
     own limits, so C also bounds the month's logs and traces (deploy/README.md).
     Set it to null only on an account whose concurrency limit is too low to
     reserve any. The account limit, account_concurrency_limit, is then the cap.
@@ -166,8 +119,8 @@ variable "account_concurrency_limit" {
   description = <<-EOT
     The account's Lambda concurrency limit in this region: "Concurrent
     executions" in Service Quotas. It caps the function when
-    reserved_concurrency is null, so Terraform checks it against Postgres's
-    connections and the free-tier budget instead. AWS raises new accounts'
+    reserved_concurrency is null, so Terraform checks it against the
+    database connections and the free-tier budget instead. AWS raises new accounts'
     limit of 10 on its own, so look it up again before every apply while
     reserved_concurrency is null.
   EOT
@@ -191,29 +144,27 @@ variable "database_max_open_connections" {
   }
 }
 
-variable "postgres_max_connections" {
-  description = "Postgres's max_connections on the VM. The VM deploy keeps Postgres's default of 100."
-  type        = number
-  default     = 100
-}
-
-variable "postgres_spare_connections" {
+variable "tenant_database_connections" {
   description = <<-EOT
-    Connections the Lambda must leave free: 3 that Postgres reserves for
-    superusers, 2 for the migrate command, and some for administration.
+    The most connections the function's instances may open together on the
+    VM's Postgres, which INTODAN/mpl runs and shares between the lobby and its
+    tenants (#232). It must not exceed what INTODAN/mpl's Terraform reserves
+    for Island Battles, its own tenant_database_connections (20).
   EOT
   type        = number
-  default     = 10
+  default     = 20
 
   validation {
-    condition     = var.postgres_spare_connections >= 5
-    error_message = "postgres_spare_connections must be at least 5: 3 for superusers and 2 for the migrate command."
+    condition     = var.tenant_database_connections >= 1
+    error_message = "tenant_database_connections must be at least 1."
   }
 }
 
 variable "lambda_settings_file" {
   description = <<-EOT
-    The Lambda's settings, which the VM deploy writes. Every KEY=value line is
+    The Lambda's settings, which scripts/lambda-env.sh writes from
+    INTODAN/mpl's settings for the tenant (deploy/README.md, "The backend's
+    settings"). Every KEY=value line is
     passed to the function as an environment variable. Defaults to
     deploy/local/lambda.env.
   EOT
@@ -224,7 +175,7 @@ variable "lambda_settings_file" {
 variable "allow_missing_lambda_settings" {
   description = <<-EOT
     Create the function without lambda_settings_file. Only for the very first
-    apply, before the VM deploy has written it: the function then fails every
+    apply, before scripts/lambda-env.sh has written it: the function then fails every
     request until scripts/aws.sh deploy publishes its settings.
   EOT
   type        = bool
