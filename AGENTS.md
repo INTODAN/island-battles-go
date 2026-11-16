@@ -41,6 +41,7 @@ When your change needs a step after it merges (a plan and apply, an apply-role s
   - `breaking-changes`: any change to the player or lobby API, events, stored data or client SDKs
   - `browser-testing`: checking the lobby page, demo or replay in a browser
   - `game-state-testing`: generation, command and game-state tests
+  - `owner-token`: in a cloud environment, when the environment's own GitHub token can't do an action (such as editing the project board)
 - The lobby lives in [`INTODAN/mpl`](https://github.com/INTODAN/mpl); lobby changes go there first. This repository uses it at the version that README.md's [The lobby's version](README.md#the-lobbys-version) names, and changes the pin only to take a lobby change that is merged there. Island Battles specifics belong in `backend/`.
 - **The repository is public.** Never commit a secret, not even for local development: `.env.example` holds placeholders only, and production's secrets live in the deploy bucket.
 - After changing an API, re-export the OpenAPI documents and regenerate the clients in the same change. On a rebase conflict in generated files, regenerate them instead of merging by hand.
