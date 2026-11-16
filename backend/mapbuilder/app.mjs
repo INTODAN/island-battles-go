@@ -1,8 +1,8 @@
 // The map builder page. builder.mjs holds the logic; this module only draws
 // the map and turns the page's events into edits.
 import {
-  builderHello, castleRadius, checkMap, describeProblems, downloadGate, dragPosition, fieldLabel, fileName, freeSpot, lobbyGate, lobbyMessage, lobbyPageFromMessage, missingTeams,
-  newMap, openMapFile, openerState, placeProblems, problemCastle, problemsFor, serialize, teamColor, upgradeLabel, withoutCastle,
+  builderHello, castleRadius, checkMap, describeProblems, downloadGate, dragPosition, fieldLabel, fileName, freeSpot, isPreviewReady, lobbyGate, lobbyMessage, lobbyPageFromMessage,
+  missingTeams, newMap, openMapFile, openerState, placeProblems, previewMessage, previewPath, problemCastle, problemsFor, serialize, teamColor, upgradeLabel, withoutCastle,
 } from "./builder.mjs";
 
 const svgNamespace = "http://www.w3.org/2000/svg";
@@ -230,6 +230,86 @@ function renderErrors() {
   renderPlane();
 }
 
+// ---- 3D preview
+
+// The preview is the 3D client's map-preview.html in a frame on this origin.
+// It loads only once it is first turned on, and the page remembers the choice
+// in this browser.
+const previewSetting = "island-battles.map-builder.preview";
+const previewToggle = byID("preview-toggle");
+const previewPanel = byID("preview");
+const previewStatus = byID("preview-status");
+let previewOn = false;
+try {
+  previewOn = localStorage.getItem(previewSetting) === "on";
+} catch {
+  // Storage may be blocked; the preview then starts off.
+}
+let previewFrame = null;
+let previewStarting = false;
+let previewReady = false;
+let previewQueued = false;
+
+function renderPreview() {
+  previewToggle.setAttribute("aria-pressed", String(previewOn));
+  previewToggle.textContent = previewOn ? "Hide 3D preview" : "Show 3D preview";
+  byID("views").classList.toggle("with-preview", previewOn);
+  previewPanel.hidden = !previewOn;
+  byID("preview-help").hidden = !previewOn;
+  if (previewOn && !previewFrame && !previewStarting) void startPreview();
+}
+
+async function startPreview() {
+  previewStarting = true;
+  previewStatus.textContent = "Loading the 3D preview…";
+  // A server without the 3D client, such as the backend on its own in
+  // development, answers 404 or 403 for the page: say so instead of showing
+  // that answer in the frame.
+  let available = false;
+  try {
+    available = (await fetch(previewPath, { method: "HEAD", cache: "no-store" })).ok;
+  } catch {
+    // Unreachable counts as missing.
+  }
+  previewStarting = false;
+  if (!available) {
+    // Turning the preview off and on again asks once more.
+    previewStatus.textContent = `The 3D preview needs the 3D web client at ${previewPath}, which this server doesn't serve.`;
+    return;
+  }
+  previewFrame = html("iframe", { title: "3D preview of the map", src: previewPath });
+  previewPanel.prepend(previewFrame);
+}
+
+// sendPreview posts the map to the preview at most once a frame, so a drag
+// doesn't queue a redraw for every pointer move.
+function sendPreview() {
+  if (!previewReady || previewQueued) return;
+  previewQueued = true;
+  requestAnimationFrame(() => {
+    previewQueued = false;
+    previewFrame?.contentWindow?.postMessage(previewMessage(map), location.origin);
+  });
+}
+
+previewToggle.addEventListener("click", () => {
+  previewOn = !previewOn;
+  try {
+    localStorage.setItem(previewSetting, previewOn ? "on" : "off");
+  } catch {
+    // The choice then lasts for this page only.
+  }
+  renderPreview();
+});
+
+// The preview says when it listens, after it loads and after any reload.
+window.addEventListener("message", (event) => {
+  if (!isPreviewReady(event, previewFrame?.contentWindow, location.origin)) return;
+  previewReady = true;
+  previewStatus.textContent = "";
+  sendPreview();
+});
+
 // ---- Editing
 
 function changed() {
@@ -237,6 +317,7 @@ function changed() {
   renderTeamHint();
   scheduleCheck();
   renderCheck();
+  sendPreview();
 }
 
 function replaceMap(nextMap) {
@@ -662,3 +743,4 @@ async function loadUpgrades() {
 
 await loadUpgrades();
 replaceMap(map);
+renderPreview();

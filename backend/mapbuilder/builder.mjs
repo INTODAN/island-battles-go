@@ -292,3 +292,25 @@ export function lobbyGate(text, check) {
   if (check.state === "invalid") return { ready: false, reason: `Fix ${plural(check.errors.length, "problem")} before sending the map to the lobby.` };
   return { ready: true, reason: "" };
 }
+
+// The live 3D preview (#278) is the 3D web client's map-preview.html, which
+// the deployment serves at /play/ on the builder's own origin. The builder
+// shows it in a frame and posts it the map after every edit, once the preview
+// says it listens. clients/island-battles-web/src/mapPreview/preview.ts holds
+// the receiving side.
+export const previewPath = "/play/map-preview.html";
+
+const previewMessageType = "island-battles.map-preview";
+const previewReadyType = "island-battles.map-preview-ready";
+
+// previewMessage is what the builder posts to the preview: the map file, as
+// it would be downloaded, whether or not the server has accepted it yet.
+export function previewMessage(map) {
+  return { type: previewMessageType, map: mapFile(map) };
+}
+
+// isPreviewReady says whether a message is the preview frame, on the
+// builder's own origin, saying that it listens.
+export function isPreviewReady(event, frameWindow, origin) {
+  return Boolean(frameWindow) && event.source === frameWindow && event.origin === origin && event.data?.type === previewReadyType;
+}

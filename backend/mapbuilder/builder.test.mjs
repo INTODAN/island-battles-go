@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  builderHello, checkMap, describeProblems, downloadGate, dragPosition, fileName, freeSpot, lobbyGate, lobbyMessage, lobbyPageFromMessage, mapFile, missingTeams, newMap,
-  openerState, openMapFile, placeProblems, problemsFor, serialize, withoutCastle,
+  builderHello, checkMap, describeProblems, downloadGate, dragPosition, fileName, freeSpot, isPreviewReady, lobbyGate, lobbyMessage, lobbyPageFromMessage, mapFile, missingTeams,
+  newMap, openerState, openMapFile, placeProblems, previewMessage, previewPath, problemsFor, serialize, withoutCastle,
 } from "./builder.mjs";
 
 const crossing = () => ({
@@ -210,4 +210,35 @@ test("a lobby page on an allowed lobby origin names itself in answer to the buil
   assert.equal(lobbyPageFromMessage(message(), [game], self), null);
   assert.equal(lobbyPageFromMessage(message({ origin: "https://evil.example" }), [game, lobby], self), null);
   assert.deepEqual(builderHello, { type: "island-battles.map-builder" });
+});
+
+test("the 3D preview gets the map file as it would be downloaded", () => {
+  const map = crossing();
+  map.castles[1].upgrades = {};
+  map.castles[2].starting_soldier_amount = null;
+  const message = previewMessage(map);
+  // The web client's src/mapPreview/preview.ts takes this type.
+  assert.equal(message.type, "island-battles.map-preview");
+  assert.deepEqual(message.map, mapFile(map));
+  assert.deepEqual(message.map.castles[2], { team_color: 0, x: 0, y: 2.5 });
+  // A copy, so later edits don't change a message that is still queued.
+  map.castles[0].x = 7;
+  assert.equal(message.map.castles[0].x, -3);
+  // Structured cloning, which postMessage uses, keeps it as it is.
+  assert.deepEqual(structuredClone(message), message);
+  assert.equal(previewPath, "/play/map-preview.html");
+});
+
+test("only the preview frame on the builder's origin says that it listens", () => {
+  const origin = "https://game.example";
+  const frame = {};
+  const message = (overrides = {}) => ({ origin, source: frame, data: { type: "island-battles.map-preview-ready" }, ...overrides });
+  assert.equal(isPreviewReady(message(), frame, origin), true);
+  assert.equal(isPreviewReady(message({ origin: "https://evil.example" }), frame, origin), false);
+  assert.equal(isPreviewReady(message({ source: {} }), frame, origin), false);
+  assert.equal(isPreviewReady(message({ data: { type: "island-battles.lobby-page" } }), frame, origin), false);
+  assert.equal(isPreviewReady(message({ data: null }), frame, origin), false);
+  // No frame yet: nothing counts, not even a message without a source.
+  assert.equal(isPreviewReady(message({ source: undefined }), undefined, origin), false);
+  assert.equal(isPreviewReady(message({ source: null }), null, origin), false);
 });
