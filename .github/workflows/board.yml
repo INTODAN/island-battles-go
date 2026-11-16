@@ -1,0 +1,104 @@
+# Reads and edits the Island Battles project board (AGENTS.md, "Where the
+# work is") for agents in sessions that can't reach GitHub's project API
+# themselves. It uses the PROJECT_TOKEN secret, the owner's classic token with
+# the project and repo scopes, and touches nothing but the board. The board is INTODAN's
+# own, so commands name it as @me.
+#
+# - list: prints every item, its Status and its labels to the log and the
+#   run's summary.
+# - set: adds each of `urls` to the board when it isn't on it, and sets its
+#   Status to `status`.
+name: Board
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "list: print the board. set: set the Status of each of urls."
+        type: choice
+        options: [list, set]
+        default: list
+      urls:
+        description: "set only: space-separated issue or pull request URLs."
+        type: string
+        default: ""
+      status:
+        description: "set only: the Status to set."
+        type: choice
+        options: [Parked, Todo, In progress, In review, Done]
+        default: Todo
+
+permissions:
+  contents: read
+
+concurrency:
+  group: board
+  cancel-in-progress: false
+
+jobs:
+  board:
+    # Only the reviewed copy on main gets the token's work done.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+      OWNER: "@me"
+      NUMBER: "1"
+      COMMAND: ${{ inputs.command || 'list' }}
+      URLS: ${{ inputs.urls }}
+      STATUS: ${{ inputs.status }}
+    steps:
+      - name: Check the token
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::The PROJECT_TOKEN secret is not set."
+            exit 1
+          fi
+          # gh can't tell a user from an organization without read:org, so
+          # the board is named as the token owner's own: @me must be INTODAN.
+          login=$(gh api user --jq .login)
+          if [ "$login" != "INTODAN" ]; then
+            echo "::error::PROJECT_TOKEN belongs to $login, not to INTODAN, the board's owner."
+            exit 1
+          fi
+      - name: List
+        if: env.COMMAND == 'list'
+        run: |
+          gh project item-list "$NUMBER" --owner "$OWNER" --format json -L 500 > items.json
+          jq -r '.items[] | [(.status // "-"), (.content.repository // "-"), ((.content.number // "") | tostring), (.content.type // "-"), ((.labels // []) | join(",")), (.title // .content.title)] | @tsv' items.json \
+            | sort > board.tsv
+          cat board.tsv
+          {
+            echo '| Status | Repository | # | Type | Labels | Title |'
+            echo '| --- | --- | --- | --- | --- | --- |'
+            awk -F'\t' '{ printf "| %s | %s | %s | %s | %s | %s |\n", $1, $2, $3, $4, $5, $6 }' board.tsv
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Set
+        if: env.COMMAND == 'set'
+        run: |
+          set -euo pipefail
+          if [ -z "$URLS" ]; then
+            echo "::error::set needs urls."
+            exit 1
+          fi
+          project_id=$(gh project view "$NUMBER" --owner "$OWNER" --format json --jq .id)
+          gh project field-list "$NUMBER" --owner "$OWNER" --format json > fields.json
+          field_id=$(jq -r '.fields[] | select(.name == "Status") | .id' fields.json)
+          option_id=$(jq -r --arg status "$STATUS" '.fields[] | select(.name == "Status") | .options[] | select(.name == $status) | .id' fields.json)
+          if [ -z "$field_id" ] || [ -z "$option_id" ]; then
+            echo "::error::The board has no Status option named \"$STATUS\"."
+            exit 1
+          fi
+          gh project item-list "$NUMBER" --owner "$OWNER" --format json -L 500 > items.json
+          read -ra urls <<< "$URLS"
+          for url in "${urls[@]}"; do
+            item_id=$(jq -r --arg url "$url" '[.items[] | select(.content.url == $url) | .id][0] // empty' items.json)
+            if [ -z "$item_id" ]; then
+              item_id=$(gh project item-add "$NUMBER" --owner "$OWNER" --url "$url" --format json --jq .id)
+              echo "Added $url"
+            fi
+            gh project item-edit --id "$item_id" --project-id "$project_id" --field-id "$field_id" --single-select-option-id "$option_id" > /dev/null
+            echo "$url: $STATUS"
+            echo "- $url: **$STATUS**" >> "$GITHUB_STEP_SUMMARY"
+          done
