@@ -55,6 +55,9 @@ jobs:
             echo "::error::The PROJECT_TOKEN secret is not set."
             exit 1
           fi
+          echo "Scopes: $(gh api -i user 2>/dev/null | grep -i '^x-oauth-scopes:' || echo none)"
+          echo "Token user: $(gh api user --jq .login || true)"
+          gh api graphql -f query='{ viewer { login } user(login: "INTODAN") { projectV2(number: 1) { title } } }' || true
       - name: List
         if: env.COMMAND == 'list'
         run: |
