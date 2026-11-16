@@ -58,3 +58,12 @@ deploy/local/
 node_modules/
 dist/
 dist-desktop/
+
+# Binaries that `go build ./backend/cmd/<name>` leaves at the repository root.
+# Anchored, so the commands' own directories under backend/cmd/ stay tracked.
+/admin-mcp
+/bot-runner-native
+/export-openapi
+/lambda
+/lobby-games
+/migrate
