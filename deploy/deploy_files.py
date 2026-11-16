@@ -153,6 +153,10 @@ def bucket_name():
     if name:
         return name
     account = aws("sts", "get-caller-identity", "--query", "Account", "--output", "text").strip()
+    return default_bucket_name(account)
+
+
+def default_bucket_name(account):
     return f"island-battles-deploy-{account}"
 
 
