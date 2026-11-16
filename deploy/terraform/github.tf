@@ -4,8 +4,11 @@
 #
 # It can read the account, as a plan must, and write only what a backend
 # deploy writes: the function's code and settings, the bot runners' code
-# (bot_runners.tf), the deploy bucket, and the web client's files under play/
-# and their cache invalidation. The VM is INTODAN/mpl's (#232). Anything else,
+# (bot_runners.tf), its own part of the deploy bucket (the state and its lock,
+# files/ and plans/), and the web client's files under play/ and their cache
+# invalidation. It writes nothing under mpl/, INTODAN/mpl's part of the deploy
+# bucket, and reads only mpl/tenants/island-battles/tenant.env there for the
+# lambda-env target. The VM is INTODAN/mpl's (#232). Anything else,
 # such as new alarms, goes through `scripts/aws.sh apply`: on a person's machine, or in
 # the Deploy workflow's apply target, which applies a saved plan from main
 # with the apply role from deploy/github_apply_role.py.
@@ -91,14 +94,41 @@ resource "aws_iam_role_policy" "github_deploy" {
         Action   = "s3:ListBucket"
         Resource = "arn:aws:s3:::${var.deploy_bucket}"
       },
+      # The deploy bucket is shared: INTODAN/mpl keeps its state, files,
+      # plans and tenants' settings under mpl/. So the grants below name this
+      # repository's keys, never the whole bucket. ReadOnlyAccess already
+      # allows s3:GetObject everywhere, so what they limit is the writes.
+      # Each key comes from elsewhere, and a change there must change this
+      # policy too: the state's from the S3 backend's key in versions.tf
+      # (STATE_KEY in deploy/deploy_files.py), the others from FILES_PREFIX,
+      # PLANS_PREFIX and TENANT_KEY in deploy/deploy_files.py.
       {
-        # The state, its lock file and deploy/local/'s files, and the
-        # settings that INTODAN/mpl publishes for Island Battles under
-        # mpl/tenants/island-battles/ (scripts/lambda-env.sh).
-        Sid      = "SyncTheDeployBucket"
+        # Terraform's state and its lock file (use_lockfile), and
+        # deploy/local/'s files, which the scripts pull and push.
+        Sid    = "SyncItsPartOfTheDeployBucket"
+        Effect = "Allow"
+        Action = ["s3:GetObject", "s3:PutObject"]
+        Resource = [
+          "arn:aws:s3:::${var.deploy_bucket}/terraform/terraform.tfstate",
+          "arn:aws:s3:::${var.deploy_bucket}/terraform/terraform.tfstate.tflock",
+          "arn:aws:s3:::${var.deploy_bucket}/files/*",
+        ]
+      },
+      {
+        # The plan target's "Save the plan" (.github/workflows/deploy.yml).
+        # The apply target reads and deletes it with the apply role.
+        Sid      = "SaveThePlans"
         Effect   = "Allow"
-        Action   = ["s3:GetObject", "s3:PutObject"]
-        Resource = "arn:aws:s3:::${var.deploy_bucket}/*"
+        Action   = "s3:PutObject"
+        Resource = "arn:aws:s3:::${var.deploy_bucket}/plans/*"
+      },
+      {
+        # The settings that INTODAN/mpl publishes for Island Battles, its
+        # tenant, which the lambda-env target copies (deploy_files.py tenant).
+        Sid      = "ReadTheTenantSettings"
+        Effect   = "Allow"
+        Action   = "s3:GetObject"
+        Resource = "arn:aws:s3:::${var.deploy_bucket}/mpl/tenants/island-battles/tenant.env"
       },
       {
         # Nothing else is deleted: Terraform only removes its lock.
