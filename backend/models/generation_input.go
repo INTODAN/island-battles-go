@@ -18,6 +18,13 @@ type FrozenGamePlayer struct {
 	// that the host added. The player's own client relays a localhost bot;
 	// the server plays the others.
 	BotKind BotKind `gorm:"column:bot_kind;not null;default:'localhost'"`
+	// BotPort is a localhost bot's port on 127.0.0.1, for BotKind localhost
+	// only; nil is DefaultLocalhostPort.
+	BotPort *uint `gorm:"column:bot_port"`
+	// BotRelayPlayerID is the roster player whose game client relays a
+	// localhost bot seat: the lobby's host at the start. Nil for a person,
+	// who relays their own localhost bot, and for every other kind.
+	BotRelayPlayerID *string `gorm:"column:bot_relay_player_id;type:uuid"`
 	// BotLevel is the level of the default bot that the backend plays for
 	// this player, one of bots.Defaults, for BotKind default only. The
 	// backend plays it as soon as each generation is created, so it never
@@ -124,7 +131,9 @@ type GenerationState struct {
 
 	Memory BotMemory `json:"memory" doc:"The memory sent with your latest completed turn of this game, for your bot's next BotTurn.memory. Null before your first completed turn, and after a completed turn without memory."`
 
-	Bot BotChoiceView `json:"bot" doc:"Your bot in this game, the one you chose in the lobby, copied when the game started. For kind localhost your client delivers each turn to your bot, which submits its answer. For kind default the backend plays your turns itself as soon as each generation is created. For kinds hosted and uploaded the server plays your turns with your bot, without your client. Only for kind localhost does your client relay anything."`
+	Bot BotChoiceView `json:"bot" doc:"Your bot in this game, the one you chose in the lobby, copied when the game started. For kind localhost your client delivers each turn to your bot, on bot.port, which submits its answer. For kind default the backend plays your turns itself as soon as each generation is created. For kinds hosted and uploaded the server plays your turns with your bot, without your client. Only for kind localhost, and for relayed_bots, does your client relay anything."`
+
+	RelayedBots []RelayedBotView `json:"relayed_bots" nullable:"false" doc:"The localhost bot seats that the host added to the lobby, which you relay because you were the host when the game started: your client reads each one's turn with GET /game/from-lobby/{lobby_id}/turn-delivery?player_id= and delivers it to 127.0.0.1 on the seat's port, as it does for your own localhost bot. Empty for everyone else."`
 
 	// TurnDeadlineAt is nil when the lobby set no turn timeout, and once the
 	// game has ended.

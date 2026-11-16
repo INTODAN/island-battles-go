@@ -29,32 +29,16 @@ const GameKey = models.LobbyGameKey
 // lobby's game API: gamehooks.GameAPIClient.
 type Lobbies = services.LobbyReader
 
-// seats reads the members of a lobby, seats among them, or returns nil
-// without lobbies, which checks no seats.
-func seats(lobbies Lobbies, lobbyID string) func(context.Context) ([]domain.Member, error) {
-	if lobbies == nil {
-		return nil
-	}
-	return func(ctx context.Context) ([]domain.Member, error) {
-		snapshot, err := lobbies.Snapshot(ctx, lobbyID)
-		switch {
-		case err == nil:
-			return snapshot.Members, nil
-		case ctx.Err() != nil:
-			return nil, ctx.Err()
-		default:
-			return nil, fmt.Errorf("%w: read the lobby's seats: %w", domain.ErrUnavailable, err)
-		}
-	}
-}
-
 // Registration is Island Battles' side of the lobby's hooks, as Go
 // functions, which Hooks serves. Its settings validator reads default maps
 // from database. Every member chooses a bot in their member settings,
 // {"bot": {...}}, before getting ready, so the ready check refuses a member
 // without one with services.BotNotChosenProblemType. The host can add bot
 // seats, whose seat_settings {"bot_level": N} name a default bot that the
-// backend plays. While serverBots are enabled, a member's bot, and a seat's,
+// backend plays, or {"bot_localhost_port": N} a localhost bot on the host's
+// machine, which the host's game client relays; each of the host's
+// localhost bots needs its own port, which the seat validator and the start
+// check through lobbies. While serverBots are enabled, a member's bot, and a seat's,
 // may also be a hosted bot at a URL or a bot package uploaded to the lobby,
 // which the validators and the ready check check against database and
 // lobbies (see services.BotRules). The start binds the game of the lobby's
@@ -65,22 +49,23 @@ func seats(lobbies Lobbies, lobbyID string) func(context.Context) ([]domain.Memb
 // The lobby runs the ready check inside the transaction of a ready or start
 // request, so it reads as little as it can: a member getting ready is
 // checked from the request alone unless their bot is an uploaded one, whose
-// package it reads; at the start, with server bots on, it also reads the
-// lobby's seats through lobbies, which the game API reads without waiting
+// package it reads; at the start it also reads the lobby's seats through
+// lobbies, which the game API reads without waiting
 // for the lobby's lock (services.BotRules.ReadyGate).
 //
 // The key, start rules and retention that the lobby applies are those of
 // LobbyGame's configuration; the registration's own are not read.
 func Registration(database *gorm.DB, publisher services.Publisher, sender *services.TurnSender, serverBots services.ServerBots, lobbies Lobbies) domain.GameRegistration {
 	rules := services.BotRules{Database: database, ServerBots: serverBots}
+	if lobbies != nil {
+		rules.Lobbies = lobbies
+	}
 	return domain.GameRegistration{
 		Key: GameKey,
 		ValidateSettings: func(ctx context.Context, _ string, settings json.RawMessage, teams []domain.TeamDefinition) error {
 			return validateSettings(ctx, database, settings, teams)
 		},
-		ReadyGate: func(ctx context.Context, lobbyID string) (domain.ReadyCheck, error) {
-			return rules.ReadyGate(ctx, lobbyID, seats(lobbies, lobbyID))
-		},
+		ReadyGate:              rules.ReadyGate,
 		ValidateSeat:           rules.ValidateBotSeat,
 		ValidateMemberSettings: rules.ValidateMemberSettings,
 		GameOver: func(ctx context.Context, lobbyID string, round int64) (bool, error) {

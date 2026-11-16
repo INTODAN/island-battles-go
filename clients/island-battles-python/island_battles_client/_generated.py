@@ -41,6 +41,10 @@ class BotChoice(GameModel):
     """
     For kind default, the level of the default bot, one that GET /bots/defaults lists. Absent for the other kinds.
     """
+    port: Annotated[StrictInt | None, Field(ge=1024, le=65535)] = None
+    """
+    For kind localhost, the port on 127.0.0.1 where the player's client delivers each turn: the one they chose in the lobby, 41414 by default. Absent for the other kinds.
+    """
 
 
 class BotCompute(GameModel):
@@ -158,6 +162,10 @@ class BotSeatSettings(GameModel):
     bot_level: Annotated[StrictInt | None, Field(ge=1)] = None
     """
     A default bot of this level, one that GET /bots/defaults lists, which the backend plays. The seat is named "Bot (level N)".
+    """
+    bot_localhost_port: Annotated[StrictInt | None, Field(ge=1024, le=65535)] = None
+    """
+    A localhost bot on the host's machine, which island-battles-bot serve --port N runs on this port of 127.0.0.1; the host's game client delivers each turn to it, as to the host's own localhost bot. A string of the port's digits, which the lobby page's text field sends, is read the same. The port must differ from every other localhost bot seat's and from the host's own localhost bot's. The seat is named "Localhost bot (port N)".
     """
     bot_package_id: UUID | None = None
     """
@@ -572,7 +580,7 @@ class GenerationState(GameModel):
     """
     bot: BotChoice
     """
-    Your bot in this game, the one you chose in the lobby, copied when the game started. For kind localhost your client delivers each turn to your bot, which submits its answer. For kind default the backend plays your turns itself as soon as each generation is created. For kinds hosted and uploaded the server plays your turns with your bot, without your client. Only for kind localhost does your client relay anything.
+    Your bot in this game, the one you chose in the lobby, copied when the game started. For kind localhost your client delivers each turn to your bot, on bot.port, which submits its answer. For kind default the backend plays your turns itself as soon as each generation is created. For kinds hosted and uploaded the server plays your turns with your bot, without your client. Only for kind localhost, and for relayed_bots, does your client relay anything.
     """
     channel: StrictStr
     """
@@ -599,6 +607,10 @@ class GenerationState(GameModel):
     How the game ended. Absent while the game runs. A finished game keeps its final generation and rejects every command.
     """
     player_id: UUID
+    relayed_bots: Sequence[RelayedBot]
+    """
+    The localhost bot seats that the host added to the lobby, which you relay because you were the host when the game started: your client reads each one's turn with GET /game/from-lobby/{lobby_id}/turn-delivery?player_id= and delivers it to 127.0.0.1 on the seat's port, as it does for your own localhost bot. Empty for everyone else.
+    """
     submitted: StrictBool
     """
     Whether you completed this generation's turn.
@@ -754,6 +766,10 @@ class MemberBot(GameModel):
     """
     For kind uploaded only: a package of yours in this lobby, from GET /game/lobbies/{lobby_id}/bot-packages.
     """
+    port: Annotated[StrictInt | None, Field(ge=1024, le=65535)] = None
+    """
+    For kind localhost only: the port on 127.0.0.1 where your bot serves (island-battles-bot serve --port N), where your game client delivers each turn. 41414 when absent.
+    """
     url: Annotated[StrictStr | None, Field(max_length=2048)] = None
     """
     For kind hosted only: where the server POSTs each TurnDelivery. https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public.
@@ -863,6 +879,25 @@ class RegisterGenerationCommands(GameModel):
     """
     Identifies this batch. Retry a lost request with the same UUID and body; use a new UUID for every new batch.
     """
+
+
+class RelayedBot(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    display_name: StrictStr
+    """
+    The seat's name in the lobby, such as "Localhost bot (port 41415)".
+    """
+    player_id: UUID
+    """
+    The seat's player ID on the roster, which GET /game/from-lobby/{lobby_id}/turn-delivery?player_id= takes.
+    """
+    port: Annotated[StrictInt, Field(ge=1024, le=65535)]
+    """
+    The port on 127.0.0.1 where your client delivers the seat's turns.
+    """
+    team_color: Annotated[StrictInt, Field(ge=1)]
 
 
 class SendSoldierGroupCommand(GameModel):

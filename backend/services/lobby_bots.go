@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -29,6 +30,11 @@ const BotNotChosenProblemType = "urn:island-battles:problem:bot-not-chosen"
 // the lobby: its owner replaced or deleted it. A member must choose it again;
 // the host removes the seat and adds it again.
 const BotPackageGoneProblemType = "urn:island-battles:problem:bot-package-gone"
+
+// LocalhostPortTakenProblemType is the lobby's game_requirement problem type
+// for a start whose host would relay two localhost bots on one port: their
+// own and a localhost bot seat's, or two seats'.
+const LocalhostPortTakenProblemType = "urn:island-battles:problem:localhost-port-taken"
 
 // botNotChosenMessage tells the player what to do; the lobby shows it.
 const botNotChosenMessage = "Choose your bot before getting ready: your localhost bot or a default bot level."
@@ -65,6 +71,11 @@ type ServerBots struct {
 type BotRules struct {
 	Database   *gorm.DB
 	ServerBots ServerBots
+	// Lobbies reads a lobby's snapshot: the localhost bot seats and the
+	// host's own localhost bot, whose ports a new localhost bot seat's must
+	// differ from, and, at the start, the lobby's seats. Nil checks no
+	// seats.
+	Lobbies LobbyReader
 }
 
 // MemberSettings are Island Battles' member settings in the lobby, which
@@ -77,7 +88,7 @@ type MemberSettings struct {
 
 // memberSettingsShape names the member settings that the server takes.
 func memberSettingsShape(serverBots bool) string {
-	shape := `member_settings must be {"bot": {"kind": "localhost"}} or {"bot": {"kind": "default", "level": N}} with a level that GET /bots/defaults lists`
+	shape := `member_settings must be {"bot": {"kind": "localhost"}}, with an optional "port" from 1024 to 65535, or {"bot": {"kind": "default", "level": N}} with a level that GET /bots/defaults lists`
 	if serverBots {
 		shape += `, {"bot": {"kind": "hosted", "url": "https://…"}} or {"bot": {"kind": "uploaded", "package_id": "<your package in this lobby>"}}`
 	}
@@ -121,6 +132,10 @@ func checkMemberBotShape(bot models.MemberBotView, serverBots bool) error {
 		return reject(422, "kind must be localhost or default")
 	}
 	switch {
+	case bot.Port != nil && bot.Kind != models.LocalhostBot:
+		return reject(422, "port is only for kind localhost")
+	case bot.Port != nil && !validLocalhostPort(*bot.Port):
+		return reject(422, localhostPortMessage)
 	case bot.Level != nil && bot.Kind != models.DefaultBot:
 		return reject(422, "level is only for kind default")
 	case bot.URL != "" && bot.Kind != models.HostedBot:
@@ -146,6 +161,14 @@ func checkMemberBotShape(bot models.MemberBotView, serverBots bool) error {
 		}
 	}
 	return nil
+}
+
+// localhostPortMessage refuses a localhost bot's port out of range.
+var localhostPortMessage = fmt.Sprintf("a localhost bot's port must be from %d to %d, such as %d", models.MinLocalhostPort, models.MaxLocalhostPort, models.DefaultLocalhostPort)
+
+// validLocalhostPort reports whether port may be a localhost bot's.
+func validLocalhostPort(port uint) bool {
+	return port >= models.MinLocalhostPort && port <= models.MaxLocalhostPort
 }
 
 // defaultLevelMessage lists the default bots' levels after a sentence.
@@ -217,37 +240,61 @@ func isUUID(value string) bool {
 // ReadyGate is the lobby's ready gate for Island Battles: a member may get
 // ready, and a roster start, only once their member settings name a bot,
 // and an uploaded bot only while it is a ready package of theirs in the
-// lobby. While server bots are offered, the check also reads the lobby's
-// bot seats at the start, with seats, since the lobby passes no seats to the
-// check: a bot seat whose package is gone stops the start too. seats may be
-// nil, which checks no seats. A start with an uploaded bot, a member's or a
-// seat's, is also refused once the bot runners have used this month's
-// compute (ServerBots.Compute, #226); getting ready is not.
+// lobby. At the start the check also reads the lobby's snapshot through
+// Lobbies, since the lobby passes no seats to the check: the host relays
+// their own localhost bot and every localhost bot seat, which need a port
+// each, and, while server bots are offered, a bot seat whose package is gone
+// stops the start too. Without Lobbies it checks no seats. A start with an
+// uploaded bot, a member's or a seat's, is also refused once the bot runners
+// have used this month's compute (ServerBots.Compute, #226); getting ready
+// is not.
 //
 // The lobby runs the check while it holds the lobby's lock, so the check
 // reads as little as it can: nothing for a member getting ready without an
 // uploaded bot, and the lobby's packages, and at the start the runners'
-// cached compute, only when a member or a seat has an uploaded bot.
-func (rules BotRules) ReadyGate(ctx context.Context, lobbyID string, seats func(context.Context) ([]domain.Member, error)) (domain.ReadyCheck, error) {
-	if !rules.ServerBots.Enabled {
-		return func(members []domain.ReadyMember, atStart bool) error {
-			return checkMembersReady(members, atStart, false, nil)
-		}, nil
-	}
+// cached compute, only when a member or a seat has an uploaded bot. The
+// game API reads the snapshot without waiting for the lobby's lock.
+func (rules BotRules) ReadyGate(ctx context.Context, lobbyID string) (domain.ReadyCheck, error) {
 	return func(members []domain.ReadyMember, atStart bool) error {
-		return rules.checkReady(ctx, lobbyID, seats, members, atStart)
+		return rules.checkReady(ctx, lobbyID, members, atStart)
 	}, nil
 }
 
-func (rules BotRules) checkReady(ctx context.Context, lobbyID string, seats func(context.Context) ([]domain.Member, error), members []domain.ReadyMember, atStart bool) error {
-	var packageSeats []domain.Member
-	if atStart && seats != nil {
-		lobbyMembers, err := seats(ctx)
-		if err != nil {
+// snapshot reads the lobby through Lobbies, or returns nil without them.
+func (rules BotRules) snapshot(ctx context.Context, lobbyID string) (*domain.Snapshot, error) {
+	if rules.Lobbies == nil {
+		return nil, nil
+	}
+	snapshot, err := rules.Lobbies.Snapshot(ctx, lobbyID)
+	switch {
+	case err == nil:
+		return &snapshot, nil
+	case ctx.Err() != nil:
+		return nil, ctx.Err()
+	default:
+		return nil, fmt.Errorf("%w: read the lobby's seats: %w", domain.ErrUnavailable, err)
+	}
+}
+
+func (rules BotRules) checkReady(ctx context.Context, lobbyID string, members []domain.ReadyMember, atStart bool) error {
+	serverBots := rules.ServerBots.Enabled
+	var lobby *domain.Snapshot
+	if atStart {
+		var err error
+		if lobby, err = rules.snapshot(ctx, lobbyID); err != nil {
 			return err
 		}
-		for _, member := range lobbyMembers {
-			if !member.IsSeat() {
+	}
+	if !serverBots {
+		if err := checkMembersReady(members, atStart, false, nil); err != nil {
+			return err
+		}
+		return checkLocalhostPorts(lobby, members)
+	}
+	var packageSeats []domain.Member
+	if lobby != nil {
+		for _, member := range lobby.Members {
+			if !member.Active || !member.IsSeat() {
 				continue
 			}
 			if settings, err := seatSettings(member.SeatSettings, true); err == nil && settings.BotPackageID != "" {
@@ -281,8 +328,82 @@ func (rules BotRules) checkReady(ctx context.Context, lobbyID string, seats func
 	if len(goneSeats) > 0 {
 		return domain.GameRequirement(BotPackageGoneProblemType, "The uploaded bot of "+strings.Join(goneSeats, ", ")+" was replaced or deleted: remove the seat and add the bot again.")
 	}
+	if err := checkLocalhostPorts(lobby, members); err != nil {
+		return err
+	}
 	if atStart && (len(packageSeats) > 0 || choseUploadedBot(members)) {
 		return rules.checkCompute(ctx)
+	}
+	return nil
+}
+
+// hostPorts are the ports of the localhost bots that a lobby's host relays,
+// by port, each with the name of whose it is: the host's own localhost bot,
+// from settings, their member settings, and every active localhost bot
+// seat. A port taken twice is listed under its first owner, and taken
+// returns it.
+func hostPorts(lobby domain.Snapshot, settings json.RawMessage) (owners map[uint]string, taken []uint) {
+	owners = map[uint]string{}
+	add := func(port uint, owner string) {
+		if _, found := owners[port]; found {
+			taken = append(taken, port)
+			return
+		}
+		owners[port] = owner
+	}
+	if bot, err := MemberBot(settings, true); err == nil && bot.Kind == models.LocalhostBot {
+		add(models.LocalhostPort(bot.Port), "the host's own localhost bot")
+	}
+	for _, member := range lobby.Members {
+		if !member.Active || !member.IsSeat() {
+			continue
+		}
+		if seat, err := seatSettings(member.SeatSettings, true); err == nil && seat.BotLocalhostPort != nil {
+			add(*seat.BotLocalhostPort, member.DisplayName)
+		}
+	}
+	return owners, taken
+}
+
+// freePort is the first port from the default one up that no localhost bot
+// in owners takes.
+func freePort(owners map[uint]string) uint {
+	port := models.DefaultLocalhostPort
+	for owners[port] != "" && port < models.MaxLocalhostPort {
+		port++
+	}
+	return port
+}
+
+// hostSettings are the member settings of the lobby's host: those of the
+// ready check's members, which the lobby passes from its own transaction,
+// or else the snapshot's.
+func hostSettings(lobby domain.Snapshot, members []domain.ReadyMember) json.RawMessage {
+	if lobby.Lobby.HostPlayerID == nil {
+		return nil
+	}
+	host := *lobby.Lobby.HostPlayerID
+	for _, member := range members {
+		if member.PlayerID == host {
+			return member.Settings
+		}
+	}
+	for _, member := range lobby.Members {
+		if member.PlayerID == host {
+			return member.MemberSettings
+		}
+	}
+	return nil
+}
+
+// checkLocalhostPorts refuses a start whose host would relay two localhost
+// bots on one port. lobby is nil when the check reads no snapshot.
+func checkLocalhostPorts(lobby *domain.Snapshot, members []domain.ReadyMember) error {
+	if lobby == nil {
+		return nil
+	}
+	if _, taken := hostPorts(*lobby, hostSettings(*lobby, members)); len(taken) > 0 {
+		return domain.GameRequirement(LocalhostPortTakenProblemType, fmt.Sprintf("Two of the localhost bots that the host relays use port %d: give each its own port, with island-battles-bot serve --port N, and remove the seat or choose the port again.", taken[0]))
 	}
 	return nil
 }
@@ -361,19 +482,26 @@ type frozenBot struct {
 	Level     uint
 	URL       string
 	PackageID string
+	// Port is a localhost bot's port, 0 for the default one.
+	Port uint
+	// RelayPlayerID is the host who relays a localhost bot seat.
+	RelayPlayerID string
 }
 
 // defaultBot is a default bot of a level.
 func defaultBot(level uint) frozenBot { return frozenBot{Kind: models.DefaultBot, Level: level} }
 
-// lobbyBots returns the bots that the server plays for the roster, by
-// player ID, from the start's snapshot: each bot seat's, and the one in
-// each player's member settings that isn't their localhost bot. A player
-// who chose their localhost bot is absent. The start requires a bot of every
-// roster player, so a player is absent otherwise only when a retried start
-// no longer finds them among the members, because they left since; their own
-// client plays.
+// lobbyBots returns the roster's bots, by player ID, from the start's
+// snapshot: each bot seat's, and the one in each player's member settings.
+// The host relays a localhost bot seat. The start requires a bot of every
+// roster player, so a player is absent only when a retried start no longer
+// finds them among the members, because they left since; their own client
+// plays, as for a localhost bot on the default port.
 func lobbyBots(snapshot domain.Snapshot) (map[string]frozenBot, error) {
+	host := ""
+	if snapshot.Lobby.HostPlayerID != nil {
+		host = *snapshot.Lobby.HostPlayerID
+	}
 	members := map[string]domain.Member{}
 	for _, member := range snapshot.Members {
 		members[member.PlayerID] = member
@@ -392,6 +520,8 @@ func lobbyBots(snapshot domain.Snapshot) (map[string]frozenBot, error) {
 			switch {
 			case settings.BotLevel != nil:
 				chosen[entry.PlayerID] = defaultBot(*settings.BotLevel)
+			case settings.BotLocalhostPort != nil:
+				chosen[entry.PlayerID] = frozenBot{Kind: models.LocalhostBot, Port: *settings.BotLocalhostPort, RelayPlayerID: host}
 			case settings.BotURL != "":
 				chosen[entry.PlayerID] = frozenBot{Kind: models.HostedBot, URL: settings.BotURL}
 			default:
@@ -400,12 +530,15 @@ func lobbyBots(snapshot domain.Snapshot) (map[string]frozenBot, error) {
 			continue
 		}
 		bot, err := MemberBot(member.MemberSettings, true)
-		if err != nil || bot.Kind == models.LocalhostBot {
+		if err != nil {
 			continue
 		}
 		frozen := frozenBot{Kind: bot.Kind, URL: bot.URL, PackageID: bot.PackageID}
 		if bot.Level != nil {
 			frozen.Level = *bot.Level
+		}
+		if bot.Port != nil {
+			frozen.Port = *bot.Port
 		}
 		chosen[entry.PlayerID] = frozen
 	}
@@ -418,6 +551,16 @@ func lobbyBots(snapshot domain.Snapshot) (map[string]frozenBot, error) {
 func (bot frozenBot) freeze(transaction *gorm.DB, lobbyID string, player *models.FrozenGamePlayer) error {
 	player.BotKind = bot.Kind
 	switch bot.Kind {
+	case models.LocalhostBot:
+		port := models.LocalhostPort(nil)
+		if bot.Port != 0 {
+			port = bot.Port
+		}
+		player.BotPort = &port
+		if bot.RelayPlayerID != "" {
+			relay := bot.RelayPlayerID
+			player.BotRelayPlayerID = &relay
+		}
 	case models.DefaultBot:
 		level := bot.Level
 		player.BotLevel = &level
@@ -448,30 +591,60 @@ func seatSettingsShape(serverBots bool) string {
 	for _, bot := range bots.Defaults() {
 		levels = append(levels, fmt.Sprint(bot.Level))
 	}
+	localhost := fmt.Sprintf(`{"bot_localhost_port": N} with a port from %d to %d`, models.MinLocalhostPort, models.MaxLocalhostPort)
 	if !serverBots {
-		return `seat_settings must be {"bot_level": N} with a level that GET /bots/defaults lists: ` + strings.Join(levels, ", ")
+		return `seat_settings must be {"bot_level": N} with a level that GET /bots/defaults lists (` + strings.Join(levels, ", ") + `) or ` + localhost
 	}
-	return `seat_settings must be {"bot_level": N} with a level that GET /bots/defaults lists (` + strings.Join(levels, ", ") + `), {"bot_url": "https://…"} or {"bot_package_id": "<a package of this lobby>"}`
+	return `seat_settings must be {"bot_level": N} with a level that GET /bots/defaults lists (` + strings.Join(levels, ", ") + `), ` + localhost + `, {"bot_url": "https://…"} or {"bot_package_id": "<a package of this lobby>"}`
+}
+
+// portDigits matches a localhost bot seat's port typed as text.
+var portDigits = regexp.MustCompile(`^"[0-9]{1,5}"$`)
+
+// numericPort reads a localhost bot seat's port that the lobby page's text
+// field sent as a string of digits, {"bot_localhost_port": "41415"}, as the
+// number it names. Other settings come back as they are.
+func numericPort(settings json.RawMessage) json.RawMessage {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(settings, &fields) != nil {
+		return settings
+	}
+	port, found := fields["bot_localhost_port"]
+	if !found || !portDigits.Match(port) {
+		return settings
+	}
+	digits := strings.TrimLeft(string(port[1:len(port)-1]), "0")
+	if digits == "" {
+		digits = "0"
+	}
+	fields["bot_localhost_port"] = json.RawMessage(digits)
+	numeric, err := json.Marshal(fields)
+	if err != nil {
+		return settings
+	}
+	return numeric
 }
 
 // seatSettings reads a bot seat's seat_settings and checks their shape: one
-// of {"bot_level": N} with a level that GET /bots/defaults lists, and, with
-// serverBots, {"bot_url": "…"} or {"bot_package_id": "…"}. It reads nothing.
+// of {"bot_level": N} with a level that GET /bots/defaults lists,
+// {"bot_localhost_port": N} with a port from 1024 to 65535, as a number or a
+// string of digits, and, with serverBots, {"bot_url": "…"} or
+// {"bot_package_id": "…"}. It reads nothing.
 func seatSettings(settings json.RawMessage, serverBots bool) (models.BotSeatSettingsView, error) {
 	invalid := errors.New(seatSettingsShape(serverBots))
 	var decoded models.BotSeatSettingsView
-	decoder := json.NewDecoder(bytes.NewReader(settings))
+	decoder := json.NewDecoder(bytes.NewReader(numericPort(settings)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&decoded); err != nil {
 		return models.BotSeatSettingsView{}, invalid
 	}
 	set := 0
-	for _, present := range []bool{decoded.BotLevel != nil, decoded.BotURL != "", decoded.BotPackageID != ""} {
+	for _, present := range []bool{decoded.BotLevel != nil, decoded.BotLocalhostPort != nil, decoded.BotURL != "", decoded.BotPackageID != ""} {
 		if present {
 			set++
 		}
 	}
-	if set != 1 || (!serverBots && decoded.BotLevel == nil) {
+	if set != 1 || (!serverBots && decoded.BotLevel == nil && decoded.BotLocalhostPort == nil) {
 		return models.BotSeatSettingsView{}, invalid
 	}
 	if decoded.BotLevel != nil {
@@ -479,11 +652,17 @@ func seatSettings(settings json.RawMessage, serverBots bool) (models.BotSeatSett
 			return models.BotSeatSettingsView{}, invalid
 		}
 	}
+	if decoded.BotLocalhostPort != nil && !validLocalhostPort(*decoded.BotLocalhostPort) {
+		return models.BotSeatSettingsView{}, errors.New(localhostPortMessage)
+	}
 	return decoded, nil
 }
 
 // BotSeatName is the display name of a bot seat of a level.
 func BotSeatName(level uint) string { return fmt.Sprintf("Bot (level %d)", level) }
+
+// LocalhostBotSeatName is the display name of a localhost bot seat.
+func LocalhostBotSeatName(port uint) string { return fmt.Sprintf("Localhost bot (port %d)", port) }
 
 // HostedBotSeatName is the display name of a hosted bot's seat.
 const HostedBotSeatName = "Hosted bot"
@@ -512,6 +691,12 @@ func UploadedBotSeatName(ownerName string) string {
 // after the level, such as "Bot (level 2)". With server bots it may instead
 // be a hosted bot at a URL, under the rules of a member's hosted bot, named
 // "Hosted bot", or any ready package of the lobby, named after its owner.
+// Whatever the server bots, a seat may be a localhost bot on a port of the
+// host's machine, which the host's game client relays, named after its port,
+// such as "Localhost bot (port 41415)"; the port must differ from the
+// host's own localhost bot's and every other localhost bot seat's, which it
+// reads through Lobbies. The start checks the ports again, since the host can
+// change their own port later.
 func (rules BotRules) ValidateBotSeat(ctx context.Context, lobbyID string, settings json.RawMessage) (string, error) {
 	decoded, err := seatSettings(settings, rules.ServerBots.Enabled)
 	if err != nil {
@@ -520,6 +705,19 @@ func (rules BotRules) ValidateBotSeat(ctx context.Context, lobbyID string, setti
 	switch {
 	case decoded.BotLevel != nil:
 		return BotSeatName(*decoded.BotLevel), nil
+	case decoded.BotLocalhostPort != nil:
+		lobby, err := rules.snapshot(ctx, lobbyID)
+		if err != nil {
+			return "", err
+		}
+		port := *decoded.BotLocalhostPort
+		if lobby != nil {
+			owners, _ := hostPorts(*lobby, hostSettings(*lobby, nil))
+			if owner, taken := owners[port]; taken {
+				return "", reject(422, fmt.Sprintf("port %d is already taken by %s: give each localhost bot its own port, such as %d, and serve it with island-battles-bot serve --port N", port, owner, freePort(owners)))
+			}
+		}
+		return LocalhostBotSeatName(port), nil
 	case decoded.BotURL != "":
 		if err := rules.checkURL(ctx, decoded.BotURL); err != nil {
 			return "", err
