@@ -790,6 +790,21 @@ export function bridgeKeyOf(
   return `${firstId}-${secondId}-${length.toFixed(3)}`;
 }
 
+/**
+ * Whether a castle's or group's label belongs to one that is gone. A game's castles never go, but
+ * the map builder's preview deletes them (#278).
+ */
+export function staleLabel(
+  id: string,
+  castleIds: ReadonlySet<number>,
+  groupIds: ReadonlySet<number>,
+): boolean {
+  const match = /^(castle|group):(\d+):/.exec(id);
+  if (!match) return false;
+  const ids = match[1] === "castle" ? castleIds : groupIds;
+  return !ids.has(Number(match[2]));
+}
+
 function updateIslands(field: Battlefield, castles: readonly Castle[]): void {
   const { scene, materials } = field;
   const key = castles
@@ -983,10 +998,7 @@ export function renderGeneration(
   for (const id of keep) groupIds.add(id);
   prune(field.groups, groupIds, disposeGroup);
   for (const id of field.labels.ids()) {
-    const match = /^group:(\d+):/.exec(id);
-    if (match && !groupIds.has(Number(match[1]))) {
-      field.labels.remove(id);
-    }
+    if (staleLabel(id, castleIds, groupIds)) field.labels.remove(id);
   }
 
   updateClashes(field, generation);

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { bridgeKeyOf } from "./battlefield";
+import { bridgeKeyOf, staleLabel } from "./battlefield";
 import {
   hashSeed,
   ISLAND_SIDES,
@@ -94,5 +94,18 @@ describe("bridgeKeyOf", () => {
     expect(bridgeKeyOf(0, 1, 1.7504)).toBe(key);
     expect(bridgeKeyOf(0, 1, 2.1)).not.toBe(key);
     expect(bridgeKeyOf(0, 2, 1.75)).not.toBe(key);
+  });
+});
+
+describe("staleLabel", () => {
+  test("drops the labels of castles and groups that are gone, and keeps the rest", () => {
+    const castles = new Set([0, 2]);
+    const groups = new Set([7]);
+    expect(staleLabel("castle:0:soldiers", castles, groups)).toBe(false);
+    // A castle the map builder's preview deleted.
+    expect(staleLabel("castle:1:soldiers", castles, groups)).toBe(true);
+    expect(staleLabel("group:7:soldiers", castles, groups)).toBe(false);
+    expect(staleLabel("group:8:soldiers", castles, groups)).toBe(true);
+    expect(staleLabel("clash:1:2", castles, groups)).toBe(false);
   });
 });
