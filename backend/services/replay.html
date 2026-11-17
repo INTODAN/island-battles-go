@@ -80,7 +80,7 @@ input { flex: 1; min-width: 100px; accent-color: #3464e0; }
 </div>
 <p id="outcome" role="status"></p>
 <p id="clashes" role="status"></p>
-<section id="logs" aria-labelledby="logs-title">
+<section id="logs" aria-labelledby="logs-title"{{if .Watcher}} hidden{{end}}>
 <h2 id="logs-title">Logs</h2>
 <div id="logs-box" tabindex="0"></div>
 </section>
@@ -96,8 +96,7 @@ input { flex: 1; min-width: 100px; accent-color: #3464e0; }
 // The replay that the server embedded. The demo viewer has none until it opens
 // a demo file, which has the same teams, frames and outcome.
 let replay = {{.Replay}};
-// A watcher outside the roster saves the demo through the watcher's route. Every team's game log is
-// public, so a watcher reads it as a player does.
+// A watcher outside the roster sees no game log, and saves the demo through the watcher's route.
 const watcher = {{if .Watcher}}true{{else}}false{{end}};
 const colors = ["#3464e0", "#d94d5b", "#288562", "#9560cb", "#b37914", "#24828f"];
 const field = document.getElementById("battlefield");
@@ -659,6 +658,8 @@ function receiveLiveState(state) {
   if (state.outcome) {
     replay.outcome = state.outcome;
     followingLive = false;
+    // Every team's logs are visible now.
+    resetLogs();
   }
   render(animate);
   // The previous turn is over; a panel still showing it loads its final lines.
@@ -727,6 +728,7 @@ function logNote(text) {
   return note;
 }
 function showLogs(immediately = false) {
+  if (watcher) return;
   const generation = replay.frames[turn].id;
   if (shownLogs === generation) return;
   shownLogs = generation;
@@ -771,7 +773,8 @@ setInterval(() => {
   if (window.parent === window || document.visibilityState !== "visible" || shownLogs === null || !isOpenTurn(shownLogs)) return;
   requestLogs(shownLogs);
 }, openTurnRefreshMilliseconds);
-// Called when a replay or a demo is shown.
+// Called when a replay or a demo is shown, and when the outcome arrives, which
+// reveals every team's logs.
 function resetLogs() {
   logCache.clear();
   logRequests.clear();
@@ -827,18 +830,25 @@ function renderLogs(logs) {
     }
   }
   // Without any line, a list of players with no lines says less than one note.
-  // Lines of the open turn may still arrive.
+  // While some teams are hidden, the caller sees only their own team. Lines of
+  // the open turn may still arrive.
   const open = isOpenTurn(logs.generation_id);
   const savedOpen = isSavedOpenTurn(logs.generation_id);
   if (!lines) {
     let note = "No bot logged anything in this generation.";
     if (open) note = "This turn is still open. Lines appear here as the bots log them.";
     else if (savedOpen) note = "This turn was still open when the demo was saved, and no bot in it had logged anything yet.";
+    else if (logs.hidden_team_colors.length) note = demoLogs ? "The saver’s team logged nothing in this generation." : "Your team logged nothing in this generation.";
     nodes.splice(0, nodes.length, logNote(note));
   } else if (open) {
     nodes.unshift(logNote("This turn is still open; more lines may arrive."));
   } else if (savedOpen) {
     nodes.unshift(logNote("This turn was still open when the demo was saved; lines logged after that are not in it."));
+  }
+  if (logs.hidden_team_colors.length) {
+    const names = logs.hidden_team_colors.map((teamColor) => `${teamName(teamColor)}’s`);
+    const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0];
+    nodes.push(logNote(demoLogs ? `${list} logs are not in this demo, because it was saved before the game ended.` : `${list} logs appear when the game ends.`));
   }
   // A refresh of the shown generation keeps the reader's place.
   const scrollTop = renderedLogs === logs.generation_id ? logsBox.scrollTop : 0;
@@ -856,7 +866,7 @@ window.addEventListener("message", (event) => {
   if (!request) return;
   logRequests.delete(event.data.id);
   const logs = event.data.body;
-  if (event.data.status !== 200 || !Array.isArray(logs?.players) || logs.generation_id !== request.generation) {
+  if (event.data.status !== 200 || !Array.isArray(logs?.players) || !Array.isArray(logs.hidden_team_colors) || logs.generation_id !== request.generation) {
     // A failed refresh keeps the lines already shown.
     if (shownLogs !== request.generation || renderedLogs === request.generation) return;
     const wait = nextLogRetry(event.data.status, request.retriesMade);

@@ -44,11 +44,8 @@ func TestWatchReplayPageReadsTheWatcherRoutes(t *testing.T) {
 	if !strings.Contains(player, "const watcher = false;") || !strings.Contains(watcher, "const watcher = true;") {
 		t.Fatal("the page doesn't say who it is for")
 	}
-	// Every team's game log is public, so both pages show the logs panel.
-	for name, page := range map[string]string{"player": player, "watcher": watcher} {
-		if !strings.Contains(page, `<section id="logs" aria-labelledby="logs-title">`) {
-			t.Errorf("%s's page has no visible logs panel", name)
-		}
+	if !strings.Contains(watcher, `id="logs" aria-labelledby="logs-title" hidden`) || strings.Contains(player, `id="logs" aria-labelledby="logs-title" hidden`) {
+		t.Fatal("only a watcher's page hides the logs")
 	}
 	// Both pages have the speed select.
 	for name, page := range map[string]string{"player": player, "watcher": watcher} {

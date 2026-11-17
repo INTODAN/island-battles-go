@@ -363,7 +363,11 @@ func TestReadsWithoutTheGameLockApplyTheDeadline(t *testing.T) {
 			return err
 		},
 		"logs": func(fixture deadlineFixture, player domain.Principal) error {
-			_, err := fixture.service.Logs(context.Background(), player, fixture.lobbyID, fixture.states[player.PlayerID].GenerationID)
+			logs, err := fixture.service.Logs(context.Background(), player, fixture.lobbyID, fixture.states[player.PlayerID].GenerationID)
+			// Once the game has ended, every team's lines are visible.
+			if err == nil && len(logs.HiddenTeamColors) != 0 {
+				err = fmt.Errorf("hidden teams %v after the end", logs.HiddenTeamColors)
+			}
 			return err
 		},
 		"demo": func(fixture deadlineFixture, player domain.Principal) error {

@@ -1,33 +1,44 @@
-// The bots' logs for the turn shown. Every team's logs are public, to players and watchers
-// alike, while the game runs and after it. Pure, so `bun test` covers it.
+// The bots' logs for the turn shown, and the visibility rule: while a game runs a player sees
+// only their own team's logs, and once it has an outcome everyone's. Pure, so `bun test` covers
+// it.
 
 import type { components } from "../../api/generated/game";
 
 export type GenerationLogs = components["schemas"]["GenerationLogs"];
 
-/**
- * Keeps the logs of each generation by id. Logs read while their turn was still open may lack
- * lines that bots log later, so they are not settled, and are read again once the turn is over.
- */
+export const OTHER_TEAMS_HIDDEN =
+  "Logs of other teams appear when the game ends";
+
+export const ALL_TEAMS_HIDDEN = "Bot logs appear when the game ends";
+
+export const SAVED_BEFORE_END =
+  "This demo was saved before the game ended, so it holds only the saver’s team’s logs";
+
+/** Whether `candidate` shows more than `held`: fewer hidden teams, or `held` is missing. */
+export function isFuller(
+  held: GenerationLogs | undefined,
+  candidate: GenerationLogs,
+): boolean {
+  return (
+    held === undefined ||
+    candidate.hidden_team_colors.length < held.hidden_team_colors.length
+  );
+}
+
+/** Keeps the logs of each generation by id, replacing an entry only with a fuller one. */
 export class LogBook {
-  private readonly byGeneration = new Map<
-    number,
-    { logs: GenerationLogs; settled: boolean }
-  >();
+  private readonly byGeneration = new Map<number, GenerationLogs>();
 
   get(generationId: number): GenerationLogs | undefined {
-    return this.byGeneration.get(generationId)?.logs;
+    return this.byGeneration.get(generationId);
   }
 
-  /**
-   * Stores `logs`, read when the turn was over (`settled`) or still open; returns whether the
-   * book changed. Settled logs are never replaced by a read from while the turn was open, which
-   * can answer after them.
-   */
-  add(logs: GenerationLogs, settled = true): boolean {
-    const held = this.byGeneration.get(logs.generation_id);
-    if (held?.settled && !settled) return false;
-    this.byGeneration.set(logs.generation_id, { logs, settled });
+  /** Stores `logs`; returns whether the book changed. */
+  add(logs: GenerationLogs): boolean {
+    if (!isFuller(this.byGeneration.get(logs.generation_id), logs)) {
+      return false;
+    }
+    this.byGeneration.set(logs.generation_id, logs);
     return true;
   }
 
@@ -35,24 +46,35 @@ export class LogBook {
     this.byGeneration.clear();
   }
 
-  /**
-   * Stores a history's logs. `openGenerationId` names the turn that was still open when the
-   * history was read, if any: its logs are not settled.
-   */
-  addAll(all: readonly GenerationLogs[], openGenerationId?: number): void {
-    for (const logs of all) {
-      this.add(logs, logs.generation_id !== openGenerationId);
-    }
+  addAll(all: readonly GenerationLogs[]): void {
+    for (const logs of all) this.add(logs);
   }
 
   /**
    * Whether the logs of a generation must be read from the server: they are missing, or they
-   * were read while the turn was open and it is over now (`settled`).
+   * hide teams although the game has ended since.
    */
-  needsFetch(generationId: number, settled: boolean): boolean {
+  needsFetch(generationId: number, ended: boolean): boolean {
     const held = this.byGeneration.get(generationId);
-    return held === undefined || (settled && !held.settled);
+    return held === undefined || (ended && held.hidden_team_colors.length > 0);
   }
+}
+
+/**
+ * The line to show above the logs when some teams' logs are left out, or null. `live` is false
+ * for a saved demo, whose hidden logs will not appear later.
+ */
+export function hiddenNotice(
+  logs: GenerationLogs | undefined,
+  options: { ended: boolean; live: boolean; watching?: boolean },
+): string | null {
+  if (!logs || logs.hidden_team_colors.length === 0) return null;
+  if (!options.live) {
+    return options.ended ? null : SAVED_BEFORE_END;
+  }
+  if (options.ended) return null;
+  // A watcher belongs to no team, so every team is hidden until the end.
+  return options.watching ? ALL_TEAMS_HIDDEN : OTHER_TEAMS_HIDDEN;
 }
 
 export interface LogFetchTimers {
@@ -76,11 +98,11 @@ export const LOG_FETCH_DEBOUNCE_MS = 300;
  */
 export class LogFetchScheduler {
   private wasOpen = false;
-  private pending: { generationId: number; settled: boolean } | undefined;
+  private pending: { generationId: number; ended: boolean } | undefined;
   private handle: unknown;
 
   constructor(
-    private readonly request: (generationId: number, settled: boolean) => void,
+    private readonly request: (generationId: number, ended: boolean) => void,
     private readonly timers: LogFetchTimers = browserTimers,
     private readonly delayMs: number = LOG_FETCH_DEBOUNCE_MS,
   ) {}
@@ -89,8 +111,7 @@ export class LogFetchScheduler {
   update(view: {
     open: boolean;
     generationId: number;
-    /** The turn is over: the game has ended or a later turn has arrived. */
-    settled: boolean;
+    ended: boolean;
     needsFetch: boolean;
   }): void {
     const justOpened = view.open && !this.wasOpen;
@@ -101,21 +122,21 @@ export class LogFetchScheduler {
     }
     if (justOpened) {
       this.cancel();
-      this.request(view.generationId, view.settled);
+      this.request(view.generationId, view.ended);
       return;
     }
     if (this.pending && this.pending.generationId === view.generationId) {
       // The same turn is still on screen: keep the running timer, with the latest state.
-      this.pending.settled = view.settled;
+      this.pending.ended = view.ended;
       return;
     }
     this.cancel();
-    this.pending = { generationId: view.generationId, settled: view.settled };
+    this.pending = { generationId: view.generationId, ended: view.ended };
     this.handle = this.timers.set(() => {
       const due = this.pending;
       this.pending = undefined;
       this.handle = undefined;
-      if (due) this.request(due.generationId, due.settled);
+      if (due) this.request(due.generationId, due.ended);
     }, this.delayMs);
   }
 

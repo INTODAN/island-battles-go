@@ -70,7 +70,7 @@ export interface paths {
         };
         /**
          * Save a lobby's game as a demo file for a roster player
-         * @description Requires a place on the game's frozen roster; the lobby is not consulted. Returns the game as a demo file, the Demo schema, as an attachment named island-battles-game-<game_id>-generation-<n>.json, where n is the number of generations played. Any roster player can save a demo at any time: one saved during the game holds the generations played so far and a null outcome. Each frame holds every team's game log lines, as GET /game/from-lobby/{lobby_id}/logs returns them when the demo is saved. The demo viewer at /game/demo-viewer/ opens the file without the lobby, a session or the game. The body is streamed, and a long game with full logs takes tens of megabytes, so it is packed with gzip (Content-Encoding: gzip) when Accept-Encoding allows it. The game is deleted 7 days after its last generation by default; then this returns 404. A lobby can play several games, one per round (lobby.round, raised by POST /lobby/v1/games/island-battles/lobbies/{lobby_id}/reopen once a game has ended); this route serves the lobby's newest game and its frozen roster, and an older game can't be reached once the next one starts.
+         * @description Requires a place on the game's frozen roster; the lobby is not consulted. Returns the game as a demo file, the Demo schema, as an attachment named island-battles-game-<game_id>-generation-<n>.json, where n is the number of generations played. Any roster player can save a demo at any time: one saved during the game holds the generations played so far and a null outcome. Each frame's game log lines follow the rule of GET /game/from-lobby/{lobby_id}/logs when the demo is saved: while the game runs only your own team's lines, once it has ended every team's. The demo viewer at /game/demo-viewer/ opens the file without the lobby, a session or the game. The body is streamed, and a long game with full logs takes tens of megabytes, so it is packed with gzip (Content-Encoding: gzip) when Accept-Encoding allows it. The game is deleted 7 days after its last generation by default; then this returns 404. A lobby can play several games, one per round (lobby.round, raised by POST /lobby/v1/games/island-battles/lobbies/{lobby_id}/reopen once a game has ended); this route serves the lobby's newest game and its frozen roster, and an older game can't be reached once the next one starts.
          */
         get: operations["getIslandLobbyDemo"];
         put?: never;
@@ -109,8 +109,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Read every team's game log lines of a generation
-         * @description For the game's roster players and for the people who may read GET /game/from-lobby/{lobby_id}/watch: a watcher with the lobby's join code whom the host hasn't kicked, or an active member of the lobby. Returns the game log lines that players' bots sent with their batches for the generation, grouped by player, each named by the display name they had at the start, never by ID. Every team's lines are public, while the game runs and after it ends; lines of the open turn may still arrive until it is over. A kicked watcher gets 403. A generation of another game returns 404. The lines are deleted with the game, 7 days after its last generation by default; then this returns 404. A lobby can play several games, one per round (lobby.round, raised by POST /lobby/v1/games/island-battles/lobbies/{lobby_id}/reopen once a game has ended); this route serves the lobby's newest game and its frozen roster, and an older game can't be reached once the next one starts.
+         * Read a generation's game log lines for a roster player
+         * @description Requires a place on the game's frozen roster; the lobby is not consulted. Returns the game log lines that players' bots sent with their batches for the generation, grouped by player, each named by the display name they had at the start, never by ID. While the game runs you see only your own team's lines; once it has an outcome you see every team's. hidden_team_colors lists the teams you can't see yet, without saying whether they logged anything. A generation of another game returns 404. The lines are deleted with the game, 7 days after its last generation by default; then this returns 404. A lobby can play several games, one per round (lobby.round, raised by POST /lobby/v1/games/island-battles/lobbies/{lobby_id}/reopen once a game has ended); this route serves the lobby's newest game and its frozen roster, and an older game can't be reached once the next one starts.
          */
         get: operations["getIslandLobbyGenerationLogs"];
         put?: never;
@@ -170,7 +170,7 @@ export interface paths {
         };
         /**
          * Read a lobby game's history for a watcher
-         * @description For the people who may read GET /game/from-lobby/{lobby_id}/watch. Returns the game so far as a demo file, the Demo schema, as GET /game/from-lobby/{lobby_id}/demo does, for scrubbing back through it. Each frame holds every team's game log lines, during the game and after it. Packed with gzip when Accept-Encoding allows it. A lobby can play several games, one per round (lobby.round, raised by POST /lobby/v1/games/island-battles/lobbies/{lobby_id}/reopen once a game has ended); this route serves the lobby's newest game and its frozen roster, and an older game can't be reached once the next one starts.
+         * @description For the people who may read GET /game/from-lobby/{lobby_id}/watch. Returns the game so far as a demo file, the Demo schema, as GET /game/from-lobby/{lobby_id}/demo does, for scrubbing back through it. A watcher belongs to no team, so while the game runs no game log lines are included and every frame's hidden_team_colors names every team; once the game has ended every team's lines are. Packed with gzip when Accept-Encoding allows it. A lobby can play several games, one per round (lobby.round, raised by POST /lobby/v1/games/island-battles/lobbies/{lobby_id}/reopen once a game has ended); this route serves the lobby's newest game and its frozen roster, and an older game can't be reached once the next one starts.
          */
         get: operations["watchIslandLobbyDemo"];
         put?: never;
@@ -628,7 +628,7 @@ export interface components {
             frames: components["schemas"]["Generation"][];
             /** Format: int64 */
             game_id: number;
-            /** @description One entry per frame, in the same order, with every team's game log lines when the demo was saved. A demo saved during the game lacks the lines that bots logged for the open turn after it was saved. */
+            /** @description One entry per frame, in the same order, with the game log lines its saver could see when saving: while the game runs only the saver's team's, once it has ended every team's. hidden_team_colors names the teams left out. */
             logs: components["schemas"]["GenerationLogs"][];
             /** @description How the game ended, or null when the demo was saved while the game was still running. */
             outcome: components["schemas"]["GameOutcome"] | null;
@@ -642,7 +642,7 @@ export interface components {
              * @description The demo format's version. The demo viewer opens only the current version and rejects a demo saved by another version of the game.
              * @enum {integer}
              */
-            schema_version: 2;
+            schema_version: 1;
             /** @description The teams that played, with their lobby names and the display names their players had at the start. */
             teams: components["schemas"]["GameTeam"][];
         };
@@ -765,7 +765,9 @@ export interface components {
             readonly $schema?: string;
             /** Format: int64 */
             generation_id: number;
-            /** @description Every player of every team, ordered by team colour and then display name, with their lines in the order they were written. */
+            /** @description Teams whose logs you can't see yet. While the game runs you see only your own team's logs; once it has an outcome you see every team's. */
+            hidden_team_colors: number[];
+            /** @description Every player of the teams you can see, ordered by team colour and then display name, with their lines in the order they were written. */
             players: components["schemas"]["PlayerGenerationLogs"][];
         };
         GenerationState: {

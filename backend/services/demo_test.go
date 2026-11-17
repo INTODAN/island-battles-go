@@ -97,29 +97,35 @@ func demoMessages(demo models.Demo) []string {
 	return messages
 }
 
-func TestADemoHoldsEveryFrameWithEveryTeamsLogs(t *testing.T) {
+func TestADemoHoldsEveryFrameWithTheLogsItsSaverMaySee(t *testing.T) {
 	fixture := newLogFixture(t)
 	playLoggedTurns(t, fixture, 2)
 
-	// Every team's lines are public: during the game, Alice's demo and Bob's
-	// both hold Blue's and Red's lines.
-	everyLine := []string{"alice in turn 1", "bob in turn 1", "alice in turn 2", "bob in turn 2"}
-	for player, name := range []string{"Alice", "Bob"} {
-		demo := saveDemo(t, fixture, player)
-		assertDemoMatchesTheGame(t, fixture, player, demo)
-		if len(demo.Frames) != 3 || demo.Outcome != nil {
-			t.Fatalf("running game's demo has %d frames and outcome %+v", len(demo.Frames), demo.Outcome)
-		}
-		if !reflect.DeepEqual(demoMessages(demo), everyLine) {
-			t.Fatalf("%s's demo lines = %q, want %q", name, demoMessages(demo), everyLine)
-		}
-		// The open turn has no lines yet, and still lists every player.
-		if open := demo.Logs[2]; len(open.Players) != 2 || len(open.Players[0].Lines) != 0 || len(open.Players[1].Lines) != 0 {
-			t.Fatalf("open turn = %+v", open)
+	// During the game, Alice's demo holds Blue's lines only, and Bob's Red's.
+	alice := saveDemo(t, fixture, 0)
+	assertDemoMatchesTheGame(t, fixture, 0, alice)
+	if len(alice.Frames) != 3 || alice.Outcome != nil {
+		t.Fatalf("running game's demo has %d frames and outcome %+v", len(alice.Frames), alice.Outcome)
+	}
+	if want := []string{"alice in turn 1", "alice in turn 2"}; !reflect.DeepEqual(demoMessages(alice), want) {
+		t.Fatalf("Alice's demo lines = %q, want %q", demoMessages(alice), want)
+	}
+	for _, logs := range alice.Logs {
+		if !reflect.DeepEqual(logs.HiddenTeamColors, []uint{2}) {
+			t.Fatalf("Alice's demo hides %v", logs.HiddenTeamColors)
 		}
 	}
+	// The open turn has no lines yet, and still lists Blue's players.
+	if open := alice.Logs[2]; len(open.Players) != 1 || len(open.Players[0].Lines) != 0 {
+		t.Fatalf("open turn = %+v", open)
+	}
+	bob := saveDemo(t, fixture, 1)
+	assertDemoMatchesTheGame(t, fixture, 1, bob)
+	if want := []string{"bob in turn 1", "bob in turn 2"}; !reflect.DeepEqual(demoMessages(bob), want) {
+		t.Fatalf("Bob's demo lines = %q, want %q", demoMessages(bob), want)
+	}
 
-	// After the end, a demo holds the same lines and the outcome.
+	// After the end, every demo holds every team's lines.
 	game, err := dal.FindGame(fixture.database, fixture.state.GameID)
 	if err != nil {
 		t.Fatal(err)
@@ -133,8 +139,13 @@ func TestADemoHoldsEveryFrameWithEveryTeamsLogs(t *testing.T) {
 	if ended.Outcome == nil || ended.Outcome.Summary != "Blue wins as the last team standing" {
 		t.Fatalf("ended demo outcome = %+v", ended.Outcome)
 	}
-	if !reflect.DeepEqual(demoMessages(ended), everyLine) {
-		t.Fatalf("ended demo lines = %q, want %q", demoMessages(ended), everyLine)
+	if want := []string{"alice in turn 1", "bob in turn 1", "alice in turn 2", "bob in turn 2"}; !reflect.DeepEqual(demoMessages(ended), want) {
+		t.Fatalf("ended demo lines = %q, want %q", demoMessages(ended), want)
+	}
+	for _, logs := range ended.Logs {
+		if len(logs.HiddenTeamColors) != 0 || len(logs.Players) != 2 {
+			t.Fatalf("ended demo logs = %+v", logs)
+		}
 	}
 	// Players are named, never identified.
 	raw, err := json.Marshal(ended)
@@ -271,7 +282,7 @@ func TestAFullLengthTwoPlayerDemoWithFullLogsFitsTheLobbyPage(t *testing.T) {
 			frame.Clashes = append(frame.Clashes, models.Clash{ID: uint(clash + 1), Time: 0.123456, Participants: []models.ClashParticipant{participant, participant}})
 		}
 		demo.Frames = append(demo.Frames, frame)
-		demo.Logs = append(demo.Logs, models.GenerationLogs{GenerationID: frame.ID, Players: []models.PlayerGenerationLogs{
+		demo.Logs = append(demo.Logs, models.GenerationLogs{GenerationID: frame.ID, HiddenTeamColors: []uint{}, Players: []models.PlayerGenerationLogs{
 			{DisplayName: "Alex", TeamColor: 1, Lines: botLines()}, {DisplayName: "Sam", TeamColor: 2, Lines: botLines()},
 		}})
 	}
