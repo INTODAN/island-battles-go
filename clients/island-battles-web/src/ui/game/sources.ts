@@ -27,6 +27,8 @@ export interface LiveSource {
   title: string;
   /** "Back to lobby" for a player; a watcher has no lobby to go back to. */
   backLabel?: string;
+  /** A watcher belongs to no team, so they see no logs until the game ends. */
+  watching: boolean;
   /** The realtime problem scope that ends this source. */
   problemScope: RealtimeProblem["scope"];
   /** Subscribes to the game's channel. */
@@ -40,10 +42,10 @@ export interface LiveSource {
   /** The demo file of the game so far, ready to save. */
   saveDemo(): Promise<DemoDownload>;
   /**
-   * Reads one turn's logs. Absent for a watcher, who sees no logs until the game ends and
-   * then gets every turn's logs with the history.
+   * Reads one turn's logs: a player's own team's while the game runs, and every team's once
+   * it has ended. A watcher's read has no lines until then.
    */
-  readLogs?(generationId: number): Promise<GenerationLogs>;
+  readLogs(generationId: number): Promise<GenerationLogs>;
 }
 
 function required<T>(data: T | undefined): T {
@@ -72,6 +74,7 @@ export function playerSource(
   const gameApi = gameApiOf(realtime);
   return {
     title: "Game",
+    watching: false,
     problemScope: "game",
     follow: () => realtime.followGame(lobbyId, round),
     leave: () => realtime.leaveGame(),
@@ -97,8 +100,8 @@ export function playerSource(
 }
 
 /**
- * A watcher's game, for someone outside the roster: the lobby's watch channel and
- * `/watch/demo`. Nothing here plays, heartbeats or applies a deadline.
+ * A watcher's game, for someone outside the roster: the lobby's watch channel, `/watch/demo`
+ * and `/watch/logs`. Nothing here plays, heartbeats or applies a deadline.
  */
 export function watchSource(
   realtime: Realtime,
@@ -108,6 +111,7 @@ export function watchSource(
   return {
     title: "Watching",
     backLabel: "Stop watching",
+    watching: true,
     problemScope: "watch",
     follow: () => realtime.followWatch(target),
     leave: () => realtime.leaveWatch(),
@@ -121,5 +125,17 @@ export function watchSource(
       return required(data);
     },
     saveDemo: () => downloadDemo(gameApi, target.lobbyId, true),
+    async readLogs(generationId) {
+      const { data } = await gameApi.GET(
+        "/game/from-lobby/{lobby_id}/watch/logs",
+        {
+          params: {
+            path: { lobby_id: target.lobbyId },
+            query: { generation_id: generationId },
+          },
+        },
+      );
+      return required(data);
+    },
   };
 }

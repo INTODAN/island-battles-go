@@ -2008,7 +2008,7 @@
     }
   },
   "info": {
-    "description": "Operations a player client calls during a started game. After every turn, each roster player's Centrifugo channel `player:{player_id}` receives a `GenerationEvent`, except after the turn that ends the game, which pushes a `GameEndedEvent` with the final generation and its outcome instead. Clients reconcile with the generation read after subscribing or reconnecting; HTTP state is authoritative, and its `outcome` is set once the game has ended. A turn times out at its `turn_deadline_at`; the server runs no timers, so a client waiting for other players calls `POST /game/from-lobby/{lobby_id}/deadline` about a second after it. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the `game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose. `GET /game/upgrades` lists what each castle upgrade level costs, and `GET /bots/defaults` the default bots that the backend plays. Before getting ready in a lobby, every member chooses their bot in their lobby member settings with the lobby's `setLobbyMemberSettings`: `{\"bot\": {\"kind\": \"localhost\"}}`, their own bot, whose turns their client relays, or `{\"bot\": {\"kind\": \"default\", \"level\": N}}`, a default bot level; `GenerationState.bot` reports it during the game. `Demo` is the demo file format, which `GET /game/from-lobby/{lobby_id}/demo` returns and the demo viewer at `/game/demo-viewer/` opens. People outside the roster watch a game with its lobby's join code (`POST /lobby/v1/watches`): the lobby's watch channel `watch:island-battles:{lobby_id}` receives a `WatchGenerationEvent` after every turn and a `WatchGameEndedEvent` after the last, in the same push as the players' events, and `GET /game/from-lobby/{lobby_id}/watch` and `/watch/demo` are their reads. `BotTurn` and `BotTurnResult` are the stateless bot contract: a bot gets a `BotTurn` each turn and answers with a `BotTurnResult`, which is sent as one completing batch. A localhost bot gets its turns as a `TurnDelivery` from `GET /game/from-lobby/{lobby_id}/turn-delivery`, which its player's client posts to it, and submits its answer itself with the delivery's one-turn submit token. Any member of a lobby can upload a bot package, the zip that the SDKs' `package` command builds, to the lobby: `POST /game/lobbies/{lobby_id}/bot-packages` presigns the upload, the zip goes straight to storage, and `POST /game/lobbies/{lobby_id}/bot-packages/{package_id}/complete` checks it. The command line uploads with an upload token from `POST /game/lobbies/{lobby_id}/bot-packages/upload-token` instead of a session.",
+    "description": "Operations a player client calls during a started game. After every turn, each roster player's Centrifugo channel `player:{player_id}` receives a `GenerationEvent`, except after the turn that ends the game, which pushes a `GameEndedEvent` with the final generation and its outcome instead. Clients reconcile with the generation read after subscribing or reconnecting; HTTP state is authoritative, and its `outcome` is set once the game has ended. A turn times out at its `turn_deadline_at`; the server runs no timers, so a client waiting for other players calls `POST /game/from-lobby/{lobby_id}/deadline` about a second after it. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the `game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose. `GET /game/upgrades` lists what each castle upgrade level costs, and `GET /bots/defaults` the default bots that the backend plays. Before getting ready in a lobby, every member chooses their bot in their lobby member settings with the lobby's `setLobbyMemberSettings`: `{\"bot\": {\"kind\": \"localhost\"}}`, their own bot, whose turns their client relays, or `{\"bot\": {\"kind\": \"default\", \"level\": N}}`, a default bot level; `GenerationState.bot` reports it during the game. `Demo` is the demo file format, which `GET /game/from-lobby/{lobby_id}/demo` returns and the demo viewer at `/game/demo-viewer/` opens. People outside the roster watch a game with its lobby's join code (`POST /lobby/v1/watches`): the lobby's watch channel `watch:island-battles:{lobby_id}` receives a `WatchGenerationEvent` after every turn and a `WatchGameEndedEvent` after the last, in the same push as the players' events, and `GET /game/from-lobby/{lobby_id}/watch`, `/watch/demo` and `/watch/logs` are their reads. `BotTurn` and `BotTurnResult` are the stateless bot contract: a bot gets a `BotTurn` each turn and answers with a `BotTurnResult`, which is sent as one completing batch. A localhost bot gets its turns as a `TurnDelivery` from `GET /game/from-lobby/{lobby_id}/turn-delivery`, which its player's client posts to it, and submits its answer itself with the delivery's one-turn submit token. Any member of a lobby can upload a bot package, the zip that the SDKs' `package` command builds, to the lobby: `POST /game/lobbies/{lobby_id}/bot-packages` presigns the upload, the zip goes straight to storage, and `POST /game/lobbies/{lobby_id}/bot-packages/{package_id}/complete` checks it. The command line uploads with an upload token from `POST /game/lobbies/{lobby_id}/bot-packages/upload-token` instead of a session.",
     "title": "Island Battles Player API",
     "version": "1.0.0"
   },
@@ -2514,6 +2514,74 @@
           }
         ],
         "summary": "Read a lobby game's history for a watcher",
+        "tags": [
+          "Island Battles"
+        ]
+      }
+    },
+    "/game/from-lobby/{lobby_id}/watch/logs": {
+      "get": {
+        "description": "For the people who may read GET /game/from-lobby/{lobby_id}/watch. Returns a generation's game log lines in the shape of GET /game/from-lobby/{lobby_id}/logs, for a reader of no team: bots often log their plans, so while the game runs no lines are included and hidden_team_colors names every team, and once the game has an outcome every team's lines are. A roster player reads it as a watcher too. A generation of another game returns 404. A kicked watcher gets 403; anyone else, and a lobby whose game hasn't started, get 404. A lobby can play several games, one per round (lobby.round, raised by POST /lobby/v1/games/island-battles/lobbies/{lobby_id}/reopen once a game has ended); this route serves the lobby's newest game and its frozen roster, and an older game can't be reached once the next one starts.",
+        "operationId": "watchIslandLobbyGenerationLogs",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lobby_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The generation whose lines to read, from Generation.id.",
+            "explode": false,
+            "in": "query",
+            "name": "generation_id",
+            "required": true,
+            "schema": {
+              "description": "The generation whose lines to read, from Generation.id.",
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerationLogs"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "PlayerToken": []
+          }
+        ],
+        "summary": "Read a generation's game log lines for a watcher",
         "tags": [
           "Island Battles"
         ]

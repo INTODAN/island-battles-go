@@ -60,7 +60,7 @@ export function mountLive(
   options: LiveOptions,
 ): { dispose(): void } {
   const { realtime, source } = options;
-  const watching = source.readLogs === undefined;
+  const { watching } = source;
   const failureText = watching ? watchFailureText : loadFailureText;
   const logs = new LogBook();
   const screen = new GameScreen(container, {
@@ -84,7 +84,6 @@ export function mountLive(
   let loading = false;
   let wasConnected = false;
   let resyncTimer: ReturnType<typeof setTimeout> | undefined;
-  let endedResync = false;
   /** The host removed this watcher: no more turns arrive. */
   let stopped = false;
   const requested = new Set<string>();
@@ -101,25 +100,20 @@ export function mountLive(
   }
 
   async function fetchLogs(generationId: number, ended: boolean) {
-    if (!source.readLogs) {
-      // A watcher sees no logs while the game runs: every team is hidden. Once it has ended,
-      // the history carries every turn's logs, so it is read once more.
-      if (!ended) {
-        if (
-          logs.add({
-            generation_id: generationId,
-            players: [],
-            hidden_team_colors: teamColors,
-          })
-        ) {
-          // The panel asked while drawing: draw again once it has finished.
-          queueMicrotask(() => {
-            if (!disposed) screen.refreshLogs();
-          });
-        }
-      } else if (!endedResync && controller) {
-        endedResync = true;
-        void resync();
+    if (watching && !ended) {
+      // A watcher sees no logs while the game runs: every team is hidden, so nothing is read.
+      // Once it has ended, `/watch/logs` has every team's.
+      if (
+        logs.add({
+          generation_id: generationId,
+          players: [],
+          hidden_team_colors: teamColors,
+        })
+      ) {
+        // The panel asked while drawing: draw again once it has finished.
+        queueMicrotask(() => {
+          if (!disposed) screen.refreshLogs();
+        });
       }
       return;
     }
@@ -185,7 +179,6 @@ export function mountLive(
       );
       controller = screen.start(demo.teams, frames, outcome);
       showYourBot(held);
-      endedResync = demo.outcome !== null;
       screen.hideOverlay();
     } catch (error) {
       if (disposed) return;
