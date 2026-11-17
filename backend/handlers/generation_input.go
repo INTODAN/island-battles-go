@@ -113,6 +113,7 @@ type TurnDeliveryResponse struct{ Body models.TurnDelivery }
 // URL when no public URL is configured.
 type TurnDeliveryRequest struct {
 	LobbyID       string `path:"lobby_id" format:"uuid"`
+	PlayerID      string `query:"player_id" format:"uuid" doc:"A localhost bot seat that you relay, one of GenerationState.relayed_bots, to read its turn instead of yours. Absent for your own turn."`
 	Authorization string `header:"Authorization"`
 	origin        string
 }
@@ -127,8 +128,9 @@ func (request *TurnDeliveryRequest) Resolve(ctx huma.Context) []error {
 	return nil
 }
 
-// TurnDelivery answers the caller's turn of the open generation with a
-// submit token, for their bot to play and submit itself.
+// TurnDelivery answers the caller's turn of the open generation, or that of
+// a localhost bot seat they relay, with a submit token, for the bot to play
+// and submit itself.
 func (handler *LobbyGame) TurnDelivery(ctx context.Context, input *TurnDeliveryRequest) (*TurnDeliveryResponse, error) {
 	defer handler.runRetention(ctx)
 	principal, err := handler.authenticate(ctx, input.Authorization)
@@ -143,7 +145,7 @@ func (handler *LobbyGame) TurnDelivery(ctx context.Context, input *TurnDeliveryR
 		origin = input.origin
 	}
 	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher, Bots: handler.Bots}
-	delivery, err := service.TurnDelivery(ctx, principal, input.LobbyID, handler.SubmitTokens, origin+"/generation/commands")
+	delivery, err := service.TurnDelivery(ctx, principal, input.LobbyID, input.PlayerID, handler.SubmitTokens, origin+"/generation/commands")
 	if err != nil {
 		return nil, generationHTTPError(ctx, err)
 	}

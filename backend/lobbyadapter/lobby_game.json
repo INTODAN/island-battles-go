@@ -5,7 +5,7 @@
   "start_rules": {"every_team_needs_member": true},
   "frontend": {
     "result_url": "/game/from-lobby/{lobby_id}/replay?lobby_round={round}",
-    "started_hint": "A default bot is played by the backend; a localhost bot is played by its player, whose open lobby tab relays each turn to the bot on their machine. The board follows recorded generations live.",
+    "started_hint": "A default bot is played by the backend; a localhost bot is played by its player, whose open lobby tab relays each turn to the bot on their machine, and a localhost bot seat by the tab of the host who added it, on the seat's port. The board follows recorded generations live.",
     "data_url_prefix": "/game/from-lobby/{lobby_id}/",
     "watch_result_url": "/game/from-lobby/{lobby_id}/watch/replay",
     "watch_data_url_prefix": "/game/from-lobby/{lobby_id}/watch/",

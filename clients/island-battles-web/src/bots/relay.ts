@@ -41,6 +41,13 @@ export interface RelayDeps {
   deadlineGraceMs?: number;
   /** Pause before asking an unreachable bot again. Default 2000. */
   botRetryMs?: number;
+  /**
+   * Relays a localhost bot seat that the player added as the host, one of
+   * `GenerationState.relayed_bots`, rather than the player's own bot: each turn is delivered
+   * whatever the player's own bot and `submitted` say, and the deadline is left to the
+   * player's own relay.
+   */
+  seat?: boolean;
 }
 
 export interface BotRelay {
@@ -85,6 +92,7 @@ export function createBotRelay(deps: RelayDeps): BotRelay {
   const status = createStore<RelayStatus>({ kind: "idle" });
   const graceMs = deps.deadlineGraceMs ?? 1000;
   const botRetryMs = deps.botRetryMs ?? 2000;
+  const seat = deps.seat === true;
   let disposed = false;
   let held: string | undefined;
   let run = 0;
@@ -138,6 +146,7 @@ export function createBotRelay(deps: RelayDeps): BotRelay {
   /** Waits for the others once the bot has the turn. */
   function waitForOthers(state: GenerationState): void {
     status.set({ kind: "delivered", generationId: state.generation_id });
+    if (seat) return;
     const now = deps.game.get();
     watchDeadline(now && turnKey(now) === turnKey(state) ? now : state);
   }
@@ -204,7 +213,10 @@ export function createBotRelay(deps: RelayDeps): BotRelay {
     if (key === held) return;
     held = key;
     reset();
-    if (state.bot.kind !== "localhost") {
+    if (seat) {
+      // Whether the seat's turn is open, only its delivery says.
+      void play(state);
+    } else if (state.bot.kind !== "localhost") {
       status.set({ kind: "idle" });
       // The backend plays this player; the relay still keeps the game moving.
       watchDeadline(state);
@@ -228,7 +240,7 @@ export function createBotRelay(deps: RelayDeps): BotRelay {
         disposed ||
         !state ||
         state.outcome ||
-        state.bot.kind !== "localhost" ||
+        (!seat && state.bot.kind !== "localhost") ||
         current.kind !== "error" ||
         current.retrying ||
         current.generationId !== state.generation_id

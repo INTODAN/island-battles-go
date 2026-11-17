@@ -164,9 +164,9 @@ func TestEveryMemberChoosesABotBeforeGettingReady(t *testing.T) {
 		`{"bot":{"kind":"default","level":0}}`:   "kind default needs a level that GET /bots/defaults lists: 1, 2, 3",
 		`{"bot":{"kind":"localhost","level":1}}`: "level is only for kind default",
 		`{"bot":{"kind":"uploaded"}}`:            "kind must be localhost or default",
-		`{"bot":{"kind":"localhost","x":1}}`:     `member_settings must be {"bot": {"kind": "localhost"}} or {"bot": {"kind": "default", "level": N}} with a level that GET /bots/defaults lists`,
-		`{"bot":{"kind":"localhost"},"x":1}`:     `member_settings must be {"bot": {"kind": "localhost"}} or {"bot": {"kind": "default", "level": N}} with a level that GET /bots/defaults lists`,
-		`{}`:                                     `member_settings must be {"bot": {"kind": "localhost"}} or {"bot": {"kind": "default", "level": N}} with a level that GET /bots/defaults lists`,
+		`{"bot":{"kind":"localhost","x":1}}`:     `member_settings must be {"bot": {"kind": "localhost"}}, with an optional "port" from 1024 to 65535, or {"bot": {"kind": "default", "level": N}} with a level that GET /bots/defaults lists`,
+		`{"bot":{"kind":"localhost"},"x":1}`:     `member_settings must be {"bot": {"kind": "localhost"}}, with an optional "port" from 1024 to 65535, or {"bot": {"kind": "default", "level": N}} with a level that GET /bots/defaults lists`,
+		`{}`:                                     `member_settings must be {"bot": {"kind": "localhost"}}, with an optional "port" from 1024 to 65535, or {"bot": {"kind": "default", "level": N}} with a level that GET /bots/defaults lists`,
 	}
 	for settings, detail := range invalid {
 		var problem struct {

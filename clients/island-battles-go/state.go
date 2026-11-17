@@ -48,6 +48,19 @@ type botChoice struct {
 	Kind  string `json:"kind"`
 	Level *uint  `json:"level,omitempty"`
 	Host  string `json:"host,omitempty"`
+	// Port is a localhost bot's port, where a game client in the browser
+	// delivers its turns. A Client plays the seat itself, on no port.
+	Port *uint `json:"port,omitempty"`
+}
+
+// relayedBot is a localhost bot seat that the host's game client in the
+// browser relays to a bot on its own port. A Client relays none: it plays
+// its own seat. It is the contract's RelayedBot.
+type relayedBot struct {
+	PlayerID    string `json:"player_id"`
+	TeamColor   uint   `json:"team_color"`
+	DisplayName string `json:"display_name"`
+	Port        uint   `json:"port"`
 }
 
 // botKinds are the contract's BotChoice kinds.
@@ -89,6 +102,7 @@ type generationState struct {
 	LogLinesStored uint         `json:"log_lines_stored"`
 	Memory         Memory       `json:"memory"`
 	Bot            botChoice    `json:"bot"`
+	RelayedBots    []relayedBot `json:"relayed_bots"`
 	TurnDeadlineAt *time.Time   `json:"turn_deadline_at"`
 	Outcome        *GameOutcome `json:"outcome,omitempty"`
 }

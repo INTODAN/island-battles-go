@@ -42,7 +42,7 @@ func TestTheHostPlaysAloneAgainstABotSeat(t *testing.T) {
 	for _, invalid := range []any{map[string]any{}, map[string]any{"bot_level": 4}, map[string]any{"bot_level": 0}, map[string]any{"bot_level": 2, "name": "Rex"}, map[string]any{"bot_level": "2"}} {
 		var refusal problem
 		stack.expect(stack.api.Post(path, alice.header, map[string]any{"team_id": room.Teams[1].ID, "seat_settings": invalid}), http.StatusUnprocessableEntity, &refusal)
-		if refusal.Code != "invalid_seat_settings" || refusal.Detail != `seat_settings must be {"bot_level": N} with a level that GET /bots/defaults lists: 1, 2, 3` {
+		if refusal.Code != "invalid_seat_settings" || refusal.Detail != `seat_settings must be {"bot_level": N} with a level that GET /bots/defaults lists (1, 2, 3) or {"bot_localhost_port": N, "bot_relay_player_id": "<your player ID>"} with a port from 1024 to 65535` {
 			t.Fatalf("seat settings %v = %+v", invalid, refusal)
 		}
 	}

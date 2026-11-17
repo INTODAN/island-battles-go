@@ -26,12 +26,14 @@ const submitTokenNoLimit = 24 * time.Hour
 
 // TurnDelivery builds the caller's turn of the lobby game's open generation,
 // as a bot that runs outside the backend is given it: the BotTurn, and a
-// submit token for submitURL that submits exactly this turn. Like the state
-// read, it first applies an overdue turn deadline and lets Go bots catch up.
-// A caller with nothing to play gets a 409: the game has ended, with
-// GameEndedProblemType, their team is eliminated, or they have completed the
-// turn.
-func (service *GenerationService) TurnDelivery(ctx context.Context, principal domain.Principal, lobbyID string, tokens *submittoken.Signer, submitURL string) (models.TurnDelivery, error) {
+// submit token for submitURL that submits exactly this turn. With seatID, a
+// roster player other than the caller, it builds that player's turn instead:
+// a localhost bot seat that the caller relays (models.RelayedBots), or a 403
+// for any other player. Like the state read, it first applies an overdue
+// turn deadline and lets Go bots catch up. A player with nothing to play
+// gets a 409: the game has ended, with GameEndedProblemType, their team is
+// eliminated, or they have completed the turn.
+func (service *GenerationService) TurnDelivery(ctx context.Context, principal domain.Principal, lobbyID, seatID string, tokens *submittoken.Signer, submitURL string) (models.TurnDelivery, error) {
 	database := service.Database.WithContext(ctx)
 	game, err := dal.FindLobbyGame(database, lobbyID)
 	if err != nil {
@@ -58,6 +60,11 @@ func (service *GenerationService) TurnDelivery(ctx context.Context, principal do
 		player, err := frozenPlayer(players, principal.PlayerID)
 		if err != nil {
 			return err
+		}
+		if seatID != "" && seatID != principal.PlayerID {
+			if player, err = relayedSeat(players, principal.PlayerID, seatID); err != nil {
+				return err
+			}
 		}
 		generation, err := dal.GetLatestGenerationForGame(transaction, locked.ID)
 		if err != nil {
@@ -98,6 +105,17 @@ func (service *GenerationService) TurnDelivery(ctx context.Context, principal do
 		return models.TurnDelivery{}, nothingToPlay
 	}
 	return delivery, nil
+}
+
+// relayedSeat is the roster player seatID, a localhost bot seat that relayer
+// relays, or a 403.
+func relayedSeat(players []models.FrozenGamePlayer, relayer, seatID string) (models.FrozenGamePlayer, error) {
+	for _, relayed := range models.RelayedBots(players, relayer) {
+		if relayed.PlayerID == seatID {
+			return frozenPlayer(players, seatID)
+		}
+	}
+	return models.FrozenGamePlayer{}, reject(403, "player_id is not a localhost bot seat that you relay: only the player who added a localhost bot seat relays it, and GenerationState.relayed_bots lists yours")
 }
 
 // AuthorizeSubmitToken checks that a verified submit token's player is on the

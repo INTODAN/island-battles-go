@@ -1,6 +1,6 @@
 import { createApiClients } from "../../api/client";
 import { ApiError } from "../../api/errors";
-import { type BotRelay, startBotRelay } from "../../bots";
+import { type BotRelays, startBotRelays } from "../../bots";
 import { tabStorage } from "../../platform";
 import type { Realtime } from "../../realtime";
 import { h } from "../dom";
@@ -270,7 +270,7 @@ export function mountLobbyApp(options: {
     stage.hidden = true;
     gameHost.hidden = false;
     realtime.followGame(lobbyId, round);
-    const relay: BotRelay = startBotRelay({ realtime, lobbyId });
+    const relay: BotRelays = startBotRelays({ realtime, lobbyId });
     const banner = mountRelayBanner(relay);
     const { gameApi } = createApiClients({
       getAccessToken: () => realtime.session.get()?.accessToken,

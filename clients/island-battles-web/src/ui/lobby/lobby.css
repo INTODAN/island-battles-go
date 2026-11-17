@@ -502,6 +502,11 @@ select:focus-visible {
   min-width: 0;
 }
 
+.bot-port {
+  flex: 0 0 6.5em;
+  min-width: 0;
+}
+
 .bot-label {
   grid-column: 1;
   font-size: 12px;
@@ -628,8 +633,8 @@ select:focus-visible {
   transform: translateX(-50%);
   z-index: 20;
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 6px;
   max-width: min(640px, calc(100% - 24px));
   padding: 8px 12px;
   border-radius: 10px;
@@ -640,6 +645,12 @@ select:focus-visible {
     13px / 1.35 system-ui,
     sans-serif;
   white-space: pre-wrap;
+}
+
+.relay-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .relay-banner[hidden] {

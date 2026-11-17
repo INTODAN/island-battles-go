@@ -1,4 +1,11 @@
-import { checkBotHealth, serveCommand } from "../../bots";
+import {
+  checkBotHealth,
+  defaultBotPort,
+  nextFreePort,
+  parseBotPort,
+  portProblem,
+  serveCommandFor,
+} from "../../bots";
 import { computeSpentMessage, uploadedGreyedOut } from "../../bots/compute";
 import {
   type BotPackage,
@@ -48,6 +55,8 @@ export function mountBotPicker(options: {
   onPackages?(items: BotPackage[]): void;
   /** Gets why uploaded bots can't be chosen this month, or null, for the host's Add bot. */
   onCompute?(spent: string | null): void;
+  /** The ports of the localhost bot seats that you added and relay, which yours must differ from. */
+  takenPorts?(): number[];
 }): BotPicker {
   const { actions } = options;
   let chosen: MemberBot | undefined;
@@ -66,14 +75,17 @@ export function mountBotPicker(options: {
     { class: "pill", attrs: { "data-status": "checking" } },
     "Checking…",
   );
-  const command = h("code", { class: "command" }, serveCommand);
+  /** The saved localhost bot's port, the default one for any other bot. */
+  const chosenPort = () =>
+    chosen?.kind === "localhost" && chosen.port ? chosen.port : defaultBotPort;
+  const command = h("code", { class: "command" }, serveCommandFor());
   const copy = h(
     "button",
     { type: "button", class: "secondary small" },
     "Copy command",
   );
   copy.addEventListener("click", async () => {
-    copy.textContent = (await copyText(serveCommand))
+    copy.textContent = (await copyText(serveCommandFor(chosenPort())))
       ? "Copied"
       : "Copy failed";
     setTimeout(() => {
@@ -102,9 +114,28 @@ export function mountBotPicker(options: {
     ),
     status,
   );
+  // The port your bot serves on, 41414 unless you change it.
+  const port = h("input", {
+    type: "text",
+    class: "bot-port",
+    value: String(defaultBotPort),
+    attrs: {
+      "aria-label": "Your localhost bot's port",
+      inputmode: "numeric",
+      maxlength: "5",
+    },
+  });
+  const usePort = h(
+    "button",
+    { type: "button", class: "secondary small" },
+    "Use this port",
+  );
   const localHelp = h(
     "div",
     { class: "bot-help" },
+    h("span", { class: "hint" }, "Port on 127.0.0.1:"),
+    port,
+    usePort,
     h("span", { class: "hint" }, "Run this in your bot's folder:"),
     command,
     copy,
@@ -199,6 +230,10 @@ export function mountBotPicker(options: {
     }
     hostedUrl.disabled = locked || saving;
     useUrl.disabled = locked || saving;
+    port.disabled = locked || saving;
+    usePort.disabled = locked || saving;
+    if (document.activeElement !== port) port.value = String(chosenPort());
+    command.textContent = serveCommandFor(chosenPort());
     if (chosen?.kind === "hosted" && document.activeElement !== hostedUrl) {
       hostedUrl.value = chosen.url ?? "";
     }
@@ -261,11 +296,28 @@ export function mountBotPicker(options: {
   }
 
   async function choose(value: string): Promise<void> {
-    const choice = choiceFromValue(value, hostedUrl.value);
+    // Your localhost bot keeps the port in its field, which the seats you relay mustn't use;
+    // a first choice of it takes the first port they leave free.
+    const taken = options.takenPorts?.() ?? [];
+    let localPort = defaultBotPort;
+    if (value === "localhost" && chosen?.kind === "localhost") {
+      const problem = portProblem(port.value, taken);
+      if (problem) {
+        options.onError(problem);
+        sync();
+        return;
+      }
+      localPort = parseBotPort(port.value) ?? defaultBotPort;
+    } else if (value === "localhost") {
+      localPort = nextFreePort(taken);
+    }
+    const choice = choiceFromValue(value, hostedUrl.value, localPort);
     const same =
       value === choiceValue(chosen) &&
       (choice?.kind !== "hosted" ||
-        (chosen?.kind === "hosted" && chosen.url === choice.url));
+        (chosen?.kind === "hosted" && chosen.url === choice.url)) &&
+      (choice?.kind !== "localhost" ||
+        (choice.port ?? defaultBotPort) === chosenPort());
     if (!choice || saving || locked || same) {
       if (value === "hosted" && !choice) {
         options.onError(
@@ -296,6 +348,10 @@ export function mountBotPicker(options: {
     }
   });
   useUrl.addEventListener("click", () => void choose("hosted"));
+  usePort.addEventListener("click", () => void choose("localhost"));
+  port.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") void choose("localhost");
+  });
   hostedUrl.addEventListener("keydown", (event) => {
     if (event.key === "Enter") void choose("hosted");
   });
@@ -359,10 +415,11 @@ export function mountBotPicker(options: {
 
   async function checkHealth(): Promise<void> {
     if (document.hidden) return;
-    const up = await checkBotHealth();
-    if (disposed) return;
+    const asked = chosenPort();
+    const up = await checkBotHealth({ port: asked });
+    if (disposed || asked !== chosenPort()) return;
     status.dataset.status = up ? "up" : "down";
-    status.textContent = up ? "Connected" : "Not running";
+    status.textContent = up ? `Connected on ${asked}` : "Not running";
   }
   void checkHealth();
   const timer = setInterval(
@@ -373,8 +430,10 @@ export function mountBotPicker(options: {
   return {
     el,
     update(next, isLocked) {
+      const before = chosenPort();
       chosen = next;
       locked = isLocked;
+      if (chosenPort() !== before) void checkHealth();
       if (serverBots) showUploaded();
       else sync();
     },
