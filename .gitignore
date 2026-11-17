@@ -74,3 +74,6 @@ dist-desktop/
 /clients/island-battles-go/island-battles-package
 /clients/island-battles-go/cmd/island-battles-mcp/island-battles-mcp
 /clients/island-battles-go/cmd/island-battles-package/island-battles-package
+
+# The bot template ships without a lock (templates/python-bot/README.md); a local uv sync writes one.
+templates/python-bot/uv.lock
