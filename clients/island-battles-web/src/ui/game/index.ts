@@ -23,6 +23,8 @@ export interface WatchViewOptions {
   lobbyId: string;
   /** The watch channel `POST /lobby/v1/watches` returned. */
   channel: string;
+  /** The join code the watch was started with, which "Ask your AI agent" names. */
+  joinCode?: string;
   realtime: Realtime;
   onBack: () => void;
 }
@@ -64,6 +66,7 @@ export function mountWatchView(
     watchSource(options.realtime, {
       lobbyId: options.lobbyId,
       channel: options.channel,
+      ...(options.joinCode === undefined ? {} : { joinCode: options.joinCode }),
     }),
     options.onBack,
   );
@@ -84,9 +87,10 @@ function mountSource(
       realtime,
       source,
       onBack,
-      onDemo: (demo) => {
+      onDemo: (demo, fileName) => {
         current?.dispose();
         current = mountDemo(container, demo, {
+          fileName,
           backLabel: "Back to game",
           onBack: showLive,
         });

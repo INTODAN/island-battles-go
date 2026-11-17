@@ -22,7 +22,8 @@ export interface LiveOptions {
   source: LiveSource;
   onBack: () => void;
   /** A demo file the player opened was valid: show it in place of this view. */
-  onDemo: (demo: Demo) => void;
+  /** Shows a demo file the player opened, with its file name. */
+  onDemo: (demo: Demo, fileName: string) => void;
 }
 
 const RESYNC_RETRY_MS = 3000;
@@ -60,7 +61,7 @@ export function mountLive(
   options: LiveOptions,
 ): { dispose(): void } {
   const { realtime, source } = options;
-  const watching = source.readLogs === undefined;
+  const { watching } = source;
   const failureText = watching ? watchFailureText : loadFailureText;
   const logs = new LogBook();
   const screen = new GameScreen(container, {
@@ -70,6 +71,12 @@ export function mountLive(
     onBack: options.onBack,
     ...(source.backLabel === undefined ? {} : { backLabel: source.backLabel }),
     onOpenFile: (file) => void openFile(file),
+    agentGame: () => {
+      const code = source.lobbyCode();
+      if (code) return { kind: "lobby", code };
+      // Nothing was saved: the prompt asks the player for the lobby's code.
+      return gameId === undefined ? null : { kind: "unknown-lobby", gameId };
+    },
     onSaveDemo: async () => saveTextFile(await source.saveDemo()),
     requestLogs: (generationId, ended) => void fetchLogs(generationId, ended),
   });
@@ -84,7 +91,6 @@ export function mountLive(
   let loading = false;
   let wasConnected = false;
   let resyncTimer: ReturnType<typeof setTimeout> | undefined;
-  let endedResync = false;
   /** The host removed this watcher: no more turns arrive. */
   let stopped = false;
   const requested = new Set<string>();
@@ -92,7 +98,7 @@ export function mountLive(
   async function openFile(file: File): Promise<void> {
     try {
       const demo = await readDemoFile(file);
-      if (!disposed) options.onDemo(demo);
+      if (!disposed) options.onDemo(demo, file.name);
     } catch (error) {
       screen.setNotice(
         `${error instanceof DemoFileError ? error.message : "The file could not be read."} The game shown before stays open.`,
@@ -101,25 +107,20 @@ export function mountLive(
   }
 
   async function fetchLogs(generationId: number, ended: boolean) {
-    if (!source.readLogs) {
-      // A watcher sees no logs while the game runs: every team is hidden. Once it has ended,
-      // the history carries every turn's logs, so it is read once more.
-      if (!ended) {
-        if (
-          logs.add({
-            generation_id: generationId,
-            players: [],
-            hidden_team_colors: teamColors,
-          })
-        ) {
-          // The panel asked while drawing: draw again once it has finished.
-          queueMicrotask(() => {
-            if (!disposed) screen.refreshLogs();
-          });
-        }
-      } else if (!endedResync && controller) {
-        endedResync = true;
-        void resync();
+    if (watching && !ended) {
+      // A watcher sees no logs while the game runs: every team is hidden, so nothing is read.
+      // Once it has ended, `/watch/logs` has every team's.
+      if (
+        logs.add({
+          generation_id: generationId,
+          players: [],
+          hidden_team_colors: teamColors,
+        })
+      ) {
+        // The panel asked while drawing: draw again once it has finished.
+        queueMicrotask(() => {
+          if (!disposed) screen.refreshLogs();
+        });
       }
       return;
     }
@@ -178,7 +179,6 @@ export function mountLive(
       );
       controller = screen.start(demo.teams, frames, outcome);
       showYourBot(held);
-      endedResync = demo.outcome !== null;
       screen.hideOverlay();
     } catch (error) {
       if (disposed) return;

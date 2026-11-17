@@ -181,6 +181,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/game/from-lobby/{lobby_id}/watch/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a generation's game log lines for a watcher
+         * @description For the people who may read GET /game/from-lobby/{lobby_id}/watch. Returns a generation's game log lines in the shape of GET /game/from-lobby/{lobby_id}/logs, for a reader of no team: bots often log their plans, so while the game runs no lines are included and hidden_team_colors names every team, and once the game has an outcome every team's lines are. A roster player reads it as a watcher too. A generation of another game returns 404. A kicked watcher gets 403; anyone else, and a lobby whose game hasn't started, get 404. A lobby can play several games, one per round (lobby.round, raised by POST /lobby/v1/games/island-battles/lobbies/{lobby_id}/reopen once a game has ended); this route serves the lobby's newest game and its frozen roster, and an older game can't be reached once the next one starts.
+         */
+        get: operations["watchIslandLobbyGenerationLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/game/lobbies/{lobby_id}/bot-packages": {
         parameters: {
             query?: never;
@@ -1497,6 +1517,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Demo"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    watchIslandLobbyGenerationLogs: {
+        parameters: {
+            query: {
+                /** @description The generation whose lines to read, from Generation.id. */
+                generation_id: number;
+            };
+            header?: {
+                Authorization?: string;
+            };
+            path: {
+                lobby_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerationLogs"];
                 };
             };
             /** @description Error */

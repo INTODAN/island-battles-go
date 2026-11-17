@@ -233,11 +233,15 @@ func TestWatchersGetEveryTurnThatGoBotsPlay(t *testing.T) {
 	}
 }
 
+// Other teams' logs stay hidden until the game ends, since bots often log
+// their plans: a player reads only their own team's lines and a watcher none.
+// Once it has ended, every reader gets every team's.
 func TestWatchersSeeTheGameLogOnlyAfterTheEnd(t *testing.T) {
 	fixture := newLogFixture(t)
 	ctx := context.Background()
-	watcher := domain.Principal{PlayerID: uuid.NewString()}
-	service := &services.GenerationService{Database: fixture.database, Publisher: fixture.publisher, Watchers: lobbyWatchers{watching: map[string]bool{watcher.PlayerID: true}}}
+	watcher, kicked := domain.Principal{PlayerID: uuid.NewString()}, domain.Principal{PlayerID: uuid.NewString()}
+	service := &services.GenerationService{Database: fixture.database, Publisher: fixture.publisher,
+		Watchers: lobbyWatchers{watching: map[string]bool{watcher.PlayerID: true}, kicked: map[string]bool{kicked.PlayerID: true}}}
 	state := fixture.state
 	alice, bob := fixture.players[0], fixture.players[1]
 	if _, err := fixture.service.Register(ctx, alice, withLogs(batch(state, false), logLine(models.GenerationLogInfo, "Blue plans"))); err != nil {
@@ -253,9 +257,38 @@ func TestWatchersSeeTheGameLogOnlyAfterTheEnd(t *testing.T) {
 	if running.Outcome != nil || len(running.Frames) != 1 || len(running.Logs) != 1 || len(running.Logs[0].Players) != 0 || !reflect.DeepEqual(running.Logs[0].HiddenTeamColors, []uint{1, 2}) {
 		t.Fatalf("running game's watch demo = %+v", running.Logs)
 	}
-	// Alice still sees her own team's lines in her own demo.
+	// The watcher's log read hides every team too, and so does a roster
+	// player's read of it, since it serves a reader of no team.
+	for name, reader := range map[string]domain.Principal{"the watcher": watcher, "Alice": alice} {
+		logs, err := service.WatchLogs(ctx, reader, state.LobbyID, state.GenerationID)
+		if err != nil || len(logs.Players) != 0 || !reflect.DeepEqual(logs.HiddenTeamColors, []uint{1, 2}) {
+			t.Fatalf("%s's watch logs of the running game = %+v, %v", name, logs, err)
+		}
+	}
+	// Alice still sees her own team's lines, and only those, in her own demo
+	// and her own log read.
 	if own, err := fixture.service.Demo(ctx, alice, state.LobbyID); err != nil || len(own.Logs[0].Players) != 1 || !reflect.DeepEqual(own.Logs[0].HiddenTeamColors, []uint{2}) {
 		t.Fatalf("Alice's demo logs = %+v, %v", own.Logs, err)
+	}
+	if own, err := fixture.service.Logs(ctx, alice, state.LobbyID, state.GenerationID); err != nil || len(own.Players) != 1 || own.Players[0].Lines[0].Message != "Blue plans" || !reflect.DeepEqual(own.HiddenTeamColors, []uint{2}) {
+		t.Fatalf("Alice's logs = %+v, %v", own, err)
+	}
+	// The watcher's log read admits whom the watch reads admit.
+	for name, read := range map[string]struct {
+		principal    domain.Principal
+		generationID uint
+		status       int
+	}{
+		"a kicked watcher":      {kicked, state.GenerationID, 403},
+		"an outsider":           {domain.Principal{PlayerID: uuid.NewString()}, state.GenerationID, 404},
+		"an unknown generation": {watcher, state.GenerationID + 100, 404},
+		"generation 0":          {watcher, 0, 422},
+	} {
+		_, err := service.WatchLogs(ctx, read.principal, state.LobbyID, read.generationID)
+		var rejection *services.GenerationError
+		if !errors.As(err, &rejection) || rejection.Status != read.status {
+			t.Errorf("%s: error = %v, want %d", name, err, read.status)
+		}
 	}
 
 	game, err := dal.FindGame(fixture.database, state.GameID)
@@ -281,6 +314,16 @@ func TestWatchersSeeTheGameLogOnlyAfterTheEnd(t *testing.T) {
 	}
 	if !reflect.DeepEqual(messages, []string{"Blue plans", "Red plans"}) {
 		t.Fatalf("lines after the end = %v", messages)
+	}
+	// After the end, every reader gets every team's lines: the watcher in
+	// the watch log read, and each player in their own.
+	if watched, err := service.WatchLogs(ctx, watcher, state.LobbyID, state.GenerationID); err != nil || !reflect.DeepEqual(watched, logs) {
+		t.Fatalf("the watcher's logs after the end = %+v, %v, want %+v", watched, err, logs)
+	}
+	for _, player := range []domain.Principal{alice, bob} {
+		if own, err := fixture.service.Logs(ctx, player, state.LobbyID, state.GenerationID); err != nil || !reflect.DeepEqual(own, logs) {
+			t.Fatalf("a player's logs after the end = %+v, %v, want %+v", own, err, logs)
+		}
 	}
 	if watched, err := service.Watch(ctx, watcher, state.LobbyID); err != nil || watched.Outcome == nil || watched.TurnDeadlineAt != nil {
 		t.Fatalf("ended watch state = %+v, %v", watched, err)

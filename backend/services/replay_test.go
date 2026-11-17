@@ -29,8 +29,9 @@ func TestReplayEscapesPlayerNames(t *testing.T) {
 	}
 }
 
-// The page asks for the watcher's demo route and shows no logs only when it is
-// rendered for a watcher.
+// The page rendered for a watcher shows the logs panel too, and the page asks
+// the lobby page for the watcher's routes, the only ones a watcher's frame
+// may read, only then.
 func TestWatchReplayPageReadsTheWatcherRoutes(t *testing.T) {
 	replay := services.GameReplay{GameID: 1, LobbyID: "6f1c2c9e-7d0a-4a43-9c55-6e3f0a1b2c3d", LobbyRound: 2, Teams: []models.GameTeam{}, Frames: []models.GenerationView{}}
 	player, err := services.RenderGameReplay(replay)
@@ -44,8 +45,13 @@ func TestWatchReplayPageReadsTheWatcherRoutes(t *testing.T) {
 	if !strings.Contains(player, "const watcher = false;") || !strings.Contains(watcher, "const watcher = true;") {
 		t.Fatal("the page doesn't say who it is for")
 	}
-	if !strings.Contains(watcher, `id="logs" aria-labelledby="logs-title" hidden`) || strings.Contains(player, `id="logs" aria-labelledby="logs-title" hidden`) {
-		t.Fatal("only a watcher's page hides the logs")
+	for name, page := range map[string]string{"player": player, "watcher": watcher} {
+		if !strings.Contains(page, `<section id="logs" aria-labelledby="logs-title">`) {
+			t.Errorf("%s's page hides the logs panel", name)
+		}
+		if !strings.Contains(page, `${watcher ? "watch/logs" : "logs"}?generation_id=`) || !strings.Contains(page, `${watcher ? "watch/demo" : "demo"}`) {
+			t.Errorf("%s's page doesn't choose the watcher's routes for a watcher", name)
+		}
 	}
 	// Both pages have the speed select.
 	for name, page := range map[string]string{"player": player, "watcher": watcher} {
