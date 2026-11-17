@@ -46,7 +46,7 @@ function host(context, { bot = async () => {}, read = null } = {}) {
       if (url.includes("/turn-delivery")) {
         const seat = new URL(url, "http://game.test").searchParams.get("player_id");
         reads.push(seat);
-        const answer = read?.(seat) ?? { status: 200 };
+        const answer = (await read?.(seat)) ?? { status: 200 };
         const body = answer.body ?? { player: seat ?? "host", turn: { generation: { id: player.state.generation_id } }, submit: { token: `ibst1.${seat ?? "host"}` } };
         return { ok: answer.status === 200, status: answer.status, json: async () => body };
       }
@@ -115,6 +115,31 @@ test("a seat's bot that refuses waits for the next turn, and a seat with nothing
   assert.equal(deliveries.some((delivery) => delivery.port === 41416), false);
   player.receive(stateOf({ generation_id: 2 }));
   await until(() => deliveries.filter((delivery) => delivery.port === 41415).length === 2);
+});
+
+test("a turn that arrives while a seat's read is pending is still sent to the seat's bot", async (context) => {
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  let holding = true;
+  const { player, deliveries } = host(context, {
+    // seat-a's first read, of turn 1, is answered only once it is released.
+    read: async (seat) => {
+      if (seat === "seat-a" && holding) {
+        holding = false;
+        await held;
+      }
+      return null;
+    },
+  });
+  player.receive(stateOf());
+  await until(() => deliveries.some((delivery) => delivery.player === "seat-b"));
+  // Turn 2 arrives during turn 1's read of seat-a, which then finishes late.
+  player.receive(stateOf({ generation_id: 2 }));
+  await until(() => deliveries.filter((delivery) => delivery.player === "seat-b").length === 2);
+  assert.equal(deliveries.some((delivery) => delivery.player === "seat-a"), false);
+  release();
+  await until(() => player.seats.get("seat-a").done === "1:2");
+  assert.equal(deliveries.filter((delivery) => delivery.player === "seat-a").length, 1);
 });
 
 test("a player without seats relays none", async (context) => {

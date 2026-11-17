@@ -209,8 +209,14 @@ export class ExamplePlayer {
     this.setSeatLine(seat, `sending this turn to the bot on port ${bot.port}.`);
     try {
       const delivery = await this.request(`/game/from-lobby/${encodeURIComponent(this.lobbyID)}/turn-delivery?player_id=${encodeURIComponent(bot.player_id)}`);
+      // A newer turn that arrived meanwhile is sent by relaySeats in finally.
       if (this.stopped || `${this.state.game_id}:${this.state.generation_id}` !== key) return;
-      if (delivery.turn?.generation?.id !== this.state.generation_id) return;
+      if (delivery.turn?.generation?.id !== this.state.generation_id) {
+        // The server is past this state's turn, whose next state brings the
+        // newer one; asking again for this turn would only repeat the read.
+        seat.done = key;
+        return;
+      }
       await this.deliver(delivery, bot.port);
       if (this.stopped) return;
       seat.done = key;
@@ -245,6 +251,9 @@ export class ExamplePlayer {
       }
     } finally {
       seat.inFlight = false;
+      // relaySeats skipped this seat while its delivery was in flight, so a
+      // turn that arrived meanwhile is sent now.
+      if (!this.stopped) this.relaySeats();
     }
   }
 
