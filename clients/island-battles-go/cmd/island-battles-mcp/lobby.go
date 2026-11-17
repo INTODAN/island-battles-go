@@ -197,8 +197,9 @@ func (client *lobbyClient) playerToken(ctx context.Context) (string, error) {
 	return client.token, nil
 }
 
-// readGame watches the lobby with code and reads its newest game's history,
-// with every team's bot logs, in the demo format.
+// readGame watches the lobby with code and reads its newest game's history
+// in the demo format, with the bot logs a watcher may see: none while the
+// game runs, every team's once it has ended.
 func (client *lobbyClient) readGame(ctx context.Context, code string) (Demo, error) {
 	lobbyID, err := client.watch(ctx, code)
 	if err != nil {
