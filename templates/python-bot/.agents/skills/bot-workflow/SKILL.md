@@ -11,7 +11,7 @@ All scripts are in `scripts/`, run from any directory, and use `uv`. Install fir
 |---|---|
 | `scripts/check.sh` | Format check, lint, types, tests and a fixture turn. **Run it before you finish and before you play.** |
 | `scripts/format.sh` | Fix formatting and safe lint errors, then run `check.sh`. |
-| `scripts/serve.sh` | Serve the bot on `http://127.0.0.1:41414` for a browser game. |
+| `scripts/serve.sh` | Serve the bot on `http://127.0.0.1:41414` for a browser game (`--port N` for another port). |
 | `scripts/run.sh` | Play a seat of a started lobby without a browser (needs the game's and the lobby's URLs, a token and a lobby id). |
 | `scripts/fixture.sh [file]` | Write the fixture turn (default `turn.json`) to edit and replay. |
 | `scripts/build.sh` | Build the package (wheel and source archive) into `dist/`. |
@@ -22,6 +22,8 @@ All scripts are in `scripts/`, run from any directory, and use `uv`. Install fir
 2. Open the lobby page (`https://lobby.elidan.org/lobby/ui/`, or `http://localhost:8890/lobby/ui/` for a local lobby and backend). Create a lobby, pick a team, add a **bot seat** (default bot level 1 is the easiest) to the other team, and pick **localhost bot** as your bot.
 3. Get ready and start. The page delivers each turn to your bot, which submits its answer itself, so keep the tab open. A turn where `play` raises or runs out of time is passed, with an `error` line from `island_battles.bots` in the game log; the terminal shows the traceback.
 4. `curl http://127.0.0.1:41414/health` answers `{"name": "bot:play", "ok": true}` when the bot is up.
+
+To play two of your bots against each other, serve each on its own port (`scripts/serve.sh --port 41415`, and another copy or module on 41416), and as the host add a **My localhost bot (port)** seat for each, with its port; the host's tab relays every seat's turns. See "Several of your bots in one game" in the README.
 
 Without a browser: `scripts/run.sh TOKEN LOBBY_ID` (the guest token and lobby id come from the lobby flow), with `ISLAND_BATTLES_GAME_URL` and `ISLAND_BATTLES_LOBBY_URL` set (`https://island-battles.elidan.org` and `https://lobby.elidan.org` for the official game, locally `http://localhost:8888` and `http://localhost:8890`), or `ISLAND_BATTLES_BASE_URL` for a server that serves the game and the lobby together. The player must have picked the localhost bot before getting ready.
 
