@@ -188,10 +188,22 @@ The board is restyled to belong with the castles ([#102](https://github.com/INTO
 |---|---|---|---|
 | JS fetched for the board (gzip) | 1.87 MB (450 KB) | 2.13 MB (516 KB) | 2.37 MB (576 KB) |
 | Asset files | 1.73 MB | 1.74 MB | 1.74 MB |
-| Draw calls, six-team busy turn | 65 | 76 | 97 to 105 |
-| Triangles drawn per frame | 34.5 k | 36.1 k | 84 to 88 k (with the shadow pass) |
+| Draw calls, `six-teams.json`, busiest sample of a turn playing | 65 (old count, not reproducible) | 67 | 103 |
+| Triangles drawn per frame, same sample | 34.5 k (old count, not reproducible) | 43.3 k | 121 k |
 
-Targets: at most 2.5 MB of JS (650 KB gzip) and 2 MB of asset files for the board, and at most about 120 draw calls and 150 k triangles for a six-team busy turn, which a mid-range laptop's integrated GPU draws well within 16 ms (60 fps), and a phone at 450 px within 33 ms (30 fps) with effects off.
+The JS and asset rows are sizes of the build at the time of #102 and #170, not re-measured by #275. The draw call and triangle rows were measured again for #275 with `tools/budgets/measure.mjs` (below), which replaced the earlier figures (76, 97 to 105, 36.1 k, 84 to 88 k) that could not be reproduced; the Before #102 column keeps the old figures only for comparison. Measured today, as ranges over the fixture's 15 frames or 14 turns:
+
+| `six-teams.json`, 1280x800 | Effects off | Effects on |
+|---|---|---|
+| Each frame shown at rest: draw calls | 17 to 55 | 32 to 89 |
+| Each frame shown at rest: triangles | 29.0 k to 55.6 k | 56.5 k to 89.9 k |
+| Each turn playing, busiest of 14 samples: draw calls | 25 to 67 | 42 to 103 |
+| Each turn playing, busiest of 14 samples: triangles | 35.9 k to 43.3 k | 95.4 k to 121.1 k |
+| Particle systems in the scene | 0 | 48 |
+
+**What it measures, and how to reproduce it.** `window.battlefieldDebug.stats()` renders one frame and reads Babylon's counters: draw calls from the engine's per-frame draw call count (shadow pass and particle systems included), triangles as `scene.getActiveIndices() / 3` (what Babylon counts for that render; the shadow pass's share is not separated, which is why Effects on is about twice Effects off). "At rest" shows each frame with `showFrame` and waits 500 ms; "playing" plays each turn into frames 2 to 15 with `playTurn` and keeps the sample with the most draw calls of 14 taken every 120 ms. Run `bun run dev`, then from this directory `node tools/budgets/measure.mjs [fixture.json] [url]` (needs Playwright's Chromium, `require("playwright")`; no backend, because the dev page reads the fixture). It opens `&fx=0` and `&fx=1` with software rendering (SwiftShader) and prints one line each; it takes about five minutes. Draw calls and triangles do not depend on the GPU, so they reproduce headless: two runs gave the same draw calls, and triangles within 40. Which sample is the busiest depends on timing, so a different machine may differ by a few draw calls on the playing rows. Frame times, JS size and asset size are not measured by the script.
+
+Targets: at most 2.5 MB of JS (650 KB gzip) and 2 MB of asset files for the board, and at most about 120 draw calls and 150 k triangles for a six-team busy turn (103 and 121 k measured), which a mid-range laptop's integrated GPU draws well within 16 ms (60 fps), and a phone at 450 px within 33 ms (30 fps) with effects off.
 
 Recordings: [a clash](docs/screenshots/art-clash.gif), [a capture](docs/screenshots/art-capture.gif) and [an upgrade](docs/screenshots/art-upgrade.gif). Before and after screenshots of the fixture frames are `docs/screenshots/art-*-before.png` and `art-*-after.png`.
 
