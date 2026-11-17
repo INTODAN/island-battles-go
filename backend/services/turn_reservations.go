@@ -125,21 +125,21 @@ func (reservations turnReservations) reserveUpgrade(parameters simulation.Upgrad
 // reserveBurst claims the castle's one burst of the turn. It leaves the burst
 // potential to acceptBurst, so that replaying the turn's commands in another
 // order than they were accepted in can't fail.
-func (reservations turnReservations) reserveBurst(parameters simulation.BurstCastleParams) (*castleReservation, error) {
+func (reservations turnReservations) reserveBurst(parameters simulation.BurstCastleParams) error {
 	castle, err := reservations.find(parameters.PersistentCastleID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	switch {
 	case castle.castle.BurstDebt > 0:
-		return nil, &GenerationError{Status: 409, Type: BurstUnavailableProblemType, Detail: fmt.Sprintf("castle %d still owes %d soldiers for its last burst", parameters.PersistentCastleID, castle.castle.BurstDebt)}
+		return &GenerationError{Status: 409, Type: BurstUnavailableProblemType, Detail: fmt.Sprintf("castle %d still owes %d soldiers for its last burst", parameters.PersistentCastleID, castle.castle.BurstDebt)}
 	case castle.castle.PendingBurst > 0:
-		return nil, &GenerationError{Status: 409, Type: BurstUnavailableProblemType, Detail: fmt.Sprintf("castle %d already has a pending burst of %d", parameters.PersistentCastleID, castle.castle.PendingBurst)}
+		return &GenerationError{Status: 409, Type: BurstUnavailableProblemType, Detail: fmt.Sprintf("castle %d already has a pending burst of %d", parameters.PersistentCastleID, castle.castle.PendingBurst)}
 	case castle.bursts:
-		return nil, &GenerationError{Status: 409, Type: BurstUnavailableProblemType, Detail: fmt.Sprintf("castle %d already bursts this turn", parameters.PersistentCastleID)}
+		return &GenerationError{Status: 409, Type: BurstUnavailableProblemType, Detail: fmt.Sprintf("castle %d already bursts this turn", parameters.PersistentCastleID)}
 	}
 	castle.bursts = true
-	return castle, nil
+	return nil
 }
 
 // reserveStored replays a command accepted earlier this turn.
@@ -162,8 +162,7 @@ func (reservations turnReservations) reserveStored(command models.CommandFields)
 		if err := json.Unmarshal(command.Parameters, &parameters); err != nil {
 			return err
 		}
-		_, err := reservations.reserveBurst(parameters)
-		return err
+		return reservations.reserveBurst(parameters)
 	}
 	return fmt.Errorf("unexpected stored command type %q", command.CommandType)
 }
@@ -237,7 +236,7 @@ func (reservations turnReservations) acceptBurst(teamColor uint, raw json.RawMes
 	if float64(internal.SoldierAmount) > potential {
 		return models.CommandFields{}, &GenerationError{Status: 409, Type: BurstAbovePotentialProblemType, Detail: fmt.Sprintf("castle %d has a burst potential of %v at burst_potential level %d; a burst of %d needs more", internal.PersistentCastleID, potential, castle.levels[models.BurstPotentialUpgrade], internal.SoldierAmount)}
 	}
-	if _, err := reservations.reserveBurst(internal); err != nil {
+	if err := reservations.reserveBurst(internal); err != nil {
 		return models.CommandFields{}, err
 	}
 	stored, err := json.Marshal(internal)
