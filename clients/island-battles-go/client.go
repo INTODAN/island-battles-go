@@ -767,6 +767,22 @@ func (client *Client) fetchUpgrades(ctx context.Context) ([]Upgrade, error) {
 	return table.Upgrades, nil
 }
 
+// fetchUpgradesWithBackoff reads the upgrade table, and retries a transport
+// error or a 5xx answer with the backoff reconcileWorker uses, as the state
+// reads do. Any other error, or the client closing, ends it. Unlike the
+// turn's completing batch, this read changes nothing, so retrying is safe.
+func (client *Client) fetchUpgradesWithBackoff() ([]Upgrade, error) {
+	for failures := 1; ; failures++ {
+		upgrades, err := client.fetchUpgrades(client.ctx)
+		if err == nil || !errors.Is(err, ErrTransport) {
+			return upgrades, err
+		}
+		if !client.sleep(client.ctx, min(client.timing.retryDelay<<min(failures-1, 7), client.timing.reconcileDelayMax)) {
+			return nil, err
+		}
+	}
+}
+
 // fetchState reads the authoritative state and installs it.
 func (client *Client) fetchState(ctx context.Context) (generationState, error) {
 	data, err := client.request(ctx, http.MethodGet, client.generationPath(), nil, false)
@@ -951,7 +967,7 @@ func (client *Client) playTurn(state generationState, stored int) error {
 	log := newGameLog(state.GenerationID, stored)
 	turnLog := newTurnLog(log, client.outputs)
 	if client.upgrades == nil {
-		upgrades, err := client.fetchUpgrades(client.ctx)
+		upgrades, err := client.fetchUpgradesWithBackoff()
 		if err != nil {
 			return err
 		}

@@ -113,7 +113,7 @@ export function createBoardCamera(
   );
   camera.fov = CAMERA.fov;
   camera.minZ = 0.1;
-  camera.maxZ = 400;
+  camera.maxZ = MIN_FAR_PLANE;
   camera.lowerBetaLimit = CAMERA.minBeta;
   camera.upperBetaLimit = CAMERA.maxBeta;
   camera.lowerRadiusLimit = CAMERA.minRadius;
@@ -192,6 +192,7 @@ export function fitCamera(
   const aspect = scene.getEngine().getAspectRatio(camera);
   const radius = fitRadius(bounds, aspect);
   camera.upperRadiusLimit = radius * CAMERA.maxRadiusFactor;
+  camera.maxZ = farPlane(camera.upperRadiusLimit);
   tween(
     scene,
     camera,
@@ -203,6 +204,62 @@ export function fitCamera(
     },
     milliseconds,
   );
+}
+
+/** The far plane of a camera at the board's usual distances. */
+export const MIN_FAR_PLANE = 400;
+/** Half the sea's diagonal (src/scene/sea.ts makes it 400 by 400). */
+const SEA_HALF_DIAGONAL = Math.hypot(200, 200);
+
+/**
+ * How far the camera draws, for a camera that may move back to `upperRadius` from a target on the
+ * board: far enough for the far edge of the sea, so a large board, such as one in the map builder's
+ * preview (#278), never shows a sea cut off.
+ */
+export function farPlane(upperRadius: number): number {
+  return Math.max(MIN_FAR_PLANE, upperRadius + SEA_HALF_DIAGONAL);
+}
+
+/**
+ * The distance at which a camera at `angle` (alpha and beta) shows the whole board, or `radius`
+ * when it is far enough back already: a board that grows past the view moves the camera back, and
+ * one that shrinks leaves it where it is.
+ */
+export function followRadius(
+  radius: number,
+  bounds: BoardBounds,
+  aspect: number,
+  angle: { alpha: number; beta: number; fov: number },
+): number {
+  return Math.max(
+    radius,
+    fitRadius(bounds, aspect, angle.fov, angle.beta, angle.alpha),
+  );
+}
+
+/**
+ * A new board size that keeps the camera's angle, pan and zoom (the map builder's preview, #278):
+ * panning stays near the new board, and the camera moves back only as far as the board needs.
+ */
+export function followBounds(
+  scene: Scene,
+  camera: ArcRotateCamera,
+  bounds: BoardBounds,
+): void {
+  const state = states.get(camera);
+  if (state) state.bounds = bounds;
+  const aspect = scene.getEngine().getAspectRatio(camera);
+  const radius = followRadius(camera.radius, bounds, aspect, camera);
+  camera.upperRadiusLimit = Math.max(
+    camera.upperRadiusLimit ?? 0,
+    fitRadius(bounds, aspect) * CAMERA.maxRadiusFactor,
+    radius,
+  );
+  camera.maxZ = farPlane(camera.upperRadiusLimit);
+  if (radius > camera.radius) {
+    state?.stopTween();
+    camera.radius = radius;
+  }
 }
 
 /** Moves in on a point of the map, keeping the current angle. */

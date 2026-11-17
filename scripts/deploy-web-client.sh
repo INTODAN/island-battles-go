@@ -6,9 +6,10 @@
 #
 # Uploads the hashed files under assets/ first, with a year-long immutable
 # Cache-Control, then the runtime config, config.json, which names the lobby's
-# URL (#228, #232), and index.html, both with no-cache, so a page never names a
+# URL (#228, #232), and the pages, map-preview.html (the map builder's 3D
+# preview, #278) and index.html, all with no-cache, so a page never names a
 # file that isn't there yet. Old hashed files stay in the bucket: tabs that are
-# open keep working. Then it invalidates /play/, /play/index.html and
+# open keep working. Then it invalidates /play/, the pages and
 # /play/config.json at CloudFront. To roll back, check out the earlier commit
 # and run it again.
 #
@@ -54,9 +55,9 @@ fi
 # Only hashed files get the year-long cache. Anything else in dist/ would be
 # cached for a year under a name that never changes, so refuse it.
 unexpected="$(find "$client_directory/dist" -mindepth 1 -maxdepth 1 \
-  ! -name index.html ! -name assets)"
+  ! -name index.html ! -name map-preview.html ! -name assets)"
 if [[ -n "$unexpected" ]]; then
-  echo "dist/ holds files other than index.html and assets/; they would be cached for a year:" >&2
+  echo "dist/ holds files other than index.html, map-preview.html and assets/; they would be cached for a year:" >&2
   echo "$unexpected" >&2
   exit 1
 fi
@@ -74,13 +75,21 @@ aws s3 cp "$config_file" "s3://$bucket/play/config.json" \
   --cache-control "no-cache" \
   --content-type "application/json" \
   --only-show-errors
+if [[ ! -f "$client_directory/dist/map-preview.html" ]]; then
+  echo "The build left no dist/map-preview.html." >&2
+  exit 1
+fi
+aws s3 cp "$client_directory/dist/map-preview.html" "s3://$bucket/play/map-preview.html" \
+  --cache-control "no-cache" \
+  --content-type "text/html; charset=utf-8" \
+  --only-show-errors
 aws s3 cp "$client_directory/dist/index.html" "s3://$bucket/play/index.html" \
   --cache-control "no-cache" \
   --content-type "text/html; charset=utf-8" \
   --only-show-errors
 
 aws cloudfront create-invalidation --distribution-id "$distribution_id" \
-  --paths "/play/" "/play/index.html" "/play/config.json" --query Invalidation.Id --output text >&2
+  --paths "/play/" "/play/index.html" "/play/map-preview.html" "/play/config.json" --query Invalidation.Id --output text >&2
 
 if [[ -n "${ISLAND_BATTLES_WEB_BUNDLE_FILE:-}" ]]; then
   echo "$bundle" >"$ISLAND_BATTLES_WEB_BUNDLE_FILE"
