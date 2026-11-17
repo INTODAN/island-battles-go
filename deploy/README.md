@@ -431,6 +431,7 @@ The 3D client in `clients/island-battles-web/` is served at `https://<game_hostn
 - **Cached at the edge.** `/play/*` uses `Managed-CachingOptimized` with compression, and never reaches the Lambda. Everything else still goes to the Lambda, uncached, except the static files of the game's other pages (see the CloudFront row of the resources table).
 - **Private bucket.** Public access is blocked, and the bucket policy lets only this distribution read `play/*`, through an origin access control.
 - **`/play/` and `/play/?join=CODE`** serve `play/index.html`: a CloudFront Function adds `index.html` to a path that ends in a slash. `/play` without the slash is redirected to `/play/`. Query strings aren't part of the cache key, so every `?join=CODE` gets the same cached page.
+- **`/play/map-preview.html`** is the [map builder's](../backend/README.md#map-builder) 3D preview (#278), a second page of the same build, which the builder at `/map/builder/` shows in a frame on the same origin. Its path doesn't end in a slash, so the CloudFront Function passes it through unchanged.
 
 **Creating the resources, once.** The change adds the bucket with its public access block, encryption setting, ownership controls and policy, the origin access control and the CloudFront function, and updates the distribution. It replaces and deletes nothing. Apply it like any other AWS change: start the Deploy workflow's `plan` target on `main`, read the plan, then start `apply` with that run's ID ([Deploying from GitHub Actions](#deploying-from-github-actions)), or run `scripts/aws.sh apply` on your machine. The apply role may create the bucket because `deploy/github_apply_role.py` names it in `ManageItsBuckets`: a new bucket in `deploy/terraform/` needs its name there, and a new run of the script before the apply that creates it. A backend deploy (`scripts/aws.sh deploy`) is unaffected afterwards: the new resources are unchanged in its plans, and it stops only on a plan that changes CloudFront.
 
@@ -447,8 +448,8 @@ It reads the bucket, the distribution and the lobby's URL from Terraform's outpu
 1. runs `bun run build` in `clients/island-battles-web/`, which builds for `/play/` with hashed files under `dist/assets/`;
 2. uploads `dist/assets/` to `s3://<bucket>/play/assets/` with `Cache-Control: public, max-age=31536000, immutable`;
 3. writes the runtime config, `play/config.json`, `{"lobby_url": "<lobby_url>"}`, with `Cache-Control: no-cache`;
-4. uploads `index.html` last, with `Cache-Control: no-cache`, so a page never names a file that isn't there yet;
-5. invalidates `/play/`, `/play/index.html` and `/play/config.json`, so the new build shows as soon as the script ends.
+4. uploads the pages last, `map-preview.html` (the [map builder's](../backend/README.md#map-builder) 3D preview, #278) and then `index.html`, with `Cache-Control: no-cache`, so a page never names a file that isn't there yet;
+5. invalidates `/play/`, `/play/index.html`, `/play/map-preview.html` and `/play/config.json`, so the new build shows as soon as the script ends.
 
 It never deletes files, so the hashed files of earlier builds stay and tabs that are open keep working. They are small; remove old ones from the bucket by hand if they ever matter. It needs `bun`, the AWS CLI and Terraform, and the credentials that `scripts/aws.sh` uses. Every release uploads it ([Releasing](#releasing)), and the Deploy workflow's `web` target does it on its own. If `ISLAND_BATTLES_WEB_BUNDLE_FILE` names a file, the script writes the build's entry script there, which is what the workflow hands to the smoke test.
 
