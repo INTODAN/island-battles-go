@@ -14,12 +14,17 @@ type UpgradeType string
 const (
 	SpeedUpgrade                UpgradeType = "speed"
 	ClashStopGenerationsUpgrade UpgradeType = "clash_stop_generations"
+	GenerationAmountUpgrade     UpgradeType = "generation_amount"
+	BurstPotentialUpgrade       UpgradeType = "burst_potential"
 )
 
 var (
 	ErrInvalidUpgrade       = errors.New("invalid upgrade")
 	ErrUpgradeMaxLevel      = errors.New("upgrade is already at its maximum level")
 	ErrInsufficientSoldiers = errors.New("not enough soldiers to upgrade")
+	ErrInvalidBurst         = errors.New("invalid burst")
+	ErrBurstUnavailable     = errors.New("castle cannot burst while it has burst debt or has burst this turn")
+	ErrBurstAbovePotential  = errors.New("burst above the castle's burst potential")
 )
 
 type upgradeLevel struct {
@@ -32,12 +37,16 @@ type upgradeLevel struct {
 var upgradeLevels = map[UpgradeType][]upgradeLevel{
 	SpeedUpgrade:                {{Value: 0.5}, {Value: 1, SoldierCost: 10}, {Value: 1.5, SoldierCost: 20}, {Value: 2, SoldierCost: 30}},
 	ClashStopGenerationsUpgrade: {{Value: 3}, {Value: 2, SoldierCost: 10}, {Value: 1, SoldierCost: 20}},
+	GenerationAmountUpgrade:     {{Value: 1}, {Value: 2, SoldierCost: 10}, {Value: 3, SoldierCost: 20}, {Value: 4, SoldierCost: 30}},
+	BurstPotentialUpgrade:       {{Value: 0}, {Value: 4, SoldierCost: 10}, {Value: 8, SoldierCost: 20}, {Value: 16, SoldierCost: 30}},
 }
 
 // upgradeDescriptions says what each type's level values measure.
 var upgradeDescriptions = map[UpgradeType]string{
 	SpeedUpgrade:                "World units a troop moves per turn",
 	ClashStopGenerationsUpgrade: "Generations a troop stays stopped after a clash",
+	GenerationAmountUpgrade:     "Soldiers a castle that a team owns produces each generation",
+	BurstPotentialUpgrade:       "Most soldiers one burst_castle command can order, which the castle repays from its later production",
 }
 
 // UpgradeTypes lists every upgrade type in a stable order.

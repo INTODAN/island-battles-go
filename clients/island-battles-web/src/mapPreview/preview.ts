@@ -108,6 +108,7 @@ export function previewGeneration(
       // `+ 0` turns -0 into 0, as the builder writes positions.
       x: entry.x + 0,
       y: entry.y + 0,
+      burst_debt: 0,
     });
   });
   if (tooLarge) castles = [];

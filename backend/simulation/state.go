@@ -30,6 +30,13 @@ type Castle struct {
 	Soldiers  uint
 	Position  pgtype.Point
 	Upgrades  models.Upgrades
+	// BurstDebt is what the castle still owes for its last burst; its
+	// production repays it before the castle grows again.
+	BurstDebt uint
+	// OrderedBurst is a burst ordered this turn. The turn's
+	// IncreaseSoldierAmount adds it to the castle and makes it the debt, so
+	// it is never stored.
+	OrderedBurst uint
 }
 
 type SoldierGroup struct {

@@ -18,7 +18,7 @@ import (
 // replay's Save demo writes it.
 const (
 	demoFormat        = "island-battles-demo"
-	demoSchemaVersion = 1
+	demoSchemaVersion = 2
 	// maxDemoBytes bounds a demo file, unpacked, as the demo viewer does.
 	maxDemoBytes = 128 << 20
 )

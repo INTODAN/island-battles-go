@@ -7,11 +7,30 @@ from typing import Any
 
 from ._generated import BotTurn
 
-_UPGRADES = {"speed": 1, "clash_stop_generations": 1}
+_UPGRADES = {
+    "burst_potential": 1,
+    "clash_stop_generations": 1,
+    "generation_amount": 1,
+    "speed": 1,
+}
 
 
 # What GET /game/upgrades returns; every game has the same table.
 _UPGRADE_TABLE = [
+    {
+        "type": "burst_potential",
+        "description": (
+            "Most soldiers one burst_castle command can order, "
+            "which the castle repays from its later production"
+        ),
+        "max_level": 4,
+        "levels": [
+            {"level": 1, "value": 0, "soldier_cost": 0},
+            {"level": 2, "value": 4, "soldier_cost": 10},
+            {"level": 3, "value": 8, "soldier_cost": 20},
+            {"level": 4, "value": 16, "soldier_cost": 30},
+        ],
+    },
     {
         "type": "clash_stop_generations",
         "description": "Generations a troop stays stopped after a clash",
@@ -20,6 +39,17 @@ _UPGRADE_TABLE = [
             {"level": 1, "value": 3, "soldier_cost": 0},
             {"level": 2, "value": 2, "soldier_cost": 10},
             {"level": 3, "value": 1, "soldier_cost": 20},
+        ],
+    },
+    {
+        "type": "generation_amount",
+        "description": "Soldiers a castle that a team owns produces each generation",
+        "max_level": 4,
+        "levels": [
+            {"level": 1, "value": 1, "soldier_cost": 0},
+            {"level": 2, "value": 2, "soldier_cost": 10},
+            {"level": 3, "value": 3, "soldier_cost": 20},
+            {"level": 4, "value": 4, "soldier_cost": 30},
         ],
     },
     {
@@ -46,6 +76,7 @@ def _castle(
         "x": x,
         "y": y,
         "upgrades": dict(_UPGRADES),
+        "burst_debt": 0,
     }
 
 

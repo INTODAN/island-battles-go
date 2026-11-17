@@ -1,6 +1,8 @@
 # Island Battles Go SDK
 
-Write a bot for [Island Battles](../../README.md) in Go. Island Battles is a real-time strategy game for teams: every team starts with a castle on an island map, a castle that a team owns grows one soldier a turn (a neutral castle keeps its soldiers until a team captures it), and you win by sending soldier groups to take every other castle. Each turn, every player's bot looks at the board and answers with orders.
+Write a bot for [Island Battles](../../README.md) in Go. Island Battles is a real-time strategy game for teams: every team starts with a castle on an island map, a castle that a team owns grows its production every turn (a neutral castle keeps its soldiers until a team captures it), and you win by sending soldier groups to take every other castle. Each turn, every player's bot looks at the board and answers with orders.
+
+**Two new upgrades and a burst command, a breaking change of the turn's board (#281).** `generation_amount` sets what a castle produces each turn (1 to 4 soldiers), and `burst_potential` the largest burst it may order (0, 4, 8 or 16 soldiers); both cost 10, 20 and 30 soldiers for levels 2 to 4. The new command `burst_castle` orders a burst: the very next generation adds it on top of the castle's production and makes it the castle's `burst_debt`, which later production repays before the castle grows again. Every castle now has `burst_debt`, and every `upgrades` map lists the four types. What to do: upgrade the SDK, since older ones refuse every turn whose upgrades list the new types, and count each castle's production and debt where your bot forecasts growth.
 
 **This is a rule change, and it breaks bots that count on neutral castles growing.** A neutral castle no longer gains a soldier each turn; it keeps its soldiers until a team captures it and grows from the next turn on, like any castle a team owns. The API is the same, but a bot that forecasts a neutral castle's defenders with growth overestimates them. What to do: count growth only for castles with a team (the default bots in `examples/defaultbots` show the forecast).
 
@@ -98,7 +100,7 @@ While your bot waits for the other players on a turn with a deadline, `run` asks
 
 `run` stops with `FAIL: …` and status 1 when your bot returns an error, panics or returns an invalid result, or when the server rejects the result, for example because a castle doesn't have the soldiers it sends. It sends the error and the turn's log lines first, and leaves the turn open: fix the bot and start `run` again for the same turn. Its log goes to stdout, and to `--log-file` when you give one.
 
-In your own program, `islandbattles.NewClient(islandbattles.URLs{Game: gameURL, Lobby: lobbyURL}, credential, lobbyID, play, options...)` is the same client, with the guest credential, which it sends only to the lobby: the game's routes take a player token, which it gets from the lobby (`POST /lobby/v1/player-tokens`), renews at 80 % of its life, and once more when the game answers 401 (a breaking change of the game API, #218; upgrade the SDK). It has `Run(ctx)`, or `Start(ctx)`, `Wait(ctx)` and `Close(ctx)`, `Refresh(ctx)`, and `Generation()`, `TeamColor()` and `Outcome()`. `WithGameEnded` reports the end; `WithLogLevel`, `WithLogFile`, `WithLogOutput` and `WithHTTPClient` configure it. Its errors are `*islandbattles.GameError` values: test them with `errors.Is(err, islandbattles.ErrInsufficientSoldiers)` (also `ErrCastleNotFound`, `ErrCastleNotOwned`, `ErrUpgradeMaxLevel`, `ErrMemoryTooLarge`, `ErrGameEnded`, `ErrAuthentication`, `ErrTransport`, `ErrProtocol`, `ErrClientClosed` and `ErrRejected`), and read the HTTP status with `errors.As`.
+In your own program, `islandbattles.NewClient(islandbattles.URLs{Game: gameURL, Lobby: lobbyURL}, credential, lobbyID, play, options...)` is the same client, with the guest credential, which it sends only to the lobby: the game's routes take a player token, which it gets from the lobby (`POST /lobby/v1/player-tokens`), renews at 80 % of its life, and once more when the game answers 401 (a breaking change of the game API, #218; upgrade the SDK). It has `Run(ctx)`, or `Start(ctx)`, `Wait(ctx)` and `Close(ctx)`, `Refresh(ctx)`, and `Generation()`, `TeamColor()` and `Outcome()`. `WithGameEnded` reports the end; `WithLogLevel`, `WithLogFile`, `WithLogOutput` and `WithHTTPClient` configure it. Its errors are `*islandbattles.GameError` values: test them with `errors.Is(err, islandbattles.ErrInsufficientSoldiers)` (also `ErrCastleNotFound`, `ErrCastleNotOwned`, `ErrUpgradeMaxLevel`, `ErrBurstUnavailable`, `ErrBurstAbovePotential`, `ErrMemoryTooLarge`, `ErrGameEnded`, `ErrAuthentication`, `ErrTransport`, `ErrProtocol`, `ErrClientClosed` and `ErrRejected`), and read the HTTP status with `errors.As`.
 
 ## The turn
 
@@ -117,7 +119,7 @@ type Play func(ctx context.Context, turn islandbattles.Turn) (islandbattles.Resu
 
 Return an `error` to pass the turn: `serve` submits no commands, keeps the memory the bot was given, and the game log gets one `error` line from the logger `island_battles.bots` with the error, which the game's **Bot logs** show you. A panic passes the turn the same way, and `serve` prints its stack.
 
-A **castle** has an `ID` that never changes, its `TeamColor`, `Soldiers`, a position `X`, `Y` in map units, and `Upgrades`, the level of every upgrade type (`castle.Upgrades.Level(islandbattles.SpeedUpgrade)` is 1 for a type the map doesn't list). A **soldier group** has the same, plus `OriginCastleID`, `DestinationCastleID` and `ClashRadius`; its upgrades are its origin castle's levels when it left. Every turn each castle grows one soldier, then the groups move (a group of speed level 1 moves 0.5 map units a turn) and land in ID order: a friendly group reinforces the castle, and a hostile one takes it when it has more soldiers than the castle.
+A **castle** has an `ID` that never changes, its `TeamColor`, `Soldiers`, a position `X`, `Y` in map units, `Upgrades`, the level of every upgrade type (`castle.Upgrades.Level(islandbattles.SpeedUpgrade)` is 1 for a type the map doesn't list), and `BurstDebt`, what it still owes for its last burst. A **soldier group** has the same but the burst, plus `OriginCastleID`, `DestinationCastleID` and `ClashRadius`; its upgrades are its origin castle's levels when it left. Every turn each castle that a team owns produces its `generation_amount` (1 soldier at level 1): a burst ordered that turn arrives on top, and burst debt is repaid first, so only what is left over grows the castle. Then the groups move (a group of speed level 1 moves 0.5 map units a turn) and land in ID order: a friendly group reinforces the castle, and a hostile one takes it when it has more soldiers than the castle.
 
 ### Helpers
 
@@ -130,6 +132,9 @@ A **castle** has an `ID` that never changes, its `TeamColor`, `Soldiers`, a posi
 | `turn.Generation.Castle(id)` | A castle by its ID. |
 | `islandbattles.NextUpgradeCost(turn, castle, upgradeType)` | What the castle's next level of a type costs in soldiers, from `turn.Upgrades`, and `false` at the maximum level. Levels bought earlier in the same result are not counted. |
 | `turn.UpgradeLevel(upgradeType, level)` | One level of the table: its `Value` (for speed, map units per turn) and `SoldierCost`. |
+| `islandbattles.Production(turn, castle)` | What the castle produces each turn, its `generation_amount` value from `turn.Upgrades`. |
+| `islandbattles.BurstPotential(turn, castle)` | The largest burst the castle may order, its `burst_potential` value from `turn.Upgrades`. Levels bought earlier in the same result are not counted. |
+| `castle.CanBurst()` | Whether the castle has no burst debt. |
 
 ## The result
 
@@ -147,7 +152,8 @@ result.Memory, err = islandbattles.NewMemory(state)
 ```
 
 - `SendSoldierGroup(originCastleID, destinationCastleID, soldierAmount)` sends soldiers from a castle your team owns to any other castle. `soldierAmount` must be at least 1.
-- `UpgradeCastle(castleID, upgradeType)` buys a castle the next level of `islandbattles.SpeedUpgrade` (how far its groups move per turn) or `islandbattles.ClashStopGenerationsUpgrade` (how many turns its groups stay stopped after a clash). The castle pays the level's cost in soldiers.
+- `UpgradeCastle(castleID, upgradeType)` buys a castle the next level of `islandbattles.SpeedUpgrade` (how far its groups move per turn), `islandbattles.ClashStopGenerationsUpgrade` (how many turns its groups stay stopped after a clash), `islandbattles.GenerationAmountUpgrade` (how many soldiers it produces each turn) or `islandbattles.BurstPotentialUpgrade` (the largest burst it may order). The castle pays the level's cost in soldiers.
+- `BurstCastle(castleID, soldierAmount)` orders a burst of 1 up to the castle's burst potential, counting the levels bought in the same result, before or after it, for a castle that `CanBurst`. The very next generation adds it on top of the castle's production and makes it the castle's `BurstDebt`, which its later production repays before the castle grows again. A castle bursts at most once a turn, and a capture clears its debt.
 - **Commands run in order, and the server checks them against the board**, counting what your earlier batches already sent this turn. If any command is invalid, such as sending more soldiers than a castle has, the server rejects the **whole result**. Count what your commands spend, upgrades included. At most `islandbattles.MaxCommands` (1,000) commands.
 
 ## Memory
@@ -300,12 +306,13 @@ go run ./examples/level3 serve
 | `def play(turn): ...` | `func play(ctx context.Context, turn islandbattles.Turn) (islandbattles.Result, error)`, of type `islandbattles.Play` |
 | `BotTurn`, `BotTurnResult` | `Turn`, `Result` |
 | `Generation`, `Castle`, `SoldierGroup`, `Clash`, `ClashParticipant` | the same names |
-| `Upgrade`, `UpgradeLevel`, `UpgradeType.speed`, `UpgradeType.clash_stop_generations` | `Upgrade`, `UpgradeLevel`, `SpeedUpgrade`, `ClashStopGenerationsUpgrade` |
+| `Upgrade`, `UpgradeLevel`, `UpgradeType.speed`, `UpgradeType.clash_stop_generations`, `UpgradeType.generation_amount`, `UpgradeType.burst_potential` | `Upgrade`, `UpgradeLevel`, `SpeedUpgrade`, `ClashStopGenerationsUpgrade`, `GenerationAmountUpgrade`, `BurstPotentialUpgrade` |
 | `PublicGenerationCommand` | `Command` |
 | `GenerationLogLine` | `LogLine` |
 | `send_soldier_group(origin, destination, amount)` | `SendSoldierGroup(origin, destination, amount)` |
 | `upgrade_castle(castle_id, upgrade_type)` | `UpgradeCastle(castleID, upgradeType)` |
 | `next_upgrade_cost(turn, castle, upgrade_type)` (`None` at the maximum) | `NextUpgradeCost(turn, castle, upgradeType)` (`false` at the maximum) |
+| `burst_castle(castle_id, amount)`, `production(turn, castle)`, `burst_potential(turn, castle)`, `can_burst(castle)` | `BurstCastle(castleID, amount)`, `Production(turn, castle)`, `BurstPotential(turn, castle)`, `castle.CanBurst()` |
 | `log_line(message, level="info")` | `Log(message)`, `Logf(format, ...)`, `LogAt(level, message)` |
 | `logger.info(...)` | `islandbattles.Logger(ctx).Info(...)` |
 | `turn_result(commands, logs, memory)` | `Result{Commands: ..., Logs: ..., Memory: ...}` |
@@ -324,7 +331,7 @@ go run ./examples/level3 serve
 | `IslandBattlesClient(credential, lobby_id, play=play, game_url=…, lobby_url=…)`: `start`, `refresh`, `wait`, `run`, `close` | `NewClient(URLs{Game: …, Lobby: …}, credential, lobbyID, play)`: `Start`, `Refresh`, `Wait`, `Run`, `Close`, each with a `ctx` |
 | `client.generation`, `client.team_color`, `client.outcome` | `client.Generation()`, `client.TeamColor()`, `client.Outcome()` |
 | `on_game_ended=`, `log_level=`, `log_file=`, `log_to_stdout=False` | `WithGameEnded(...)`, `WithLogLevel(...)`, `WithLogFile(...)`, `WithLogOutput(nil)` |
-| `CastleNotFoundError`, `CastleNotOwnedError`, `UpgradeMaxLevelError`, `InsufficientSoldiersError`, `GameEndedError` | `ErrCastleNotFound`, `ErrCastleNotOwned`, `ErrUpgradeMaxLevel`, `ErrInsufficientSoldiers`, `ErrGameEnded`, with `errors.Is` |
+| `CastleNotFoundError`, `CastleNotOwnedError`, `UpgradeMaxLevelError`, `InsufficientSoldiersError`, `BurstUnavailableError`, `BurstAbovePotentialError`, `GameEndedError` | `ErrCastleNotFound`, `ErrCastleNotOwned`, `ErrUpgradeMaxLevel`, `ErrInsufficientSoldiers`, `ErrBurstUnavailable`, `ErrBurstAbovePotential`, `ErrGameEnded`, with `errors.Is` |
 | `GameAuthenticationError`, `GameTransportError`, `GameProtocolError`, `GameClientClosedError`, `GameError` | `ErrAuthentication`, `ErrTransport`, `ErrProtocol`, `ErrClientClosed`, `ErrRejected`; `*GameError` has `Status` and `Detail` |
 
 ## Differences from the Python SDK

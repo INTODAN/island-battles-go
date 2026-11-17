@@ -276,8 +276,8 @@ func (game *Game) computeChanges(turn int) turnChanges {
 
 // CastleLedger accounts for one castle's soldiers from one turn to the next,
 // in the order the game runs a turn: the commands send groups and buy
-// upgrades, groups move and clash, every castle a team owns grows by one
-// soldier, then the groups that reached their castle arrive in group ID
+// upgrades, groups move and clash, every castle a team owns grows (see
+// growth), then the groups that reached their castle arrive in group ID
 // order.
 type CastleLedger struct {
 	Turn           int    `json:"turn" jsonschema:"The turn this ledger makes, from the turn before it."`
@@ -290,7 +290,7 @@ type CastleLedger struct {
 	SentOut        []LedgerGroup  `json:"sent_out,omitempty" jsonschema:"Groups the castle sent with the previous turn's commands."`
 	UpgradesBought map[string]int `json:"upgrades_bought,omitempty" jsonschema:"Upgrade types bought, with the level reached."`
 	UpgradeCost    *uint          `json:"upgrade_cost,omitempty" jsonschema:"The soldiers the upgrades cost, worked out from the soldiers."`
-	Growth         uint           `json:"growth" jsonschema:"1 when a team owned the castle when castles grew, else 0."`
+	Growth         uint           `json:"growth" jsonschema:"What the castle grew by when castles grew: its production (its generation_amount level, 1 to 4 soldiers), plus a burst that arrived this turn, less what repaid its burst debt; 0 when no team owned it."`
 	// GarrisonBeforeArrivals is what defended the castle when the first group
 	// arrived.
 	GarrisonBeforeArrivals int           `json:"garrison_before_arrivals"`
@@ -320,6 +320,21 @@ type ArrivalStep struct {
 	OwnerAfter     string `json:"owner_after"`
 }
 
+// growth is what a castle that a team owned grew by from before to after, as
+// the game plays it: its production, the generation_amount level after the
+// turn's upgrades (level n produces n soldiers), less what repaid its burst
+// debt. A castle without debt before and with debt after burst this turn:
+// the burst arrived on top of its production, and the debt is the burst. (A
+// castle that burst and was captured in the same turn has no debt after it,
+// so its ledger doesn't reconcile.)
+func growth(before, after islandbattles.Castle) uint {
+	production := uint(min(max(after.Upgrades.Level(islandbattles.GenerationAmountUpgrade), 1), 4))
+	if before.BurstDebt == 0 && after.BurstDebt > 0 {
+		return production + after.BurstDebt
+	}
+	return production - min(before.BurstDebt, production)
+}
+
 // ledger accounts for castle from before, on the turn before, to after. The
 // upgrades' cost isn't in a demo, so it is worked out: the smallest cost
 // that gives the soldiers and owner shown. Without arrivals that is one
@@ -344,7 +359,7 @@ func (game *Game) ledger(turn int, before, after islandbattles.Castle, changes t
 		}
 	}
 	if before.TeamColor != 0 {
-		ledger.Growth = 1
+		ledger.Growth = growth(before, after)
 	}
 	var arrivals []arrivedGroup
 	for _, arrival := range changes.arrived {

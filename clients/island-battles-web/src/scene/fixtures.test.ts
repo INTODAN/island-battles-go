@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import type { components } from "../api/generated/game";
-import { hasUpgrades, upgradeLevels } from "./format";
+import { burstLines, hasUpgrades, upgradeLevels } from "./format";
 
 type Demo = components["schemas"]["Demo"];
 
@@ -76,6 +76,30 @@ describe("upgrade text", () => {
       "Speed 2 · Stop 1",
     );
     expect(upgradeLevels({ other: 3, speed: 1 })).toBe("Speed 1 · other 3");
+    expect(
+      upgradeLevels({
+        burst_potential: 2,
+        clash_stop_generations: 1,
+        generation_amount: 3,
+        speed: 1,
+      }),
+    ).toBe("Speed 1 · Stop 1 · Growth 3 · Burst 2");
+  });
+
+  test("a castle's burst debt is told while it is owed", () => {
+    const castle = {
+      id: 0,
+      team_color: 1,
+      soldiers: 5,
+      x: 0,
+      y: 0,
+      upgrades: {},
+      burst_debt: 0,
+    };
+    expect(burstLines(castle)).toEqual([]);
+    expect(burstLines({ ...castle, burst_debt: 6 })).toEqual([
+      "Burst debt: 6 soldiers",
+    ]);
   });
 
   test("the upgrade line shows once a level is above the first", () => {

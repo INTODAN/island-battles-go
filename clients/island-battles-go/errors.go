@@ -38,6 +38,12 @@ var (
 	// ErrInsufficientSoldiers: a castle has too few soldiers left after this
 	// turn's reservations.
 	ErrInsufficientSoldiers = errors.New("insufficient soldiers")
+	// ErrBurstUnavailable: a burst's castle has burst debt or a burst
+	// already accepted this turn.
+	ErrBurstUnavailable = errors.New("burst unavailable")
+	// ErrBurstAbovePotential: a burst orders more soldiers than the castle's
+	// burst potential, counting this turn's upgrades.
+	ErrBurstAbovePotential = errors.New("burst above potential")
 	// ErrGameEnded: the server refused a batch because the game has ended.
 	// The Client handles it itself: it reads the final state and reports
 	// the end.
@@ -60,6 +66,8 @@ var problemKinds = map[string]error{
 	"urn:island-battles:problem:castle-not-owned":      ErrCastleNotOwned,
 	"urn:island-battles:problem:upgrade-max-level":     ErrUpgradeMaxLevel,
 	"urn:island-battles:problem:insufficient-soldiers": ErrInsufficientSoldiers,
+	"urn:island-battles:problem:burst-unavailable":     ErrBurstUnavailable,
+	"urn:island-battles:problem:burst-above-potential": ErrBurstAbovePotential,
 	"urn:island-battles:problem:game-log-limit":        ErrGameLogLimit,
 	"urn:island-battles:problem:bot-memory-too-large":  ErrMemoryTooLarge,
 }

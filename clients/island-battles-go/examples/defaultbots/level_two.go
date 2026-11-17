@@ -72,7 +72,7 @@ func (plans planned) count() int {
 // lands. ok is false when the castle will be the bot's anyway.
 func (board board) attack(origin, target islandbattles.Castle, plans planned) (soldiers, defenders uint, turns int, ok bool) {
 	turns = travelTurns(origin.Distance(target), board.speed(origin.Upgrades))
-	owner, defenders := forecast(target, append(board.arrivals(target), plans[target.ID]...), turns)
+	owner, defenders := board.forecast(target, append(board.arrivals(target), plans[target.ID]...), turns)
 	if owner == board.team {
 		return 0, 0, turns, false
 	}

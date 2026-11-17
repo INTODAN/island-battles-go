@@ -45,7 +45,7 @@ func LoadGameState(database *gorm.DB, gameID uint) (simulation.GameState, error)
 		persistentCastleIDs[castle.ID] = castle.PersistentCastleID
 		state.Castles[castle.PersistentCastleID] = &simulation.Castle{
 			ID: castle.PersistentCastleID, TeamColor: castle.TeamColor, Soldiers: castle.SoldierAmount,
-			Position: castle.Position, Upgrades: castle.Upgrades,
+			Position: castle.Position, Upgrades: castle.Upgrades, BurstDebt: castle.BurstDebt,
 		}
 	}
 	for _, group := range generation.SoldierGroups {
@@ -74,7 +74,7 @@ func SaveGeneration(database *gorm.DB, gameID uint, state simulation.GameState, 
 			CastleFields: models.CastleFields{
 				TeamColor: castle.TeamColor, Position: castle.Position, PersistentCastleID: castle.ID, Upgrades: castle.Upgrades.Clone(),
 			},
-			SoldierAmount: castle.Soldiers,
+			SoldierAmount: castle.Soldiers, BurstDebt: castle.BurstDebt,
 		})
 	}
 	if err := database.Create(&gameMap).Error; err != nil {

@@ -49,6 +49,14 @@ class InsufficientSoldiersError(GameCommandError):
     """The castle has too few soldiers left after this turn's reservations."""
 
 
+class BurstUnavailableError(GameCommandError):
+    """The castle has burst debt or a burst this turn."""
+
+
+class BurstAbovePotentialError(GameCommandError):
+    """The burst is above the castle's burst potential, counting this turn's upgrades."""
+
+
 class GameLogLimitError(GameError):
     """The server refused a batch's game log lines, which would pass its limit.
 
@@ -87,6 +95,8 @@ PROBLEM_TYPE_ERRORS: dict[str, type[GameError]] = {
     "urn:island-battles:problem:castle-not-owned": CastleNotOwnedError,
     "urn:island-battles:problem:upgrade-max-level": UpgradeMaxLevelError,
     "urn:island-battles:problem:insufficient-soldiers": InsufficientSoldiersError,
+    "urn:island-battles:problem:burst-unavailable": BurstUnavailableError,
+    "urn:island-battles:problem:burst-above-potential": BurstAbovePotentialError,
     "urn:island-battles:problem:game-log-limit": GameLogLimitError,
     "urn:island-battles:problem:bot-memory-too-large": BotMemoryTooLargeError,
 }

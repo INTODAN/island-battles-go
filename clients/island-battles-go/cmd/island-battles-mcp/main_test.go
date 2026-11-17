@@ -225,6 +225,29 @@ func TestTheUpgradeCostSearchIsBounded(t *testing.T) {
 // boards don't follow from each other.
 const webFixtures = "../../../island-battles-web/test/fixtures"
 
+// A castle grows by its generation_amount level, plus a burst that arrived
+// in the turn, less what repays its burst debt, as the game plays it.
+func TestGrowthFollowsProductionAndBursts(t *testing.T) {
+	castle := func(level int, debt uint) islandbattles.Castle {
+		return islandbattles.Castle{TeamColor: 1, BurstDebt: debt, Upgrades: islandbattles.Upgrades{islandbattles.GenerationAmountUpgrade: level}}
+	}
+	for name, test := range map[string]struct {
+		before, after islandbattles.Castle
+		want          uint
+	}{
+		"level 1":                  {castle(1, 0), castle(1, 0), 1},
+		"level 3":                  {castle(3, 0), castle(3, 0), 3},
+		"bought level 2 this turn": {castle(1, 0), castle(2, 0), 2},
+		"a burst of 8 arrives":     {castle(3, 0), castle(3, 8), 11},
+		"the debt takes it all":    {castle(3, 8), castle(3, 5), 0},
+		"the debt's last 2":        {castle(3, 2), castle(3, 0), 1},
+	} {
+		if got := growth(test.before, test.after); got != test.want {
+			t.Errorf("%s: growth %d, want %d", name, got, test.want)
+		}
+	}
+}
+
 // Every castle's ledger in the web client's real bot games reconciles: the
 // ledger follows the game's turn order exactly.
 func TestTheLedgersOfRealGamesReconcile(t *testing.T) {
@@ -394,7 +417,7 @@ func TestDemoFilesAreCheckedAndMayBePacked(t *testing.T) {
 	if overview := call[Overview](t, client, "load_demo", map[string]any{"path": write("packed.json.gz", packed.Bytes())}); overview.Turns != 6 {
 		t.Fatalf("packed demo = %+v", overview)
 	}
-	older := strings.Replace(string(raw), `"schema_version": 1`, `"schema_version": 0`, 1)
+	older := strings.Replace(string(raw), `"schema_version": 2`, `"schema_version": 1`, 1)
 	for name, content := range map[string]string{
 		"not JSON":        "<html>",
 		"a map file":      `{"map_name":"Islands","castles":[]}`,
@@ -405,7 +428,7 @@ func TestDemoFilesAreCheckedAndMayBePacked(t *testing.T) {
 			t.Errorf("%s: message = %q", name, message)
 		}
 	}
-	if message := fails(t, client, "load_demo", map[string]any{"path": write("older.json", []byte(older))}); !strings.Contains(message, "format version 0") {
+	if message := fails(t, client, "load_demo", map[string]any{"path": write("older.json", []byte(older))}); !strings.Contains(message, "format version 1, and this server reads only version 2") {
 		t.Fatalf("older format message = %q", message)
 	}
 	// Both games stay loaded, and game names one.

@@ -33,7 +33,12 @@ def _identifiers(rng: random.Random, count: int) -> list[int]:
 
 
 def _upgrades(rng: random.Random) -> dict:
-    return {"clash_stop_generations": rng.randint(1, 3), "speed": rng.randint(1, 4)}
+    return {
+        "burst_potential": rng.randint(1, 4),
+        "clash_stop_generations": rng.randint(1, 3),
+        "generation_amount": rng.randint(1, 4),
+        "speed": rng.randint(1, 4),
+    }
 
 
 def random_board(rng: random.Random) -> tuple[dict, dict]:
@@ -50,6 +55,7 @@ def random_board(rng: random.Random) -> tuple[dict, dict]:
                 "x": x,
                 "y": y,
                 "upgrades": _upgrades(rng),
+                "burst_debt": rng.choice([0, rng.randint(1, 16)]),
             }
         )
     groups = []

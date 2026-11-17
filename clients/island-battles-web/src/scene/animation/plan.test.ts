@@ -736,6 +736,7 @@ describe("castle counts and growth", () => {
     x,
     y: 0,
     upgrades: { speed: 1, clash_stop_generations: 1 },
+    burst_debt: 0,
   });
   const group = (): Generation["soldier_groups"][number] => ({
     id: 5,
@@ -782,6 +783,33 @@ describe("castle counts and growth", () => {
       castles: [castle(0, 1, 31, 0), castle(1, 0, 21, 4)],
     });
     expect(countOf(grown, 1).replayed).toBe(false);
+  });
+
+  test("a castle grows by its generation_amount, gets its burst in the next generation, then repays its debt", () => {
+    const grower = (soldiers: number, debt: number) => ({
+      ...castle(0, 1, soldiers, 0),
+      upgrades: { speed: 1, clash_stop_generations: 1, generation_amount: 3 },
+      burst_debt: debt,
+    });
+    const frame = (id: number, soldiers: number, debt: number) => ({
+      id,
+      castles: [grower(soldiers, debt), castle(1, 0, 20, 4)],
+      soldier_groups: [],
+      clashes: [],
+    });
+    // A burst of 8 ordered in the turn arrives with the production of 3 and is owed.
+    const paidOut = planTurn(frame(1, 10, 0), frame(2, 21, 8));
+    expect(countOf(paidOut, 0).replayed).toBe(true);
+    // The production repays 3 of the debt, so the castle stays at 21.
+    const repaying = planTurn(frame(2, 21, 8), frame(3, 21, 5));
+    expect(countOf(repaying, 0).replayed).toBe(true);
+    // The last 2 of the debt leave 1 soldier of growth.
+    const repaid = planTurn(frame(3, 21, 2), frame(4, 22, 0));
+    expect(countOf(repaid, 0).replayed).toBe(true);
+    // A castle that grew by 1 at generation_amount 3 doesn't follow the rules.
+    expect(
+      countOf(planTurn(frame(4, 22, 0), frame(5, 23, 0)), 0).replayed,
+    ).toBe(false);
   });
 
   test("a neutral castle captured this turn has the surplus without growth, then grows next turn", () => {

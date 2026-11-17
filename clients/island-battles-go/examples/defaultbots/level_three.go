@@ -126,7 +126,7 @@ func (budget *castleBudget) spare(target *islandbattles.Castle) int {
 // most, and the launches its plans have yet to send.
 func (state *levelThreeTurn) reserve(owned []islandbattles.Castle) {
 	for _, castle := range owned {
-		budget := &castleBudget{castle: castle, hold: int(garrisonToHold(state.board.arrivals(castle), state.board.team))}
+		budget := &castleBudget{castle: castle, hold: int(state.board.garrisonToHold(castle, state.board.arrivals(castle), state.board.team))}
 		budget.guard, budget.guardAgainst = state.guard(castle)
 		state.budgets[castle.ID] = budget
 	}
@@ -141,7 +141,8 @@ func (state *levelThreeTurn) reserve(owned []islandbattles.Castle) {
 
 // guard is how many soldiers a castle keeps so that no single enemy castle
 // could take it by sending everything it has, and the enemy castle that
-// needs the most: with the castle's growth while the enemy group travels,
+// needs the most: with the castle's growth while the enemy group travels
+// (its production less what repays its burst debt, see growth),
 // and the margin an attacker adds, a garrison this large needs more soldiers
 // than the enemy castle holds.
 func (state *levelThreeTurn) guard(castle islandbattles.Castle) (int, *uint) {
@@ -152,7 +153,7 @@ func (state *levelThreeTurn) guard(castle islandbattles.Castle) (int, *uint) {
 			continue
 		}
 		turns := travelTurns(enemy.Distance(castle), state.board.speed(enemy.Upgrades))
-		if needed := int(enemy.Soldiers) - turns - int(attackMargin(enemy.Soldiers)) - 1; needed > guard {
+		if needed := int(enemy.Soldiers) - state.board.grownBy(castle, turns) - int(attackMargin(enemy.Soldiers)) - 1; needed > guard {
 			guard, against = needed, &enemy.ID
 		}
 	}
@@ -227,11 +228,11 @@ func (state *levelThreeTurn) defend(owned []islandbattles.Castle) {
 		budget := state.budgets[castle.ID]
 		arrivals := append(state.board.arrivals(castle), state.planned[castle.ID]...)
 		available := castle.Soldiers - uint(budget.used)
-		missing := int(garrisonToHold(arrivals, state.board.team)) - int(available)
+		missing := int(state.board.garrisonToHold(castle, arrivals, state.board.team)) - int(available)
 		if missing <= 0 {
 			continue
 		}
-		falls := fallTurn(castle, arrivals, available, state.board.team)
+		falls := state.board.fallTurn(castle, arrivals, available, state.board.team)
 		helped := uint(0)
 		for _, helper := range byDistance(castle, owned) {
 			spare := state.budgets[helper.ID].spare(nil)
@@ -259,14 +260,14 @@ func (state *levelThreeTurn) defend(owned []islandbattles.Castle) {
 
 // fallTurn is the first turn whose arrivals take a castle that keeps
 // soldiers, or a turn past every arrival when it holds.
-func fallTurn(castle islandbattles.Castle, arrivals []arrival, soldiers, team uint) int {
+func (board board) fallTurn(castle islandbattles.Castle, arrivals []arrival, soldiers, team uint) int {
 	castle.Soldiers = soldiers
 	last := 0
 	for _, landing := range arrivals {
 		last = max(last, landing.turn)
 	}
 	for turn := 1; turn <= last; turn++ {
-		if owner, _ := forecast(castle, arrivals, turn); owner != team {
+		if owner, _ := board.forecast(castle, arrivals, turn); owner != team {
 			return turn
 		}
 	}
@@ -311,7 +312,7 @@ func (state *levelThreeTurn) bestAttack(owned []islandbattles.Castle) (combined,
 		for count, origin := range origins {
 			total += state.budgets[origin.ID].spare(&target)
 			turns := state.travel(origin, target)
-			owner, defenders := forecast(target, append(state.board.arrivals(target), state.planned[target.ID]...), turns)
+			owner, defenders := state.board.forecast(target, append(state.board.arrivals(target), state.planned[target.ID]...), turns)
 			if owner == state.board.team {
 				break
 			}

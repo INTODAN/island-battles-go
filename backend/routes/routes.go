@@ -163,11 +163,13 @@ func SetupGameRoutes(api huma.API, game *handlers.LobbyGame) {
 		Description: "A submit token from a TurnDelivery, submit.token, which starts with ibst1. It authorizes POST /generation/commands for one player's turn of one generation of one game, until the turn's deadline plus 30 seconds, or 24 hours after the generation when turns have no time limit."}
 	huma.Register(api, huma.Operation{
 		OperationID: "registerGenerationCommand", Path: "/generation/commands", Method: http.MethodPost,
-		Summary: "Register an atomic player command batch and optionally complete the turn", Description: "Requires a player token of a player on the game's frozen roster (PlayerToken), or a submit token: Authorization: Bearer ibst1.… from GET /game/from-lobby/{lobby_id}/turn-delivery stands for its player for the batch of its game and generation only, and anything else (another game or generation, an expired or altered token, a player no longer on the roster) is 401. Either way the lobby is not consulted, and the rules below are the same. Players send send_soldier_group and upgrade_castle commands for castles their team owns; other command types are forbidden (403). " +
+		Summary: "Register an atomic player command batch and optionally complete the turn", Description: "Requires a player token of a player on the game's frozen roster (PlayerToken), or a submit token: Authorization: Bearer ibst1.… from GET /game/from-lobby/{lobby_id}/turn-delivery stands for its player for the batch of its game and generation only, and anything else (another game or generation, an expired or altered token, a player no longer on the roster) is 401. Either way the lobby is not consulted, and the rules below are the same. Players send send_soldier_group, upgrade_castle and burst_castle commands for castles their team owns; other command types are forbidden (403). " +
 			"upgrade_castle buys the next level of one upgrade type and pays that level's soldier_cost, listed by GET /game/upgrades, from the castle's soldiers. A castle may be upgraded several times in one turn, and each upgrade buys the next level. " +
+			"Every generation, each castle a team owns produces its generation_amount value of soldiers. burst_castle orders a burst of 1 up to the castle's burst_potential value, counting the turn's upgrades (every upgrade of its batch, before or after it, and of earlier batches; a batch's bursts are checked after its other commands): the very next generation adds it to the castle on top of its production and makes it the castle's burst_debt. " +
+			"Each later generation's production repays the debt first, and only what is left over grows the castle. A castle with burst_debt can't burst, nor can a castle burst twice in one turn; a capture clears the debt. " +
 			"Every command is checked against the generation and every command already accepted this turn, including your own earlier batches, so an accepted command cannot fail when the turn runs. An invalid command rejects the whole batch, and nothing of it is stored. " +
 			"Malformed parameters are 422. Rejections that clients tell apart carry a problem type: a castle that is not in the generation is 422 " + services.CastleNotFoundProblemType + ", an unknown upgrade_type is 422 " + services.UnknownUpgradeTypeProblemType + ", a castle your team does not own is 403 " + services.CastleNotOwnedProblemType + ", " +
-			"an upgrade past its type's max_level, counting this turn's upgrades, is 409 " + services.UpgradeMaxLevelProblemType + ", and soldiers or an upgrade cost beyond what the castle has left after this turn's reservations is 409 " + services.InsufficientSoldiersProblemType + ". A castle may spend all its soldiers. " +
+			"an upgrade past its type's max_level, counting this turn's upgrades, is 409 " + services.UpgradeMaxLevelProblemType + ", soldiers or an upgrade cost beyond what the castle has left after this turn's reservations is 409 " + services.InsufficientSoldiersProblemType + ", a burst of a castle with burst_debt or a burst accepted this turn is 409 " + services.BurstUnavailableProblemType + ", and a burst above the castle's burst potential is 409 " + services.BurstAbovePotentialProblemType + ". A castle may spend all its soldiers. " +
 			"Complete defaults to true; an empty batch can complete a turn. The last frozen roster completion advances exactly once. " +
 			"The game ends after the turn that leaves one team with castles or soldier groups, a draw when the last teams are eliminated in the same turn, or after the turn that creates generation 300, where the team with the most castles wins. " +
 			"That turn's generation is the last, its state carries the outcome, and every later command conflicts (409) with problem type " + services.GameEndedProblemType + ". " +
@@ -183,12 +185,14 @@ func SetupGameRoutes(api huma.API, game *handlers.LobbyGame) {
 	}, game.RegisterGenerationCommands)
 	registry := api.OpenAPI().Components.Schemas
 	// The service decodes parameters by command_type, so the published command
-	// is one of the two player command shapes.
+	// is one of the player command shapes.
 	send := registry.Schema(reflect.TypeOf(models.SendSoldierGroupCommand{}), true, "")
 	upgrade := registry.Schema(reflect.TypeOf(models.UpgradeCastleCommand{}), true, "")
+	burst := registry.Schema(reflect.TypeOf(models.BurstCastleCommand{}), true, "")
 	*registry.Map()["PublicGenerationCommand"] = huma.Schema{
-		OneOf:         []*huma.Schema{send, upgrade},
-		Discriminator: &huma.Discriminator{PropertyName: "command_type", Mapping: map[string]string{string(models.SendSoldierGroup): send.Ref, string(models.UpgradeCastle): upgrade.Ref}},
+		OneOf: []*huma.Schema{send, upgrade, burst},
+		Discriminator: &huma.Discriminator{PropertyName: "command_type", Mapping: map[string]string{
+			string(models.SendSoldierGroup): send.Ref, string(models.UpgradeCastle): upgrade.Ref, string(models.BurstCastle): burst.Ref}},
 	}
 	// Published on each roster player's personal channel, and for watchers on
 	// the lobby's watch channel, rather than over HTTP.
@@ -272,7 +276,7 @@ func SetupRoutes(api huma.API, env *handlers.Env, adminAPIKey string) {
 	huma.Register(api, huma.Operation{OperationID: "listUpgrades", Path: "/game/upgrades", Method: http.MethodGet,
 		Summary: "List the castle upgrades, their levels and their costs.",
 		Description: "Lists every upgrade type, sorted by type, with what its levels measure and, for each level from 1 to max_level, its effect and the soldiers a castle pays to reach it from the level below. Every castle starts at level 1. " +
-			"The table is static and needs no authentication. Castles and soldier groups carry their current levels, and upgrade_castle in POST /generation/commands buys the next one."}, handlers.ListUpgrades)
+			"The table is static and needs no authentication. Castles and soldier groups carry their current levels, and upgrade_castle in POST /generation/commands buys the next one. generation_amount is what a castle produces each generation, and burst_potential the most a burst_castle command may order."}, handlers.ListUpgrades)
 	huma.Register(api, huma.Operation{OperationID: "listDefaultBots", Path: "/bots/defaults", Method: http.MethodGet,
 		Summary: "List the default bots that the backend plays, and whether it offers hosted and uploaded bots.",
 		Description: "Lists the default bots in level order, each with its level, a name and a description of how it plays. Higher levels play better. " +

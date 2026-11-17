@@ -12,16 +12,20 @@ import (
 )
 
 // turnReservations follows what the turn's accepted commands take from each
-// castle: the soldiers that sends and upgrades claim, and every upgrade type's
-// level after the upgrades bought so far. Simulate deducts the same totals in
-// whatever order the players' commands run, and buys each castle's levels in
-// the same sequence, so commands that fit here cannot fail there.
+// castle: the soldiers that sends and upgrades claim, every upgrade type's
+// level after the upgrades bought so far, and whether the castle bursts.
+// Simulate deducts the same totals in whatever order the players' commands
+// run, and buys each castle's levels in the same sequence, so commands that
+// fit here cannot fail there. A burst is checked against the burst potential
+// when it is accepted; Simulate checks it after every command of the turn,
+// when the levels can only be higher.
 type turnReservations map[uint]*castleReservation
 
 type castleReservation struct {
 	castle     models.Castle
 	unreserved uint
 	levels     models.Upgrades
+	bursts     bool
 }
 
 func newTurnReservations(generation *models.Generation) turnReservations {
@@ -118,6 +122,24 @@ func (reservations turnReservations) reserveUpgrade(parameters simulation.Upgrad
 	return nil
 }
 
+// reserveBurst claims the castle's one burst of the turn. It leaves the burst
+// potential to acceptBurst, so that replaying the turn's commands in another
+// order than they were accepted in can't fail.
+func (reservations turnReservations) reserveBurst(parameters simulation.BurstCastleParams) error {
+	castle, err := reservations.find(parameters.PersistentCastleID)
+	if err != nil {
+		return err
+	}
+	switch {
+	case castle.castle.BurstDebt > 0:
+		return &GenerationError{Status: 409, Type: BurstUnavailableProblemType, Detail: fmt.Sprintf("castle %d still owes %d soldiers for its last burst", parameters.PersistentCastleID, castle.castle.BurstDebt)}
+	case castle.bursts:
+		return &GenerationError{Status: 409, Type: BurstUnavailableProblemType, Detail: fmt.Sprintf("castle %d already bursts this turn", parameters.PersistentCastleID)}
+	}
+	castle.bursts = true
+	return nil
+}
+
 // reserveStored replays a command accepted earlier this turn.
 func (reservations turnReservations) reserveStored(command models.CommandFields) error {
 	switch command.CommandType {
@@ -133,6 +155,12 @@ func (reservations turnReservations) reserveStored(command models.CommandFields)
 			return err
 		}
 		return reservations.reserveUpgrade(parameters)
+	case models.BurstCastle:
+		var parameters simulation.BurstCastleParams
+		if err := json.Unmarshal(command.Parameters, &parameters); err != nil {
+			return err
+		}
+		return reservations.reserveBurst(parameters)
 	}
 	return fmt.Errorf("unexpected stored command type %q", command.CommandType)
 }
@@ -184,6 +212,35 @@ func (reservations turnReservations) acceptUpgrade(teamColor uint, raw json.RawM
 	}
 	stored, err := json.Marshal(internal)
 	return models.CommandFields{CommandType: models.UpgradeCastle, Parameters: stored}, err
+}
+
+// acceptBurst validates a player's burst_castle, reserves it and translates it
+// into the internal command. The amount may be at most the castle's burst
+// potential at the levels the turn's accepted upgrades have reached;
+// validateCommands accepts a batch's bursts after its other commands, so
+// those include every upgrade of the batch.
+func (reservations turnReservations) acceptBurst(teamColor uint, raw json.RawMessage) (models.CommandFields, error) {
+	var parameters models.BurstCastleParameters
+	if !decodeStrictly(raw, &parameters) || parameters.CastleID == nil || parameters.SoldierAmount == nil || *parameters.SoldierAmount == 0 {
+		return models.CommandFields{}, reject(422, "burst_castle parameters must contain an integer castle_id and a positive soldier_amount")
+	}
+	castle, err := reservations.owned(teamColor, *parameters.CastleID)
+	if err != nil {
+		return models.CommandFields{}, err
+	}
+	internal := simulation.BurstCastleParams{PersistentCastleID: *parameters.CastleID, SoldierAmount: *parameters.SoldierAmount}
+	potential, err := castle.levels.Value(models.BurstPotentialUpgrade)
+	if err != nil {
+		return models.CommandFields{}, err
+	}
+	if float64(internal.SoldierAmount) > potential {
+		return models.CommandFields{}, &GenerationError{Status: 409, Type: BurstAbovePotentialProblemType, Detail: fmt.Sprintf("castle %d has a burst potential of %v at burst_potential level %d; a burst of %d needs more", internal.PersistentCastleID, potential, castle.levels[models.BurstPotentialUpgrade], internal.SoldierAmount)}
+	}
+	if err := reservations.reserveBurst(internal); err != nil {
+		return models.CommandFields{}, err
+	}
+	stored, err := json.Marshal(internal)
+	return models.CommandFields{CommandType: models.BurstCastle, Parameters: stored}, err
 }
 
 // decodeStrictly decodes one parameters object, refusing unknown keys and

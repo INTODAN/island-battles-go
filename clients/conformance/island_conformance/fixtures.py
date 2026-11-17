@@ -15,22 +15,49 @@ from island_conformance import reference
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "models.json"
 
 
-def levels(speed: int = 1, clash_stop_generations: int = 1) -> dict:
+def levels(
+    speed: int = 1,
+    clash_stop_generations: int = 1,
+    generation_amount: int = 1,
+    burst_potential: int = 1,
+) -> dict:
     """Every upgrade type's level, as the server lists them."""
-    return {"clash_stop_generations": clash_stop_generations, "speed": speed}
+    return {
+        "burst_potential": burst_potential,
+        "clash_stop_generations": clash_stop_generations,
+        "generation_amount": generation_amount,
+        "speed": speed,
+    }
 
 
 CASTLES = [
-    {"id": 0, "team_color": 1, "soldiers": 30, "x": -2, "y": 0, "upgrades": levels()},
+    {
+        "id": 0,
+        "team_color": 1,
+        "soldiers": 30,
+        "x": -2,
+        "y": 0,
+        "upgrades": levels(),
+        "burst_debt": 0,
+    },
     {
         "id": 1,
         "team_color": 2,
         "soldiers": 30,
         "x": 2,
         "y": 0,
-        "upgrades": levels(speed=3, clash_stop_generations=2),
+        "upgrades": levels(speed=3, clash_stop_generations=2, burst_potential=3),
+        "burst_debt": 6,
     },
-    {"id": 2, "team_color": 0, "soldiers": 15, "x": 0, "y": 3, "upgrades": levels()},
+    {
+        "id": 2,
+        "team_color": 0,
+        "soldiers": 15,
+        "x": 0,
+        "y": 3,
+        "upgrades": levels(),
+        "burst_debt": 0,
+    },
 ]
 GROUPS = [
     {
@@ -96,6 +123,7 @@ COINCIDENT = {
             "x": -1.5,
             "y": -2.25,
             "upgrades": levels(),
+            "burst_debt": 0,
         },
         {
             "id": 5,
@@ -104,6 +132,7 @@ COINCIDENT = {
             "x": -1.5,
             "y": -2.25,
             "upgrades": levels(),
+            "burst_debt": 0,
         },
         {
             "id": 6,
@@ -111,7 +140,13 @@ COINCIDENT = {
             "soldiers": 7,
             "x": 4.75,
             "y": -0.5,
-            "upgrades": levels(speed=4, clash_stop_generations=3),
+            "upgrades": levels(
+                speed=4,
+                clash_stop_generations=3,
+                generation_amount=4,
+                burst_potential=4,
+            ),
+            "burst_debt": 16,
         },
     ],
     "soldier_groups": [
@@ -243,6 +278,14 @@ def build_model_fixtures() -> dict:
             {
                 "name": "fractional upgrade level",
                 "generation": mutated(["castles", 0, "upgrades", "speed"], 1.5),
+            },
+            {
+                "name": "castle misses its burst debt",
+                "generation": mutated(["castles", 0, "burst_debt"], delete=True),
+            },
+            {
+                "name": "negative burst debt",
+                "generation": mutated(["castles", 0, "burst_debt"], -1),
             },
         ],
     }

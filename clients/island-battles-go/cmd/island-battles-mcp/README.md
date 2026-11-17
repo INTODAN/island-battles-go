@@ -78,7 +78,7 @@ Turns count from 1, as the replay's "Turn n / m" does. Turn n's board is what th
 | `get_logs` | The bot log lines over a range of turns that the loaded copy holds, filtered by team, player, lowest level or text, and which teams' lines are left out |
 | `team_timeline` | Each team's castles and soldiers, turn by turn |
 
-The answers are compact JSON. The ledgers follow the game's rules for a turn: commands send groups and buy upgrades, groups move and clash, every castle a team owns grows by one soldier, and then the groups that reached their castle arrive in group ID order. A friendly group reinforces its castle. A hostile group fights the garrison and takes the castle when more attackers than defenders arrive. A demo doesn't say what upgrades cost, so the ledger works the cost out from the soldiers, trying at most 1000 costs when groups arrived. A group that was sent and arrived or was destroyed within one turn shows on no board, so its ledger names the soldiers that no board shows.
+The answers are compact JSON. The ledgers follow the game's rules for a turn: commands send groups and buy upgrades, groups move and clash, every castle a team owns grows by its production (its `generation_amount` level, 1 to 4 soldiers; a burst ordered that turn arrives on top, and burst debt is repaid first), and then the groups that reached their castle arrive in group ID order. A friendly group reinforces its castle. A hostile group fights the garrison and takes the castle when more attackers than defenders arrive. A demo doesn't say what upgrades cost, so the ledger works the cost out from the soldiers, trying at most 1000 costs when groups arrived. A group that was sent and arrived or was destroyed within one turn shows on no board, so its ledger names the soldiers that no board shows.
 
 ## How lobby mode reads a game
 
@@ -98,4 +98,4 @@ The tools are tested over an in-memory MCP connection against [`testdata/demo.js
 go test ./clients/island-battles-go/cmd/island-battles-mcp
 ```
 
-The demo format is the game's `Demo` schema in [`backend/api/openapi.json`](../../../../backend/api/openapi.json). When its `schema_version` changes, change `demoSchemaVersion` in [`demo.go`](demo.go).
+The demo format is the game's `Demo` schema in [`backend/api/openapi.json`](../../../../backend/api/openapi.json). It reads version 2, whose castles have `burst_debt` (#281), and refuses a demo of another version, such as one saved before that release. When its `schema_version` changes, change `demoSchemaVersion` in [`demo.go`](demo.go).

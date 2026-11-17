@@ -27,6 +27,7 @@ const castle = (id: number, x: number, y: number, team = 1): Castle => ({
   team_color: team,
   soldiers: 10,
   upgrades: { speed: 1 },
+  burst_debt: 0,
 });
 const group = (
   id: number,

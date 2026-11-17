@@ -165,6 +165,26 @@ func TestLevelThreeKeepsAGuardAgainstTheEnemy(t *testing.T) {
 	}
 }
 
+// The guard counts the castle's production, less what repays its burst
+// debt, while the enemy group travels.
+func TestLevelThreesGuardCountsTheCastlesGrowth(t *testing.T) {
+	// At generation_amount 4, castle 0 grows 16 in the enemy's 4 turns, so
+	// it keeps 45 - 16 - 6 - 1 = 22 and can spare the 16 for castle 1.
+	producing := castle(0, 1, 40, 0, 0)
+	producing.Upgrades[islandbattles.GenerationAmountUpgrade] = 4
+	castles := []islandbattles.Castle{producing, castle(1, 0, 10, -1, 0), castle(2, 2, 45, 2, 0)}
+	_, sends, _ := play(t, 3, turn(1, castles, nil, ""))
+	if len(sends) != 1 || sends[0].Origin != 0 || sends[0].Destination != 1 {
+		t.Fatalf("got sends %+v", sends)
+	}
+	// With a burst debt of 12, it grows only 4 in those turns and keeps 34.
+	producing.BurstDebt = 12
+	castles[0] = producing
+	if _, sends, _ = play(t, 3, turn(1, castles, nil, "")); len(sends) != 0 {
+		t.Fatalf("got sends %+v", sends)
+	}
+}
+
 func TestLevelThreeCombinesAttacksAndRemembersTheLaterLaunch(t *testing.T) {
 	// Castle 2 is neutral and keeps its 20 defenders. It lands from castle 1 in
 	// 4 turns and from castle 0 in 10. Neither can take it alone (20 + 1 + a

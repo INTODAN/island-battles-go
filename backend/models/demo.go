@@ -7,15 +7,16 @@ const DemoFormat = "island-battles-demo"
 
 // DemoSchemaVersion is the demo file format's version. Change it whenever the
 // format, or a type it holds such as GenerationView, changes in a way that an
-// older viewer can't read. The viewer opens only this version.
-const DemoSchemaVersion = 1
+// older viewer can't read. The viewer opens only this version. Version 2
+// (#281) gave every castle the required burst_debt.
+const DemoSchemaVersion = 2
 
 // Demo is a saved game: every generation played so far, with the game logs
 // its saver could see. It is a file that the player keeps, so it holds
 // everything the demo viewer shows, without a lobby, a session or the game.
 type Demo struct {
 	Format        string     `json:"format" enum:"island-battles-demo" doc:"Marks the file as an Island Battles demo."`
-	SchemaVersion int        `json:"schema_version" enum:"1" doc:"The demo format's version. The demo viewer opens only the current version and rejects a demo saved by another version of the game."`
+	SchemaVersion int        `json:"schema_version" enum:"2" doc:"The demo format's version. The demo viewer opens only the current version and rejects a demo saved by another version of the game."`
 	SavedAt       time.Time  `json:"saved_at" doc:"When the demo was saved."`
 	GameID        uint       `json:"game_id" minimum:"1"`
 	Teams         []GameTeam `json:"teams" nullable:"false" doc:"The teams that played, with their lobby names and the display names their players had at the start."`

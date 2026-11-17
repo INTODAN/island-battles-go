@@ -13,6 +13,8 @@ from island_battles_client import (
     BotMemoryTooLargeError,
     BotTurn,
     BotTurnResult,
+    BurstAbovePotentialError,
+    BurstUnavailableError,
     CastleNotFoundError,
     CastleNotOwnedError,
     GameAuthenticationError,
@@ -25,6 +27,7 @@ from island_battles_client import (
     InsufficientSoldiersError,
     IslandBattlesClient,
     UpgradeMaxLevelError,
+    burst_castle,
     log_line,
     logger,
     send_soldier_group,
@@ -54,6 +57,8 @@ def describe(error: BaseException) -> dict[str, Any]:
         (CastleNotOwnedError, "not_owned"),
         (UpgradeMaxLevelError, "max_level"),
         (InsufficientSoldiersError, "insufficient_soldiers"),
+        (BurstUnavailableError, "burst_unavailable"),
+        (BurstAbovePotentialError, "burst_above_potential"),
         (GameError, "rejected"),
     )
     kind = next((kind for type_, kind in kinds if isinstance(error, type_)), "player")
@@ -76,6 +81,11 @@ class Adapter:
             return send_soldier_group(
                 order.get("origin_castle_id"),  # ty: ignore[invalid-argument-type]
                 order.get("destination_castle_id"),  # ty: ignore[invalid-argument-type]
+                order.get("soldier_amount"),  # ty: ignore[invalid-argument-type]
+            )
+        if order["type"] == "burst_castle":
+            return burst_castle(
+                order.get("castle_id"),  # ty: ignore[invalid-argument-type]
                 order.get("soldier_amount"),  # ty: ignore[invalid-argument-type]
             )
         return upgrade_castle(

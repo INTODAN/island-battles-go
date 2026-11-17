@@ -161,6 +161,10 @@ def upgrade(castle_id, upgrade_type) -> dict:
     }
 
 
+def burst(castle_id, amount) -> dict:
+    return {"type": "burst_castle", "castle_id": castle_id, "soldier_amount": amount}
+
+
 async def centrifugo(method: str, payload: dict) -> None:
     """Call Centrifugo's server API, e.g. to publish or force a reconnect."""
     async with httpx.AsyncClient(timeout=10) as http:

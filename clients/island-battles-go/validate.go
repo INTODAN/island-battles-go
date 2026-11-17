@@ -63,6 +63,14 @@ func validateCommand(command Command) error {
 		if !slices.Contains(UpgradeTypes(), parameters.UpgradeType) {
 			return fmt.Errorf("unknown upgrade_type %q", parameters.UpgradeType)
 		}
+	case BurstCastleCommand:
+		var parameters BurstCastleParameters
+		if err := decodeParameters(command.Parameters, &parameters); err != nil {
+			return err
+		}
+		if parameters.SoldierAmount < 1 {
+			return errors.New("soldier_amount must be at least 1")
+		}
 	default:
 		return fmt.Errorf("unknown command_type %q", command.CommandType)
 	}

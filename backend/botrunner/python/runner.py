@@ -80,6 +80,8 @@ EXIT_WAIT_SECONDS = 1.0
 REJECTION_TYPES = {
     "urn:island-battles:problem:upgrade-max-level",
     "urn:island-battles:problem:insufficient-soldiers",
+    "urn:island-battles:problem:burst-unavailable",
+    "urn:island-battles:problem:burst-above-potential",
 }
 PACKAGE_ID = re.compile(r"[A-Za-z0-9-]{1,64}")
 

@@ -68,15 +68,15 @@ type GenerationRequest struct {
 
 // PublicGenerationCommand keeps raw parameters so the service can decode them
 // strictly and reject other command types with 403. The published schema
-// describes it as one of SendSoldierGroupCommand and UpgradeCastleCommand,
-// chosen by command_type.
+// describes it as one of SendSoldierGroupCommand, UpgradeCastleCommand and
+// BurstCastleCommand, chosen by command_type.
 type PublicGenerationCommand struct {
 	CommandType CommandType     `json:"command_type"`
 	Parameters  json.RawMessage `json:"parameters"`
 }
 
-// SendSoldierGroupCommand and UpgradeCastleCommand only describe the two
-// shapes of PublicGenerationCommand in the published schema.
+// SendSoldierGroupCommand, UpgradeCastleCommand and BurstCastleCommand only
+// describe the shapes of PublicGenerationCommand in the published schema.
 type SendSoldierGroupCommand struct {
 	CommandType CommandType                `json:"command_type" enum:"send_soldier_group"`
 	Parameters  SendSoldierGroupParameters `json:"parameters"`
@@ -85,6 +85,11 @@ type SendSoldierGroupCommand struct {
 type UpgradeCastleCommand struct {
 	CommandType CommandType             `json:"command_type" enum:"upgrade_castle"`
 	Parameters  UpgradeCastleParameters `json:"parameters"`
+}
+
+type BurstCastleCommand struct {
+	CommandType CommandType           `json:"command_type" enum:"burst_castle"`
+	Parameters  BurstCastleParameters `json:"parameters"`
 }
 
 // SendSoldierGroupParameters orders soldiers from an owned castle. Pointers let
@@ -100,6 +105,13 @@ type SendSoldierGroupParameters struct {
 type UpgradeCastleParameters struct {
 	CastleID    *uint        `json:"castle_id" nullable:"false" doc:"Castle your team owns. It pays the level's soldier_cost from GET /game/upgrades."`
 	UpgradeType *UpgradeType `json:"upgrade_type" nullable:"false" doc:"The type to raise by one level. Several upgrades of a castle in one turn each buy the next level."`
+}
+
+// BurstCastleParameters orders a burst for an owned castle. Pointers let
+// validation distinguish a missing field from 0.
+type BurstCastleParameters struct {
+	CastleID      *uint `json:"castle_id" nullable:"false" doc:"Castle your team owns, with no burst_debt and no other burst this turn."`
+	SoldierAmount *uint `json:"soldier_amount" minimum:"1" nullable:"false" doc:"Soldiers the burst adds, at most the castle's burst_potential value from GET /game/upgrades, counting the turn's upgrades: every upgrade of its batch, before or after it, and of the turn's earlier batches. The castle gets them in the next generation, on top of its production, and repays them from its later production."`
 }
 
 type RegisterGenerationCommands struct {
@@ -186,6 +198,7 @@ type CastleView struct {
 	X         float64  `json:"x"`
 	Y         float64  `json:"y"`
 	Upgrades  Upgrades `json:"upgrades" doc:"Every upgrade type's level. GET /game/upgrades lists the levels and what the next one costs."`
+	BurstDebt uint     `json:"burst_debt" doc:"Soldiers the castle still owes for its last burst. A burst arrives in the generation right after the turn that orders it, on top of that generation's production, and becomes the debt. Each later generation's production repays the debt first, and only what is left over grows the castle. A castle with debt can't burst. A capture clears it."`
 }
 
 type SoldierGroupView struct {

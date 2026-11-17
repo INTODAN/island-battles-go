@@ -66,11 +66,11 @@ func TestHandlerListsTheGamesUpgrades(t *testing.T) {
 			t.Fatalf("%s accepts level %d above the listed maximum", upgrade.Type, upgrade.MaxLevel+1)
 		}
 	}
-	expected := map[models.UpgradeType]int{models.SpeedUpgrade: 4, models.ClashStopGenerationsUpgrade: 3}
+	expected := map[models.UpgradeType]int{models.SpeedUpgrade: 4, models.ClashStopGenerationsUpgrade: 3, models.GenerationAmountUpgrade: 4, models.BurstPotentialUpgrade: 4}
 	if !reflect.DeepEqual(listed, expected) {
 		t.Fatalf("upgrades=%v, want %v", listed, expected)
 	}
-	if upgrades[0].Type != models.ClashStopGenerationsUpgrade {
+	if upgrades[0].Type != models.BurstPotentialUpgrade {
 		t.Fatalf("upgrades are not sorted by type: %v", upgrades)
 	}
 }

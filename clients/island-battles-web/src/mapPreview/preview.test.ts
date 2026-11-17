@@ -56,6 +56,7 @@ describe("previewGeneration", () => {
           upgrades: { clash_stop_generations: 1, speed: 3 },
           x: -5,
           y: 0,
+          burst_debt: 0,
         },
         {
           id: 1,
@@ -64,6 +65,7 @@ describe("previewGeneration", () => {
           upgrades: { clash_stop_generations: 1, speed: 1 },
           x: 5,
           y: 0,
+          burst_debt: 0,
         },
         // No starting soldiers of its own: the map's default.
         {
@@ -73,6 +75,7 @@ describe("previewGeneration", () => {
           upgrades: { clash_stop_generations: 1, speed: 1 },
           x: 0,
           y: 0,
+          burst_debt: 0,
         },
       ],
       clashes: [],
@@ -122,7 +125,15 @@ describe("previewGeneration", () => {
     });
     // A castle keeps its index as its ID, so the preview's IDs match the builder's numbers.
     expect(generation.castles).toEqual([
-      { id: 1, team_color: 0, soldiers: 0, upgrades: {}, x: 1, y: 2 },
+      {
+        id: 1,
+        team_color: 0,
+        soldiers: 0,
+        upgrades: {},
+        x: 1,
+        y: 2,
+        burst_debt: 0,
+      },
       {
         id: 2,
         team_color: 0,
@@ -130,8 +141,17 @@ describe("previewGeneration", () => {
         upgrades: { clash_stop_generations: 2 },
         x: 0,
         y: 3,
+        burst_debt: 0,
       },
-      { id: 5, team_color: 2, soldiers: 0, upgrades: {}, x: 4, y: 4 },
+      {
+        id: 5,
+        team_color: 2,
+        soldiers: 0,
+        upgrades: {},
+        x: 4,
+        y: 4,
+        burst_debt: 0,
+      },
     ]);
     expect(Object.is(generation.castles[1]?.x, 0)).toBe(true);
     expect(teams.map((team) => team.color)).toEqual([2]);

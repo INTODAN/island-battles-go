@@ -9,7 +9,7 @@ export type Demo = components["schemas"]["Demo"];
 
 /** The format and the one schema version this client opens. */
 export const DEMO_FORMAT = "island-battles-demo";
-export const DEMO_SCHEMA_VERSION = 1;
+export const DEMO_SCHEMA_VERSION = 2;
 
 /**
  * The largest file the view opens. A demo is saved through the lobby page, which reads at most
@@ -172,6 +172,7 @@ function checkFrame(rawFrame: unknown, path: string): number {
     coordinate(castle.x, `${castlePath}.x`);
     coordinate(castle.y, `${castlePath}.y`);
     upgrades(castle.upgrades, `${castlePath}.upgrades`);
+    count(castle.burst_debt, `${castlePath}.burst_debt`);
   });
   array(frame.soldier_groups, `${path}.soldier_groups`).forEach(
     (rawGroup, index) => {

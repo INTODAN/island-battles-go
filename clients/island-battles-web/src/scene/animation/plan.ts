@@ -177,10 +177,14 @@ export const SPAWN_SPAN = 0.15;
 export const HELD_RATTLE_SPAN = 0.3;
 
 const SPEED_BY_LEVEL = [0.5, 1, 1.5, 2];
+/** Soldiers a castle that a team owns produces each turn, by generation_amount level. */
+const PRODUCTION_BY_LEVEL = [1, 2, 3, 4];
 /** Soldier cost of reaching each level, from level 1; mirrors backend/models/upgrades.go. */
 export const UPGRADE_COSTS: Readonly<Record<string, readonly number[]>> = {
   speed: [0, 10, 20, 30],
   clash_stop_generations: [0, 10, 20],
+  generation_amount: [0, 10, 20, 30],
+  burst_potential: [0, 10, 20, 30],
 };
 
 /** World units a group moves per turn, from its snapshotted speed upgrade. */
@@ -190,6 +194,25 @@ export function speedOf(upgrades: Record<string, number>): number {
     Math.max(1, Math.trunc(upgrades.speed ?? 1)),
   );
   return SPEED_BY_LEVEL[level - 1] ?? 0.5;
+}
+
+/**
+ * What a castle that a team owns grows by in a turn, as on the server: its production at the
+ * turn's generation_amount level, less what repays the castle's burst debt. A castle without debt
+ * that has debt after the turn burst in it: the burst arrived on top of the production, and the
+ * debt is its amount. (A castle that burst and was captured in the same turn has no debt after
+ * it, so its count doesn't replay and ticks straight to the result.)
+ */
+export function growthOf(before: Castle, after: Castle): number {
+  const level = Math.min(
+    PRODUCTION_BY_LEVEL.length,
+    Math.max(1, Math.trunc(after.upgrades.generation_amount ?? 1)),
+  );
+  const production = PRODUCTION_BY_LEVEL[level - 1] ?? 1;
+  if (before.burst_debt === 0 && after.burst_debt > 0) {
+    return production + after.burst_debt;
+  }
+  return production - Math.min(before.burst_debt, production);
 }
 
 function upgradeCost(
@@ -661,7 +684,7 @@ const NEUTRAL_TEAM = 0;
 
 /**
  * Replays the turn's arithmetic for a castle: its commands at t = 0 (soldiers sent, upgrades
- * paid), growth by one, then the landings in group ID order. The landing times are handed out
+ * paid), its growth (growthOf), then the landings in group ID order. The landing times are handed out
  * in time order. Only a castle that a team owns grows, and growth comes before the landings, as
  * on the server: a neutral castle keeps its soldiers, and one captured this turn was still
  * neutral at the growth step.
@@ -687,7 +710,7 @@ function replayCastle(
   let team = before.team_color;
   pushStep(countKeys, 0, soldiers);
   if (before.team_color !== NEUTRAL_TEAM) {
-    soldiers += 1;
+    soldiers += growthOf(before, after);
     pushStep(countKeys, growth, soldiers);
   }
   landings.forEach((arrival, index) => {
