@@ -1,6 +1,6 @@
 import { type MapPoint, toWorld, toWorldDistance } from "./coordinates";
 
-// The board keeps at least the generated map's 8 by 6 map units, with a margin around each
+// The board keeps at least 8 by 6 map units, with a margin around each
 // castle for its island and label. Castles never move, so any frame's castles bound the board.
 /** The smallest board, in map units. */
 export const MIN_BOARD_WIDTH = 8;

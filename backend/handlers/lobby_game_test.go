@@ -70,7 +70,7 @@ func TestWatcherReplayIsServedToWatchersOnly(t *testing.T) {
 	database := testutils.InitTestDB(t)
 	alice, bob, lobbyID, red, blue := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
 	if _, err := services.RunLobbyGame(context.Background(), database, &testutils.RecordedPublisher{}, nil, domain.Snapshot{
-		Lobby:       domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted},
+		Lobby:       domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted, GameSettings: testutils.CircleMapSettings(2, "")},
 		Teams:       []domain.Team{{ID: red, Name: "Red", Order: 1}, {ID: blue, Name: "Blue", Order: 2}},
 		StartRoster: domain.StartRoster{{PlayerID: alice, TeamID: red, TeamOrder: 1}, {PlayerID: bob, TeamID: blue, TeamOrder: 2}},
 		Members:     []domain.Member{{PlayerID: alice, DisplayName: "Alice"}, {PlayerID: bob, DisplayName: "Bob"}},
@@ -196,7 +196,7 @@ func TestStartedGameServesItsRosterWithoutTheLobby(t *testing.T) {
 	database := testutils.InitTestDB(t)
 	alice, bob, lobbyID, red, blue := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
 	snapshot := domain.Snapshot{
-		Lobby:       domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted},
+		Lobby:       domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted, GameSettings: testutils.CircleMapSettings(2, "")},
 		Teams:       []domain.Team{{ID: red, Name: "Red", Order: 1}, {ID: blue, Name: "Blue", Order: 2}},
 		StartRoster: domain.StartRoster{{PlayerID: alice, TeamID: red, TeamOrder: 1}, {PlayerID: bob, TeamID: blue, TeamOrder: 2}},
 		Members:     []domain.Member{{PlayerID: alice, DisplayName: "Alice"}, {PlayerID: bob, DisplayName: "Bob"}},
@@ -208,7 +208,7 @@ func TestStartedGameServesItsRosterWithoutTheLobby(t *testing.T) {
 	// Carol plays a different game, so she is on a roster but not on this one.
 	carol, otherLobby, green, yellow := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
 	if _, err := services.RunLobbyGame(context.Background(), database, &testutils.RecordedPublisher{}, nil, domain.Snapshot{
-		Lobby:       domain.Lobby{ID: otherLobby, GameKey: "island-battles", Phase: domain.PhaseStarted},
+		Lobby:       domain.Lobby{ID: otherLobby, GameKey: "island-battles", Phase: domain.PhaseStarted, GameSettings: testutils.CircleMapSettings(2, "")},
 		Teams:       []domain.Team{{ID: green, Name: "Green", Order: 1}, {ID: yellow, Name: "Yellow", Order: 2}},
 		StartRoster: domain.StartRoster{{PlayerID: carol, TeamID: green, TeamOrder: 1}, {PlayerID: uuid.NewString(), TeamID: yellow, TeamOrder: 2}},
 	}); err != nil {

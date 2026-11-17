@@ -7,6 +7,7 @@ import (
 	"github.com/INTODAN/mpl/domain"
 	"github.com/INTODAN/mpl/gamehooks"
 	"islandBattles/backend/dal"
+	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/models"
 
@@ -32,7 +33,7 @@ func TestALobbyPlaysASecondGameAfterTheFirstEnds(t *testing.T) {
 	var room domain.Snapshot
 	stack.expect(stack.api.Post("/lobby/v1/lobbies", alice.header, map[string]any{
 		"request_id": uuid.NewString(), "game_key": lobbyadapter.GameKey, "name": "Rematch", "teams": teamBodies("Red", "Blue", "Green"),
-		"client_instance_id": alice.client,
+		"client_instance_id": alice.client, "game_settings": testutils.CircleMapSettings(3, ""),
 	}), http.StatusCreated, &room)
 	if room.Lobby.Round != 1 {
 		t.Fatalf("a new lobby's round = %d, want 1", room.Lobby.Round)

@@ -2,7 +2,6 @@ package services_test
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -41,7 +40,7 @@ func startGoBotGame(t *testing.T, settings string, blueLevel, redLevel uint) goB
 	clock := time.Now()
 	game := goBotGame{database: database, publisher: &testutils.RecordedPublisher{}, lobbyID: uuid.NewString(), clock: &clock}
 	game.service = &services.GenerationService{Database: database, Publisher: game.publisher, Now: func() time.Time { return *game.clock }}
-	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: game.lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted, GameSettings: json.RawMessage(settings)}}
+	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: game.lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted, GameSettings: testutils.CircleMapSettings(2, settings)}}
 	levels := map[string]uint{}
 	players := make([]domain.Principal, 0, 2)
 	for index, level := range []uint{blueLevel, redLevel} {

@@ -25,7 +25,7 @@ test("the room names the chosen map", async (context) => {
     if (!available) return new Response("", { status: 503 });
     return Response.json({ maps: [{ map_template_id: 4, map_name: "Strait", team_count: 2, plane_size_x: 10, plane_size_y: 6, castle_count: 3 }] });
   });
-  assert.equal(await describeSettings({}), "Map: generated for the players · Turn limit: 30 s");
+  assert.equal(await describeSettings({}), "No map chosen · Turn limit: 30 s");
   assert.equal(await describeSettings({ map: { map_name: "Loaded" }, turn_timeout_seconds: 10 }), "Map: Loaded · Turn limit: 10 s");
   assert.equal(requests, 0);
   // A failed list falls back to the ID and is fetched again next time.

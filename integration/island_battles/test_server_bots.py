@@ -31,7 +31,7 @@ from integration.test_live import guests as guests_fixture
 from lobby_api_client.models import TeamDefinition
 from lobby_client import Scope
 from test_bot_packages import command, upload_token
-from test_lobby_binding import GAME, choose_bot, game_auth
+from test_lobby_binding import GAME, choose_bot, circle_map, game_auth
 
 guests = guests_fixture
 pytestmark = pytest.mark.asyncio
@@ -144,7 +144,7 @@ async def test_uploaded_and_hosted_bots_play_a_whole_game_with_no_client(guests,
     room = await alice.create_lobby(
         game_key="island-battles", name="Server bots",
         teams=[TeamDefinition(name="Red"), TeamDefinition(name="Blue"), TeamDefinition(name="Green")],
-        request_id=uuid4(), game_settings={"turn_timeout_seconds": None})
+        request_id=uuid4(), game_settings={"map": circle_map(3), "turn_timeout_seconds": None})
     scope = Scope.from_snapshot(room)
     red, blue, green = (str(team.id) for team in room.teams)
 
