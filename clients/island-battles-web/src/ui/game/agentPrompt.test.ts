@@ -29,6 +29,10 @@ describe("Ask your AI agent", () => {
     );
     expect(prompt).toContain(MCP_README);
     expect(prompt).toContain("call load_lobby with the lobby code ABCD2345");
+    expect(prompt).toContain("It reads the lobby's newest game as a watcher");
+    expect(prompt).toContain(
+      "a watcher sees no bot logs until the game has ended",
+    );
     expect(prompt).toContain("I play for team Blue (colour 1).");
     expect(prompt).toContain(
       'The replay is stopped on turn 40 of 57. "The current turn" means turn 40.',
@@ -62,6 +66,21 @@ describe("Ask your AI agent", () => {
         ...production,
       }),
     ).toContain("I saved it as a demo file of game 12.");
+  });
+
+  test("a game whose lobby code isn't known asks for the code, not for a demo file", () => {
+    const prompt = agentPrompt({
+      game: { kind: "unknown-lobby", gameId: 12 },
+      turn: 3,
+      turns: 9,
+      ...production,
+    });
+    expect(prompt).toContain(
+      "game 12 of a lobby whose join code this page doesn't know. Ask me for the code",
+    );
+    expect(prompt).toContain("it loads the lobby's newest game");
+    expect(prompt).not.toContain("demo file");
+    expect(prompt).not.toContain("load_demo with");
   });
 
   test("a local or other server is passed to the MCP server", () => {

@@ -2,9 +2,13 @@
 // investigates the game with them through the island-battles MCP server
 // (clients/island-battles-go/cmd/island-battles-mcp, #282). Pure, so `bun test` covers it.
 
-/** The game the agent should load: a lobby's game by its join code, or a demo file. */
+/**
+ * The game the agent should load: a lobby's game by its join code, a lobby's game whose code
+ * this page doesn't know, or a demo file.
+ */
 export type AgentGame =
   | { kind: "lobby"; code: string }
+  | { kind: "unknown-lobby"; gameId: number }
   | { kind: "demo"; gameId: number; fileName: string | null };
 
 export interface AgentPromptOptions {
@@ -43,13 +47,21 @@ export function mcpAddCommand(gameUrl: string, lobbyUrl: string): string {
   );
 }
 
+/** The prompt's line that tells the agent how to load the game. */
+function loadLine(game: AgentGame): string {
+  switch (game.kind) {
+    case "lobby":
+      return `The game: call load_lobby with the lobby code ${game.code}. It reads the lobby's newest game as a watcher, also while it is still running; a watcher sees no bot logs until the game has ended, and then every team's.`;
+    case "unknown-lobby":
+      return `The game: game ${game.gameId} of a lobby whose join code this page doesn't know. Ask me for the code, as the lobby page shows it, then call load_lobby with it; it loads the lobby's newest game.`;
+    case "demo":
+      return `The game: I saved it as a demo file${game.fileName ? ` named "${game.fileName}"` : ` of game ${game.gameId}`}. Ask me for its path on this computer, then call load_demo with it.`;
+  }
+}
+
 /** The prompt that "Ask your AI agent" copies. */
 export function agentPrompt(options: AgentPromptOptions): string {
   const { game, turn, turns } = options;
-  const load =
-    game.kind === "lobby"
-      ? `The game: call load_lobby with the lobby code ${game.code}. It reads the game as a watcher, also while it is still running.`
-      : `The game: I saved it as a demo file${game.fileName ? ` named "${game.fileName}"` : ` of game ${game.gameId}`}. Ask me for its path on this computer, then call load_demo with it.`;
   const lines = [
     "Let's investigate a game of Island Battles together, with the island-battles MCP server.",
     "",
@@ -58,7 +70,7 @@ export function agentPrompt(options: AgentPromptOptions): string {
     `  ${mcpAddCommand(options.gameUrl, options.lobbyUrl)}`,
     `Then restart this session. For another MCP client, run island-battles-mcp as a stdio server. Setup: ${MCP_README}`,
     "",
-    load,
+    loadLine(game),
   ];
   if (options.team) {
     lines.push(

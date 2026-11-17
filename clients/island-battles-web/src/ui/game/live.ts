@@ -74,9 +74,8 @@ export function mountLive(
     agentGame: () => {
       const code = source.lobbyCode();
       if (code) return { kind: "lobby", code };
-      return gameId === undefined
-        ? null
-        : { kind: "demo", gameId, fileName: null };
+      // Nothing was saved: the prompt asks the player for the lobby's code.
+      return gameId === undefined ? null : { kind: "unknown-lobby", gameId };
     },
     onSaveDemo: async () => saveTextFile(await source.saveDemo()),
     requestLogs: (generationId, ended) => void fetchLogs(generationId, ended),
