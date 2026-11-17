@@ -44,7 +44,7 @@ So log a summary, not one line per castle: with 40 castles, one line per castle 
 
 - **The game's log panel** in the lobby page's replay: your team's lines while the game runs, every team's after it ends. Always on.
 - **stdout** of the process that plays (`scripts/serve.sh`, `scripts/run.sh`), at `info` and above.
-- **A file**: `scripts/run.sh` appends to `bot.log`. For `serve`, redirect: `scripts/serve.sh 2>&1 | tee bot.log` (in PowerShell, `scripts\serve.cmd 2>&1 | Tee-Object bot.log`).
+- **A file**: `scripts/run.sh` appends to `bot.log`. For `serve`, redirect: `scripts/serve.sh 2>&1 | tee bot.log` (in PowerShell, `cmd /c "scripts\serve.cmd 2>&1" | ForEach-Object { $_; Add-Content bot.log $_ }`, which keeps `bot.log` plain text; in Windows PowerShell 5.1, `Tee-Object` writes UTF-16 and piping stderr straight into it turns each line into an error record).
 
 An exception in `play` is answered as an error with its traceback, and shown in the game log with the exception first.
 
