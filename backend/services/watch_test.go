@@ -233,7 +233,7 @@ func TestWatchersGetEveryTurnThatGoBotsPlay(t *testing.T) {
 	}
 }
 
-func TestWatchersSeeTheGameLogOnlyAfterTheEnd(t *testing.T) {
+func TestWatchersSeeEveryTeamsGameLog(t *testing.T) {
 	fixture := newLogFixture(t)
 	ctx := context.Background()
 	watcher := domain.Principal{PlayerID: uuid.NewString()}
@@ -250,11 +250,16 @@ func TestWatchersSeeTheGameLogOnlyAfterTheEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if running.Outcome != nil || len(running.Frames) != 1 || len(running.Logs) != 1 || len(running.Logs[0].Players) != 0 || !reflect.DeepEqual(running.Logs[0].HiddenTeamColors, []uint{1, 2}) {
+	// Every team's lines are public: a watcher reads them while the game
+	// runs, in the history and turn by turn, as Alice does in her demo.
+	if running.Outcome != nil || len(running.Frames) != 1 || len(running.Logs) != 1 || len(running.Logs[0].Players) != 2 ||
+		running.Logs[0].Players[0].Lines[0].Message != "Blue plans" || running.Logs[0].Players[1].Lines[0].Message != "Red plans" {
 		t.Fatalf("running game's watch demo = %+v", running.Logs)
 	}
-	// Alice still sees her own team's lines in her own demo.
-	if own, err := fixture.service.Demo(ctx, alice, state.LobbyID); err != nil || len(own.Logs[0].Players) != 1 || !reflect.DeepEqual(own.Logs[0].HiddenTeamColors, []uint{2}) {
+	if read, err := service.Logs(ctx, watcher, state.LobbyID, state.GenerationID); err != nil || !reflect.DeepEqual(read, running.Logs[0]) {
+		t.Fatalf("watcher's logs = %+v, %v", read, err)
+	}
+	if own, err := fixture.service.Demo(ctx, alice, state.LobbyID); err != nil || !reflect.DeepEqual(own.Logs, running.Logs) {
 		t.Fatalf("Alice's demo logs = %+v, %v", own.Logs, err)
 	}
 
@@ -270,7 +275,7 @@ func TestWatchersSeeTheGameLogOnlyAfterTheEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	logs := ended.Logs[0]
-	if ended.Outcome == nil || len(logs.HiddenTeamColors) != 0 || len(logs.Players) != 2 {
+	if ended.Outcome == nil || len(logs.Players) != 2 {
 		t.Fatalf("ended game's watch demo = %+v", logs)
 	}
 	var messages []string

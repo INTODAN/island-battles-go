@@ -207,27 +207,27 @@ A bot can send the lines it logs while playing a generation, its **game log**, w
 
 The lines live in the `generation_logs` table, one row per line, with the game, the generation, the player, the line's `sequence` within the player's generation (from 1), its level, logger and message. The unique index on the generation, player and sequence serves the line count under the lock and the reads. The table is game data: AutoMigrate creates it, and [retention](#game-retention) deletes the lines with their generation. Players are named in the logs by `FrozenGamePlayer.DisplayName`, the lobby display name copied at start, as the replay's team players are; a player that the start snapshot doesn't list is named `Player <n>` after their roster position.
 
-`GET /game/from-lobby/{lobby_id}/logs?generation_id=N` reads one generation's game log, with the same authorization as `/generation`: a place on the game's frozen roster. Its response is the `GenerationLogs` schema:
+`GET /game/from-lobby/{lobby_id}/logs?generation_id=N` reads one generation's game log. **Every team's game log is public** (#287): the game's roster players and everyone who may [watch the game](#watching-a-game) with the lobby's join code read every team's lines, while the game runs and after it. It admits the same callers as `/watch`: a roster player, a watcher the host hasn't kicked, or an active lobby member. Its response is the `GenerationLogs` schema:
 
 ```json
 {
   "generation_id": 41,
   "players": [
-    {"display_name": "Alex", "team_color": 1, "lines": [{"level": "info", "logger": "island_battles.player", "message": "attacking castle 3 with 12 soldiers"}]}
-  ],
-  "hidden_team_colors": [2]
+    {"display_name": "Alex", "team_color": 1, "lines": [{"level": "info", "logger": "island_battles.player", "message": "attacking castle 3 with 12 soldiers"}]},
+    {"display_name": "Sam", "team_color": 2, "lines": []}
+  ]
 }
 ```
 
-- While the game runs, the caller sees only their own team's lines. Once the game has an outcome, every roster player sees every player's lines.
-- `players` lists every player of the visible teams, also those without lines, ordered by team colour and then display name. Each player's `lines` keep the order they were stored in.
-- `hidden_team_colors` lists, in ascending order, the teams whose lines the caller can't see yet, so a page can explain why. It doesn't reveal whether those teams logged anything. It is empty once the game has ended.
+- `players` lists every player of every team, also those without lines, ordered by team colour and then display name. Each player's `lines` keep the order they were stored in. Lines of the open turn may still arrive until the turn is over.
 - The response contains no player IDs.
-- `generation_id` must be a generation of this game; any other is 404, as are callers off the roster. Like the other game reads, the request ends with a game [retention](#game-retention) pass.
+- `generation_id` must be a generation of this game; any other is 404. A kicked watcher gets 403, and anyone else who may not watch the game 404. Like the other game reads, the request ends with a game [retention](#game-retention) pass.
 
-A [demo](#demos) holds one `GenerationLogs` per generation, with the visibility rule that applied when it was saved.
+**Public logs are a breaking change; clients must upgrade.** `GenerationLogs.hidden_team_colors` is gone, and the demo format is version 2 (#287). Before, a player read only their own team's lines while the game ran, and a watcher none.
 
-The replay shows the game log in a **Logs** panel below the board, for the generation on the board. The replay runs in the lobby page's sandboxed frame without the credential, so it reads the logs through the page: Island Battles' catalog entry sets the lobby frontend's `DataURLPrefix` to `/game/from-lobby/{lobby_id}/`, and the replay posts `game.request` messages for `/game/from-lobby/{lobby_id}/logs?generation_id=N`, which the page fetches for it (see the [lobby frontend README](https://github.com/INTODAN/mpl/blob/main/frontend/README.md#what-a-game-provides)). The replay page data carries the `lobby_id` for that path. The panel groups the lines by team and then by player, in monospace, coloured by level, and scrolls inside a fixed height, so the frame's reported size doesn't change as lines load. It caches the lines of generations whose turn is over. For the open turn, the latest generation of a running game, it says that lines may still arrive and, while that generation is shown in a visible tab, reads its lines again every 3 seconds, at most one read at a time; a generation that was open when shown is read once more when the next one arrives, for its final lines. It explains hidden teams ("Red’s logs appear when the game ends") and generations without lines, and loads every generation again when the game's outcome arrives. Opened outside the lobby page, it says the logs need the lobby.
+A [demo](#demos) holds one `GenerationLogs` per generation, every team's lines.
+
+The replay shows the game log in a **Logs** panel below the board, for the generation on the board. The replay runs in the lobby page's sandboxed frame without the credential, so it reads the logs through the page: Island Battles' catalog entry sets the lobby frontend's `DataURLPrefix` to `/game/from-lobby/{lobby_id}/`, and the replay posts `game.request` messages for `/game/from-lobby/{lobby_id}/logs?generation_id=N`, which the page fetches for it (see the [lobby frontend README](https://github.com/INTODAN/mpl/blob/main/frontend/README.md#what-a-game-provides)). The replay page data carries the `lobby_id` for that path. The panel groups the lines by team and then by player, in monospace, coloured by level, and scrolls inside a fixed height, so the frame's reported size doesn't change as lines load. It caches the lines of generations whose turn is over. For the open turn, the latest generation of a running game, it says that lines may still arrive and, while that generation is shown in a visible tab, reads its lines again every 3 seconds, at most one read at a time; a generation that was open when shown is read once more when the next one arrives, for its final lines. It explains generations without lines. A watcher's replay shows the same panel, since the lobby page fetches the logs with the watcher's credential. Opened outside the lobby page, it says the logs need the lobby.
 
 ### Bot turns
 
@@ -387,7 +387,7 @@ A roster player can save the game as a **demo file** at any time, and watch it l
 ```json
 {
   "format": "island-battles-demo",
-  "schema_version": 1,
+  "schema_version": 2,
   "saved_at": "2026-10-31T12:00:00Z",
   "game_id": 12,
   "teams": [{"color": 1, "name": "Blue", "players": ["Alex"]}],
@@ -398,11 +398,11 @@ A roster player can save the game as a **demo file** at any time, and watch it l
 ```
 
 - `frames` holds every generation played when the demo was saved, in order, each the same `Generation` board view that players and the replay receive.
-- `logs` holds one entry per frame, in the same order, each a `GenerationLogs` as the [game log read](#game-logs) returns it. Its lines follow that read's visibility rule when the demo is saved: a demo saved during the game holds only the saver's team's lines, and one saved after the end holds every team's. `hidden_team_colors` names the teams left out.
+- `logs` holds one entry per frame, in the same order, each a `GenerationLogs` as the [game log read](#game-logs) returns it: every team's lines. A demo saved during the game lacks the lines that bots logged for the open turn after it was saved.
 - `outcome` is null when the demo was saved while the game was running.
 - `schema_version` is `models.DemoSchemaVersion`. Raise it whenever the format, or a type it holds such as `Generation`, changes in a way the viewer can't read. Following the [breaking-changes skill](../.agents/skills/breaking-changes/SKILL.md), the viewer opens only the current version and keeps no readers for older ones.
 
-The request loads the generations with the replay's batched loader and the visible lines in one query, by generation ID and player, so the number of queries doesn't grow with the game. It takes no game lock, like the replay: the game is read first, so a game that ends meanwhile is saved by the stricter rule. It streams the file a frame and a generation's logs at a time, without escaping `<`, `>` and `&`. Like the other game reads, the request ends with a game [retention](#game-retention) pass.
+The request loads the generations with the replay's batched loader and their lines in one query, by generation ID, so the number of queries doesn't grow with the game. It takes no game lock, like the replay: a turn that commits meanwhile can at most add a frame without its outcome. It streams the file a frame and a generation's logs at a time, without escaping `<`, `>` and `&`. Like the other game reads, the request ends with a game [retention](#game-retention) pass.
 
 A long game's demo is large, and the deployed backend can't send a large response quickly. The [Lambda host](#hosts-and-deploys) streams a response's first 6 MB at full speed and the rest at about 2 MB/s, and a request has 30 seconds by default, less the backend's 2-second margin. So when the request's `Accept-Encoding` allows gzip, as every browser's does, the demo is packed with gzip as it is written (`Content-Encoding: gzip`, with `Vary: Accept-Encoding`), never whole in memory. Browsers unpack it as they read it. CloudFront forwards the browser's `Accept-Encoding` to the Lambda, because its origin request policy forwards every viewer header, and passes `Content-Encoding` back unchanged; it compresses nothing itself. Bots' lines repeat their wording, so they pack well:
 
@@ -421,11 +421,11 @@ Run the viewer's file checks from the repository root with `node backend/demovie
 
 ### Watching a game
 
-People outside the roster can watch a lobby's game with its join code. The generic lobby keeps them as [watchers](https://github.com/INTODAN/mpl#watchers) and authorizes the watch channel; Island Battles decides what they see: the board, every turn, the teams and the outcome, and the game log only once the game has ended, as other teams' lines are for players ([game logs](#game-logs)).
+People outside the roster can watch a lobby's game with its join code. The generic lobby keeps them as [watchers](https://github.com/INTODAN/mpl#watchers) and authorizes the watch channel; Island Battles decides what they see: the board, every turn, the teams, the outcome and every team's game log, which is public ([game logs](#game-logs)).
 
 - **Start watching** with `POST /lobby/v1/watches {"game_key": "island-battles", "join_code": ...}`. It returns the lobby's watch channel, `watch:island-battles:<lobby_id>`. The host lists watchers with `GET /lobby/v1/games/island-battles/lobbies/{lobby_id}/watchers` and kicks one with `DELETE …/watchers/{player_id}`.
 - **Live turns.** Every push of `game.next_generation` and `game.ended` to the players' channels also goes to the watch channel, in the same Centrifugo request: after each turn, at the turn deadline, at the start, and for each turn that the [default bots](#default-bots) play. The watch channel's events, `WatchGenerationEvent` and `WatchGameEndedEvent`, carry a `WatchState`.
-- **Reads.** `GET /game/from-lobby/{lobby_id}/watch` returns the current `WatchState`: the game and generation IDs, the watch channel, the teams with their players' names, the board, the turn's deadline and the outcome. It has none of `GenerationState`'s player-only fields: no player ID, team colour, submission, memory, bot or log count. `GET /game/from-lobby/{lobby_id}/watch/demo` returns the history in the [demo format](#demos), for scrubbing back; while the game runs it holds no log lines and each frame's `hidden_team_colors` names every team, and once it has ended every team's lines. Both admit a watcher the host hasn't kicked and an active lobby member, which the lobby checks (`domain.WatchAuthorizer`), and the game's roster players. A kicked watcher gets 403, anyone else 404; a roster player is checked first and always reads, whatever their watcher row says. A kick bars that player ID, the guest session, not the person: a new session can watch again with the code. Like the other reads they first apply an overdue turn deadline and let default bots catch up.
+- **Reads.** `GET /game/from-lobby/{lobby_id}/watch` returns the current `WatchState`: the game and generation IDs, the watch channel, the teams with their players' names, the board, the turn's deadline and the outcome. It has none of `GenerationState`'s player-only fields: no player ID, team colour, submission, memory, bot or log count. `GET /game/from-lobby/{lobby_id}/watch/demo` returns the history in the [demo format](#demos), for scrubbing back, with every team's lines, and `GET /game/from-lobby/{lobby_id}/logs` one turn's lines. They admit a watcher the host hasn't kicked and an active lobby member, which the lobby checks (`domain.WatchAuthorizer`), and the game's roster players. A kicked watcher gets 403, anyone else 404; a roster player is checked first and always reads, whatever their watcher row says. A kick bars that player ID, the guest session, not the person: a new session can watch again with the code. Like the other reads they first apply an overdue turn deadline and let default bots catch up.
 - **No effect on the game.** Watchers aren't on the frozen roster, so they never count toward the turn barrier or a deadline, and they never submit. They hold no lease and don't keep the lobby alive. When the lobby is deleted, its watchers can no longer read the game, although its players still can.
 
 ### Binding to the lobby

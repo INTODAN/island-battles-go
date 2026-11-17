@@ -101,6 +101,37 @@ func TestWatcherReplayIsServedToWatchersOnly(t *testing.T) {
 	if response := api.Get("/game/from-lobby/"+uuid.NewString()+"/watch/replay", "Authorization: Bearer watcher"); response.Code != http.StatusNotFound {
 		t.Fatalf("unknown lobby=%d", response.Code)
 	}
+
+	// Every team's game log is public: a watcher reads Alice's lines while
+	// the game runs, through the players' log read.
+	huma.Register(api, huma.Operation{OperationID: "current", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/generation"}, handler.CurrentGeneration)
+	huma.Register(api, huma.Operation{OperationID: "commands", Method: http.MethodPost, Path: "/generation/commands", SkipValidateBody: true}, handler.RegisterGenerationCommands)
+	huma.Register(api, huma.Operation{OperationID: "logs", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/logs"}, handler.GenerationLogs)
+	var state models.GenerationState
+	if err := json.Unmarshal(api.Get("/game/from-lobby/"+lobbyID+"/generation", "Authorization: Bearer alice").Body.Bytes(), &state); err != nil {
+		t.Fatal(err)
+	}
+	batch := fmt.Sprintf(`{"game_id":%d,"generation_id":%d,"request_id":%q,"complete":false,"commands":[],"logs":[{"level":"info","logger":"bot","message":"holding"}]}`, state.GameID, state.GenerationID, uuid.NewString())
+	if response := api.Post("/generation/commands", "Authorization: Bearer alice", strings.NewReader(batch)); response.Code != http.StatusOK {
+		t.Fatalf("log batch=%d %s", response.Code, response.Body.String())
+	}
+	logsPath := fmt.Sprintf("/game/from-lobby/%s/logs?generation_id=%d", lobbyID, state.GenerationID)
+	for credential, want := range map[string]int{"Bearer watcher": http.StatusOK, "Bearer kicked": http.StatusForbidden, "Bearer outsider": http.StatusNotFound} {
+		response := api.Get(logsPath, "Authorization: "+credential)
+		if response.Code != want {
+			t.Fatalf("%s logs=%d %s", credential, response.Code, response.Body.String())
+		}
+		if want != http.StatusOK {
+			continue
+		}
+		var logs models.GenerationLogs
+		if err := json.Unmarshal(response.Body.Bytes(), &logs); err != nil {
+			t.Fatal(err)
+		}
+		if len(logs.Players) != 2 || logs.Players[0].DisplayName != "Alice" || len(logs.Players[0].Lines) != 1 || logs.Players[0].Lines[0].Message != "holding" {
+			t.Fatalf("watcher's logs = %+v", logs)
+		}
+	}
 }
 
 func TestStartedGameServesItsRosterWithoutTheLobby(t *testing.T) {
@@ -216,11 +247,13 @@ func TestStartedGameServesItsRosterWithoutTheLobby(t *testing.T) {
 		}
 		return logs
 	}
-	if logs := readLogs("Bearer alice"); len(logs.Players) != 1 || logs.Players[0].DisplayName != "Alice" || len(logs.Players[0].Lines) != 1 || logs.Players[0].Lines[0].Message != "attacking with 5" {
-		t.Fatalf("Alice's logs = %+v", logs)
-	}
-	if logs := readLogs("Bearer bob"); len(logs.Players) != 1 || logs.Players[0].DisplayName != "Bob" || len(logs.Players[0].Lines) != 0 || len(logs.HiddenTeamColors) != 1 {
-		t.Fatalf("Bob's logs = %+v", logs)
+	// Every team's lines are public: Bob, of the other team, reads Alice's
+	// while the game runs.
+	for _, credential := range []string{"Bearer alice", "Bearer bob"} {
+		if logs := readLogs(credential); len(logs.Players) != 2 || logs.Players[0].DisplayName != "Alice" || len(logs.Players[0].Lines) != 1 || logs.Players[0].Lines[0].Message != "attacking with 5" ||
+			logs.Players[1].DisplayName != "Bob" || len(logs.Players[1].Lines) != 0 {
+			t.Fatalf("%s logs = %+v", credential, logs)
+		}
 	}
 	if response := api.Get("/game/from-lobby/"+lobbyID+"/logs", "Authorization: Bearer alice"); response.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("logs without a generation=%d", response.Code)
@@ -257,8 +290,8 @@ func TestStartedGameServesItsRosterWithoutTheLobby(t *testing.T) {
 		t.Fatalf("replay page = %+v", page)
 	}
 
-	// A demo is a download of the same frames, with the logs its saver may
-	// see: during the game, Bob sees no line of Alice's.
+	// A demo is a download of the same frames, with every team's logs:
+	// during the game, Bob's demo holds Alice's line.
 	saveDemo := func(credential string) models.Demo {
 		t.Helper()
 		response := api.Get(demoPath, "Authorization: "+credential)
@@ -278,10 +311,9 @@ func TestStartedGameServesItsRosterWithoutTheLobby(t *testing.T) {
 		}
 		return demo
 	}
-	if demo := saveDemo("Bearer bob"); demo.Outcome != nil || len(demo.Logs[0].Players) != 1 || demo.Logs[0].Players[0].DisplayName != "Bob" || !reflect.DeepEqual(demo.Logs[0].HiddenTeamColors, []uint{initial.TeamColor}) {
-		t.Fatalf("Bob's demo logs = %+v", demo.Logs)
-	}
-	if demo := saveDemo("Bearer alice"); len(demo.Logs[0].Players) != 1 || len(demo.Logs[0].Players[0].Lines) != 1 || demo.Logs[0].Players[0].Lines[0].Message != "attacking with 5" {
-		t.Fatalf("Alice's demo logs = %+v", demo.Logs)
+	for _, credential := range []string{"Bearer alice", "Bearer bob"} {
+		if demo := saveDemo(credential); demo.Outcome != nil || len(demo.Logs[0].Players) != 2 || len(demo.Logs[0].Players[0].Lines) != 1 || demo.Logs[0].Players[0].Lines[0].Message != "attacking with 5" {
+			t.Fatalf("%s demo logs = %+v", credential, demo.Logs)
+		}
 	}
 }

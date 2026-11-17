@@ -85,24 +85,23 @@ func countStoredLogLines(transaction *gorm.DB, state *models.GenerationState) er
 	return err
 }
 
-// Logs returns a generation's game log for a roster player. While the game
-// runs, the caller sees only their own team's lines; once it has an outcome,
-// every team's. It takes no game lock, like Replay: the game is read first,
-// so a game that ends meanwhile is shown by the stricter rule.
+// Logs returns a generation's game log, every team's lines, to anyone who
+// may read GET /game/from-lobby/{lobby_id}/watch: the game's roster players,
+// the lobby's watchers the host hasn't kicked and its active members. Every
+// team's lines are public, during the game and after it. It takes no game
+// lock, like Replay.
 func (service *GenerationService) Logs(ctx context.Context, principal domain.Principal, lobbyID string, generationID uint) (models.GenerationLogs, error) {
 	database := service.Database.WithContext(ctx)
-	game, err := dal.FindLobbyGame(database, lobbyID)
+	game, err := service.authorizeWatcher(ctx, principal, lobbyID)
 	if err != nil {
 		return models.GenerationLogs{}, err
 	}
-	observability.Annotate(ctx, slog.Uint64("game_id", uint64(game.ID)), slog.Uint64("generation_id", uint64(generationID)))
-	if err := service.authorize(ctx, principal, game); err != nil {
-		return models.GenerationLogs{}, err
-	}
+	observability.Annotate(ctx, slog.Uint64("generation_id", uint64(generationID)))
 	if game, err = service.applyOverdueDeadline(ctx, game); err != nil {
 		return models.GenerationLogs{}, err
 	}
-	// Checked after authorization, so only roster players learn of it.
+	// Checked after authorization, so only those who may read the game learn
+	// of it.
 	if generationID == 0 {
 		return models.GenerationLogs{}, reject(422, "generation_id must be a positive generation ID")
 	}
@@ -117,39 +116,28 @@ func (service *GenerationService) Logs(ctx context.Context, principal domain.Pri
 	if err != nil {
 		return models.GenerationLogs{}, err
 	}
-	caller, err := frozenPlayer(players, principal.PlayerID)
-	if err != nil {
-		return models.GenerationLogs{}, err
-	}
 	lines, err := dal.LoadGenerationLogs(database, generationID)
 	if err != nil {
 		return models.GenerationLogs{}, err
 	}
-	return generationLogs(game, generationID, players, caller, lines), nil
+	return generationLogs(generationID, players, lines), nil
 }
 
-// generationLogs groups a generation's lines by player and leaves out the
-// teams the caller can't see yet.
-func generationLogs(game *models.Game, generationID uint, players []models.FrozenGamePlayer, caller models.FrozenGamePlayer, lines []models.GenerationLog) models.GenerationLogs {
-	visible := func(teamColor uint) bool { return game.Outcome != nil || teamColor == caller.TeamColor }
-	logs := models.GenerationLogs{GenerationID: generationID, Players: []models.PlayerGenerationLogs{}, HiddenTeamColors: []uint{}}
-	for _, team := range game.Teams {
-		if !visible(team.Color) {
-			logs.HiddenTeamColors = append(logs.HiddenTeamColors, team.Color)
-		}
-	}
-	slices.Sort(logs.HiddenTeamColors)
+// generationLogs groups a generation's lines by player, every roster player
+// of every team.
+func generationLogs(generationID uint, players []models.FrozenGamePlayer, lines []models.GenerationLog) models.GenerationLogs {
+	logs := models.GenerationLogs{GenerationID: generationID, Players: []models.PlayerGenerationLogs{}}
 	byPlayer := map[string][]models.GenerationLogLine{}
 	for _, line := range lines {
 		byPlayer[line.PlayerID] = append(byPlayer[line.PlayerID], models.GenerationLogLine{Level: line.Level, Logger: line.Logger, Message: line.Message})
 	}
-	visiblePlayers := slices.DeleteFunc(slices.Clone(players), func(player models.FrozenGamePlayer) bool { return !visible(player.TeamColor) })
+	ordered := slices.Clone(players)
 	// Equal names keep the roster's player ID order, which the response
 	// doesn't show but keeps stable across reads.
-	slices.SortStableFunc(visiblePlayers, func(left, right models.FrozenGamePlayer) int {
+	slices.SortStableFunc(ordered, func(left, right models.FrozenGamePlayer) int {
 		return cmp.Or(cmp.Compare(left.TeamColor, right.TeamColor), cmp.Compare(left.DisplayName, right.DisplayName))
 	})
-	for _, player := range visiblePlayers {
+	for _, player := range ordered {
 		playerLines := byPlayer[player.PlayerID]
 		if playerLines == nil {
 			playerLines = []models.GenerationLogLine{}

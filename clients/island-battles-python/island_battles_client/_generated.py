@@ -372,7 +372,7 @@ class Demo(GameModel):
     game_id: Annotated[StrictInt, Field(ge=1)]
     logs: Sequence[GenerationLogs]
     """
-    One entry per frame, in the same order, with the game log lines its saver could see when saving: while the game runs only the saver's team's, once it has ended every team's. hidden_team_colors names the teams left out.
+    One entry per frame, in the same order, with every team's game log lines when the demo was saved. A demo saved during the game lacks the lines that bots logged for the open turn after it was saved.
     """
     outcome: GameOutcome | None
     """
@@ -382,7 +382,7 @@ class Demo(GameModel):
     """
     When the demo was saved.
     """
-    schema_version: Literal[1]
+    schema_version: Literal[2]
     """
     The demo format's version. The demo viewer opens only the current version and rejects a demo saved by another version of the game.
     """
@@ -549,13 +549,9 @@ class GenerationLogs(GameModel):
     A URL to the JSON Schema for this object.
     """
     generation_id: Annotated[StrictInt, Field(ge=1)]
-    hidden_team_colors: Sequence[HiddenTeamColor]
-    """
-    Teams whose logs you can't see yet. While the game runs you see only your own team's logs; once it has an outcome you see every team's.
-    """
     players: Sequence[PlayerGenerationLogs]
     """
-    Every player of the teams you can see, ordered by team colour and then display name, with their lines in the order they were written.
+    Every player of every team, ordered by team colour and then display name, with their lines in the order they were written.
     """
 
 
@@ -608,10 +604,6 @@ class GenerationState(GameModel):
     """
     When this generation's turn times out: the generation's creation time plus the lobby's turn_timeout_seconds. Null when turns have no time limit, and once the game has ended. If a player of a team hasn't completed the turn by then, the team loses and the game ends. A client waiting for other players calls POST /game/from-lobby/{lobby_id}/deadline about a second after it, because the server runs no timers.
     """
-
-
-class HiddenTeamColor(RootModel[StrictInt]):
-    root: Annotated[StrictInt, Field(ge=0)]
 
 
 class ListDefaultBotsResponseBody(GameModel):

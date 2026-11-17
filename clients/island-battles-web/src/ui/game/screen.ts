@@ -29,13 +29,11 @@ import {
   teamStats,
   turnLabel,
 } from "./history";
-import { hiddenNotice, type LogBook, LogFetchScheduler } from "./logs";
+import { type LogBook, LogFetchScheduler } from "./logs";
 
 export interface ScreenOptions {
   /** True when new turns can arrive: the live view. */
   live: boolean;
-  /** True for a watcher outside the roster, who sees no team's logs until the end. */
-  watching?: boolean;
   logs: LogBook;
   onBack: () => void;
   /** The label of the button that leaves the screen. Default "Back to lobby". */
@@ -44,8 +42,11 @@ export interface ScreenOptions {
   onOpenFile: (file: File) => void;
   /** Saves the game so far as a demo file; rejects with the reason. Absent for an opened demo. */
   onSaveDemo?: () => Promise<void>;
-  /** Called when the shown turn's logs are not held or hide teams that have since been revealed. */
-  requestLogs?: (generationId: number, ended: boolean) => void;
+  /**
+   * Called when the shown turn's logs are not held, or were read while the turn was open and it
+   * is over now (`settled`).
+   */
+  requestLogs?: (generationId: number, settled: boolean) => void;
 }
 
 /** `stopped`: a watcher the host removed, who receives no more turns. */
@@ -123,8 +124,9 @@ export class GameScreen {
   private readonly logsBox = element("details", "gv-logs");
   private readonly logsSummary = element("summary");
   private readonly logsBody = element("div", "gv-logs-body");
-  private readonly logScheduler = new LogFetchScheduler((generationId, ended) =>
-    this.options.requestLogs?.(generationId, ended),
+  private readonly logScheduler = new LogFetchScheduler(
+    (generationId, settled) =>
+      this.options.requestLogs?.(generationId, settled),
   );
   private teamRows = new Map<
     number,
@@ -518,21 +520,26 @@ export class GameScreen {
     const frame = state.frames[state.index];
     if (!running || !frame) return;
     const logs = this.options.logs.get(frame.id);
-    const ended = state.outcome !== null;
+    // The open turn is the latest of a running game; bots may still log lines for it.
+    const settled =
+      state.outcome !== null || state.index < state.frames.length - 1;
     this.logsSummary.textContent = `Bot logs · ${turnLabel(state.index, state.frames.length)}`;
     this.logScheduler.update({
       open: this.logsBox.open,
       generationId: frame.id,
-      ended,
-      needsFetch: this.options.logs.needsFetch(frame.id, ended),
+      settled,
+      needsFetch: this.options.logs.needsFetch(frame.id, settled),
     });
     const parts: HTMLElement[] = [];
-    const notice = hiddenNotice(logs, {
-      ended,
-      live: state.live,
-      watching: this.options.watching === true,
-    });
-    if (notice) parts.push(element("p", "gv-logs-note", notice));
+    if (logs && !settled && state.live) {
+      parts.push(
+        element(
+          "p",
+          "gv-logs-note",
+          "This turn is still open; more lines may arrive.",
+        ),
+      );
+    }
     if (!logs) {
       parts.push(element("p", "gv-logs-note", "Loading the logs…"));
     } else {

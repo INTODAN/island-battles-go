@@ -135,30 +135,28 @@ func TestGameLogLinesAreStoredInOrderWithTheirGeneration(t *testing.T) {
 
 	aliceLines := []models.GenerationLogLine{logLine(models.GenerationLogDebug, "planning"), logLine(models.GenerationLogInfo, "attacking castle 1"),
 		logLine(models.GenerationLogWarning, "low on soldiers"), logLine(models.GenerationLogError, "done")}
-	want := models.GenerationLogs{GenerationID: state.GenerationID, HiddenTeamColors: []uint{2}, Players: []models.PlayerGenerationLogs{
+	everyone := models.GenerationLogs{GenerationID: state.GenerationID, Players: []models.PlayerGenerationLogs{
 		{DisplayName: "Alice", TeamColor: 1, Lines: aliceLines},
-	}}
-	// While the game runs, each team sees only its own lines.
-	if logs := readLogs(t, fixture, 0, state.GenerationID); !reflect.DeepEqual(logs, want) {
-		t.Fatalf("Alice's view = %+v, want %+v", logs, want)
-	}
-	bobView := models.GenerationLogs{GenerationID: state.GenerationID, HiddenTeamColors: []uint{1}, Players: []models.PlayerGenerationLogs{
 		{DisplayName: "Bob", TeamColor: 2, Lines: []models.GenerationLogLine{logLine(models.GenerationLogInfo, "bob's secret plan")}},
 	}}
-	if logs := readLogs(t, fixture, 1, state.GenerationID); !reflect.DeepEqual(logs, bobView) {
-		t.Fatalf("Bob's view = %+v, want %+v", logs, bobView)
+	// Every team's lines are public: while the game runs, each player reads
+	// the other team's lines too.
+	for player := range fixture.players {
+		if logs := readLogs(t, fixture, player, state.GenerationID); !reflect.DeepEqual(logs, everyone) {
+			t.Fatalf("player %d's view = %+v, want %+v", player, logs, everyone)
+		}
 	}
-	// The next generation has no lines yet, and every visible player is listed.
+	// The next generation has no lines yet, and every player is listed.
 	next, err := fixture.service.Current(ctx, alice, state.LobbyID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	empty := readLogs(t, fixture, 0, next.GenerationID)
-	if len(empty.Players) != 1 || len(empty.Players[0].Lines) != 0 || !reflect.DeepEqual(empty.HiddenTeamColors, []uint{2}) {
+	if len(empty.Players) != 2 || len(empty.Players[0].Lines) != 0 || len(empty.Players[1].Lines) != 0 {
 		t.Fatalf("next generation = %+v", empty)
 	}
 
-	// Once the game has an outcome, everyone sees every team.
+	// Once the game has an outcome, nothing changes.
 	game, err := dal.FindGame(fixture.database, state.GameID)
 	if err != nil {
 		t.Fatal(err)
@@ -167,7 +165,6 @@ func TestGameLogLinesAreStoredInOrderWithTheirGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	ended := readLogs(t, fixture, 1, state.GenerationID)
-	everyone := models.GenerationLogs{GenerationID: state.GenerationID, HiddenTeamColors: []uint{}, Players: append(want.Players, bobView.Players...)}
 	if !reflect.DeepEqual(ended, everyone) {
 		t.Fatalf("Bob's view after the end = %+v, want %+v", ended, everyone)
 	}
@@ -277,8 +274,10 @@ func TestGameLogsNeedTheRosterAndAGenerationOfTheGame(t *testing.T) {
 			t.Errorf("%s: error=%v, want 404", name, err)
 		}
 	}
-	if _, err := fixture.service.Logs(ctx, alice, uuid.NewString(), fixture.state.GenerationID); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("unknown lobby error = %v", err)
+	if _, err := fixture.service.Logs(ctx, alice, uuid.NewString(), fixture.state.GenerationID); err == nil {
+		t.Fatal("Alice read the logs of an unknown lobby")
+	} else {
+		assertTurnStatus(t, err, 404)
 	}
 	// The lobby listed no member for the other game's player, so the game
 	// names them by roster position.
@@ -286,10 +285,10 @@ func TestGameLogsNeedTheRosterAndAGenerationOfTheGame(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(logs.Players) != 1 || logs.Players[0].DisplayName != "Player 1" || len(logs.HiddenTeamColors) != 0 {
+	if len(logs.Players) != 1 || logs.Players[0].DisplayName != "Player 1" {
 		t.Fatalf("unnamed player's logs = %+v", logs)
 	}
-	// The generation is checked only for roster players.
+	// The generation is checked only for those who may read the game.
 	if _, err := fixture.service.Logs(ctx, otherPlayer, fixture.state.LobbyID, 0); err == nil {
 		t.Fatal("an outsider read generation 0")
 	} else {

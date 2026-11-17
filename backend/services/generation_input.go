@@ -71,7 +71,7 @@ type GenerationService struct {
 	Publisher Publisher
 	// Now is the clock that turn deadlines are applied by; nil is time.Now.
 	Now func() time.Time
-	// Watchers authorizes the watcher reads, Watch and WatchDemo, against
+	// Watchers authorizes the watcher reads, Watch, WatchDemo and Logs, against
 	// the lobby's watcher rows. Nil lets only roster players read them.
 	Watchers domain.WatchAuthorizer
 	// Bots sends the turns of hosted and uploaded bots that requests

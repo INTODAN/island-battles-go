@@ -72,7 +72,7 @@ func TestWriteWebClientBotFixture(t *testing.T) {
 	frames = frames[29:49]
 	logs := make([]models.GenerationLogs, len(frames))
 	for index, frame := range frames {
-		logs[index] = models.GenerationLogs{GenerationID: frame.ID, Players: []models.PlayerGenerationLogs{}, HiddenTeamColors: []uint{}}
+		logs[index] = models.GenerationLogs{GenerationID: frame.ID, Players: []models.PlayerGenerationLogs{}}
 	}
 	demo := models.Demo{Format: "island-battles-demo", SchemaVersion: models.DemoSchemaVersion, SavedAt: time.Date(2026, 11, 12, 12, 0, 0, 0, time.UTC), GameID: 1, Teams: teams, Frames: frames, Logs: logs}
 	data, err := json.Marshal(demo)

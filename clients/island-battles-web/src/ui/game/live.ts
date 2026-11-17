@@ -60,34 +60,37 @@ export function mountLive(
   options: LiveOptions,
 ): { dispose(): void } {
   const { realtime, source } = options;
-  const watching = source.readLogs === undefined;
+  const watching = source.problemScope === "watch";
   const failureText = watching ? watchFailureText : loadFailureText;
   const logs = new LogBook();
   const screen = new GameScreen(container, {
     live: true,
-    watching,
     logs,
     onBack: options.onBack,
     ...(source.backLabel === undefined ? {} : { backLabel: source.backLabel }),
     onOpenFile: (file) => void openFile(file),
     onSaveDemo: async () => saveTextFile(await source.saveDemo()),
-    requestLogs: (generationId, ended) => void fetchLogs(generationId, ended),
+    requestLogs: (generationId, settled) =>
+      void fetchLogs(generationId, settled),
   });
   screen.setTitle(source.title);
 
   let disposed = false;
   let controller: GameController | undefined;
   let gameId: number | undefined;
-  let teamColors: number[] = [];
   /** Turns that arrived before the history was loaded. */
   let pending: LiveTurn[] = [];
   let loading = false;
   let wasConnected = false;
   let resyncTimer: ReturnType<typeof setTimeout> | undefined;
-  let endedResync = false;
   /** The host removed this watcher: no more turns arrive. */
   let stopped = false;
   const requested = new Set<string>();
+
+  /** The turn that was still open when a history was read: the last of a running game. */
+  function openGeneration(demo: Demo): number | undefined {
+    return demo.outcome === null ? demo.frames.at(-1)?.id : undefined;
+  }
 
   async function openFile(file: File): Promise<void> {
     try {
@@ -100,36 +103,14 @@ export function mountLive(
     }
   }
 
-  async function fetchLogs(generationId: number, ended: boolean) {
-    if (!source.readLogs) {
-      // A watcher sees no logs while the game runs: every team is hidden. Once it has ended,
-      // the history carries every turn's logs, so it is read once more.
-      if (!ended) {
-        if (
-          logs.add({
-            generation_id: generationId,
-            players: [],
-            hidden_team_colors: teamColors,
-          })
-        ) {
-          // The panel asked while drawing: draw again once it has finished.
-          queueMicrotask(() => {
-            if (!disposed) screen.refreshLogs();
-          });
-        }
-      } else if (!endedResync && controller) {
-        endedResync = true;
-        void resync();
-      }
-      return;
-    }
-    const key = `${generationId}:${ended}`;
+  async function fetchLogs(generationId: number, settled: boolean) {
+    const key = `${generationId}:${settled}`;
     if (requested.has(key)) return;
     requested.add(key);
     try {
       const data = await source.readLogs(generationId);
       if (disposed) return;
-      if (logs.add(data)) screen.refreshLogs();
+      if (logs.add(data, settled)) screen.refreshLogs();
     } catch {
       // Try again later, not at once: the panel asks again whenever the view redraws.
       setTimeout(() => requested.delete(key), RESYNC_RETRY_MS);
@@ -159,7 +140,7 @@ export function mountLive(
     try {
       const demo = await source.readHistory();
       if (disposed) return;
-      logs.addAll(demo.logs);
+      logs.addAll(demo.logs, openGeneration(demo));
       const turns = [...pending];
       const held = source.current();
       if (held) turns.push(held);
@@ -172,13 +153,11 @@ export function mountLive(
         demo.outcome ?? live.find((turn) => turn.outcome)?.outcome ?? null;
       pending = [];
       gameId = demo.game_id;
-      teamColors = demo.teams.map((team) => team.color);
       screen.setTitle(
         watching ? `Watching game ${demo.game_id}` : `Game ${demo.game_id}`,
       );
       controller = screen.start(demo.teams, frames, outcome);
       showYourBot(held);
-      endedResync = demo.outcome !== null;
       screen.hideOverlay();
     } catch (error) {
       if (disposed) return;
@@ -199,7 +178,7 @@ export function mountLive(
     try {
       const demo = await source.readHistory();
       if (disposed || !controller || demo.game_id !== gameId) return;
-      logs.addAll(demo.logs);
+      logs.addAll(demo.logs, openGeneration(demo));
       controller.merge(demo.frames, demo.outcome);
       screen.refreshLogs();
     } catch {

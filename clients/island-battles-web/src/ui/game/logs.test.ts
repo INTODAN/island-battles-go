@@ -1,66 +1,46 @@
 import { describe, expect, test } from "bun:test";
-import {
-  ALL_TEAMS_HIDDEN,
-  type GenerationLogs,
-  hiddenNotice,
-  LogBook,
-  LogFetchScheduler,
-  OTHER_TEAMS_HIDDEN,
-  SAVED_BEFORE_END,
-} from "./logs";
+import { type GenerationLogs, LogBook, LogFetchScheduler } from "./logs";
 
-const logs = (id: number, hidden: number[]): GenerationLogs => ({
+const logs = (id: number, message?: string): GenerationLogs => ({
   generation_id: id,
-  hidden_team_colors: hidden,
-  players: [],
+  players: [
+    {
+      display_name: "Alex",
+      team_color: 1,
+      lines: message ? [{ level: "info", logger: "bot", message }] : [],
+    },
+  ],
 });
 
 describe("LogBook", () => {
-  test("keeps the fuller logs of a generation", () => {
+  test("reads the logs of a turn once, after it is over", () => {
     const book = new LogBook();
-    expect(book.add(logs(5, [2]))).toBe(true);
-    expect(book.add(logs(5, []))).toBe(true);
-    expect(book.add(logs(5, [2]))).toBe(false);
-    expect(book.get(5)?.hidden_team_colors).toEqual([]);
+    expect(book.needsFetch(5, true)).toBe(true);
+    expect(book.add(logs(5, "attack"))).toBe(true);
+    expect(book.needsFetch(5, true)).toBe(false);
+    expect(book.get(5)?.players[0]?.lines[0]?.message).toBe("attack");
   });
 
-  test("reads logs that are missing, or that hid teams before the game ended", () => {
+  test("reads the open turn's logs again once it is over", () => {
     const book = new LogBook();
-    expect(book.needsFetch(5, false)).toBe(true);
-    book.add(logs(5, [2]));
+    expect(book.add(logs(5), false)).toBe(true);
+    // While the turn stays open, it isn't read again.
     expect(book.needsFetch(5, false)).toBe(false);
     expect(book.needsFetch(5, true)).toBe(true);
-    book.add(logs(5, []));
+    expect(book.add(logs(5, "final line"), true)).toBe(true);
     expect(book.needsFetch(5, true)).toBe(false);
-  });
-});
-
-describe("hiddenNotice", () => {
-  test("says other teams' logs appear when the game ends", () => {
-    expect(hiddenNotice(logs(1, [2]), { ended: false, live: true })).toBe(
-      OTHER_TEAMS_HIDDEN,
-    );
-    expect(OTHER_TEAMS_HIDDEN).toBe(
-      "Logs of other teams appear when the game ends",
-    );
+    // A read from while it was open, answering late, doesn't replace the final lines.
+    expect(book.add(logs(5), false)).toBe(false);
+    expect(book.get(5)?.players[0]?.lines).toHaveLength(1);
   });
 
-  test("a watcher is told every team's logs appear when the game ends", () => {
-    const options = { ended: false, live: true, watching: true };
-    expect(hiddenNotice(logs(1, [1, 2]), options)).toBe(ALL_TEAMS_HIDDEN);
-    expect(hiddenNotice(logs(1, []), { ...options, ended: true })).toBeNull();
-  });
-
-  test("says nothing when no team is hidden, or the game has ended", () => {
-    expect(hiddenNotice(logs(1, []), { ended: false, live: true })).toBeNull();
-    expect(hiddenNotice(logs(1, [2]), { ended: true, live: true })).toBeNull();
-    expect(hiddenNotice(undefined, { ended: false, live: true })).toBeNull();
-  });
-
-  test("a demo saved during the game says it holds only one team's logs", () => {
-    expect(hiddenNotice(logs(1, [2]), { ended: false, live: false })).toBe(
-      SAVED_BEFORE_END,
-    );
+  test("a history's open turn is not settled", () => {
+    const book = new LogBook();
+    book.addAll([logs(4, "a"), logs(5)], 5);
+    expect(book.needsFetch(4, true)).toBe(false);
+    expect(book.needsFetch(5, true)).toBe(true);
+    book.addAll([logs(6)]);
+    expect(book.needsFetch(6, true)).toBe(false);
   });
 });
 
@@ -89,8 +69,8 @@ describe("LogFetchScheduler", () => {
         }
       }
     };
-    const show = (id: number, open: boolean, ended = false) =>
-      scheduler.update({ open, generationId: id, ended, needsFetch: true });
+    const show = (id: number, open: boolean, settled = false) =>
+      scheduler.update({ open, generationId: id, settled, needsFetch: true });
     return { requests, advance, show, scheduler };
   }
 
@@ -113,7 +93,7 @@ describe("LogFetchScheduler", () => {
     scheduler.update({
       open: true,
       generationId: 7,
-      ended: false,
+      settled: false,
       needsFetch: false,
     });
     advance(1000);
@@ -139,7 +119,7 @@ describe("LogFetchScheduler", () => {
     ]);
   });
 
-  test("fetches the final turn once when the game ends with the panel open", () => {
+  test("fetches the open turn once more when it is over with the panel open", () => {
     const { requests, advance, show } = setup();
     show(1, true);
     show(9, true);

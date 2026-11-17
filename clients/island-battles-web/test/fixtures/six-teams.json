@@ -1,6 +1,6 @@
 {
   "format": "island-battles-demo",
-  "schema_version": 1,
+  "schema_version": 2,
   "saved_at": "2026-11-07T12:00:00Z",
   "game_id": 1,
   "teams": [
@@ -1913,20 +1913,20 @@
     }
   ],
   "logs": [
-    { "generation_id": 1, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 2, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 3, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 4, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 5, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 6, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 7, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 8, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 9, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 10, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 11, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 12, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 13, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 14, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 15, "players": [], "hidden_team_colors": [] }
+    { "generation_id": 1, "players": [] },
+    { "generation_id": 2, "players": [] },
+    { "generation_id": 3, "players": [] },
+    { "generation_id": 4, "players": [] },
+    { "generation_id": 5, "players": [] },
+    { "generation_id": 6, "players": [] },
+    { "generation_id": 7, "players": [] },
+    { "generation_id": 8, "players": [] },
+    { "generation_id": 9, "players": [] },
+    { "generation_id": 10, "players": [] },
+    { "generation_id": 11, "players": [] },
+    { "generation_id": 12, "players": [] },
+    { "generation_id": 13, "players": [] },
+    { "generation_id": 14, "players": [] },
+    { "generation_id": 15, "players": [] }
   ]
 }

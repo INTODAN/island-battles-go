@@ -92,7 +92,7 @@ func TestWriteWebClientFixtures(t *testing.T) {
 			teams[index] = models.GameTeam{Color: uint(index + 1), Name: teamNames[index], Players: []string{"Bot " + teamNames[index]}}
 		}
 		for index, frame := range frames {
-			logs[index] = models.GenerationLogs{GenerationID: frame.ID, Players: []models.PlayerGenerationLogs{}, HiddenTeamColors: []uint{}}
+			logs[index] = models.GenerationLogs{GenerationID: frame.ID, Players: []models.PlayerGenerationLogs{}}
 		}
 		demo := models.Demo{Format: "island-battles-demo", SchemaVersion: models.DemoSchemaVersion, SavedAt: time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC), GameID: 1, Teams: teams, Frames: frames, Logs: logs}
 		data, err := json.Marshal(demo)

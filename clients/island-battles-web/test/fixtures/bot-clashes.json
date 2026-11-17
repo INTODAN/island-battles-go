@@ -1,6 +1,6 @@
 {
   "format": "island-battles-demo",
-  "schema_version": 1,
+  "schema_version": 2,
   "saved_at": "2026-11-12T12:00:00Z",
   "game_id": 1,
   "teams": [
@@ -5793,25 +5793,25 @@
     }
   ],
   "logs": [
-    { "generation_id": 30, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 31, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 32, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 33, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 34, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 35, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 36, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 37, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 38, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 39, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 40, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 41, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 42, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 43, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 44, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 45, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 46, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 47, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 48, "players": [], "hidden_team_colors": [] },
-    { "generation_id": 49, "players": [], "hidden_team_colors": [] }
+    { "generation_id": 30, "players": [] },
+    { "generation_id": 31, "players": [] },
+    { "generation_id": 32, "players": [] },
+    { "generation_id": 33, "players": [] },
+    { "generation_id": 34, "players": [] },
+    { "generation_id": 35, "players": [] },
+    { "generation_id": 36, "players": [] },
+    { "generation_id": 37, "players": [] },
+    { "generation_id": 38, "players": [] },
+    { "generation_id": 39, "players": [] },
+    { "generation_id": 40, "players": [] },
+    { "generation_id": 41, "players": [] },
+    { "generation_id": 42, "players": [] },
+    { "generation_id": 43, "players": [] },
+    { "generation_id": 44, "players": [] },
+    { "generation_id": 45, "players": [] },
+    { "generation_id": 46, "players": [] },
+    { "generation_id": 47, "players": [] },
+    { "generation_id": 48, "players": [] },
+    { "generation_id": 49, "players": [] }
   ]
 }

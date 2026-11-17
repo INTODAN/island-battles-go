@@ -37,11 +37,8 @@ export interface LiveSource {
   readHistory(): Promise<Demo>;
   /** The demo file of the game so far, ready to save. */
   saveDemo(): Promise<DemoDownload>;
-  /**
-   * Reads one turn's logs. Absent for a watcher, who sees no logs until the game ends and
-   * then gets every turn's logs with the history.
-   */
-  readLogs?(generationId: number): Promise<GenerationLogs>;
+  /** Reads one turn's logs: every team's, which are public to players and watchers alike. */
+  readLogs(generationId: number): Promise<GenerationLogs>;
 }
 
 function required<T>(data: T | undefined): T {
@@ -82,21 +79,28 @@ export function playerSource(
       return required(data);
     },
     saveDemo: () => downloadDemo(gameApi, lobbyId, false),
-    async readLogs(generationId) {
-      const { data } = await gameApi.GET("/game/from-lobby/{lobby_id}/logs", {
-        params: {
-          path: { lobby_id: lobbyId },
-          query: { generation_id: generationId },
-        },
-      });
-      return required(data);
-    },
+    readLogs: (generationId) => readLogs(gameApi, lobbyId, generationId),
   };
 }
 
+/** Reads one turn's logs of the lobby's newest game, for a roster player or a watcher. */
+async function readLogs(
+  gameApi: ReturnType<typeof gameApiOf>,
+  lobbyId: string,
+  generationId: number,
+): Promise<GenerationLogs> {
+  const { data } = await gameApi.GET("/game/from-lobby/{lobby_id}/logs", {
+    params: {
+      path: { lobby_id: lobbyId },
+      query: { generation_id: generationId },
+    },
+  });
+  return required(data);
+}
+
 /**
- * A watcher's game, for someone outside the roster: the lobby's watch channel and
- * `/watch/demo`. Nothing here plays, heartbeats or applies a deadline.
+ * A watcher's game, for someone outside the roster: the lobby's watch channel, `/watch/demo`
+ * and `/logs`. Nothing here plays, heartbeats or applies a deadline.
  */
 export function watchSource(
   realtime: Realtime,
@@ -119,5 +123,6 @@ export function watchSource(
       return required(data);
     },
     saveDemo: () => downloadDemo(gameApi, target.lobbyId, true),
+    readLogs: (generationId) => readLogs(gameApi, target.lobbyId, generationId),
   };
 }

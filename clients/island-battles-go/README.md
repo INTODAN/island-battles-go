@@ -173,7 +173,7 @@ func play(_ context.Context, turn islandbattles.Turn) (islandbattles.Result, err
 
 ## Logging
 
-The game log stores lines with each turn, and the replay in the lobby page shows them: your team's lines while the game runs, and every team's once it has ended. A bot writes lines in two ways.
+The game log stores lines with each turn, and the replay in the lobby page shows them. Every team's lines are public: other players and watchers read yours while the game runs, as you read theirs. A bot writes lines in two ways.
 
 Log with `islandbattles.Logger(ctx)`, a standard `log/slog` logger named `island_battles.player`:
 

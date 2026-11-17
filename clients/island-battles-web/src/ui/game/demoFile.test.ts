@@ -9,7 +9,7 @@ import {
 } from "./demoFile";
 import { sampleDemo } from "./testing";
 
-const expected = { format: "island-battles-demo", schemaVersion: 1 };
+const expected = { format: "island-battles-demo", schemaVersion: 2 };
 
 function rejects(file: unknown, pattern: RegExp, name: string) {
   const text = typeof file === "string" ? file : JSON.stringify(file);
@@ -26,13 +26,8 @@ function rejects(file: unknown, pattern: RegExp, name: string) {
 describe("readDemo", () => {
   test("a demo opens as it was saved", () => {
     expect(readDemo(JSON.stringify(sampleDemo()))).toEqual(sampleDemo());
-    // A demo of a running game has no outcome, and the saver's team only.
+    // A demo of a running game has no outcome, and every team's logs.
     const running = { ...sampleDemo(), outcome: null };
-    running.logs = running.logs.map((logs) => ({
-      ...logs,
-      players: logs.players.slice(0, 1),
-      hidden_team_colors: [2],
-    }));
     expect(readDemo(JSON.stringify(running))).toEqual(running);
     expect(readDemo(JSON.stringify(sampleDemo(), null, 2))).toEqual(
       sampleDemo(),
@@ -69,12 +64,17 @@ describe("readDemo", () => {
       "version 0",
     );
     rejects(
-      { ...sampleDemo(), schema_version: 2 },
-      /a later version of Island Battles \(demo format version 2\)\. This viewer opens only version 1\./,
+      { ...sampleDemo(), schema_version: 3 },
+      /a later version of Island Battles \(demo format version 3\)\. This viewer opens only version 2\./,
       "a later version",
     );
     rejects(
-      { ...sampleDemo(), schema_version: "1" },
+      { ...sampleDemo(), schema_version: 1 },
+      /an earlier version of Island Battles \(demo format version 1\)\. This viewer opens only version 2\./,
+      "an earlier version",
+    );
+    rejects(
+      { ...sampleDemo(), schema_version: "2" },
       /not a version number/,
       "a version as text",
     );
@@ -229,12 +229,6 @@ describe("readDemo", () => {
       ],
       [
         (f) => {
-          f.logs[0].hidden_team_colors = null;
-        },
-        /logs\[0\]\.hidden_team_colors must be a list/,
-      ],
-      [
-        (f) => {
           f.logs[0].players[0].lines[0].level = "fatal";
         },
         /logs\[0\]\.players\[0\]\.lines\[0\]\.level must be debug, info, warning or error/,
@@ -281,7 +275,7 @@ describe("file checks", () => {
     const wrong = new File(["hello"], "notes.txt");
     await expect(readDemoFile(wrong)).rejects.toThrow(/it is not JSON/);
     const later = new File(
-      [JSON.stringify({ ...sampleDemo(), schema_version: 2 })],
+      [JSON.stringify({ ...sampleDemo(), schema_version: 3 })],
       "later.json",
     );
     await expect(readDemoFile(later)).rejects.toThrow(/a later version/);

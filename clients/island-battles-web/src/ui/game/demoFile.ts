@@ -9,7 +9,7 @@ export type Demo = components["schemas"]["Demo"];
 
 /** The format and the one schema version this client opens. */
 export const DEMO_FORMAT = "island-battles-demo";
-export const DEMO_SCHEMA_VERSION = 1;
+export const DEMO_SCHEMA_VERSION = 2;
 
 /**
  * The largest file the view opens. A demo is saved through the lobby page, which reads at most
@@ -221,12 +221,6 @@ function checkLogs(
       `${path}.generation_id must be frames[${index}].id, ${frameId}`,
     );
   }
-  array(
-    generationLogs.hidden_team_colors,
-    `${path}.hidden_team_colors`,
-  ).forEach((color, colorIndex) => {
-    count(color, `${path}.hidden_team_colors[${colorIndex}]`, 1);
-  });
   array(generationLogs.players, `${path}.players`).forEach(
     (rawPlayer, playerIndex) => {
       const playerPath = `${path}.players[${playerIndex}]`;
@@ -321,7 +315,7 @@ export function describeDemo(demo: Demo): string {
       : `${demo.frames.length} generations`;
   const state = demo.outcome
     ? "The game had ended."
-    : "Saved during the game, before it ended, so it has no outcome and holds only the saver’s team’s logs.";
+    : "Saved during the game, before it ended, so it has no outcome.";
   return `Game ${demo.game_id} · ${generations} · saved ${savedAt}. ${state}`;
 }
 

@@ -38,27 +38,21 @@ func LoadGenerationLogs(database *gorm.DB, generationID uint) ([]models.Generati
 	return lines, err
 }
 
-// LoadPlayersLogs returns, in one query, every stored line of the players
-// in playerIDs for the generations in generationIDs, ordered by generation,
-// then by player and then by sequence. The generations lead the index that
-// serves it.
-func LoadPlayersLogs(database *gorm.DB, generationIDs []uint, playerIDs []string) ([]models.GenerationLog, error) {
-	if len(generationIDs) == 0 || len(playerIDs) == 0 {
+// LoadGenerationsLogs returns, in one query, every stored line of the
+// generations in generationIDs, ordered by generation, then by player and
+// then by sequence. The generations lead the index that serves it.
+func LoadGenerationsLogs(database *gorm.DB, generationIDs []uint) ([]models.GenerationLog, error) {
+	if len(generationIDs) == 0 {
 		return nil, nil
 	}
 	generations := make([]any, len(generationIDs))
 	for index, generationID := range generationIDs {
 		generations[index] = generationID
 	}
-	players := make([]any, len(playerIDs))
-	for index, playerID := range playerIDs {
-		players[index] = playerID
-	}
 	var lines []models.GenerationLog
 	// Only what a reader shows, since a long game has many lines.
 	err := database.Select("GenerationID", "PlayerID", "Level", "Logger", "Message").
 		Where(clause.IN{Column: clause.Column{Name: "generation_id"}, Values: generations}).
-		Where(clause.IN{Column: clause.Column{Name: "player_id"}, Values: players}).
 		Order(clause.OrderBy{Columns: []clause.OrderByColumn{
 			{Column: clause.Column{Name: "generation_id"}}, {Column: clause.Column{Name: "player_id"}}, {Column: clause.Column{Name: "sequence"}},
 		}}).Find(&lines).Error

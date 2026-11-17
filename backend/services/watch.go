@@ -15,9 +15,8 @@ import (
 // Watchers are people outside the roster who watch a lobby's game with its
 // join code. The generic lobby keeps their rows and authorizes the watch
 // channel; Island Battles decides what they read: the board, every turn, the
-// teams and the outcome, and the game log only once the game has ended, as
-// other teams' lines are for players. A watcher never plays, so they never
-// count toward the turn barrier or a deadline.
+// teams, the outcome and every team's game log, which is public. A watcher
+// never plays, so they never count toward the turn barrier or a deadline.
 
 // watchState builds what watchers see of a generation.
 func watchState(game *models.Game, generation *models.Generation) (models.WatchState, error) {
@@ -108,16 +107,13 @@ func (service *GenerationService) Watch(ctx context.Context, principal domain.Pr
 }
 
 // WatchDemo returns a lobby game's history for watchers, in the demo format:
-// every generation so far, and the game log lines only once the game has
-// ended. Until then each frame's hidden_team_colors names every team.
+// every generation so far, with every team's game log lines.
 func (service *GenerationService) WatchDemo(ctx context.Context, principal domain.Principal, lobbyID string) (models.Demo, error) {
 	game, err := service.authorizeWatcher(ctx, principal, lobbyID)
 	if err != nil {
 		return models.Demo{}, err
 	}
-	// A watcher belongs to no team: the zero player's team colour is no
-	// team's.
-	return service.demo(ctx, game, models.FrozenGamePlayer{})
+	return service.demo(ctx, game)
 }
 
 // WatchReplay derives the replay of a lobby's game for watchers, as Replay

@@ -174,7 +174,6 @@ function checkDemo(demo) {
     const path = `logs[${index}]`;
     object(generationLogs, path);
     if (generationLogs.generation_id !== frames[index].id) throw new Problem(`${path}.generation_id must be frames[${index}].id, ${frames[index].id}`);
-    array(generationLogs.hidden_team_colors, `${path}.hidden_team_colors`).forEach((color, colorIndex) => count(color, `${path}.hidden_team_colors[${colorIndex}]`, 1));
     array(generationLogs.players, `${path}.players`).forEach((player, playerIndex) => {
       const playerPath = `${path}.players[${playerIndex}]`;
       object(player, playerPath);
@@ -197,6 +196,6 @@ function checkDemo(demo) {
 export function describeDemo(demo) {
   const savedAt = new Date(demo.saved_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
   const generations = demo.frames.length === 1 ? "1 generation" : `${demo.frames.length} generations`;
-  const state = demo.outcome ? "The game had ended." : "Saved during the game, before it ended, so it has no outcome and holds only the saver’s team’s logs.";
+  const state = demo.outcome ? "The game had ended." : "Saved during the game, before it ended, so it has no outcome.";
   return `Game ${demo.game_id} · ${generations} · saved ${savedAt}. ${state}`;
 }
