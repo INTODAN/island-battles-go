@@ -67,3 +67,10 @@ dist-desktop/
 /lambda
 /lobby-games
 /migrate
+
+# Binaries that `go build` leaves for the Go SDK's commands, in the SDK's
+# directory or in the command's own.
+/clients/island-battles-go/island-battles-mcp
+/clients/island-battles-go/island-battles-package
+/clients/island-battles-go/cmd/island-battles-mcp/island-battles-mcp
+/clients/island-battles-go/cmd/island-battles-package/island-battles-package

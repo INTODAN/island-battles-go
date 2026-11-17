@@ -485,6 +485,7 @@ export function mountLobbyApp(options: {
       mountWatchView(viewHost, {
         lobbyId,
         channel,
+        joinCode,
         realtime,
         onBack: () => stopWatch(),
       });

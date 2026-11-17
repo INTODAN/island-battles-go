@@ -13,6 +13,8 @@ import { GameScreen } from "./screen";
 export interface DemoShowOptions {
   /** Defaults to "Back to lobby". */
   backLabel?: string;
+  /** The demo's file name, for the title and "Ask your AI agent". */
+  fileName?: string;
   onBack: () => void;
 }
 
@@ -22,7 +24,12 @@ export function mountDemo(
   demo: Demo,
   options: DemoShowOptions,
 ): { dispose(): void } {
-  return mountDemoSource(container, Promise.resolve(demo), options, "");
+  return mountDemoSource(
+    container,
+    Promise.resolve(demo),
+    options,
+    options.fileName ?? "",
+  );
 }
 
 /** Reads the file, then shows it; a wrong file gets a message and the Back button. */
@@ -42,6 +49,7 @@ function mountDemoSource(
 ): { dispose(): void } {
   const logs = new LogBook();
   let disposed = false;
+  let shown: Demo | undefined;
   const screen = new GameScreen(container, {
     live: false,
     logs,
@@ -50,10 +58,15 @@ function mountDemoSource(
       ? {}
       : { backLabel: options.backLabel }),
     onOpenFile: (file) => void open(file),
+    agentGame: () =>
+      shown
+        ? { kind: "demo", gameId: shown.game_id, fileName: name || null }
+        : null,
   });
   screen.setTitle(name ? `Demo · ${name}` : "Demo");
 
   function show(demo: Demo): void {
+    shown = demo;
     logs.clear();
     logs.addAll(demo.logs);
     screen.setTitle(name ? `Demo · ${name}` : `Demo · game ${demo.game_id}`);

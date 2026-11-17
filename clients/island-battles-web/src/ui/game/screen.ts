@@ -4,6 +4,7 @@
 
 import { Engine } from "@babylonjs/core/Engines/engine";
 import { Scene } from "@babylonjs/core/scene";
+import { gameBaseUrl, lobbyBaseUrl } from "../../platform";
 import type { ConnectionState } from "../../realtime";
 import { createScenePlayer } from "../../scene/animation";
 import { battlefieldOf } from "../../scene/battlefield";
@@ -18,6 +19,7 @@ import {
 import { teamColorHex } from "../../scene/palette";
 import { installBoardControls } from "../../scene/picking";
 import { showBoardLoading } from "../boardLoading";
+import { type AgentGame, agentPrompt, copyText } from "./agentPrompt";
 import { clashSummary } from "./clashes";
 import { GameController, type ViewState } from "./controller";
 import "./game.css";
@@ -42,6 +44,11 @@ export interface ScreenOptions {
   backLabel?: string;
   /** Called with a file the player chose with Open demo file. */
   onOpenFile: (file: File) => void;
+  /**
+   * The game that "Ask your AI agent" names: a lobby code, or a demo file. Read when the button
+   * is pressed; null when it isn't known yet.
+   */
+  agentGame?: () => AgentGame | null;
   /** Saves the game so far as a demo file; rejects with the reason. Absent for an opened demo. */
   onSaveDemo?: () => Promise<void>;
   /** Called when the shown turn's logs are not held or hide teams that have since been revealed. */
@@ -102,6 +109,9 @@ export class GameScreen {
   private readonly notice = element("p", "gv-notice");
   private readonly summary = element("p", "gv-summary");
   private readonly saveError = element("p", "gv-notice");
+  private readonly askStatus = element("p", "gv-summary gv-ask-status");
+  private readonly askText = element("textarea", "gv-ask-text");
+  private askTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly clashes = element("p", "gv-summary gv-clashes");
   private readonly overlay = element("div", "gv-overlay");
   private readonly overlayText = element("p");
@@ -164,16 +174,40 @@ export class GameScreen {
     const save = button("Save demo", "Save demo");
     save.hidden = !this.options.onSaveDemo;
     save.addEventListener("click", () => void this.saveDemo(save));
+    const ask = button("Ask your AI agent", "Ask your AI agent");
+    ask.title =
+      "Copies a prompt for your AI agent: how to start the island-battles MCP server, this game and the turn shown";
+    ask.addEventListener("click", () => void this.askAgent());
     this.connection.append(this.connectionDot, this.connectionLabel);
     this.connection.setAttribute("role", "status");
     this.turn.setAttribute("aria-live", "polite");
-    top.append(back, this.title, this.turn, this.connection, open, save, file);
+    top.append(
+      back,
+      this.title,
+      this.turn,
+      this.connection,
+      open,
+      save,
+      ask,
+      file,
+    );
 
     this.notice.setAttribute("role", "alert");
     this.notice.hidden = true;
     this.summary.hidden = true;
     this.saveError.setAttribute("role", "alert");
     this.saveError.hidden = true;
+    this.askStatus.setAttribute("role", "status");
+    this.askStatus.hidden = true;
+    this.askText.readOnly = true;
+    this.askText.rows = 8;
+    this.askText.setAttribute("aria-label", "Prompt for your AI agent");
+    this.askText.hidden = true;
+    // The prompt copied by hand goes away once the player leaves it.
+    this.askText.addEventListener("blur", () => {
+      this.askText.hidden = true;
+      this.askStatus.hidden = true;
+    });
     this.clashes.setAttribute("role", "status");
     this.clashes.hidden = true;
 
@@ -229,6 +263,8 @@ export class GameScreen {
       top,
       this.notice,
       this.saveError,
+      this.askStatus,
+      this.askText,
       this.summary,
       this.teamsBox,
       this.banner,
@@ -273,6 +309,49 @@ export class GameScreen {
     } finally {
       save.disabled = false;
     }
+  }
+
+  /** The prompt "Ask your AI agent" copies for the turn shown, or null before the board is drawn. */
+  agentPromptText(): string | null {
+    const running = this.running;
+    if (!running) return null;
+    const state = running.controller.state;
+    const game = this.options.agentGame?.() ?? null;
+    if (!game) return null;
+    const yourTeam = running.teams.find(
+      (team) => team.color === this.yourBot?.teamColor,
+    );
+    return agentPrompt({
+      game,
+      turn: state.index + 1,
+      turns: state.frames.length,
+      team: yourTeam ? { name: yourTeam.name, color: yourTeam.color } : null,
+      gameUrl: gameBaseUrl(),
+      lobbyUrl: lobbyBaseUrl(),
+    });
+  }
+
+  private async askAgent(): Promise<void> {
+    clearTimeout(this.askTimer);
+    const prompt = this.agentPromptText();
+    this.askText.hidden = true;
+    if (!prompt) {
+      this.askStatus.textContent =
+        "The game isn't loaded yet: try again in a moment.";
+    } else if (await copyText(prompt)) {
+      this.askStatus.textContent =
+        "Copied a prompt for your AI agent: paste it into Claude Code or another agent with the island-battles MCP server.";
+      this.askTimer = setTimeout(() => {
+        this.askStatus.hidden = true;
+      }, 8000);
+    } else {
+      // The clipboard refused, as some web views do: show the prompt to copy by hand.
+      this.askStatus.textContent = "Copy this prompt into your AI agent:";
+      this.askText.value = prompt;
+      this.askText.hidden = false;
+      this.askText.select();
+    }
+    this.askStatus.hidden = false;
   }
 
   showLoading(text: string): void {
@@ -399,6 +478,7 @@ export class GameScreen {
     if (this.disposed) return;
     this.disposed = true;
     this.logScheduler.cancel();
+    clearTimeout(this.askTimer);
     this.stop();
     this.container.replaceChildren();
   }
