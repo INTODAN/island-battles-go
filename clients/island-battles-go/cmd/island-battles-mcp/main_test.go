@@ -58,7 +58,7 @@ func quietLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard
 // connectWithFixture serves the tools with the fixture loaded.
 func connectWithFixture(t *testing.T) *testClient {
 	t.Helper()
-	client := connect(t, newStore(newLobbyClient("http://lobby.invalid", "http://game.invalid", "AI agent", http.DefaultClient), quietLogger()))
+	client := connect(t, newStore(newLobbyClient("http://lobby.invalid", "http://game.invalid", "AI agent", http.DefaultClient, quietLogger()), quietLogger()))
 	call[Overview](t, client, "load_demo", map[string]any{"path": fixturePath})
 	return client
 }
@@ -312,14 +312,14 @@ func TestDemoFilesAreCheckedAndMayBePacked(t *testing.T) {
 		}
 		return path
 	}
-	client := connect(t, newStore(newLobbyClient("http://lobby.invalid", "http://game.invalid", "AI agent", http.DefaultClient), quietLogger()))
+	client := connect(t, newStore(newLobbyClient("http://lobby.invalid", "http://game.invalid", "AI agent", http.DefaultClient, quietLogger()), quietLogger()))
 	if message := fails(t, client, "game_overview", nil); !strings.Contains(message, "no game is loaded") {
 		t.Fatalf("message = %q", message)
 	}
 	if overview := call[Overview](t, client, "load_demo", map[string]any{"path": write("packed.json.gz", packed.Bytes())}); overview.Turns != 6 {
 		t.Fatalf("packed demo = %+v", overview)
 	}
-	older := strings.Replace(string(raw), `"schema_version": 2`, `"schema_version": 1`, 1)
+	older := strings.Replace(string(raw), `"schema_version": 1`, `"schema_version": 0`, 1)
 	for name, content := range map[string]string{
 		"not JSON":        "<html>",
 		"a map file":      `{"map_name":"Islands","castles":[]}`,
@@ -330,7 +330,7 @@ func TestDemoFilesAreCheckedAndMayBePacked(t *testing.T) {
 			t.Errorf("%s: message = %q", name, message)
 		}
 	}
-	if message := fails(t, client, "load_demo", map[string]any{"path": write("older.json", []byte(older))}); !strings.Contains(message, "format version 1") {
+	if message := fails(t, client, "load_demo", map[string]any{"path": write("older.json", []byte(older))}); !strings.Contains(message, "format version 0") {
 		t.Fatalf("older format message = %q", message)
 	}
 	// Both games stay loaded, and game names one.
@@ -347,6 +347,9 @@ type fakeLobby struct {
 	sessions   int
 	codes      []string
 	authorized []string
+	// unwatched lists the lobbies a watch was removed from, with the
+	// credential that removed it.
+	unwatched []string
 }
 
 func (fake *fakeLobby) handler(t *testing.T) http.Handler {
@@ -384,6 +387,12 @@ func (fake *fakeLobby) handler(t *testing.T) http.Handler {
 		}
 		_, _ = io.WriteString(response, `{"token":"player-token","expires_at":"2999-01-01T00:00:00Z"}`)
 	})
+	mux.HandleFunc("DELETE /lobby/v1/games/{game_key}/lobbies/{lobby_id}/watch", func(response http.ResponseWriter, request *http.Request) {
+		fake.mutex.Lock()
+		fake.unwatched = append(fake.unwatched, request.PathValue("game_key")+"/"+request.PathValue("lobby_id")+" "+request.Header.Get("Authorization"))
+		fake.mutex.Unlock()
+		response.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("GET /game/from-lobby/{lobby_id}/watch/demo", func(response http.ResponseWriter, request *http.Request) {
 		fake.mutex.Lock()
 		defer fake.mutex.Unlock()
@@ -402,22 +411,83 @@ func (fake *fakeLobby) handler(t *testing.T) http.Handler {
 	return mux
 }
 
-func TestLobbyModeReadsTheGameAsAWatcher(t *testing.T) {
-	raw, err := os.ReadFile(fixturePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// A running game: no outcome yet.
+// watchedWhileRunning turns the fixture into what a watcher reads of the
+// game while it runs: no outcome, and no team's logs.
+func watchedWhileRunning(t *testing.T, raw []byte) []byte {
+	t.Helper()
 	var running map[string]any
 	if err := json.Unmarshal(raw, &running); err != nil {
 		t.Fatal(err)
 	}
 	running["outcome"] = nil
-	runningRaw, _ := json.Marshal(running)
+	for _, entry := range running["logs"].([]any) {
+		logs := entry.(map[string]any)
+		logs["players"] = []any{}
+		logs["hidden_team_colors"] = []any{1, 2}
+	}
+	encoded, err := json.Marshal(running)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return encoded
+}
+
+// The server stops watching the lobbies it watched when it stops, so the
+// host's watcher list doesn't keep it and restarts don't fill the lobby's
+// watcher limit.
+func TestTheServerStopsWatchingWhenItStops(t *testing.T) {
+	raw, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeLobby{demo: watchedWhileRunning(t, raw)}
+	server := httptest.NewServer(fake.handler(t))
+	defer server.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	serverTransport, _ := mcp.NewInMemoryTransports()
+	stopped := make(chan error, 1)
+	go func() {
+		stopped <- run(ctx, options{lobbyCode: "ABCD2345", gameURL: server.URL, lobbyURL: server.URL, displayName: "AI agent"}, serverTransport, server.Client(), quietLogger())
+	}()
+	// Wait until the game is read, which follows the watch.
+	for deadline := time.Now().Add(10 * time.Second); ; {
+		fake.mutex.Lock()
+		reads := fake.demoReads
+		fake.mutex.Unlock()
+		if reads > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the game was never read")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case err := <-stopped:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the server didn't stop")
+	}
+	fake.mutex.Lock()
+	defer fake.mutex.Unlock()
+	if !reflect.DeepEqual(fake.unwatched, []string{"island-battles/lobby-1 Bearer guest-credential"}) {
+		t.Fatalf("unwatched = %q", fake.unwatched)
+	}
+}
+
+func TestLobbyModeReadsTheGameAsAWatcher(t *testing.T) {
+	raw, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runningRaw := watchedWhileRunning(t, raw)
 	fake := &fakeLobby{demo: runningRaw}
 	server := httptest.NewServer(fake.handler(t))
 	defer server.Close()
-	games := newStore(newLobbyClient(server.URL+"/", server.URL, "AI agent", server.Client()), quietLogger())
+	games := newStore(newLobbyClient(server.URL+"/", server.URL, "AI agent", server.Client(), quietLogger()), quietLogger())
 	client := connect(t, games)
 
 	overview := call[Overview](t, client, "load_lobby", map[string]any{"code": " abcd2345 "})
@@ -427,10 +497,22 @@ func TestLobbyModeReadsTheGameAsAWatcher(t *testing.T) {
 	if !reflect.DeepEqual(fake.authorized, []string{"Bearer player-token"}) {
 		t.Fatalf("demo reads authorized with %q", fake.authorized)
 	}
-	// The open turn's lines may still grow.
-	logs := call[LogsView](t, client, "get_logs", map[string]any{"turn": 6})
-	if !strings.Contains(logs.Note, "still open") {
-		t.Fatalf("note = %q", logs.Note)
+	// A watcher reads no logs while the game runs, and the tools say why.
+	if !strings.HasPrefix(overview.Logs, "No bot logs: the game is still running") {
+		t.Fatalf("overview logs = %q", overview.Logs)
+	}
+	logs := call[LogsView](t, client, "get_logs", map[string]any{"turn": 1, "to_turn": 6})
+	if logs.Lines != 0 || !strings.Contains(logs.Note, "The lines of Blue, Red are not in this copy: the game is still running") || !strings.Contains(logs.Note, "Turn 6 is still open") {
+		t.Fatalf("logs = %+v", logs)
+	}
+	explanation := call[CastleExplanation](t, client, "explain_castle", map[string]any{"castle_id": 2, "turn": 4})
+	if len(explanation.Logs) == 0 {
+		t.Fatal("explain_castle named no team's logs")
+	}
+	for _, team := range explanation.Logs {
+		if len(team.Lines) != 0 || !strings.Contains(team.Hidden, "still running") {
+			t.Fatalf("explained logs = %+v", explanation.Logs)
+		}
 	}
 	// A running game is read again once its copy is old.
 	games.mutex.Lock()
@@ -442,5 +524,48 @@ func TestLobbyModeReadsTheGameAsAWatcher(t *testing.T) {
 	}
 	if message := fails(t, client, "load_lobby", map[string]any{"code": "ZZZZ2345"}); !strings.Contains(message, "no Island Battles lobby has the code ZZZZ2345") {
 		t.Fatalf("message = %q", message)
+	}
+}
+
+// A demo saved during the game holds only its saver's team's logs, and the
+// tools say so instead of suggesting the other teams logged nothing.
+func TestADemoSavedDuringTheGameSaysWhoseLogsItHolds(t *testing.T) {
+	raw, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var demo map[string]any
+	if err := json.Unmarshal(raw, &demo); err != nil {
+		t.Fatal(err)
+	}
+	demo["outcome"] = nil
+	for _, entry := range demo["logs"].([]any) {
+		logs := entry.(map[string]any)
+		logs["players"] = slices.DeleteFunc(logs["players"].([]any), func(player any) bool { return player.(map[string]any)["team_color"] != float64(1) })
+		logs["hidden_team_colors"] = []any{2}
+	}
+	encoded, err := json.Marshal(demo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "saved-early.json")
+	if err := os.WriteFile(path, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client := connect(t, newStore(newLobbyClient("http://lobby.invalid", "http://game.invalid", "AI agent", http.DefaultClient, quietLogger()), quietLogger()))
+	overview := call[Overview](t, client, "load_demo", map[string]any{"path": path})
+	if !strings.HasPrefix(overview.Logs, "No bot logs of Red: this demo was saved before the game ended") {
+		t.Fatalf("overview logs = %q", overview.Logs)
+	}
+	logs := call[LogsView](t, client, "get_logs", map[string]any{"turn": 1, "to_turn": 5})
+	if logs.Lines == 0 || !strings.Contains(logs.Note, "The lines of Red are not in this copy: this demo was saved before the game ended") {
+		t.Fatalf("logs = %+v", logs)
+	}
+	for _, turn := range logs.Turns {
+		for _, player := range turn.Players {
+			if player.Team != "Blue" {
+				t.Fatalf("lines of %s", player.Team)
+			}
+		}
 	}
 }

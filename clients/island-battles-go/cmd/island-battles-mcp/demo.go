@@ -18,13 +18,15 @@ import (
 // replay's Save demo writes it.
 const (
 	demoFormat        = "island-battles-demo"
-	demoSchemaVersion = 2
+	demoSchemaVersion = 1
 	// maxDemoBytes bounds a demo file, unpacked, as the demo viewer does.
 	maxDemoBytes = 128 << 20
 )
 
-// Demo is a saved game: every board played so far, and every team's bot log
-// lines for each.
+// Demo is a saved game: every board played so far, and the bot log lines
+// for each that its saver could see. Other teams' lines are hidden until the
+// game ends: a demo saved during the game holds only its saver's team's
+// lines, and a watcher's none; a demo of an ended game holds every team's.
 type Demo struct {
 	Format        string                     `json:"format"`
 	SchemaVersion int                        `json:"schema_version"`
@@ -50,10 +52,12 @@ type DemoOutcome struct {
 	Summary         string `json:"summary"`
 }
 
-// GenerationLogs is one board's bot log lines, by player.
+// GenerationLogs is one board's bot log lines, by player, and the teams
+// whose lines the demo leaves out.
 type GenerationLogs struct {
-	GenerationID uint         `json:"generation_id"`
-	Players      []PlayerLogs `json:"players"`
+	GenerationID     uint         `json:"generation_id"`
+	Players          []PlayerLogs `json:"players"`
+	HiddenTeamColors []uint       `json:"hidden_team_colors"`
 }
 
 // PlayerLogs is one player's lines for a board.

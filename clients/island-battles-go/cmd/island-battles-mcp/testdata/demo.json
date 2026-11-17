@@ -1,6 +1,6 @@
 {
  "format": "island-battles-demo",
- "schema_version": 2,
+ "schema_version": 1,
  "saved_at": "2026-11-16T12:00:00Z",
  "game_id": 7,
  "teams": [
@@ -381,7 +381,8 @@
       }
      ]
     }
-   ]
+   ],
+   "hidden_team_colors": []
   },
   {
    "generation_id": 102,
@@ -408,7 +409,8 @@
       }
      ]
     }
-   ]
+   ],
+   "hidden_team_colors": []
   },
   {
    "generation_id": 103,
@@ -429,7 +431,8 @@
      "team_color": 2,
      "lines": []
     }
-   ]
+   ],
+   "hidden_team_colors": []
   },
   {
    "generation_id": 104,
@@ -456,7 +459,8 @@
       }
      ]
     }
-   ]
+   ],
+   "hidden_team_colors": []
   },
   {
    "generation_id": 105,
@@ -477,7 +481,8 @@
      "team_color": 2,
      "lines": []
     }
-   ]
+   ],
+   "hidden_team_colors": []
   },
   {
    "generation_id": 106,
@@ -492,7 +497,8 @@
      "team_color": 2,
      "lines": []
     }
-   ]
+   ],
+   "hidden_team_colors": []
   }
  ]
 }

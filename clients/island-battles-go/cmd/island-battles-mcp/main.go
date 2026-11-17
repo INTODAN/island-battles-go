@@ -4,11 +4,14 @@
 // captured?". It serves one client over stdio and reads games two ways:
 //
 //   - a demo file, saved with Save demo in a game's replay, which holds every
-//     turn's board and every team's bot logs;
-//   - a lobby's game by the lobby's join code, live or finished, which it
-//     reads from the game's public watcher endpoints like any watcher: a
-//     guest session on the lobby, a watch with the code, and the game's
-//     history with every team's bot logs, which are public.
+//     turn's board and the bot logs its saver could see: every team's once
+//     the game has ended, only the saver's team's before;
+//   - a lobby's newest game by the lobby's join code, live or finished, which
+//     it reads from the game's watcher endpoints like any watcher: a guest
+//     session on the lobby, a watch with the code, and the game's history.
+//     Other teams' bot logs are hidden until the game ends, so a watcher
+//     reads no logs while it runs, and every team's once it has ended. The
+//     server stops watching when it stops.
 //
 // Install and register it with Claude Code:
 //
@@ -106,7 +109,14 @@ func or(value, fallback string) string {
 // run loads what the options name and serves the tools over transport until
 // the client disconnects or ctx ends.
 func run(ctx context.Context, settings options, transport mcp.Transport, client *http.Client, logger *slog.Logger) error {
-	games := newStore(newLobbyClient(settings.lobbyURL, settings.gameURL, settings.displayName, client), logger)
+	lobby := newLobbyClient(settings.lobbyURL, settings.gameURL, settings.displayName, client, logger)
+	// However the server stops, it stops watching the lobbies it watched.
+	defer func() {
+		stopping, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		lobby.unwatch(stopping)
+	}()
+	games := newStore(lobby, logger)
 	if settings.demoPath != "" {
 		if _, err := games.loadDemo(settings.demoPath); err != nil {
 			return err

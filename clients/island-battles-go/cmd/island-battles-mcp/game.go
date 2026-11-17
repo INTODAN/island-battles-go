@@ -503,6 +503,52 @@ func (game *Game) teamLogLines(turn int, team uint, limit int) ([]string, int) {
 	return lines, omitted
 }
 
+// logsHidden says whether the copy leaves out team's lines on turn.
+func (game *Game) logsHidden(turn int, team uint) bool {
+	return turn >= 1 && turn <= game.Turns() && slices.Contains(game.Demo.Logs[turn-1].HiddenTeamColors, team)
+}
+
+// hiddenTeams names the teams whose lines the copy leaves out on any turn
+// from from to to.
+func (game *Game) hiddenTeams(from, to int) []string {
+	var colors []uint
+	for turn := max(from, 1); turn <= min(to, game.Turns()); turn++ {
+		for _, color := range game.Demo.Logs[turn-1].HiddenTeamColors {
+			if !slices.Contains(colors, color) {
+				colors = append(colors, color)
+			}
+		}
+	}
+	slices.Sort(colors)
+	names := make([]string, len(colors))
+	for index, color := range colors {
+		names[index] = game.team(color)
+	}
+	return names
+}
+
+// hiddenLogsReason says why the copy leaves some teams' lines out. Other
+// teams' logs stay hidden until the game ends, since bots often log their
+// plans.
+func (game *Game) hiddenLogsReason() string {
+	if game.LobbyCode != "" {
+		return "the game is still running, and a watcher sees no bot logs until it has ended; call load_lobby again once it has ended to read every team's"
+	}
+	return "this demo was saved before the game ended, so it holds only its saver's team's logs; a demo saved after the end holds every team's"
+}
+
+// logsSummary says whose bot logs the copy holds.
+func (game *Game) logsSummary() string {
+	hidden := game.hiddenTeams(1, game.Turns())
+	switch {
+	case len(hidden) == 0:
+		return "Every team's bot logs."
+	case len(hidden) == len(game.Demo.Teams):
+		return "No bot logs: " + game.hiddenLogsReason() + "."
+	}
+	return "No bot logs of " + strings.Join(hidden, ", ") + ": " + game.hiddenLogsReason() + "."
+}
+
 // formatLine writes a log line compactly, as "level logger: message".
 func formatLine(line islandbattles.LogLine) string {
 	return fmt.Sprintf("%s %s: %s", line.Level, line.Logger, line.Message)

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -24,6 +25,7 @@ type lobbyClient struct {
 	lobbyURL, gameURL string
 	displayName       string
 	http              *http.Client
+	logger            *slog.Logger
 
 	mutex          sync.Mutex
 	session        string
@@ -34,9 +36,9 @@ type lobbyClient struct {
 	lobbies map[string]string
 }
 
-func newLobbyClient(lobbyURL, gameURL, displayName string, client *http.Client) *lobbyClient {
+func newLobbyClient(lobbyURL, gameURL, displayName string, client *http.Client, logger *slog.Logger) *lobbyClient {
 	return &lobbyClient{lobbyURL: strings.TrimRight(lobbyURL, "/"), gameURL: strings.TrimRight(gameURL, "/"), displayName: displayName,
-		http: client, lobbies: map[string]string{}}
+		http: client, logger: logger, lobbies: map[string]string{}}
 }
 
 // problemError is a request the lobby or the game refused.
@@ -92,6 +94,9 @@ func (client *lobbyClient) do(ctx context.Context, what, method, target, bearer 
 		}
 		return &problemError{status: response.StatusCode, what: what, detail: detail}
 	}
+	if answer == nil {
+		return nil
+	}
 	return json.NewDecoder(response.Body).Decode(answer)
 }
 
@@ -101,6 +106,9 @@ func (client *lobbyClient) ensureSession(ctx context.Context) error {
 	if client.session != "" && time.Until(client.sessionExpires) > time.Minute {
 		return nil
 	}
+	// The new session watches anew, so the old one stops watching while it
+	// still can.
+	client.unwatchLocked(ctx)
 	var session struct {
 		AccessToken string    `json:"access_token"`
 		ExpiresAt   time.Time `json:"expires_at"`
@@ -111,7 +119,6 @@ func (client *lobbyClient) ensureSession(ctx context.Context) error {
 	}
 	client.session, client.sessionExpires = session.AccessToken, session.ExpiresAt
 	client.token = ""
-	clear(client.lobbies)
 	return nil
 }
 
@@ -139,6 +146,32 @@ func (client *lobbyClient) watch(ctx context.Context, code string) (string, erro
 	}
 	client.lobbies[code] = access.LobbyID
 	return access.LobbyID, nil
+}
+
+// unwatch stops watching every lobby this client watches, so the lobby's
+// host no longer sees it among the watchers, and restarts don't pile up
+// watchers toward the lobby's limit. It is best effort: a failure leaves a
+// watcher row, which the host can remove.
+func (client *lobbyClient) unwatch(ctx context.Context) {
+	client.mutex.Lock()
+	defer client.mutex.Unlock()
+	client.unwatchLocked(ctx)
+}
+
+// unwatchLocked is unwatch for a caller that holds the mutex.
+func (client *lobbyClient) unwatchLocked(ctx context.Context) {
+	if client.session != "" && time.Now().Before(client.sessionExpires) {
+		for code, lobbyID := range client.lobbies {
+			// An active member of the lobby has no watcher row, and gets 404.
+			err := client.do(ctx, "stop watching the lobby with code "+code, http.MethodDelete,
+				client.lobbyURL+"/lobby/v1/games/"+gameKey+"/lobbies/"+url.PathEscape(lobbyID)+"/watch", client.session, nil, nil)
+			var problem *problemError
+			if err != nil && !(errors.As(err, &problem) && problem.status == http.StatusNotFound) && client.logger != nil {
+				client.logger.Warn("Couldn't stop watching the lobby; its host can remove the watcher", "code", code, "error", err)
+			}
+		}
+	}
+	clear(client.lobbies)
 }
 
 // playerToken returns a player token for the game, issuing a new one at
