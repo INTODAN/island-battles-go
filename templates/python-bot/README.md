@@ -7,7 +7,7 @@ A starter project for a bot in the strategy game Island Battles: a working bot, 
 1. Copy this directory (it needs nothing outside itself) and rename the project in `pyproject.toml`.
 2. Install [uv](https://docs.astral.sh/uv/), then `uv sync` (it installs Python 3.14 if needed).
 3. `scripts/check.sh` formats, lints, type-checks, tests and runs the bot once on a sample turn.
-4. `scripts/serve.sh` serves the bot on `http://127.0.0.1:41414`. Open the lobby page at `https://lobby.elidan.org/lobby/ui/` (or the 3D client at `https://island-battles.elidan.org/play/`, or a local lobby page at `http://localhost:8890/lobby/ui/`), create a lobby, add a bot seat for the other team, pick **localhost bot** as your bot, get ready and start. The page delivers each turn to your bot, which submits its answer to the game itself ([how](#how-your-bot-gets-its-turns)). Saving `bot.py` reloads it.
+4. `scripts/serve.sh` serves the bot on `http://127.0.0.1:41414`. Open the lobby page at `https://lobby.elidan.org/lobby/ui/` (or the 3D client at `https://island-battles.elidan.org/play/`, or a local lobby page at `http://localhost:8890/lobby/ui/`), create a lobby, add a default bot seat for the other team, pick **localhost bot** as your bot, get ready and start. The page delivers each turn to your bot, which submits its answer to the game itself ([how](#how-your-bot-gets-its-turns)). Saving `bot.py` reloads it.
 
 The bot is in `bot.py`. It buys speed upgrades, attacks the nearest castle that is not its own and keeps a counter in its memory. Replace the strategy; keep the shape.
 
@@ -52,7 +52,7 @@ To play two versions of your bot against each other, or against yourself, serve 
 
 1. Serve each one in its own terminal, such as this bot with `scripts/serve.sh --port 41415` and a copy of the project (or another module, `uv run island-battles-bot serve other:play --port 41416 --allow-origin https://lobby.elidan.org`) on 41416.
 2. As the host, in the lobby page or the 3D client, add a bot to a free team with **My localhost bot (port)** and type its port, once per bot. A port is from 1024 to 65535, and each of your localhost bots, your own included, needs its own; the room says which ones answer.
-3. Choose your own bot (a default level is fine, or your localhost bot on yet another port), get ready and start. Your tab relays every seat's turns to its port, so keep it open until the game ends.
+3. Choose your own bot (a default level is fine, or your localhost bot on yet another port), get ready and start. Your tab relays the turns of every seat that you added to its port, so keep it open until the game ends; if you leave, nobody relays them, not even the next host.
 
 ## Coding agents
 
