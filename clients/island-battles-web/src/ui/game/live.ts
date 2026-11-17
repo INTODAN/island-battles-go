@@ -12,7 +12,7 @@ import type { Realtime } from "../../realtime";
 import type { GameController } from "./controller";
 import { type Demo, DemoFileError, readDemoFile } from "./demoFile";
 import { mergeGenerations } from "./history";
-import { LogBook } from "./logs";
+import { LogBook, openGenerationId } from "./logs";
 import { saveTextFile } from "./saveDemo";
 import { GameScreen } from "./screen";
 import type { LiveSource, LiveTurn } from "./sources";
@@ -124,13 +124,18 @@ export function mountLive(
       }
       return;
     }
-    const key = `${generationId}:${ended}`;
+    // Logs read while their turn is open are provisional: they are read again once it ends.
+    const state = controller?.state;
+    const open =
+      state !== undefined &&
+      generationId === openGenerationId(state.frames, state.outcome !== null);
+    const key = `${generationId}:${ended}:${open}`;
     if (requested.has(key)) return;
     requested.add(key);
     try {
       const data = await source.readLogs(generationId);
       if (disposed) return;
-      if (logs.add(data)) screen.refreshLogs();
+      if (logs.add(data, { provisional: open })) screen.refreshLogs();
     } catch {
       // Try again later, not at once: the panel asks again whenever the view redraws.
       setTimeout(() => requested.delete(key), RESYNC_RETRY_MS);
@@ -167,7 +172,11 @@ export function mountLive(
     try {
       const demo = await source.readHistory();
       if (disposed) return;
-      logs.addAll(demo.logs);
+      // The history's newest turn may still be open: its logs are read again once it ends.
+      logs.addAll(
+        demo.logs,
+        openGenerationId(demo.frames, Boolean(demo.outcome)),
+      );
       const turns = [...pending];
       const held = source.current();
       if (held) turns.push(held);
@@ -206,7 +215,10 @@ export function mountLive(
     try {
       const demo = await source.readHistory();
       if (disposed || !controller || demo.game_id !== gameId) return;
-      logs.addAll(demo.logs);
+      logs.addAll(
+        demo.logs,
+        openGenerationId(demo.frames, Boolean(demo.outcome)),
+      );
       controller.merge(demo.frames, demo.outcome);
       screen.refreshLogs();
     } catch {
