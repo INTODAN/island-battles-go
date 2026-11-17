@@ -5,7 +5,7 @@ A starter project for a bot in the strategy game Island Battles: a working bot, 
 ## Start
 
 1. Copy this directory (it needs nothing outside itself) and rename the project in `pyproject.toml`.
-2. Install [uv](https://docs.astral.sh/uv/), then `uv sync` (it installs Python 3.14 if needed). The template has no `uv.lock`, so this takes the newest SDK and writes your own lock; commit it with your bot. The game changes its turns with its releases and only the newest SDK reads them: when the game says your bot did not understand the turn, run `uv sync --upgrade-package island-battles-python` and restart the bot.
+2. Install [uv](https://docs.astral.sh/uv/), then `uv sync` (it installs Python 3.14 if needed). The template has no `uv.lock`, so this takes the newest SDK and writes your own lock; commit it with your bot. The game changes its turns with its releases and only the newest SDK reads them: when the game says your bot did not understand the turn, run `uv sync --upgrade-package island-battles-python` and restart the bot; for an uploaded package, run the same, then `scripts/package.sh`, and upload the new zip.
 3. `scripts/check.sh` formats, lints, type-checks, tests and runs the bot once on a sample turn.
 4. `scripts/serve.sh` serves the bot on `http://127.0.0.1:41414`. Open the lobby page at `https://lobby.elidan.org/lobby/ui/` (or the 3D client at `https://island-battles.elidan.org/play/`, or a local lobby page at `http://localhost:8890/lobby/ui/`), create a lobby, add a default bot seat for the other team, pick **localhost bot** as your bot, get ready and start. The page delivers each turn to your bot, which submits its answer to the game itself ([how](#how-your-bot-gets-its-turns)). Saving `bot.py` reloads it.
 

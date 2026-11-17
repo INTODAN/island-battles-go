@@ -83,6 +83,9 @@ describe("the localhost bot", () => {
     expect(old.message).toContain(
       "uv sync --upgrade-package island-battles-python",
     );
+    expect(old.message).toContain(
+      "go get github.com/INTODAN/island-battles-go/clients/island-battles-go@latest",
+    );
   });
 
   test("health is true only for an OK answer", async () => {

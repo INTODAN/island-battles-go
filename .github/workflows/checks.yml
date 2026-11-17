@@ -1,13 +1,17 @@
 # The repository's checks, the same ones the root README's Commands list for a
 # person's machine (README.md, "Checks on every pull request"). They run on
 # every pull request to main, and the release workflow can call them with
-# `uses: ./.github/workflows/checks.yml` before it deploys.
+# `uses: ./.github/workflows/checks.yml` before it deploys. Once a week, on
+# main, only the `template-published` job runs.
 name: Checks
 
 on:
   pull_request:
     branches: [main]
   workflow_call:
+  # Mondays at 06:17 UTC.
+  schedule:
+    - cron: "17 6 * * 1"
 
 permissions:
   contents: read
@@ -21,6 +25,7 @@ concurrency:
 jobs:
   go:
     name: Go
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -68,6 +73,7 @@ jobs:
 
   api-contract:
     name: API contract
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -96,6 +102,7 @@ jobs:
 
   python:
     name: Python
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -145,8 +152,17 @@ jobs:
       - name: Python bot template (as the tutorial installs it)
         run: scripts/check-template.sh
 
+      # The same, with only the SDK on PyPI, as a player who copies the template
+      # from main gets it. A template change that needs an unreleased SDK fails
+      # here and waits for the release. Pull requests only: not when the
+      # release calls these checks, since that release is what publishes the SDK.
+      - name: Python bot template (with the SDK on PyPI)
+        if: github.event_name == 'pull_request'
+        run: scripts/check-template.sh --published
+
   js:
     name: JS
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -162,6 +178,7 @@ jobs:
 
   deploy:
     name: Deploy
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -182,3 +199,18 @@ jobs:
       # and no Terraform.
       - name: Deploy plan checks
         run: python3 -I -m unittest discover -s deploy -p 'test_*.py'
+
+  # The weekly run: main's template with the SDK on PyPI. The template has no
+  # lock, so a new ruff, ty or pytest release can break it with no commit here.
+  template-published:
+    name: Python bot template (published SDK)
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Python bot template (with the SDK on PyPI)
+        run: scripts/check-template.sh --published

@@ -5,7 +5,7 @@ description: "The day-to-day loop for this bot project: the scripts and when to 
 
 # Bot workflow
 
-All scripts are in `scripts/`, run from any directory, and use `uv`. Install first with `uv sync`. When the game says the bot did not understand the turn, its SDK is older than the game: run `uv sync --upgrade-package island-battles-python` and restart the bot.
+All scripts are in `scripts/`, run from any directory, and use `uv`. Install first with `uv sync`. When the game says the bot did not understand the turn, its SDK is older than the game: run `uv sync --upgrade-package island-battles-python` and restart the bot. An uploaded package with the old SDK needs the same `uv sync`, then `scripts/package.sh` and a new upload.
 
 | Script | Use it to |
 |---|---|

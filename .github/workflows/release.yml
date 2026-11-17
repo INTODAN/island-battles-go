@@ -177,6 +177,9 @@ jobs:
   # re-run this job alone; the `skip-existing` setting makes a re-run skip the
   # files a partial run uploaded. The lobby's client, mpl-lobby-client, is
   # published by the lobby's own repository, INTODAN/mpl.
+  # From the backend's deploy until this job publishes, a new copy of the bot
+  # template installs the previous SDK, which may not read the new backend's
+  # turns: minutes in a good run, longer if this job fails.
   # Trusted publishing: no PyPI token exists. The PyPI publisher names this
   # workflow and the environment `pypi-island-battles` (deploy/README.md,
   # "Publishing the Python clients").
