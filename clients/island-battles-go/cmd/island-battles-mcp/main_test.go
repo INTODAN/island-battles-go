@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	islandbattles "github.com/INTODAN/island-battles-go/clients/island-battles-go"
+
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -180,6 +182,79 @@ func TestTheLedgerWorksOutWhatUpgradesCost(t *testing.T) {
 	if ledger == nil || !reflect.DeepEqual(ledger.UpgradesBought, map[string]int{"speed": 2}) || ledger.UpgradeCost == nil || *ledger.UpgradeCost != 1 || !ledger.Reconciled || ledger.Note != "" {
 		t.Fatalf("ledger = %+v", ledger)
 	}
+}
+
+// Working out an upgrade cost tries a bounded number of costs, so a crafted
+// demo with a huge garrison can't hold up loading it.
+func TestTheUpgradeCostSearchIsBounded(t *testing.T) {
+	demo, err := readDemoFile(fixturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	game := newGame("demo.json", "demo file", demo)
+	before := islandbattles.Castle{ID: 99, TeamColor: 1, Soldiers: 4_000_000_000}
+	after := islandbattles.Castle{ID: 99, TeamColor: 2, Soldiers: 7}
+	changes := turnChanges{arrived: []arrivedGroup{{id: 500, team: 2, from: 1, castle: 99, soldiers: 5}}}
+	started := time.Now()
+	ledger := game.ledger(2, before, after, changes)
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("the search took %s", elapsed)
+	}
+	if ledger.Reconciled || !strings.Contains(ledger.Note, "wasn't worked out") {
+		t.Fatalf("ledger = %+v", ledger)
+	}
+	// Without arrivals the cost needs no search, whatever the garrison.
+	alone := game.ledger(2, before, islandbattles.Castle{ID: 99, TeamColor: 1, Soldiers: 3_999_999_991}, turnChanges{})
+	if !alone.Reconciled || alone.UpgradeCost == nil || *alone.UpgradeCost != 10 {
+		t.Fatalf("ledger without arrivals = %+v", alone)
+	}
+	// The whole game's search is bounded too: a cost of 2 is found until the
+	// game's search is spent.
+	small, held := islandbattles.Castle{ID: 99, TeamColor: 1, Soldiers: 10}, islandbattles.Castle{ID: 99, TeamColor: 1, Soldiers: 4}
+	if found := game.ledger(2, small, held, changes); !found.Reconciled || found.UpgradeCost == nil || *found.UpgradeCost != 2 {
+		t.Fatalf("ledger = %+v", found)
+	}
+	game.costSearch = 0
+	if spent := game.ledger(2, small, held, changes); spent.Reconciled || !strings.Contains(spent.Note, "wasn't worked out") {
+		t.Fatalf("ledger past the game's search = %+v", spent)
+	}
+}
+
+// webFixtures are the web client's demos of real bot games, which the game's
+// own simulation writes. heading-arrows.json is edited by hand, so its
+// boards don't follow from each other.
+const webFixtures = "../../../island-battles-web/test/fixtures"
+
+// Every castle's ledger in the web client's real bot games reconciles: the
+// ledger follows the game's turn order exactly.
+func TestTheLedgersOfRealGamesReconcile(t *testing.T) {
+	paths, err := filepath.Glob(filepath.Join(webFixtures, "*.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledgers := 0
+	for _, path := range paths {
+		if filepath.Base(path) == "heading-arrows.json" {
+			continue
+		}
+		demo, err := readDemoFile(path)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		game := newGame(filepath.Base(path), "demo file "+path, demo)
+		for turn := 2; turn <= game.Turns(); turn++ {
+			for castleID, ledger := range game.changes[turn-1].ledgers {
+				ledgers++
+				if !ledger.Reconciled {
+					t.Errorf("%s turn %d castle %d: %+v", filepath.Base(path), turn, castleID, ledger)
+				}
+			}
+		}
+	}
+	if ledgers < 50 {
+		t.Fatalf("only %d ledgers in %d fixtures", ledgers, len(paths))
+	}
+	t.Logf("%d ledgers reconcile", ledgers)
 }
 
 func TestDiffTurnsListsEveryChange(t *testing.T) {

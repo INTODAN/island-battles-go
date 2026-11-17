@@ -34,7 +34,21 @@ type Game struct {
 	groups    map[uint]groupOrigin
 	// changes[n-1] is what changed to make turn n; changes[0] is empty.
 	changes []turnChanges
+	// costSearch is what is left of the arrival steps that working out
+	// upgrade costs may take for the whole game, so a crafted demo can't
+	// hold up loading it.
+	costSearch int
 }
+
+// The bounds of working out an upgrade cost from the soldiers when groups
+// arrived at the castle: the costs tried for one castle on one turn, and
+// the arrival steps tried for the whole game. A turn's upgrades cost at
+// most a few dozen soldiers.
+const (
+	maxCostTried     = 1000
+	maxCostSearch    = 20_000_000
+	costSearchFailed = "The upgrade cost wasn't worked out: the soldiers would need a cost of more than %d, or the demo has more to search than this server allows."
+)
 
 // groupOrigin is where and when a soldier group was sent.
 type groupOrigin struct {
@@ -73,7 +87,8 @@ type defeatedGroup struct {
 
 // newGame derives the game's provenance and changes from a checked demo.
 func newGame(key, source string, demo Demo) *Game {
-	game := &Game{Key: key, Source: source, Demo: demo, LoadedAt: time.Now().UTC(), teamNames: teamNames(demo.Teams), groups: map[uint]groupOrigin{}}
+	game := &Game{Key: key, Source: source, Demo: demo, LoadedAt: time.Now().UTC(), teamNames: teamNames(demo.Teams), groups: map[uint]groupOrigin{},
+		costSearch: maxCostSearch}
 	for index, frame := range demo.Frames {
 		turn := index + 1
 		firstClash := map[uint]islandbattles.ClashParticipant{}
@@ -307,7 +322,9 @@ type ArrivalStep struct {
 
 // ledger accounts for castle from before, on the turn before, to after. The
 // upgrades' cost isn't in a demo, so it is worked out: the smallest cost
-// that gives the soldiers and owner shown.
+// that gives the soldiers and owner shown. Without arrivals that is one
+// subtraction; with arrivals the costs are tried in turn, within
+// maxCostTried and the game's costSearch.
 func (game *Game) ledger(turn int, before, after islandbattles.Castle, changes turnChanges) *CastleLedger {
 	ledger := &CastleLedger{Turn: turn, CastleID: after.ID, OwnerBefore: game.team(before.TeamColor), OwnerAfter: game.team(after.TeamColor),
 		SoldiersBefore: before.Soldiers, SoldiersAfter: after.Soldiers}
@@ -368,7 +385,27 @@ func (game *Game) ledger(turn int, before, after islandbattles.Castle, changes t
 		return int(before.Soldiers) - int(sentOut) - cost + int(ledger.Growth)
 	}
 	maxCost := int(before.Soldiers) - int(sentOut) + int(ledger.Growth)
-	for cost := 0; cost <= maxCost; cost++ {
+	searched := true
+	costs := func(yield func(int) bool) {
+		if len(arrivals) == 0 {
+			// The garrison only pays the cost, so the cost is what is missing.
+			if missing := maxCost - int(after.Soldiers); missing >= 0 && before.TeamColor == after.TeamColor {
+				yield(missing)
+			}
+			return
+		}
+		for cost := 0; cost <= maxCost; cost++ {
+			if cost > maxCostTried || game.costSearch < len(arrivals) {
+				searched = false
+				return
+			}
+			game.costSearch -= len(arrivals)
+			if !yield(cost) {
+				return
+			}
+		}
+	}
+	for cost := range costs {
 		if _, steps, matches := simulate(cost); matches {
 			ledger.Arrivals, ledger.Reconciled, ledger.GarrisonBeforeArrivals = steps, true, garrisonBefore(cost)
 			if cost > 0 {
@@ -389,6 +426,9 @@ func (game *Game) ledger(turn int, before, after islandbattles.Castle, changes t
 	_, ledger.Arrivals, _ = simulate(0)
 	ledger.GarrisonBeforeArrivals = garrisonBefore(0)
 	ledger.Note = "The boards don't account for this castle exactly: a group that was sent and arrived within one turn shows on no board."
+	if !searched {
+		ledger.Note = fmt.Sprintf(costSearchFailed, maxCostTried)
+	}
 	return ledger
 }
 
