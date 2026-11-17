@@ -269,6 +269,12 @@ go run github.com/INTODAN/island-battles-go/clients/island-battles-go/cmd/island
 
 uploads the zip to a lobby (#221), where everyone in it sees it in the bot picker. Copy the game's address and the **upload token** from the bot picker's **Upload from the command line**, in the lobby page or the 3D client: the token stands for you in that lobby for 15 minutes, so the command needs no session of yours. It is the same as the Python SDK's `island-battles-bot upload`. The zip goes straight to the game's storage, then the game checks it as `package` does (the manifest, its command's file, at most 250 MiB zipped and 1 GiB unpacked, no path outside the package) and prints its reason if it refuses it. A member has one package per lobby: uploading a new one replaces the previous one. The browser pickers can also upload the zip themselves with **Upload bot (.zip)**. Choosing an uploaded package as your bot comes later.
 
+## Investigate a game with your AI agent
+
+[`cmd/island-battles-mcp`](cmd/island-battles-mcp/README.md) is an MCP server that you run on your own computer, so that your AI agent can investigate a game with you, from a demo file or by the lobby's code. You might ask: "On turn 40, how did my castle get captured?" Install it with `go install github.com/INTODAN/island-battles-go/clients/island-battles-go/cmd/island-battles-mcp@latest`; its README says how to register it. The 3D client's **Ask your AI agent** button copies a prompt that sets it up.
+
+The command lives in this module, so from the release that adds it, the SDK's `go.mod` also requires the [MCP Go SDK](https://github.com/modelcontextprotocol/go-sdk) (`github.com/modelcontextprotocol/go-sdk`) and a newer `golang.org/x/sys` (v0.41.0, from v0.11.0). A bot that imports the SDK gets them in its module graph, though only the command uses the MCP Go SDK.
+
 ## Examples
 
 | Example | |

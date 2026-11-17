@@ -44,6 +44,8 @@ export interface LiveSource {
    * it has ended. A watcher's read has no lines until then.
    */
   readLogs(generationId: number): Promise<GenerationLogs>;
+  /** The lobby's join code, for "Ask your AI agent", when it is known. */
+  lobbyCode(): string | undefined;
 }
 
 function required<T>(data: T | undefined): T {
@@ -94,6 +96,12 @@ export function playerSource(
       });
       return required(data);
     },
+    lobbyCode() {
+      const snapshot = realtime.lobby.get();
+      return snapshot?.lobby.id === lobbyId
+        ? snapshot.lobby.join_code
+        : undefined;
+    },
   };
 }
 
@@ -103,7 +111,7 @@ export function playerSource(
  */
 export function watchSource(
   realtime: Realtime,
-  target: { lobbyId: string; channel: string },
+  target: { lobbyId: string; channel: string; joinCode?: string },
 ): LiveSource {
   const gameApi = gameApiOf(realtime);
   return {
@@ -135,5 +143,6 @@ export function watchSource(
       );
       return required(data);
     },
+    lobbyCode: () => target.joinCode,
   };
 }
