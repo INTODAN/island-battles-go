@@ -45,6 +45,11 @@ describe("the monthly guard on uploaded bots", () => {
       { value: "level-1", label: "Bot level 1", disabled: false },
       { value: "level-2", label: "Bot level 2", disabled: false },
       {
+        value: "localhost",
+        label: "My localhost bot (port)",
+        disabled: false,
+      },
+      {
         value: "package-p-1",
         label: "Uploaded: Uma's bot (python)",
         disabled: true,
@@ -65,7 +70,7 @@ describe("the monthly guard on uploaded bots", () => {
       seatOptions({ levels: [1], serverBots: false, packages, spent }).map(
         (choice) => choice.value,
       ),
-    ).toEqual(["level-1"]);
+    ).toEqual(["level-1", "localhost"]);
   });
 
   test("a greyed-out choice falls back to the first one offered", () => {

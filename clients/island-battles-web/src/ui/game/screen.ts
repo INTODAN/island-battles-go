@@ -108,7 +108,8 @@ export class GameScreen {
   private readonly overlayAction = button("Try again", "Try again");
   private readonly teamsBox = element("div", "gv-teams");
   /** The bot that plays your seat, for your team's card; a watcher has none. */
-  private yourBot: { teamColor: number; text: string } | undefined;
+  /** The line under each team whose bot you play or relay, by team colour. */
+  private yourBots = new Map<number, string>();
   private readonly banner = element("div", "gv-outcome");
   private readonly bannerText = element("span");
   private readonly slider = element("input", "gv-slider");
@@ -412,10 +413,18 @@ export class GameScreen {
    * the player list: who plays it, and for a hosted or uploaded bot that the server does.
    */
   setYourBot(teamColor: number, text: string): void {
-    if (this.yourBot?.teamColor === teamColor && this.yourBot.text === text) {
+    this.setYourBots(new Map([[teamColor, text]]));
+  }
+
+  /** Names the bots under their teams: yours, and the localhost bot seats that this tab relays. */
+  setYourBots(lines: ReadonlyMap<number, string>): void {
+    if (
+      lines.size === this.yourBots.size &&
+      [...lines].every(([team, text]) => this.yourBots.get(team) === text)
+    ) {
       return;
     }
-    this.yourBot = { teamColor, text };
+    this.yourBots = new Map(lines);
     this.showYourBot();
   }
 
@@ -424,9 +433,9 @@ export class GameScreen {
       ".gv-team",
     )) {
       const line = card.querySelector<HTMLElement>(".gv-team-bot");
-      const yours = this.yourBot?.teamColor === Number(card.dataset.team);
-      if (line) line.hidden = !yours;
-      if (line && yours) line.textContent = this.yourBot?.text ?? "";
+      const text = this.yourBots.get(Number(card.dataset.team));
+      if (line) line.hidden = text === undefined;
+      if (line && text !== undefined) line.textContent = text;
     }
   }
 

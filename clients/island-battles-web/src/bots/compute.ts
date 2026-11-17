@@ -55,9 +55,9 @@ export interface BotOption {
 }
 
 /**
- * The host's Add bot choices for an empty team: a default bot of each level and, when the
- * server offers them, each of the lobby's packages, greyed out once their compute is spent,
- * and a hosted bot.
+ * The host's Add bot choices for an empty team: a default bot of each level, a localhost bot on
+ * a port of the host's machine, which the host's tab relays, and, when the server offers them,
+ * each of the lobby's packages, greyed out once their compute is spent, and a hosted bot.
  */
 export function seatOptions(options: {
   levels: number[];
@@ -70,6 +70,11 @@ export function seatOptions(options: {
     label: `Bot level ${level}`,
     disabled: false,
   }));
+  choices.push({
+    value: "localhost",
+    label: "My localhost bot (port)",
+    disabled: false,
+  });
   if (!options.serverBots) return choices;
   for (const item of options.packages) {
     choices.push({

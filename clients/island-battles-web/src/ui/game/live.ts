@@ -7,7 +7,7 @@
 // holds. A turn that arrives while the history loads is kept and merged after it.
 
 import { ApiError } from "../../api/errors";
-import { describeGameBot } from "../../bots/kinds";
+import { describeGameBot, describeRelayedBot } from "../../bots/kinds";
 import type { Realtime } from "../../realtime";
 import type { GameController } from "./controller";
 import { type Demo, DemoFileError, readDemoFile } from "./demoFile";
@@ -136,10 +136,17 @@ export function mountLive(
     }
   }
 
-  /** Names the bot that plays your seat under your team, from a roster player's turn. */
+  /**
+   * Names the bot that plays your seat under your team, from a roster player's turn, and each
+   * localhost bot seat that this tab relays under the seat's team.
+   */
   function showYourBot(turn: LiveTurn | null): void {
     if (turn?.bot && turn.team_color !== undefined) {
-      screen.setYourBot(turn.team_color, describeGameBot(turn.bot));
+      const lines = new Map([[turn.team_color, describeGameBot(turn.bot)]]);
+      for (const seat of turn.relayed_bots ?? []) {
+        lines.set(seat.team_color, describeRelayedBot(seat));
+      }
+      screen.setYourBots(lines);
     }
   }
 

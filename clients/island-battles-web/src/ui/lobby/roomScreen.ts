@@ -1,3 +1,4 @@
+import { checkBotHealth, nextFreePort, portProblem } from "../../bots";
 import { offeredChoice, seatOptions } from "../../bots/compute";
 import { webClientUrl } from "../../platform";
 import type { Realtime, Snapshot } from "../../realtime";
@@ -24,6 +25,8 @@ import {
   countPeople,
   describeBot,
   describeSettings,
+  hostPorts,
+  localhostSeats,
   type MemberRow,
   type RoomModel,
   seatBody,
@@ -101,6 +104,10 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
   const chosenSeat = new Map<string, string>();
   /** The URL typed for each team's hosted bot, by team ID. */
   const seatUrls = new Map<string, string>();
+  /** The port typed for each team's localhost bot, by team ID. */
+  const seatPorts = new Map<string, string>();
+  /** Whether each localhost bot seat's port answers, by port, as last asked; the host's room asks. */
+  let seatHealth = new Map<number, boolean>();
   let lastVersion = -1;
 
   const title = h("h1", {});
@@ -252,6 +259,12 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
       return handleProblem(cause, "bot").message;
     },
     playerId: () => realtime.session.get()?.playerId,
+    takenPorts() {
+      const snapshot = realtime.lobby.get();
+      if (!snapshot) return [];
+      const model = room(snapshot);
+      return model.isHost ? localhostSeats(model).map((seat) => seat.port) : [];
+    },
     onPackages(items) {
       const key = (list: BotPackage[]) =>
         list.map((item) => item.package_id).join();
@@ -358,14 +371,20 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
   };
   /** A fresh request ID per click; a transport retry resends the same body, so the seat is added once. */
   const addBot = (teamId: string) => {
-    const settings = seatSettingsFromValue(
-      seatChoice(teamId),
-      seatUrls.get(teamId) ?? "",
-    );
+    const choice = seatChoice(teamId);
+    const snapshot = realtime.lobby.get();
+    const taken = snapshot ? hostPorts(room(snapshot)) : [];
+    const port = seatPorts.get(teamId) ?? String(nextFreePort(taken));
+    const portRefused =
+      choice === "localhost" ? portProblem(port, taken) : null;
+    const settings = portRefused
+      ? null
+      : seatSettingsFromValue(choice, seatUrls.get(teamId) ?? "", port);
     if (!settings) {
       problems.seat = {
         teamId,
         message:
+          portRefused ??
           "Type the bot's URL first, such as https://bot.example.com/turn.",
       };
       render();
@@ -435,10 +454,22 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
 
   // --- Rendering ---
 
-  /** A seat is a bot: always ready, with no lease, and the host may remove it while waiting. */
-  function memberItem(member: MemberRow, remove?: () => void): HTMLElement {
+  /**
+   * A seat is a bot: always ready, with no lease, and the host may remove it while waiting. The
+   * host sees whether each localhost bot seat's bot answers on its port.
+   */
+  function memberItem(
+    member: MemberRow,
+    remove?: () => void,
+    isHost = false,
+  ): HTMLElement {
     const seat = member.kind === "seat";
     const ready = seat || member.ready;
+    const localPort =
+      seat && isHost && member.bot?.kind === "localhost"
+        ? member.bot.port
+        : undefined;
+    const up = localPort === undefined ? undefined : seatHealth.get(localPort);
     return h(
       "li",
       {
@@ -459,7 +490,20 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
       h(
         "span",
         { class: `bot-label${member.bot ? "" : " none"}` },
-        describeBot(member.bot),
+        describeBot(member.bot, seat),
+        localPort === undefined
+          ? null
+          : h(
+              "span",
+              {
+                class: "pill",
+                attrs: {
+                  "data-status":
+                    up === undefined ? "checking" : up ? "up" : "down",
+                },
+              },
+              up === undefined ? "Checking…" : up ? "Connected" : "Not running",
+            ),
       ),
       h(
         "span",
@@ -514,6 +558,22 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
         },
         text,
       );
+    const portInput =
+      choice === "localhost"
+        ? h("input", {
+            type: "text",
+            class: "bot-port",
+            value:
+              seatPorts.get(team.id) ?? String(nextFreePort(hostPorts(model))),
+            attrs: {
+              "aria-label": `Localhost bot port for ${team.name}`,
+              inputmode: "numeric",
+              maxlength: "5",
+            },
+            oninput: (event: Event) =>
+              seatPorts.set(team.id, (event.target as HTMLInputElement).value),
+          })
+        : null;
     const urlInput =
       choice === "hosted"
         ? h("input", {
@@ -552,6 +612,14 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
               ),
             ),
             urlInput,
+            portInput,
+            portInput
+              ? h(
+                  "span",
+                  { class: "hint" },
+                  "Your tab relays this bot's turns to 127.0.0.1 on its port; serve it there with island-battles-bot serve --port N.",
+                )
+              : null,
             computeSpent && serverBots && lobbyPackages.length > 0
               ? h("span", { class: "hint" }, computeSpent)
               : null,
@@ -605,6 +673,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
                 editSeats && member.kind === "seat"
                   ? () => void removeBot(member, team.id)
                   : undefined,
+                model.isHost,
               ),
             ),
           )
@@ -719,6 +788,33 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     realtime.lobby.subscribe(onLobby),
     realtime.connection.subscribe(() => render()),
   ];
+
+  /** Asks the host's localhost bot seats' ports whether their bots run, while the room shows. */
+  async function checkSeats(): Promise<void> {
+    const snapshot = realtime.lobby.get();
+    if (disposed || document.hidden || !snapshot) return;
+    const model = room(snapshot);
+    const ports = model.isHost
+      ? [...new Set(localhostSeats(model).map((seat) => seat.port))]
+      : [];
+    if (ports.length === 0 && seatHealth.size === 0) return;
+    const answers = await Promise.all(
+      ports.map((port) => checkBotHealth({ port })),
+    );
+    if (disposed) return;
+    const next = new Map(
+      ports.map((port, index) => [port, answers[index] === true]),
+    );
+    // A render rebuilds the teams' fields, so only a change renders.
+    const same =
+      next.size === seatHealth.size &&
+      [...next].every(([port, up]) => seatHealth.get(port) === up);
+    seatHealth = next;
+    if (!same) render();
+  }
+  void checkSeats();
+  const seatTimer = setInterval(() => void checkSeats(), 3000);
+  unsubscribers.push(() => clearInterval(seatTimer));
 
   void actions
     .mapTemplates()

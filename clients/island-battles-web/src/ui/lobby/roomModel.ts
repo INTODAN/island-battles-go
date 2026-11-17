@@ -1,3 +1,4 @@
+import { defaultBotPort, parseBotPort } from "../../bots/localhost";
 import type { Snapshot } from "../../realtime";
 import type {
   AddSeatBody,
@@ -31,12 +32,20 @@ export function seatLevel(
   return typeof level === "number" ? level : undefined;
 }
 
-/** A seat's bot, from its settings: a default level, a hosted bot's URL or an uploaded package. */
+/**
+ * A seat's bot, from its settings: a default level, a localhost bot on a port of the host's
+ * machine (sent as a number, or as digits by the lobby page), a hosted bot's URL or an uploaded
+ * package.
+ */
 function seatChoice(
   settings: Record<string, unknown> | null | undefined,
 ): MemberBot | undefined {
   const level = seatLevel(settings);
   if (level !== undefined) return { kind: "default", level };
+  const port = parseBotPort(
+    settings?.bot_localhost_port as string | number | undefined,
+  );
+  if (port !== null) return { kind: "localhost", port };
   if (typeof settings?.bot_url === "string") {
     return { kind: "hosted", url: settings.bot_url };
   }
@@ -55,8 +64,10 @@ export function memberSettingsBot(
 ): MemberBot | undefined {
   const bot = settings?.bot;
   if (typeof bot !== "object" || bot === null) return undefined;
-  const { kind, level, url, package_id } = bot as Record<string, unknown>;
-  if (kind === "localhost") return { kind };
+  const { kind, level, url, package_id, port } = bot as Record<string, unknown>;
+  if (kind === "localhost") {
+    return typeof port === "number" ? { kind, port } : { kind };
+  }
   if (kind === "default" && typeof level === "number") return { kind, level };
   if (kind === "hosted" && typeof url === "string") return { kind, url };
   if (kind === "uploaded" && typeof package_id === "string") {
@@ -80,15 +91,21 @@ export function seatBody(
 
 /**
  * The seat settings that an Add bot select's value stands for: `level-N`,
- * `package-<id>`, or `hosted` with the URL typed next to it. Null when the
- * value needs a URL that is empty.
+ * `package-<id>`, `hosted` with the URL typed next to it, or `localhost` with
+ * the port typed next to it. Null when the value needs a URL that is empty or
+ * a port that isn't one.
  */
 export function seatSettingsFromValue(
   value: string,
   url: string,
+  port = "",
 ): BotSeatSettings | null {
   const level = /^level-([1-9][0-9]*)$/.exec(value);
   if (level) return { bot_level: Number(level[1]) };
+  if (value === "localhost") {
+    const parsed = parseBotPort(port);
+    return parsed === null ? null : { bot_localhost_port: parsed };
+  }
   if (value.startsWith("package-") && value.length > "package-".length) {
     return { bot_package_id: value.slice("package-".length) };
   }
@@ -141,12 +158,19 @@ export interface RoomModel {
   phase: string;
 }
 
-/** A few words naming a member's bot. */
-export function describeBot(bot: MemberBot | undefined): string {
+/**
+ * A few words naming a member's bot. A seat's localhost bot runs on the host's machine, which
+ * relays it.
+ */
+export function describeBot(bot: MemberBot | undefined, seat = false): string {
   if (!bot) return "No bot yet";
   switch (bot.kind) {
     case "localhost":
-      return "Own bot (localhost)";
+      if (seat)
+        return `Localhost bot on the host's port ${bot.port ?? defaultBotPort}`;
+      return bot.port && bot.port !== defaultBotPort
+        ? `Own bot (localhost:${bot.port})`
+        : "Own bot (localhost)";
     case "default":
       return `Default bot, level ${bot.level ?? "?"}`;
     case "hosted":
@@ -173,10 +197,19 @@ export function choiceValue(bot: MemberBot | undefined): string {
 
 /**
  * The choice a radio value stands for, or null for none. `hosted` takes the
- * URL typed next to it, and is null while that is empty.
+ * URL typed next to it, and is null while that is empty. `localhost` takes the
+ * port next to it, left out when it is the default one.
  */
-export function choiceFromValue(value: string, url = ""): MemberBot | null {
-  if (value === "localhost") return { kind: "localhost" };
+export function choiceFromValue(
+  value: string,
+  url = "",
+  port: number = defaultBotPort,
+): MemberBot | null {
+  if (value === "localhost") {
+    return port === defaultBotPort
+      ? { kind: "localhost" }
+      : { kind: "localhost", port };
+  }
   if (value === "hosted") {
     const trimmed = url.trim();
     return trimmed ? { kind: "hosted", url: trimmed } : null;
@@ -186,6 +219,36 @@ export function choiceFromValue(value: string, url = ""): MemberBot | null {
   }
   const level = /^level-([1-9][0-9]*)$/.exec(value);
   return level ? { kind: "default", level: Number(level[1]) } : null;
+}
+
+/**
+ * The ports of the localhost bots that the host relays: their own localhost bot's and every
+ * localhost bot seat's.
+ */
+export function hostPorts(model: RoomModel): number[] {
+  const members = [
+    ...model.teams.flatMap((team) => team.members),
+    ...model.unassigned,
+  ];
+  return members.flatMap((member) =>
+    member.bot?.kind === "localhost" &&
+    (member.kind === "seat" || member.isHost)
+      ? [member.bot.port ?? defaultBotPort]
+      : [],
+  );
+}
+
+/** The localhost bot seats of a room, which its host relays, with their ports. */
+export function localhostSeats(
+  model: RoomModel,
+): { name: string; port: number }[] {
+  return model.teams.flatMap((team) =>
+    team.members.flatMap((member) =>
+      member.kind === "seat" && member.bot?.kind === "localhost"
+        ? [{ name: member.name, port: member.bot.port ?? defaultBotPort }]
+        : [],
+    ),
+  );
 }
 
 /** Arranges a lobby snapshot, with the members' bots, for the room screen. */
