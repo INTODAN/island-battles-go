@@ -3,7 +3,7 @@
 
 import { createApiClients } from "../../api/client";
 import { ApiError } from "../../api/errors";
-import type { BotChoice } from "../../bots/kinds";
+import type { BotChoice, RelayedBot } from "../../bots/kinds";
 import type { Realtime, RealtimeProblem } from "../../realtime";
 import type { Demo } from "./demoFile";
 import type { GameOutcome, Generation } from "./history";
@@ -18,6 +18,8 @@ export interface LiveTurn {
   /** A roster player's team and the bot that plays their seat; a watcher's turns have neither. */
   team_color?: number;
   bot?: BotChoice;
+  /** The localhost bot seats that the player added as the host, which only they relay. */
+  relayed_bots?: RelayedBot[];
 }
 
 export interface LiveSource {

@@ -135,7 +135,7 @@ func (service *GenerationService) current(ctx context.Context, principal domain.
 		if err != nil {
 			return err
 		}
-		if state, err = generationState(locked, generation, player, inputs, memory); err != nil {
+		if state, err = generationState(locked, generation, players, player, inputs, memory); err != nil {
 			return err
 		}
 		return countStoredLogLines(transaction, &state)
@@ -252,7 +252,7 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 			if err != nil {
 				return err
 			}
-			if state, err = generationState(locked, generation, player, inputs, memory); err != nil {
+			if state, err = generationState(locked, generation, players, player, inputs, memory); err != nil {
 				return err
 			}
 			return countStoredLogLines(transaction, &state)
@@ -319,7 +319,7 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 			// request's turn has committed.
 			goBotsOnly = locked.Outcome == nil && slices.ContainsFunc(players, isGoBot) && turnComplete(locked, generation, players, inputs)
 		}
-		if state, err = generationState(locked, generation, player, inputs, memory); err != nil {
+		if state, err = generationState(locked, generation, players, player, inputs, memory); err != nil {
 			return err
 		}
 		return countStoredLogLines(transaction, &state)
@@ -399,15 +399,16 @@ func validateCommands(generation *models.Generation, teamColor uint, inputs []mo
 	return commands, nil
 }
 
-// generationState builds a player's state. memory is the memory sent with
-// the player's latest completed turn.
-func generationState(game *models.Game, generation *models.Generation, player models.FrozenGamePlayer, inputs []models.GenerationInput, memory models.BotMemory) (models.GenerationState, error) {
+// generationState builds a player's state, one of players. memory is the
+// memory sent with the player's latest completed turn.
+func generationState(game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer, player models.FrozenGamePlayer, inputs []models.GenerationInput, memory models.BotMemory) (models.GenerationState, error) {
 	channel, err := domain.PlayerChannel(player.PlayerID)
 	if err != nil {
 		return models.GenerationState{}, err
 	}
 	state := models.GenerationState{GameID: game.ID, LobbyID: *game.LobbyID, LobbyRound: game.LobbyRound, GenerationID: generation.ID, PlayerID: player.PlayerID, TeamColor: player.TeamColor, Channel: channel,
-		Generation: GenerationView(generation), Outcome: outcomeView(game), Memory: memory, TurnDeadlineAt: turnDeadline(game, generation), Bot: models.FrozenBot(player)}
+		Generation: GenerationView(generation), Outcome: outcomeView(game), Memory: memory, TurnDeadlineAt: turnDeadline(game, generation), Bot: models.FrozenBot(player),
+		RelayedBots: models.RelayedBots(players, player.PlayerID)}
 	for _, input := range inputs {
 		if input.PlayerID == player.PlayerID {
 			state.Submitted = input.Completed
@@ -437,7 +438,7 @@ func generationEvents(game *models.Game, generation *models.Generation, players 
 		if err != nil {
 			return nil, err
 		}
-		state, err := generationState(game, generation, player, inputs, memories[player.PlayerID])
+		state, err := generationState(game, generation, players, player, inputs, memories[player.PlayerID])
 		if err != nil {
 			return nil, err
 		}

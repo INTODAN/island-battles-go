@@ -218,7 +218,7 @@ func TestTheStartSendsTheFirstTurnOfEachHostedAndUploadedBot(t *testing.T) {
 		t.Fatalf("the hosted bot's event = %+v", hosted)
 	}
 	// The delivery is what GET …/turn-delivery answers that player.
-	served, err := game.service.TurnDelivery(context.Background(), game.players[1], game.lobbyID, game.tokens, serverBotSubmitURL)
+	served, err := game.service.TurnDelivery(context.Background(), game.players[1], game.lobbyID, "", game.tokens, serverBotSubmitURL)
 	if err != nil {
 		t.Fatal(err)
 	}

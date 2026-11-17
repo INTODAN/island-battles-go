@@ -129,8 +129,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Read your turn as a delivery for your bot, with a one-turn submit token
-         * @description Requires a place on the game's frozen roster; the lobby is not consulted. Returns the caller's turn of the current generation as a TurnDelivery: the BotTurn the server builds for their bot (the board, their team, the upgrade cost table, the memory their latest completed turn sent and the deadline), and how to submit the answer: submit.url, POST /generation/commands on the game's public URL, and submit.token, a submit token that submits exactly this player's turn of this generation. A game client relays it to the player's bot server, island-battles-bot serve, which answers 202 at once, plays the turn and submits its commands, logs and memory itself, with complete true and Authorization: Bearer <token>; the client submits nothing. Each call issues a new token for the same turn. Like every game request, it first applies the turn's deadline once it has passed. When the caller has nothing to play it returns 409: the game has ended (problem type urn:island-battles:problem:game-ended), their team has been eliminated, or they have already completed the turn. A lobby can play several games, one per round (lobby.round, raised by POST /lobby/v1/games/island-battles/lobbies/{lobby_id}/reopen once a game has ended); this route serves the lobby's newest game and its frozen roster, and an older game can't be reached once the next one starts.
+         * Read your turn, or a localhost bot seat's that you relay, as a delivery for the bot, with a one-turn submit token
+         * @description Requires a place on the game's frozen roster; the lobby is not consulted. Returns the caller's turn of the current generation as a TurnDelivery: the BotTurn the server builds for their bot (the board, their team, the upgrade cost table, the memory their latest completed turn sent and the deadline), and how to submit the answer: submit.url, POST /generation/commands on the game's public URL, and submit.token, a submit token that submits exactly this player's turn of this generation. A game client relays it to the player's bot server, island-battles-bot serve, which answers 202 at once, plays the turn and submits its commands, logs and memory itself, with complete true and Authorization: Bearer <token>; the client submits nothing. Each call issues a new token for the same turn. With player_id, the player who added a localhost bot seat to the lobby reads the seat's turn instead, one of their GenerationState.relayed_bots, to relay it to the seat's bot on its own port; the delivery and its token are the seat's. A player_id that is not a localhost bot seat that the caller added is 403, for a later host too. Like every game request, it first applies the turn's deadline once it has passed. When the player has nothing to play it returns 409: the game has ended (problem type urn:island-battles:problem:game-ended), their team has been eliminated, or they have already completed the turn. A lobby can play several games, one per round (lobby.round, raised by POST /lobby/v1/games/island-battles/lobbies/{lobby_id}/reopen once a game has ended); this route serves the lobby's newest game and its frozen roster, and an older game can't be reached once the next one starts.
          */
         get: operations["getIslandLobbyTurnDelivery"];
         put?: never;
@@ -382,6 +382,11 @@ export interface components {
              * @description For kind default, the level of the default bot, one that GET /bots/defaults lists. Absent for the other kinds.
              */
             level?: number;
+            /**
+             * Format: int64
+             * @description For kind localhost, the port on 127.0.0.1 where the player's client delivers each turn: the one they chose in the lobby, 41414 by default. Absent for the other kinds.
+             */
+            port?: number;
         };
         BotCompute: {
             /**
@@ -464,18 +469,25 @@ export interface components {
             /** @description Every checked package of the lobby, newest first, at most one per member. */
             packages: components["schemas"]["BotPackage"][];
         };
-        /** @description Island Battles seat_settings for a bot seat that the host adds with POST …/seats: exactly one of bot_level, bot_url and bot_package_id. {"bot_level": N}, with a level that GET /bots/defaults lists, is a default bot that the backend plays, named "Bot (level N)". When GET /bots/defaults says server_bots, also {"bot_url": "https://…"}, a hosted bot under the rules of MemberBot's url, named "Hosted bot", or {"bot_package_id": "…"}, any ready bot package of the lobby, named after its owner, such as "Alex's bot"; the server plays both. A seat whose package is gone by the start stops it with game_requirement of type urn:island-battles:problem:bot-package-gone. */
+        /** @description Island Battles seat_settings for a bot seat that the host adds with POST …/seats: exactly one of bot_level, bot_localhost_port, bot_url and bot_package_id. {"bot_level": N}, with a level that GET /bots/defaults lists, is a default bot that the backend plays, named "Bot (level N)". {"bot_localhost_port": N, "bot_relay_player_id": "<your player ID>"}, a port from 1024 to 65535, is a localhost bot on your machine as the host, which island-battles-bot serve --port N runs and only your game client relays, named "Localhost bot (port N)": you can seat several, each on its own port. bot_relay_player_id records who added the seat, since the lobby doesn't, and must be the host's own player ID. A later host never relays it: a start with a localhost bot seat whose adder left the lobby fails with game_requirement of type urn:island-battles:problem:localhost-seat-relay-gone, until the host removes the seat, and can add it again from their own page. A port that your own localhost bot or another localhost bot seat of yours already uses is invalid_seat_settings, unless the seat is already there with these settings, so a seat request sent again after a lost answer finds its own seat. A start where someone would relay two localhost bots on one port, after they changed their own port or added the same seat twice, fails with game_requirement of type urn:island-battles:problem:localhost-port-taken. When GET /bots/defaults says server_bots, also {"bot_url": "https://…"}, a hosted bot under the rules of MemberBot's url, named "Hosted bot", or {"bot_package_id": "…"}, any ready bot package of the lobby, named after its owner, such as "Alex's bot"; the server plays both. A seat whose package is gone by the start stops it with game_requirement of type urn:island-battles:problem:bot-package-gone. */
         BotSeatSettings: {
             /**
              * Format: int64
              * @description A default bot of this level, one that GET /bots/defaults lists, which the backend plays. The seat is named "Bot (level N)".
              */
             bot_level?: number;
+            /** @description A localhost bot on the machine of the host who adds the seat, which island-battles-bot serve --port N runs on this port of 127.0.0.1; that host's game client delivers each turn to it, as to their own localhost bot. A string of the port's digits, which the lobby page's text field sends, is read the same. The port must differ from that host's own localhost bot's and from every other localhost bot seat's that they added. Needs bot_relay_player_id. The seat is named "Localhost bot (port N)". */
+            bot_localhost_port?: number | string;
             /**
              * Format: uuid
              * @description Any member's bot package in this lobby, which the server runs. The seat is named after its owner, such as "Alex's bot". Only when GET /bots/defaults says server_bots.
              */
             bot_package_id?: string;
+            /**
+             * Format: uuid
+             * @description With bot_localhost_port only, and required with it: the player ID of the host who adds the seat, whose game client alone relays it. It must be the lobby's host. When that player is no longer in the lobby, the start is refused until the seat is removed.
+             */
+            bot_relay_player_id?: string;
             /** @description A hosted bot at this URL, under the rules of a member's hosted bot; the server sends it each turn. The seat is named "Hosted bot". Only when GET /bots/defaults says server_bots. */
             bot_url?: string;
         };
@@ -822,7 +834,7 @@ export interface components {
              * @example https://example.com/GenerationState.json
              */
             readonly $schema?: string;
-            /** @description Your bot in this game, the one you chose in the lobby, copied when the game started. For kind localhost your client delivers each turn to your bot, which submits its answer. For kind default the backend plays your turns itself as soon as each generation is created. For kinds hosted and uploaded the server plays your turns with your bot, without your client. Only for kind localhost does your client relay anything. */
+            /** @description Your bot in this game, the one you chose in the lobby, copied when the game started. For kind localhost your client delivers each turn to your bot, on bot.port, which submits its answer. For kind default the backend plays your turns itself as soon as each generation is created. For kinds hosted and uploaded the server plays your turns with your bot, without your client. Only for kind localhost, and for relayed_bots, does your client relay anything. */
             bot: components["schemas"]["BotChoice"];
             /** @description Your personal Centrifugo channel, which receives GenerationEvent after each turn and GameEndedEvent after the last one. */
             channel: string;
@@ -851,6 +863,8 @@ export interface components {
             outcome?: components["schemas"]["GameOutcome"];
             /** Format: uuid */
             player_id: string;
+            /** @description The localhost bot seats that you added to the lobby as its host, which only you relay: your client reads each one's turn with GET /game/from-lobby/{lobby_id}/turn-delivery?player_id= and delivers it to 127.0.0.1 on the seat's port, as it does for your own localhost bot. Empty for everyone else. */
+            relayed_bots: components["schemas"]["RelayedBot"][];
             /** @description Whether you completed this generation's turn. */
             submitted: boolean;
             /** Format: int64 */
@@ -954,7 +968,7 @@ export interface components {
              */
             team_count: number;
         };
-        /** @description The bot you choose for yourself. Send only the field of its kind: level for default, url for hosted, package_id for uploaded, and none for localhost. A hosted bot's URL is https://, at most 2048 characters, without credentials, on port 443 or none, and names a host, not an IP address, whose addresses are all public: not loopback, private, link-local or unique-local. The server resolves it when you choose it, and again before it sends each turn. An uploaded bot is one of your ready packages in the lobby; if you replace or delete it, choose it again before getting ready. */
+        /** @description The bot you choose for yourself. Send only the field of its kind: level for default, url for hosted, package_id for uploaded, and port, or none, for localhost. A localhost bot's port is from 1024 to 65535, 41414 when left out. A hosted bot's URL is https://, at most 2048 characters, without credentials, on port 443 or none, and names a host, not an IP address, whose addresses are all public: not loopback, private, link-local or unique-local. The server resolves it when you choose it, and again before it sends each turn. An uploaded bot is one of your ready packages in the lobby; if you replace or delete it, choose it again before getting ready. */
         MemberBot: {
             /**
              * @description localhost: your own bot, which island-battles-bot serve runs on your machine and your game client relays each turn to. default: a default bot of GET /bots/defaults, which the backend plays. hosted: your own bot server at url, which the server sends each turn to. uploaded: your own bot package in this lobby, package_id, which the server runs. hosted and uploaded are offered only when GET /bots/defaults says server_bots.
@@ -971,10 +985,15 @@ export interface components {
              * @description For kind uploaded only: a package of yours in this lobby, from GET /game/lobbies/{lobby_id}/bot-packages.
              */
             package_id?: string;
+            /**
+             * Format: int64
+             * @description For kind localhost only: the port on 127.0.0.1 where your bot serves (island-battles-bot serve --port N), where your game client delivers each turn. 41414 when absent.
+             */
+            port?: number;
             /** @description For kind hosted only: where the server POSTs each TurnDelivery. https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public. */
             url?: string;
         };
-        /** @description Island Battles member_settings for setLobbyMemberSettings: the bot that plays for you. {"bot": {"kind": "localhost"}} is your own bot, which island-battles-bot serve runs on your machine and your game client relays each turn to, and {"bot": {"kind": "default", "level": N}} a default bot of a level that GET /bots/defaults lists, which the backend plays itself. When GET /bots/defaults says server_bots, also {"bot": {"kind": "hosted", "url": "https://…"}}, your own bot server at a public URL, or {"bot": {"kind": "uploaded", "package_id": "…"}}, one of your bot packages in the lobby; the server plays both, without your game client. Anything else is invalid_member_settings. You choose a bot before getting ready, and can change it while the lobby waits: getting ready without one is refused with game_requirement of type urn:island-battles:problem:bot-not-chosen, and an uploaded bot that is no longer a ready package of yours in the lobby, replaced, deleted or someone else's, with type urn:island-battles:problem:bot-package-gone. The start checks every roster player and bot seat the same way. It then initializes one playable generation, which waits for every frozen roster player to complete their turn, and copies each roster player's bot, and each bot seat's, which GenerationState.bot reports from then on. */
+        /** @description Island Battles member_settings for setLobbyMemberSettings: the bot that plays for you. {"bot": {"kind": "localhost"}} is your own bot, which island-battles-bot serve runs on your machine and your game client relays each turn to, on port 41414 or on the port you add, {"bot": {"kind": "localhost", "port": 41415}}, and {"bot": {"kind": "default", "level": N}} a default bot of a level that GET /bots/defaults lists, which the backend plays itself. When GET /bots/defaults says server_bots, also {"bot": {"kind": "hosted", "url": "https://…"}}, your own bot server at a public URL, or {"bot": {"kind": "uploaded", "package_id": "…"}}, one of your bot packages in the lobby; the server plays both, without your game client. Anything else is invalid_member_settings. You choose a bot before getting ready, and can change it while the lobby waits: getting ready without one is refused with game_requirement of type urn:island-battles:problem:bot-not-chosen, and an uploaded bot that is no longer a ready package of yours in the lobby, replaced, deleted or someone else's, with type urn:island-battles:problem:bot-package-gone. The start checks every roster player and bot seat the same way. It then initializes one playable generation, which waits for every frozen roster player to complete their turn, and copies each roster player's bot, and each bot seat's, which GenerationState.bot reports from then on. */
         MemberSettings: {
             bot: components["schemas"]["MemberBot"];
         };
@@ -1030,6 +1049,22 @@ export interface components {
              * @description Identifies this batch. Retry a lost request with the same UUID and body; use a new UUID for every new batch.
              */
             request_id: string;
+        };
+        RelayedBot: {
+            /** @description The seat's name in the lobby, such as "Localhost bot (port 41415)". */
+            display_name: string;
+            /**
+             * Format: uuid
+             * @description The seat's player ID on the roster, which GET /game/from-lobby/{lobby_id}/turn-delivery?player_id= takes.
+             */
+            player_id: string;
+            /**
+             * Format: int64
+             * @description The port on 127.0.0.1 where your client delivers the seat's turns.
+             */
+            port: number;
+            /** Format: int64 */
+            team_color: number;
         };
         SendSoldierGroupCommand: {
             /**
@@ -1429,7 +1464,10 @@ export interface operations {
     };
     getIslandLobbyTurnDelivery: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description A localhost bot seat that you relay, one of GenerationState.relayed_bots, to read its turn instead of yours. Absent for your own turn. */
+                player_id?: string;
+            };
             header?: {
                 Authorization?: string;
             };

@@ -7,6 +7,7 @@
 import type { components } from "../api/generated/game";
 
 export type BotChoice = components["schemas"]["BotChoice"];
+export type RelayedBot = components["schemas"]["RelayedBot"];
 
 /** Whether the server plays this bot without the player's tab: a hosted or an uploaded bot. */
 export function playedByServer(bot: BotChoice): boolean {
@@ -17,7 +18,7 @@ export function playedByServer(bot: BotChoice): boolean {
 export function describeGameBot(bot: BotChoice): string {
   switch (bot.kind) {
     case "localhost":
-      return "Your localhost bot, relayed by this tab";
+      return `Your localhost bot on port ${bot.port ?? 41414}, relayed by this tab`;
     case "default":
       return `Default bot, level ${bot.level ?? "?"}, played by the server`;
     case "hosted":
@@ -25,4 +26,9 @@ export function describeGameBot(bot: BotChoice): string {
     case "uploaded":
       return "Played by the server: your uploaded bot";
   }
+}
+
+/** The line under a localhost bot seat's team for the host who relays it. */
+export function describeRelayedBot(seat: RelayedBot): string {
+  return `Your localhost bot seat on port ${seat.port}, relayed by this tab`;
 }

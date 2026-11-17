@@ -1,4 +1,4 @@
-import { BotError, deliverTurn } from "./localhost-bot.mjs";
+import { BotError, defaultBotPort, deliverTurn } from "./localhost-bot.mjs";
 
 // Castles and soldiers with this color belong to no player team.
 export const NEUTRAL_TEAM_COLOR = 0;
@@ -31,12 +31,14 @@ const BOT_RETRY_MS = 2000;
 
 // The example player has two jobs. In a demo (the default), it plays the
 // example strategy while it is enabled. Outside a demo, it delivers the turns
-// of a player whose bot is the localhost bot to that bot: it reads the
-// player's turn delivery and posts it to the bot, which submits the turn
-// itself; the page submits nothing. A player with a default bot level is only
-// followed, since the backend plays for them. In both, a player that isn't
-// playing a turn, or whose bot has the turn, asks the server to apply its
-// deadline.
+// of a player whose bot is the localhost bot to that bot, on the port that
+// GenerationState.bot names: it reads the player's turn delivery and posts it
+// to the bot, which submits the turn itself; the page submits nothing. A
+// player with a default bot level is only followed, since the backend plays
+// for them. A player also relays the localhost bot seats that they added as
+// the host, GenerationState.relayed_bots, each to its own port (seat
+// relays, below). In both, a player that isn't playing a turn, or whose bot
+// has the turn, asks the server to apply its deadline.
 //
 // A lobby plays one game per round, and the lobby page makes a player for each
 // round, with lobbyRound. The player takes only the states of that round's
@@ -56,7 +58,7 @@ export function serverBotStatus(bot) {
 
 export class ExamplePlayer {
   constructor({ lobbyID, lobbyRound = null, playerID, subscription, enabled = true, demo = true, pending = null, savePending = () => {},
-    onState = () => {}, onStatus = () => {}, retryDelay = 500, botRetryDelay = BOT_RETRY_MS, deliver = (delivery) => deliverTurn(delivery),
+    onState = () => {}, onStatus = () => {}, retryDelay = 500, botRetryDelay = BOT_RETRY_MS, deliver = (delivery, port) => deliverTurn(delivery, { port }),
     fetcher = (...args) => globalThis.fetch(...args), now = () => Date.now() }) {
     Object.assign(this, { lobbyID, lobbyRound, playerID, subscription, enabled, demo, pending, savePending, onState, onStatus, retryDelay,
       botRetryDelay, deliver, fetcher, now });
@@ -71,6 +73,12 @@ export class ExamplePlayer {
     // Why the server's rejection paused this player, until it is resumed.
     this.attention = null;
     this.inFlight = false;
+    // The requests in flight, which stop() aborts.
+    this.controllers = new Set();
+    // The player's own status, [title, detail], and the relays of the
+    // localhost bot seats that the player relays, by the seat's player ID.
+    this.own = null;
+    this.seats = new Map();
     this.commandRetry = null;
     this.commandFailures = 0;
     this.state = null;
@@ -94,7 +102,7 @@ export class ExamplePlayer {
 
   async request(path, body, method = body ? "POST" : "GET") {
     const controller = new AbortController();
-    this.requestController = controller;
+    this.controllers.add(controller);
     const timeout = setTimeout(() => controller.abort(), 8000);
     try {
       const response = await this.fetcher(path, {
@@ -112,7 +120,7 @@ export class ExamplePlayer {
       return result;
     } finally {
       clearTimeout(timeout);
-      if (this.requestController === controller) this.requestController = null;
+      this.controllers.delete(controller);
     }
   }
 
@@ -137,6 +145,116 @@ export class ExamplePlayer {
     this.onState(state);
     this.scheduleDeadline();
     this.scheduleTurn();
+    this.relaySeats();
+  }
+
+  // Reports the player's own status, with a line for each localhost bot
+  // seat that the player relays.
+  status(title, detail) {
+    this.own = [title, detail];
+    this.report();
+  }
+
+  report() {
+    const seats = [...this.seats.values()].filter((seat) => seat.line);
+    if (seats.length === 0) {
+      if (this.own) this.onStatus(...this.own);
+      return;
+    }
+    const lines = seats.map((seat) => `${seat.bot.display_name}: ${seat.line}`);
+    const [title, detail] = this.own ?? ["Your localhost bot seats", ""];
+    this.onStatus(title, [detail, ...lines].filter(Boolean).join(" · "));
+  }
+
+  // The seat relays: outside a demo, the player who added each
+  // localhost bot seat delivers its turn to its bot, on the seat's port, as it
+  // does its own. Each seat's turn is read with player_id, and the seat's bot
+  // submits it with the seat's submit token. A seat's bot that isn't running
+  // is asked again until it is; one that refused the turn waits for the next.
+  relaySeats() {
+    const state = this.state;
+    if (this.demo || this.stopped || !state) return;
+    const relayed = state.relayed_bots ?? [];
+    if (relayed.length === 0 && this.seats.size === 0) return;
+    for (const [playerID, seat] of this.seats) {
+      if (!relayed.some((bot) => bot.player_id === playerID)) {
+        clearTimeout(seat.retry);
+        this.seats.delete(playerID);
+      }
+    }
+    for (const bot of relayed) {
+      if (!this.seats.has(bot.player_id)) this.seats.set(bot.player_id, { bot, done: null, inFlight: false, retry: null, failures: 0, line: "" });
+      const seat = this.seats.get(bot.player_id);
+      seat.bot = bot;
+      const key = `${state.game_id}:${state.generation_id}`;
+      if (this.ended || state.outcome) {
+        clearTimeout(seat.retry);
+        seat.retry = null;
+        seat.line = "game over.";
+      } else if (seat.done !== key && !seat.inFlight && !seat.retry) {
+        void this.deliverSeat(seat, key);
+      }
+    }
+    this.report();
+  }
+
+  setSeatLine(seat, line) {
+    seat.line = line;
+    this.report();
+  }
+
+  async deliverSeat(seat, key) {
+    const { bot } = seat;
+    seat.inFlight = true;
+    this.setSeatLine(seat, `sending this turn to the bot on port ${bot.port}.`);
+    try {
+      const delivery = await this.request(`/game/from-lobby/${encodeURIComponent(this.lobbyID)}/turn-delivery?player_id=${encodeURIComponent(bot.player_id)}`);
+      // A newer turn that arrived meanwhile is sent by relaySeats in finally.
+      if (this.stopped || `${this.state.game_id}:${this.state.generation_id}` !== key) return;
+      if (delivery.turn?.generation?.id !== this.state.generation_id) {
+        // The server is past this state's turn, whose next state brings the
+        // newer one; asking again for this turn would only repeat the read.
+        seat.done = key;
+        return;
+      }
+      await this.deliver(delivery, bot.port);
+      if (this.stopped) return;
+      seat.done = key;
+      seat.failures = 0;
+      this.setSeatLine(seat, "has this turn and submits it itself.");
+    } catch (error) {
+      if (this.stopped) return;
+      const again = (ms) => {
+        seat.retry = setTimeout(() => {
+          seat.retry = null;
+          this.relaySeats();
+        }, ms);
+      };
+      if (error instanceof BotError && error.kind === "unreachable") {
+        this.setSeatLine(seat, `not running. ${error.message} Trying again…`);
+        again(this.botRetryDelay);
+      } else if (error instanceof BotError) {
+        seat.done = key;
+        this.setSeatLine(seat, error.kind === "too-slow" ? error.message : `refused the turn. ${error.message}`);
+      } else if (error.status === 409) {
+        // Nothing to play: the seat's team is out, its turn is complete, or
+        // the game ended, which the next state says.
+        seat.done = key;
+        this.setSeatLine(seat, error.type === GAME_ENDED_PROBLEM ? "game over." : "nothing to play this turn.");
+      } else if ([401, 403, 404, 422].includes(error.status)) {
+        seat.done = key;
+        this.setSeatLine(seat, error.message);
+      } else {
+        seat.failures++;
+        this.setSeatLine(seat, "reconnecting; the turn is sent when the server responds.");
+        again(Math.min(this.retryDelay * 2 ** Math.min(seat.failures - 1, 5), 10000));
+      }
+    } finally {
+      seat.inFlight = false;
+      // relaySeats skipped this seat while its delivery was in flight, so a
+      // turn that arrived meanwhile is sent now.
+      if (!this.stopped) this.relaySeats();
+    }
   }
 
   // A player that waits for the others, because it completed its turn or
@@ -174,20 +292,20 @@ export class ExamplePlayer {
     // plays a hosted or an uploaded bot without the page, which says so.
     if (!this.demo && this.state.bot?.kind !== "localhost") {
       const served = serverBotStatus(this.state.bot);
-      if (served) this.onStatus(...served);
+      if (served) this.status(...served);
       return;
     }
     const key = `${this.state.game_id}:${this.state.generation_id}`;
     if (this.failed === key) return;
     if (this.ended || this.state.outcome) {
       // The final generation has no turn to play.
-      this.onStatus("Game over", this.state.outcome?.summary || "The game has ended.");
+      this.status("Game over", this.state.outcome?.summary || "The game has ended.");
     } else if (!this.playing(this.state)) {
       // A rejected turn pauses the player until it is resumed.
-      if (this.attention) this.onStatus("Player needs attention", this.attention);
-      else this.onStatus("Paused", "This player will wait before submitting its next turn.");
+      if (this.attention) this.status("Player needs attention", this.attention);
+      else this.status("Paused", "This player will wait before submitting its next turn.");
     } else if (this.state.submitted) {
-      this.onStatus("Turn submitted", "Waiting for the other player to finish.");
+      this.status("Turn submitted", "Waiting for the other player to finish.");
     } else if (this.delivered === key) {
       // The bot has the turn, and the next generation or the deadline ends it.
     } else if (!this.demo) {
@@ -215,7 +333,7 @@ export class ExamplePlayer {
       this.remember(null);
       this.receive(result);
       const order = submitted.commands[0]?.parameters;
-      this.onStatus("Example player running", order
+      this.status("Example player running", order
         ? `Sent 1 soldier: Castle ${order.origin_castle_id + 1} → Castle ${order.destination_castle_id + 1}.`
         : "No enemy castle or available soldiers. Passed this turn.");
     } catch (error) {
@@ -239,7 +357,7 @@ export class ExamplePlayer {
         this.enabled = false;
       } else {
         // A lost command response is retried with the original UUID and body.
-        this.onStatus("Reconnecting", "The same turn will be retried when the server responds.");
+        this.status("Reconnecting", "The same turn will be retried when the server responds.");
         this.commandFailures++;
         this.commandRetry = setTimeout(() => {
           this.commandRetry = null;
@@ -261,17 +379,17 @@ export class ExamplePlayer {
     const key = `${state.game_id}:${state.generation_id}`;
     this.inFlight = true;
     try {
-      this.onStatus("Your bot is playing", "Sending this turn to your bot.");
+      this.status("Your bot is playing", "Sending this turn to your bot.");
       const delivery = await this.request(`/game/from-lobby/${encodeURIComponent(this.lobbyID)}/turn-delivery`);
       if (this.stopped) return;
       // A delivery read before the next generation arrived would be refused
       // by the server, so only the current turn's is posted.
       if (delivery.turn?.generation?.id !== state.generation_id || `${this.state.game_id}:${this.state.generation_id}` !== key) return;
-      await this.deliver(delivery);
+      await this.deliver(delivery, this.state.bot?.port ?? defaultBotPort);
       if (this.stopped) return;
       this.commandFailures = 0;
       this.delivered = key;
-      this.onStatus("Your bot is playing", "Your bot has this turn and submits it itself. Waiting for the other players.");
+      this.status("Your bot is playing", "Your bot has this turn and submits it itself. Waiting for the other players.");
       this.scheduleDeadline();
     } catch (error) {
       if (this.stopped) return;
@@ -288,7 +406,7 @@ export class ExamplePlayer {
         this.attention = error.message;
         this.enabled = false;
       } else {
-        this.onStatus("Reconnecting", "This turn will be sent to your bot when the server responds.");
+        this.status("Reconnecting", "This turn will be sent to your bot when the server responds.");
         this.commandFailures++;
         this.commandRetry = setTimeout(() => {
           this.commandRetry = null;
@@ -307,14 +425,14 @@ export class ExamplePlayer {
   botFailed(error) {
     this.failed = `${this.state.game_id}:${this.state.generation_id}`;
     if (error.kind === "unreachable") {
-      this.onStatus("Your bot is not running", `${error.message} Trying again…`);
+      this.status("Your bot is not running", `${error.message} Trying again…`);
       this.commandRetry = setTimeout(() => {
         this.commandRetry = null;
         this.failed = null;
         this.scheduleTurn();
       }, this.botRetryDelay);
     } else {
-      this.onStatus(error.kind === "too-slow" ? "Your bot was too slow" : "Your bot refused the turn", error.message);
+      this.status(error.kind === "too-slow" ? "Your bot was too slow" : "Your bot refused the turn", error.message);
     }
     this.scheduleDeadline();
   }
@@ -327,7 +445,7 @@ export class ExamplePlayer {
       .then((state) => { this.refreshFailures = 0; this.receive(state); })
       .catch((error) => {
         if (this.stopped) return;
-        this.onStatus("Waiting for connection", error.message);
+        this.status("Waiting for connection", error.message);
         if (!error.status || error.status >= 500) {
           this.refreshFailures++;
           this.refreshRetry = setTimeout(() => { this.refreshRetry = null; void this.refresh(); }, Math.min(500 * 2 ** Math.min(this.refreshFailures - 1, 5), 10000));
@@ -362,7 +480,8 @@ export class ExamplePlayer {
     clearTimeout(this.commandRetry);
     clearTimeout(this.refreshRetry);
     clearTimeout(this.deadlineTimer);
-    this.requestController?.abort();
+    for (const seat of this.seats.values()) clearTimeout(seat.retry);
+    for (const controller of this.controllers) controller.abort();
     this.subscription.unsubscribe();
   }
 }

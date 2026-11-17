@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { describeGameBot, playedByServer } from "./kinds";
+import { describeGameBot, describeRelayedBot, playedByServer } from "./kinds";
 
 describe("the bot that plays your seat", () => {
   test("is played by the server unless it is your localhost bot or a default bot", () => {
@@ -13,8 +13,19 @@ describe("the bot that plays your seat", () => {
 
   test("is named for the game view's player list", () => {
     expect(describeGameBot({ kind: "localhost" })).toBe(
-      "Your localhost bot, relayed by this tab",
+      "Your localhost bot on port 41414, relayed by this tab",
     );
+    expect(describeGameBot({ kind: "localhost", port: 41415 })).toBe(
+      "Your localhost bot on port 41415, relayed by this tab",
+    );
+    expect(
+      describeRelayedBot({
+        player_id: "seat",
+        team_color: 2,
+        display_name: "Localhost bot (port 41416)",
+        port: 41416,
+      }),
+    ).toBe("Your localhost bot seat on port 41416, relayed by this tab");
     expect(describeGameBot({ kind: "default", level: 2 })).toBe(
       "Default bot, level 2, played by the server",
     );
