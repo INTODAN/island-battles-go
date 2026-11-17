@@ -108,7 +108,7 @@ export async function deliverTurn(delivery, { port = defaultBotPort, fetch = glo
   const body = (await response.text().catch(() => "")).trim();
   const said = body === "" ? "" : `\n${body.split("\n").slice(-maxErrorLines).join("\n")}`;
   if (response.status === 422) {
-    throw new BotError("refused", `Your bot did not understand the turn. Upgrade its SDK (island-battles-python, or the Go SDK) to one that takes turn deliveries.${said}`);
+    throw new BotError("refused", `Your bot did not understand the turn: its SDK is older than the game. Upgrade it and restart the bot: uv sync --upgrade-package island-battles-python in the bot's folder (or go get -u github.com/INTODAN/island-battles-go/clients/island-battles-go for the Go SDK).${said}`);
   }
   throw new BotError("refused", `Your bot refused the turn (HTTP ${response.status}).${said}`);
 }

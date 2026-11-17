@@ -3,7 +3,8 @@
 #
 # Starting this workflow is the approval: only people with write access can,
 # only from main, and the deploy jobs run in the `production` environment,
-# which is limited to main. It runs the checks, deploys (the backend, then the
+# which is limited to main. It runs the checks and checks the bot template with
+# the SDK it publishes (scripts/check-template.sh), deploys (the backend, then the
 # web client in /play/, then the smoke test), and only after all of that
 # creates the tags and the GitHub release. A failed check or deploy leaves no
 # tag and no release. The VM is deployed from INTODAN/mpl since the cutover
@@ -70,11 +71,31 @@ jobs:
           cat "$RUNNER_TEMP/summary" >>"$GITHUB_STEP_SUMMARY"
           cat "$RUNNER_TEMP/outputs" >>"$GITHUB_OUTPUT"
 
+  # The bot template, installed as the bot tutorial installs it (with the newest
+  # island-battles-python), with the SDK this release publishes: built from
+  # this commit at the release's version. Players copy the template from main
+  # after the release, and only the newest SDK reads the turns of the backend
+  # this release deploys, so a template that fails here stops the release
+  # before anything deploys.
+  template:
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Check the bot template with this release's SDK
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: scripts/check-template.sh "$VERSION"
+
   # Each deploy is a call of the Deploy workflow, whose job runs in the
   # `production` environment (an environment can't be set on a calling job),
   # needs id-token from here, and holds the group `deploy` while it runs.
   deploy_backend:
-    needs: plan
+    needs: [plan, template]
     uses: ./.github/workflows/deploy.yml
     permissions:
       contents: read
@@ -199,7 +220,7 @@ jobs:
 
   # Says why nothing was tagged. The failed job above is the cause.
   not_released:
-    needs: [guard, check, plan, deploy_backend, deploy_web, smoke, release]
+    needs: [guard, check, plan, template, deploy_backend, deploy_web, smoke, release]
     if: ${{ always() && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
     runs-on: ubuntu-24.04
     steps:

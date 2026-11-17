@@ -18,7 +18,7 @@
 - `clients/island-battles-python/`: The Python gameplay SDK and the `island-battles-bot` command (serve, check and run a bot function). Its models are generated; only the turn runtime, the bot helpers and model utilities are hand-written.
 - `clients/island-battles-go/cmd/island-battles-mcp/`: A local MCP server for players: their AI agent investigates a game with them, from a demo file or by lobby code, with the bot logs that the demo or a watcher may see. See [its README](clients/island-battles-go/cmd/island-battles-mcp/README.md) to install it; the 3D client's **Ask your AI agent** button copies a prompt that sets it up.
 - `clients/island-battles-go/`: The Go SDK for writing bots, its own Go module (`github.com/INTODAN/island-battles-go/clients/island-battles-go`): a bot is a function, and `islandbattles.Main` gives its program `serve`, `check`, `fixture` and `run`, which plays a seat without a browser. Its `examples/` hold the three default bots, which the backend plays from there. See [its README](clients/island-battles-go/README.md).
-- `templates/python-bot/`: A starter project for a Python bot (uv, ruff, ty, pytest, scripts and skills for coding agents) that depends on the published SDK. Copy it out to start a bot. See [its README](templates/python-bot/README.md).
+- `templates/python-bot/`: A starter project for a Python bot (uv, ruff, ty, pytest, scripts and skills for coding agents) that depends on the published SDK. It has no `uv.lock`, so a copy's first `uv sync` takes the newest SDK. Copy it out to start a bot. See [its README](templates/python-bot/README.md).
 - `clients/island-battles-web/`: The 3D browser client (TypeScript, Babylon.js, Bun and Biome). Currently a scaffold. See [its README](clients/island-battles-web/README.md).
 - `clients/conformance/`: Language-agnostic tests that verify any gameplay client through a JSON Lines adapter.
 - `integration/island_battles/`: Host-specific lobby/game binding acceptance checks.
@@ -75,7 +75,7 @@ Teams and readiness belong to the generic lobby. Starting freezes a roster. The 
 |---|---|
 | Go | `go vet`, `golangci-lint` (pinned to the version in the workflow), a `gofmt -l` check of the two modules (the host and the Go SDK in `clients/island-battles-go/`), and `go test` with Testcontainers on the runner's Docker |
 | API contract | the player OpenAPI `--check`, `scripts/sync-lobby-api.sh --check` and the generated gameplay models' `--check` |
-| Python | the bot client's tests, the Python bot runner's tests and the offline gameplay client conformance tests, with `uv --locked`, for the Python client and the Go SDK's adapter, and the [Python bot template](templates/python-bot/README.md)'s `scripts/check.sh` against the locked PyPI SDK and against `clients/island-battles-python` |
+| Python | the bot client's tests, the Python bot runner's tests and the offline gameplay client conformance tests, with `uv --locked`, for the Python client and the Go SDK's adapter, and the [Python bot template](templates/python-bot/README.md)'s `scripts/check.sh`, installed as the bot tutorial installs it, with `clients/island-battles-python` as the newest SDK (`scripts/check-template.sh`, which the release also runs with its own version before it deploys) |
 | JS | `node --test` for the tests in `backend/demo`, `backend/demoviewer` and `backend/mapbuilder` |
 | Deploy | `python3 -I -m unittest discover -s deploy -p 'test_*.py'` |
 

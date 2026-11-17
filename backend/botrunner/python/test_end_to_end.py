@@ -73,7 +73,7 @@ class EndToEndTest(unittest.TestCase):
     def test_plays_a_packaged_template_bot(self) -> None:
         work = Path(tempfile.mkdtemp(prefix="bot-runner-e2e-"))
         self.addCleanup(shutil.rmtree, work, True)
-        # The template locks the SDK from PyPI; use this repository's, which
+        # The template takes the SDK from PyPI; use this repository's, which
         # has the worker mode, as a wheel, since a package holds wheels only.
         run(["uv", "build", "--wheel", "--out-dir", str(work / "wheels"), str(SDK)], REPOSITORY)
         [wheel] = (work / "wheels").glob("island_battles_python-*.whl")

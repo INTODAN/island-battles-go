@@ -80,7 +80,9 @@ describe("the localhost bot", () => {
   test("an old SDK's answer asks for an upgrade", async () => {
     expect((await failure(reply("{}", 200))).kind).toBe("refused");
     const old = await failure(reply("the body is not a BotTurn", 422));
-    expect(old.message).toContain("Upgrade its SDK");
+    expect(old.message).toContain(
+      "uv sync --upgrade-package island-battles-python",
+    );
   });
 
   test("health is true only for an OK answer", async () => {
