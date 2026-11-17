@@ -98,4 +98,4 @@ The tools are tested over an in-memory MCP connection against [`testdata/demo.js
 go test ./clients/island-battles-go/cmd/island-battles-mcp
 ```
 
-The demo format is the game's `Demo` schema in [`backend/api/openapi.json`](../../../../backend/api/openapi.json). When its `schema_version` changes, change `demoSchemaVersion` in [`demo.go`](demo.go).
+The demo format is the game's `Demo` schema in [`backend/api/openapi.json`](../../../../backend/api/openapi.json). It reads version 2, whose castles have `burst_debt` (#281), and refuses a demo of another version, such as one saved before that release. When its `schema_version` changes, change `demoSchemaVersion` in [`demo.go`](demo.go).

@@ -417,7 +417,7 @@ func TestDemoFilesAreCheckedAndMayBePacked(t *testing.T) {
 	if overview := call[Overview](t, client, "load_demo", map[string]any{"path": write("packed.json.gz", packed.Bytes())}); overview.Turns != 6 {
 		t.Fatalf("packed demo = %+v", overview)
 	}
-	older := strings.Replace(string(raw), `"schema_version": 1`, `"schema_version": 0`, 1)
+	older := strings.Replace(string(raw), `"schema_version": 2`, `"schema_version": 1`, 1)
 	for name, content := range map[string]string{
 		"not JSON":        "<html>",
 		"a map file":      `{"map_name":"Islands","castles":[]}`,
@@ -428,7 +428,7 @@ func TestDemoFilesAreCheckedAndMayBePacked(t *testing.T) {
 			t.Errorf("%s: message = %q", name, message)
 		}
 	}
-	if message := fails(t, client, "load_demo", map[string]any{"path": write("older.json", []byte(older))}); !strings.Contains(message, "format version 0") {
+	if message := fails(t, client, "load_demo", map[string]any{"path": write("older.json", []byte(older))}); !strings.Contains(message, "format version 1, and this server reads only version 2") {
 		t.Fatalf("older format message = %q", message)
 	}
 	// Both games stay loaded, and game names one.

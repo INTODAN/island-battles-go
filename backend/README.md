@@ -389,7 +389,7 @@ A roster player can save the game as a **demo file** at any time, and watch it l
 ```json
 {
   "format": "island-battles-demo",
-  "schema_version": 1,
+  "schema_version": 2,
   "saved_at": "2026-10-31T12:00:00Z",
   "game_id": 12,
   "teams": [{"color": 1, "name": "Blue", "players": ["Alex"]}],
@@ -402,7 +402,7 @@ A roster player can save the game as a **demo file** at any time, and watch it l
 - `frames` holds every generation played when the demo was saved, in order, each the same `Generation` board view that players and the replay receive.
 - `logs` holds one entry per frame, in the same order, each a `GenerationLogs` as the [game log read](#game-logs) returns it. Its lines follow that read's visibility rule when the demo is saved: a demo saved during the game holds only the saver's team's lines, and one saved after the end holds every team's. `hidden_team_colors` names the teams left out.
 - `outcome` is null when the demo was saved while the game was running.
-- `schema_version` is `models.DemoSchemaVersion`. Raise it whenever the format, or a type it holds such as `Generation`, changes in a way the viewer can't read. Following the [breaking-changes skill](../.agents/skills/breaking-changes/SKILL.md), the viewer opens only the current version and keeps no readers for older ones.
+- `schema_version` is `models.DemoSchemaVersion`. Raise it whenever the format, or a type it holds such as `Generation`, changes in a way the viewer can't read. Following the [breaking-changes skill](../.agents/skills/breaking-changes/SKILL.md), the viewer opens only the current version and keeps no readers for older ones. Version 2 (#281) gave every castle the required `burst_debt`; the viewer, the 3D client and the player MCP refuse a version 1 demo as one from an earlier version of Island Battles.
 
 The request loads the generations with the replay's batched loader and the visible lines in one query, by generation ID and player, so the number of queries doesn't grow with the game. It takes no game lock, like the replay: the game is read first, so a game that ends meanwhile is saved by the stricter rule. It streams the file a frame and a generation's logs at a time, without escaping `<`, `>` and `&`. Like the other game reads, the request ends with a game [retention](#game-retention) pass.
 

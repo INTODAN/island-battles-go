@@ -2,15 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DemoFileError, describeDemo, fileSizeProblem, maxDemoBytes, readDemo } from "./demo-file.mjs";
 
-const expected = { format: "island-battles-demo", schemaVersion: 1 };
+const expected = { format: "island-battles-demo", schemaVersion: 2 };
 
 // demo is a two-generation demo saved by Alex on Blue after the game ended,
 // in the Demo schema of backend/api/openapi.json.
 function demo() {
-  const castle = (id, team_color, soldiers, x) => ({ id, team_color, soldiers, x, y: 0, upgrades: { speed: 1, clash_stop_generations: 1 } });
+  const castle = (id, team_color, soldiers, x) => ({ id, team_color, soldiers, x, y: 0, upgrades: { speed: 1, clash_stop_generations: 1 }, burst_debt: 0 });
   return {
     format: "island-battles-demo",
-    schema_version: 1,
+    schema_version: 2,
     saved_at: "2026-10-31T12:00:00Z",
     game_id: 12,
     teams: [{ color: 1, name: "Blue", players: ["Alex"] }, { color: 2, name: "Red", players: ["Sam"] }],
@@ -62,11 +62,12 @@ test("files that aren't demos are refused plainly", () => {
 
 test("demos of other format versions are refused with their version", () => {
   rejects({ ...demo(), schema_version: 0 }, /not a version number/, "version 0");
-  rejects({ ...demo(), schema_version: 2 }, /a later version of Island Battles \(demo format version 2\)\. This viewer opens only version 1\./, "a later version");
-  rejects({ ...demo(), schema_version: "1" }, /not a version number/, "a version as text");
+  rejects({ ...demo(), schema_version: 3 }, /a later version of Island Battles \(demo format version 3\)\. This viewer opens only version 2\./, "a later version");
+  rejects({ ...demo(), schema_version: "2" }, /not a version number/, "a version as text");
   rejects({ ...demo(), schema_version: undefined }, /not a version number/, "no version");
+  // A version 1 demo, saved before castles had burst_debt.
   const older = { format: "island-battles-demo", schema_version: 1 };
-  assert.throws(() => readDemo(JSON.stringify(older), { ...expected, schemaVersion: 2 }), /an earlier version of Island Battles \(demo format version 1\)\. This viewer opens only version 2\./);
+  assert.throws(() => readDemo(JSON.stringify(older), expected), /an earlier version of Island Battles \(demo format version 1\)\. This viewer opens only version 2\./);
 });
 
 test("damaged demos name the value that is wrong", () => {

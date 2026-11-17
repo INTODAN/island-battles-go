@@ -687,7 +687,7 @@ export interface components {
              * @description The demo format's version. The demo viewer opens only the current version and rejects a demo saved by another version of the game.
              * @enum {integer}
              */
-            schema_version: 1;
+            schema_version: 2;
             /** @description The teams that played, with their lobby names and the display names their players had at the start. */
             teams: components["schemas"]["GameTeam"][];
         };

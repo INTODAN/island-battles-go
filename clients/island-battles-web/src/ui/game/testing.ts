@@ -56,7 +56,7 @@ export function sampleDemo(): Demo {
   ];
   return {
     format: "island-battles-demo",
-    schema_version: 1,
+    schema_version: 2,
     saved_at: "2026-10-31T12:00:00Z",
     game_id: 12,
     teams: [

@@ -9,7 +9,7 @@ import {
 } from "./demoFile";
 import { sampleDemo } from "./testing";
 
-const expected = { format: "island-battles-demo", schemaVersion: 1 };
+const expected = { format: "island-battles-demo", schemaVersion: 2 };
 
 function rejects(file: unknown, pattern: RegExp, name: string) {
   const text = typeof file === "string" ? file : JSON.stringify(file);
@@ -69,12 +69,12 @@ describe("readDemo", () => {
       "version 0",
     );
     rejects(
-      { ...sampleDemo(), schema_version: 2 },
-      /a later version of Island Battles \(demo format version 2\)\. This viewer opens only version 1\./,
+      { ...sampleDemo(), schema_version: 3 },
+      /a later version of Island Battles \(demo format version 3\)\. This viewer opens only version 2\./,
       "a later version",
     );
     rejects(
-      { ...sampleDemo(), schema_version: "1" },
+      { ...sampleDemo(), schema_version: "2" },
       /not a version number/,
       "a version as text",
     );
@@ -83,10 +83,9 @@ describe("readDemo", () => {
       /not a version number/,
       "no version",
     );
+    // A version 1 demo, saved before castles had burst_debt.
     const older = { format: "island-battles-demo", schema_version: 1 };
-    expect(() =>
-      readDemo(JSON.stringify(older), { ...expected, schemaVersion: 2 }),
-    ).toThrow(
+    expect(() => readDemo(JSON.stringify(older))).toThrow(
       /an earlier version of Island Battles \(demo format version 1\)\. This viewer opens only version 2\./,
     );
   });
@@ -281,7 +280,7 @@ describe("file checks", () => {
     const wrong = new File(["hello"], "notes.txt");
     await expect(readDemoFile(wrong)).rejects.toThrow(/it is not JSON/);
     const later = new File(
-      [JSON.stringify({ ...sampleDemo(), schema_version: 2 })],
+      [JSON.stringify({ ...sampleDemo(), schema_version: 3 })],
       "later.json",
     );
     await expect(readDemoFile(later)).rejects.toThrow(/a later version/);

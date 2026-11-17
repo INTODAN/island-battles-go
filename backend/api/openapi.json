@@ -679,7 +679,7 @@
           "schema_version": {
             "description": "The demo format's version. The demo viewer opens only the current version and rejects a demo saved by another version of the game.",
             "enum": [
-              1
+              2
             ],
             "format": "int64",
             "type": "integer"

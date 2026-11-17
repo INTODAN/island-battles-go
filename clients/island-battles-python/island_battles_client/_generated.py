@@ -408,7 +408,7 @@ class Demo(GameModel):
     """
     When the demo was saved.
     """
-    schema_version: Literal[1]
+    schema_version: Literal[2]
     """
     The demo format's version. The demo viewer opens only the current version and rejects a demo saved by another version of the game.
     """

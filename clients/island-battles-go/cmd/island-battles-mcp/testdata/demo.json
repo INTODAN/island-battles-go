@@ -1,6 +1,6 @@
 {
  "format": "island-battles-demo",
- "schema_version": 1,
+ "schema_version": 2,
  "saved_at": "2026-11-16T12:00:00Z",
  "game_id": 7,
  "teams": [
@@ -35,9 +35,12 @@
      "x": -4,
      "y": 0,
      "upgrades": {
+      "burst_potential": 1,
       "clash_stop_generations": 1,
+      "generation_amount": 1,
       "speed": 1
-     }
+     },
+     "burst_debt": 0
     },
     {
      "id": 1,
@@ -46,9 +49,12 @@
      "x": 4,
      "y": 0,
      "upgrades": {
+      "burst_potential": 1,
       "clash_stop_generations": 1,
+      "generation_amount": 1,
       "speed": 1
-     }
+     },
+     "burst_debt": 0
     },
     {
      "id": 2,
@@ -57,9 +63,12 @@
      "x": 0,
      "y": 3,
      "upgrades": {
+      "burst_potential": 1,
       "clash_stop_generations": 1,
+      "generation_amount": 1,
       "speed": 1
-     }
+     },
+     "burst_debt": 0
     }
    ],
    "soldier_groups": [],
@@ -75,9 +84,12 @@
      "x": -4,
      "y": 0,
      "upgrades": {
+      "burst_potential": 1,
       "clash_stop_generations": 1,
+      "generation_amount": 1,
       "speed": 1
-     }
+     },
+     "burst_debt": 0
     },
     {
      "id": 1,
@@ -86,9 +98,12 @@
      "x": 4,
      "y": 0,
      "upgrades": {
+      "burst_potential": 1,
       "clash_stop_generations": 1,
+      "generation_amount": 1,
       "speed": 1
-     }
+     },
+     "burst_debt": 0
     },
     {
      "id": 2,
@@ -97,9 +112,12 @@
      "x": 0,
      "y": 3,
      "upgrades": {
+      "burst_potential": 1,
       "clash_stop_generations": 1,
+      "generation_amount": 1,
       "speed": 1
-     }
+     },
+     "burst_debt": 0
     }
    ],
    "soldier_groups": [
@@ -113,7 +131,9 @@
      "destination_castle_id": 2,
      "clash_radius": 0.25,
      "upgrades": {
+      "burst_potential": 1,
       "clash_stop_generations": 1,
+      "generation_amount": 1,
       "speed": 1
      }
     },
@@ -127,7 +147,9 @@
      "destination_castle_id": 0,
      "clash_radius": 0.25,
      "upgrades": {
+      "burst_potential": 1,
       "clash_stop_generations": 1,
+      "generation_amount": 1,
       "speed": 1
      }
     }
@@ -144,9 +166,12 @@
      "x": -4,
      "y": 0,
      "upgrades": {
+      "burst_potential": 1,
       "clash_stop_generations": 1,
+      "generation_amount": 1,
       "speed": 1
-     }
+     },
+     "burst_debt": 0
     },
     {
      "id": 1,
@@ -155,9 +180,12 @@
      "x": 4,
      "y": 0,
      "upgrades": {
+      "burst_potential": 1,
       "clash_stop_generations": 1,
+      "generation_amount": 1,
       "speed": 1
-     }
+     },
+     "burst_debt": 0
     },
     {
      "id": 2,
@@ -166,9 +194,12 @@
      "x": 0,
      "y": 3,
      "upgrades": {
+      "burst_potential": 1,
       "clash_stop_generations": 1,
+      "generation_amount": 1,
       "speed": 1
-     }
+     },
+     "burst_debt": 0
     }
    ],
    "soldier_groups": [
@@ -182,7 +213,9 @@
      "destination_castle_id": 0,
      "clash_radius": 0.25,
      "upgrades": {
+      "burst_potential": 1,
       "clash_stop_generations": 1,
+      "generation_amount": 1,
       "speed": 1
      }
     }
@@ -199,9 +232,12 @@
      "x": -4,
      "y": 0,
      "upgrades": {
+      "burst_potential": 1,
       "clash_stop_generations": 1,
+      "generation_amount": 1,
       "speed": 1
-     }
+     },
+     "burst_debt": 0
     },
     {
      "id": 1,
@@ -210,9 +246,12 @@
      "x": 4,
      "y": 0,
      "upgrades": {
+      "burst_potential": 1,
       "clash_stop_generations": 1,
+      "generation_amount": 1,
       "speed": 1
-     }
+     },
+     "burst_debt": 0
     },
     {
      "id": 2,
@@ -221,9 +260,12 @@
      "x": 0,
      "y": 3,
      "upgrades": {
+      "burst_potential": 1,
       "clash_stop_generations": 1,
+      "generation_amount": 1,
       "speed": 2
-     }
+     },
+     "burst_debt": 0
     }
    ],
    "soldier_groups": [],
@@ -239,9 +281,12 @@
      "x": -4,
      "y": 0,
      "upgrades": {
+      "burst_potential": 1,
       "clash_stop_generations": 1,
+      "generation_amount": 1,
       "speed": 1
-     }
+     },
+     "burst_debt": 0
     },
     {
      "id": 1,
@@ -250,9 +295,12 @@
      "x": 4,
      "y": 0,
      "upgrades": {
+      "burst_potential": 1,
       "clash_stop_generations": 1,
+      "generation_amount": 1,
       "speed": 1
-     }
+     },
+     "burst_debt": 0
     },
     {
      "id": 2,
@@ -261,9 +309,12 @@
      "x": 0,
      "y": 3,
      "upgrades": {
+      "burst_potential": 1,
       "clash_stop_generations": 1,
+      "generation_amount": 1,
       "speed": 2
-     }
+     },
+     "burst_debt": 0
     }
    ],
    "soldier_groups": [
@@ -277,7 +328,9 @@
      "destination_castle_id": 2,
      "clash_radius": 0.25,
      "upgrades": {
+      "burst_potential": 1,
       "clash_stop_generations": 1,
+      "generation_amount": 1,
       "speed": 1
      }
     }
@@ -319,9 +372,12 @@
      "x": -4,
      "y": 0,
      "upgrades": {
+      "burst_potential": 1,
       "clash_stop_generations": 1,
+      "generation_amount": 1,
       "speed": 1
-     }
+     },
+     "burst_debt": 0
     },
     {
      "id": 1,
@@ -330,9 +386,12 @@
      "x": 4,
      "y": 0,
      "upgrades": {
+      "burst_potential": 1,
       "clash_stop_generations": 1,
+      "generation_amount": 1,
       "speed": 1
-     }
+     },
+     "burst_debt": 0
     },
     {
      "id": 2,
@@ -341,9 +400,12 @@
      "x": 0,
      "y": 3,
      "upgrades": {
+      "burst_potential": 1,
       "clash_stop_generations": 1,
+      "generation_amount": 1,
       "speed": 2
-     }
+     },
+     "burst_debt": 0
     }
    ],
    "soldier_groups": [],
