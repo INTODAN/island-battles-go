@@ -124,7 +124,9 @@ export function mountLive(
       }
       return;
     }
-    // Logs read while their turn is open are provisional: they are read again once it ends.
+    // The panel of a player never asks for the open turn (it shows the latest ended turn
+    // instead), so this is a safeguard: logs read while their turn is open would be
+    // provisional, read again once it ends.
     const state = controller?.state;
     const open =
       state !== undefined &&

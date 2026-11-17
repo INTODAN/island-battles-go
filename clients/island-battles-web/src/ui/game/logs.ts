@@ -64,11 +64,9 @@ export class LogBook {
   add(logs: GenerationLogs, options: { provisional?: boolean } = {}): boolean {
     const provisional = options.provisional === true;
     const held = this.byGeneration.get(logs.generation_id);
-    const replaces =
-      isFuller(held?.logs, logs) ||
-      (held?.provisional === true &&
-        logs.hidden_team_colors.length <= held.logs.hidden_team_colors.length);
-    if (!replaces) return false;
+    // Any answer replaces logs read while their turn was open, even one hiding more teams:
+    // otherwise the entry would stay provisional, with its read already made.
+    if (held?.provisional !== true && !isFuller(held?.logs, logs)) return false;
     this.byGeneration.set(logs.generation_id, { logs, provisional });
     return true;
   }

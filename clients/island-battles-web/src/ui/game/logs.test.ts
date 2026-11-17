@@ -86,6 +86,15 @@ describe("LogBook", () => {
     expect(book.get(5)).toBe(final);
   });
 
+  test("any answer replaces an open turn's logs, even one hiding more teams", () => {
+    const book = new LogBook();
+    book.add(logs(5, [2]), { provisional: true });
+    expect(book.add(logs(5, [2, 3]))).toBe(true);
+    expect(book.isProvisional(5)).toBe(false);
+    expect(book.settled(5)).toEqual(logs(5, [2, 3]));
+    expect(book.needsFetch(5, { ended: false, open: false })).toBe(false);
+  });
+
   test("the game ending reads an open turn's logs again", () => {
     const book = new LogBook();
     book.add(logs(9, [2]), { provisional: true });
@@ -352,6 +361,19 @@ describe("LogFetchScheduler", () => {
       [16, false],
       [21, false],
     ]);
+  });
+
+  test("closing the panel cancels the longer wait too", () => {
+    const { requests, advance, show } = setup();
+    show(1, true);
+    // Turns change for under a second: the longer wait is running.
+    for (let id = 2; id <= 5; id++) {
+      show(id, true);
+      advance(200);
+    }
+    show(5, false);
+    advance(2000);
+    expect(requests).toEqual([[1, false]]);
   });
 
   test("closing the panel cancels a waiting request", () => {
