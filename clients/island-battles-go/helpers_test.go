@@ -163,10 +163,8 @@ func TestProductionAndBurstPotentialReadTheTurnsTable(t *testing.T) {
 	if !castle.CanBurst() {
 		t.Fatal("a castle without debt can't burst")
 	}
-	for _, busy := range []Castle{{BurstDebt: 1}, {PendingBurst: 4}} {
-		if busy.CanBurst() {
-			t.Fatalf("%+v can burst", busy)
-		}
+	if busy := (Castle{BurstDebt: 1}); busy.CanBurst() {
+		t.Fatalf("%+v can burst", busy)
 	}
 }
 

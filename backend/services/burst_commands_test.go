@@ -52,10 +52,9 @@ func TestBurstRejectionsCarryProblemTypes(t *testing.T) {
 	assertTurnCounts(t, fixture, 1, 0, 0, 2)
 }
 
-// A burst is public: it is pending in the next generation, then paid out with
-// the production and owed, and the castle can't burst again until the debt is
-// repaid.
-func TestABurstIsPendingThenOwed(t *testing.T) {
+// A burst arrives in the very next generation, on top of the production, and
+// is a public debt: the castle can't burst again until the debt is repaid.
+func TestABurstArrivesInTheNextGenerationAndIsOwed(t *testing.T) {
 	fixture := newTurnFixture(t)
 	ctx := context.Background()
 	alice, bob := fixture.players[0], fixture.players[1]
@@ -84,32 +83,26 @@ func TestABurstIsPendingThenOwed(t *testing.T) {
 	castle := func(state models.GenerationState) models.CastleView {
 		return state.Generation.Castles[0]
 	}
-	// Bob sees Alice's pending burst. The castle paid 10 and produced 1.
+	// Bob sees Alice's burst and debt in the next generation: the castle paid
+	// 10, produced 1 and got the burst of 4.
 	state = completeTurn(state)
-	if got := castle(state); got.Soldiers != 21 || got.PendingBurst != 4 || got.BurstDebt != 0 {
+	if got := castle(state); got.Soldiers != 25 || got.BurstDebt != 4 {
 		t.Fatalf("after the burst: %+v", got)
-	}
-	_, err = fixture.service.Register(ctx, alice, batch(state, false, burst(0, 1)))
-	assertProblem(t, err, 409, services.BurstUnavailableProblemType, "castle 0 already has a pending burst of 4")
-	// The production and the burst arrive together, and the burst is owed.
-	state = completeTurn(state)
-	if got := castle(state); got.Soldiers != 26 || got.PendingBurst != 0 || got.BurstDebt != 4 {
-		t.Fatalf("after the payout: %+v", got)
 	}
 	_, err = fixture.service.Register(ctx, alice, batch(state, false, burst(0, 1)))
 	assertProblem(t, err, 409, services.BurstUnavailableProblemType, "castle 0 still owes 4 soldiers")
 	// Four turns of production repay the debt, and the castle grows again.
-	for range 4 {
+	for repaid := range 4 {
 		state = completeTurn(state)
-	}
-	if got := castle(state); got.Soldiers != 26 || got.BurstDebt != 0 {
-		t.Fatalf("after repaying: %+v", got)
+		if got := castle(state); got.Soldiers != 25 || got.BurstDebt != uint(3-repaid) {
+			t.Fatalf("after repaying %d: %+v", repaid+1, got)
+		}
 	}
 	if _, err := fixture.service.Register(ctx, alice, batch(state, false, burst(0, 4))); err != nil {
 		t.Fatalf("a castle without debt can't burst again: %v", err)
 	}
 	state = completeTurn(state)
-	if got := castle(state); got.Soldiers != 27 || got.PendingBurst != 4 {
+	if got := castle(state); got.Soldiers != 30 || got.BurstDebt != 4 {
 		t.Fatalf("after the second burst: %+v", got)
 	}
 }

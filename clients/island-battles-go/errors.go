@@ -38,8 +38,8 @@ var (
 	// ErrInsufficientSoldiers: a castle has too few soldiers left after this
 	// turn's reservations.
 	ErrInsufficientSoldiers = errors.New("insufficient soldiers")
-	// ErrBurstUnavailable: a burst's castle has burst debt, a pending burst,
-	// or a burst already accepted this turn.
+	// ErrBurstUnavailable: a burst's castle has burst debt or a burst
+	// already accepted this turn.
 	ErrBurstUnavailable = errors.New("burst unavailable")
 	// ErrBurstAbovePotential: a burst orders more soldiers than the castle's
 	// burst potential, counting this turn's upgrades.

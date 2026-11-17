@@ -133,8 +133,6 @@ func (reservations turnReservations) reserveBurst(parameters simulation.BurstCas
 	switch {
 	case castle.castle.BurstDebt > 0:
 		return &GenerationError{Status: 409, Type: BurstUnavailableProblemType, Detail: fmt.Sprintf("castle %d still owes %d soldiers for its last burst", parameters.PersistentCastleID, castle.castle.BurstDebt)}
-	case castle.castle.PendingBurst > 0:
-		return &GenerationError{Status: 409, Type: BurstUnavailableProblemType, Detail: fmt.Sprintf("castle %d already has a pending burst of %d", parameters.PersistentCastleID, castle.castle.PendingBurst)}
 	case castle.bursts:
 		return &GenerationError{Status: 409, Type: BurstUnavailableProblemType, Detail: fmt.Sprintf("castle %d already bursts this turn", parameters.PersistentCastleID)}
 	}

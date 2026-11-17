@@ -73,21 +73,18 @@ type Castle struct {
 	Y         float64 `json:"y"`
 	// Upgrades is the level of every upgrade type.
 	Upgrades Upgrades `json:"upgrades"`
-	// BurstDebt is what the castle still owes for its last burst. Each
-	// generation its production repays the debt first, and only what is
-	// left over grows the castle. A capture clears it.
+	// BurstDebt is what the castle still owes for its last burst, which
+	// arrived in the generation right after the turn that ordered it. Each
+	// later generation its production repays the debt first, and only what
+	// is left over grows the castle. A capture clears it.
 	BurstDebt uint `json:"burst_debt"`
-	// PendingBurst is a burst ordered in an earlier turn, which the next
-	// generation adds to the castle on top of its production and turns into
-	// BurstDebt. A capture clears it.
-	PendingBurst uint `json:"pending_burst"`
 }
 
-// CanBurst says whether the castle may burst: it has no burst debt and no
-// pending burst. Its team must own it, and its burst potential must be
-// above 0; BurstPotential says how much it is.
+// CanBurst says whether the castle may burst: it has no burst debt. Its
+// team must own it, and its burst potential must be above 0;
+// BurstPotential says how much it is.
 func (castle Castle) CanBurst() bool {
-	return castle.BurstDebt == 0 && castle.PendingBurst == 0
+	return castle.BurstDebt == 0
 }
 
 // SoldierGroup is a group of soldiers marching from one castle to another.
@@ -223,7 +220,7 @@ type UpgradeCastleParameters struct {
 }
 
 // BurstCastleParameters orders a burst for a castle the bot's team owns,
-// which has no burst debt and no pending burst.
+// which has no burst debt.
 type BurstCastleParameters struct {
 	CastleID uint `json:"castle_id"`
 	// SoldierAmount is at least 1 and at most the castle's burst potential,

@@ -46,7 +46,7 @@ const (
 	UpgradeMaxLevelProblemType      = "urn:island-battles:problem:upgrade-max-level"
 	InsufficientSoldiersProblemType = "urn:island-battles:problem:insufficient-soldiers"
 	// BurstUnavailableProblemType rejects a burst of a castle that has burst
-	// debt, a pending burst, or a burst already accepted this turn.
+	// debt or a burst already accepted this turn.
 	BurstUnavailableProblemType = "urn:island-battles:problem:burst-unavailable"
 	// BurstAbovePotentialProblemType rejects a burst above the castle's
 	// burst potential.

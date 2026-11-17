@@ -51,7 +51,7 @@ func TestGameStateRoundTrip(t *testing.T) {
 		t.Fatalf("loaded state: %+v", state)
 	}
 	if loaded := state.Castles[2]; loaded.ID != 2 || loaded.TeamColor != 2 || loaded.Soldiers != 15 ||
-		loaded.Position != castle.Position || loaded.Upgrades[models.SpeedUpgrade] != 3 || loaded.BurstDebt != 4 || loaded.PendingBurst != 0 {
+		loaded.Position != castle.Position || loaded.Upgrades[models.SpeedUpgrade] != 3 || loaded.BurstDebt != 4 {
 		t.Fatalf("loaded castle: %+v", loaded)
 	}
 	expectedGroup := simulation.SoldierGroup{
@@ -63,7 +63,7 @@ func TestGameStateRoundTrip(t *testing.T) {
 	}
 
 	state.Castles[0].TeamColor, state.Castles[0].Soldiers = 2, 4
-	state.Castles[1].PendingBurst = 6
+	state.Castles[1].BurstDebt = 6
 	state.SoldierGroups[5] = &simulation.SoldierGroup{
 		ID: 5, TeamColor: 1, Soldiers: 3, Position: state.Castles[0].Position, OriginCastleID: 0, DestinationCastleID: 1,
 		ClashRadius: models.DefaultClashRadius, Upgrades: models.Upgrades{}.Clone(),

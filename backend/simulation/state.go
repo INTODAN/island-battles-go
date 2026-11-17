@@ -33,11 +33,9 @@ type Castle struct {
 	// BurstDebt is what the castle still owes for its last burst; its
 	// production repays it before the castle grows again.
 	BurstDebt uint
-	// PendingBurst is a burst ordered in an earlier turn, which this turn's
-	// production pays out.
-	PendingBurst uint
-	// OrderedBurst is a burst ordered this turn. IncreaseSoldierAmount makes
-	// it the pending burst, so it is never stored.
+	// OrderedBurst is a burst ordered this turn. The turn's
+	// IncreaseSoldierAmount adds it to the castle and makes it the debt, so
+	// it is never stored.
 	OrderedBurst uint
 }
 

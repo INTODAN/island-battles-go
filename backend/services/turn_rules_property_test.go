@@ -19,7 +19,7 @@ type modelCastle struct {
 	teamColor  uint
 	unreserved uint
 	levels     map[models.UpgradeType]int
-	// busy is a castle with burst debt, a pending burst, or a burst this turn.
+	// busy is a castle with burst debt or a burst this turn.
 	busy bool
 }
 
@@ -68,7 +68,7 @@ func playRandomTurns(t *testing.T, seed int64) {
 		board := map[uint]*modelCastle{}
 		castleIDs := []uint{missingCastleID}
 		for _, castle := range state.Generation.Castles {
-			board[castle.ID] = &modelCastle{teamColor: castle.TeamColor, unreserved: castle.Soldiers, levels: maps.Clone(castle.Upgrades), busy: castle.BurstDebt > 0 || castle.PendingBurst > 0}
+			board[castle.ID] = &modelCastle{teamColor: castle.TeamColor, unreserved: castle.Soldiers, levels: maps.Clone(castle.Upgrades), busy: castle.BurstDebt > 0}
 			castleIDs = append(castleIDs, castle.ID)
 		}
 		type acceptedRequest struct {

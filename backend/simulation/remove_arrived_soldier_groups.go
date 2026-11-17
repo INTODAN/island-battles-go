@@ -6,7 +6,7 @@ type RemoveArrivedSoldierGroupsParams struct{}
 // order, so each arrival meets the castle as the earlier arrivals left it. A
 // friendly arrival reinforces the castle; a hostile one fights its garrison and
 // captures it when more attackers than defenders arrive. A capture clears the
-// castle's burst debt and any burst its previous owner ordered.
+// castle's burst debt, including the debt of a burst that arrived this turn.
 func (RemoveArrivedSoldierGroupsParams) apply(state *GameState, events []Event) ([]Event, error) {
 	for _, soldierGroup := range state.SortedSoldierGroups() {
 		destination, err := state.castle(soldierGroup.DestinationCastleID)
@@ -22,7 +22,7 @@ func (RemoveArrivedSoldierGroupsParams) apply(state *GameState, events []Event) 
 		case soldierGroup.Soldiers > destination.Soldiers:
 			destination.TeamColor = soldierGroup.TeamColor
 			destination.Soldiers = soldierGroup.Soldiers - destination.Soldiers
-			destination.BurstDebt, destination.PendingBurst, destination.OrderedBurst = 0, 0, 0
+			destination.BurstDebt = 0
 		default:
 			destination.Soldiers -= soldierGroup.Soldiers
 		}

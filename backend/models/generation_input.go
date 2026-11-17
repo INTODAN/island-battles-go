@@ -101,8 +101,8 @@ type UpgradeCastleParameters struct {
 // BurstCastleParameters orders a burst for an owned castle. Pointers let
 // validation distinguish a missing field from 0.
 type BurstCastleParameters struct {
-	CastleID      *uint `json:"castle_id" nullable:"false" doc:"Castle your team owns, with no burst_debt and no pending_burst, and no other burst this turn."`
-	SoldierAmount *uint `json:"soldier_amount" minimum:"1" nullable:"false" doc:"Soldiers the burst adds, at most the castle's burst_potential value from GET /game/upgrades, counting the upgrades accepted before it this turn. The castle gets them at the generation after next, with its production, and repays them from its later production."`
+	CastleID      *uint `json:"castle_id" nullable:"false" doc:"Castle your team owns, with no burst_debt and no other burst this turn."`
+	SoldierAmount *uint `json:"soldier_amount" minimum:"1" nullable:"false" doc:"Soldiers the burst adds, at most the castle's burst_potential value from GET /game/upgrades, counting the upgrades accepted before it this turn. The castle gets them in the next generation, on top of its production, and repays them from its later production."`
 }
 
 type RegisterGenerationCommands struct {
@@ -181,14 +181,13 @@ type GenerationView struct {
 }
 
 type CastleView struct {
-	ID           uint     `json:"id" doc:"Castle ID, stable for the whole game."`
-	TeamColor    uint     `json:"team_color" doc:"Owning team; 0 is neutral."`
-	Soldiers     uint     `json:"soldiers"`
-	X            float64  `json:"x"`
-	Y            float64  `json:"y"`
-	Upgrades     Upgrades `json:"upgrades" doc:"Every upgrade type's level. GET /game/upgrades lists the levels and what the next one costs."`
-	BurstDebt    uint     `json:"burst_debt" doc:"Soldiers the castle still owes for its last burst. Each generation its production repays the debt first, and only what is left over grows the castle. A castle with debt can't burst. A capture clears it."`
-	PendingBurst uint     `json:"pending_burst" doc:"Soldiers of a burst ordered in an earlier turn, which the next generation adds to the castle on top of its production and turns into burst_debt. A castle with a pending burst can't burst again. A capture clears it."`
+	ID        uint     `json:"id" doc:"Castle ID, stable for the whole game."`
+	TeamColor uint     `json:"team_color" doc:"Owning team; 0 is neutral."`
+	Soldiers  uint     `json:"soldiers"`
+	X         float64  `json:"x"`
+	Y         float64  `json:"y"`
+	Upgrades  Upgrades `json:"upgrades" doc:"Every upgrade type's level. GET /game/upgrades lists the levels and what the next one costs."`
+	BurstDebt uint     `json:"burst_debt" doc:"Soldiers the castle still owes for its last burst. A burst arrives in the generation right after the turn that orders it, on top of that generation's production, and becomes the debt. Each later generation's production repays the debt first, and only what is left over grows the castle. A castle with debt can't burst. A capture clears it."`
 }
 
 type SoldierGroupView struct {

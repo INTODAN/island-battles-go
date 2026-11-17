@@ -50,10 +50,10 @@ func UpgradeCastle(castleID uint, upgradeType UpgradeType) Command {
 
 // BurstCastle builds a command that orders a burst of soldierAmount soldiers,
 // from 1 up to the castle's burst potential (BurstPotential), for a castle
-// your team owns that can burst (Castle.CanBurst). The burst is the castle's
-// PendingBurst in the next generation; the generation after adds it to the
-// castle on top of its production and makes it the castle's BurstDebt, which
-// later production repays before the castle grows again.
+// your team owns that can burst (Castle.CanBurst). The very next generation
+// adds the burst to the castle on top of its production and makes it the
+// castle's BurstDebt, which later production repays before the castle grows
+// again.
 func BurstCastle(castleID, soldierAmount uint) Command {
 	return newCommand(BurstCastleCommand, BurstCastleParameters{CastleID: castleID, SoldierAmount: soldierAmount})
 }

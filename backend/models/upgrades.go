@@ -23,7 +23,7 @@ var (
 	ErrUpgradeMaxLevel      = errors.New("upgrade is already at its maximum level")
 	ErrInsufficientSoldiers = errors.New("not enough soldiers to upgrade")
 	ErrInvalidBurst         = errors.New("invalid burst")
-	ErrBurstUnavailable     = errors.New("castle cannot burst while it has burst debt or a pending burst")
+	ErrBurstUnavailable     = errors.New("castle cannot burst while it has burst debt or has burst this turn")
 	ErrBurstAbovePotential  = errors.New("burst above the castle's burst potential")
 )
 

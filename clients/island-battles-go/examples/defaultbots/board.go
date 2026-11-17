@@ -140,23 +140,18 @@ func (board board) arrivals(castle islandbattles.Castle) []arrival {
 }
 
 // growth follows what a castle that a team owns grows by each turn: its
-// production, plus its pending burst in the first turn, less what repays its
-// burst debt.
+// production, less what repays its burst debt. The default bots don't burst,
+// and another team's burst shows only once it has arrived, as debt.
 type growth struct {
-	production, debt, pending uint
+	production, debt uint
 }
 
 func (board board) growth(castle islandbattles.Castle) growth {
-	return growth{production: islandbattles.Production(board.turn, castle), debt: castle.BurstDebt, pending: castle.PendingBurst}
+	return growth{production: islandbattles.Production(board.turn, castle), debt: castle.BurstDebt}
 }
 
 // next is what the castle grows by in the next turn.
 func (growth *growth) next() uint {
-	if growth.pending > 0 {
-		grown := growth.production + growth.pending
-		growth.debt, growth.pending = growth.pending, 0
-		return grown
-	}
 	repaid := min(growth.debt, growth.production)
 	growth.debt -= repaid
 	return growth.production - repaid
@@ -165,7 +160,7 @@ func (growth *growth) next() uint {
 // forecast follows a castle to the end of a turn, counting this one as 1, as
 // the simulation plays it: every turn a castle that a team owns grows (see
 // growth), a neutral one doesn't, then the turn's arrivals land in order. A
-// castle captured by an arrival loses its burst debt and pending burst, and
+// castle captured by an arrival loses its burst debt, and
 // grows from the next turn on. A friendly group reinforces the castle, and a
 // hostile one takes it when it has more soldiers than the castle.
 func (board board) forecast(castle islandbattles.Castle, arrivals []arrival, turns int) (owner, soldiers uint) {
@@ -184,7 +179,7 @@ func (board board) forecast(castle islandbattles.Castle, arrivals []arrival, tur
 				soldiers += landing.soldiers
 			case landing.soldiers > soldiers:
 				owner, soldiers = landing.team, landing.soldiers-soldiers
-				grows.debt, grows.pending = 0, 0
+				grows.debt = 0
 			default:
 				soldiers -= landing.soldiers
 			}

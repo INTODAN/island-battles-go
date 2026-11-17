@@ -29,28 +29,28 @@ func TestForecastGrowsOnlyCastlesATeamOwns(t *testing.T) {
 	}
 }
 
-// forecast and garrisonToHold count a castle's production, its pending burst
-// and its burst debt, as the simulation plays them, and a capture clears the
-// burst. The fixture turn's table has every level.
-func TestForecastCountsProductionAndBursts(t *testing.T) {
+// forecast and garrisonToHold count a castle's production and its burst
+// debt, as the simulation plays them, and a capture clears the debt. The
+// fixture turn's table has every level.
+func TestForecastCountsProductionAndBurstDebt(t *testing.T) {
 	view := board{turn: islandbattles.FixtureTurn()}
-	// Production 2; the pending 4 lands with turn 1's production, then turns
-	// 2 and 3 repay it, and turn 4 grows again.
-	castle := islandbattles.Castle{ID: 1, TeamColor: 1, Soldiers: 10, PendingBurst: 4, Upgrades: islandbattles.Upgrades{islandbattles.GenerationAmountUpgrade: 2}}
-	for turns, want := range []uint{10, 16, 16, 16, 18} {
+	// Production 2 and a debt of 3: turn 1 repays 2, turn 2 repays 1 and
+	// grows the castle by 1, and turn 3 grows it by 2.
+	castle := islandbattles.Castle{ID: 1, TeamColor: 1, Soldiers: 10, BurstDebt: 3, Upgrades: islandbattles.Upgrades{islandbattles.GenerationAmountUpgrade: 2}}
+	for turns, want := range []uint{10, 10, 11, 13, 15} {
 		if owner, soldiers := view.forecast(castle, nil, turns); owner != 1 || soldiers != want {
 			t.Fatalf("after %d turns: owner %d with %d, want %d", turns, owner, soldiers, want)
 		}
 	}
-	// A group of 20 lands on turn 3, when the castle has grown by 6: it
-	// holds with 14 of its soldiers.
+	// A group of 20 lands on turn 3, when the castle has grown by 3: it
+	// holds with 17 of its soldiers.
 	landing := []arrival{{turn: 3, id: 1, team: 2, soldiers: 20}}
-	if hold := view.garrisonToHold(castle, landing, 1); hold != 14 {
-		t.Fatalf("the castle must keep %d, want 14", hold)
+	if hold := view.garrisonToHold(castle, landing, 1); hold != 17 {
+		t.Fatalf("the castle must keep %d, want 17", hold)
 	}
-	// Team 2 captures it with 4 left on turn 3, and it grows 2 a turn after,
+	// Team 2 captures it with 7 left on turn 3, and it grows 2 a turn after,
 	// with no debt to repay.
-	if owner, soldiers := view.forecast(castle, landing, 4); owner != 2 || soldiers != 6 {
+	if owner, soldiers := view.forecast(castle, landing, 4); owner != 2 || soldiers != 9 {
 		t.Fatalf("after the capture: owner %d with %d", owner, soldiers)
 	}
 }
