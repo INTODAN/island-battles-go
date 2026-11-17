@@ -36,7 +36,7 @@ func TestTheAdderReadsTheTurnsOfTheLocalhostBotSeatsTheyRelay(t *testing.T) {
 		return fmt.Appendf(nil, `{"bot_localhost_port":"%d","bot_relay_player_id":%q}`, port, adder)
 	}
 	snapshot := domain.Snapshot{
-		Lobby: domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted, HostPlayerID: &host},
+		Lobby: domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted, HostPlayerID: &host, GameSettings: testutils.CircleMapSettings(5, "")},
 		Teams: teams,
 		Members: []domain.Member{
 			{PlayerID: host, DisplayName: "Alice", Active: true, MemberSettings: []byte(`{"bot":{"kind":"localhost"}}`)},
