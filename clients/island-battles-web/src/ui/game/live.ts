@@ -147,7 +147,7 @@ export function mountLive(
       for (const seat of turn.relayed_bots ?? []) {
         lines.set(seat.team_color, describeRelayedBot(seat));
       }
-      screen.setYourBots(lines);
+      screen.setYourBots(turn.team_color, lines);
     }
   }
 
