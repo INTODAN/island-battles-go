@@ -16,6 +16,7 @@ import (
 	"github.com/danielgtaylor/huma/v2/humatest"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"islandBattles/backend/dal"
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/models"
@@ -101,35 +102,92 @@ func TestWatcherReplayIsServedToWatchersOnly(t *testing.T) {
 	if response := api.Get("/game/from-lobby/"+uuid.NewString()+"/watch/replay", "Authorization: Bearer watcher"); response.Code != http.StatusNotFound {
 		t.Fatalf("unknown lobby=%d", response.Code)
 	}
+}
 
-	// Every team's game log is public: a watcher reads Alice's lines while
-	// the game runs, through the players' log read.
-	huma.Register(api, huma.Operation{OperationID: "current", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/generation"}, handler.CurrentGeneration)
-	huma.Register(api, huma.Operation{OperationID: "commands", Method: http.MethodPost, Path: "/generation/commands", SkipValidateBody: true}, handler.RegisterGenerationCommands)
-	huma.Register(api, huma.Operation{OperationID: "logs", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/logs"}, handler.GenerationLogs)
-	var state models.GenerationState
-	if err := json.Unmarshal(api.Get("/game/from-lobby/"+lobbyID+"/generation", "Authorization: Bearer alice").Body.Bytes(), &state); err != nil {
+// A watcher's log read admits whom the watch reads admit. While the game runs
+// it has no lines for anyone, a roster player included; once the game has
+// ended it has every team's.
+func TestWatcherLogsShowEveryTeamOnlyAfterTheEnd(t *testing.T) {
+	database := testutils.InitTestDB(t)
+	alice, bob, lobbyID, red, blue := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	bound, err := services.RunLobbyGame(context.Background(), database, &testutils.RecordedPublisher{}, nil, domain.Snapshot{
+		Lobby:       domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted},
+		Teams:       []domain.Team{{ID: red, Name: "Red", Order: 1}, {ID: blue, Name: "Blue", Order: 2}},
+		StartRoster: domain.StartRoster{{PlayerID: alice, TeamID: red, TeamOrder: 1}, {PlayerID: bob, TeamID: blue, TeamOrder: 2}},
+		Members:     []domain.Member{{PlayerID: alice, DisplayName: "Alice"}, {PlayerID: bob, DisplayName: "Bob"}},
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	batch := fmt.Sprintf(`{"game_id":%d,"generation_id":%d,"request_id":%q,"complete":false,"commands":[],"logs":[{"level":"info","logger":"bot","message":"holding"}]}`, state.GameID, state.GenerationID, uuid.NewString())
-	if response := api.Post("/generation/commands", "Authorization: Bearer alice", strings.NewReader(batch)); response.Code != http.StatusOK {
-		t.Fatalf("log batch=%d %s", response.Code, response.Body.String())
+	generation, err := dal.GetLatestGenerationForGame(database, bound.GameID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	logsPath := fmt.Sprintf("/game/from-lobby/%s/logs?generation_id=%d", lobbyID, state.GenerationID)
-	for credential, want := range map[string]int{"Bearer watcher": http.StatusOK, "Bearer kicked": http.StatusForbidden, "Bearer outsider": http.StatusNotFound} {
-		response := api.Get(logsPath, "Authorization: "+credential)
-		if response.Code != want {
-			t.Fatalf("%s logs=%d %s", credential, response.Code, response.Body.String())
-		}
-		if want != http.StatusOK {
-			continue
+	if err := dal.StoreGenerationLogs(database, []models.GenerationLog{
+		{GameID: bound.GameID, GenerationID: generation.ID, PlayerID: alice, Sequence: 1, Level: models.GenerationLogInfo, Logger: "bot", Message: "Red plans"},
+		{GameID: bound.GameID, GenerationID: generation.ID, PlayerID: bob, Sequence: 1, Level: models.GenerationLogInfo, Logger: "bot", Message: "Blue plans"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	watcher, kicked := uuid.NewString(), uuid.NewString()
+	handler := handlers.LobbyGame{Database: database, Publisher: &testutils.RecordedPublisher{},
+		Watchers: watchingPlayers{watching: map[string]bool{watcher: true}, kicked: map[string]bool{kicked: true}},
+		Players:  bearerPlayers{"Bearer alice": {PlayerID: alice}, "Bearer watcher": {PlayerID: watcher}, "Bearer kicked": {PlayerID: kicked}, "Bearer outsider": {PlayerID: uuid.NewString()}}}
+	_, api := humatest.New(t)
+	huma.Register(api, huma.Operation{OperationID: "watchLogs", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/watch/logs"}, handler.WatchLogs)
+	huma.Register(api, huma.Operation{OperationID: "logs", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/logs"}, handler.GenerationLogs)
+	path := fmt.Sprintf("/game/from-lobby/%s/watch/logs?generation_id=%d", lobbyID, generation.ID)
+	read := func(path, credential string) models.GenerationLogs {
+		t.Helper()
+		response := api.Get(path, "Authorization: "+credential)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s %s=%d %s", credential, path, response.Code, response.Body.String())
 		}
 		var logs models.GenerationLogs
 		if err := json.Unmarshal(response.Body.Bytes(), &logs); err != nil {
 			t.Fatal(err)
 		}
-		if len(logs.Players) != 2 || logs.Players[0].DisplayName != "Alice" || len(logs.Players[0].Lines) != 1 || logs.Players[0].Lines[0].Message != "holding" {
-			t.Fatalf("watcher's logs = %+v", logs)
+		return logs
+	}
+	messages := func(logs models.GenerationLogs) []string {
+		found := []string{}
+		for _, player := range logs.Players {
+			for _, line := range player.Lines {
+				found = append(found, line.Message)
+			}
+		}
+		return found
+	}
+
+	for credential, want := range map[string]int{"Bearer kicked": http.StatusForbidden, "Bearer outsider": http.StatusNotFound, "Bearer stranger": http.StatusUnauthorized} {
+		if response := api.Get(path, "Authorization: "+credential); response.Code != want {
+			t.Fatalf("%s watch logs=%d %s", credential, response.Code, response.Body.String())
+		}
+	}
+	for _, credential := range []string{"Bearer watcher", "Bearer alice"} {
+		if logs := read(path, credential); len(logs.Players) != 0 || !reflect.DeepEqual(logs.HiddenTeamColors, []uint{1, 2}) {
+			t.Fatalf("%s's watch logs of the running game = %+v", credential, logs)
+		}
+	}
+	// Alice's own read shows her team's lines only.
+	ownPath := fmt.Sprintf("/game/from-lobby/%s/logs?generation_id=%d", lobbyID, generation.ID)
+	if logs := read(ownPath, "Bearer alice"); !reflect.DeepEqual(messages(logs), []string{"Red plans"}) || !reflect.DeepEqual(logs.HiddenTeamColors, []uint{2}) {
+		t.Fatalf("Alice's logs of the running game = %+v", logs)
+	}
+	if response := api.Get(fmt.Sprintf("/game/from-lobby/%s/watch/logs", lobbyID), "Authorization: Bearer watcher"); response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("watch logs without a generation=%d", response.Code)
+	}
+
+	game, err := dal.FindGame(database, bound.GameID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dal.SaveGameOutcome(database, game, models.GameOutcome{Reason: models.GameOutcomeGenerationCap}); err != nil {
+		t.Fatal(err)
+	}
+	for _, reader := range []struct{ path, credential string }{{path, "Bearer watcher"}, {path, "Bearer alice"}, {ownPath, "Bearer alice"}} {
+		if logs := read(reader.path, reader.credential); !reflect.DeepEqual(messages(logs), []string{"Red plans", "Blue plans"}) || len(logs.HiddenTeamColors) != 0 {
+			t.Fatalf("%s %s after the end = %+v", reader.credential, reader.path, logs)
 		}
 	}
 }
@@ -247,13 +305,11 @@ func TestStartedGameServesItsRosterWithoutTheLobby(t *testing.T) {
 		}
 		return logs
 	}
-	// Every team's lines are public: Bob, of the other team, reads Alice's
-	// while the game runs.
-	for _, credential := range []string{"Bearer alice", "Bearer bob"} {
-		if logs := readLogs(credential); len(logs.Players) != 2 || logs.Players[0].DisplayName != "Alice" || len(logs.Players[0].Lines) != 1 || logs.Players[0].Lines[0].Message != "attacking with 5" ||
-			logs.Players[1].DisplayName != "Bob" || len(logs.Players[1].Lines) != 0 {
-			t.Fatalf("%s logs = %+v", credential, logs)
-		}
+	if logs := readLogs("Bearer alice"); len(logs.Players) != 1 || logs.Players[0].DisplayName != "Alice" || len(logs.Players[0].Lines) != 1 || logs.Players[0].Lines[0].Message != "attacking with 5" {
+		t.Fatalf("Alice's logs = %+v", logs)
+	}
+	if logs := readLogs("Bearer bob"); len(logs.Players) != 1 || logs.Players[0].DisplayName != "Bob" || len(logs.Players[0].Lines) != 0 || len(logs.HiddenTeamColors) != 1 {
+		t.Fatalf("Bob's logs = %+v", logs)
 	}
 	if response := api.Get("/game/from-lobby/"+lobbyID+"/logs", "Authorization: Bearer alice"); response.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("logs without a generation=%d", response.Code)
@@ -290,8 +346,8 @@ func TestStartedGameServesItsRosterWithoutTheLobby(t *testing.T) {
 		t.Fatalf("replay page = %+v", page)
 	}
 
-	// A demo is a download of the same frames, with every team's logs:
-	// during the game, Bob's demo holds Alice's line.
+	// A demo is a download of the same frames, with the logs its saver may
+	// see: during the game, Bob sees no line of Alice's.
 	saveDemo := func(credential string) models.Demo {
 		t.Helper()
 		response := api.Get(demoPath, "Authorization: "+credential)
@@ -311,9 +367,10 @@ func TestStartedGameServesItsRosterWithoutTheLobby(t *testing.T) {
 		}
 		return demo
 	}
-	for _, credential := range []string{"Bearer alice", "Bearer bob"} {
-		if demo := saveDemo(credential); demo.Outcome != nil || len(demo.Logs[0].Players) != 2 || len(demo.Logs[0].Players[0].Lines) != 1 || demo.Logs[0].Players[0].Lines[0].Message != "attacking with 5" {
-			t.Fatalf("%s demo logs = %+v", credential, demo.Logs)
-		}
+	if demo := saveDemo("Bearer bob"); demo.Outcome != nil || len(demo.Logs[0].Players) != 1 || demo.Logs[0].Players[0].DisplayName != "Bob" || !reflect.DeepEqual(demo.Logs[0].HiddenTeamColors, []uint{initial.TeamColor}) {
+		t.Fatalf("Bob's demo logs = %+v", demo.Logs)
+	}
+	if demo := saveDemo("Bearer alice"); len(demo.Logs[0].Players) != 1 || len(demo.Logs[0].Players[0].Lines) != 1 || demo.Logs[0].Players[0].Lines[0].Message != "attacking with 5" {
+		t.Fatalf("Alice's demo logs = %+v", demo.Logs)
 	}
 }

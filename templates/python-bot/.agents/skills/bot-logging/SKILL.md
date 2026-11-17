@@ -42,7 +42,7 @@ So log a summary, not one line per castle: with 40 castles, one line per castle 
 
 ## Where lines show up
 
-- **The game's log panel** in the lobby page's replay: every team's lines, which are public to players and watchers while the game runs. Always on. Don't log what you'd keep from your opponents.
+- **The game's log panel** in the lobby page's replay: your team's lines while the game runs, every team's after it ends. Always on.
 - **stdout** of the process that plays (`scripts/serve.sh`, `scripts/run.sh`), at `info` and above.
 - **A file**: `scripts/run.sh` appends to `bot.log`. For `serve`, redirect: `scripts/serve.sh 2>&1 | tee bot.log`.
 

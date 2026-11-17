@@ -61,11 +61,12 @@ export function mountLive(
   options: LiveOptions,
 ): { dispose(): void } {
   const { realtime, source } = options;
-  const watching = source.problemScope === "watch";
+  const { watching } = source;
   const failureText = watching ? watchFailureText : loadFailureText;
   const logs = new LogBook();
   const screen = new GameScreen(container, {
     live: true,
+    watching,
     logs,
     onBack: options.onBack,
     ...(source.backLabel === undefined ? {} : { backLabel: source.backLabel }),
@@ -78,14 +79,14 @@ export function mountLive(
         : { kind: "demo", gameId, fileName: null };
     },
     onSaveDemo: async () => saveTextFile(await source.saveDemo()),
-    requestLogs: (generationId, settled) =>
-      void fetchLogs(generationId, settled),
+    requestLogs: (generationId, ended) => void fetchLogs(generationId, ended),
   });
   screen.setTitle(source.title);
 
   let disposed = false;
   let controller: GameController | undefined;
   let gameId: number | undefined;
+  let teamColors: number[] = [];
   /** Turns that arrived before the history was loaded. */
   let pending: LiveTurn[] = [];
   let loading = false;
@@ -94,11 +95,6 @@ export function mountLive(
   /** The host removed this watcher: no more turns arrive. */
   let stopped = false;
   const requested = new Set<string>();
-
-  /** The turn that was still open when a history was read: the last of a running game. */
-  function openGeneration(demo: Demo): number | undefined {
-    return demo.outcome === null ? demo.frames.at(-1)?.id : undefined;
-  }
 
   async function openFile(file: File): Promise<void> {
     try {
@@ -111,14 +107,31 @@ export function mountLive(
     }
   }
 
-  async function fetchLogs(generationId: number, settled: boolean) {
-    const key = `${generationId}:${settled}`;
+  async function fetchLogs(generationId: number, ended: boolean) {
+    if (watching && !ended) {
+      // A watcher sees no logs while the game runs: every team is hidden, so nothing is read.
+      // Once it has ended, `/watch/logs` has every team's.
+      if (
+        logs.add({
+          generation_id: generationId,
+          players: [],
+          hidden_team_colors: teamColors,
+        })
+      ) {
+        // The panel asked while drawing: draw again once it has finished.
+        queueMicrotask(() => {
+          if (!disposed) screen.refreshLogs();
+        });
+      }
+      return;
+    }
+    const key = `${generationId}:${ended}`;
     if (requested.has(key)) return;
     requested.add(key);
     try {
       const data = await source.readLogs(generationId);
       if (disposed) return;
-      if (logs.add(data, settled)) screen.refreshLogs();
+      if (logs.add(data)) screen.refreshLogs();
     } catch {
       // Try again later, not at once: the panel asks again whenever the view redraws.
       setTimeout(() => requested.delete(key), RESYNC_RETRY_MS);
@@ -148,7 +161,7 @@ export function mountLive(
     try {
       const demo = await source.readHistory();
       if (disposed) return;
-      logs.addAll(demo.logs, openGeneration(demo));
+      logs.addAll(demo.logs);
       const turns = [...pending];
       const held = source.current();
       if (held) turns.push(held);
@@ -161,6 +174,7 @@ export function mountLive(
         demo.outcome ?? live.find((turn) => turn.outcome)?.outcome ?? null;
       pending = [];
       gameId = demo.game_id;
+      teamColors = demo.teams.map((team) => team.color);
       screen.setTitle(
         watching ? `Watching game ${demo.game_id}` : `Game ${demo.game_id}`,
       );
@@ -186,7 +200,7 @@ export function mountLive(
     try {
       const demo = await source.readHistory();
       if (disposed || !controller || demo.game_id !== gameId) return;
-      logs.addAll(demo.logs, openGeneration(demo));
+      logs.addAll(demo.logs);
       controller.merge(demo.frames, demo.outcome);
       screen.refreshLogs();
     } catch {

@@ -1,0 +1,20 @@
+/* The map builder's 3D preview (map-preview.html). */
+body {
+  position: relative;
+}
+
+.preview-note {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 6;
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(20, 32, 46, 0.92);
+  color: #fff;
+  font:
+    14px / 1.4 system-ui,
+    sans-serif;
+}

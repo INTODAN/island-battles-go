@@ -30,13 +30,9 @@ def posts(proxy) -> list[dict]:
 
 
 def own_lines(logs: dict) -> list[dict]:
-    """The lines of the client's own player, Alice. Every team's lines are public."""
-    [alice] = [
-        player
-        for player in logs["players"]
-        if player["display_name"] == "Conformance Alice"
-    ]
-    return alice["lines"]
+    """The lines of the only visible player, the client's own."""
+    assert len(logs["players"]) == 1, logs
+    return logs["players"][0]["lines"]
 
 
 def line(level: str, message: str, logger: str = PLAYER_LOGGER) -> dict:
@@ -232,22 +228,18 @@ async def test_lines_the_server_refuses_are_dropped_and_the_turn_completes(
     )
 
 
-async def test_every_teams_lines_are_public(launch, match):
+async def test_the_opponents_lines_are_hidden_until_the_game_ends(launch, match):
     alice, generation = await playing(launch, match)
     await log(alice, "info", "alice's plan")
     await alice.send({"type": "finish"})
     await match.wait_submitted(match.alice)
     await match.complete(match.bob, logs=[line("info", "bob's plan")])
-    everyone = {
-        "Conformance Alice": [line("info", "alice's plan")],
-        "Conformance Bob": [line("info", "bob's plan")],
-    }
-    # While the game runs, each player reads the other team's lines too.
-    for seat in (match.alice, match.bob):
-        view = await match.read_logs(seat, generation["id"])
-        assert {
-            player["display_name"]: player["lines"] for player in view["players"]
-        } == everyone
+    alice_view = await match.read_logs(match.alice, generation["id"])
+    bob_view = await match.read_logs(match.bob, generation["id"])
+    assert own_lines(alice_view) == [line("info", "alice's plan")]
+    assert own_lines(bob_view) == [line("info", "bob's plan")]
+    assert alice_view["hidden_team_colors"] == [match.bob.state["team_color"]]
+    assert bob_view["hidden_team_colors"] == [match.alice.state["team_color"]]
     await alice.close()
 
     # Two generations exist; play every turn up to the last over HTTP.
@@ -255,6 +247,10 @@ async def test_every_teams_lines_are_public(launch, match):
     assert final["outcome"] is not None
     for seat in (match.alice, match.bob):
         ended = await match.read_logs(seat, generation["id"])
+        assert ended["hidden_team_colors"] == []
         assert {
             player["display_name"]: player["lines"] for player in ended["players"]
-        } == everyone
+        } == {
+            "Conformance Alice": [line("info", "alice's plan")],
+            "Conformance Bob": [line("info", "bob's plan")],
+        }

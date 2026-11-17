@@ -18,7 +18,11 @@ if (dev && !desktop) {
 const outdir = desktop ? "dist-desktop" : "dist";
 await rm(outdir, { recursive: true, force: true });
 const result = await Bun.build({
-  entrypoints: ["./index.html"],
+  // map-preview.html is the map builder's 3D preview (#278), which the builder at /map/builder/
+  // shows in a frame from /play/map-preview.html. The desktop app has no map builder.
+  entrypoints: desktop
+    ? ["./index.html"]
+    : ["./index.html", "./map-preview.html"],
   outdir,
   publicPath: desktop ? "/" : "/play/",
   minify: true,

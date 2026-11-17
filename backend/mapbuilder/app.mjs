@@ -1,8 +1,8 @@
 // The map builder page. builder.mjs holds the logic; this module only draws
 // the map and turns the page's events into edits.
 import {
-  builderHello, castleRadius, checkMap, describeProblems, downloadGate, dragPosition, fieldLabel, fileName, freeSpot, lobbyGate, lobbyMessage, lobbyPageFromMessage, missingTeams,
-  newMap, openMapFile, openerState, placeProblems, problemCastle, problemsFor, serialize, teamColor, upgradeLabel, withoutCastle,
+  builderHello, castleRadius, checkMap, describeProblems, downloadGate, dragPosition, fieldLabel, fileName, freeSpot, isPreviewReady, lobbyGate, lobbyMessage, lobbyPageFromMessage,
+  missingTeams, newMap, openMapFile, openerState, placeProblems, previewFailure, previewMessage, previewPath, previewStartLimit, problemCastle, problemsFor, serialize, teamColor, upgradeLabel, withoutCastle,
 } from "./builder.mjs";
 
 const svgNamespace = "http://www.w3.org/2000/svg";
@@ -230,6 +230,104 @@ function renderErrors() {
   renderPlane();
 }
 
+// ---- 3D preview
+
+// The preview is the 3D client's map-preview.html in a frame on this origin.
+// It loads only once it is first turned on, and the page remembers the choice
+// in this browser.
+const previewSetting = "island-battles.map-builder.preview";
+const previewToggle = byID("preview-toggle");
+const previewPanel = byID("preview");
+const previewStatus = byID("preview-status");
+let previewOn = false;
+try {
+  previewOn = localStorage.getItem(previewSetting) === "on";
+} catch {
+  // Storage may be blocked; the preview then starts off.
+}
+let previewFrame = null;
+let previewStarting = false;
+let previewReady = false;
+let previewFailed = false;
+let previewQueued = false;
+
+function renderPreview() {
+  previewToggle.setAttribute("aria-pressed", String(previewOn));
+  previewToggle.textContent = previewOn ? "Hide 3D preview" : "Show 3D preview";
+  byID("views").classList.toggle("with-preview", previewOn);
+  previewPanel.hidden = !previewOn;
+  byID("preview-help").hidden = !previewOn;
+  if (previewOn && !previewFrame && !previewStarting) void startPreview();
+  // Nothing is sent while the preview is hidden: send the map as it is now.
+  sendPreview();
+}
+
+async function startPreview() {
+  previewStarting = true;
+  previewStatus.textContent = "Loading the 3D preview…";
+  // A server without the 3D client, such as the backend on its own in
+  // development, answers 404 or 403 for the page: say so instead of showing
+  // that answer in the frame.
+  let available = false;
+  try {
+    available = (await fetch(previewPath, { method: "HEAD", cache: "no-store" })).ok;
+  } catch {
+    // Unreachable counts as missing.
+  }
+  previewStarting = false;
+  if (!available) {
+    // Turning the preview off and on again asks once more.
+    previewStatus.textContent = `The 3D preview needs the 3D web client at ${previewPath}, which this server doesn't serve.`;
+    return;
+  }
+  previewFrame = html("iframe", { title: "3D preview of the map", src: previewPath });
+  // A preview whose scripts fail to load never says anything: give up on it
+  // a while after the frame has loaded.
+  previewFrame.addEventListener("load", () => {
+    setTimeout(() => {
+      if (!previewReady && !previewFailed) previewStatus.textContent = "The 3D preview didn't start. Reload the page to try again.";
+    }, previewStartLimit);
+  });
+  previewPanel.prepend(previewFrame);
+}
+
+// sendPreview posts the map to the preview at most once a frame, so a drag
+// doesn't queue a redraw for every pointer move, and not at all while the
+// preview is hidden: showing it again sends the map once.
+function sendPreview() {
+  if (!previewOn || !previewReady || previewQueued) return;
+  previewQueued = true;
+  requestAnimationFrame(() => {
+    previewQueued = false;
+    if (previewOn) previewFrame?.contentWindow?.postMessage(previewMessage(map, upgrades, drag !== null), location.origin);
+  });
+}
+
+previewToggle.addEventListener("click", () => {
+  previewOn = !previewOn;
+  try {
+    localStorage.setItem(previewSetting, previewOn ? "on" : "off");
+  } catch {
+    // The choice then lasts for this page only.
+  }
+  renderPreview();
+});
+
+// The preview says when it listens, after it loads and after any reload, or
+// why it can't draw at all.
+window.addEventListener("message", (event) => {
+  const failure = previewFailure(event, previewFrame?.contentWindow, location.origin);
+  if (failure) {
+    previewFailed = true;
+    previewStatus.textContent = failure;
+    return;
+  }
+  if (!isPreviewReady(event, previewFrame?.contentWindow, location.origin)) return;
+  previewReady = true;
+  previewStatus.textContent = "";
+  sendPreview();
+});
+
 // ---- Editing
 
 function changed() {
@@ -237,6 +335,7 @@ function changed() {
   renderTeamHint();
   scheduleCheck();
   renderCheck();
+  sendPreview();
 }
 
 function replaceMap(nextMap) {
@@ -564,6 +663,8 @@ function endDrag(event) {
   drag = null;
   if (plane.hasPointerCapture(event.pointerId)) plane.releasePointerCapture(event.pointerId);
   renderPlane();
+  // The preview draws the drag's end at once.
+  sendPreview();
 }
 plane.addEventListener("pointerup", endDrag);
 plane.addEventListener("pointercancel", endDrag);
@@ -662,3 +763,4 @@ async function loadUpgrades() {
 
 await loadUpgrades();
 replaceMap(map);
+renderPreview();

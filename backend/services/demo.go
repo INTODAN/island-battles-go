@@ -17,12 +17,14 @@ import (
 )
 
 // Demo saves a lobby's game as a demo for a roster player: every stored
-// generation so far, with every team's game log lines. It takes no game lock,
-// like Replay: a turn that commits meanwhile can at most add a frame without
-// its outcome. The number of queries doesn't grow with the length of the
-// game.
+// generation so far, and for each the game log lines that the player may see
+// now, by the rule Logs applies. It takes no game lock, like Replay: the game
+// is read first, so a game that ends meanwhile is saved by the stricter rule,
+// and a turn that commits meanwhile can at most add a frame without its
+// outcome. The number of queries doesn't grow with the length of the game.
 func (service *GenerationService) Demo(ctx context.Context, principal domain.Principal, lobbyID string) (models.Demo, error) {
-	game, err := dal.FindLobbyGame(service.Database.WithContext(ctx), lobbyID)
+	database := service.Database.WithContext(ctx)
+	game, err := dal.FindLobbyGame(database, lobbyID)
 	if err != nil {
 		return models.Demo{}, err
 	}
@@ -30,12 +32,20 @@ func (service *GenerationService) Demo(ctx context.Context, principal domain.Pri
 	if err := service.authorize(ctx, principal, game); err != nil {
 		return models.Demo{}, err
 	}
-	return service.demo(ctx, game)
+	caller, err := dal.FindFrozenPlayer(database, game.ID, principal.PlayerID)
+	if err != nil {
+		return models.Demo{}, err
+	}
+	if caller == nil {
+		return models.Demo{}, reject(404, "game not found")
+	}
+	return service.demo(ctx, game, *caller)
 }
 
-// demo saves the game as a demo, with every team's lines: they are public to
-// players and watchers alike.
-func (service *GenerationService) demo(ctx context.Context, game *models.Game) (models.Demo, error) {
+// demo saves the game as a demo for caller, whose team's lines it shows while
+// the game runs. A caller of no team, such as a watcher, sees lines only once
+// the game has ended.
+func (service *GenerationService) demo(ctx context.Context, game *models.Game, caller models.FrozenGamePlayer) (models.Demo, error) {
 	database := service.Database.WithContext(ctx)
 	game, err := service.applyOverdueDeadline(ctx, game)
 	if err != nil {
@@ -53,7 +63,14 @@ func (service *GenerationService) demo(ctx context.Context, game *models.Game) (
 	for index, generation := range generations {
 		generationIDs[index] = generation.ID
 	}
-	lines, err := dal.LoadGenerationsLogs(database, generationIDs)
+	// Only the lines the caller may see are loaded.
+	var visiblePlayerIDs []string
+	for _, player := range players {
+		if game.Outcome != nil || player.TeamColor == caller.TeamColor {
+			visiblePlayerIDs = append(visiblePlayerIDs, player.PlayerID)
+		}
+	}
+	lines, err := dal.LoadPlayersLogs(database, generationIDs, visiblePlayerIDs)
 	if err != nil {
 		return models.Demo{}, err
 	}
@@ -68,7 +85,7 @@ func (service *GenerationService) demo(ctx context.Context, game *models.Game) (
 		for next < len(lines) && lines[next].GenerationID == generationID {
 			next++
 		}
-		demo.Logs = append(demo.Logs, generationLogs(generationID, players, lines[first:next]))
+		demo.Logs = append(demo.Logs, generationLogs(game, generationID, players, caller, lines[first:next]))
 	}
 	return demo, nil
 }

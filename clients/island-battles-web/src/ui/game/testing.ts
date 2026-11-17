@@ -55,7 +55,7 @@ export function sampleDemo(): Demo {
   ];
   return {
     format: "island-battles-demo",
-    schema_version: 2,
+    schema_version: 1,
     saved_at: "2026-10-31T12:00:00Z",
     game_id: 12,
     teams: [
@@ -85,6 +85,7 @@ export function sampleDemo(): Demo {
           },
           { display_name: "Sam", team_color: 2, lines: [] },
         ],
+        hidden_team_colors: [],
       },
       {
         generation_id: 42,
@@ -92,6 +93,7 @@ export function sampleDemo(): Demo {
           { display_name: "Alex", team_color: 1, lines: [] },
           { display_name: "Sam", team_color: 2, lines: [] },
         ],
+        hidden_team_colors: [],
       },
     ],
   };

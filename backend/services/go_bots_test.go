@@ -111,7 +111,8 @@ func TestGoBotsPlayAGameToItsOutcomeWithoutAnyClient(t *testing.T) {
 	if !strings.HasPrefix(string(state.Memory), `{"turn":`) {
 		t.Fatalf("unexpected memory %s", state.Memory)
 	}
-	// Each bot logged its first turn, and every team's lines are public.
+	// Each bot logged its first turn, which only its team sees while the
+	// game runs and everyone once it has ended.
 	stored, err := dal.LoadGameGenerations(game.database, game.gameID)
 	if err != nil {
 		t.Fatal(err)
@@ -210,11 +211,10 @@ func TestAGoBotThatFailsPassesItsTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Every team's lines are public; Sam, on Red, is listed second.
-	if len(logs.Players) != 2 || len(logs.Players[0].Lines) != 0 || len(logs.Players[1].Lines) != 1 {
+	if len(logs.Players) != 1 || len(logs.Players[0].Lines) != 1 {
 		t.Fatalf("unexpected game log %+v", logs)
 	}
-	if line := logs.Players[1].Lines[0]; line.Level != models.GenerationLogError || line.Logger != services.GoBotLogger ||
+	if line := logs.Players[0].Lines[0]; line.Level != models.GenerationLogError || line.Logger != services.GoBotLogger ||
 		line.Message != "The level 9 bot failed this turn, so it passes: there is no default bot of level 9" {
 		t.Fatalf("unexpected line %+v", line)
 	}

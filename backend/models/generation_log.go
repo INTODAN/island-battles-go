@@ -54,11 +54,13 @@ type GenerationLogLine struct {
 	Message string             `json:"message" minLength:"1" maxLength:"500" doc:"The line, of 1 to 500 Unicode code points. A client cuts a longer line to fit and says so at its end."`
 }
 
-// GenerationLogs is the game log of one generation: every team's lines,
-// which are public to the game's players and watchers.
+// GenerationLogs is the game log of one generation, as one roster player may
+// see it.
 type GenerationLogs struct {
 	GenerationID uint                   `json:"generation_id" minimum:"1"`
-	Players      []PlayerGenerationLogs `json:"players" nullable:"false" doc:"Every player of every team, ordered by team colour and then display name, with their lines in the order they were written."`
+	Players      []PlayerGenerationLogs `json:"players" nullable:"false" doc:"Every player of the teams you can see, ordered by team colour and then display name, with their lines in the order they were written."`
+	// HiddenTeamColors never says whether a hidden team logged anything.
+	HiddenTeamColors []uint `json:"hidden_team_colors" nullable:"false" doc:"Teams whose logs you can't see yet. While the game runs you see only your own team's logs; once it has an outcome you see every team's."`
 }
 
 // PlayerGenerationLogs is one player's lines for a generation. It names the

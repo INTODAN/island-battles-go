@@ -129,8 +129,8 @@ type replayPage struct {
 	Replay *GameReplay
 	Viewer bool
 	// Watcher is a replay for someone outside the roster: it asks the lobby
-	// page for the watcher's demo route. Its game log is every team's, as a
-	// player's is.
+	// page for the watcher's demo and log routes, and shows the game log
+	// only once the game has ended, since a watcher belongs to no team.
 	Watcher bool
 	// DemoFormat and DemoSchemaVersion are the demo files the viewer opens.
 	DemoFormat        string

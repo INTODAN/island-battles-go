@@ -34,7 +34,16 @@
 
   <main class="workspace">
     <section class="plane-panel" aria-label="Plane">
-      <svg id="plane" class="plane" role="application" aria-label="Map plane. Drag castles to move them; double-click an empty spot to add one."></svg>
+      <div class="plane-toolbar">
+        <button id="preview-toggle" class="secondary" type="button" aria-pressed="false" aria-controls="preview">3D preview</button>
+      </div>
+      <div id="views" class="views">
+        <svg id="plane" class="plane" role="application" aria-label="Map plane. Drag castles to move them; double-click an empty spot to add one."></svg>
+        <div id="preview" class="preview" role="region" aria-label="3D preview" hidden>
+          <p id="preview-status" class="preview-status" role="status"></p>
+        </div>
+      </div>
+      <p id="preview-help" class="plane-help" hidden>The 3D preview draws the map as a game built from it starts, with the game's own board, and follows every edit. Drag it to turn the board, right-drag or drag with two fingers to pan, and press F after clicking it to fit the board again. It ignores the plane size, which only the server checks.</p>
       <p class="plane-help">Drag a castle to move it, or select it and use the arrow keys (Shift for whole units). Double-click an empty spot to add a castle. Delete removes the selected castle. The plane is centred on the origin, and y grows downwards, as in the replay.</p>
     </section>
 
