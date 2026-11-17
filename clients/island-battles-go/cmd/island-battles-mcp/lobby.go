@@ -166,7 +166,8 @@ func (client *lobbyClient) unwatchLocked(ctx context.Context) {
 			err := client.do(ctx, "stop watching the lobby with code "+code, http.MethodDelete,
 				client.lobbyURL+"/lobby/v1/games/"+gameKey+"/lobbies/"+url.PathEscape(lobbyID)+"/watch", client.session, nil, nil)
 			var problem *problemError
-			if err != nil && !(errors.As(err, &problem) && problem.status == http.StatusNotFound) && client.logger != nil {
+			notWatching := errors.As(err, &problem) && problem.status == http.StatusNotFound
+			if err != nil && !notWatching && client.logger != nil {
 				client.logger.Warn("Couldn't stop watching the lobby; its host can remove the watcher", "code", code, "error", err)
 			}
 		}
