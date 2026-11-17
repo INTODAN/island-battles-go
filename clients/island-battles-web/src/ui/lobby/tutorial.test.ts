@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { commandText, templateRepo, tutorialSteps } from "./tutorial";
+import {
+  commandText,
+  installCommand,
+  templateRepo,
+  tutorialSteps,
+} from "./tutorial";
 
 const template = new URL(
   "../../../../../templates/python-bot/",
@@ -25,7 +30,16 @@ describe("bot tutorial", () => {
       `git clone --depth 1 --filter=blob:none --sparse ${templateRepo}`,
     );
     expect(text).toContain("sparse-checkout set templates/python-bot");
-    expect(text).toContain("uv sync");
+    expect(text).toContain(installCommand);
+  });
+
+  test("installs the way the template's README and the release's check do", () => {
+    expect(read("README.md")).toContain(installCommand);
+    const check = readFileSync(
+      new URL("../../../../../scripts/check-template.sh", import.meta.url),
+      "utf8",
+    );
+    expect(check).toContain(`install=(${installCommand})`);
   });
 
   test("every script it runs exists in the template", () => {

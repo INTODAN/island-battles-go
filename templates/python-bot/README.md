@@ -5,7 +5,7 @@ A starter project for a bot in the strategy game Island Battles: a working bot, 
 ## Start
 
 1. Copy this directory (it needs nothing outside itself) and rename the project in `pyproject.toml`.
-2. Install [uv](https://docs.astral.sh/uv/), then `uv sync` (it installs Python 3.14 if needed).
+2. Install [uv](https://docs.astral.sh/uv/), then `uv sync` (it installs Python 3.14 if needed). The template has no `uv.lock`, so this takes the newest SDK and writes your own lock; commit it with your bot. The game changes its turns with its releases and only the newest SDK reads them: when the game says your bot did not understand the turn, run `uv sync --upgrade-package island-battles-python` and restart the bot; for an uploaded package, run the same, then `scripts/package.sh`, and upload the new zip.
 3. `scripts/check.sh` formats, lints, type-checks, tests and runs the bot once on a sample turn.
 4. `scripts/serve.sh` serves the bot on `http://127.0.0.1:41414`. Open the lobby page at `https://lobby.elidan.org/lobby/ui/` (or the 3D client at `https://island-battles.elidan.org/play/`, or a local lobby page at `http://localhost:8890/lobby/ui/`), create a lobby, add a default bot seat for the other team, pick **localhost bot** as your bot, get ready and start. The page delivers each turn to your bot, which submits its answer to the game itself ([how](#how-your-bot-gets-its-turns)). Saving `bot.py` reloads it.
 
@@ -25,7 +25,7 @@ All run from any directory.
 | `scripts/build.sh` | `uv build`: a wheel and a source archive in `dist/`, and prints their paths. |
 | `scripts/package.sh` | `island-battles-bot package`: `dist/island-battles-bot.zip`, the bot and its dependencies for the server's runners (Linux arm64). Needs a network. |
 
-`scripts/build.sh` makes the standard Python package of the bot. `scripts/package.sh` makes the zip the game server's runners will run: your bot and its locked dependencies for Linux arm64 (`dist/island-battles-bot.zip`; see "Package your bot" in the SDK's README). Packaging needs `island-battles-python` 1.3.0 or newer, the minimum in `pyproject.toml`; move to a later release with `uv lock --upgrade-package island-battles-python`.
+`scripts/build.sh` makes the standard Python package of the bot. `scripts/package.sh` makes the zip the game server's runners will run: your bot and its locked dependencies for Linux arm64 (`dist/island-battles-bot.zip`; see "Package your bot" in the SDK's README).
 
 To upload the zip to your lobby, open the bot picker in the lobby page or the 3D client: **Upload bot (.zip)** takes the file, or **Upload from the command line** shows a command to copy, with the game's address and a token that is valid for 15 minutes:
 
