@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -28,7 +29,7 @@ func newLogFixture(t *testing.T) turnFixture {
 	alice, bob := domain.Principal{PlayerID: uuid.NewString()}, domain.Principal{PlayerID: uuid.NewString()}
 	publisher := &testutils.RecordedPublisher{}
 	if _, err := services.RunLobbyGame(context.Background(), database, publisher, nil, domain.Snapshot{
-		Lobby:       domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted},
+		Lobby:       domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted, GameSettings: testutils.CircleMapSettings(2, "")},
 		Teams:       []domain.Team{{ID: blue, Order: 1, Name: "Blue"}, {ID: red, Order: 2, Name: "Red"}},
 		StartRoster: domain.StartRoster{{PlayerID: alice.PlayerID, TeamID: blue}, {PlayerID: bob.PlayerID, TeamID: red}},
 		Members:     []domain.Member{{PlayerID: alice.PlayerID, DisplayName: "Alice"}, {PlayerID: bob.PlayerID, DisplayName: "Bob"}},
@@ -249,8 +250,8 @@ func TestGameLogsNeedTheRosterAndAGenerationOfTheGame(t *testing.T) {
 	// through her lobby.
 	otherLobby, otherTeam, otherPlayer := uuid.NewString(), uuid.NewString(), domain.Principal{PlayerID: uuid.NewString()}
 	if _, err := services.RunLobbyGame(ctx, fixture.database, fixture.publisher, nil, domain.Snapshot{
-		Lobby: domain.Lobby{ID: otherLobby, GameKey: "island-battles", Phase: domain.PhaseStarted},
-		Teams: []domain.Team{{ID: otherTeam, Order: 1}}, StartRoster: domain.StartRoster{{PlayerID: otherPlayer.PlayerID, TeamID: otherTeam}},
+		Lobby: domain.Lobby{ID: otherLobby, GameKey: "island-battles", Phase: domain.PhaseStarted, GameSettings: testutils.CircleMapSettings(2, "")},
+		Teams: []domain.Team{{ID: otherTeam, Order: 1}, {ID: uuid.NewString(), Order: 2}}, StartRoster: domain.StartRoster{{PlayerID: otherPlayer.PlayerID, TeamID: otherTeam}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -281,12 +282,13 @@ func TestGameLogsNeedTheRosterAndAGenerationOfTheGame(t *testing.T) {
 		t.Fatalf("unknown lobby error = %v", err)
 	}
 	// The lobby listed no member for the other game's player, so the game
-	// names them by roster position.
+	// names them by roster position. The second team has no player, so its
+	// logs are hidden.
 	logs, err := fixture.service.Logs(ctx, otherPlayer, otherLobby, otherState.GenerationID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(logs.Players) != 1 || logs.Players[0].DisplayName != "Player 1" || len(logs.HiddenTeamColors) != 0 {
+	if len(logs.Players) != 1 || logs.Players[0].DisplayName != "Player 1" || !slices.Equal(logs.HiddenTeamColors, []uint{2}) {
 		t.Fatalf("unnamed player's logs = %+v", logs)
 	}
 	// The generation is checked only for roster players.

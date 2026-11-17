@@ -6,7 +6,7 @@ import pytest
 from lobby_client import LobbyError, Scope
 
 from integration.test_live import create, game_sql, guests, latest
-from test_lobby_binding import GAME, LOCALHOST_BOT, choose_bot, game_auth
+from test_lobby_binding import GAME, LOCALHOST_BOT, choose_bot, game_auth, island_settings
 
 pytestmark = pytest.mark.asyncio
 
@@ -31,7 +31,7 @@ async def play_until_timeout(http, player, lobby_id):
 
 async def test_a_lobby_plays_a_second_game_after_the_first_ends(guests):
     alice, bob, carol = await guests("Alice"), await guests("Bob"), await guests("Carol")
-    room = await create(alice, "island-battles", {"turn_timeout_seconds": TURN_TIMEOUT_SECONDS})
+    room = await create(alice, "island-battles", island_settings({"turn_timeout_seconds": TURN_TIMEOUT_SECONDS}))
     scope = Scope.from_snapshot(room)
     assert room.lobby.round_ == 1
     await bob.join_lobby(game_key=scope.game_key, join_code=room.lobby.join_code)

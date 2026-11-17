@@ -859,13 +859,13 @@ export interface components {
             readonly $schema?: string;
             upgrades: components["schemas"]["Upgrade"][];
         };
-        /** @description Island Battles game_settings for a lobby create request. Choose at most one map: map_template_id or map. The map must be made for exactly the lobby's teams: player_amount equal to the team count, and castle team colours exactly 1 to that count, in team order, with 0 for neutral castles. Without a map the game starts on a generated map. turn_timeout_seconds sets how long each turn lasts, from 5 to 600 seconds, 30 when left out, or null for no limit. An invalid choice fails lobby creation with invalid_game_settings, and its detail names each invalid field, such as game_settings.map.castles[0].x. The host can change them while the lobby waits, with the lobby's changeLobbySettings (PUT …/settings), which checks them as on create: send one team per colour of the new map. The start uses the map and turn timeout set last. */
+        /** @description Island Battles game_settings for a lobby create request. Choose exactly one map: map_template_id, a default map from GET /map/templates, or map, a map file; settings without a map are refused. The map must be made for exactly the lobby's teams: player_amount equal to the team count, and castle team colours exactly 1 to that count, in team order, with 0 for neutral castles. turn_timeout_seconds sets how long each turn lasts, from 5 to 600 seconds, 30 when left out, or null for no limit. An invalid choice fails lobby creation with invalid_game_settings, and its detail names each invalid field, such as game_settings.map.castles[0].x. The host can change them while the lobby waits, with the lobby's changeLobbySettings (PUT …/settings), which checks them as on create: send one team per colour of the new map. The start uses the map and turn timeout set last, and checks them again. */
         LobbySettings: {
-            /** @description Start on this map file. Cannot be combined with map_template_id. */
+            /** @description Start on this map file. Give this or map_template_id, not both. */
             map?: components["schemas"]["MapTemplate"];
             /**
              * Format: int64
-             * @description Start on this default map, a map_template_id from GET /map/templates. Cannot be combined with map.
+             * @description Start on this default map, a map_template_id from GET /map/templates. Give this or map, not both.
              */
             map_template_id?: number;
             /**

@@ -2,7 +2,6 @@ package services_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -56,7 +55,7 @@ func newDeadlineFixture(t *testing.T, settings string, names ...[]string) deadli
 	t.Helper()
 	database := testutils.InitTestDB(t)
 	fixture := deadlineFixture{database: database, publisher: &testutils.RecordedPublisher{}, lobbyID: uuid.NewString(), states: map[string]models.GenerationState{}}
-	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: fixture.lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted, GameSettings: json.RawMessage(settings)}}
+	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: fixture.lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted, GameSettings: testutils.CircleMapSettings(len(names), settings)}}
 	for index, teamNames := range names {
 		team := domain.Team{ID: uuid.NewString(), Order: index + 1, Name: deadlineTeamNames[index]}
 		snapshot.Teams = append(snapshot.Teams, team)

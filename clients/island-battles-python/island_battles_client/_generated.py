@@ -705,11 +705,11 @@ class LobbySettings(GameModel):
     )
     map: MapTemplate | None = None
     """
-    Start on this map file. Cannot be combined with map_template_id.
+    Start on this map file. Give this or map_template_id, not both.
     """
     map_template_id: Annotated[StrictInt | None, Field(ge=1)] = None
     """
-    Start on this default map, a map_template_id from GET /map/templates. Cannot be combined with map.
+    Start on this default map, a map_template_id from GET /map/templates. Give this or map, not both.
     """
     turn_timeout_seconds: Annotated[StrictInt | None, Field(ge=5, le=600)] = 30
     """

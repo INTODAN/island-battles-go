@@ -1,10 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { boardBounds } from "./board";
-import { CAMERA, fitRadius } from "./camera";
+import {
+  CAMERA,
+  farPlane,
+  fitRadius,
+  followRadius,
+  MIN_FAR_PLANE,
+} from "./camera";
 import { WORLD_SCALE } from "./coordinates";
 
 describe("board fitting", () => {
-  test("keeps at least the generated map's 8 by 6 map units, in world units", () => {
+  test("keeps at least 8 by 6 map units, in world units", () => {
     const minimum = {
       halfWidth: 4 * WORLD_SCALE,
       halfDepth: 3 * WORLD_SCALE,
@@ -73,5 +79,37 @@ describe("board fitting", () => {
     expect(CAMERA.maxBeta).toBeLessThan(Math.PI / 2);
     expect(CAMERA.beta).toBeGreaterThan(CAMERA.minBeta);
     expect(CAMERA.beta).toBeLessThan(CAMERA.maxBeta);
+  });
+});
+
+describe("following a board that changes size (the map builder's preview)", () => {
+  const angle = { alpha: CAMERA.alpha, beta: CAMERA.beta, fov: CAMERA.fov };
+  const small = boardBounds([{ x: 3, y: 0 }]);
+  const large = boardBounds([{ x: 30, y: 20 }]);
+
+  test("keeps the zoom while the board still fits", () => {
+    const radius = fitRadius(large, 1.5) * 1.2;
+    expect(followRadius(radius, small, 1.5, angle)).toBe(radius);
+  });
+
+  test("draws far enough for the sea around the largest board", () => {
+    // A game's board keeps the usual far plane.
+    expect(farPlane(fitRadius(small, 1.5) * CAMERA.maxRadiusFactor)).toBe(
+      MIN_FAR_PLANE,
+    );
+    // The preview's largest board: castles 100 map units out.
+    const largest = boardBounds([{ x: 100, y: 100 }]);
+    const upper = fitRadius(largest, 0.7) * CAMERA.maxRadiusFactor;
+    expect(farPlane(upper)).toBeGreaterThan(upper + 200);
+  });
+
+  test("moves back as far as a board that grew past the view needs, at the camera's angle", () => {
+    const radius = fitRadius(small, 1.5);
+    const turned = { ...angle, alpha: angle.alpha + 1, beta: angle.beta - 0.3 };
+    const needed = followRadius(radius, large, 1.5, turned);
+    expect(needed).toBeGreaterThan(radius);
+    expect(needed).toBe(
+      fitRadius(large, 1.5, turned.fov, turned.beta, turned.alpha),
+    );
   });
 });

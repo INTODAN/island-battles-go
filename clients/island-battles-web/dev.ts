@@ -1,4 +1,5 @@
 import index from "./index.html";
+import mapPreview from "./map-preview.html";
 import { lobbyOrigin, proxyOrigin } from "./proxy";
 
 // The lobby and the backend run as separate processes (./scripts/dev.sh). This
@@ -14,7 +15,13 @@ const runtimeConfig = {
 const server = Bun.serve({
   port: 3000,
   development: { hmr: true, console: true },
-  routes: { "/": index, "/config.json": Response.json(runtimeConfig) },
+  routes: {
+    "/": index,
+    "/config.json": Response.json(runtimeConfig),
+    // The map builder's 3D preview, where production serves it, so the builder (/map/builder/,
+    // forwarded to the backend) finds it on this origin as it does there.
+    "/play/map-preview.html": mapPreview,
+  },
   async fetch(request) {
     const url = new URL(request.url);
     // Saved games for the 3D board's dev page, /?fixture=<file>.

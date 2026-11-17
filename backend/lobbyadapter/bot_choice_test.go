@@ -10,6 +10,7 @@ import (
 
 	"github.com/INTODAN/mpl/domain"
 	lobbypostgres "github.com/INTODAN/mpl/postgres"
+	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
@@ -62,6 +63,7 @@ func (stack *lobbyStack) room(gameKey string, host, other guest) domain.Snapshot
 	stack.expect(stack.api.Post("/lobby/v1/lobbies", host.header, map[string]any{
 		"request_id": uuid.NewString(), "game_key": gameKey, "name": "Bots",
 		"teams": []map[string]any{{"name": "Red"}, {"name": "Blue"}}, "client_instance_id": host.client,
+		"game_settings": testutils.CircleMapSettings(2, ""),
 	}), http.StatusCreated, &snapshot)
 	stack.expect(stack.api.Post("/lobby/v1/memberships", other.header, map[string]any{"game_key": gameKey, "join_code": snapshot.Lobby.JoinCode, "client_instance_id": other.client}), http.StatusOK, nil)
 	for index, member := range []guest{host, other} {

@@ -26,6 +26,9 @@ import (
 const twoTeamMapFile = `{"map_name":"Strait","player_amount":2,"plane_size_x":10,"plane_size_y":6,"neutral_starting_soldier_amount":5,` +
 	`"castles":[{"team_color":1,"x":-4,"y":0,"starting_soldier_amount":40,"upgrades":{"speed":2}},{"team_color":0,"x":0,"y":0},{"team_color":2,"x":4,"y":1,"starting_soldier_amount":40}]}`
 
+// noMap refuses settings that choose no map.
+const noMap = "game_settings: must choose a map: map_template_id for a default map from GET /map/templates, or map for a map file"
+
 func storeTemplate(t *testing.T, database *gorm.DB, mapFile string) uint {
 	t.Helper()
 	template, err := models.DecodeMapTemplate([]byte(mapFile))
@@ -46,7 +49,7 @@ func TestRegistrationValidatesTheMapChoice(t *testing.T) {
 	twoTeams := []domain.TeamDefinition{{Name: "Blue"}, {Name: "Red"}}
 	threeTeams := slices.Concat(twoTeams, []domain.TeamDefinition{{Name: "Green"}})
 	ctx := context.Background()
-	for _, settings := range []string{``, `{}`, fmt.Sprintf(`{"map_template_id":%d}`, templateID), `{"map":` + twoTeamMapFile + `}`, `{"turn_timeout_seconds":null}`, fmt.Sprintf(`{"map_template_id":%d,"turn_timeout_seconds":600}`, templateID)} {
+	for _, settings := range []string{fmt.Sprintf(`{"map_template_id":%d}`, templateID), `{"map":` + twoTeamMapFile + `}`, `{"map":` + twoTeamMapFile + `,"turn_timeout_seconds":null}`, fmt.Sprintf(`{"map_template_id":%d,"turn_timeout_seconds":600}`, templateID)} {
 		if _, err := policy.ValidateGameSettings(ctx, lobbyadapter.GameKey, "", json.RawMessage(settings), twoTeams); err != nil {
 			t.Errorf("settings %s rejected: %v", settings, err)
 		}
@@ -62,7 +65,11 @@ func TestRegistrationValidatesTheMapChoice(t *testing.T) {
 		{`{"map":` + strings.Replace(twoTeamMapFile, `"x":4`, `"x":6`, 1) + `}`, twoTeams, "game_settings.map.castles[2].x: must be inside the plane, from -5 to 5"},
 		{fmt.Sprintf(`{"map_template_id":%d,"map":%s}`, templateID, twoTeamMapFile), twoTeams, "game_settings.map: cannot be combined with map_template_id"},
 		{`{"map":"Strait"}`, twoTeams, "game_settings.map: expected object"},
-		{`{"turn_timeout_seconds":3}`, twoTeams, "game_settings.turn_timeout_seconds: must be a whole number of seconds from 5 to 600, or null for no limit"},
+		{fmt.Sprintf(`{"map_template_id":%d,"turn_timeout_seconds":3}`, templateID), twoTeams, "game_settings.turn_timeout_seconds: must be a whole number of seconds from 5 to 600, or null for no limit"},
+		// Every game starts on a default map or a map file.
+		{``, twoTeams, noMap},
+		{`{}`, twoTeams, noMap},
+		{`{"turn_timeout_seconds":null}`, twoTeams, noMap},
 	}
 	for _, rejection := range rejections {
 		_, err := policy.ValidateGameSettings(ctx, lobbyadapter.GameKey, "", json.RawMessage(rejection.settings), rejection.teams)
@@ -115,20 +122,26 @@ func TestStartedLobbyPlaysOnTheChosenMap(t *testing.T) {
 	}
 }
 
-func TestStartWithoutAMapChoiceUsesTheGeneratedMap(t *testing.T) {
+// A lobby whose settings choose no map, as settings could before every game
+// needed one, doesn't start. Its round gets no game, so the lobby can be
+// reopened and given a map.
+func TestStartWithoutAMapChoiceIsRefused(t *testing.T) {
 	database := testutils.InitTestDB(t)
-	snapshot := startedSnapshot()
-	snapshot.Lobby.GameSettings = json.RawMessage(domain.EmptyGameSettings)
-	gameID, err := start(t, hooksClient(t, database, &testutils.RecordedPublisher{}), snapshot)
-	if err != nil {
-		t.Fatal(err)
+	client := hooksClient(t, database, &testutils.RecordedPublisher{})
+	for _, settings := range []string{``, domain.EmptyGameSettings, `{"turn_timeout_seconds":30}`} {
+		snapshot := startedSnapshot()
+		snapshot.Lobby.GameSettings = json.RawMessage(settings)
+		if gameID, err := start(t, client, snapshot); err == nil {
+			t.Fatalf("settings %q started game %d", settings, gameID)
+		}
+		ended, err := dal.LobbyRoundEnded(database, snapshot.Lobby.ID, snapshot.Lobby.Round)
+		if err != nil || !ended {
+			t.Fatalf("settings %q: round ended = %v, %v; want a round without a game", settings, ended, err)
+		}
 	}
-	game, err := dal.GetGameByID(database, gameID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if started := game.Generations[0].Map; started.MapName != "Lobby battle" || len(started.Castles) != 2 {
-		t.Fatalf("started map = %+v", started)
+	var games int64
+	if err := database.Model(&models.Game{}).Count(&games).Error; err != nil || games != 0 {
+		t.Fatalf("games = %d, %v", games, err)
 	}
 }
 

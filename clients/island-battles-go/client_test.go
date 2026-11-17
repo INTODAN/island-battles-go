@@ -39,6 +39,8 @@ type fakeServer struct {
 	deadline func() map[string]any
 	// failReads answers this many generation reads with 503.
 	failReads int
+	// failUpgrades answers this many upgrade table reads with 503.
+	failUpgrades int
 	// issued counts the player tokens the lobby issued; valid are those the
 	// game accepts, and refuseTokens makes it refuse every one.
 	issued       int
@@ -103,6 +105,12 @@ func (fake *fakeServer) handle(writer http.ResponseWriter, request *http.Request
 	}
 	if request.Method == http.MethodGet && strings.HasSuffix(request.URL.Path, "/generation") && fake.failReads > 0 {
 		fake.failReads--
+		fake.mutex.Unlock()
+		writeJSON(writer, 503, map[string]any{"detail": "injected"})
+		return
+	}
+	if request.URL.Path == "/game/upgrades" && fake.failUpgrades > 0 {
+		fake.failUpgrades--
 		fake.mutex.Unlock()
 		writeJSON(writer, 503, map[string]any{"detail": "injected"})
 		return
@@ -584,6 +592,31 @@ func TestClientRecoversWithBackoffAfterFailedReads(t *testing.T) {
 	}
 	if server.mutex.Lock(); server.failReads != 0 {
 		t.Fatalf("%d failures left", server.failReads)
+	}
+	server.mutex.Unlock()
+}
+
+func TestClientRetriesFailedUpgradesRead(t *testing.T) {
+	server, realtime := newFakeServer(t), &fakeRealtime{}
+	server.failUpgrades = 2
+	played := make(chan uint, 4)
+	client := testClient(t, server, realtime, func(_ context.Context, turn Turn) (Result, error) {
+		played <- turn.Generation.ID
+		return Result{}, nil
+	})
+	if _, err := client.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case id := <-played:
+		if id != 1 {
+			t.Fatalf("played %d", id)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the turn was never played after the upgrades read failed")
+	}
+	if server.mutex.Lock(); server.failUpgrades != 0 {
+		t.Fatalf("%d failures left", server.failUpgrades)
 	}
 	server.mutex.Unlock()
 }
