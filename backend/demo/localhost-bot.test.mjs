@@ -40,7 +40,8 @@ test("failures are told apart: not running, too slow, refused with the bot's rea
   // An old SDK answers 200 with a result, or 422 for a body that isn't a BotTurn.
   assert.equal((await failure(async () => new Response("{}", { status: 200 }))).kind, "refused");
   const old = await failure(async () => new Response("the body is not a BotTurn", { status: 422 }));
-  assert.match(old.message, /Upgrade its SDK/);
+  assert.match(old.message, /its SDK is older than the game.*uv sync --upgrade-package island-battles-python/);
+  assert.match(old.message, /go get github\.com\/INTODAN\/island-battles-go\/clients\/island-battles-go@latest /);
 });
 
 test("the health check says whether the bot's server answers, on its port", async () => {

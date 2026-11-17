@@ -16,6 +16,13 @@ export const systemLabels: Record<TutorialSystem, string> = {
   windows: "Windows (PowerShell)",
 };
 
+/**
+ * Installs the template. The template has no uv.lock, so this takes the newest
+ * island-battles-python, the only SDK that reads the turns the live game sends,
+ * and writes the player's own lock.
+ */
+export const installCommand = "uv sync";
+
 export interface TutorialStep {
   title: string;
   /** What the step does, before its commands. */
@@ -48,13 +55,14 @@ export function tutorialSteps(system: TutorialSystem): TutorialStep[] {
     {
       title: "1. Get the bot template",
       intro:
-        "You need git and uv (https://docs.astral.sh/uv/). This downloads only the Python template into a folder called my-bot, and installs it.",
+        "You need git and uv (https://docs.astral.sh/uv/). This downloads only the Python template into a folder called my-bot, and installs it with the newest SDK, the one the game speaks.",
       commands: [
         `git clone --depth 1 --filter=blob:none --sparse ${templateRepo}`,
         "git -C island-battles-go sparse-checkout set templates/python-bot",
         copy,
         "cd my-bot",
-        "uv sync",
+        // scripts/check-template.sh runs this command before every release.
+        installCommand,
       ],
       after: `Your bot is bot.py. Run ${scriptCommand(system, "check")} to test it once. Change the strategy in play().`,
     },

@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import {
   commandText,
   detectSystem,
+  installCommand,
   scriptCommand,
   templateRepo,
   tutorialSteps,
@@ -53,7 +54,7 @@ describe("bot tutorial", () => {
           `git clone --depth 1 --filter=blob:none --sparse ${templateRepo}`,
         );
         expect(text).toContain("sparse-checkout set templates/python-bot");
-        expect(text).toContain("uv sync");
+        expect(text).toContain(installCommand);
       });
 
       test("every script it runs or names exists in the template", () => {
@@ -91,6 +92,15 @@ describe("bot tutorial", () => {
       });
     });
   }
+
+  test("installs the way the template's README and the release's check do", () => {
+    expect(read("README.md")).toContain(installCommand);
+    const check = readFileSync(
+      new URL("../../../../../scripts/check-template.sh", import.meta.url),
+      "utf8",
+    );
+    expect(check).toContain(`install=(${installCommand})`);
+  });
 
   test("serves and packages the bot with the SDK's commands", () => {
     expect(read("scripts/serve.sh")).toContain(
