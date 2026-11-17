@@ -22,7 +22,8 @@ export interface LiveOptions {
   source: LiveSource;
   onBack: () => void;
   /** A demo file the player opened was valid: show it in place of this view. */
-  onDemo: (demo: Demo) => void;
+  /** Shows a demo file the player opened, with its file name. */
+  onDemo: (demo: Demo, fileName: string) => void;
 }
 
 const RESYNC_RETRY_MS = 3000;
@@ -69,6 +70,13 @@ export function mountLive(
     onBack: options.onBack,
     ...(source.backLabel === undefined ? {} : { backLabel: source.backLabel }),
     onOpenFile: (file) => void openFile(file),
+    agentGame: () => {
+      const code = source.lobbyCode();
+      if (code) return { kind: "lobby", code };
+      return gameId === undefined
+        ? null
+        : { kind: "demo", gameId, fileName: null };
+    },
     onSaveDemo: async () => saveTextFile(await source.saveDemo()),
     requestLogs: (generationId, settled) =>
       void fetchLogs(generationId, settled),
@@ -95,7 +103,7 @@ export function mountLive(
   async function openFile(file: File): Promise<void> {
     try {
       const demo = await readDemoFile(file);
-      if (!disposed) options.onDemo(demo);
+      if (!disposed) options.onDemo(demo, file.name);
     } catch (error) {
       screen.setNotice(
         `${error instanceof DemoFileError ? error.message : "The file could not be read."} The game shown before stays open.`,

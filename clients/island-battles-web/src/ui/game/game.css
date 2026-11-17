@@ -267,6 +267,21 @@
   font-size: 12px;
 }
 
+.gv-ask-text {
+  box-sizing: border-box;
+  width: min(560px, 100%);
+  padding: 6px 10px;
+  border: 1px solid #b8c4d4;
+  border-radius: 8px;
+  font:
+    12px / 1.4 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
+  resize: vertical;
+}
+
 .gv-teams {
   align-self: flex-start;
   display: flex;

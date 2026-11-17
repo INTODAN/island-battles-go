@@ -1,0 +1,498 @@
+{
+ "format": "island-battles-demo",
+ "schema_version": 2,
+ "saved_at": "2026-11-16T12:00:00Z",
+ "game_id": 7,
+ "teams": [
+  {
+   "color": 1,
+   "name": "Blue",
+   "players": [
+    "Alex"
+   ]
+  },
+  {
+   "color": 2,
+   "name": "Red",
+   "players": [
+    "Sam"
+   ]
+  }
+ ],
+ "outcome": {
+  "reason": "last_team_standing",
+  "winner_team_color": 2,
+  "summary": "Red wins as the last team standing"
+ },
+ "frames": [
+  {
+   "id": 101,
+   "castles": [
+    {
+     "id": 0,
+     "team_color": 1,
+     "soldiers": 10,
+     "x": -4,
+     "y": 0,
+     "upgrades": {
+      "clash_stop_generations": 1,
+      "speed": 1
+     }
+    },
+    {
+     "id": 1,
+     "team_color": 2,
+     "soldiers": 10,
+     "x": 4,
+     "y": 0,
+     "upgrades": {
+      "clash_stop_generations": 1,
+      "speed": 1
+     }
+    },
+    {
+     "id": 2,
+     "team_color": 0,
+     "soldiers": 5,
+     "x": 0,
+     "y": 3,
+     "upgrades": {
+      "clash_stop_generations": 1,
+      "speed": 1
+     }
+    }
+   ],
+   "soldier_groups": [],
+   "clashes": []
+  },
+  {
+   "id": 102,
+   "castles": [
+    {
+     "id": 0,
+     "team_color": 1,
+     "soldiers": 5,
+     "x": -4,
+     "y": 0,
+     "upgrades": {
+      "clash_stop_generations": 1,
+      "speed": 1
+     }
+    },
+    {
+     "id": 1,
+     "team_color": 2,
+     "soldiers": 3,
+     "x": 4,
+     "y": 0,
+     "upgrades": {
+      "clash_stop_generations": 1,
+      "speed": 1
+     }
+    },
+    {
+     "id": 2,
+     "team_color": 0,
+     "soldiers": 5,
+     "x": 0,
+     "y": 3,
+     "upgrades": {
+      "clash_stop_generations": 1,
+      "speed": 1
+     }
+    }
+   ],
+   "soldier_groups": [
+    {
+     "id": 0,
+     "team_color": 1,
+     "soldiers": 6,
+     "x": -1,
+     "y": 2.2,
+     "origin_castle_id": 0,
+     "destination_castle_id": 2,
+     "clash_radius": 0.25,
+     "upgrades": {
+      "clash_stop_generations": 1,
+      "speed": 1
+     }
+    },
+    {
+     "id": 1,
+     "team_color": 2,
+     "soldiers": 8,
+     "x": 2,
+     "y": 0,
+     "origin_castle_id": 1,
+     "destination_castle_id": 0,
+     "clash_radius": 0.25,
+     "upgrades": {
+      "clash_stop_generations": 1,
+      "speed": 1
+     }
+    }
+   ],
+   "clashes": []
+  },
+  {
+   "id": 103,
+   "castles": [
+    {
+     "id": 0,
+     "team_color": 1,
+     "soldiers": 6,
+     "x": -4,
+     "y": 0,
+     "upgrades": {
+      "clash_stop_generations": 1,
+      "speed": 1
+     }
+    },
+    {
+     "id": 1,
+     "team_color": 2,
+     "soldiers": 4,
+     "x": 4,
+     "y": 0,
+     "upgrades": {
+      "clash_stop_generations": 1,
+      "speed": 1
+     }
+    },
+    {
+     "id": 2,
+     "team_color": 1,
+     "soldiers": 1,
+     "x": 0,
+     "y": 3,
+     "upgrades": {
+      "clash_stop_generations": 1,
+      "speed": 1
+     }
+    }
+   ],
+   "soldier_groups": [
+    {
+     "id": 1,
+     "team_color": 2,
+     "soldiers": 8,
+     "x": -1,
+     "y": 0,
+     "origin_castle_id": 1,
+     "destination_castle_id": 0,
+     "clash_radius": 0.25,
+     "upgrades": {
+      "clash_stop_generations": 1,
+      "speed": 1
+     }
+    }
+   ],
+   "clashes": []
+  },
+  {
+   "id": 104,
+   "castles": [
+    {
+     "id": 0,
+     "team_color": 2,
+     "soldiers": 1,
+     "x": -4,
+     "y": 0,
+     "upgrades": {
+      "clash_stop_generations": 1,
+      "speed": 1
+     }
+    },
+    {
+     "id": 1,
+     "team_color": 2,
+     "soldiers": 5,
+     "x": 4,
+     "y": 0,
+     "upgrades": {
+      "clash_stop_generations": 1,
+      "speed": 1
+     }
+    },
+    {
+     "id": 2,
+     "team_color": 1,
+     "soldiers": 1,
+     "x": 0,
+     "y": 3,
+     "upgrades": {
+      "clash_stop_generations": 1,
+      "speed": 2
+     }
+    }
+   ],
+   "soldier_groups": [],
+   "clashes": []
+  },
+  {
+   "id": 105,
+   "castles": [
+    {
+     "id": 0,
+     "team_color": 2,
+     "soldiers": 2,
+     "x": -4,
+     "y": 0,
+     "upgrades": {
+      "clash_stop_generations": 1,
+      "speed": 1
+     }
+    },
+    {
+     "id": 1,
+     "team_color": 2,
+     "soldiers": 2,
+     "x": 4,
+     "y": 0,
+     "upgrades": {
+      "clash_stop_generations": 1,
+      "speed": 1
+     }
+    },
+    {
+     "id": 2,
+     "team_color": 1,
+     "soldiers": 1,
+     "x": 0,
+     "y": 3,
+     "upgrades": {
+      "clash_stop_generations": 1,
+      "speed": 2
+     }
+    }
+   ],
+   "soldier_groups": [
+    {
+     "id": 3,
+     "team_color": 2,
+     "soldiers": 3,
+     "x": 1.5,
+     "y": 1.5,
+     "origin_castle_id": 1,
+     "destination_castle_id": 2,
+     "clash_radius": 0.25,
+     "upgrades": {
+      "clash_stop_generations": 1,
+      "speed": 1
+     }
+    }
+   ],
+   "clashes": [
+    {
+     "id": 0,
+     "time": 0.4,
+     "participants": [
+      {
+       "group_id": 2,
+       "team_color": 1,
+       "x": 1.4,
+       "y": 1.6,
+       "clash_radius": 0.25,
+       "soldiers_before": 1,
+       "soldiers_after": 0
+      },
+      {
+       "group_id": 3,
+       "team_color": 2,
+       "x": 1.5,
+       "y": 1.5,
+       "clash_radius": 0.25,
+       "soldiers_before": 4,
+       "soldiers_after": 3
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": 106,
+   "castles": [
+    {
+     "id": 0,
+     "team_color": 2,
+     "soldiers": 3,
+     "x": -4,
+     "y": 0,
+     "upgrades": {
+      "clash_stop_generations": 1,
+      "speed": 1
+     }
+    },
+    {
+     "id": 1,
+     "team_color": 2,
+     "soldiers": 3,
+     "x": 4,
+     "y": 0,
+     "upgrades": {
+      "clash_stop_generations": 1,
+      "speed": 1
+     }
+    },
+    {
+     "id": 2,
+     "team_color": 2,
+     "soldiers": 1,
+     "x": 0,
+     "y": 3,
+     "upgrades": {
+      "clash_stop_generations": 1,
+      "speed": 2
+     }
+    }
+   ],
+   "soldier_groups": [],
+   "clashes": []
+  }
+ ],
+ "logs": [
+  {
+   "generation_id": 101,
+   "players": [
+    {
+     "display_name": "Alex",
+     "team_color": 1,
+     "lines": [
+      {
+       "level": "info",
+       "logger": "island_battles.player",
+       "message": "sending 6 to the neutral castle 2"
+      }
+     ]
+    },
+    {
+     "display_name": "Sam",
+     "team_color": 2,
+     "lines": [
+      {
+       "level": "debug",
+       "logger": "island_battles.player",
+       "message": "reading the board"
+      },
+      {
+       "level": "info",
+       "logger": "island_battles.player",
+       "message": "attacking castle 0 with 8"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "generation_id": 102,
+   "players": [
+    {
+     "display_name": "Alex",
+     "team_color": 1,
+     "lines": [
+      {
+       "level": "warning",
+       "logger": "island_battles.player",
+       "message": "castle 0 is under threat"
+      }
+     ]
+    },
+    {
+     "display_name": "Sam",
+     "team_color": 2,
+     "lines": [
+      {
+       "level": "info",
+       "logger": "island_battles.player",
+       "message": "marching on castle 0"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "generation_id": 103,
+   "players": [
+    {
+     "display_name": "Alex",
+     "team_color": 1,
+     "lines": [
+      {
+       "level": "info",
+       "logger": "island_battles.player",
+       "message": "upgrading speed at castle 2"
+      }
+     ]
+    },
+    {
+     "display_name": "Sam",
+     "team_color": 2,
+     "lines": []
+    }
+   ]
+  },
+  {
+   "generation_id": 104,
+   "players": [
+    {
+     "display_name": "Alex",
+     "team_color": 1,
+     "lines": [
+      {
+       "level": "info",
+       "logger": "island_battles.player",
+       "message": "sending 1 to castle 1"
+      }
+     ]
+    },
+    {
+     "display_name": "Sam",
+     "team_color": 2,
+     "lines": [
+      {
+       "level": "info",
+       "logger": "island_battles.player",
+       "message": "attacking castle 2 with 4"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "generation_id": 105,
+   "players": [
+    {
+     "display_name": "Alex",
+     "team_color": 1,
+     "lines": [
+      {
+       "level": "error",
+       "logger": "island_battles.player",
+       "message": "no soldiers left"
+      }
+     ]
+    },
+    {
+     "display_name": "Sam",
+     "team_color": 2,
+     "lines": []
+    }
+   ]
+  },
+  {
+   "generation_id": 106,
+   "players": [
+    {
+     "display_name": "Alex",
+     "team_color": 1,
+     "lines": []
+    },
+    {
+     "display_name": "Sam",
+     "team_color": 2,
+     "lines": []
+    }
+   ]
+  }
+ ]
+}

@@ -39,6 +39,8 @@ export interface LiveSource {
   saveDemo(): Promise<DemoDownload>;
   /** Reads one turn's logs: every team's, which are public to players and watchers alike. */
   readLogs(generationId: number): Promise<GenerationLogs>;
+  /** The lobby's join code, for "Ask your AI agent", when it is known. */
+  lobbyCode(): string | undefined;
 }
 
 function required<T>(data: T | undefined): T {
@@ -80,6 +82,12 @@ export function playerSource(
     },
     saveDemo: () => downloadDemo(gameApi, lobbyId, false),
     readLogs: (generationId) => readLogs(gameApi, lobbyId, generationId),
+    lobbyCode() {
+      const snapshot = realtime.lobby.get();
+      return snapshot?.lobby.id === lobbyId
+        ? snapshot.lobby.join_code
+        : undefined;
+    },
   };
 }
 
@@ -104,7 +112,7 @@ async function readLogs(
  */
 export function watchSource(
   realtime: Realtime,
-  target: { lobbyId: string; channel: string },
+  target: { lobbyId: string; channel: string; joinCode?: string },
 ): LiveSource {
   const gameApi = gameApiOf(realtime);
   return {
@@ -124,5 +132,6 @@ export function watchSource(
     },
     saveDemo: () => downloadDemo(gameApi, target.lobbyId, true),
     readLogs: (generationId) => readLogs(gameApi, target.lobbyId, generationId),
+    lobbyCode: () => target.joinCode,
   };
 }
