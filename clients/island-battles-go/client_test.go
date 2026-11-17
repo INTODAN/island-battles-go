@@ -138,14 +138,23 @@ func (fake *fakeServer) handle(writer http.ResponseWriter, request *http.Request
 		var batch map[string]any
 		_ = json.Unmarshal(body, &batch)
 		if batch["complete"] == true {
-			completed := fake.stateOf(state["generation_id"].(uint), true, nil)
-			fake.setState(completed)
-			state = completed
+			state = fake.complete(batch)
 		}
 		writeJSON(writer, 200, state)
 	default:
 		writeJSON(writer, 404, map[string]any{"title": "Not Found", "status": 404, "detail": "no route"})
 	}
+}
+
+// complete completes the turn of a batch's generation, unless a test moved
+// the state on since the batch arrived, and returns the state to answer.
+func (fake *fakeServer) complete(batch map[string]any) map[string]any {
+	fake.mutex.Lock()
+	defer fake.mutex.Unlock()
+	if generationID := fake.state["generation_id"].(uint); float64(generationID) == batch["generation_id"] {
+		fake.state = fake.stateOf(generationID, true, nil)
+	}
+	return fake.state
 }
 
 func writeJSON(writer http.ResponseWriter, status int, value any) {
@@ -156,23 +165,40 @@ func writeJSON(writer http.ResponseWriter, status int, value any) {
 
 // fakeRealtime is a realtime connection that acknowledges every subscription
 // and lets a test publish on the channel.
+// Like Centrifugo's, it reports the connection and the subscription from
+// goroutines of its own; settle waits for them.
 type fakeRealtime struct {
-	mutex  sync.Mutex
-	events realtimeEvents
-	closed bool
+	mutex   sync.Mutex
+	events  realtimeEvents
+	closed  bool
+	pending sync.WaitGroup
 }
 
 func (fake *fakeRealtime) dial(_, _ string, _ func() (string, error), events realtimeEvents) (realtimeConnection, error) {
 	fake.mutex.Lock()
 	defer fake.mutex.Unlock()
 	fake.events = events
-	go events.connected()
+	fake.pending.Go(events.connected)
 	return fake, nil
 }
 
 func (fake *fakeRealtime) Subscribe(string) error {
-	go fake.events.subscribed()
+	fake.mutex.Lock()
+	defer fake.mutex.Unlock()
+	fake.pending.Go(fake.events.subscribed)
 	return nil
+}
+
+// settle waits until the connection's and subscription's events were
+// reported.
+func (fake *fakeRealtime) settle() { fake.pending.Wait() }
+
+// reconnect reports a reconnect.
+func (fake *fakeRealtime) reconnect() {
+	fake.mutex.Lock()
+	events := fake.events
+	fake.mutex.Unlock()
+	events.connected()
 }
 
 func (fake *fakeRealtime) Close() {
@@ -530,14 +556,24 @@ func TestClientRecoversWithBackoffAfterFailedReads(t *testing.T) {
 	if id := <-played; id != 1 {
 		t.Fatalf("played %d", id)
 	}
-	eventually(t, func() bool { return len(server.batchesSent()) == 1 })
+	// Wait until the server completed generation 1, which it does after the
+	// batch arrives, and until the start's events, which wake the reads, were
+	// reported. Before either, the state below could be overwritten or a
+	// read fail that this test doesn't mean to.
+	eventually(t, func() bool {
+		server.mutex.Lock()
+		defer server.mutex.Unlock()
+		return server.state["submitted"] == true
+	})
+	realtime.settle()
 	// A generation missed while offline: the reads after the reconnect fail
-	// twice, then succeed.
+	// twice, then succeed. Only a read can bring generation 2, so playing it
+	// also proves that both failures were read.
 	server.mutex.Lock()
 	server.failReads = 2
 	server.state = server.stateOf(2, false, nil)
 	server.mutex.Unlock()
-	realtime.events.connected()
+	realtime.reconnect()
 	select {
 	case id := <-played:
 		if id != 2 {
