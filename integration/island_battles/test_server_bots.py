@@ -87,7 +87,7 @@ def package_template(work: Path) -> Path:
     project = work / "bot"
     shutil.copytree(TEMPLATE, project, ignore=shutil.ignore_patterns(".venv", "dist", "__pycache__", "uv.lock"))
     pyproject = project / "pyproject.toml"
-    text = pyproject.read_text().replace('"island-battles-python>=0.2.0"', '"island-battles-python"')
+    text = pyproject.read_text().replace('"island-battles-python>=1.3.0"', '"island-battles-python"')
     assert '"island-battles-python"' in text
     pyproject.write_text(text + f'\n[tool.uv.sources]\nisland-battles-python = {{ path = "{wheel.as_posix()}" }}\n')
     run(["uv", "lock"], project)
