@@ -40,6 +40,11 @@ export interface BoardLook {
   setShadows(on: boolean): void;
   /** Draws the shallows and foam around these waterlines (world x and z). */
   setIslands(polygons: readonly WorldPolygon[]): void;
+  /**
+   * How finely `setIslands` samples the shallows, in texels per world unit: 16 by default. The map
+   * builder's preview, which redraws them as castles move, uses fewer (#278).
+   */
+  texelsPerUnit: number;
   /** Settles once the environment texture has loaded (or failed to). */
   skyReady: Promise<void>;
 }
@@ -95,8 +100,9 @@ export function createBoardLook(scene: Scene): BoardLook {
       });
     },
     setIslands(polygons) {
-      sea.setField(distanceField(polygons));
+      sea.setField(distanceField(polygons, 1, look.texelsPerUnit));
     },
+    texelsPerUnit: 16,
     skyReady: Promise.resolve(),
   };
   scene.onNewMeshAddedObservable.add((mesh: AbstractMesh) => {
