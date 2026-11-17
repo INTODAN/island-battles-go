@@ -10,6 +10,33 @@
       "team_color": 1,
       "upgrades": [
         {
+          "type": "burst_potential",
+          "description": "Most soldiers one burst_castle command can order, which the castle repays from its later production",
+          "max_level": 4,
+          "levels": [
+            {
+              "level": 1,
+              "value": 0,
+              "soldier_cost": 0
+            },
+            {
+              "level": 2,
+              "value": 4,
+              "soldier_cost": 10
+            },
+            {
+              "level": 3,
+              "value": 8,
+              "soldier_cost": 20
+            },
+            {
+              "level": 4,
+              "value": 16,
+              "soldier_cost": 30
+            }
+          ]
+        },
+        {
           "type": "clash_stop_generations",
           "description": "Generations a troop stays stopped after a clash",
           "max_level": 3,
@@ -28,6 +55,33 @@
               "level": 3,
               "value": 1,
               "soldier_cost": 20
+            }
+          ]
+        },
+        {
+          "type": "generation_amount",
+          "description": "Soldiers a castle that a team owns produces each generation",
+          "max_level": 4,
+          "levels": [
+            {
+              "level": 1,
+              "value": 1,
+              "soldier_cost": 0
+            },
+            {
+              "level": 2,
+              "value": 2,
+              "soldier_cost": 10
+            },
+            {
+              "level": 3,
+              "value": 3,
+              "soldier_cost": 20
+            },
+            {
+              "level": 4,
+              "value": 4,
+              "soldier_cost": 30
             }
           ]
         },
@@ -73,9 +127,13 @@
             "x": -3.0,
             "y": 0.0,
             "upgrades": {
-              "speed": 1,
-              "clash_stop_generations": 1
-            }
+              "burst_potential": 1,
+              "clash_stop_generations": 1,
+              "generation_amount": 1,
+              "speed": 1
+            },
+            "burst_debt": 0,
+            "pending_burst": 0
           },
           {
             "id": 1,
@@ -84,9 +142,13 @@
             "x": 3.0,
             "y": 0.0,
             "upgrades": {
-              "speed": 1,
-              "clash_stop_generations": 1
-            }
+              "burst_potential": 1,
+              "clash_stop_generations": 1,
+              "generation_amount": 1,
+              "speed": 1
+            },
+            "burst_debt": 0,
+            "pending_burst": 0
           },
           {
             "id": 2,
@@ -95,9 +157,13 @@
             "x": 0.0,
             "y": 2.0,
             "upgrades": {
-              "speed": 1,
-              "clash_stop_generations": 1
-            }
+              "burst_potential": 1,
+              "clash_stop_generations": 1,
+              "generation_amount": 1,
+              "speed": 1
+            },
+            "burst_debt": 0,
+            "pending_burst": 0
           },
           {
             "id": 3,
@@ -106,9 +172,13 @@
             "x": -2.0,
             "y": -2.0,
             "upgrades": {
-              "speed": 1,
-              "clash_stop_generations": 1
-            }
+              "burst_potential": 1,
+              "clash_stop_generations": 1,
+              "generation_amount": 1,
+              "speed": 1
+            },
+            "burst_debt": 0,
+            "pending_burst": 0
           }
         ],
         "soldier_groups": [
@@ -122,8 +192,10 @@
             "y": 0.0,
             "clash_radius": 0.5,
             "upgrades": {
-              "speed": 1,
-              "clash_stop_generations": 1
+              "burst_potential": 1,
+              "clash_stop_generations": 1,
+              "generation_amount": 1,
+              "speed": 1
             }
           }
         ],
