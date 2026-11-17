@@ -6,7 +6,7 @@ INTODAN/mpl deploys (#232). It checks, in order:
 
 1. The game's `/healthz` returns 204, and with `--expected-version` its
    `X-Island-Battles-Version` header names that release.
-2. The game's `/` opens the lobby's page, on the lobby's URL.
+2. The game's `/` redirects (307) to `/play/`, the 3D client.
 3. The lobby's old routes on the game's URL say where it went: the lobby page
    redirects (301) to the same path and query on the lobby's URL, and the
    lobby's API answers 410 with a problem that names the lobby's URL.
@@ -121,11 +121,12 @@ async def check_game(game: httpx.AsyncClient, lobby_origin: str, expected_versio
                                    "running is not the release's build.")
         report(f"the backend reports version {version}")
 
-    lobby_page = await game.get("/", follow_redirects=True)
-    if lobby_page.status_code != 200 or str(lobby_page.url) != lobby_origin + LOBBY_PAGE:
-        raise SmokeTestFailure(f"/ led to {lobby_page.url} with {lobby_page.status_code}, expected the lobby's page at "
-                               f"{lobby_origin}{LOBBY_PAGE} with 200")
-    report(f"/ opens the lobby's page at {lobby_origin}{LOBBY_PAGE}")
+    root = await game.get("/")
+    if root.status_code != 307 or root.headers.get("location") != "/play/":
+        raise SmokeTestFailure(f"/ answered {root.status_code} to {root.headers.get('location')!r}, expected 307 to "
+                               "/play/ from the backend (the web client itself is checked with "
+                               "ISLAND_BATTLES_EXPECTED_WEB_BUNDLE).")
+    report("/ redirects to /play/")
 
     moved = await game.get(f"{LOBBY_PAGE}?join=SMOKE")
     if moved.status_code != 301 or moved.headers.get("location") != f"{lobby_origin}{LOBBY_PAGE}?join=SMOKE":

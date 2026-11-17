@@ -138,6 +138,24 @@ function playbackInterval(speed) {
   return playbackSpeeds.includes(speed) ? playbackBaseMilliseconds / speed : playbackBaseMilliseconds;
 }
 // playback-speed:end
+// playback-timer:begin
+// createPlaybackTimer runs tick every interval() milliseconds. restart() starts
+// the interval over, so that pressing Play (#273) shows the first generation
+// after one full interval rather than after whatever was left of the running one.
+function createPlaybackTimer(tick, interval) {
+  let handle = null;
+  const run = () => {
+    tick();
+    handle = setTimeout(run, interval());
+  };
+  return {
+    restart() {
+      clearTimeout(handle);
+      handle = setTimeout(run, interval());
+    },
+  };
+}
+// playback-timer:end
 // heading-lines:begin
 // Heading lines (#89, edge cases fixed in #168): the segment from each moving group to the castle it is heading for.
 // This block is pure geometry in board pixels, so backend/demoviewer/heading-lines.test.mjs runs it on its own. The
@@ -599,7 +617,7 @@ function step(steps) {
   followingLive = false;
   render();
 }
-play.addEventListener("click", () => { followingLive = false; if (turn === lastTurn) turn = 0; playing = !playing; render(); });
+play.addEventListener("click", () => { followingLive = false; if (turn === lastTurn) turn = 0; playing = !playing; if (playing) playbackTimer.restart(); render(); });
 document.getElementById("previous").addEventListener("click", () => step(-1));
 document.getElementById("next").addEventListener("click", () => step(1));
 slider.addEventListener("input", () => { turn = Number(slider.value); playing = false; followingLive = false; render(); });
@@ -933,9 +951,9 @@ function playbackTick() {
     if (turn === lastTurn) playing = false;
     render(true);
   }
-  setTimeout(playbackTick, playbackInterval(Number(speedSelect.value)));
 }
-setTimeout(playbackTick, playbackInterval(1));
+const playbackTimer = createPlaybackTimer(playbackTick, () => playbackInterval(Number(speedSelect.value)));
+playbackTimer.restart();
 {{if .Viewer -}}
 // The viewer's module opens a demo file, checks it and shows it with this.
 window.showDemo = (demo) => {
