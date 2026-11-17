@@ -78,6 +78,20 @@ class BotCompute(GameModel):
     """
 
 
+class BotLocalhostPort(RootModel[StrictInt]):
+    root: Annotated[StrictInt, Field(ge=1024, le=65535)]
+    """
+    A localhost bot on the machine of the host who adds the seat, which island-battles-bot serve --port N runs on this port of 127.0.0.1; that host's game client delivers each turn to it, as to their own localhost bot. A string of the port's digits, which the lobby page's text field sends, is read the same. The port must differ from that host's own localhost bot's and from every other localhost bot seat's that they added. Needs bot_relay_player_id. The seat is named "Localhost bot (port N)".
+    """
+
+
+class BotLocalhostPort1(RootModel[StrictStr]):
+    root: Annotated[StrictStr, Field(pattern="^[0-9]{1,5}$")]
+    """
+    The port's digits, as the lobby page's text field sends them. The number they name must be from 1024 to 65535.
+    """
+
+
 class BotPackage(GameModel):
     model_config = ConfigDict(
         extra="ignore",
@@ -163,13 +177,17 @@ class BotSeatSettings(GameModel):
     """
     A default bot of this level, one that GET /bots/defaults lists, which the backend plays. The seat is named "Bot (level N)".
     """
-    bot_localhost_port: Annotated[StrictInt | None, Field(ge=1024, le=65535)] = None
+    bot_localhost_port: BotLocalhostPort | BotLocalhostPort1 | None = None
     """
-    A localhost bot on the host's machine, which island-battles-bot serve --port N runs on this port of 127.0.0.1; the host's game client delivers each turn to it, as to the host's own localhost bot. A string of the port's digits, which the lobby page's text field sends, is read the same. The port must differ from every other localhost bot seat's and from the host's own localhost bot's. The seat is named "Localhost bot (port N)".
+    A localhost bot on the machine of the host who adds the seat, which island-battles-bot serve --port N runs on this port of 127.0.0.1; that host's game client delivers each turn to it, as to their own localhost bot. A string of the port's digits, which the lobby page's text field sends, is read the same. The port must differ from that host's own localhost bot's and from every other localhost bot seat's that they added. Needs bot_relay_player_id. The seat is named "Localhost bot (port N)".
     """
     bot_package_id: UUID | None = None
     """
     Any member's bot package in this lobby, which the server runs. The seat is named after its owner, such as "Alex's bot". Only when GET /bots/defaults says server_bots.
+    """
+    bot_relay_player_id: UUID | None = None
+    """
+    With bot_localhost_port only, and required with it: the player ID of the host who adds the seat, whose game client alone relays it. It must be the lobby's host. When that player is not on the roster at the start, nobody relays the seat, which loses its turns like a bot that is down.
     """
     bot_url: Annotated[StrictStr | None, Field(max_length=2048)] = None
     """
@@ -609,7 +627,7 @@ class GenerationState(GameModel):
     player_id: UUID
     relayed_bots: Sequence[RelayedBot]
     """
-    The localhost bot seats that the host added to the lobby, which you relay because you were the host when the game started: your client reads each one's turn with GET /game/from-lobby/{lobby_id}/turn-delivery?player_id= and delivers it to 127.0.0.1 on the seat's port, as it does for your own localhost bot. Empty for everyone else.
+    The localhost bot seats that you added to the lobby as its host, which only you relay: your client reads each one's turn with GET /game/from-lobby/{lobby_id}/turn-delivery?player_id= and delivers it to 127.0.0.1 on the seat's port, as it does for your own localhost bot. Empty for everyone else.
     """
     submitted: StrictBool
     """

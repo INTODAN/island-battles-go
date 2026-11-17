@@ -68,7 +68,7 @@ func SetupGameRoutes(api huma.API, game *handlers.LobbyGame) {
 		Summary: "Read your turn, or a localhost bot seat's that you relay, as a delivery for the bot, with a one-turn submit token",
 		Description: "Requires a place on the game's frozen roster; the lobby is not consulted. Returns the caller's turn of the current generation as a TurnDelivery: the BotTurn the server builds for their bot (the board, their team, the upgrade cost table, the memory their latest completed turn sent and the deadline), and how to submit the answer: submit.url, POST /generation/commands on the game's public URL, and submit.token, a submit token that submits exactly this player's turn of this generation. " +
 			"A game client relays it to the player's bot server, island-battles-bot serve, which answers 202 at once, plays the turn and submits its commands, logs and memory itself, with complete true and Authorization: Bearer <token>; the client submits nothing. Each call issues a new token for the same turn. " +
-			"With player_id, the host at the start reads the turn of a localhost bot seat instead, one of their GenerationState.relayed_bots, to relay it to the seat's bot on its own port; the delivery and its token are the seat's. A player_id that is not a localhost bot seat the caller relays is 403. " +
+			"With player_id, the player who added a localhost bot seat to the lobby reads the seat's turn instead, one of their GenerationState.relayed_bots, to relay it to the seat's bot on its own port; the delivery and its token are the seat's. A player_id that is not a localhost bot seat that the caller added is 403, for a later host too. " +
 			"Like every game request, it first applies the turn's deadline once it has passed. When the player has nothing to play it returns 409: the game has ended (problem type " + services.GameEndedProblemType + "), their team has been eliminated, or they have already completed the turn." + newestGame,
 		Tags: []string{"Island Battles"}, Security: playerTokenSecurity,
 	}, game.TurnDelivery)
@@ -211,8 +211,16 @@ func SetupGameRoutes(api huma.API, game *handlers.LobbyGame) {
 	seatSettings := registry.SchemaFromRef(registry.Schema(reflect.TypeOf(models.BotSeatSettingsView{}), true, "").Ref)
 	seatSettings.Description = "Island Battles seat_settings for a bot seat that the host adds with POST …/seats: exactly one of bot_level, bot_localhost_port, bot_url and bot_package_id. " +
 		"{\"bot_level\": N}, with a level that GET /bots/defaults lists, is a default bot that the backend plays, named \"Bot (level N)\". " +
-		"{\"bot_localhost_port\": N}, a port from 1024 to 65535, is a localhost bot on the host's machine, which island-battles-bot serve --port N runs and the game client of the host at the start relays, named \"Localhost bot (port N)\": the host can seat several, each on its own port. A port that the host's own localhost bot or another localhost bot seat already uses is invalid_seat_settings, and a start whose host would relay two localhost bots on one port, after the host changed their own, fails with game_requirement of type " + services.LocalhostPortTakenProblemType + ". " +
+		"{\"bot_localhost_port\": N, \"bot_relay_player_id\": \"<your player ID>\"}, a port from 1024 to 65535, is a localhost bot on your machine as the host, which island-battles-bot serve --port N runs and only your game client relays, named \"Localhost bot (port N)\": you can seat several, each on its own port. bot_relay_player_id records who added the seat, since the lobby doesn't, and must be the host's own player ID. A later host never relays it: when you are not on the roster at the start, nobody does, and the seat loses its turns like a bot that is down. " +
+		"A port that your own localhost bot or another localhost bot seat of yours already uses is invalid_seat_settings, unless the seat is already there with these settings, so a seat request sent again after a lost answer finds its own seat. A start where someone would relay two localhost bots on one port, after they changed their own port or added the same seat twice, fails with game_requirement of type " + services.LocalhostPortTakenProblemType + ". " +
 		"When GET /bots/defaults says server_bots, also {\"bot_url\": \"https://…\"}, a hosted bot under the rules of MemberBot's url, named \"Hosted bot\", or {\"bot_package_id\": \"…\"}, any ready bot package of the lobby, named after its owner, such as \"Alex's bot\"; the server plays both. A seat whose package is gone by the start stops it with game_requirement of type " + services.BotPackageGoneProblemType + "."
+	// The server also reads a localhost bot seat's port as a string of
+	// digits, which the lobby page's generic seat text field sends.
+	port := seatSettings.Properties["bot_localhost_port"]
+	seatSettings.Properties["bot_localhost_port"] = &huma.Schema{Description: port.Description, OneOf: []*huma.Schema{
+		{Type: huma.TypeInteger, Format: port.Format, Minimum: port.Minimum, Maximum: port.Maximum},
+		{Type: huma.TypeString, Pattern: "^[0-9]{1,5}$", Description: "The port's digits, as the lobby page's text field sends them. The number they name must be from 1024 to 65535."},
+	}}
 }
 
 // SubmitTokenScheme names the security scheme of the submit tokens that turn

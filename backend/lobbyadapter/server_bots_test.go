@@ -146,7 +146,7 @@ func TestServerBotsAreRefusedWhileTheFlagIsOff(t *testing.T) {
 	for _, settings := range []map[string]any{{"bot_url": "https://bot.example.com/turn"}, {"bot_package_id": packageID}} {
 		var refusal problem
 		stack.expect(stack.addSeat(solo, carol, 1, settings), http.StatusUnprocessableEntity, &refusal)
-		if refusal.Code != "invalid_seat_settings" || refusal.Detail != `seat_settings must be {"bot_level": N} with a level that GET /bots/defaults lists (1, 2, 3) or {"bot_localhost_port": N} with a port from 1024 to 65535` {
+		if refusal.Code != "invalid_seat_settings" || refusal.Detail != `seat_settings must be {"bot_level": N} with a level that GET /bots/defaults lists (1, 2, 3) or {"bot_localhost_port": N, "bot_relay_player_id": "<your player ID>"} with a port from 1024 to 65535` {
 			t.Errorf("seat settings %v = %+v", settings, refusal)
 		}
 	}

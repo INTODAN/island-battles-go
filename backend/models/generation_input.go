@@ -22,8 +22,10 @@ type FrozenGamePlayer struct {
 	// only; nil is DefaultLocalhostPort.
 	BotPort *uint `gorm:"column:bot_port"`
 	// BotRelayPlayerID is the roster player whose game client relays a
-	// localhost bot seat: the lobby's host at the start. Nil for a person,
-	// who relays their own localhost bot, and for every other kind.
+	// localhost bot seat: the player who added the seat, as its settings'
+	// bot_relay_player_id records. Nil for a seat whose adder was not on the
+	// roster at the start, which nobody relays, for a person, who relays
+	// their own localhost bot, and for every other kind.
 	BotRelayPlayerID *string `gorm:"column:bot_relay_player_id;type:uuid"`
 	// BotLevel is the level of the default bot that the backend plays for
 	// this player, one of bots.Defaults, for BotKind default only. The
@@ -133,7 +135,7 @@ type GenerationState struct {
 
 	Bot BotChoiceView `json:"bot" doc:"Your bot in this game, the one you chose in the lobby, copied when the game started. For kind localhost your client delivers each turn to your bot, on bot.port, which submits its answer. For kind default the backend plays your turns itself as soon as each generation is created. For kinds hosted and uploaded the server plays your turns with your bot, without your client. Only for kind localhost, and for relayed_bots, does your client relay anything."`
 
-	RelayedBots []RelayedBotView `json:"relayed_bots" nullable:"false" doc:"The localhost bot seats that the host added to the lobby, which you relay because you were the host when the game started: your client reads each one's turn with GET /game/from-lobby/{lobby_id}/turn-delivery?player_id= and delivers it to 127.0.0.1 on the seat's port, as it does for your own localhost bot. Empty for everyone else."`
+	RelayedBots []RelayedBotView `json:"relayed_bots" nullable:"false" doc:"The localhost bot seats that you added to the lobby as its host, which only you relay: your client reads each one's turn with GET /game/from-lobby/{lobby_id}/turn-delivery?player_id= and delivers it to 127.0.0.1 on the seat's port, as it does for your own localhost bot. Empty for everyone else."`
 
 	// TurnDeadlineAt is nil when the lobby set no turn timeout, and once the
 	// game has ended.

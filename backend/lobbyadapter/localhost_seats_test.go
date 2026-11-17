@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/INTODAN/mpl/domain"
+	"github.com/google/uuid"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/models"
@@ -24,27 +25,31 @@ func TestTheHostSeatsLocalhostBotsEachOnItsOwnPort(t *testing.T) {
 	// A port is a number, or the digits that the lobby page's text field
 	// sends; the seat is named after it.
 	var seated domain.Snapshot
-	stack.expect(stack.addSeat(room, alice, 1, map[string]any{"bot_localhost_port": "41415"}), http.StatusOK, &seated)
+	stack.expect(stack.addSeat(room, alice, 1, localhostSeat("41415", alice)), http.StatusOK, &seated)
 	if seat := seatOn(t, seated, 1); seat.DisplayName != "Localhost bot (port 41415)" {
 		t.Fatalf("seat = %+v", seat)
 	}
-	stack.expect(stack.addSeat(room, alice, 2, map[string]any{"bot_localhost_port": 41416}), http.StatusOK, &seated)
+	stack.expect(stack.addSeat(room, alice, 2, localhostSeat(41416, alice)), http.StatusOK, &seated)
 	if seat := seatOn(t, seated, 2); seat.DisplayName != "Localhost bot (port 41416)" {
 		t.Fatalf("seat = %+v", seat)
 	}
 
 	// Each of the host's localhost bots needs a port of its own, and a port
-	// is not a privileged one.
+	// is not a privileged one. The seat names the host who adds it.
+	shape := `{"bot_localhost_port": N, "bot_relay_player_id": "<your player ID>"} with a port from 1024 to 65535`
 	for _, refused := range []struct {
 		settings map[string]any
 		detail   string
 	}{
-		{map[string]any{"bot_localhost_port": 41415}, "port 41415 is already taken by Localhost bot (port 41415)"},
-		{map[string]any{"bot_localhost_port": "41414"}, "port 41414 is already taken by the host's own localhost bot"},
-		{map[string]any{"bot_localhost_port": 80}, "a localhost bot's port must be from 1024 to 65535"},
-		{map[string]any{"bot_localhost_port": 70000}, "a localhost bot's port must be from 1024 to 65535"},
-		{map[string]any{"bot_localhost_port": "41 417"}, `{"bot_localhost_port": N} with a port from 1024 to 65535`},
-		{map[string]any{"bot_localhost_port": 41417, "bot_level": 1}, `{"bot_localhost_port": N} with a port from 1024 to 65535`},
+		{localhostSeat("41414", alice), "port 41414 is already taken by your own localhost bot"},
+		{localhostSeat(80, alice), "a localhost bot's port must be from 1024 to 65535"},
+		{localhostSeat(70000, alice), "a localhost bot's port must be from 1024 to 65535"},
+		{localhostSeat("41 417", alice), shape},
+		{map[string]any{"bot_localhost_port": 41417, "bot_relay_player_id": alice.playerID, "bot_level": 1}, shape},
+		{map[string]any{"bot_localhost_port": 41417}, shape},
+		{map[string]any{"bot_level": 1, "bot_relay_player_id": alice.playerID}, shape},
+		{map[string]any{"bot_localhost_port": 41417, "bot_relay_player_id": "alice"}, shape},
+		{map[string]any{"bot_localhost_port": 41417, "bot_relay_player_id": uuid.NewString()}, "bot_relay_player_id must be your own player ID"},
 	} {
 		var refusal problem
 		stack.expect(stack.addSeat(room, alice, 3, refused.settings), http.StatusUnprocessableEntity, &refusal)
@@ -52,9 +57,9 @@ func TestTheHostSeatsLocalhostBotsEachOnItsOwnPort(t *testing.T) {
 			t.Fatalf("seat %v = %+v", refused.settings, refusal)
 		}
 	}
-	// The first free port is suggested.
+	// The first port that her bots leave free is suggested.
 	var refusal problem
-	stack.expect(stack.addSeat(room, alice, 3, map[string]any{"bot_localhost_port": 41416}), http.StatusUnprocessableEntity, &refusal)
+	stack.expect(stack.addSeat(room, alice, 3, localhostSeat(41414, alice)), http.StatusUnprocessableEntity, &refusal)
 	if !strings.Contains(refusal.Detail, "such as 41417") {
 		t.Fatalf("refusal = %+v", refusal)
 	}
@@ -127,5 +132,105 @@ func TestALocalhostBotsPortIsChecked(t *testing.T) {
 	state := stack.state(room, bob)
 	if state.Bot.Port == nil || *state.Bot.Port != 50000 || len(state.RelayedBots) != 0 {
 		t.Fatalf("Bob's state = %+v", state)
+	}
+}
+
+// localhostSeat are the seat settings of a localhost bot seat on port, a
+// number or its digits, that adder adds.
+func localhostSeat(port any, adder guest) map[string]any {
+	return map[string]any{"bot_localhost_port": port, "bot_relay_player_id": adder.playerID}
+}
+
+// activeSeats counts a snapshot's active seats.
+func activeSeats(snapshot domain.Snapshot) int {
+	count := 0
+	for _, member := range snapshot.Members {
+		if member.IsSeat() && member.Active {
+			count++
+		}
+	}
+	return count
+}
+
+// A seat request sent again after a lost answer, with its request ID, finds
+// its own seat, though the lobby checks the seat's settings before its
+// request ID. The same seat added twice, under two request IDs, stops the
+// start instead.
+func TestALocalhostSeatRequestSentAgainFindsItsSeat(t *testing.T) {
+	stack := newLobbyStack(t)
+	alice, bob := stack.guest("Alice"), stack.guest("Bob")
+	room := stack.teamsRoom(alice, "Red", "Blue", "Green", "Gold")
+	stack.join(room, bob, 3)
+	request := map[string]any{"request_id": uuid.NewString(), "team_id": room.Teams[1].ID, "seat_settings": localhostSeat("41415", alice)}
+	var first, again domain.Snapshot
+	stack.expect(stack.api.Post(stack.lobbyPath(room)+"/seats", alice.header, request), http.StatusOK, &first)
+	stack.expect(stack.api.Post(stack.lobbyPath(room)+"/seats", alice.header, request), http.StatusOK, &again)
+	if activeSeats(first) != 1 || activeSeats(again) != 1 || seatOn(t, again, 1).ID != seatOn(t, first, 1).ID {
+		t.Fatalf("seats = %+v, then %+v", first.Members, again.Members)
+	}
+
+	stack.expect(stack.addSeat(room, alice, 2, localhostSeat(41415, alice)), http.StatusOK, nil)
+	for _, member := range []guest{alice, bob} {
+		stack.expect(stack.choose(room, member, `{"kind":"default","level":1}`), http.StatusOK, nil)
+		stack.expect(stack.ready(room, member), http.StatusOK, nil)
+	}
+	var taken gameRequirement
+	stack.expect(stack.api.Post(stack.lobbyPath(room)+"/start", alice.header, map[string]any{}), http.StatusConflict, &taken)
+	if taken.Type != services.LocalhostPortTakenProblemType || !strings.Contains(taken.Detail, "that Alice relays use port 41415") {
+		t.Fatalf("start = %+v", taken)
+	}
+}
+
+// Only the player who added a localhost bot seat relays it, so a host never
+// chooses the local ports that someone else's tab contacts. When the host
+// leaves, the next host doesn't relay their seats: nobody does, and those
+// seats lose their turns, like bots that are down.
+func TestOnlyTheAdderRelaysALocalhostSeat(t *testing.T) {
+	stack := newLobbyStack(t)
+	alice, bob := stack.guest("Alice"), stack.guest("Bob")
+	room := stack.teamsRoom(alice, "Red", "Blue", "Green")
+	stack.join(room, bob, 2)
+	stack.expect(stack.choose(room, bob, `{"kind":"localhost"}`), http.StatusOK, nil)
+	// Alice may not seat a bot that Bob would relay.
+	var refusal problem
+	stack.expect(stack.addSeat(room, alice, 1, localhostSeat(41415, bob)), http.StatusUnprocessableEntity, &refusal)
+	if !strings.Contains(refusal.Detail, "bot_relay_player_id must be your own player ID") {
+		t.Fatalf("refusal = %+v", refusal)
+	}
+	stack.expect(stack.addSeat(room, alice, 1, localhostSeat(41415, alice)), http.StatusOK, nil)
+
+	// Alice leaves, and Bob is the host. He can't add a seat in Alice's name;
+	// his own seats may take the port of hers, which his tab doesn't relay.
+	stack.expect(stack.api.Delete(stack.lobbyPath(room)+"/membership", alice.header), http.StatusNoContent, nil)
+	stack.expect(stack.addSeat(room, bob, 0, localhostSeat(41416, alice)), http.StatusUnprocessableEntity, &refusal)
+	if !strings.Contains(refusal.Detail, "bot_relay_player_id must be your own player ID") {
+		t.Fatalf("refusal = %+v", refusal)
+	}
+	stack.expect(stack.addSeat(room, bob, 0, localhostSeat(41414, bob)), http.StatusUnprocessableEntity, &refusal)
+	if !strings.Contains(refusal.Detail, "port 41414 is already taken by your own localhost bot") {
+		t.Fatalf("refusal = %+v", refusal)
+	}
+	stack.expect(stack.addSeat(room, bob, 0, localhostSeat(41415, bob)), http.StatusOK, nil)
+	stack.expect(stack.ready(room, bob), http.StatusOK, nil)
+	var started domain.Snapshot
+	stack.expect(stack.api.Post(stack.lobbyPath(room)+"/start", bob.header, map[string]any{}), http.StatusOK, &started)
+
+	alicesSeat, bobsSeat := seatOn(t, started, 1), seatOn(t, started, 0)
+	state := stack.state(room, bob)
+	want := models.RelayedBotView{PlayerID: bobsSeat.PlayerID, TeamColor: 1, DisplayName: "Localhost bot (port 41415) #2", Port: 41415}
+	if len(state.RelayedBots) != 1 || state.RelayedBots[0] != want {
+		t.Fatalf("Bob's relayed bots = %+v, want %+v", state.RelayedBots, want)
+	}
+	// The frozen roster relays Alice's seat from nobody, so the server
+	// refuses Bob its turn deliveries too (handlers'
+	// TestTheAdderReadsTheTurnsOfTheLocalhostBotSeatsTheyRelay).
+	players, err := dal.LoadFrozenPlayers(stack.database, state.GameID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, player := range players {
+		if player.PlayerID == alicesSeat.PlayerID && (player.BotKind != models.LocalhostBot || player.BotRelayPlayerID != nil) {
+			t.Fatalf("Alice's seat %+v", player)
+		}
 	}
 }

@@ -69,9 +69,13 @@ type MemberSettingsView struct {
 }
 
 // BotSeatSettingsView are the seat_settings of a bot seat that the host adds.
-// Exactly one field is set.
+// Exactly one bot field is set: bot_level, bot_localhost_port, bot_url or
+// bot_package_id. A localhost bot seat also names its relay.
 type BotSeatSettingsView struct {
-	BotLocalhostPort *uint  `json:"bot_localhost_port,omitempty" minimum:"1024" maximum:"65535" doc:"A localhost bot on the host's machine, which island-battles-bot serve --port N runs on this port of 127.0.0.1; the host's game client delivers each turn to it, as to the host's own localhost bot. A string of the port's digits, which the lobby page's text field sends, is read the same. The port must differ from every other localhost bot seat's and from the host's own localhost bot's. The seat is named \"Localhost bot (port N)\"."`
+	BotLocalhostPort *uint  `json:"bot_localhost_port,omitempty" minimum:"1024" maximum:"65535" doc:"A localhost bot on the machine of the host who adds the seat, which island-battles-bot serve --port N runs on this port of 127.0.0.1; that host's game client delivers each turn to it, as to their own localhost bot. A string of the port's digits, which the lobby page's text field sends, is read the same. The port must differ from that host's own localhost bot's and from every other localhost bot seat's that they added. Needs bot_relay_player_id. The seat is named \"Localhost bot (port N)\"."`
+	// BotRelayPlayerID records who added a localhost bot seat, since the
+	// lobby doesn't: only their tab relays the seat, never a later host's.
+	BotRelayPlayerID string `json:"bot_relay_player_id,omitempty" format:"uuid" doc:"With bot_localhost_port only, and required with it: the player ID of the host who adds the seat, whose game client alone relays it. It must be the lobby's host. When that player is not on the roster at the start, nobody relays the seat, which loses its turns like a bot that is down."`
 	BotLevel         *uint  `json:"bot_level,omitempty" minimum:"1" doc:"A default bot of this level, one that GET /bots/defaults lists, which the backend plays. The seat is named \"Bot (level N)\"."`
 	BotURL           string `json:"bot_url,omitempty" maxLength:"2048" doc:"A hosted bot at this URL, under the rules of a member's hosted bot; the server sends it each turn. The seat is named \"Hosted bot\". Only when GET /bots/defaults says server_bots."`
 	BotPackageID     string `json:"bot_package_id,omitempty" format:"uuid" doc:"Any member's bot package in this lobby, which the server runs. The seat is named after its owner, such as \"Alex's bot\". Only when GET /bots/defaults says server_bots."`
@@ -129,8 +133,8 @@ type RelayedBotView struct {
 	Port        uint   `json:"port" minimum:"1024" maximum:"65535" doc:"The port on 127.0.0.1 where your client delivers the seat's turns."`
 }
 
-// RelayedBots are the localhost bot seats that relayer relays, in team
-// order.
+// RelayedBots are the localhost bot seats that relayer relays, those that
+// they added to the lobby, in team order.
 func RelayedBots(players []FrozenGamePlayer, relayer string) []RelayedBotView {
 	relayed := []RelayedBotView{}
 	for _, player := range players {

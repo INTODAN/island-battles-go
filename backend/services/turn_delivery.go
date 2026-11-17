@@ -115,7 +115,7 @@ func relayedSeat(players []models.FrozenGamePlayer, relayer, seatID string) (mod
 			return frozenPlayer(players, seatID)
 		}
 	}
-	return models.FrozenGamePlayer{}, reject(403, "player_id is not a localhost bot seat that you relay: the host at the start relays the localhost bot seats, which GenerationState.relayed_bots lists")
+	return models.FrozenGamePlayer{}, reject(403, "player_id is not a localhost bot seat that you relay: only the player who added a localhost bot seat relays it, and GenerationState.relayed_bots lists yours")
 }
 
 // AuthorizeSubmitToken checks that a verified submit token's player is on the
