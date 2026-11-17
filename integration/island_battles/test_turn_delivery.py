@@ -17,7 +17,7 @@ from integration.test_live import create
 from integration.test_live import guests as guests_fixture
 from island_battles_client.cli import BotServer, ReloadingPlay
 from lobby_client import Scope
-from test_lobby_binding import GAME, choose_bot, game_auth
+from test_lobby_binding import GAME, choose_bot, game_auth, island_settings
 
 guests = guests_fixture
 pytestmark = pytest.mark.asyncio
@@ -61,7 +61,7 @@ def bot_server(tmp_path):
 
 async def test_a_localhost_bot_plays_a_game_through_turn_deliveries(guests, bot_server):
     alice = await guests("Alice")
-    room = await create(alice, "island-battles")
+    room = await create(alice, "island-battles", island_settings())
     scope = Scope.from_snapshot(room)
     red, blue = room.teams[0].id, room.teams[1].id
     await alice.add_seat(scope, str(blue), {"bot_level": 1})

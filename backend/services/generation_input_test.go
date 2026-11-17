@@ -30,7 +30,7 @@ func newTurnFixture(t *testing.T) turnFixture {
 	lobbyID := uuid.NewString()
 	teamOne, teamTwo := uuid.NewString(), uuid.NewString()
 	players := []domain.Principal{{PlayerID: uuid.NewString()}, {PlayerID: uuid.NewString()}}
-	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted}, Teams: []domain.Team{{ID: teamOne, Order: 1, Name: "Blue"}, {ID: teamTwo, Order: 2, Name: "Red"}}, StartRoster: domain.StartRoster{{PlayerID: players[0].PlayerID, TeamID: teamOne}, {PlayerID: players[1].PlayerID, TeamID: teamTwo}}}
+	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted, GameSettings: testutils.CircleMapSettings(2, "")}, Teams: []domain.Team{{ID: teamOne, Order: 1, Name: "Blue"}, {ID: teamTwo, Order: 2, Name: "Red"}}, StartRoster: domain.StartRoster{{PlayerID: players[0].PlayerID, TeamID: teamOne}, {PlayerID: players[1].PlayerID, TeamID: teamTwo}}}
 	publisher := &testutils.RecordedPublisher{}
 	if _, err := services.RunLobbyGame(context.Background(), database, publisher, nil, snapshot); err != nil {
 		t.Fatal(err)
@@ -208,7 +208,7 @@ func TestGenerationRejectsAnotherGamesRoster(t *testing.T) {
 	ctx := context.Background()
 	otherLobby, teamOne, teamTwo := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	elsewhere := domain.Principal{PlayerID: uuid.NewString()}
-	other := domain.Snapshot{Lobby: domain.Lobby{ID: otherLobby, GameKey: "island-battles", Phase: domain.PhaseStarted}, Teams: []domain.Team{{ID: teamOne, Order: 1}, {ID: teamTwo, Order: 2}}, StartRoster: domain.StartRoster{{PlayerID: elsewhere.PlayerID, TeamID: teamOne}, {PlayerID: uuid.NewString(), TeamID: teamTwo}}}
+	other := domain.Snapshot{Lobby: domain.Lobby{ID: otherLobby, GameKey: "island-battles", Phase: domain.PhaseStarted, GameSettings: testutils.CircleMapSettings(2, "")}, Teams: []domain.Team{{ID: teamOne, Order: 1}, {ID: teamTwo, Order: 2}}, StartRoster: domain.StartRoster{{PlayerID: elsewhere.PlayerID, TeamID: teamOne}, {PlayerID: uuid.NewString(), TeamID: teamTwo}}}
 	if _, err := services.RunLobbyGame(ctx, fixture.database, fixture.publisher, nil, other); err != nil {
 		t.Fatal(err)
 	}

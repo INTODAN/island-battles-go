@@ -4,10 +4,10 @@ import {
   CreateRequests,
   changeSettingsBody,
   describeTurnTimeout,
-  fixedTeamCount,
   lobbyMapSettings,
   type MapTemplate,
   type MapTemplateSummary,
+  mapTeamCount,
   normalizeJoinCode,
   readMapFile,
   teamName,
@@ -38,33 +38,19 @@ const templates: MapTemplateSummary[] = [
 
 const values = (extra: Partial<CreateFormValues> = {}): CreateFormValues => ({
   lobbyName: "Alex's lobby",
-  teamCount: 2,
-  map: { kind: "generated" },
+  map: { kind: "template", templateId: 4 },
   turnTimeoutSeconds: 30,
   ...extra,
 });
 
 describe("the create form", () => {
-  test("a generated map takes the chosen teams, named after the board's colours", () => {
-    const result = validateCreateForm(values({ teamCount: 3 }), templates);
+  test("a default map or a file sets the teams, named after the board's colours", () => {
     // One player per team: the request names the teams and nothing else.
-    expect(result).toEqual({
+    expect(validateCreateForm(values(), templates)).toEqual({
       ok: true,
       teams: [{ name: "Blue" }, { name: "Red" }, { name: "Green" }],
-      gameSettings: { turn_timeout_seconds: 30 },
-    });
-  });
-
-  test("a template or a file sets the teams, whatever the team count field says", () => {
-    const template = validateCreateForm(
-      values({ teamCount: 6, map: { kind: "template", templateId: 4 } }),
-      templates,
-    );
-    expect(template).toMatchObject({
-      ok: true,
       gameSettings: { map_template_id: 4, turn_timeout_seconds: 30 },
     });
-    if (template.ok) expect(template.teams).toHaveLength(3);
 
     const map = {
       map_name: "Mine",
@@ -87,6 +73,15 @@ describe("the create form", () => {
       ]);
   });
 
+  test("needs a map", () => {
+    expect(
+      validateCreateForm(values({ map: { kind: "none" } }), templates),
+    ).toEqual({
+      ok: false,
+      errors: { map: "Pick a default map, or load a map file." },
+    });
+  });
+
   test("sends null for no turn limit", () => {
     const result = validateCreateForm(
       values({ turnTimeoutSeconds: null }),
@@ -102,7 +97,7 @@ describe("the create form", () => {
     const result = validateCreateForm(
       values({
         lobbyName: "  ",
-        teamCount: 7,
+        map: { kind: "none" },
         turnTimeoutSeconds: 7,
       }),
       templates,
@@ -111,22 +106,9 @@ describe("the create form", () => {
     if (!result.ok) {
       expect(Object.keys(result.errors).sort()).toEqual([
         "lobbyName",
-        "teamCount",
+        "map",
         "turnTimeout",
       ]);
-    }
-  });
-
-  test("allows 2 to 6 teams only", () => {
-    for (const teamCount of [1, 7, 2.5, Number.NaN]) {
-      expect(validateCreateForm(values({ teamCount }), templates).ok).toBe(
-        false,
-      );
-    }
-    for (const teamCount of [2, 3, 4, 5, 6]) {
-      expect(validateCreateForm(values({ teamCount }), templates).ok).toBe(
-        true,
-      );
     }
   });
 
@@ -178,11 +160,14 @@ describe("the create form", () => {
   });
 
   test("a map decides the team count", () => {
-    expect(fixedTeamCount({ kind: "generated" }, templates)).toBeNull();
-    expect(fixedTeamCount({ kind: "template", templateId: 4 }, templates)).toBe(
+    expect(mapTeamCount({ kind: "none" }, templates)).toBeNull();
+    expect(mapTeamCount({ kind: "template", templateId: 4 }, templates)).toBe(
       3,
     );
-    expect(fixedTeamCount({ kind: "file", map: null }, templates)).toBeNull();
+    expect(
+      mapTeamCount({ kind: "template", templateId: 99 }, templates),
+    ).toBeNull();
+    expect(mapTeamCount({ kind: "file", map: null }, templates)).toBeNull();
   });
 
   test("reads a map file far enough for the form", () => {
@@ -224,22 +209,21 @@ describe("the create form", () => {
 });
 
 describe("the room's Change map form", () => {
-  test("starts from the lobby's map, turn limit and teams", () => {
-    expect(lobbyMapSettings({}, 3)).toEqual({
-      teamCount: 3,
-      map: { kind: "generated" },
+  test("starts from the lobby's map and turn limit", () => {
+    // Settings without a map start on the first default map once it loads.
+    expect(lobbyMapSettings({})).toEqual({
+      map: { kind: "none" },
       turnTimeoutSeconds: 30,
       currentTurnTimeoutSeconds: 30,
     });
     expect(
-      lobbyMapSettings({ map_template_id: 4, turn_timeout_seconds: null }, 3),
+      lobbyMapSettings({ map_template_id: 4, turn_timeout_seconds: null }),
     ).toMatchObject({
       map: { kind: "template", templateId: 4 },
       turnTimeoutSeconds: null,
     });
     const map = { map_name: "Mine", player_amount: 4 };
-    expect(lobbyMapSettings({ map, turn_timeout_seconds: 120 }, 4)).toEqual({
-      teamCount: 4,
+    expect(lobbyMapSettings({ map, turn_timeout_seconds: 120 })).toEqual({
       map: { kind: "file", map: map as unknown as MapTemplate },
       turnTimeoutSeconds: 120,
       currentTurnTimeoutSeconds: 120,
@@ -249,7 +233,6 @@ describe("the room's Change map form", () => {
   test("builds the request body: the map's teams and the settings", () => {
     const result = validateMapSettings(
       {
-        teamCount: 2,
         map: { kind: "template", templateId: 4 },
         turnTimeoutSeconds: 600,
       },
@@ -262,19 +245,13 @@ describe("the room's Change map form", () => {
         game_settings: { map_template_id: 4, turn_timeout_seconds: 600 },
       });
     }
-    const generated = validateMapSettings(
-      { teamCount: 2, map: { kind: "generated" }, turnTimeoutSeconds: null },
-      templates,
-    );
-    if (!generated.ok) throw new Error("the generated map was refused");
-    expect(changeSettingsBody(generated)).toEqual({
-      teams: [{ name: "Blue" }, { name: "Red" }],
-      game_settings: { turn_timeout_seconds: null },
-    });
   });
 
   test("keeps a turn limit the list lacks only when it is the lobby's own", () => {
-    const values = lobbyMapSettings({ turn_timeout_seconds: 45 }, 2);
+    const values = lobbyMapSettings({
+      map_template_id: 4,
+      turn_timeout_seconds: 45,
+    });
     expect(validateMapSettings(values, templates)).toMatchObject({
       ok: true,
       gameSettings: { turn_timeout_seconds: 45 },
@@ -286,7 +263,7 @@ describe("the room's Change map form", () => {
 
   test("refuses a lobby's default map that is no longer listed", () => {
     const result = validateMapSettings(
-      lobbyMapSettings({ map_template_id: 77 }, 2),
+      lobbyMapSettings({ map_template_id: 77 }),
       templates,
     );
     expect(result).toMatchObject({

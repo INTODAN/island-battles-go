@@ -1,5 +1,4 @@
-// The settings form's team count for the generated map (#174), run against a
-// minimal stand-in for the DOM.
+// The settings form's map choice, run against a minimal stand-in for the DOM.
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -32,6 +31,10 @@ class FakeElement {
     if (this.tag === "select") this.options.splice(this.options.indexOf(reference), 0, ...(node instanceof FakeElement ? node.children : [node]));
     else this.children.push(node);
   }
+  removeChild(node) {
+    this.options = this.options.filter((option) => option !== node);
+    this.children = this.children.filter((child) => child !== node);
+  }
   setAttribute() {}
   addEventListener(type, listener) { (this.listeners[type] ||= []).push(listener); }
   dispatch(type) { for (const listener of this.listeners[type] || []) listener(); }
@@ -52,59 +55,66 @@ globalThis.document = { createElement: (tag) => new FakeElement(tag) };
 globalThis.Option = FakeOption;
 globalThis.window = { addEventListener() {} };
 globalThis.location = { origin: "https://lobby.example" };
-globalThis.fetch = async () => Response.json({ maps: [{ map_template_id: 4, map_name: "Strait", team_count: 3, plane_size_x: 10, plane_size_y: 6, castle_count: 3 }] });
+let defaultMaps = [
+  { map_template_id: 4, map_name: "Strait", team_count: 3, plane_size_x: 10, plane_size_y: 6, castle_count: 3 },
+  { map_template_id: 7, map_name: "Bay", team_count: 2, plane_size_x: 8, plane_size_y: 6, castle_count: 4 },
+];
+// Each test reads the maps from a game of its own, since the module loads
+// them once per game.
+let games = 0;
+globalThis.fetch = async () => Response.json({ maps: defaultMaps });
 
-const { SettingsForm, defaultGeneratedTeams, generatedTeamCounts, generatedTeamSelection } = await import("./lobby-settings.mjs");
+const { SettingsForm } = await import("./lobby-settings.mjs");
 
 function form(options = {}) {
   const container = new FakeElement("div");
-  const instance = new SettingsForm({ container, ...options });
-  return instance;
+  games += 1;
+  return new SettingsForm({ container, gameURL: `https://game${games}.example`, ...options });
 }
 
-test("the generated map offers 2 to 6 teams and the create form defaults to 2", () => {
-  assert.deepEqual(generatedTeamCounts, [2, 3, 4, 5, 6]);
+const loaded = () => new Promise((resolve) => setTimeout(resolve));
+
+test("a new lobby starts on the first default map", async () => {
   const created = form();
-  assert.deepEqual(created.teams.options.map((option) => option.value), ["2", "3", "4", "5", "6"]);
-  assert.equal(created.teams.value, String(defaultGeneratedTeams));
-  assert.equal(created.teamsLabel.hidden, false);
-  assert.deepEqual(created.choice().teams, ["Blue", "Red"]);
+  assert.equal(created.select.value, "");
+  assert.throws(() => created.choice(), /still loading/);
+  await loaded();
+  assert.equal(created.select.value, "template:4");
+  assert.ok(!created.select.options.includes(created.noMap));
+  assert.deepEqual(created.choice(), { settings: { map_template_id: 4, turn_timeout_seconds: 30 }, teams: ["Blue", "Red", "Green"] });
+  assert.equal(created.status.text, "Teams: Blue, Red, Green.");
 });
 
-test("the chosen number of teams is returned for the generated map", () => {
+test("the chosen map sets the teams", async () => {
   const created = form();
-  for (const count of generatedTeamCounts) {
-    created.teams.value = String(count);
-    created.teams.dispatch("change");
-    assert.equal(created.choice().teams.length, count);
-    assert.match(created.status.text, new RegExp(`^Teams: .*`));
-  }
-  created.teams.value = "3";
-  assert.deepEqual(created.choice().teams, ["Blue", "Red", "Green"]);
-  assert.deepEqual(created.choice().settings, { turn_timeout_seconds: 30 });
-});
-
-test("the Teams select shows for the generated map only", async () => {
-  const created = form();
-  await new Promise((resolve) => setTimeout(resolve));
-  created.select.value = "template:4";
+  await loaded();
+  created.select.value = "template:7";
   created.select.dispatch("change");
-  assert.equal(created.teamsLabel.hidden, true);
-  assert.equal(created.choice().teams.length, 3);
+  assert.deepEqual(created.choice(), { settings: { map_template_id: 7, turn_timeout_seconds: 30 }, teams: ["Blue", "Red"] });
   created.select.value = "file";
   created.select.dispatch("change");
-  assert.equal(created.teamsLabel.hidden, true);
-  created.select.value = "";
-  created.select.dispatch("change");
-  assert.equal(created.teamsLabel.hidden, false);
+  assert.throws(() => created.choice(), /Choose a map file/);
 });
 
-test("the room's form shows the lobby's current number of teams", () => {
-  assert.equal(form({ current: {}, teamCount: 4 }).teams.value, "4");
-  assert.equal(form({ current: { turn_timeout_seconds: 10 }, teamCount: 6 }).choice().teams.length, 6);
-  // A count the form doesn't offer falls back to the default.
-  assert.equal(form({ current: {}, teamCount: 9 }).teams.value, "2");
-  assert.equal(generatedTeamSelection(5), 5);
-  assert.equal(generatedTeamSelection(1), 2);
-  assert.equal(generatedTeamSelection(undefined), 2);
+test("there is no map to choose without default maps or a file", async () => {
+  const saved = defaultMaps;
+  defaultMaps = [];
+  try {
+    const created = form();
+    await loaded();
+    assert.equal(created.select.value, "");
+    assert.equal(created.noMap.text, "Pick a map");
+    assert.throws(() => created.choice(), /load a map file/);
+  } finally {
+    defaultMaps = saved;
+  }
+});
+
+test("the room's form shows the lobby's map, and the first default map for settings without one", async () => {
+  const chosen = form({ current: { map_template_id: 7 } });
+  await loaded();
+  assert.equal(chosen.select.value, "template:7");
+  const old = form({ current: { turn_timeout_seconds: 10 } });
+  await loaded();
+  assert.deepEqual(old.choice(), { settings: { map_template_id: 4, turn_timeout_seconds: 10 }, teams: ["Blue", "Red", "Green"] });
 });

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/bots"
 	"islandBattles/backend/models"
 	"islandBattles/backend/simulation"
@@ -24,14 +23,12 @@ type tournamentMap struct {
 	gameMap models.Map
 }
 
-// generatedTournamentMap is the map a lobby without a map choice starts on,
-// for two teams.
-func generatedTournamentMap() tournamentMap {
-	binding := models.BindingResult{Teams: []models.TeamBinding{{TeamID: "blue", TeamOrder: 1, TeamColor: 1}, {TeamID: "red", TeamOrder: 2, TeamColor: 2}}}
-	snapshot := domain.Snapshot{Teams: []domain.Team{{ID: "blue", Order: 1, Name: "Blue"}, {ID: "red", Order: 2, Name: "Red"}},
-		StartRoster: []domain.StartRosterEntry{{PlayerID: "a", TeamID: "blue"}, {PlayerID: "b", TeamID: "red"}}}
-	_, gameMap := prepareLobbyGame(binding, snapshot)
-	return tournamentMap{name: "generated", gameMap: gameMap}
+// circleTournamentMap is the two teams' castles 4 apart, each with 30
+// soldiers, in an 8 by 6 plane.
+func circleTournamentMap() tournamentMap {
+	thirty := uint(30)
+	return tournamentMap{name: "circle", gameMap: models.BuildMap(models.MapTemplateView{MapFields: models.MapFields{MapName: "circle", PlayerAmount: 2, PlaneSizeX: 8, PlaneSizeY: 6},
+		Castles: []models.CastleTemplateView{{TeamColor: 1, X: -2, StartingSoldierAmount: &thirty}, {TeamColor: 2, X: 2, StartingSoldierAmount: &thirty}}})}
 }
 
 // neutralTournamentMap mirrors castles, each at x and y with soldiers, around
@@ -51,7 +48,7 @@ func neutralTournamentMap(name string, neutrals ...[3]float64) tournamentMap {
 
 func tournamentMaps() []tournamentMap {
 	return []tournamentMap{
-		generatedTournamentMap(),
+		circleTournamentMap(),
 		neutralTournamentMap("islands", [3]float64{2.5, 2, 10}, [3]float64{1, 1.5, 15}, [3]float64{2.5, -2.5, 20}),
 		neutralTournamentMap("strait", [3]float64{1.5, 0.5, 5}, [3]float64{3, 3, 25}, [3]float64{0.5, 3, 15}),
 		neutralTournamentMap("archipelago", [3]float64{3, 1.5, 8}, [3]float64{3.5, -2, 12}, [3]float64{1.5, 2.5, 18}, [3]float64{0, 1, 30}, [3]float64{2, -0.5, 6}),
