@@ -2,14 +2,17 @@
 
 These games are the two-player match: a team holds one player, so the client
 under test plays Alice and the runner plays her opponent Bob over plain HTTP.
-Every castle starts with 30 soldiers; speed levels 2, 3 and 4 cost 10, 20 and
-30, and clash_stop_generations levels 2 and 3 cost 10 and 20.
+Every castle starts with 30 soldiers; speed, generation_amount and
+burst_potential levels 2, 3 and 4 cost 10, 20 and 30, and
+clash_stop_generations levels 2 and 3 cost 10 and 20. burst_potential level 2
+allows a burst of 4.
 """
 
 from island_conformance.adapter import AdapterProcess
 from island_conformance.live import (
     COMMANDS,
     Match,
+    burst,
     enemy_castle,
     own_castle,
     send,
@@ -17,6 +20,17 @@ from island_conformance.live import (
 )
 
 PROBLEM = "urn:island-battles:problem:"
+UPGRADE_TYPES = {
+    "burst_potential",
+    "clash_stop_generations",
+    "generation_amount",
+    "speed",
+}
+
+
+def level_one(**levels: int) -> dict:
+    """Every upgrade type at level 1, except the levels given."""
+    return dict.fromkeys(UPGRADE_TYPES, 1) | levels
 
 
 async def playing(launch) -> tuple[AdapterProcess, dict]:
@@ -48,8 +62,7 @@ async def test_an_upgrade_pays_its_level_and_a_group_carries_the_levels(
     alice, generation = await playing(launch)
     own, enemy = own_castle(match.alice.state), enemy_castle(match.alice.state)
     assert all(
-        set(entity["upgrades"]) == {"speed", "clash_stop_generations"}
-        for entity in generation["castles"]
+        set(entity["upgrades"]) == UPGRADE_TYPES for entity in generation["castles"]
     )
     assert castle(generation, own)["upgrades"]["speed"] == 1
     advanced = await next_generation(alice, match, upgrade(own, "speed"))
@@ -66,7 +79,7 @@ async def test_an_upgrade_pays_its_level_and_a_group_carries_the_levels(
     ]
     upgraded = castle(advanced, own)
     # 30 soldiers pay 10, then the castle grows by one.
-    assert upgraded["upgrades"] == {"speed": 2, "clash_stop_generations": 1}
+    assert upgraded["upgrades"] == level_one(speed=2)
     assert upgraded["soldiers"] == 21
     # A group leaving the castle carries its levels.
     advanced = await next_generation(alice, match, send(own, enemy, 1))
@@ -75,7 +88,72 @@ async def test_an_upgrade_pays_its_level_and_a_group_carries_the_levels(
         for group in advanced["soldier_groups"]
         if group["origin_castle_id"] == own
     )
-    assert group["upgrades"] == {"speed": 2, "clash_stop_generations": 1}
+    assert group["upgrades"] == level_one(speed=2)
+
+
+async def test_a_burst_is_pending_then_paid_out_and_owed(launch, match, proxy):
+    alice, _ = await playing(launch)
+    own = own_castle(match.alice.state)
+    # Level 2 of burst_potential costs 10 and allows a burst of 4, which the
+    # same result may order after buying it.
+    advanced = await next_generation(
+        alice, match, upgrade(own, "burst_potential"), burst(own, 4)
+    )
+    assert posts(proxy)[-1]["commands"][-1] == {
+        "command_type": "burst_castle",
+        "parameters": {"castle_id": own, "soldier_amount": 4},
+    }
+    pending = castle(advanced, own)
+    assert (pending["soldiers"], pending["pending_burst"], pending["burst_debt"]) == (
+        21,
+        4,
+        0,
+    )
+    # A castle with a pending burst can't burst again.
+    await alice.send({"type": "finish", "commands": [burst(own, 1)]})
+    stopped = await alice.expect("stopped")
+    assert (stopped["error"]["kind"], stopped["error"]["status"]) == (
+        "burst_unavailable",
+        409,
+    )
+    await alice.close()
+    alice, _ = await playing(launch)
+    # The burst arrives with the production, and the castle owes it.
+    owed = castle(await next_generation(alice, match), own)
+    assert (owed["soldiers"], owed["pending_burst"], owed["burst_debt"]) == (26, 0, 4)
+
+
+async def test_a_burst_above_the_potential_is_rejected(launch, match):
+    own = own_castle(match.alice.state)
+    for orders in ([burst(own, 1)], [upgrade(own, "burst_potential"), burst(own, 5)]):
+        alice, _ = await playing(launch)
+        await alice.send({"type": "finish", "commands": orders})
+        stopped = await alice.expect("stopped")
+        assert (stopped["error"]["kind"], stopped["error"]["status"]) == (
+            "burst_above_potential",
+            409,
+        )
+        assert not (await match.read(match.alice))["submitted"]
+        await alice.close()
+
+
+async def test_invalid_bursts_are_rejected_before_any_request(launch, match, proxy):
+    own = own_castle(match.alice.state)
+    for order in (
+        burst(own, 0),
+        burst(own, -1),
+        burst(-1, 4),
+        burst(own, "4"),
+        {"type": "burst_castle", "castle_id": own},
+        {"type": "burst_castle", "soldier_amount": 4},
+    ):
+        alice, _ = await playing(launch)
+        await alice.send({"type": "finish", "commands": [order]})
+        assert (await alice.expect("stopped"))["error"]["kind"] == "invalid_argument"
+        await alice.close()
+    assert all(
+        not batch["complete"] and not batch["commands"] for batch in posts(proxy)
+    )
 
 
 async def test_two_upgrades_of_one_type_pay_for_both_levels_down_to_the_last_soldier(
@@ -136,9 +214,7 @@ async def test_invalid_upgrades_are_rejected_before_any_request(launch, match, p
     )
 
 
-async def test_server_rejects_what_only_an_earlier_batch_reserved(
-    launch, match, proxy
-):
+async def test_server_rejects_what_only_an_earlier_batch_reserved(launch, match, proxy):
     own, enemy = own_castle(match.alice.state), enemy_castle(match.alice.state)
     # An earlier batch of Alice's own, which the runner sends with her
     # credential, buys both clash_stop_generations levels and pays all 30

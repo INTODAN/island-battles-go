@@ -1,6 +1,6 @@
 ---
 name: island-battles-rules
-description: "The rules of an Island Battles game: turns (generations), castles, soldiers, growth, movement, clashes, capturing, upgrades and their costs, and how a game is won, lost or drawn. Load it before deciding what a bot should do, or when a result of the bot surprises you."
+description: "The rules of an Island Battles game: turns (generations), castles, soldiers, growth, movement, clashes, capturing, upgrades and their costs, bursts, and how a game is won, lost or drawn. Load it before deciding what a bot should do, or when a result of the bot surprises you."
 ---
 
 # Island Battles rules
@@ -13,7 +13,7 @@ The game is a list of **generations**, numbered from 1. In each one, every playe
 
 1. **Your commands**, in the order you list them.
 2. **Movement**: every soldier group moves, and enemy groups that meet clash.
-3. **Growth**: every castle that a team owns gains **1 soldier**. A **neutral** castle (`team_color` 0) does not grow: it keeps its soldiers until a team captures it.
+3. **Growth**: every castle that a team owns produces its `generation_amount` value of soldiers (1 at level 1, up to 4). A castle with a pending burst gets the burst on top, and a castle with burst debt repays it first (see Bursts). A **neutral** castle (`team_color` 0) does not grow: it keeps its soldiers until a team captures it.
 4. **Arrival**: groups that reached their destination castle land.
 
 So a group you send moves in the same turn, and a castle grows before the arrivals fight it. A neutral castle captured this turn was still neutral at the growth step, so it does not grow this turn and grows from the next turn on.
@@ -37,7 +37,7 @@ Counting soldiers before the losses, if the smaller side has **half or more** of
 A group that ends the turn at its destination lands, in group id order:
 
 - **Your own castle**: its soldiers join the castle.
-- **Any other castle** (enemy or neutral): if the group has **more** soldiers than the castle, the castle becomes yours with the difference as its soldiers (it keeps its upgrade levels). Otherwise the castle loses that many soldiers and stays as it was. An equal fight leaves the castle with 0 soldiers and its owner.
+- **Any other castle** (enemy or neutral): if the group has **more** soldiers than the castle, the castle becomes yours with the difference as its soldiers (it keeps its upgrade levels, and loses its burst debt and pending burst). Otherwise the castle loses that many soldiers and stays as it was. An equal fight leaves the castle with 0 soldiers and its owner.
 
 ## Upgrades
 
@@ -47,8 +47,20 @@ A group that ends the turn at its destination lands, in group id order:
 |---|---|---|---|
 | `speed` (map units per turn) | 1 / 2 / 3 / 4 | 0.5 / 1 / 1.5 / 2 | 0 / 10 / 20 / 30 |
 | `clash_stop_generations` (turns stopped) | 1 / 2 / 3 | 3 / 2 / 1 | 0 / 10 / 20 |
+| `generation_amount` (soldiers produced per turn) | 1 / 2 / 3 / 4 | 1 / 2 / 3 / 4 | 0 / 10 / 20 / 30 |
+| `burst_potential` (largest burst) | 1 / 2 / 3 / 4 | 0 / 4 / 8 / 16 | 0 / 10 / 20 / 30 |
 
 The costs are in `turn.upgrades`; read them there rather than hard-coding them.
+
+## Bursts
+
+`burst_castle(castle_id, amount)` orders a **burst** of 1 up to the castle's `burst_potential` value (counting the levels bought earlier this turn) for a castle you own. A castle at `burst_potential` level 1 can't burst. The burst is a loan:
+
+1. The turn you order it, the castle grows as usual, and the next generation shows the burst as the castle's `pending_burst`.
+2. The turn after, the castle gets its production **plus** the burst, and the burst becomes its `burst_debt`.
+3. From then on, each turn's production repays the debt first; only what is left over grows the castle. Once the debt is 0 it grows normally again.
+
+A castle can't burst while it has `burst_debt` or a `pending_burst`, nor twice in one turn. A capture clears both. Every player sees both fields.
 
 ## Winning, losing, drawing
 
@@ -62,4 +74,4 @@ The host sets the turn timeout: 30 seconds unless the lobby chose 5 to 600 secon
 
 ## Rejected results
 
-The server checks all commands against the board and rejects the **whole result** if one is invalid: soldiers a castle does not have (counting what earlier commands in the result spend), a castle that is not yours or does not exist, an upgrade past the maximum level, or sending to the same castle. The turn is not played. See `writing-a-bot`.
+The server checks all commands against the board and rejects the **whole result** if one is invalid: soldiers a castle does not have (counting what earlier commands in the result spend), a castle that is not yours or does not exist, an upgrade past the maximum level, a burst above the castle's burst potential or of a castle with debt or a pending burst, or sending to the same castle. The turn is not played. See `writing-a-bot`.
