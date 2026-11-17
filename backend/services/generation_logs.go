@@ -90,19 +90,40 @@ func countStoredLogLines(transaction *gorm.DB, state *models.GenerationState) er
 // every team's. It takes no game lock, like Replay: the game is read first,
 // so a game that ends meanwhile is shown by the stricter rule.
 func (service *GenerationService) Logs(ctx context.Context, principal domain.Principal, lobbyID string, generationID uint) (models.GenerationLogs, error) {
-	database := service.Database.WithContext(ctx)
-	game, err := dal.FindLobbyGame(database, lobbyID)
+	game, err := dal.FindLobbyGame(service.Database.WithContext(ctx), lobbyID)
 	if err != nil {
 		return models.GenerationLogs{}, err
 	}
-	observability.Annotate(ctx, slog.Uint64("game_id", uint64(game.ID)), slog.Uint64("generation_id", uint64(generationID)))
+	observability.Annotate(ctx, slog.Uint64("game_id", uint64(game.ID)))
 	if err := service.authorize(ctx, principal, game); err != nil {
 		return models.GenerationLogs{}, err
 	}
-	if game, err = service.applyOverdueDeadline(ctx, game); err != nil {
+	return service.logs(ctx, game, generationID, principal.PlayerID)
+}
+
+// WatchLogs returns a generation's game log for the people who may read
+// Watch. A watcher belongs to no team, so while the game runs every team is
+// hidden; once it has an outcome every team's lines are shown, as for a
+// roster player. A roster player reads it as a watcher too.
+func (service *GenerationService) WatchLogs(ctx context.Context, principal domain.Principal, lobbyID string, generationID uint) (models.GenerationLogs, error) {
+	game, err := service.authorizeWatcher(ctx, principal, lobbyID)
+	if err != nil {
 		return models.GenerationLogs{}, err
 	}
-	// Checked after authorization, so only roster players learn of it.
+	return service.logs(ctx, game, generationID, "")
+}
+
+// logs reads a generation's game log for an authorized caller, the roster
+// player callerID, or a watcher of no team when callerID is empty.
+func (service *GenerationService) logs(ctx context.Context, game *models.Game, generationID uint, callerID string) (models.GenerationLogs, error) {
+	database := service.Database.WithContext(ctx)
+	observability.Annotate(ctx, slog.Uint64("generation_id", uint64(generationID)))
+	game, err := service.applyOverdueDeadline(ctx, game)
+	if err != nil {
+		return models.GenerationLogs{}, err
+	}
+	// Checked after authorization, so only those who may read the game
+	// learn of it.
 	if generationID == 0 {
 		return models.GenerationLogs{}, reject(422, "generation_id must be a positive generation ID")
 	}
@@ -117,9 +138,12 @@ func (service *GenerationService) Logs(ctx context.Context, principal domain.Pri
 	if err != nil {
 		return models.GenerationLogs{}, err
 	}
-	caller, err := frozenPlayer(players, principal.PlayerID)
-	if err != nil {
-		return models.GenerationLogs{}, err
+	// The zero player's team colour is no team's.
+	var caller models.FrozenGamePlayer
+	if callerID != "" {
+		if caller, err = frozenPlayer(players, callerID); err != nil {
+			return models.GenerationLogs{}, err
+		}
 	}
 	lines, err := dal.LoadGenerationLogs(database, generationID)
 	if err != nil {

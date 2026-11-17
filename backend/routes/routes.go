@@ -116,7 +116,7 @@ func SetupGameRoutes(api huma.API, game *handlers.LobbyGame) {
 		OperationID: "watchIslandLobbyReplay", Path: "/game/from-lobby/{lobby_id}/watch/replay", Method: http.MethodGet,
 		Summary: "View the Island Battles replay of a lobby's game as a watcher",
 		Description: "The replay page of GET /game/from-lobby/{lobby_id}/replay for the people who may read GET /game/from-lobby/{lobby_id}/watch: every stored generation, the teams and the outcome once the game has ended, drawn by the same code as the roster's replay. " +
-			"The page reads its history for Save demo through /game/from-lobby/{lobby_id}/watch/demo, and shows no game log lines, since a watcher sees none while the game runs. A kicked watcher gets 403; anyone else, and a lobby whose game hasn't started, get 404." + newestGame,
+			"The page reads its history for Save demo through /game/from-lobby/{lobby_id}/watch/demo, and its Logs panel through /game/from-lobby/{lobby_id}/watch/logs, which has no lines while the game runs and every team's once it has ended. A kicked watcher gets 403; anyone else, and a lobby whose game hasn't started, get 404." + newestGame,
 		Tags: []string{"Island Battles"}, Security: playerTokenSecurity,
 	}, game.WatchReplay)
 	huma.Register(api, huma.Operation{
@@ -134,19 +134,28 @@ func SetupGameRoutes(api huma.API, game *handlers.LobbyGame) {
 			Content: map[string]*huma.MediaType{"application/json": {Schema: demo}},
 		}},
 	}, game.WatchDemo)
+	huma.Register(api, huma.Operation{
+		OperationID: "watchIslandLobbyGenerationLogs", Path: "/game/from-lobby/{lobby_id}/watch/logs", Method: http.MethodGet,
+		Summary: "Read a generation's game log lines for a watcher",
+		Description: "For the people who may read GET /game/from-lobby/{lobby_id}/watch. Returns a generation's game log lines in the shape of GET /game/from-lobby/{lobby_id}/logs, for a reader of no team: bots often log their plans, so while the game runs no lines are included and hidden_team_colors names every team, and once the game has an outcome every team's lines are. A roster player reads it as a watcher too. " +
+			"A generation of another game returns 404. A kicked watcher gets 403; anyone else, and a lobby whose game hasn't started, get 404." + newestGame,
+		Tags: []string{"Island Battles"}, Security: playerTokenSecurity,
+	}, game.WatchLogs)
 	// A demo is a file format, like a map file.
 	dropSchemaLink(api, reflect.TypeFor[models.Demo]())
-	for _, parameter := range api.OpenAPI().Paths["/game/from-lobby/{lobby_id}/logs"].Get.Parameters {
-		if parameter.Name == "generation_id" {
-			// The service requires it after authorizing the caller; see
-			// GenerationLogs. Huma validates requests against the schema it
-			// registered, so the documented minimum goes on a copy: on the
-			// original, generation_id=0 would be refused before authentication.
-			parameter.Required = true
-			minimum := 1.0
-			documented := *parameter.Schema
-			documented.Minimum = &minimum
-			parameter.Schema = &documented
+	for _, path := range []string{"/game/from-lobby/{lobby_id}/logs", "/game/from-lobby/{lobby_id}/watch/logs"} {
+		for _, parameter := range api.OpenAPI().Paths[path].Get.Parameters {
+			if parameter.Name == "generation_id" {
+				// The service requires it after authorizing the caller; see
+				// GenerationLogs. Huma validates requests against the schema it
+				// registered, so the documented minimum goes on a copy: on the
+				// original, generation_id=0 would be refused before authentication.
+				parameter.Required = true
+				minimum := 1.0
+				documented := *parameter.Schema
+				documented.Minimum = &minimum
+				parameter.Schema = &documented
+			}
 		}
 	}
 	api.OpenAPI().Components.SecuritySchemes[SubmitTokenScheme] = &huma.SecurityScheme{Type: "http", Scheme: "bearer", BearerFormat: "ibst1",
