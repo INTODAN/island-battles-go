@@ -302,15 +302,35 @@ export const previewPath = "/play/map-preview.html";
 
 const previewMessageType = "island-battles.map-preview";
 const previewReadyType = "island-battles.map-preview-ready";
+const previewFailedType = "island-battles.map-preview-failed";
+
+// previewStartLimit is how long the builder waits, after the frame has
+// loaded, for the preview to say that it listens before it says the preview
+// didn't start, such as when its scripts failed to load.
+export const previewStartLimit = 15000;
 
 // previewMessage is what the builder posts to the preview: the map file, as
-// it would be downloaded, whether or not the server has accepted it yet.
-export function previewMessage(map) {
-  return { type: previewMessageType, map: mapFile(map) };
+// it would be downloaded, whether or not the server has accepted it yet, and
+// the game's upgrade types from upgrades.json, so the preview gives every
+// castle each type's level, as a game's first generation does. moving says a
+// castle is being dragged: the preview then redraws moved castles less often,
+// and draws the drag's end at once.
+export function previewMessage(map, upgrades = [], moving = false) {
+  return { type: previewMessageType, map: mapFile(map), upgrade_types: upgrades.map(({ type }) => type), moving };
 }
+
+const fromPreview = (event, frameWindow, origin) => Boolean(frameWindow) && event.source === frameWindow && event.origin === origin;
 
 // isPreviewReady says whether a message is the preview frame, on the
 // builder's own origin, saying that it listens.
 export function isPreviewReady(event, frameWindow, origin) {
-  return Boolean(frameWindow) && event.source === frameWindow && event.origin === origin && event.data?.type === previewReadyType;
+  return fromPreview(event, frameWindow, origin) && event.data?.type === previewReadyType;
+}
+
+// previewFailure returns the reason the preview frame gives for not drawing,
+// such as a browser without WebGL, or null for any other message.
+export function previewFailure(event, frameWindow, origin) {
+  if (!fromPreview(event, frameWindow, origin) || event.data?.type !== previewFailedType) return null;
+  const message = event.data.message;
+  return typeof message === "string" && message ? message : "The 3D preview couldn't start.";
 }

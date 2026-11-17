@@ -4,13 +4,18 @@ import { type Battlefield, battlefieldOf, renderGeneration } from "../scene";
 import { loadBoardAssets } from "../scene/boardAssets";
 import { fitCamera } from "../scene/camera";
 import { applyGraphics, savedGraphics } from "../scene/graphics";
+import { createBoardLook } from "../scene/look";
 import { installBoardControls } from "../scene/picking";
 import { showBoardLoading } from "../ui/boardLoading";
 import {
+  createRedrawQueue,
+  FAILED_MESSAGE_TYPE,
+  MAX_PREVIEW_DISTANCE,
   mapFromMessage,
   type Preview,
   previewGeneration,
   previewKey,
+  previewTexelsPerUnit,
   READY_MESSAGE_TYPE,
 } from "./preview";
 
@@ -24,6 +29,10 @@ declare global {
       readonly field: Battlefield | undefined;
       /** How many maps have been drawn, the empty board first. */
       readonly draws: number;
+      /** Whether a map that moves castles waits to be drawn. */
+      readonly pending: boolean;
+      /** The shallows' resolution of the last draw, in texels per world unit. */
+      readonly texelsPerUnit: number;
       /** Settles once the board's art has loaded. */
       assets: Promise<void>;
     };
@@ -48,7 +57,15 @@ let engine: Engine;
 try {
   engine = new Engine(canvas, true, { preserveDrawingBuffer: true });
 } catch (error) {
-  say("This browser can't draw the 3D preview: it needs WebGL.");
+  const message = "This browser can't draw the 3D preview: it needs WebGL.";
+  say(message);
+  // The builder shows the reason over the frame, in place of its loading line.
+  if (inFrame) {
+    window.parent.postMessage(
+      { type: FAILED_MESSAGE_TYPE, message },
+      location.origin,
+    );
+  }
   throw error;
 }
 const scene = new Scene(engine);
@@ -63,6 +80,7 @@ assets.then(
   },
 );
 
+const look = createBoardLook(scene);
 let draws = 0;
 let drawnKey = "";
 const draw = (preview: Preview) => {
@@ -70,8 +88,19 @@ const draw = (preview: Preview) => {
   if (key === drawnKey) return;
   drawnKey = key;
   draws++;
-  renderGeneration(scene, preview.generation, preview.teams);
+  say(
+    preview.tooLarge
+      ? `A castle is more than ${MAX_PREVIEW_DISTANCE} units from the centre, too far for the 3D preview. It draws the map again once every castle is within ${MAX_PREVIEW_DISTANCE} units.`
+      : "",
+  );
+  look.texelsPerUnit = previewTexelsPerUnit(preview.generation.castles);
+  // Keep the player's view while castles move; the board only moves back when it outgrows it.
+  renderGeneration(scene, preview.generation, preview.teams, {
+    camera: "follow",
+  });
 };
+// Moving castles redraws the islands and shallows, which is slow: wait for a drag to settle.
+const queue = createRedrawQueue(draw);
 
 // The empty board makes the camera, so the scene can render before the first map arrives.
 draw(previewGeneration({}));
@@ -85,16 +114,27 @@ window.mapPreviewDebug = {
   get draws() {
     return draws;
   },
+  get pending() {
+    return queue.pending;
+  },
+  get texelsPerUnit() {
+    return look.texelsPerUnit;
+  },
   assets,
 };
 
 window.addEventListener("message", (event) => {
-  const map = mapFromMessage(
+  const message = mapFromMessage(
     event,
     inFrame ? window.parent : null,
     location.origin,
   );
-  if (map !== undefined) draw(previewGeneration(map));
+  if (message !== undefined) {
+    queue.push(
+      previewGeneration(message.map, message.upgradeTypes),
+      message.moving,
+    );
+  }
 });
 if (inFrame) {
   window.parent.postMessage({ type: READY_MESSAGE_TYPE }, location.origin);

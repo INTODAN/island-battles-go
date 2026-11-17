@@ -43,7 +43,7 @@ import {
   squadSize,
 } from "./art";
 import { type BoardBounds, boardBounds } from "./board";
-import { createBoardCamera, fitCamera } from "./camera";
+import { createBoardCamera, fitCamera, followBounds } from "./camera";
 import { castleDisplayLevel } from "./castleLevel";
 import {
   type CastleView,
@@ -778,6 +778,18 @@ function placeOutline(
   );
 }
 
+/**
+ * A bridge's key: its castles and its length, rounded to a thousandth of a world unit. A bridge's
+ * shape is made for its length, so castles that move apart or together get a new bridge.
+ */
+export function bridgeKeyOf(
+  firstId: number,
+  secondId: number,
+  length: number,
+): string {
+  return `${firstId}-${secondId}-${length.toFixed(3)}`;
+}
+
 function updateIslands(field: Battlefield, castles: readonly Castle[]): void {
   const { scene, materials } = field;
   const key = castles
@@ -809,11 +821,11 @@ function updateIslands(field: Battlefield, castles: readonly Castle[]): void {
     const first = byId.get(firstId);
     const second = byId.get(secondId);
     if (!first || !second) continue;
-    const bridgeKey = `${firstId}-${secondId}`;
-    wanted.add(bridgeKey);
     const start = toWorld(first);
     const end = toWorld(second);
     const length = Math.hypot(end.x - start.x, end.z - start.z);
+    const bridgeKey = bridgeKeyOf(firstId, secondId, length);
+    wanted.add(bridgeKey);
     const seed = hashSeed(firstId, secondId);
     const yaw = -Math.atan2(end.z - start.z, end.x - start.x);
     const middle = { x: (start.x + end.x) / 2, z: (start.z + end.z) / 2 };
@@ -871,6 +883,12 @@ export interface RenderOptions {
   keepGroups?: ReadonlySet<number>;
   /** False leaves the heading arrows to the caller (a turn draws its own). */
   headings?: boolean;
+  /**
+   * What a new board size does to the camera: "fit" (the default) frames the whole board at the
+   * default view; "follow" keeps the player's angle, pan and zoom, and only moves back when the
+   * board grows past the view, as the map builder's preview needs while castles move (#278).
+   */
+  camera?: "fit" | "follow";
 }
 
 /**
@@ -890,13 +908,16 @@ export function renderGeneration(
   field.teams = teams;
 
   const bounds = boardBounds(generation.castles);
-  if (
-    bounds.halfWidth !== field.bounds.halfWidth ||
-    bounds.halfDepth !== field.bounds.halfDepth ||
-    field.castles.size === 0
-  ) {
+  if (field.castles.size === 0) {
     field.bounds = bounds;
     fitCamera(scene, field.camera, bounds);
+  } else if (
+    bounds.halfWidth !== field.bounds.halfWidth ||
+    bounds.halfDepth !== field.bounds.halfDepth
+  ) {
+    field.bounds = bounds;
+    if (options.camera === "follow") followBounds(scene, field.camera, bounds);
+    else fitCamera(scene, field.camera, bounds);
   }
 
   updateIslands(field, generation.castles);

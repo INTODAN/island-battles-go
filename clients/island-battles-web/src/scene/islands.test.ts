@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { bridgeKeyOf } from "./battlefield";
 import {
   hashSeed,
   ISLAND_SIDES,
@@ -84,5 +85,14 @@ describe("shared landmasses", () => {
 
   test("the grouping does not depend on the castles' order", () => {
     expect(landmasses([...castles].reverse())).toEqual(landmasses(castles));
+  });
+});
+
+describe("bridgeKeyOf", () => {
+  test("changes with the bridge's length, so moved castles get a bridge of the new length", () => {
+    const key = bridgeKeyOf(0, 1, 1.75);
+    expect(bridgeKeyOf(0, 1, 1.7504)).toBe(key);
+    expect(bridgeKeyOf(0, 1, 2.1)).not.toBe(key);
+    expect(bridgeKeyOf(0, 2, 1.75)).not.toBe(key);
   });
 });

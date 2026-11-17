@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   builderHello, checkMap, describeProblems, downloadGate, dragPosition, fileName, freeSpot, isPreviewReady, lobbyGate, lobbyMessage, lobbyPageFromMessage, mapFile, missingTeams,
-  newMap, openerState, openMapFile, placeProblems, previewMessage, previewPath, problemsFor, serialize, withoutCastle,
+  newMap, openerState, openMapFile, placeProblems, previewFailure, previewMessage, previewPath, previewStartLimit, problemsFor, serialize, withoutCastle,
 } from "./builder.mjs";
 
 const crossing = () => ({
@@ -216,10 +216,18 @@ test("the 3D preview gets the map file as it would be downloaded", () => {
   const map = crossing();
   map.castles[1].upgrades = {};
   map.castles[2].starting_soldier_amount = null;
-  const message = previewMessage(map);
+  // upgrades.json, as the page loads it.
+  const upgrades = [{ type: "clash_stop_generations", max_level: 4 }, { type: "speed", max_level: 4 }];
+  const message = previewMessage(map, upgrades);
   // The web client's src/mapPreview/preview.ts takes this type.
   assert.equal(message.type, "island-battles.map-preview");
   assert.deepEqual(message.map, mapFile(map));
+  // The preview gives every castle each type of the table, as a game's first generation does.
+  assert.deepEqual(message.upgrade_types, ["clash_stop_generations", "speed"]);
+  assert.deepEqual(previewMessage(map).upgrade_types, []);
+  // Whether a castle is being dragged, so the preview redraws moves less often.
+  assert.equal(message.moving, false);
+  assert.equal(previewMessage(map, upgrades, true).moving, true);
   assert.deepEqual(message.map.castles[2], { team_color: 0, x: 0, y: 2.5 });
   // A copy, so later edits don't change a message that is still queued.
   map.castles[0].x = 7;
@@ -241,4 +249,20 @@ test("only the preview frame on the builder's origin says that it listens", () =
   // No frame yet: nothing counts, not even a message without a source.
   assert.equal(isPreviewReady(message({ source: undefined }), undefined, origin), false);
   assert.equal(isPreviewReady(message({ source: null }), null, origin), false);
+});
+
+test("the preview frame can say why it can't draw", () => {
+  const origin = "https://game.example";
+  const frame = {};
+  const failed = (data, overrides = {}) => ({ origin, source: frame, data: { type: "island-battles.map-preview-failed", ...data }, ...overrides });
+  const reason = "This browser can't draw the 3D preview: it needs WebGL.";
+  assert.equal(previewFailure(failed({ message: reason }), frame, origin), reason);
+  assert.equal(previewFailure(failed({}), frame, origin), "The 3D preview couldn't start.");
+  assert.equal(previewFailure(failed({ message: 3 }), frame, origin), "The 3D preview couldn't start.");
+  assert.equal(previewFailure(failed({ message: reason }, { origin: "https://evil.example" }), frame, origin), null);
+  assert.equal(previewFailure(failed({ message: reason }, { source: {} }), frame, origin), null);
+  assert.equal(previewFailure(failed({ message: reason }), null, origin), null);
+  assert.equal(previewFailure({ origin, source: frame, data: { type: "island-battles.map-preview-ready" } }, frame, origin), null);
+  assert.equal(isPreviewReady(failed({ message: reason }), frame, origin), false);
+  assert.ok(previewStartLimit >= 5000);
 });

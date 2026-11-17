@@ -2,7 +2,7 @@
 // the map and turns the page's events into edits.
 import {
   builderHello, castleRadius, checkMap, describeProblems, downloadGate, dragPosition, fieldLabel, fileName, freeSpot, isPreviewReady, lobbyGate, lobbyMessage, lobbyPageFromMessage,
-  missingTeams, newMap, openMapFile, openerState, placeProblems, previewMessage, previewPath, problemCastle, problemsFor, serialize, teamColor, upgradeLabel, withoutCastle,
+  missingTeams, newMap, openMapFile, openerState, placeProblems, previewFailure, previewMessage, previewPath, previewStartLimit, problemCastle, problemsFor, serialize, teamColor, upgradeLabel, withoutCastle,
 } from "./builder.mjs";
 
 const svgNamespace = "http://www.w3.org/2000/svg";
@@ -248,6 +248,7 @@ try {
 let previewFrame = null;
 let previewStarting = false;
 let previewReady = false;
+let previewFailed = false;
 let previewQueued = false;
 
 function renderPreview() {
@@ -257,6 +258,8 @@ function renderPreview() {
   previewPanel.hidden = !previewOn;
   byID("preview-help").hidden = !previewOn;
   if (previewOn && !previewFrame && !previewStarting) void startPreview();
+  // Nothing is sent while the preview is hidden: send the map as it is now.
+  sendPreview();
 }
 
 async function startPreview() {
@@ -278,17 +281,25 @@ async function startPreview() {
     return;
   }
   previewFrame = html("iframe", { title: "3D preview of the map", src: previewPath });
+  // A preview whose scripts fail to load never says anything: give up on it
+  // a while after the frame has loaded.
+  previewFrame.addEventListener("load", () => {
+    setTimeout(() => {
+      if (!previewReady && !previewFailed) previewStatus.textContent = "The 3D preview didn't start. Reload the page to try again.";
+    }, previewStartLimit);
+  });
   previewPanel.prepend(previewFrame);
 }
 
 // sendPreview posts the map to the preview at most once a frame, so a drag
-// doesn't queue a redraw for every pointer move.
+// doesn't queue a redraw for every pointer move, and not at all while the
+// preview is hidden: showing it again sends the map once.
 function sendPreview() {
-  if (!previewReady || previewQueued) return;
+  if (!previewOn || !previewReady || previewQueued) return;
   previewQueued = true;
   requestAnimationFrame(() => {
     previewQueued = false;
-    previewFrame?.contentWindow?.postMessage(previewMessage(map), location.origin);
+    if (previewOn) previewFrame?.contentWindow?.postMessage(previewMessage(map, upgrades, drag !== null), location.origin);
   });
 }
 
@@ -302,8 +313,15 @@ previewToggle.addEventListener("click", () => {
   renderPreview();
 });
 
-// The preview says when it listens, after it loads and after any reload.
+// The preview says when it listens, after it loads and after any reload, or
+// why it can't draw at all.
 window.addEventListener("message", (event) => {
+  const failure = previewFailure(event, previewFrame?.contentWindow, location.origin);
+  if (failure) {
+    previewFailed = true;
+    previewStatus.textContent = failure;
+    return;
+  }
   if (!isPreviewReady(event, previewFrame?.contentWindow, location.origin)) return;
   previewReady = true;
   previewStatus.textContent = "";
@@ -645,6 +663,8 @@ function endDrag(event) {
   drag = null;
   if (plane.hasPointerCapture(event.pointerId)) plane.releasePointerCapture(event.pointerId);
   renderPlane();
+  // The preview draws the drag's end at once.
+  sendPreview();
 }
 plane.addEventListener("pointerup", endDrag);
 plane.addEventListener("pointercancel", endDrag);
