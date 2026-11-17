@@ -56,7 +56,6 @@ def random_board(rng: random.Random) -> tuple[dict, dict]:
                 "y": y,
                 "upgrades": _upgrades(rng),
                 "burst_debt": rng.choice([0, rng.randint(1, 16)]),
-                "pending_burst": rng.choice([0, rng.randint(1, 16)]),
             }
         )
     groups = []

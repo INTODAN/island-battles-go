@@ -85,10 +85,10 @@ def burst_castle(castle_id: int, soldier_amount: int) -> PublicGenerationCommand
     """Build a ``burst_castle`` command; raises ``ValidationError`` if invalid.
 
     The burst orders ``soldier_amount`` soldiers, from 1 up to the castle's
-    ``burst_potential``, for a castle that ``can_burst``. It is the castle's
-    ``pending_burst`` in the next generation; the generation after adds it to
-    the castle on top of its production and makes it the castle's
-    ``burst_debt``, which later production repays before the castle grows.
+    ``burst_potential``, for a castle that ``can_burst``. The very next
+    generation adds it to the castle on top of its production and makes it
+    the castle's ``burst_debt``, which later production repays before the
+    castle grows again.
     """
     return PublicGenerationCommand(
         BurstCastleCommand(
@@ -101,11 +101,11 @@ def burst_castle(castle_id: int, soldier_amount: int) -> PublicGenerationCommand
 
 
 def can_burst(castle: Castle) -> bool:
-    """Whether the castle has no burst debt and no pending burst.
+    """Whether the castle has no burst debt.
 
     Its team must also own it, and its ``burst_potential`` must be above 0.
     """
-    return castle.burst_debt == 0 and castle.pending_burst == 0
+    return castle.burst_debt == 0
 
 
 def _level_value(

@@ -50,7 +50,7 @@ class InsufficientSoldiersError(GameCommandError):
 
 
 class BurstUnavailableError(GameCommandError):
-    """The castle has burst debt, a pending burst, or a burst this turn."""
+    """The castle has burst debt or a burst this turn."""
 
 
 class BurstAbovePotentialError(GameCommandError):

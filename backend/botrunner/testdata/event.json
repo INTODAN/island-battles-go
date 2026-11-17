@@ -132,8 +132,7 @@
               "generation_amount": 1,
               "speed": 1
             },
-            "burst_debt": 0,
-            "pending_burst": 0
+            "burst_debt": 0
           },
           {
             "id": 1,
@@ -147,8 +146,7 @@
               "generation_amount": 1,
               "speed": 1
             },
-            "burst_debt": 0,
-            "pending_burst": 0
+            "burst_debt": 0
           },
           {
             "id": 2,
@@ -162,8 +160,7 @@
               "generation_amount": 1,
               "speed": 1
             },
-            "burst_debt": 0,
-            "pending_burst": 0
+            "burst_debt": 0
           },
           {
             "id": 3,
@@ -177,8 +174,7 @@
               "generation_amount": 1,
               "speed": 1
             },
-            "burst_debt": 0,
-            "pending_burst": 0
+            "burst_debt": 0
           }
         ],
         "soldier_groups": [

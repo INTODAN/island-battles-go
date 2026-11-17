@@ -86,7 +86,7 @@ describe("upgrade text", () => {
     ).toBe("Speed 1 · Stop 1 · Growth 3 · Burst 2");
   });
 
-  test("a castle's burst is told while it is pending or owed", () => {
+  test("a castle's burst debt is told while it is owed", () => {
     const castle = {
       id: 0,
       team_color: 1,
@@ -95,12 +95,8 @@ describe("upgrade text", () => {
       y: 0,
       upgrades: {},
       burst_debt: 0,
-      pending_burst: 0,
     };
     expect(burstLines(castle)).toEqual([]);
-    expect(burstLines({ ...castle, pending_burst: 8 })).toEqual([
-      "Burst of 8 arrives next turn",
-    ]);
     expect(burstLines({ ...castle, burst_debt: 6 })).toEqual([
       "Burst debt: 6 soldiers",
     ]);

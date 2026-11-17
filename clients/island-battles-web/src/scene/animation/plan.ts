@@ -198,8 +198,10 @@ export function speedOf(upgrades: Record<string, number>): number {
 
 /**
  * What a castle that a team owns grows by in a turn, as on the server: its production at the
- * turn's generation_amount level, plus a pending burst, which the turn pays out; otherwise the
- * production less what repays the castle's burst debt.
+ * turn's generation_amount level, less what repays the castle's burst debt. A castle without debt
+ * that has debt after the turn burst in it: the burst arrived on top of the production, and the
+ * debt is its amount. (A castle that burst and was captured in the same turn has no debt after
+ * it, so its count doesn't replay and ticks straight to the result.)
  */
 export function growthOf(before: Castle, after: Castle): number {
   const level = Math.min(
@@ -207,7 +209,9 @@ export function growthOf(before: Castle, after: Castle): number {
     Math.max(1, Math.trunc(after.upgrades.generation_amount ?? 1)),
   );
   const production = PRODUCTION_BY_LEVEL[level - 1] ?? 1;
-  if (before.pending_burst > 0) return production + before.pending_burst;
+  if (before.burst_debt === 0 && after.burst_debt > 0) {
+    return production + after.burst_debt;
+  }
   return production - Math.min(before.burst_debt, production);
 }
 

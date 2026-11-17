@@ -91,7 +91,7 @@ async def test_an_upgrade_pays_its_level_and_a_group_carries_the_levels(
     assert group["upgrades"] == level_one(speed=2)
 
 
-async def test_a_burst_is_pending_then_paid_out_and_owed(launch, match, proxy):
+async def test_a_burst_arrives_in_the_next_generation_and_is_owed(launch, match, proxy):
     alice, _ = await playing(launch)
     own = own_castle(match.alice.state)
     # Level 2 of burst_potential costs 10 and allows a burst of 4, which the
@@ -103,13 +103,12 @@ async def test_a_burst_is_pending_then_paid_out_and_owed(launch, match, proxy):
         "command_type": "burst_castle",
         "parameters": {"castle_id": own, "soldier_amount": 4},
     }
-    pending = castle(advanced, own)
-    assert (pending["soldiers"], pending["pending_burst"], pending["burst_debt"]) == (
-        21,
-        4,
-        0,
-    )
-    # A castle with a pending burst can't burst again.
+    # The very next generation has the burst on top of the production: the
+    # castle paid 10 and got 1 plus 4, and owes the 4.
+    burst_in = castle(advanced, own)
+    assert (burst_in["soldiers"], burst_in["burst_debt"]) == (25, 4)
+    assert "pending_burst" not in burst_in
+    # A castle with debt can't burst again.
     await alice.send({"type": "finish", "commands": [burst(own, 1)]})
     stopped = await alice.expect("stopped")
     assert (stopped["error"]["kind"], stopped["error"]["status"]) == (
@@ -118,9 +117,9 @@ async def test_a_burst_is_pending_then_paid_out_and_owed(launch, match, proxy):
     )
     await alice.close()
     alice, _ = await playing(launch)
-    # The burst arrives with the production, and the castle owes it.
+    # The next production repays 1 of the debt instead of growing the castle.
     owed = castle(await next_generation(alice, match), own)
-    assert (owed["soldiers"], owed["pending_burst"], owed["burst_debt"]) == (26, 0, 4)
+    assert (owed["soldiers"], owed["burst_debt"]) == (25, 3)
 
 
 async def test_a_burst_above_the_potential_is_rejected(launch, match):

@@ -173,7 +173,6 @@ function checkFrame(rawFrame: unknown, path: string): number {
     coordinate(castle.y, `${castlePath}.y`);
     upgrades(castle.upgrades, `${castlePath}.upgrades`);
     count(castle.burst_debt, `${castlePath}.burst_debt`);
-    count(castle.pending_burst, `${castlePath}.pending_burst`);
   });
   array(frame.soldier_groups, `${path}.soldier_groups`).forEach(
     (rawGroup, index) => {

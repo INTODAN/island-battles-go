@@ -24,8 +24,7 @@
             "generation_amount": 1,
             "speed": 2
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 1,
@@ -39,8 +38,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 2,
@@ -54,8 +52,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 3,
@@ -69,8 +66,7 @@
             "generation_amount": 1,
             "speed": 3
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 4,
@@ -84,8 +80,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 5,
@@ -99,8 +94,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 6,
@@ -114,8 +108,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 7,
@@ -129,8 +122,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 8,
@@ -144,8 +136,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 9,
@@ -159,8 +150,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         }
       ],
       "soldier_groups": [
@@ -294,8 +284,7 @@
             "generation_amount": 1,
             "speed": 2
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 1,
@@ -309,8 +298,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 2,
@@ -324,8 +312,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 3,
@@ -339,8 +326,7 @@
             "generation_amount": 1,
             "speed": 3
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 4,
@@ -354,8 +340,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 5,
@@ -369,8 +354,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 6,
@@ -384,8 +368,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 7,
@@ -399,8 +382,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 8,
@@ -414,8 +396,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 9,
@@ -429,8 +410,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         }
       ],
       "soldier_groups": [
@@ -621,8 +601,7 @@
             "generation_amount": 1,
             "speed": 2
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 1,
@@ -636,8 +615,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 2,
@@ -651,8 +629,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 3,
@@ -666,8 +643,7 @@
             "generation_amount": 1,
             "speed": 3
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 4,
@@ -681,8 +657,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 5,
@@ -696,8 +671,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 6,
@@ -711,8 +685,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 7,
@@ -726,8 +699,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 8,
@@ -741,8 +713,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 9,
@@ -756,8 +727,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         }
       ],
       "soldier_groups": [
@@ -907,8 +877,7 @@
             "generation_amount": 1,
             "speed": 2
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 1,
@@ -922,8 +891,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 2,
@@ -937,8 +905,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 3,
@@ -952,8 +919,7 @@
             "generation_amount": 1,
             "speed": 3
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 4,
@@ -967,8 +933,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 5,
@@ -982,8 +947,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 6,
@@ -997,8 +961,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 7,
@@ -1012,8 +975,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 8,
@@ -1027,8 +989,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 9,
@@ -1042,8 +1003,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         }
       ],
       "soldier_groups": [
@@ -1186,8 +1146,7 @@
             "generation_amount": 1,
             "speed": 2
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 1,
@@ -1201,8 +1160,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 2,
@@ -1216,8 +1174,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 3,
@@ -1231,8 +1188,7 @@
             "generation_amount": 1,
             "speed": 3
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 4,
@@ -1246,8 +1202,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 5,
@@ -1261,8 +1216,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 6,
@@ -1276,8 +1230,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 7,
@@ -1291,8 +1244,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 8,
@@ -1306,8 +1258,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 9,
@@ -1321,8 +1272,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         }
       ],
       "soldier_groups": [
@@ -1456,8 +1406,7 @@
             "generation_amount": 1,
             "speed": 2
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 1,
@@ -1471,8 +1420,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 2,
@@ -1486,8 +1434,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 3,
@@ -1501,8 +1448,7 @@
             "generation_amount": 1,
             "speed": 3
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 4,
@@ -1516,8 +1462,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 5,
@@ -1531,8 +1476,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 6,
@@ -1546,8 +1490,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 7,
@@ -1561,8 +1504,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 8,
@@ -1576,8 +1518,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 9,
@@ -1591,8 +1532,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         }
       ],
       "soldier_groups": [
@@ -1742,8 +1682,7 @@
             "generation_amount": 1,
             "speed": 2
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 1,
@@ -1757,8 +1696,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 2,
@@ -1772,8 +1710,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 3,
@@ -1787,8 +1724,7 @@
             "generation_amount": 1,
             "speed": 3
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 4,
@@ -1802,8 +1738,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 5,
@@ -1817,8 +1752,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 6,
@@ -1832,8 +1766,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 7,
@@ -1847,8 +1780,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 8,
@@ -1862,8 +1794,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 9,
@@ -1877,8 +1808,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         }
       ],
       "soldier_groups": [
@@ -2028,8 +1958,7 @@
             "generation_amount": 1,
             "speed": 2
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 1,
@@ -2043,8 +1972,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 2,
@@ -2058,8 +1986,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 3,
@@ -2073,8 +2000,7 @@
             "generation_amount": 1,
             "speed": 3
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 4,
@@ -2088,8 +2014,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 5,
@@ -2103,8 +2028,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 6,
@@ -2118,8 +2042,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 7,
@@ -2133,8 +2056,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 8,
@@ -2148,8 +2070,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 9,
@@ -2163,8 +2084,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         }
       ],
       "soldier_groups": [
@@ -2314,8 +2234,7 @@
             "generation_amount": 1,
             "speed": 2
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 1,
@@ -2329,8 +2248,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 2,
@@ -2344,8 +2262,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 3,
@@ -2359,8 +2276,7 @@
             "generation_amount": 1,
             "speed": 3
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 4,
@@ -2374,8 +2290,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 5,
@@ -2389,8 +2304,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 6,
@@ -2404,8 +2318,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 7,
@@ -2419,8 +2332,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 8,
@@ -2434,8 +2346,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 9,
@@ -2449,8 +2360,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         }
       ],
       "soldier_groups": [
@@ -2616,8 +2526,7 @@
             "generation_amount": 1,
             "speed": 2
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 1,
@@ -2631,8 +2540,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 2,
@@ -2646,8 +2554,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 3,
@@ -2661,8 +2568,7 @@
             "generation_amount": 1,
             "speed": 3
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 4,
@@ -2676,8 +2582,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 5,
@@ -2691,8 +2596,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 6,
@@ -2706,8 +2610,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 7,
@@ -2721,8 +2624,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 8,
@@ -2736,8 +2638,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 9,
@@ -2751,8 +2652,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         }
       ],
       "soldier_groups": [
@@ -2918,8 +2818,7 @@
             "generation_amount": 1,
             "speed": 2
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 1,
@@ -2933,8 +2832,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 2,
@@ -2948,8 +2846,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 3,
@@ -2963,8 +2860,7 @@
             "generation_amount": 1,
             "speed": 3
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 4,
@@ -2978,8 +2874,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 5,
@@ -2993,8 +2888,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 6,
@@ -3008,8 +2902,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 7,
@@ -3023,8 +2916,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 8,
@@ -3038,8 +2930,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 9,
@@ -3053,8 +2944,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         }
       ],
       "soldier_groups": [
@@ -3204,8 +3094,7 @@
             "generation_amount": 1,
             "speed": 2
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 1,
@@ -3219,8 +3108,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 2,
@@ -3234,8 +3122,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 3,
@@ -3249,8 +3136,7 @@
             "generation_amount": 1,
             "speed": 3
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 4,
@@ -3264,8 +3150,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 5,
@@ -3279,8 +3164,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 6,
@@ -3294,8 +3178,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 7,
@@ -3309,8 +3192,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 8,
@@ -3324,8 +3206,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         },
         {
           "id": 9,
@@ -3339,8 +3220,7 @@
             "generation_amount": 1,
             "speed": 1
           },
-          "burst_debt": 0,
-          "pending_burst": 0
+          "burst_debt": 0
         }
       ],
       "soldier_groups": [

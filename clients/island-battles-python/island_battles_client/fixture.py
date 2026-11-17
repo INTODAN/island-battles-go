@@ -77,7 +77,6 @@ def _castle(
         "y": y,
         "upgrades": dict(_UPGRADES),
         "burst_debt": 0,
-        "pending_burst": 0,
     }
 
 

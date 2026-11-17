@@ -10,7 +10,7 @@ A bot is one function in `bot.py`, `play(turn: BotTurn) -> BotTurnResult`, sync 
 ## What `play` receives
 
 - `turn.generation.castles` and `.soldier_groups`: the board (`.id` is the generation number; `.clashes` lists last turn's fights).
-- `turn.team_color`: your team. Castle: `id`, `team_color`, `soldiers`, `x`, `y`, `upgrades` (`castle.upgrades["speed"]`), `burst_debt` and `pending_burst`. Group: also `origin_castle_id`, `destination_castle_id`, `clash_radius`.
+- `turn.team_color`: your team. Castle: `id`, `team_color`, `soldiers`, `x`, `y`, `upgrades` (`castle.upgrades["speed"]`), and `burst_debt`. Group: also `origin_castle_id`, `destination_castle_id`, `clash_radius`.
 - `turn.upgrades`: the upgrade cost table. `turn.memory`: what you returned last turn, or `None`. `turn.turn_deadline_at`: when the turn times out, or `None`.
 
 Models are frozen: build new values instead of changing them.
@@ -41,7 +41,7 @@ SDK releases with bursts also have `burst_castle(castle_id, amount)`, `burst_pot
 The server checks the commands in order against the board and rejects the **whole result** (the turn stays open and `scripts/run.sh` stops; through `serve` the lobby page shows the error) if any one is invalid:
 
 - `InsufficientSoldiersError`: a castle sends or pays more than it has. Commands add up: sending 10 and upgrading for 10 needs 20. Track what each castle spends in a `spent` dict, as `bot.py` does. `next_upgrade_cost` does not count upgrades bought earlier in the same result.
-- `CastleNotOwnedError` (castle is neutral or an enemy's, or you sent from it), `CastleNotFoundError`, `UpgradeMaxLevelError`, and, for bursts, `BurstUnavailableError` (debt, a pending burst, or a second burst this turn) and `BurstAbovePotentialError`.
+- `CastleNotOwnedError` (castle is neutral or an enemy's, or you sent from it), `CastleNotFoundError`, `UpgradeMaxLevelError`, and, for bursts, `BurstUnavailableError` (debt, or a second burst this turn) and `BurstAbovePotentialError`.
 - Zero soldiers, or the same castle as origin and destination.
 
 ## Stateless, with memory

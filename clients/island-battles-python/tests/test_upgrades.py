@@ -69,7 +69,6 @@ def test_production_and_burst_potential_read_the_turns_table() -> None:
     assert production(turn, upgraded) == 4
     assert burst_potential(turn, upgraded) == 8
     assert not can_burst(castle.model_copy(update={"burst_debt": 1}))
-    assert not can_burst(castle.model_copy(update={"pending_burst": 4}))
 
 
 def test_burst_castle_builds_the_command() -> None:

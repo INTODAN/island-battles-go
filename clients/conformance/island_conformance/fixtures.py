@@ -39,7 +39,6 @@ CASTLES = [
         "y": 0,
         "upgrades": levels(),
         "burst_debt": 0,
-        "pending_burst": 0,
     },
     {
         "id": 1,
@@ -49,7 +48,6 @@ CASTLES = [
         "y": 0,
         "upgrades": levels(speed=3, clash_stop_generations=2, burst_potential=3),
         "burst_debt": 6,
-        "pending_burst": 0,
     },
     {
         "id": 2,
@@ -59,7 +57,6 @@ CASTLES = [
         "y": 3,
         "upgrades": levels(),
         "burst_debt": 0,
-        "pending_burst": 0,
     },
 ]
 GROUPS = [
@@ -127,7 +124,6 @@ COINCIDENT = {
             "y": -2.25,
             "upgrades": levels(),
             "burst_debt": 0,
-            "pending_burst": 0,
         },
         {
             "id": 5,
@@ -137,7 +133,6 @@ COINCIDENT = {
             "y": -2.25,
             "upgrades": levels(),
             "burst_debt": 0,
-            "pending_burst": 0,
         },
         {
             "id": 6,
@@ -151,8 +146,7 @@ COINCIDENT = {
                 generation_amount=4,
                 burst_potential=4,
             ),
-            "burst_debt": 0,
-            "pending_burst": 16,
+            "burst_debt": 16,
         },
     ],
     "soldier_groups": [
@@ -290,8 +284,8 @@ def build_model_fixtures() -> dict:
                 "generation": mutated(["castles", 0, "burst_debt"], delete=True),
             },
             {
-                "name": "negative pending burst",
-                "generation": mutated(["castles", 0, "pending_burst"], -1),
+                "name": "negative burst debt",
+                "generation": mutated(["castles", 0, "burst_debt"], -1),
             },
         ],
     }

@@ -737,7 +737,6 @@ describe("castle counts and growth", () => {
     y: 0,
     upgrades: { speed: 1, clash_stop_generations: 1 },
     burst_debt: 0,
-    pending_burst: 0,
   });
   const group = (): Generation["soldier_groups"][number] => ({
     id: 5,
@@ -786,26 +785,20 @@ describe("castle counts and growth", () => {
     expect(countOf(grown, 1).replayed).toBe(false);
   });
 
-  test("a castle grows by its generation_amount, gets its pending burst, then repays its debt", () => {
-    const grower = (soldiers: number, debt: number, pending: number) => ({
+  test("a castle grows by its generation_amount, gets its burst in the next generation, then repays its debt", () => {
+    const grower = (soldiers: number, debt: number) => ({
       ...castle(0, 1, soldiers, 0),
       upgrades: { speed: 1, clash_stop_generations: 1, generation_amount: 3 },
       burst_debt: debt,
-      pending_burst: pending,
     });
-    const frame = (
-      id: number,
-      soldiers: number,
-      debt: number,
-      pending = 0,
-    ) => ({
+    const frame = (id: number, soldiers: number, debt: number) => ({
       id,
-      castles: [grower(soldiers, debt, pending), castle(1, 0, 20, 4)],
+      castles: [grower(soldiers, debt), castle(1, 0, 20, 4)],
       soldier_groups: [],
       clashes: [],
     });
-    // The pending burst of 8 arrives with the production of 3 and is owed.
-    const paidOut = planTurn(frame(1, 10, 0, 8), frame(2, 21, 8));
+    // A burst of 8 ordered in the turn arrives with the production of 3 and is owed.
+    const paidOut = planTurn(frame(1, 10, 0), frame(2, 21, 8));
     expect(countOf(paidOut, 0).replayed).toBe(true);
     // The production repays 3 of the debt, so the castle stays at 21.
     const repaying = planTurn(frame(2, 21, 8), frame(3, 21, 5));
