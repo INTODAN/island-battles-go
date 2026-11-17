@@ -23,9 +23,9 @@ type FrozenGamePlayer struct {
 	BotPort *uint `gorm:"column:bot_port"`
 	// BotRelayPlayerID is the roster player whose game client relays a
 	// localhost bot seat: the player who added the seat, as its settings'
-	// bot_relay_player_id records. Nil for a seat whose adder was not on the
-	// roster at the start, which nobody relays, for a person, who relays
-	// their own localhost bot, and for every other kind.
+	// bot_relay_player_id records. Nil for a person, who relays their own
+	// localhost bot, for every other kind, and for a seat whose adder a
+	// retried start no longer finds on the roster, which nobody relays.
 	BotRelayPlayerID *string `gorm:"column:bot_relay_player_id;type:uuid"`
 	// BotLevel is the level of the default bot that the backend plays for
 	// this player, one of bots.Defaults, for BotKind default only. The

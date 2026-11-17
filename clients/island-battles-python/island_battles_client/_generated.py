@@ -187,7 +187,7 @@ class BotSeatSettings(GameModel):
     """
     bot_relay_player_id: UUID | None = None
     """
-    With bot_localhost_port only, and required with it: the player ID of the host who adds the seat, whose game client alone relays it. It must be the lobby's host. When that player is not on the roster at the start, nobody relays the seat, which loses its turns like a bot that is down.
+    With bot_localhost_port only, and required with it: the player ID of the host who adds the seat, whose game client alone relays it. It must be the lobby's host. When that player is no longer in the lobby, the start is refused until the seat is removed.
     """
     bot_url: Annotated[StrictStr | None, Field(max_length=2048)] = None
     """

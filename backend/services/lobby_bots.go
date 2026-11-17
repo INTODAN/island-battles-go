@@ -36,6 +36,13 @@ const BotPackageGoneProblemType = "urn:island-battles:problem:bot-package-gone"
 // their own and a localhost bot seat's that they added, or two such seats'.
 const LocalhostPortTakenProblemType = "urn:island-battles:problem:localhost-port-taken"
 
+// LocalhostSeatRelayGoneProblemType is the lobby's game_requirement problem
+// type for a start with a localhost bot seat whose adder, the only person
+// who may relay it, is no longer in the lobby: nobody would play its turns,
+// so its team would lose at the first deadline, or, without a turn limit,
+// the game would wait for it forever.
+const LocalhostSeatRelayGoneProblemType = "urn:island-battles:problem:localhost-seat-relay-gone"
+
 // botNotChosenMessage tells the player what to do; the lobby shows it.
 const botNotChosenMessage = "Choose your bot before getting ready: your localhost bot or a default bot level."
 
@@ -411,15 +418,29 @@ func memberSettings(lobby domain.Snapshot, members []domain.ReadyMember, playerI
 	return nil
 }
 
-// checkLocalhostPorts refuses a start where a person's game client would
-// relay two localhost bots on one port: their own and a localhost bot seat
-// that they added, or two such seats. Each person relays only their own
-// seats, so two people's bots may share a port. A seat whose adder is not in
-// the lobby is relayed by nobody and checked against nothing. lobby is nil
-// when the check reads no snapshot.
+// checkLocalhostPorts refuses a start with a localhost bot seat whose adder
+// is no longer an active person in the lobby, since nobody else may relay
+// it, and one where a person's game client would relay two localhost bots on
+// one port: their own and a localhost bot seat that they added, or two such
+// seats. Each person relays only their own seats, so two people's bots may
+// share a port. lobby is nil when the check reads no snapshot.
 func checkLocalhostPorts(lobby *domain.Snapshot, members []domain.ReadyMember) error {
 	if lobby == nil {
 		return nil
+	}
+	people := map[string]bool{}
+	for _, member := range lobby.Members {
+		if member.Active && !member.IsSeat() {
+			people[member.PlayerID] = true
+		}
+	}
+	for _, member := range lobby.Members {
+		if !member.Active || !member.IsSeat() {
+			continue
+		}
+		if seat, err := seatSettings(member.SeatSettings, true); err == nil && seat.BotLocalhostPort != nil && !people[seat.BotRelayPlayerID] {
+			return domain.GameRequirement(LocalhostSeatRelayGoneProblemType, fmt.Sprintf("Remove %s: the player who added it left, and only they can relay it. The host can add it again from their own page.", member.DisplayName))
+		}
 	}
 	for _, member := range lobby.Members {
 		if !member.Active || member.IsSeat() {
@@ -519,7 +540,9 @@ func defaultBot(level uint) frozenBot { return frozenBot{Kind: models.DefaultBot
 // lobbyBots returns the roster's bots, by player ID, from the start's
 // snapshot: each bot seat's, and the one in each player's member settings.
 // The player who added a localhost bot seat relays it, when they are a
-// person on the roster; otherwise nobody does. The start requires a bot of
+// person on the roster; the start check refuses a seat whose adder left, so
+// nobody relays it only when a retried start no longer finds them. The
+// start requires a bot of
 // every roster player, so a player is absent only when a retried start no
 // longer finds them among the members, because they left since; their own
 // client plays, as for a localhost bot on the default port.

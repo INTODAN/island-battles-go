@@ -183,8 +183,8 @@ func TestALocalhostSeatRequestSentAgainFindsItsSeat(t *testing.T) {
 
 // Only the player who added a localhost bot seat relays it, so a host never
 // chooses the local ports that someone else's tab contacts. When the host
-// leaves, the next host doesn't relay their seats: nobody does, and those
-// seats lose their turns, like bots that are down.
+// leaves, the next host doesn't relay their seats, and the start is refused
+// until those seats are gone, since nobody would play their turns.
 func TestOnlyTheAdderRelaysALocalhostSeat(t *testing.T) {
 	stack := newLobbyStack(t)
 	alice, bob := stack.guest("Alice"), stack.guest("Bob")
@@ -210,27 +210,24 @@ func TestOnlyTheAdderRelaysALocalhostSeat(t *testing.T) {
 	if !strings.Contains(refusal.Detail, "port 41414 is already taken by your own localhost bot") {
 		t.Fatalf("refusal = %+v", refusal)
 	}
-	stack.expect(stack.addSeat(room, bob, 0, localhostSeat(41415, bob)), http.StatusOK, nil)
+	var seated domain.Snapshot
+	stack.expect(stack.addSeat(room, bob, 0, localhostSeat(41415, bob)), http.StatusOK, &seated)
 	stack.expect(stack.ready(room, bob), http.StatusOK, nil)
+	var gone gameRequirement
+	stack.expect(stack.api.Post(stack.lobbyPath(room)+"/start", bob.header, map[string]any{}), http.StatusConflict, &gone)
+	if gone.Type != services.LocalhostSeatRelayGoneProblemType || gone.Detail != "Remove Localhost bot (port 41415): the player who added it left, and only they can relay it. The host can add it again from their own page." {
+		t.Fatalf("start = %+v", gone)
+	}
+
+	// Bob replaces Alice's seat with a default bot, and starts.
+	stack.expect(stack.api.Delete(stack.lobbyPath(room)+"/seats/"+seatOn(t, seated, 1).ID, bob.header), http.StatusOK, nil)
+	stack.expect(stack.addSeat(room, bob, 1, map[string]any{"bot_level": 1}), http.StatusOK, nil)
 	var started domain.Snapshot
 	stack.expect(stack.api.Post(stack.lobbyPath(room)+"/start", bob.header, map[string]any{}), http.StatusOK, &started)
-
-	alicesSeat, bobsSeat := seatOn(t, started, 1), seatOn(t, started, 0)
+	bobsSeat := seatOn(t, started, 0)
 	state := stack.state(room, bob)
 	want := models.RelayedBotView{PlayerID: bobsSeat.PlayerID, TeamColor: 1, DisplayName: "Localhost bot (port 41415) #2", Port: 41415}
 	if len(state.RelayedBots) != 1 || state.RelayedBots[0] != want {
 		t.Fatalf("Bob's relayed bots = %+v, want %+v", state.RelayedBots, want)
-	}
-	// The frozen roster relays Alice's seat from nobody, so the server
-	// refuses Bob its turn deliveries too (handlers'
-	// TestTheAdderReadsTheTurnsOfTheLocalhostBotSeatsTheyRelay).
-	players, err := dal.LoadFrozenPlayers(stack.database, state.GameID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, player := range players {
-		if player.PlayerID == alicesSeat.PlayerID && (player.BotKind != models.LocalhostBot || player.BotRelayPlayerID != nil) {
-			t.Fatalf("Alice's seat %+v", player)
-		}
 	}
 }
