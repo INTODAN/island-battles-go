@@ -141,7 +141,8 @@ func (state *levelThreeTurn) reserve(owned []islandbattles.Castle) {
 
 // guard is how many soldiers a castle keeps so that no single enemy castle
 // could take it by sending everything it has, and the enemy castle that
-// needs the most: with the castle's growth while the enemy group travels,
+// needs the most: with the castle's growth while the enemy group travels
+// (its production less what repays its burst debt, see growth),
 // and the margin an attacker adds, a garrison this large needs more soldiers
 // than the enemy castle holds.
 func (state *levelThreeTurn) guard(castle islandbattles.Castle) (int, *uint) {
@@ -152,7 +153,7 @@ func (state *levelThreeTurn) guard(castle islandbattles.Castle) (int, *uint) {
 			continue
 		}
 		turns := travelTurns(enemy.Distance(castle), state.board.speed(enemy.Upgrades))
-		if needed := int(enemy.Soldiers) - turns - int(attackMargin(enemy.Soldiers)) - 1; needed > guard {
+		if needed := int(enemy.Soldiers) - state.board.grownBy(castle, turns) - int(attackMargin(enemy.Soldiers)) - 1; needed > guard {
 			guard, against = needed, &enemy.ID
 		}
 	}

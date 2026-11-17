@@ -157,6 +157,16 @@ func (growth *growth) next() uint {
 	return growth.production - repaid
 }
 
+// grownBy is what a castle that a team owns grows by in its next turns
+// turns (see growth).
+func (board board) grownBy(castle islandbattles.Castle, turns int) int {
+	grows, grown := board.growth(castle), 0
+	for range turns {
+		grown += int(grows.next())
+	}
+	return grown
+}
+
 // forecast follows a castle to the end of a turn, counting this one as 1, as
 // the simulation plays it: every turn a castle that a team owns grows (see
 // growth), a neutral one doesn't, then the turn's arrivals land in order. A
