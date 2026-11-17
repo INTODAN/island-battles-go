@@ -1,6 +1,10 @@
 package models
 
-import "net/url"
+import (
+	"cmp"
+	"net/url"
+	"slices"
+)
 
 // DefaultLocalhostPort is the Island Battles bot port, where
 // island-battles-bot serve listens unless --port says otherwise, and where a
@@ -125,7 +129,7 @@ type RelayedBotView struct {
 	Port        uint   `json:"port" minimum:"1024" maximum:"65535" doc:"The port on 127.0.0.1 where your client delivers the seat's turns."`
 }
 
-// RelayedBots are the localhost bot seats that relayer relays, in roster
+// RelayedBots are the localhost bot seats that relayer relays, in team
 // order.
 func RelayedBots(players []FrozenGamePlayer, relayer string) []RelayedBotView {
 	relayed := []RelayedBotView{}
@@ -134,5 +138,6 @@ func RelayedBots(players []FrozenGamePlayer, relayer string) []RelayedBotView {
 			relayed = append(relayed, RelayedBotView{PlayerID: player.PlayerID, TeamColor: player.TeamColor, DisplayName: player.DisplayName, Port: LocalhostPort(player.BotPort)})
 		}
 	}
+	slices.SortFunc(relayed, func(left, right RelayedBotView) int { return cmp.Compare(left.TeamColor, right.TeamColor) })
 	return relayed
 }
