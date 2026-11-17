@@ -370,23 +370,31 @@ func validateCommands(generation *models.Generation, teamColor uint, inputs []mo
 	if err != nil {
 		return nil, err
 	}
-	commands := make([]models.CommandFields, 0, len(public))
-	for _, command := range public {
-		var internal models.CommandFields
-		switch command.CommandType {
-		case models.SendSoldierGroup:
-			internal, err = reservations.acceptSend(teamColor, command.Parameters)
-		case models.UpgradeCastle:
-			internal, err = reservations.acceptUpgrade(teamColor, command.Parameters)
-		case models.BurstCastle:
-			internal, err = reservations.acceptBurst(teamColor, command.Parameters)
-		default:
-			return nil, reject(403, "only send_soldier_group, upgrade_castle and burst_castle are player commands")
+	// The batch's bursts are checked after its other commands, so a burst's
+	// potential counts every upgrade of its batch, wherever the burst stands
+	// in it, and of the turn's earlier batches. The commands keep their order.
+	commands := make([]models.CommandFields, len(public))
+	for _, bursts := range []bool{false, true} {
+		for index, command := range public {
+			if (command.CommandType == models.BurstCastle) != bursts {
+				continue
+			}
+			var internal models.CommandFields
+			switch command.CommandType {
+			case models.SendSoldierGroup:
+				internal, err = reservations.acceptSend(teamColor, command.Parameters)
+			case models.UpgradeCastle:
+				internal, err = reservations.acceptUpgrade(teamColor, command.Parameters)
+			case models.BurstCastle:
+				internal, err = reservations.acceptBurst(teamColor, command.Parameters)
+			default:
+				return nil, reject(403, "only send_soldier_group, upgrade_castle and burst_castle are player commands")
+			}
+			if err != nil {
+				return nil, err
+			}
+			commands[index] = internal
 		}
-		if err != nil {
-			return nil, err
-		}
-		commands = append(commands, internal)
 	}
 	return commands, nil
 }

@@ -39,7 +39,7 @@ func TestBurstRejectionsCarryProblemTypes(t *testing.T) {
 		{"enemy castle", []models.PublicGenerationCommand{burst(1, 1)}, 403, services.CastleNotOwnedProblemType, "castle 1 belongs to team 2"},
 		{"level 1 has no potential", []models.PublicGenerationCommand{burst(0, 1)}, 409, services.BurstAbovePotentialProblemType, "burst potential of 0"},
 		{"above the potential", []models.PublicGenerationCommand{potential, burst(0, 5)}, 409, services.BurstAbovePotentialProblemType, "burst potential of 4 at burst_potential level 2; a burst of 5"},
-		{"before the upgrade", []models.PublicGenerationCommand{burst(0, 4), potential}, 409, services.BurstAbovePotentialProblemType, "burst potential of 0"},
+		{"before an upgrade that isn't enough", []models.PublicGenerationCommand{burst(0, 5), potential}, 409, services.BurstAbovePotentialProblemType, "burst potential of 4 at burst_potential level 2; a burst of 5"},
 		{"twice in one batch", []models.PublicGenerationCommand{potential, burst(0, 2), burst(0, 2)}, 409, services.BurstUnavailableProblemType, "castle 0 already bursts this turn"},
 	}
 	for _, test := range cases {
@@ -50,6 +50,26 @@ func TestBurstRejectionsCarryProblemTypes(t *testing.T) {
 	}
 	// Every rejected batch was dropped whole.
 	assertTurnCounts(t, fixture, 1, 0, 0, 2)
+}
+
+// A batch's bursts count every upgrade of the batch, also one that comes
+// after the burst, so the order inside a batch doesn't matter.
+func TestABurstCountsTheUpgradesLaterInItsBatch(t *testing.T) {
+	fixture := newTurnFixture(t)
+	ctx := context.Background()
+	alice, bob := fixture.players[0], fixture.players[1]
+	state := fixture.state
+	if _, err := fixture.service.Register(ctx, alice, batch(state, true, burst(0, 4), upgrade(0, models.BurstPotentialUpgrade))); err != nil {
+		t.Fatalf("a burst before its upgrade in one batch is refused: %v", err)
+	}
+	next, err := fixture.service.Register(ctx, bob, batch(state, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The castle paid 10, produced 1 and got the burst of 4.
+	if got := next.Generation.Castles[0]; got.Soldiers != 25 || got.BurstDebt != 4 || got.Upgrades[models.BurstPotentialUpgrade] != 2 {
+		t.Fatalf("after the burst: %+v", got)
+	}
 }
 
 // A burst arrives in the very next generation, on top of the production, and

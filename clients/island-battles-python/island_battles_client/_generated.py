@@ -241,7 +241,7 @@ class BurstCastleParameters(GameModel):
     """
     soldier_amount: Annotated[StrictInt, Field(ge=1)]
     """
-    Soldiers the burst adds, at most the castle's burst_potential value from GET /game/upgrades, counting the upgrades accepted before it this turn. The castle gets them in the next generation, on top of its production, and repays them from its later production.
+    Soldiers the burst adds, at most the castle's burst_potential value from GET /game/upgrades, counting the turn's upgrades: every upgrade of its batch, before or after it, and of the turn's earlier batches. The castle gets them in the next generation, on top of its production, and repays them from its later production.
     """
 
 

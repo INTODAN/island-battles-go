@@ -102,7 +102,7 @@ type UpgradeCastleParameters struct {
 // validation distinguish a missing field from 0.
 type BurstCastleParameters struct {
 	CastleID      *uint `json:"castle_id" nullable:"false" doc:"Castle your team owns, with no burst_debt and no other burst this turn."`
-	SoldierAmount *uint `json:"soldier_amount" minimum:"1" nullable:"false" doc:"Soldiers the burst adds, at most the castle's burst_potential value from GET /game/upgrades, counting the upgrades accepted before it this turn. The castle gets them in the next generation, on top of its production, and repays them from its later production."`
+	SoldierAmount *uint `json:"soldier_amount" minimum:"1" nullable:"false" doc:"Soldiers the burst adds, at most the castle's burst_potential value from GET /game/upgrades, counting the turn's upgrades: every upgrade of its batch, before or after it, and of the turn's earlier batches. The castle gets them in the next generation, on top of its production, and repays them from its later production."`
 }
 
 type RegisterGenerationCommands struct {

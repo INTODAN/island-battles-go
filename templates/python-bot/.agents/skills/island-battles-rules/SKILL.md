@@ -54,7 +54,7 @@ The costs are in `turn.upgrades`; read them there rather than hard-coding them.
 
 ## Bursts
 
-`burst_castle(castle_id, amount)` orders a **burst** of 1 up to the castle's `burst_potential` value (counting the levels bought earlier this turn) for a castle you own. A castle at `burst_potential` level 1 can't burst. The burst is a loan:
+`burst_castle(castle_id, amount)` orders a **burst** of 1 up to the castle's `burst_potential` value (counting the levels bought this turn, also later in the same result) for a castle you own. A castle at `burst_potential` level 1 can't burst. The burst is a loan:
 
 1. The turn you order it, the castle gets its production **plus** the burst, so the very next generation has them, and the burst becomes its `burst_debt`. The burst arrives before that turn's groups land, so it already helps the castle hold.
 2. From then on, each turn's production repays the debt first; only what is left over grows the castle. Once the debt is 0 it grows normally again.

@@ -23,6 +23,11 @@ type modelCastle struct {
 	busy bool
 }
 
+// modelBurst is a burst_castle command of a batch.
+type modelBurst struct {
+	castleID, amount uint
+}
+
 type modelRejection struct {
 	status      int
 	problemType string
@@ -101,6 +106,9 @@ func playRandomTurns(t *testing.T, seed int64) {
 			}
 			var expected *modelRejection
 			var commands []models.PublicGenerationCommand
+			// The batch's bursts are checked after its other commands, so a
+			// burst counts every upgrade of its batch.
+			var bursts []modelBurst
 			for commandIndex := 0; commandIndex < 1+random.Intn(3); commandIndex++ {
 				if random.Intn(4) == 0 {
 					origin, destination := pickCastle(), castleIDs[1+random.Intn(len(castleIDs)-1)]
@@ -129,24 +137,7 @@ func playRandomTurns(t *testing.T, seed int64) {
 				if random.Intn(4) == 0 {
 					castleID, amount := pickCastle(), uint(random.Intn(10))
 					commands = append(commands, burst(castleID, amount))
-					if expected != nil {
-						continue
-					}
-					castle := trial[castleID]
-					switch {
-					case amount == 0:
-						expected = &modelRejection{422, ""}
-					case castle == nil:
-						expected = &modelRejection{422, services.CastleNotFoundProblemType}
-					case castle.teamColor != teamColor:
-						expected = &modelRejection{403, services.CastleNotOwnedProblemType}
-					case amount > potentials[castle.levels[models.BurstPotentialUpgrade]-1]:
-						expected = &modelRejection{409, services.BurstAbovePotentialProblemType}
-					case castle.busy:
-						expected = &modelRejection{409, services.BurstUnavailableProblemType}
-					default:
-						castle.busy = true
-					}
+					bursts = append(bursts, modelBurst{castleID, amount})
 					continue
 				}
 				castleID := pickCastle()
@@ -173,6 +164,26 @@ func playRandomTurns(t *testing.T, seed int64) {
 				default:
 					castle.unreserved -= costs[upgradeType][castle.levels[upgradeType]]
 					castle.levels[upgradeType]++
+				}
+			}
+			for _, order := range bursts {
+				if expected != nil {
+					break
+				}
+				castle := trial[order.castleID]
+				switch {
+				case order.amount == 0:
+					expected = &modelRejection{422, ""}
+				case castle == nil:
+					expected = &modelRejection{422, services.CastleNotFoundProblemType}
+				case castle.teamColor != teamColor:
+					expected = &modelRejection{403, services.CastleNotOwnedProblemType}
+				case order.amount > potentials[castle.levels[models.BurstPotentialUpgrade]-1]:
+					expected = &modelRejection{409, services.BurstAbovePotentialProblemType}
+				case castle.busy:
+					expected = &modelRejection{409, services.BurstUnavailableProblemType}
+				default:
+					castle.busy = true
 				}
 			}
 			request := batch(state, false, commands...)

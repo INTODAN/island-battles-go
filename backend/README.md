@@ -160,7 +160,7 @@ Each request UUID identifies one immutable batch for one player and generation. 
 | The type's pending level is already its maximum | 409 | `urn:island-battles:problem:upgrade-max-level` |
 | Soldiers or an upgrade cost beyond the castle's unreserved soldiers | 409 | `urn:island-battles:problem:insufficient-soldiers` |
 | A burst of a castle with `burst_debt`, or a burst already accepted this turn | 409 | `urn:island-battles:problem:burst-unavailable` |
-| A burst above the castle's `burst_potential` value, counting the upgrades accepted before it this turn | 409 | `urn:island-battles:problem:burst-above-potential` |
+| A burst above the castle's `burst_potential` value, counting this turn's upgrades: every one of its batch, wherever the burst stands, and those of earlier batches | 409 | `urn:island-battles:problem:burst-above-potential` |
 | The batch's [game log](#game-logs) lines would pass 100 for the player's generation, or one has more than 500 characters | 422 | `urn:island-battles:problem:game-log-limit` |
 | The batch's [bot memory](#bot-turns) is larger than 64 KiB as compact JSON | 422 | `urn:island-battles:problem:bot-memory-too-large` |
 
@@ -474,7 +474,7 @@ Each command buys the type's next level for a castle the player's team owns and 
 
 ### Bursts
 
-`burst_castle` orders a burst of 1 up to the castle's `burst_potential` value, counting the upgrades accepted before it this turn:
+`burst_castle` orders a burst of 1 up to the castle's `burst_potential` value, counting this turn's upgrades: registration checks a batch's bursts after its other commands, so a burst counts every upgrade of its batch, before or after it, and of the turn's earlier batches (levels only rise in a turn):
 
 ```json
 {"command_type": "burst_castle", "parameters": {"castle_id": 0, "soldier_amount": 8}}

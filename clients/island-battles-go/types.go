@@ -224,7 +224,7 @@ type UpgradeCastleParameters struct {
 type BurstCastleParameters struct {
 	CastleID uint `json:"castle_id"`
 	// SoldierAmount is at least 1 and at most the castle's burst potential,
-	// counting the upgrades bought before it this turn.
+	// counting the upgrades bought this turn, before or after it.
 	SoldierAmount uint `json:"soldier_amount"`
 }
 

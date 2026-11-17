@@ -216,7 +216,9 @@ func (reservations turnReservations) acceptUpgrade(teamColor uint, raw json.RawM
 
 // acceptBurst validates a player's burst_castle, reserves it and translates it
 // into the internal command. The amount may be at most the castle's burst
-// potential at the levels the turn's accepted upgrades have reached.
+// potential at the levels the turn's accepted upgrades have reached;
+// validateCommands accepts a batch's bursts after its other commands, so
+// those include every upgrade of the batch.
 func (reservations turnReservations) acceptBurst(teamColor uint, raw json.RawMessage) (models.CommandFields, error) {
 	var parameters models.BurstCastleParameters
 	if !decodeStrictly(raw, &parameters) || parameters.CastleID == nil || parameters.SoldierAmount == nil || *parameters.SoldierAmount == 0 {
