@@ -28,6 +28,7 @@ func TestGameStateRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	castle.Upgrades[models.SpeedUpgrade] = 3
+	castle.BurstDebt = 4
 	if err := database.Save(castle).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -50,18 +51,19 @@ func TestGameStateRoundTrip(t *testing.T) {
 		t.Fatalf("loaded state: %+v", state)
 	}
 	if loaded := state.Castles[2]; loaded.ID != 2 || loaded.TeamColor != 2 || loaded.Soldiers != 15 ||
-		loaded.Position != castle.Position || loaded.Upgrades[models.SpeedUpgrade] != 3 {
+		loaded.Position != castle.Position || loaded.Upgrades[models.SpeedUpgrade] != 3 || loaded.BurstDebt != 4 || loaded.PendingBurst != 0 {
 		t.Fatalf("loaded castle: %+v", loaded)
 	}
 	expectedGroup := simulation.SoldierGroup{
 		ID: 0, TeamColor: 2, Soldiers: 7, Position: group.Position, OriginCastleID: 1, DestinationCastleID: 2,
-		MovementPauseGenerations: 2, ClashRadius: .75, Upgrades: models.Upgrades{models.SpeedUpgrade: 1, models.ClashStopGenerationsUpgrade: 2},
+		MovementPauseGenerations: 2, ClashRadius: .75, Upgrades: models.Upgrades{models.ClashStopGenerationsUpgrade: 2}.Clone(),
 	}
 	if !reflect.DeepEqual(*state.SoldierGroups[0], expectedGroup) {
 		t.Fatalf("loaded group: %+v", state.SoldierGroups[0])
 	}
 
 	state.Castles[0].TeamColor, state.Castles[0].Soldiers = 2, 4
+	state.Castles[1].PendingBurst = 6
 	state.SoldierGroups[5] = &simulation.SoldierGroup{
 		ID: 5, TeamColor: 1, Soldiers: 3, Position: state.Castles[0].Position, OriginCastleID: 0, DestinationCastleID: 1,
 		ClashRadius: models.DefaultClashRadius, Upgrades: models.Upgrades{}.Clone(),

@@ -8,11 +8,12 @@ type Generation = components["schemas"]["Generation"];
 /** A generation with two castles, Blue's holding `blue` soldiers and Red's `red`. */
 export function generation(id: number, blue = 30, red = 30): Generation {
   const upgrades = { speed: 1, clash_stop_generations: 1 };
+  const burst = { burst_debt: 0, pending_burst: 0 };
   return {
     id,
     castles: [
-      { id: 0, team_color: 1, soldiers: blue, x: -2, y: 0, upgrades },
-      { id: 1, team_color: 2, soldiers: red, x: 2, y: 0, upgrades },
+      { id: 0, team_color: 1, soldiers: blue, x: -2, y: 0, upgrades, ...burst },
+      { id: 1, team_color: 2, soldiers: red, x: 2, y: 0, upgrades, ...burst },
     ],
     soldier_groups: [],
     clashes: [],

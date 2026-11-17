@@ -29,7 +29,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 1,
@@ -40,7 +42,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 2,
@@ -51,7 +55,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 3,
@@ -62,7 +68,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 4,
@@ -73,7 +81,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 5,
@@ -84,7 +94,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 6,
@@ -95,7 +107,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 7,
@@ -106,7 +120,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 8,
@@ -117,7 +133,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         }
       ],
       "soldier_groups": [
@@ -164,7 +182,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 1,
@@ -175,7 +195,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 2,
@@ -186,7 +208,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 3,
@@ -197,7 +221,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 4,
@@ -208,7 +234,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 5,
@@ -219,7 +247,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 6,
@@ -230,7 +260,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 7,
@@ -241,7 +273,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 8,
@@ -252,7 +286,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         }
       ],
       "soldier_groups": [
@@ -299,7 +335,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 1,
@@ -310,7 +348,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 2,
@@ -321,7 +361,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 3,
@@ -332,7 +374,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 4,
@@ -343,7 +387,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 5,
@@ -354,7 +400,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 6,
@@ -365,7 +413,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 7,
@@ -376,7 +426,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 8,
@@ -387,7 +439,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         }
       ],
       "soldier_groups": [
@@ -434,7 +488,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 1,
@@ -445,7 +501,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 2,
@@ -456,7 +514,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 3,
@@ -467,7 +527,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 4,
@@ -478,7 +540,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 5,
@@ -489,7 +553,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 6,
@@ -500,7 +566,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 7,
@@ -511,7 +579,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 8,
@@ -522,7 +592,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         }
       ],
       "soldier_groups": [
@@ -569,7 +641,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 1,
@@ -580,7 +654,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 2,
@@ -591,7 +667,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 3,
@@ -602,7 +680,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 4,
@@ -613,7 +693,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 5,
@@ -624,7 +706,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 6,
@@ -635,7 +719,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 7,
@@ -646,7 +732,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 8,
@@ -657,7 +745,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         }
       ],
       "soldier_groups": [
@@ -704,7 +794,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 1,
@@ -715,7 +807,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 2,
@@ -726,7 +820,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 3,
@@ -737,7 +833,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 4,
@@ -748,7 +846,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 5,
@@ -759,7 +859,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 6,
@@ -770,7 +872,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 7,
@@ -781,7 +885,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 8,
@@ -792,7 +898,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         }
       ],
       "soldier_groups": [
@@ -839,7 +947,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 1,
@@ -850,7 +960,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 2,
@@ -861,7 +973,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 3,
@@ -872,7 +986,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 4,
@@ -883,7 +999,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 5,
@@ -894,7 +1012,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 6,
@@ -905,7 +1025,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 7,
@@ -916,7 +1038,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 8,
@@ -927,7 +1051,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         }
       ],
       "soldier_groups": [
@@ -1002,7 +1128,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 1,
@@ -1013,7 +1141,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 2,
@@ -1024,7 +1154,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 3,
@@ -1035,7 +1167,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 4,
@@ -1046,7 +1180,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 5,
@@ -1057,7 +1193,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 6,
@@ -1068,7 +1206,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 7,
@@ -1079,7 +1219,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         },
         {
           "id": 8,
@@ -1090,7 +1232,9 @@
           "upgrades": {
             "clash_stop_generations": 1,
             "speed": 1
-          }
+          },
+          "burst_debt": 0,
+          "pending_burst": 0
         }
       ],
       "soldier_groups": [

@@ -119,7 +119,7 @@ let fieldY = 3;
 const point = (node) => [(fieldX + node.x) * worldScale, (fieldY + node.y) * worldScale];
 // Each castle's upgrade levels, written under its label, such as "Speed 2 · Stop 1".
 // Known types come first under short names; any other type follows under its own.
-const upgradeNames = new Map([["speed", "Speed"], ["clash_stop_generations", "Stop"]]);
+const upgradeNames = new Map([["speed", "Speed"], ["clash_stop_generations", "Stop"], ["generation_amount", "Growth"], ["burst_potential", "Burst"]]);
 const upgradeRank = (type) => [...upgradeNames.keys()].indexOf(type) >>> 0;
 const upgradeLevels = (castle) => Object.keys(castle.upgrades)
   .sort((left, right) => upgradeRank(left) - upgradeRank(right) || left.localeCompare(right))

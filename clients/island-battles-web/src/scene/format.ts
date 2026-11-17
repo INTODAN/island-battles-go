@@ -9,6 +9,8 @@ type GameTeam = components["schemas"]["GameTeam"];
 const upgradeNames = new Map([
   ["speed", "Speed"],
   ["clash_stop_generations", "Stop"],
+  ["generation_amount", "Growth"],
+  ["burst_potential", "Burst"],
 ]);
 const upgradeRank = (type: string) =>
   [...upgradeNames.keys()].indexOf(type) >>> 0;
@@ -50,7 +52,20 @@ export function castleTooltip(
     `${castleTitle(castle)} (ID ${castle.id})`,
     `${teamName(teams, castle.team_color)} · ${castle.soldiers} soldiers`,
     `Upgrades: ${upgradeLevels(castle.upgrades) || "none"}`,
+    ...burstLines(castle),
   ];
+}
+
+/** A castle's burst, when it has one: pending until the next turn pays it out, then owed. */
+export function burstLines(castle: Castle): string[] {
+  const lines: string[] = [];
+  if (castle.pending_burst > 0) {
+    lines.push(`Burst of ${castle.pending_burst} arrives next turn`);
+  }
+  if (castle.burst_debt > 0) {
+    lines.push(`Burst debt: ${castle.burst_debt} soldiers`);
+  }
+  return lines;
 }
 
 export function groupTooltip(
