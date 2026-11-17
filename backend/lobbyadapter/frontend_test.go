@@ -73,7 +73,7 @@ func TestFrontendGameWatchersReadOnlyTheWatchRoutes(t *testing.T) {
 			t.Errorf("%s is under the watch prefix", playerRead)
 		}
 	}
-	for _, watchRead := range []string{"/game/from-lobby/{lobby_id}/watch/demo", game.WatchResultURL} {
+	for _, watchRead := range []string{"/game/from-lobby/{lobby_id}/watch/demo", "/game/from-lobby/{lobby_id}/watch/logs", game.WatchResultURL} {
 		if !strings.HasPrefix(watchRead, game.WatchDataURLPrefix) {
 			t.Errorf("%s is not under the watch prefix", watchRead)
 		}

@@ -80,7 +80,7 @@ input { flex: 1; min-width: 100px; accent-color: #3464e0; }
 </div>
 <p id="outcome" role="status"></p>
 <p id="clashes" role="status"></p>
-<section id="logs" aria-labelledby="logs-title"{{if .Watcher}} hidden{{end}}>
+<section id="logs" aria-labelledby="logs-title">
 <h2 id="logs-title">Logs</h2>
 <div id="logs-box" tabindex="0"></div>
 </section>
@@ -96,7 +96,8 @@ input { flex: 1; min-width: 100px; accent-color: #3464e0; }
 // The replay that the server embedded. The demo viewer has none until it opens
 // a demo file, which has the same teams, frames and outcome.
 let replay = {{.Replay}};
-// A watcher outside the roster sees no game log, and saves the demo through the watcher's route.
+// A watcher outside the roster belongs to no team: they see no game log until the game ends,
+// and read it and save the demo through the watcher's routes.
 const watcher = {{if .Watcher}}true{{else}}false{{end}};
 const colors = ["#3464e0", "#d94d5b", "#288562", "#9560cb", "#b37914", "#24828f"];
 const field = document.getElementById("battlefield");
@@ -718,6 +719,8 @@ function nextLogRetry(status, retriesMade) {
 const logDebouncer = createDebouncer(setTimeout, clearTimeout, logShownMilliseconds);
 // Counts resets, so a retry waiting from before one is dropped.
 let logEpoch = 0;
+// A watcher sees every team's logs once the game has ended, and none before.
+const logsHidden = () => watcher && !replay.outcome;
 const isOpenTurn = (generation) => !demoLogs && !replay.outcome && generation === latestGeneration;
 // A demo saved during the game ends with the turn that was open then.
 const isSavedOpenTurn = (generation) => demoLogs !== null && !replay.outcome && generation === latestGeneration;
@@ -728,11 +731,14 @@ function logNote(text) {
   return note;
 }
 function showLogs(immediately = false) {
-  if (watcher) return;
   const generation = replay.frames[turn].id;
   if (shownLogs === generation) return;
   shownLogs = generation;
   document.getElementById("logs-title").textContent = `Logs · Generation ${turn + 1}`;
+  if (!demoLogs && logsHidden()) {
+    logsBox.replaceChildren(logNote("Bot logs appear when the game ends."));
+    return;
+  }
   if (demoLogs) {
     renderLogs(demoLogs.get(generation));
     return;
@@ -755,11 +761,12 @@ function showLogs(immediately = false) {
   }
 }
 function requestLogs(generation, retriesMade = 0) {
+  if (logsHidden()) return;
   const cacheable = !isOpenTurn(generation);
   if ([...logRequests.values()].some((request) => request.generation === generation && request.cacheable === cacheable)) return;
   const id = `logs-${++requestCount}`;
   logRequests.set(id, { generation, cacheable, retriesMade });
-  const path = `/game/from-lobby/${encodeURIComponent(replay.lobby_id)}/logs?generation_id=${generation}`;
+  const path = `/game/from-lobby/${encodeURIComponent(replay.lobby_id)}/${watcher ? "watch/logs" : "logs"}?generation_id=${generation}`;
   window.parent.postMessage({ type: "game.request", id, path }, "*");
   // The page answers every request it accepts; stop waiting for a lost one.
   setTimeout(() => {

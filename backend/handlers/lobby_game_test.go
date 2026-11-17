@@ -16,6 +16,7 @@ import (
 	"github.com/danielgtaylor/huma/v2/humatest"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"islandBattles/backend/dal"
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/models"
@@ -100,6 +101,94 @@ func TestWatcherReplayIsServedToWatchersOnly(t *testing.T) {
 	}
 	if response := api.Get("/game/from-lobby/"+uuid.NewString()+"/watch/replay", "Authorization: Bearer watcher"); response.Code != http.StatusNotFound {
 		t.Fatalf("unknown lobby=%d", response.Code)
+	}
+}
+
+// A watcher's log read admits whom the watch reads admit. While the game runs
+// it has no lines for anyone, a roster player included; once the game has
+// ended it has every team's.
+func TestWatcherLogsShowEveryTeamOnlyAfterTheEnd(t *testing.T) {
+	database := testutils.InitTestDB(t)
+	alice, bob, lobbyID, red, blue := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	bound, err := services.RunLobbyGame(context.Background(), database, &testutils.RecordedPublisher{}, nil, domain.Snapshot{
+		Lobby:       domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted},
+		Teams:       []domain.Team{{ID: red, Name: "Red", Order: 1}, {ID: blue, Name: "Blue", Order: 2}},
+		StartRoster: domain.StartRoster{{PlayerID: alice, TeamID: red, TeamOrder: 1}, {PlayerID: bob, TeamID: blue, TeamOrder: 2}},
+		Members:     []domain.Member{{PlayerID: alice, DisplayName: "Alice"}, {PlayerID: bob, DisplayName: "Bob"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	generation, err := dal.GetLatestGenerationForGame(database, bound.GameID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dal.StoreGenerationLogs(database, []models.GenerationLog{
+		{GameID: bound.GameID, GenerationID: generation.ID, PlayerID: alice, Sequence: 1, Level: models.GenerationLogInfo, Logger: "bot", Message: "Red plans"},
+		{GameID: bound.GameID, GenerationID: generation.ID, PlayerID: bob, Sequence: 1, Level: models.GenerationLogInfo, Logger: "bot", Message: "Blue plans"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	watcher, kicked := uuid.NewString(), uuid.NewString()
+	handler := handlers.LobbyGame{Database: database, Publisher: &testutils.RecordedPublisher{},
+		Watchers: watchingPlayers{watching: map[string]bool{watcher: true}, kicked: map[string]bool{kicked: true}},
+		Players:  bearerPlayers{"Bearer alice": {PlayerID: alice}, "Bearer watcher": {PlayerID: watcher}, "Bearer kicked": {PlayerID: kicked}, "Bearer outsider": {PlayerID: uuid.NewString()}}}
+	_, api := humatest.New(t)
+	huma.Register(api, huma.Operation{OperationID: "watchLogs", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/watch/logs"}, handler.WatchLogs)
+	huma.Register(api, huma.Operation{OperationID: "logs", Method: http.MethodGet, Path: "/game/from-lobby/{lobby_id}/logs"}, handler.GenerationLogs)
+	path := fmt.Sprintf("/game/from-lobby/%s/watch/logs?generation_id=%d", lobbyID, generation.ID)
+	read := func(path, credential string) models.GenerationLogs {
+		t.Helper()
+		response := api.Get(path, "Authorization: "+credential)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s %s=%d %s", credential, path, response.Code, response.Body.String())
+		}
+		var logs models.GenerationLogs
+		if err := json.Unmarshal(response.Body.Bytes(), &logs); err != nil {
+			t.Fatal(err)
+		}
+		return logs
+	}
+	messages := func(logs models.GenerationLogs) []string {
+		found := []string{}
+		for _, player := range logs.Players {
+			for _, line := range player.Lines {
+				found = append(found, line.Message)
+			}
+		}
+		return found
+	}
+
+	for credential, want := range map[string]int{"Bearer kicked": http.StatusForbidden, "Bearer outsider": http.StatusNotFound, "Bearer stranger": http.StatusUnauthorized} {
+		if response := api.Get(path, "Authorization: "+credential); response.Code != want {
+			t.Fatalf("%s watch logs=%d %s", credential, response.Code, response.Body.String())
+		}
+	}
+	for _, credential := range []string{"Bearer watcher", "Bearer alice"} {
+		if logs := read(path, credential); len(logs.Players) != 0 || !reflect.DeepEqual(logs.HiddenTeamColors, []uint{1, 2}) {
+			t.Fatalf("%s's watch logs of the running game = %+v", credential, logs)
+		}
+	}
+	// Alice's own read shows her team's lines only.
+	ownPath := fmt.Sprintf("/game/from-lobby/%s/logs?generation_id=%d", lobbyID, generation.ID)
+	if logs := read(ownPath, "Bearer alice"); !reflect.DeepEqual(messages(logs), []string{"Red plans"}) || !reflect.DeepEqual(logs.HiddenTeamColors, []uint{2}) {
+		t.Fatalf("Alice's logs of the running game = %+v", logs)
+	}
+	if response := api.Get(fmt.Sprintf("/game/from-lobby/%s/watch/logs", lobbyID), "Authorization: Bearer watcher"); response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("watch logs without a generation=%d", response.Code)
+	}
+
+	game, err := dal.FindGame(database, bound.GameID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dal.SaveGameOutcome(database, game, models.GameOutcome{Reason: models.GameOutcomeGenerationCap}); err != nil {
+		t.Fatal(err)
+	}
+	for _, reader := range []struct{ path, credential string }{{path, "Bearer watcher"}, {path, "Bearer alice"}, {ownPath, "Bearer alice"}} {
+		if logs := read(reader.path, reader.credential); !reflect.DeepEqual(messages(logs), []string{"Red plans", "Blue plans"}) || len(logs.HiddenTeamColors) != 0 {
+			t.Fatalf("%s %s after the end = %+v", reader.credential, reader.path, logs)
+		}
 	}
 }
 
