@@ -13,12 +13,11 @@ import (
 
 // LobbySettings are the Island Battles settings a host chooses when creating a
 // lobby, its game_settings object. The lobby hands them back in the started
-// snapshot. They hold at most one map choice: a default map by its template
-// ID, or a whole map file. With neither, the game starts on the generated map.
-// They also set the turn timeout.
+// snapshot. They hold exactly one map choice: a default map by its template
+// ID, or a whole map file. They also set the turn timeout.
 type LobbySettings struct {
-	MapTemplateID uint             `json:"map_template_id,omitempty" minimum:"1" doc:"Start on this default map, a map_template_id from GET /map/templates. Cannot be combined with map."`
-	Map           *MapTemplateView `json:"map,omitempty" doc:"Start on this map file. Cannot be combined with map_template_id."`
+	MapTemplateID uint             `json:"map_template_id,omitempty" minimum:"1" doc:"Start on this default map, a map_template_id from GET /map/templates. Give this or map, not both."`
+	Map           *MapTemplateView `json:"map,omitempty" doc:"Start on this map file. Give this or map_template_id, not both."`
 	// TurnTimeoutSeconds is nil for no limit. ParseLobbySettings fills in
 	// DefaultTurnTimeoutSeconds when the settings leave it out.
 	TurnTimeoutSeconds *uint `json:"turn_timeout_seconds,omitempty" minimum:"5" maximum:"600" nullable:"true" default:"30" doc:"How long each turn lasts, in whole seconds from 5 to 600, counted from when its generation was created; 30 when left out. null means no limit, for example while debugging a bot. When a turn's deadline passes before every player has completed it, each team with a player who hadn't loses, and the game ends."`
@@ -66,7 +65,7 @@ func NewLobbySettingsError(field, message string) *LobbySettingsError {
 }
 
 // ParseLobbySettings decodes a lobby's game settings. It rejects unknown
-// fields, both map choices at once, an inline map that DecodeMapTemplate
+// fields, settings without a map choice or with both, an inline map that DecodeMapTemplate
 // rejects, and a turn timeout that is neither null nor a whole number of
 // seconds from MinTurnTimeoutSeconds to MaxTurnTimeoutSeconds. Settings
 // without a turn timeout get DefaultTurnTimeoutSeconds. Whether a template
@@ -86,6 +85,11 @@ func ParseLobbySettings(raw json.RawMessage) (LobbySettings, error) {
 	rawMap, hasMap := fields["map"]
 	if hasTemplateID && hasMap {
 		return LobbySettings{}, NewLobbySettingsError("map", "cannot be combined with map_template_id; choose a default map or a map file")
+	}
+	// Every game starts on a default map or a map file.
+	if !hasTemplateID && !hasMap {
+		return LobbySettings{}, &LobbySettingsError{Details: []*huma.ErrorDetail{{Location: LobbySettingsLocation,
+			Message: "must choose a map: map_template_id for a default map from GET /map/templates, or map for a map file"}}}
 	}
 	timeout, err := parseTurnTimeout(fields)
 	if err != nil {

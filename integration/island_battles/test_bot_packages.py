@@ -14,7 +14,7 @@ import pytest
 from integration.test_live import create
 from integration.test_live import guests as guests_fixture
 from lobby_client import Scope
-from test_lobby_binding import GAME, game_auth
+from test_lobby_binding import GAME, game_auth, island_settings
 
 guests = guests_fixture
 pytestmark = pytest.mark.asyncio
@@ -53,7 +53,7 @@ async def upload_token(http: httpx.AsyncClient, player, lobby_id: str) -> str:
 
 async def test_members_upload_from_both_command_lines_and_everyone_sees_them(guests, tmp_path):
     alice, bob, stranger = await guests("Alice"), await guests("Bob"), await guests("Stranger")
-    room = await create(alice, "island-battles")
+    room = await create(alice, "island-battles", island_settings())
     scope = Scope.from_snapshot(room)
     await bob.join_lobby(game_key=scope.game_key, join_code=room.lobby.join_code)
     for name, data in {"python.zip": PYTHON_ZIP, "native.zip": NATIVE_ZIP, "bad.zip": BAD_ZIP}.items():

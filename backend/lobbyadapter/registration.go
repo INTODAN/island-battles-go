@@ -164,11 +164,11 @@ func gameOver(ctx context.Context, database *gorm.DB, lobbyID string, round int6
 	}
 }
 
-// validateSettings accepts no map choice, or a map that exists and is made for
-// the lobby's teams. A failed database read is reported as unavailable rather
-// than as invalid settings.
+// validateSettings accepts settings that choose a map that exists and is made
+// for the lobby's teams. A failed database read is reported as unavailable
+// rather than as invalid settings.
 func validateSettings(ctx context.Context, database *gorm.DB, settings json.RawMessage, teams []domain.TeamDefinition) error {
-	_, err := services.LobbyMap(database.WithContext(ctx), settings, len(teams))
+	_, _, err := services.LobbyGameSettings(database.WithContext(ctx), settings, len(teams))
 	var invalidSettings *models.LobbySettingsError
 	switch {
 	case err == nil, errors.As(err, &invalidSettings):

@@ -39,7 +39,7 @@ func deliveryGame(t *testing.T) (humatest.TestAPI, *submittoken.Signer, []string
 	database := testutils.InitTestDB(t)
 	players := []string{uuid.NewString(), uuid.NewString()}
 	lobbyID, blue, red := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted}, Teams: []domain.Team{{ID: blue, Order: 1}, {ID: red, Order: 2}},
+	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted, GameSettings: testutils.CircleMapSettings(2, "")}, Teams: []domain.Team{{ID: blue, Order: 1}, {ID: red, Order: 2}},
 		StartRoster: domain.StartRoster{{PlayerID: players[0], TeamID: blue}, {PlayerID: players[1], TeamID: red}}}
 	publisher := &testutils.RecordedPublisher{}
 	if _, err := services.RunLobbyGame(context.Background(), database, publisher, nil, snapshot); err != nil {

@@ -9,7 +9,7 @@ from integration.test_live import guests as guests_fixture
 from lobby_api_client.models import TeamDefinition
 from lobby_client import LobbyError, Scope
 from test_bot_choice import run_bot
-from test_lobby_binding import GAME, choose_bot, game_auth
+from test_lobby_binding import GAME, choose_bot, circle_map, game_auth, island_settings
 
 guests = guests_fixture
 pytestmark = pytest.mark.asyncio
@@ -21,7 +21,7 @@ def seats(snapshot):
 
 async def test_one_person_plays_a_whole_game_against_a_level_two_bot_seat(guests):
     alice = await guests("Alice")
-    room = await create(alice, "island-battles")
+    room = await create(alice, "island-battles", island_settings())
     scope = Scope.from_snapshot(room)
     red, blue = room.teams[0].id, room.teams[1].id
 
@@ -73,7 +73,7 @@ async def test_only_the_host_changes_seats_and_seats_alone_never_start(guests):
     room = await alice.create_lobby(
         game_key="island-battles", name="Seats",
         teams=[TeamDefinition(name=name) for name in ("Blue", "Red", "Green", "Purple")],
-        request_id=uuid4(),
+        request_id=uuid4(), game_settings={"map": circle_map(4)},
     )
     assert room.lobby.capacity == 4
     scope = Scope.from_snapshot(room)

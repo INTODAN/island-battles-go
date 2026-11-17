@@ -10,7 +10,7 @@ import {
 import { WORLD_SCALE } from "./coordinates";
 
 describe("board fitting", () => {
-  test("keeps at least the generated map's 8 by 6 map units, in world units", () => {
+  test("keeps at least 8 by 6 map units, in world units", () => {
     const minimum = {
       halfWidth: 4 * WORLD_SCALE,
       halfDepth: 3 * WORLD_SCALE,

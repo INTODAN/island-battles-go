@@ -28,8 +28,8 @@ func TestTheDemoIsPackedWithGzipForClientsThatAcceptIt(t *testing.T) {
 	database := testutils.InitTestDB(t)
 	playerID, lobbyID, teamID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	if _, err := services.RunLobbyGame(context.Background(), database, &testutils.RecordedPublisher{}, nil, domain.Snapshot{
-		Lobby: domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted},
-		Teams: []domain.Team{{ID: teamID, Order: 1, Name: "Blue"}}, StartRoster: domain.StartRoster{{PlayerID: playerID, TeamID: teamID}},
+		Lobby: domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted, GameSettings: testutils.CircleMapSettings(2, "")},
+		Teams: []domain.Team{{ID: teamID, Order: 1, Name: "Blue"}, {ID: uuid.NewString(), Order: 2, Name: "Red"}}, StartRoster: domain.StartRoster{{PlayerID: playerID, TeamID: teamID}},
 	}); err != nil {
 		t.Fatal(err)
 	}
