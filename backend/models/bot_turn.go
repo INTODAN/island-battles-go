@@ -60,9 +60,13 @@ func (memory BotMemory) Compact() (BotMemory, error) {
 type BotTurn struct {
 	GameID     uint           `json:"game_id" minimum:"1"`
 	Generation GenerationView `json:"generation"`
-	TeamColor  uint           `json:"team_color" minimum:"1"`
-	Upgrades   []UpgradeView  `json:"upgrades" nullable:"false" doc:"The upgrade cost table, the same list GET /game/upgrades returns as its upgrades. It is the same for the whole game. Reaching a level costs its soldier_cost."`
-	Memory     BotMemory      `json:"memory" doc:"The memory the bot returned with its previous turn in this game, or null on its first turn and after a turn that returned null."`
+	// TurnNumber and MaxGenerations are GenerationState.TurnNumber and
+	// GenerationState.MaxGenerations.
+	TurnNumber     int           `json:"turn_number" minimum:"1" doc:"This turn's number in the game, from 1: the game's first generation is turn 1, and every turn adds one, the n of the replay's Turn n / m. generation.id is not the turn number: it is the server's ID of the generation, which increases with every turn but doesn't start at 1."`
+	MaxGenerations int           `json:"max_generations" minimum:"2" doc:"The game's last generation, the same for the whole game. The turn that creates generation max_generations ends the game, if nothing has ended it before, so turn max_generations - 1 is the last one a bot plays: max_generations - turn_number turns are left, this one included."`
+	TeamColor      uint          `json:"team_color" minimum:"1"`
+	Upgrades       []UpgradeView `json:"upgrades" nullable:"false" doc:"The upgrade cost table, the same list GET /game/upgrades returns as its upgrades. It is the same for the whole game. Reaching a level costs its soldier_cost."`
+	Memory         BotMemory     `json:"memory" doc:"The memory the bot returned with its previous turn in this game, or null on its first turn and after a turn that returned null."`
 	// TurnDeadlineAt is GenerationState.TurnDeadlineAt.
 	TurnDeadlineAt *time.Time `json:"turn_deadline_at" nullable:"true" doc:"When the turn times out, GenerationState.turn_deadline_at, or null when turns have no time limit. A bot that hasn't answered by then makes its whole team lose."`
 }

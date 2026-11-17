@@ -622,6 +622,8 @@ class IslandBattlesClient:
                 turn = BotTurn(
                     game_id=state.game_id,
                     generation=state.generation,
+                    turn_number=state.turn_number,
+                    max_generations=state.max_generations,
                     upgrades=self._upgrades,
                     memory=state.memory,
                     team_color=state.team_color,

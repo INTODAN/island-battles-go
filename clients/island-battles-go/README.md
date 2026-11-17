@@ -110,7 +110,8 @@ In your own program, `islandbattles.NewClient(islandbattles.URLs{Game: gameURL, 
 type Play func(ctx context.Context, turn islandbattles.Turn) (islandbattles.Result, error)
 ```
 
-- `turn.Generation` is the board: `Castles`, `SoldierGroups` and the `Clashes` of the last turn, and its `ID`, which grows by one every turn.
+- `turn.Generation` is the board: `Castles`, `SoldierGroups` and the `Clashes` of the last turn, and its `ID`, the server's ID of the generation, which increases with every turn but isn't the turn number.
+- `turn.TurnNumber` is the turn's number in the game, 1 on its first turn, and `turn.MaxGenerations` the game's last generation: the turn that creates it ends the game, so `turn.MaxGenerations - turn.TurnNumber` turns are left, this one included.
 - `turn.TeamColor` is your team; `islandbattles.NeutralTeamColor` (0) is no team.
 - `turn.Upgrades` is the upgrade cost table: every upgrade type with each level's `Value` and `SoldierCost`. It is the same for the whole game.
 - `turn.Memory` is what your bot remembered last turn ([memory](#memory)), and `turn.GameID` the game.
@@ -316,6 +317,7 @@ go run ./examples/level3 serve
 | `log_line(message, level="info")` | `Log(message)`, `Logf(format, ...)`, `LogAt(level, message)` |
 | `logger.info(...)` | `islandbattles.Logger(ctx).Info(...)` |
 | `turn_result(commands, logs, memory)` | `Result{Commands: ..., Logs: ..., Memory: ...}` |
+| `turn.turn_number`, `turn.max_generations` | `turn.TurnNumber`, `turn.MaxGenerations` |
 | `turn.memory` (a dict), `memory={...}` | `turn.Memory.Decode(&state)`, `NewMemory(state)` |
 | `MEMORY_LIMIT_BYTES` | `MemoryLimitBytes` |
 | `NEUTRAL_TEAM_COLOR` | `NeutralTeamColor` |

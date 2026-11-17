@@ -407,7 +407,7 @@ func generationState(game *models.Game, generation *models.Generation, players [
 		return models.GenerationState{}, err
 	}
 	state := models.GenerationState{GameID: game.ID, LobbyID: *game.LobbyID, LobbyRound: game.LobbyRound, GenerationID: generation.ID, PlayerID: player.PlayerID, TeamColor: player.TeamColor, Channel: channel,
-		Generation: GenerationView(generation), Outcome: outcomeView(game), Memory: memory, TurnDeadlineAt: turnDeadline(game, generation), Bot: models.FrozenBot(player),
+		Generation: GenerationView(generation), TurnNumber: generation.Number, MaxGenerations: MaxGenerations, Outcome: outcomeView(game), Memory: memory, TurnDeadlineAt: turnDeadline(game, generation), Bot: models.FrozenBot(player),
 		RelayedBots: models.RelayedBots(players, player.PlayerID)}
 	for _, input := range inputs {
 		if input.PlayerID == player.PlayerID {

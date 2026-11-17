@@ -284,19 +284,15 @@ func playTurn(ctx context.Context, transaction *gorm.DB, game *models.Game, play
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	generations, err := dal.CountGenerationsForGame(transaction, game.ID)
+	generation, err := dal.GetGeneration(transaction, generationID)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 	// A game that ends keeps this generation as its last one.
-	if outcome := simulation.Outcome(board, game.Teams, generations >= MaxGenerations); outcome != nil {
+	if outcome := simulation.Outcome(board, game.Teams, generation.Number >= MaxGenerations); outcome != nil {
 		if err := dal.SaveGameOutcome(transaction, game, *outcome); err != nil {
 			return nil, nil, nil, nil, err
 		}
-	}
-	generation, err := dal.GetGeneration(transaction, generationID)
-	if err != nil {
-		return nil, nil, nil, nil, err
 	}
 	inputs, err = playGoBots(ctx, transaction, game, generation, players, nil)
 	if err != nil {
@@ -383,7 +379,9 @@ func (service *GenerationService) playGoBotTurns(ctx context.Context, gameID uin
 }
 
 // newGoBotTurn builds the turn a Go bot is given. Its upgrade table is the one
-// GET /game/upgrades lists, as the turns of relayed bots carry it.
+// GET /game/upgrades lists, as the turns of relayed bots carry it. Its turn
+// number is the generation's Number, which the DAL's loaders fill in.
 func newGoBotTurn(game *models.Game, generation *models.Generation, teamColor uint, memory models.BotMemory) models.BotTurn {
-	return models.BotTurn{GameID: game.ID, TeamColor: teamColor, Upgrades: models.UpgradeTable(), Memory: memory, TurnDeadlineAt: turnDeadline(game, generation)}
+	return models.BotTurn{GameID: game.ID, TurnNumber: generation.Number, MaxGenerations: MaxGenerations, TeamColor: teamColor, Upgrades: models.UpgradeTable(), Memory: memory,
+		TurnDeadlineAt: turnDeadline(game, generation)}
 }

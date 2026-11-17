@@ -37,10 +37,12 @@ func fullTurn() models.BotTurn {
 	deadline := time.Date(2026, 11, 7, 12, 0, 30, 123456789, time.UTC)
 	upgrades := models.Upgrades{models.SpeedUpgrade: 2, models.ClashStopGenerationsUpgrade: 3}
 	return models.BotTurn{
-		GameID:    7,
-		TeamColor: 2,
-		Upgrades:  models.UpgradeTable(),
-		Memory:    models.BotMemory(`{"plans":[{"target":3,"at":1e3}],"name":"é","big":123456789012345678901234567890}`),
+		GameID:         7,
+		TurnNumber:     12,
+		MaxGenerations: 300,
+		TeamColor:      2,
+		Upgrades:       models.UpgradeTable(),
+		Memory:         models.BotMemory(`{"plans":[{"target":3,"at":1e3}],"name":"é","big":123456789012345678901234567890}`),
 		Generation: models.GenerationView{
 			ID: 41,
 			Castles: []models.CastleView{

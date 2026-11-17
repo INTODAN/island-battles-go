@@ -17,6 +17,16 @@ type Turn struct {
 	GameID uint `json:"game_id"`
 	// Generation is the board of this turn.
 	Generation Generation `json:"generation"`
+	// TurnNumber is this turn's number in the game, from 1: the first generation
+	// is turn 1, and every turn adds one. Generation.ID is not the turn
+	// number: it is the server's ID of the generation, which doesn't start
+	// at 1.
+	TurnNumber int `json:"turn_number"`
+	// MaxGenerations is the game's last generation. The turn that creates
+	// generation MaxGenerations ends the game, if nothing has ended it
+	// before, so turn MaxGenerations-1 is the last one a bot plays:
+	// MaxGenerations-TurnNumber turns are left, this one included.
+	MaxGenerations int `json:"max_generations"`
 	// TeamColor is the bot's team.
 	TeamColor uint `json:"team_color"`
 	// Upgrades is the upgrade cost table, the list GET /game/upgrades
@@ -54,7 +64,8 @@ type TurnSubmit struct {
 
 // Generation is the board of one turn. It is the contract's Generation.
 type Generation struct {
-	// ID increases with every turn.
+	// ID is the server's ID of the generation, which increases with every
+	// turn but isn't the turn number: Turn.TurnNumber is.
 	ID            uint           `json:"id"`
 	Castles       []Castle       `json:"castles"`
 	SoldierGroups []SoldierGroup `json:"soldier_groups"`

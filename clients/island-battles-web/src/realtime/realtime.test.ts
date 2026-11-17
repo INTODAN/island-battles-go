@@ -149,6 +149,8 @@ const state = (generationId: number, overrides: object = {}): GenerationState =>
     memory: null,
     player_id: PLAYER_ID,
     submitted: false,
+    turn_number: generationId,
+    max_generations: 300,
     turn_deadline_at: null,
     ...overrides,
   }) as unknown as GenerationState;

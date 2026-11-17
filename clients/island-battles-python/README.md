@@ -72,7 +72,7 @@ def play(turn: BotTurn) -> BotTurnResult:
 
 `play` can be `def` or `async def`. Put it in a module, such as `mybot.py`, and refer to it as `mybot:play`. The full example, with upgrades, logging and memory, is [examples/bot.py](examples/bot.py).
 
-- `turn.generation` is the board (`castles`, `soldier_groups`, `clashes`), `turn.team_color` your team, `turn.game_id` the game, `turn.upgrades` the upgrade cost table, `turn.memory` what you returned last turn (`None` on the first turn and after a turn that returned none), and `turn.turn_deadline_at` when the turn times out, or `None`. A bot that doesn't answer by then makes its whole team lose.
+- `turn.generation` is the board (`castles`, `soldier_groups`, `clashes`), `turn.turn_number` the turn's number in the game (1 on its first turn; `turn.generation.id` is the server's ID of the generation, which doesn't start at 1), `turn.max_generations` the game's last generation (the turn that creates it ends the game, so `turn.max_generations - turn.turn_number` turns are left, this one included), `turn.team_color` your team, `turn.game_id` the game, `turn.upgrades` the upgrade cost table, `turn.memory` what you returned last turn (`None` on the first turn and after a turn that returned none), and `turn.turn_deadline_at` when the turn times out, or `None`. A bot that doesn't answer by then makes its whole team lose.
 - `turn_result(commands=(), logs=(), memory=None)` builds the result. The helpers `send_soldier_group(origin_castle_id, destination_castle_id, soldier_amount)`, `upgrade_castle(castle_id, upgrade_type)` and `burst_castle(castle_id, soldier_amount)` build commands, and `log_line(message, level="info")` builds a game log line. They validate their arguments against the generated models and raise `pydantic.ValidationError` for invalid ones, before any request.
 - **Memory** is any JSON object of at most 64 KiB as compact JSON (`MEMORY_LIMIT_BYTES` is 65,536 bytes). The completing batch saves it on the server, and the next turn's `turn.memory` is that memory. `check`, `serve` and the client raise `BotMemoryTooLargeError` for more, before any request.
 - **Commands** run in order. The server checks them against the board and everything already reserved this turn, including your own earlier batches, and rejects the **whole result** if any command is invalid, such as sending soldiers a castle doesn't have. Count what your commands spend. `turn.upgrades` is the upgrade cost table, the list `GET /game/upgrades` returns: every type's levels with the `soldier_cost` of reaching each. `next_upgrade_cost(turn, castle, UpgradeType.speed)` gives what the castle's next level costs, or `None` at the maximum level (levels bought earlier in the same result aren't counted). Count the cost in what the castle spends.
@@ -219,7 +219,7 @@ The full HTTP contract, authorization rules, reservation checks, retry behavior 
 from island_battles_client import logger
 
 def play(turn):
-    logger.info("generation %d: %d castles", turn.generation.id, len(turn.generation.castles))
+    logger.info("turn %d: %d castles", turn.turn_number, len(turn.generation.castles))
     ...
 ```
 

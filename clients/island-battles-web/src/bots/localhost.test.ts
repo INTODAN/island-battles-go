@@ -10,6 +10,8 @@ const delivery = {
   turn: {
     game_id: 5,
     generation: { id: 2, castles: [], soldier_groups: [], clashes: [] },
+    turn_number: 1,
+    max_generations: 300,
     memory: { a: 1 },
     team_color: 1,
     turn_deadline_at: null,

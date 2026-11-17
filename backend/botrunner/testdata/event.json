@@ -7,6 +7,8 @@
   "delivery": {
     "turn": {
       "game_id": 1,
+      "turn_number": 3,
+      "max_generations": 300,
       "team_color": 1,
       "upgrades": [
         {

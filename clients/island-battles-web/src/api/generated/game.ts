@@ -496,6 +496,11 @@ export interface components {
             /** Format: int64 */
             game_id: number;
             generation: components["schemas"]["Generation"];
+            /**
+             * Format: int64
+             * @description The game's last generation, the same for the whole game. The turn that creates generation max_generations ends the game, if nothing has ended it before, so turn max_generations - 1 is the last one a bot plays: max_generations - turn_number turns are left, this one included.
+             */
+            max_generations: number;
             /** @description The memory the bot returned with its previous turn in this game, or null on its first turn and after a turn that returned null. */
             memory: {
                 [key: string]: unknown;
@@ -507,6 +512,11 @@ export interface components {
              * @description When the turn times out, GenerationState.turn_deadline_at, or null when turns have no time limit. A bot that hasn't answered by then makes its whole team lose.
              */
             turn_deadline_at: string | null;
+            /**
+             * Format: int64
+             * @description This turn's number in the game, from 1: the game's first generation is turn 1, and every turn adds one, the n of the replay's Turn n / m. generation.id is not the turn number: it is the server's ID of the generation, which increases with every turn but doesn't start at 1.
+             */
+            turn_number: number;
             /** @description The upgrade cost table, the same list GET /game/upgrades returns as its upgrades. It is the same for the whole game. Reaching a level costs its soldier_cost. */
             upgrades: components["schemas"]["Upgrade"][];
         };
@@ -790,7 +800,7 @@ export interface components {
             clashes: components["schemas"]["Clash"][];
             /**
              * Format: int64
-             * @description Generation ID; increases with every turn.
+             * @description The server's ID of the generation. It increases with every turn but is not the turn number, which BotTurn.turn_number and GenerationState.turn_number give: it doesn't start at 1.
              */
             id: number;
             soldier_groups: components["schemas"]["SoldierGroup"][];
@@ -855,6 +865,11 @@ export interface components {
              * @description How many game log lines you have stored for this generation, out of the 100 a player may store per generation. 0 when there are none. A client that restarts during a turn continues counting from it.
              */
             log_lines_stored: number;
+            /**
+             * Format: int64
+             * @description The game's last generation, the same for the whole game. The turn that creates generation max_generations ends the game, if nothing has ended it before, so turn max_generations - 1 is the last one players play. BotTurn.max_generations is the same number.
+             */
+            max_generations: number;
             /** @description The memory sent with your latest completed turn of this game, for your bot's next BotTurn.memory. Null before your first completed turn, and after a completed turn without memory. */
             memory: {
                 [key: string]: unknown;
@@ -874,6 +889,11 @@ export interface components {
              * @description When this generation's turn times out: the generation's creation time plus the lobby's turn_timeout_seconds. Null when turns have no time limit, and once the game has ended. If a player of a team hasn't completed the turn by then, the team loses and the game ends. A client waiting for other players calls POST /game/from-lobby/{lobby_id}/deadline about a second after it, because the server runs no timers.
              */
             turn_deadline_at: string | null;
+            /**
+             * Format: int64
+             * @description This generation's turn number in the game, from 1: the game's first generation is turn 1, and every turn adds one, the n of the replay's Turn n / m. generation_id is not the turn number: it is the server's ID of the generation, which increases with every turn but doesn't start at 1. BotTurn.turn_number is the same number.
+             */
+            turn_number: number;
         };
         ListDefaultBotsResponseBody: {
             /**

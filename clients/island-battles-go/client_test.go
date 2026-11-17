@@ -62,7 +62,7 @@ func (fake *fakeServer) stateOf(generationID uint, submitted bool, outcome map[s
 	turn.Generation.ID = generationID
 	state := map[string]any{
 		"game_id": 7, "lobby_id": testLobbyID, "lobby_round": 1, "generation_id": generationID, "player_id": testPlayerID,
-		"team_color": 1, "channel": "player:" + testPlayerID, "submitted": submitted, "generation": turn.Generation,
+		"team_color": 1, "channel": "player:" + testPlayerID, "submitted": submitted, "generation": turn.Generation, "turn_number": generationID, "max_generations": 300,
 		"log_lines_stored": 0, "memory": nil, "bot": map[string]any{"kind": "localhost", "port": 41414}, "relayed_bots": []any{}, "turn_deadline_at": nil,
 	}
 	if outcome != nil {
@@ -311,7 +311,7 @@ func TestClientPlaysATurnAndReportsTheEnd(t *testing.T) {
 	if string(encoded) != want {
 		t.Fatalf("got %s, want %s", encoded, want)
 	}
-	if mutex.Lock(); len(turns) != 1 || turns[0].GameID != 7 || len(turns[0].Upgrades) == 0 {
+	if mutex.Lock(); len(turns) != 1 || turns[0].GameID != 7 || turns[0].TurnNumber != 1 || turns[0].MaxGenerations != 300 || len(turns[0].Upgrades) == 0 {
 		t.Fatalf("got turns %+v", turns)
 	}
 	mutex.Unlock()

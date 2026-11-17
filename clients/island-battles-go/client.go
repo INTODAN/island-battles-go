@@ -976,6 +976,8 @@ func (client *Client) playTurn(state generationState, stored int) error {
 	turn := Turn{
 		GameID:         state.GameID,
 		Generation:     state.Generation,
+		TurnNumber:     state.TurnNumber,
+		MaxGenerations: state.MaxGenerations,
 		TeamColor:      state.TeamColor,
 		Upgrades:       client.upgrades,
 		Memory:         state.Memory,
