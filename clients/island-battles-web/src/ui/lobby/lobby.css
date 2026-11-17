@@ -739,3 +739,45 @@ select:focus-visible {
 .change-map h2 {
   margin: 0 0 4px;
 }
+
+/* Bot tutorial: a collapsible card under the menu's cards */
+
+.tutorial {
+  margin-top: 14px;
+}
+
+.tutorial summary {
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: 600;
+  min-height: 24px;
+}
+
+.tutorial-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+
+.tutorial-steps p {
+  margin: 4px 0;
+}
+
+.command-block {
+  display: block;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  overflow-x: auto;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+
+.tutorial-copy {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 6px 0;
+}
