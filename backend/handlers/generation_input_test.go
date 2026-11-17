@@ -30,7 +30,12 @@ func (authentication commandAuthentication) AuthenticatePlayer(_ context.Context
 func TestGenerationHTTPAuthenticationValidationAndStatus(t *testing.T) {
 	database := testutils.InitTestDB(t)
 	playerID, lobbyID, teamID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted, GameSettings: testutils.CircleMapSettings(2, "")}, Teams: []domain.Team{{ID: teamID, Order: 1}, {ID: uuid.NewString(), Order: 2}}, StartRoster: domain.StartRoster{{PlayerID: playerID, TeamID: teamID}}}
+	// The second team has no player, and an empty castle right next to the
+	// first team's, which the first turn takes.
+	settings := `{"map":{"map_name":"Neighbours","player_amount":2,"plane_size_x":8,"plane_size_y":6,"neutral_starting_soldier_amount":0,` +
+		`"castles":[{"team_color":1,"x":0,"y":0,"starting_soldier_amount":30},{"team_color":2,"x":0.1,"y":0}]}}`
+	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted, GameSettings: json.RawMessage(settings)},
+		Teams: []domain.Team{{ID: teamID, Order: 1}, {ID: uuid.NewString(), Order: 2}}, StartRoster: domain.StartRoster{{PlayerID: playerID, TeamID: teamID}}}
 	publisher := &testutils.RecordedPublisher{}
 	binding, err := services.RunLobbyGame(context.Background(), database, publisher, nil, snapshot)
 	if err != nil {
@@ -52,7 +57,7 @@ func TestGenerationHTTPAuthenticationValidationAndStatus(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &state); err != nil {
 		t.Fatal(err)
 	}
-	if state.GameID != binding.GameID || len(state.Generation.Castles) != 1 || state.Generation.Castles[0].ID != 0 || state.TurnDeadlineAt == nil {
+	if state.GameID != binding.GameID || len(state.Generation.Castles) != 2 || state.Generation.Castles[0].ID != 0 || state.TurnDeadlineAt == nil {
 		t.Fatalf("state=%+v", state)
 	}
 	// Before the deadline, applying it answers the state and changes nothing.
@@ -84,9 +89,11 @@ func TestGenerationHTTPAuthenticationValidationAndStatus(t *testing.T) {
 	if response := api.Post("/generation/commands", "Authorization: Bearer valid", strings.NewReader(forbidden)); response.Code != 403 {
 		t.Fatalf("forbidden=%d %s", response.Code, response.Body.String())
 	}
-	response = api.Post("/generation/commands", "Authorization: Bearer valid", strings.NewReader(request))
+	capture := fmt.Sprintf(`{"game_id":%d,"generation_id":%d,"request_id":%q,"complete":true,"commands":[{"command_type":"send_soldier_group","parameters":{"origin_castle_id":0,"destination_castle_id":1,"soldier_amount":20}}]}`,
+		state.GameID, state.GenerationID, uuid.NewString())
+	response = api.Post("/generation/commands", "Authorization: Bearer valid", strings.NewReader(capture))
 	if response.Code != 200 {
-		t.Fatalf("empty complete=%d %s", response.Code, response.Body.String())
+		t.Fatalf("complete=%d %s", response.Code, response.Body.String())
 	}
 	var next models.GenerationState
 	if err := json.Unmarshal(response.Body.Bytes(), &next); err != nil {
@@ -95,12 +102,12 @@ func TestGenerationHTTPAuthenticationValidationAndStatus(t *testing.T) {
 	if next.GenerationID == state.GenerationID || next.Submitted {
 		t.Fatalf("omitted complete did not advance: %+v", next)
 	}
-	if response := api.Post("/generation/commands", "Authorization: Bearer valid", strings.NewReader(request)); response.Code != 200 {
+	if response := api.Post("/generation/commands", "Authorization: Bearer valid", strings.NewReader(capture)); response.Code != 200 {
 		t.Fatalf("retry=%d %s", response.Code, response.Body.String())
 	}
-	// The only team is the last team standing, so its first turn ends the game.
+	// The first team took the second team's only castle, so it is the last team standing.
 	if next.Outcome == nil || next.Outcome.Reason != models.GameOutcomeLastTeamStanding {
-		t.Fatalf("a one-team game did not end: %+v", next.Outcome)
+		t.Fatalf("the game did not end: %+v", next.Outcome)
 	}
 	stale := fmt.Sprintf(`{"game_id":%d,"generation_id":%d,"request_id":%q,"commands":[]}`, state.GameID, next.GenerationID, uuid.NewString())
 	response = api.Post("/generation/commands", "Authorization: Bearer valid", strings.NewReader(stale))

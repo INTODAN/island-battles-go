@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -281,12 +282,13 @@ func TestGameLogsNeedTheRosterAndAGenerationOfTheGame(t *testing.T) {
 		t.Fatalf("unknown lobby error = %v", err)
 	}
 	// The lobby listed no member for the other game's player, so the game
-	// names them by roster position.
+	// names them by roster position. The second team has no player, so its
+	// logs are hidden.
 	logs, err := fixture.service.Logs(ctx, otherPlayer, otherLobby, otherState.GenerationID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(logs.Players) != 1 || logs.Players[0].DisplayName != "Player 1" || len(logs.HiddenTeamColors) != 0 {
+	if len(logs.Players) != 1 || logs.Players[0].DisplayName != "Player 1" || !slices.Equal(logs.HiddenTeamColors, []uint{2}) {
 		t.Fatalf("unnamed player's logs = %+v", logs)
 	}
 	// The generation is checked only for roster players.

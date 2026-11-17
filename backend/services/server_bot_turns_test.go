@@ -109,7 +109,7 @@ func startServerBotGame(t *testing.T, packages []models.BotPackage, bots []servi
 			t.Fatal(err)
 		}
 	}
-	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: game.lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted, GameSettings: testutils.CircleMapSettings(2, `{"turn_timeout_seconds":30}`)}}
+	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: game.lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted, GameSettings: testutils.CircleMapSettings(len(bots), `{"turn_timeout_seconds":30}`)}}
 	chosen := map[string]services.ServerBot{}
 	for index, bot := range bots {
 		team := domain.Team{ID: uuid.NewString(), Order: index + 1, Name: fmt.Sprintf("Team %d", index+1)}
