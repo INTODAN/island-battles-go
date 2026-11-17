@@ -1,7 +1,7 @@
 // Island Battles' map choice and turn timeout for the lobby frontend's create
-// form. The host either keeps the generated map, picks a default map from
-// GET /map/templates, or loads a map file made with the map builder. The
-// chosen map sets the lobby's teams: one per team colour, named after the
+// form. The host picks a default map from GET /map/templates, the first one
+// unless they pick another, or loads a map file made with the map builder.
+// The chosen map sets the lobby's teams: one per team colour, named after the
 // colour the board draws. The turn timeout sets how long each turn lasts.
 //
 // The lobby page passes gameURL, the game's site, which is not the lobby
@@ -19,18 +19,6 @@ export function teamName(colour) {
 // The lobby teams for a map made for teamCount teams, in team colour order.
 export function teamNames(teamCount) {
   return Array.from({ length: teamCount }, (_, index) => teamName(index + 1));
-}
-
-// The generated map fits any number of teams, so the host chooses how many
-// teams a lobby on it has, as in the 3D client's form.
-export const generatedTeamCounts = [2, 3, 4, 5, 6];
-export const defaultGeneratedTeams = 2;
-
-// generatedTeamSelection is the team count the form shows for a lobby that has
-// teamCount teams on the generated map: that count when the form offers it,
-// and the default otherwise.
-export function generatedTeamSelection(teamCount) {
-  return generatedTeamCounts.includes(teamCount) ? teamCount : defaultGeneratedTeams;
 }
 
 // The turn timeouts the form offers, as game_settings.turn_timeout_seconds:
@@ -149,7 +137,8 @@ async function describeMapChoice(settings, gameURL) {
     } catch { /* Name the map by its ID instead. */ }
     return `Map: default map #${settings.map_template_id}`;
   }
-  return "Map: generated for the players";
+  // Only a lobby created before every lobby needed a map has none.
+  return "No map chosen";
 }
 
 // The status line's start for a map file, by where it came from.
@@ -159,7 +148,7 @@ const fileSourceLabels = { file: "", builder: "From the map builder: ", lobby: "
 export const changeSettingsLabel = "Change map";
 
 // settingsSelection reads a lobby's game_settings as the form shows them: the
-// map select's value ("" for the generated map, "template:ID" or "file"), the
+// map select's value ("template:ID", "file", or "" for no map), the
 // map file the settings carry, and the turn timeout select's value ("none" for
 // no limit).
 export function settingsSelection(settings) {
@@ -180,16 +169,18 @@ function node(tag, properties = {}, ...children) {
 // it with a container for its controls and an onChange callback, and calls
 // choice() when the host creates a lobby. The room's form for changing a
 // waiting lobby's settings is the same, constructed with current, the lobby's
-// game_settings, and teamCount, how many teams the lobby has, which it shows as
-// chosen. destroy() stops a form that the
-// page removes from listening to the map builder.
+// game_settings, which it shows as chosen. Without a map to show, the form
+// chooses the first default map once the default maps load. destroy() stops a
+// form that the page removes from listening to the map builder.
 export class SettingsForm {
-  constructor({ container, onChange = () => {}, current = null, teamCount = defaultGeneratedTeams, gameURL = "" }) {
+  constructor({ container, onChange = () => {}, current = null, gameURL = "" }) {
     this.onChange = onChange;
     this.gameURL = gameURL;
     // The builder is on the game's site.
     this.builderOrigin = gameURL ? new URL(gameURL).origin : location.origin;
     this.maps = [];
+    // Set once the default maps have loaded, even when there are none.
+    this.mapsLoaded = false;
     this.file = null;
     this.fileError = "";
     // Where the loaded map file came from: "file", "builder", or "lobby" for
@@ -201,30 +192,28 @@ export class SettingsForm {
     // until the default maps load and the select can show it.
     this.pendingTemplate = "";
     this.listening = new AbortController();
-    this.select = node("select", {},
-      new Option("Generated map", ""), new Option("Load a map file…", "file"));
+    // Shown until a map is chosen: while the default maps load, or when none could be.
+    this.noMap = new Option("Loading the default maps…", "");
+    this.select = node("select", {}, this.noMap, new Option("Load a map file…", "file"));
     this.fileInput = node("input", { type: "file", accept: ".json,application/json", hidden: true });
     this.fileInput.setAttribute("aria-label", "Map file");
-    this.teams = node("select", {},
-      ...generatedTeamCounts.map((count) => new Option(String(count), String(count), false, count === defaultGeneratedTeams)));
-    this.teamsLabel = node("label", {}, "Teams", this.teams);
     this.status = node("p", { className: "hint" });
     this.status.setAttribute("role", "status");
     this.builderButton = node("button", { type: "button", className: "secondary" }, "Build a map…");
     this.timeout = node("select", {},
       ...turnTimeouts.map(({ seconds, label }) => new Option(label, seconds === null ? "none" : String(seconds), false, seconds === defaultTurnTimeout)));
-    container.append(node("label", {}, "Map", this.select), this.teamsLabel, this.fileInput, this.builderButton, this.status,
+    container.append(node("label", {}, "Map", this.select), this.fileInput, this.builderButton, this.status,
       node("label", {}, "Turn timeout", this.timeout),
       node("p", { className: "hint" }, "A team whose player doesn’t finish a turn in time loses the game."));
     this.builderButton.addEventListener("click", () => this.openBuilder());
     window.addEventListener("message", (event) => this.receive(event), { signal: this.listening.signal });
     this.select.addEventListener("change", () => {
       this.pendingTemplate = "";
+      if (this.select.value) this.removeNoMap();
       this.update();
     });
-    this.teams.addEventListener("change", () => this.update());
     this.fileInput.addEventListener("change", () => this.readFile());
-    if (current) this.showCurrent(current, teamCount);
+    if (current) this.showCurrent(current);
     this.update();
     this.loadMaps();
   }
@@ -235,7 +224,7 @@ export class SettingsForm {
 
   // showCurrent selects the map and turn timeout of a lobby's settings. A
   // default map is selected once the default maps load.
-  showCurrent(settings, teamCount) {
+  showCurrent(settings) {
     const selection = settingsSelection(settings);
     if (![...this.timeout.options].some((option) => option.value === selection.timeout)) {
       this.timeout.append(new Option(`${selection.timeout} s`, selection.timeout));
@@ -245,11 +234,14 @@ export class SettingsForm {
       this.file = selection.file;
       this.fileSource = "lobby";
       this.select.value = "file";
+      this.removeNoMap();
     } else {
       this.pendingTemplate = selection.map;
-      // Only the generated map is made for the lobby's own number of teams.
-      if (!selection.map) this.teams.value = String(generatedTeamSelection(teamCount));
     }
+  }
+
+  removeNoMap() {
+    if ([...this.select.options].includes(this.noMap)) this.select.removeChild(this.noMap);
   }
 
   async loadMaps() {
@@ -257,16 +249,24 @@ export class SettingsForm {
       this.maps = await loadDefaultMaps(this.gameURL);
     } catch {
       this.mapsError = "Could not load the default maps. You can still load a map file.";
+      this.noMap.text = "Pick a map";
       this.update();
       return;
     }
+    this.mapsLoaded = true;
     const options = this.maps.map((map) => new Option(describeMap(map.map_name, map.team_count, map.plane_size_x, map.plane_size_y), `template:${map.map_template_id}`));
-    this.select.insertBefore(node("optgroup", { label: "Default maps" }, ...options), this.select.options[1]);
+    const fileOption = [...this.select.options].find((option) => option.value === "file");
+    this.select.insertBefore(node("optgroup", { label: "Default maps" }, ...options), fileOption);
     if (this.pendingTemplate) {
       if (options.some((option) => option.value === this.pendingTemplate)) this.select.value = this.pendingTemplate;
       else this.mapsError = "The lobby’s default map is no longer offered. Choose another map.";
       this.pendingTemplate = "";
+    } else if (!this.select.value && options.length) {
+      // A new lobby starts on the first default map.
+      this.select.value = options[0].value;
     }
+    if (this.select.value) this.removeNoMap();
+    else this.noMap.text = "Pick a map";
     this.update();
   }
 
@@ -319,6 +319,7 @@ export class SettingsForm {
     this.pendingTemplate = "";
     this.fileInput.value = "";
     this.select.value = "file";
+    this.removeNoMap();
     this.update();
   }
 
@@ -336,16 +337,16 @@ export class SettingsForm {
   update() {
     const loading = this.select.value === "file";
     this.fileInput.hidden = !loading;
-    this.teamsLabel.hidden = this.select.value !== "";
     if (loading) {
       this.status.textContent = this.fileError || (this.file
         ? `${fileSourceLabels[this.fileSource]}${describeMap(this.file.map_name, this.file.player_amount, this.file.plane_size_x, this.file.plane_size_y)}. Teams: ${teamNames(this.file.player_amount).join(", ")}.`
         : "Choose a map file made with the map builder.");
     } else if (this.pendingTemplate) {
       this.status.textContent = this.mapsError || "Loading the lobby’s default map…";
+    } else if (!this.select.value) {
+      this.status.textContent = this.mapsError || (this.mapsLoaded ? "Pick a default map, or load a map file." : "");
     } else {
-      const map = this.select.value && this.chosenDefaultMap();
-      const teams = `Teams: ${teamNames(map ? map.team_count : Number(this.teams.value)).join(", ")}.`;
+      const teams = `Teams: ${teamNames(this.chosenDefaultMap().team_count).join(", ")}.`;
       this.status.textContent = this.mapsError ? `${teams} ${this.mapsError}` : teams;
     }
     this.onChange();
@@ -356,9 +357,8 @@ export class SettingsForm {
     return this.maps.find((map) => map.map_template_id === id);
   }
 
-  // The lobby's game_settings and team names. The generated map is made for
-  // the lobby's teams, as many as the host chose.
-  // Throws when the choice is not complete.
+  // The lobby's game_settings and team names: one team per colour of the
+  // chosen map. Throws when the choice is not complete.
   choice() {
     if (this.pendingTemplate) {
       throw new Error(this.mapsError ? "Could not load the default maps. Pick another map, or reload the page." : "The default maps are still loading. Try again in a moment.");
@@ -368,10 +368,10 @@ export class SettingsForm {
       if (!this.file) throw new Error(this.fileError || "Choose a map file to load, or pick another map.");
       return { settings: { map: this.file, ...timeout }, teams: teamNames(this.file.player_amount) };
     }
-    if (this.select.value) {
-      const map = this.chosenDefaultMap();
-      return { settings: { map_template_id: map.map_template_id, ...timeout }, teams: teamNames(map.team_count) };
+    if (!this.select.value) {
+      throw new Error(this.mapsError || (this.mapsLoaded ? "Pick a default map, or load a map file." : "The default maps are still loading. Try again in a moment."));
     }
-    return { settings: timeout, teams: teamNames(Number(this.teams.value)) };
+    const map = this.chosenDefaultMap();
+    return { settings: { map_template_id: map.map_template_id, ...timeout }, teams: teamNames(map.team_count) };
   }
 }

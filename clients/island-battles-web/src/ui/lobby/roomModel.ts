@@ -274,7 +274,8 @@ export function describeSettings(
   templates: MapTemplateSummary[],
 ): string {
   const limit = describeTurnTimeout(settings);
-  let map = "Map: generated for the players";
+  // Only a lobby created before every lobby needed a map has none.
+  let map = "No map chosen";
   const file = settings?.map;
   if (typeof file === "object" && file !== null && "map_name" in file) {
     map = `Map: ${String((file as { map_name: unknown }).map_name)}`;

@@ -20,7 +20,7 @@ So a group you send moves in the same turn, and a castle grows before the arriva
 
 ## Castles and soldiers
 
-A **castle** has an `id`, a `team_color`, `soldiers`, a position (`x`, `y`) and `upgrades` (its levels). On the generated map each team starts with one castle holding 30 soldiers. Other maps decide where the castles are, how many each team starts with and how many soldiers they hold, and may have neutral castles. Ids never change or get reused.
+A **castle** has an `id`, a `team_color`, `soldiers`, a position (`x`, `y`) and `upgrades` (its levels). Every game is played on a map, a default map or a map file, which decides where the castles are, how many each team starts with and how many soldiers they hold, and may have neutral castles. Ids never change or get reused.
 
 `send_soldier_group(origin, destination, amount)` takes `amount` soldiers out of one of your castles (at least 1, at most what it has) and puts them in a **group** that walks in a straight line to the destination castle, which can be any other castle. The group copies the origin castle's upgrade levels at that moment and keeps them.
 

@@ -280,7 +280,7 @@ func startedSnapshot() domain.Snapshot {
 	host := playerID
 	teamOne, teamTwo := uuid.NewString(), uuid.NewString()
 	guestID := uuid.NewString()
-	return domain.Snapshot{Lobby: domain.Lobby{ID: lobbyID, GameKey: lobbyadapter.GameKey, Phase: domain.PhaseStarted, Round: 1, HostPlayerID: &host}, Teams: []domain.Team{{ID: teamOne, LobbyID: lobbyID, Name: "Blue", Order: 1}, {ID: teamTwo, LobbyID: lobbyID, Name: "Red", Order: 2}}, StartRoster: domain.StartRoster{{PlayerID: playerID, TeamID: teamOne, MemberID: uuid.NewString(), TeamOrder: 1}, {PlayerID: guestID, TeamID: teamTwo, MemberID: uuid.NewString(), TeamOrder: 2}}, Members: []domain.Member{{PlayerID: playerID, DisplayName: "Host"}, {PlayerID: guestID, DisplayName: "Guest"}}}
+	return domain.Snapshot{Lobby: domain.Lobby{ID: lobbyID, GameKey: lobbyadapter.GameKey, Phase: domain.PhaseStarted, Round: 1, HostPlayerID: &host, GameSettings: testutils.CircleMapSettings(2, "")}, Teams: []domain.Team{{ID: teamOne, LobbyID: lobbyID, Name: "Blue", Order: 1}, {ID: teamTwo, LobbyID: lobbyID, Name: "Red", Order: 2}}, StartRoster: domain.StartRoster{{PlayerID: playerID, TeamID: teamOne, MemberID: uuid.NewString(), TeamOrder: 1}, {PlayerID: guestID, TeamID: teamTwo, MemberID: uuid.NewString(), TeamOrder: 2}}, Members: []domain.Member{{PlayerID: playerID, DisplayName: "Host"}, {PlayerID: guestID, DisplayName: "Guest"}}}
 }
 
 func assertBindingCounts(t *testing.T, db *gorm.DB, lobbyID string, games, bindings int64) {

@@ -1,6 +1,7 @@
 """Island Battles integration checks layered on the shared lobby acceptance suite."""
 import base64
 import json
+import math
 import os
 import signal
 from uuid import uuid4
@@ -41,10 +42,34 @@ async def choose_bot(player, lobby_id, choice):
     return response.json()
 
 
+def circle_map(teams=2):
+    """A map file for teams teams: one castle per team, with 30 soldiers, on a
+    circle of radius 2, as the backend tests' testutils.CircleMap."""
+    castles = []
+    for index in range(teams):
+        angle = math.pi + 2 * math.pi * index / teams
+        castles.append({"team_color": index + 1, "x": 2 * math.cos(angle), "y": 2 * math.sin(angle),
+                        "starting_soldier_amount": 30})
+    return {"map_name": "Circle", "player_amount": teams, "plane_size_x": 8, "plane_size_y": 6,
+            "neutral_starting_soldier_amount": 0, "castles": castles}
+
+
+def island_settings(settings=None, teams=2):
+    """Island Battles game settings for a lobby of teams teams: settings, on
+    circle_map(teams) unless they choose a map. Every lobby needs a map."""
+    settings = dict(settings or {})
+    if "map" not in settings and "map_template_id" not in settings:
+        settings["map"] = circle_map(teams)
+    return settings
+
+
 async def started_lobby(guests, game_key, game_settings=None, bots=(LOCALHOST_BOT, LOCALHOST_BOT)):
     """A started two-player lobby. In Island Battles, Alice and Bob play with
-    bots, by default their localhost bots, whose turns the tests submit."""
+    bots, by default their localhost bots, whose turns the tests submit, on
+    circle_map unless game_settings choose a map."""
     alice, bob = await guests("Alice"), await guests("Bob")
+    if game_key == "island-battles":
+        game_settings = island_settings(game_settings)
     room = await create(alice, game_key, game_settings)
     scope = Scope.from_snapshot(room)
     await bob.join_lobby(game_key=scope.game_key, join_code=room.lobby.join_code)
@@ -61,7 +86,7 @@ async def started_lobby(guests, game_key, game_settings=None, bots=(LOCALHOST_BO
 
 async def test_start_initializes_one_generation_and_binding_is_idempotent(guests):
     alice, bob, scope = await started_lobby(guests, "island-battles")
-    assert (await alice.snapshot(scope)).lobby.game_settings.to_dict() == {}
+    assert (await alice.snapshot(scope)).lobby.game_settings.to_dict() == island_settings()
     assert await game_sql(f"SELECT count(*) FROM games WHERE lobby_id='{scope.lobby_id}' AND jsonb_array_length(teams) = 2 AND outcome IS NULL") == "1"
     # Starting a started lobby again returns it and binds nothing new: the
     # game bound the round once, through the lobby's start hook.
@@ -101,7 +126,7 @@ def decode_segment(segment):
 
 async def test_the_lobby_issues_player_tokens_for_its_games_and_publishes_their_keys(guests):
     alice = await guests("Alice")
-    room = await create(alice, "island-battles")
+    room = await create(alice, "island-battles", island_settings())
     player_id = next(str(member.player_id) for member in room.members)
     issued = await alice.issue_player_token("island-battles")
     header, claims, _ = issued.token.split(".")
@@ -187,7 +212,7 @@ async def test_game_settings_reach_the_started_snapshot(guests):
     _, bob, scope = await started_lobby(guests, "island-battles", settings)
     started = await bob.snapshot(scope)
     assert started.lobby.phase == "started"
-    assert started.lobby.game_settings.to_dict() == settings
+    assert started.lobby.game_settings.to_dict() == island_settings(settings)
 
 
 async def test_island_battles_rejects_settings_it_does_not_know(guests):
@@ -240,9 +265,13 @@ async def test_lobby_starts_on_a_loaded_map_file(guests):
     assert await started_map(scope.lobby_id) == f"{name}:1/40,0/5,2/40"
 
 
-async def test_lobby_without_a_map_starts_on_the_generated_map(guests):
-    _, _, scope = await started_lobby(guests, "island-battles")
-    assert await started_map(scope.lobby_id) == "Lobby battle:1/30,2/30"
+async def test_island_battles_refuses_a_lobby_without_a_map(guests):
+    alice = await guests("Alice")
+    for settings in (None, {}, {"turn_timeout_seconds": 30}):
+        with pytest.raises(LobbyError) as rejected:
+            await create(alice, "island-battles", settings)
+        assert (rejected.value.code, rejected.value.status) == ("invalid_game_settings", 422)
+        assert str(rejected.value.detail).startswith("game_settings: must choose a map"), rejected.value.detail
 
 
 async def test_island_battles_rejects_a_bad_map_choice(guests):

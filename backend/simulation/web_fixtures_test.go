@@ -25,7 +25,7 @@ func TestWriteWebClientFixtures(t *testing.T) {
 	}
 	teamNames := []string{"Blue", "Red", "Green", "Purple", "Amber", "Teal"}
 
-	// The generated map: one castle per team on a circle of radius 2 (services.prepareLobbyGame).
+	// One castle per team on a circle of radius 2, as testutils.CircleMap places them.
 	generated := func(teamCount int) simulation.GameState {
 		state := simulation.GameState{Castles: map[uint]*simulation.Castle{}, SoldierGroups: map[uint]*simulation.SoldierGroup{}}
 		for index := range teamCount {

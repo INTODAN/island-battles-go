@@ -6,6 +6,7 @@ import (
 
 	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/dal"
+	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/models"
 
@@ -20,6 +21,7 @@ func (stack *lobbyStack) soloRoom(gameKey string, host guest) domain.Snapshot {
 	stack.expect(stack.api.Post("/lobby/v1/lobbies", host.header, map[string]any{
 		"request_id": uuid.NewString(), "game_key": gameKey, "name": "Solo",
 		"teams": []map[string]any{{"name": "Red"}, {"name": "Blue"}}, "client_instance_id": host.client,
+		"game_settings": testutils.CircleMapSettings(2, ""),
 	}), http.StatusCreated, &snapshot)
 	stack.expect(stack.api.Put(stack.lobbyPath(snapshot)+"/team", host.header, map[string]any{"team_id": snapshot.Teams[0].ID}), http.StatusOK, nil)
 	return snapshot

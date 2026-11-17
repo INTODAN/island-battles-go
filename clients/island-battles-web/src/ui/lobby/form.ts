@@ -45,15 +45,16 @@ export function describeTurnTimeout(
   return `Turn limit: ${seconds % 60 === 0 ? `${seconds / 60} min` : `${seconds} s`}`;
 }
 
+/** Every lobby plays on a default map or a map file, which sets its teams. */
 export type MapChoice =
-  | { kind: "generated" }
+  /** No map yet: the default maps are still loading, or none was picked. */
+  | { kind: "none" }
   | { kind: "template"; templateId: number }
   /** A map file's parsed JSON once `POST /map/validate` accepted it, or null with the problem to show. */
   | { kind: "file"; map: MapTemplate | null; error?: string };
 
 /** The map and turn limit fields, which the create form and the room's Change map form share. */
 export interface MapSettingsValues {
-  teamCount: number;
   map: MapChoice;
   /** Seconds, or null for no limit. */
   turnTimeoutSeconds: number | null;
@@ -68,7 +69,7 @@ export interface CreateFormValues extends MapSettingsValues {
   lobbyName: string;
 }
 
-export type FormField = "lobbyName" | "teamCount" | "map" | "turnTimeout";
+export type FormField = "lobbyName" | "map" | "turnTimeout";
 
 export type FormErrors = Partial<Record<FormField, string>>;
 
@@ -109,8 +110,8 @@ export function readMapFile(text: string): MapTemplate {
   return map as MapTemplate;
 }
 
-/** The team count a map choice fixes, or null when the host picks it. */
-export function fixedTeamCount(
+/** The number of teams a map choice is made for, or null while it isn't known. */
+export function mapTeamCount(
   choice: MapChoice,
   templates: MapTemplateSummary[],
 ): number | null {
@@ -124,10 +125,7 @@ export function fixedTeamCount(
   return null;
 }
 
-/**
- * Checks the create form. A map decides the lobby's teams, so with a template
- * or a file the team count field is ignored and the map's count is used.
- */
+/** Checks the create form. The map decides the lobby's teams. */
 export function validateCreateForm(
   values: CreateFormValues,
   templates: MapTemplateSummary[],
@@ -146,12 +144,11 @@ export function validateCreateForm(
 }
 
 /**
- * The map and turn limit fields' values for a lobby's `game_settings` and
- * number of teams, which the room's Change map form starts from.
+ * The map and turn limit fields' values for a lobby's `game_settings`, which
+ * the room's Change map form starts from.
  */
 export function lobbyMapSettings(
   settings: Record<string, unknown> | undefined,
-  teamCount: number,
 ): MapSettingsValues {
   const seconds =
     settings && "turn_timeout_seconds" in settings
@@ -163,14 +160,13 @@ export function lobbyMapSettings(
       : typeof seconds === "number"
         ? seconds
         : defaultTurnTimeout;
-  let map: MapChoice = { kind: "generated" };
+  let map: MapChoice = { kind: "none" };
   if (typeof settings?.map === "object" && settings.map !== null) {
     map = { kind: "file", map: settings.map as MapTemplate };
   } else if (typeof settings?.map_template_id === "number") {
     map = { kind: "template", templateId: settings.map_template_id };
   }
   return {
-    teamCount,
     map,
     turnTimeoutSeconds,
     currentTurnTimeoutSeconds: turnTimeoutSeconds,
@@ -183,31 +179,21 @@ export function validateMapSettings(
   templates: MapTemplateSummary[],
 ): FormResult {
   const errors: FormErrors = {};
-  const fixed = fixedTeamCount(values.map, templates);
-  const teamCount = fixed ?? values.teamCount;
   const choice = values.map;
-  if (
-    choice.kind === "template" &&
-    fixed === null &&
-    !templates.some((map) => map.map_template_id === choice.templateId)
-  ) {
+  const teamCount = mapTeamCount(choice, templates);
+  if (choice.kind === "none") {
+    errors.map = "Pick a default map, or load a map file.";
+  } else if (choice.kind === "template" && teamCount === null) {
     errors.map = "That map is no longer on the list. Pick another.";
-  }
-  if (choice.kind === "file") {
-    if (choice.error) errors.map = choice.error;
-    else if (!choice.map)
-      errors.map = "Choose a map file, or pick another map.";
-  }
-  if (
-    !Number.isInteger(teamCount) ||
-    teamCount < minTeams ||
-    teamCount > maxTeams
+  } else if (choice.kind === "file" && (choice.error || !choice.map)) {
+    errors.map = choice.error || "Choose a map file, or pick another map.";
+  } else if (
+    teamCount !== null &&
+    (!Number.isInteger(teamCount) ||
+      teamCount < minTeams ||
+      teamCount > maxTeams)
   ) {
-    if (fixed === null) {
-      errors.teamCount = `Choose from ${minTeams} to ${maxTeams} teams.`;
-    } else if (!errors.map) {
-      errors.map = `This map is made for ${fixed} teams; lobbies have ${minTeams} to ${maxTeams}.`;
-    }
+    errors.map = `This map is made for ${teamCount} teams; lobbies have ${minTeams} to ${maxTeams}.`;
   }
   if (
     values.turnTimeoutSeconds !== null &&
@@ -216,15 +202,17 @@ export function validateMapSettings(
   ) {
     errors.turnTimeout = "Pick one of the listed turn limits.";
   }
-  if (Object.keys(errors).length > 0) return { ok: false, errors };
+  if (teamCount === null || Object.keys(errors).length > 0) {
+    return { ok: false, errors };
+  }
 
   const gameSettings: Record<string, unknown> = {
     turn_timeout_seconds: values.turnTimeoutSeconds,
   };
-  if (values.map.kind === "template") {
-    gameSettings.map_template_id = values.map.templateId;
-  } else if (values.map.kind === "file" && values.map.map) {
-    gameSettings.map = values.map.map;
+  if (choice.kind === "template") {
+    gameSettings.map_template_id = choice.templateId;
+  } else if (choice.kind === "file") {
+    gameSettings.map = choice.map;
   }
   return {
     ok: true,

@@ -11,7 +11,7 @@ import pytest
 from integration.test_live import BASE, create
 from integration.test_live import guests as guests_fixture
 from lobby_client import LobbyError, Scope
-from test_lobby_binding import GAME, choose_bot, game_auth, member_settings_path
+from test_lobby_binding import GAME, choose_bot, game_auth, island_settings, member_settings_path
 
 guests = guests_fixture
 pytestmark = pytest.mark.asyncio
@@ -37,7 +37,7 @@ async def run_bot(player, lobby_id, timeout):
 
 async def test_a_localhost_bot_plays_a_default_level_to_the_end(guests):
     alice, bob = await guests("Alice"), await guests("Bob")
-    room = await create(alice, "island-battles")
+    room = await create(alice, "island-battles", island_settings())
     scope = Scope.from_snapshot(room)
     await bob.join_lobby(game_key=scope.game_key, join_code=room.lobby.join_code)
     await alice.select_team(scope, room.teams[0].id)
