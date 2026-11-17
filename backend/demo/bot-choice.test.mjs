@@ -30,7 +30,7 @@ test("a localhost bot is named with its port, and a localhost seat with whoever 
     const seat = { player_id: "b", display_name: "Localhost bot (port 41416)", kind: "seat", seat_settings: { bot_localhost_port: port, bot_relay_player_id: "a" }, member_settings: null };
     assert.deepEqual(memberBot(seat), { kind: "localhost", port: 41416, relayed: true, relay: "a" });
     assert.equal(describeBot(memberBot(seat), "Alex"), "localhost bot on Alex's port 41416");
-    assert.equal(describeBot(memberBot(seat), null), "localhost bot on port 41416, not relayed: whoever added it left");
+    assert.equal(describeBot(memberBot(seat), null), "localhost bot on port 41416, whoever added it left, so the start is refused until it is removed");
   }
   const snapshot = { members: [
     { player_id: "a", display_name: "Alex", kind: "human", member_settings: { bot: { kind: "localhost" } } },
@@ -40,7 +40,7 @@ test("a localhost bot is named with its port, and a localhost seat with whoever 
     { player_id: "e", display_name: "Localhost bot (port 41417)", kind: "seat", active: true, seat_settings: { bot_localhost_port: 41417, bot_relay_player_id: "gone" } },
   ] };
   assert.deepEqual(localhostSeats(snapshot), [{ name: "Localhost bot (port 41415)", port: 41415, relay: "a" }, { name: "Localhost bot (port 41417)", port: 41417, relay: "gone" }]);
-  assert.match(describeChoices(snapshot.members, "a"), /Localhost bot \(port 41415\): localhost bot on Alex's port 41415 · .* · Localhost bot \(port 41417\): localhost bot on port 41417, not relayed/);
+  assert.match(describeChoices(snapshot.members, "a"), /Localhost bot \(port 41415\): localhost bot on Alex's port 41415 · .* · Localhost bot \(port 41417\): localhost bot on port 41417, whoever added it left/);
 });
 
 test("every member's choice is named, from the snapshot's members", () => {

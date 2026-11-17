@@ -9,6 +9,7 @@ import {
   localhostSeats,
   memberSettingsBot,
   seatSettingsFromValue,
+  startBlocker,
   yourPorts,
   yourSeats,
 } from "../ui/lobby/roomModel";
@@ -181,6 +182,10 @@ describe("localhost bots in the room", () => {
     ]);
     expect(yourSeats(model).map((seat) => seat.port)).toEqual([41415, 41416]);
     expect(model.teams[4]?.members[0]?.relay).toBeNull();
+    // Only its adder may relay it, so the start waits for the host to remove it.
+    expect(startBlocker(model, { every_team_needs_member: true })).toBe(
+      "Remove Localhost bot (port 41417): the player who added it left. The host can add it again from their own tab.",
+    );
   });
 
   test("a player relays only the seats they added, whoever the host is", () => {
@@ -217,7 +222,7 @@ describe("localhost bots in the room", () => {
       ),
     ).toBe("Localhost bot on your port 41416");
     expect(describeBot({ kind: "localhost", port: 41416 }, null)).toBe(
-      "Localhost bot on port 41416, not relayed: whoever added it left",
+      "Localhost bot on port 41416, whoever added it left, so the start is refused until it is removed",
     );
     expect(choiceFromValue("localhost", "", 41415)).toEqual({
       kind: "localhost",

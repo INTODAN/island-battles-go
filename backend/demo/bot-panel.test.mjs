@@ -331,7 +331,7 @@ test("a player relays only the seats they added, whoever the host is", async () 
   instance.stopPolling();
 });
 
-test("everyone sees a localhost bot seat whose adder left, which nobody relays", async () => {
+test("everyone sees a localhost bot seat whose adder left, which stops the start", async () => {
   const { instance, checks } = panel();
   const gone = { player_id: "gone", display_name: "Kim", kind: "human", active: false, member_settings: null };
   instance.update({ lobby: { host_player_id: "sam" }, members: [
@@ -340,10 +340,10 @@ test("everyone sees a localhost bot seat whose adder left, which nobody relays",
   ] });
   assert.equal(instance.localSeats.hidden, false);
   assert.deepEqual(instance.localSeats.children.map((row) => row.textContent), [
-    "Localhost bot (port 41415) is not relayed: the player who added it left, so it will lose every turn. The host can remove it and add it again from their own page.",
-    "Localhost bot (port 41416) is not relayed: the player who added it left, so it will lose every turn. The host can remove it and add it again from their own page.",
+    "Localhost bot (port 41415) can't play: the player who added it left, and only they can relay it, so the game won't start until the host removes it. The host can add it again from their own page.",
+    "Localhost bot (port 41416) can't play: the player who added it left, and only they can relay it, so the game won't start until the host removes it. The host can add it again from their own page.",
   ]);
-  assert.match(instance.summary.textContent, /Localhost bot \(port 41415\): localhost bot on port 41415, not relayed: whoever added it left/);
+  assert.match(instance.summary.textContent, /Localhost bot \(port 41415\): localhost bot on port 41415, whoever added it left, so the start is refused/);
   // This page contacts no port of theirs.
   assert.equal(instance.polling, null);
   await delay(20);

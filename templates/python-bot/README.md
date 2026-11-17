@@ -52,7 +52,7 @@ To play two versions of your bot against each other, or against yourself, serve 
 
 1. Serve each one in its own terminal, such as this bot with `scripts/serve.sh --port 41415` and a copy of the project (or another module, `uv run island-battles-bot serve other:play --port 41416 --allow-origin https://lobby.elidan.org`) on 41416.
 2. As the host, in the lobby page or the 3D client, add a bot to a free team with **My localhost bot (port)** and type its port, once per bot. A port is from 1024 to 65535, and each of your localhost bots, your own included, needs its own; the room says which ones answer.
-3. Choose your own bot (a default level is fine, or your localhost bot on yet another port), get ready and start. Your tab relays the turns of every seat that you added to its port, so keep it open until the game ends; if you leave, nobody relays them, not even the next host.
+3. Choose your own bot (a default level is fine, or your localhost bot on yet another port), get ready and start. Your tab relays the turns of every seat that you added to its port, so keep it open until the game ends; if you leave before the start, the next host must remove them before the game can start.
 
 ## Coding agents
 

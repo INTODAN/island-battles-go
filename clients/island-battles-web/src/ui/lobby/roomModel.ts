@@ -24,7 +24,7 @@ export interface MemberRow {
   bot: MemberBot | undefined;
   /**
    * For a localhost bot seat only: who relays it, the host who added it (its settings'
-   * `bot_relay_player_id`), or null once they are no longer in the lobby, when nobody does.
+   * `bot_relay_player_id`), or null once they are no longer in the lobby, which stops the start.
    */
   relay?: SeatRelay | null;
 }
@@ -186,7 +186,7 @@ export function describeBot(
   switch (bot.kind) {
     case "localhost":
       if (relay === null)
-        return `Localhost bot on port ${bot.port ?? defaultBotPort}, not relayed: whoever added it left`;
+        return `Localhost bot on port ${bot.port ?? defaultBotPort}, whoever added it left, so the start is refused until it is removed`;
       if (relay)
         return `Localhost bot on ${relay.isYou ? "your" : `${relay.name}'s`} port ${bot.port ?? defaultBotPort}`;
       return bot.port && bot.port !== defaultBotPort
@@ -399,6 +399,16 @@ export function startBlocker(
     room.teams.some((team) => team.members.length === 0)
   ) {
     return "Every team needs a player or a bot.";
+  }
+  // Only the player who added a localhost bot seat may relay it.
+  const orphan = members.find(
+    (member) =>
+      member.kind === "seat" &&
+      member.bot?.kind === "localhost" &&
+      member.relay === null,
+  );
+  if (orphan) {
+    return `Remove ${orphan.name}: the player who added it left. The host can add it again from their own tab.`;
   }
   return null;
 }

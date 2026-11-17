@@ -58,12 +58,12 @@ export function urlHost(url) {
 }
 
 // A few words naming a member's bot. A localhost bot seat's names the person
-// who relays it, relayer, or says that nobody does when relayer is null.
+// who relays it, relayer, or says that the start is refused when relayer is null: they left.
 export function describeBot(bot, relayer) {
   if (!bot) return "no bot yet";
   switch (bot.kind) {
     case "localhost":
-      if (bot.relayed && relayer === null) return `localhost bot on port ${bot.port}, not relayed: whoever added it left`;
+      if (bot.relayed && relayer === null) return `localhost bot on port ${bot.port}, whoever added it left, so the start is refused until it is removed`;
       if (bot.relayed) return `localhost bot on ${relayer ? `${relayer}'s` : "the host's"} port ${bot.port}`;
       return bot.port && bot.port !== defaultBotPort ? `own bot (localhost:${bot.port})` : "own bot (localhost)";
     case "hosted": return `hosted bot (${urlHost(bot.url ?? "")})`;
@@ -92,7 +92,7 @@ export function memberBot(member) {
 }
 
 // The display name of the person in the lobby who relays a localhost bot
-// seat, bot, or null when they left: nobody relays it then.
+// seat, bot, or null when they left: only they may relay it, so the start is refused.
 export function seatRelayer(members, bot) {
   const relayer = members.find((member) => member.player_id === bot.relay && member.kind !== "seat" && member.active !== false);
   return relayer ? relayer.display_name : null;
@@ -281,7 +281,7 @@ export class RoomPanel {
     this.hosted = this.buildHostedHelp();
     // The localhost bot seats that the player added, which they relay, each
     // with its own indicator, and their ports' health as last read; and the
-    // seats whose adder left, which nobody relays.
+    // seats whose adder left, which stop the start.
     this.seats = [];
     this.orphanSeats = [];
     this.seatHealth = new Map();
@@ -449,13 +449,13 @@ export class RoomPanel {
 
   // The localhost bot seats that the player relays, each with its indicator
   // and the command that serves it, and a warning for a port taken twice;
-  // and, for everyone, the seats that nobody relays.
+  // and, for everyone, the seats whose adder left, which stop the start.
   showSeats() {
     const seats = this.seats;
     const orphans = this.orphanSeats.map((seat) => {
       const row = document.createElement("p");
       row.className = "hint seat-orphan";
-      row.textContent = `${seat.name} is not relayed: the player who added it left, so it will lose every turn. The host can remove it and add it again from their own page.`;
+      row.textContent = `${seat.name} can't play: the player who added it left, and only they can relay it, so the game won't start until the host removes it. The host can add it again from their own page.`;
       return row;
     });
     this.localSeats.hidden = seats.length === 0 && orphans.length === 0;
