@@ -106,8 +106,8 @@ export function startBotRelay(options: {
 }
 
 /**
- * Starts the player's own relay and, for the host at the start, one relay per localhost bot
- * seat they added, `GenerationState.relayed_bots`: each reads its seat's turn with
+ * Starts the player's own relay and one relay per localhost bot seat that they added as the
+ * host, `GenerationState.relayed_bots`: each reads its seat's turn with
  * `player_id` and delivers it to the seat's own port. Only the player's own relay asks for
  * turn deadlines.
  */

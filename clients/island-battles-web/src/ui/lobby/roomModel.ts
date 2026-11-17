@@ -22,6 +22,18 @@ export interface MemberRow {
   isHost: boolean;
   /** A person's bot choice, or a seat's bot. */
   bot: MemberBot | undefined;
+  /**
+   * For a localhost bot seat only: who relays it, the host who added it (its settings'
+   * `bot_relay_player_id`), or null once they are no longer in the lobby, when nobody does.
+   */
+  relay?: SeatRelay | null;
+}
+
+/** The person whose tab relays a localhost bot seat: the host who added it. */
+export interface SeatRelay {
+  playerId: string;
+  name: string;
+  isYou: boolean;
 }
 
 /** The bot level a seat was added with, from its settings. */
@@ -92,19 +104,23 @@ export function seatBody(
 /**
  * The seat settings that an Add bot select's value stands for: `level-N`,
  * `package-<id>`, `hosted` with the URL typed next to it, or `localhost` with
- * the port typed next to it. Null when the value needs a URL that is empty or
- * a port that isn't one.
+ * the port typed next to it, which `playerId`, the host who adds it, relays.
+ * Null when the value needs a URL that is empty, a port that isn't one, or the
+ * host's player ID.
  */
 export function seatSettingsFromValue(
   value: string,
   url: string,
   port = "",
+  playerId = "",
 ): BotSeatSettings | null {
   const level = /^level-([1-9][0-9]*)$/.exec(value);
   if (level) return { bot_level: Number(level[1]) };
   if (value === "localhost") {
     const parsed = parseBotPort(port);
-    return parsed === null ? null : { bot_localhost_port: parsed };
+    return parsed === null || !playerId
+      ? null
+      : { bot_localhost_port: parsed, bot_relay_player_id: playerId };
   }
   if (value.startsWith("package-") && value.length > "package-".length) {
     return { bot_package_id: value.slice("package-".length) };
@@ -159,15 +175,20 @@ export interface RoomModel {
 }
 
 /**
- * A few words naming a member's bot. A seat's localhost bot runs on the host's machine, which
- * relays it.
+ * A few words naming a member's bot. A localhost bot seat's, with its row's `relay`, runs on the
+ * machine of the host who added it, whose tab alone relays it; nobody does once they left.
  */
-export function describeBot(bot: MemberBot | undefined, seat = false): string {
+export function describeBot(
+  bot: MemberBot | undefined,
+  relay?: SeatRelay | null,
+): string {
   if (!bot) return "No bot yet";
   switch (bot.kind) {
     case "localhost":
-      if (seat)
-        return `Localhost bot on the host's port ${bot.port ?? defaultBotPort}`;
+      if (relay === null)
+        return `Localhost bot on port ${bot.port ?? defaultBotPort}, not relayed: whoever added it left`;
+      if (relay)
+        return `Localhost bot on ${relay.isYou ? "your" : `${relay.name}'s`} port ${bot.port ?? defaultBotPort}`;
       return bot.port && bot.port !== defaultBotPort
         ? `Own bot (localhost:${bot.port})`
         : "Own bot (localhost)";
@@ -222,33 +243,74 @@ export function choiceFromValue(
 }
 
 /**
- * The ports of the localhost bots that the host relays: their own localhost bot's and every
- * localhost bot seat's.
+ * The ports of the localhost bots that your tab relays: your own localhost bot's and those of
+ * the localhost bot seats that you added.
  */
-export function hostPorts(model: RoomModel): number[] {
+export function yourPorts(model: RoomModel): number[] {
   const members = [
     ...model.teams.flatMap((team) => team.members),
     ...model.unassigned,
   ];
   return members.flatMap((member) =>
     member.bot?.kind === "localhost" &&
-    (member.kind === "seat" || member.isHost)
+    (member.kind === "seat" ? member.relay?.isYou === true : member.isYou)
       ? [member.bot.port ?? defaultBotPort]
       : [],
   );
 }
 
-/** The localhost bot seats of a room, which its host relays, with their ports. */
+/**
+ * The localhost bot seats of a room, with their ports and who relays them: the host who added
+ * each, or null once they left.
+ */
 export function localhostSeats(
   model: RoomModel,
-): { name: string; port: number }[] {
+): { name: string; port: number; relay: SeatRelay | null }[] {
   return model.teams.flatMap((team) =>
     team.members.flatMap((member) =>
       member.kind === "seat" && member.bot?.kind === "localhost"
-        ? [{ name: member.name, port: member.bot.port ?? defaultBotPort }]
+        ? [
+            {
+              name: member.name,
+              port: member.bot.port ?? defaultBotPort,
+              relay: member.relay ?? null,
+            },
+          ]
         : [],
     ),
   );
+}
+
+/** The localhost bot seats that you added, which your tab relays. */
+export function yourSeats(
+  model: RoomModel,
+): { name: string; port: number; relay: SeatRelay | null }[] {
+  return localhostSeats(model).filter((seat) => seat.relay?.isYou === true);
+}
+
+/**
+ * Who relays a localhost bot seat, from its settings: the person among the lobby's active members
+ * whose player ID is its `bot_relay_player_id`, or null.
+ */
+function seatRelay(
+  settings: Record<string, unknown> | null | undefined,
+  members: Snapshot["members"],
+  playerId: string,
+): SeatRelay | null {
+  const relay = settings?.bot_relay_player_id;
+  const member = (members ?? []).find(
+    (candidate) =>
+      candidate.player_id === relay &&
+      candidate.active &&
+      candidate.kind !== "seat",
+  );
+  return member
+    ? {
+        playerId: member.player_id,
+        name: member.display_name,
+        isYou: member.player_id === playerId,
+      }
+    : null;
 }
 
 /** Arranges a lobby snapshot, with the members' bots, for the room screen. */
@@ -258,6 +320,9 @@ export function buildRoom(snapshot: Snapshot, playerId: string): RoomModel {
     .sort((left, right) => left.join_sequence - right.join_sequence)
     .map((member): MemberRow & { teamId: string | null } => {
       const seat = member.kind === "seat";
+      const bot = seat
+        ? seatChoice(member.seat_settings)
+        : memberSettingsBot(member.member_settings);
       return {
         memberId: member.id,
         playerId: member.player_id,
@@ -267,9 +332,16 @@ export function buildRoom(snapshot: Snapshot, playerId: string): RoomModel {
         connected: seat || member.disconnected_until === null,
         isYou: member.player_id === playerId,
         isHost: member.player_id === snapshot.lobby.host_player_id,
-        bot: seat
-          ? seatChoice(member.seat_settings)
-          : memberSettingsBot(member.member_settings),
+        bot,
+        ...(seat && bot?.kind === "localhost"
+          ? {
+              relay: seatRelay(
+                member.seat_settings,
+                snapshot.members,
+                playerId,
+              ),
+            }
+          : {}),
         teamId: member.team_id,
       };
     });

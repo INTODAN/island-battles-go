@@ -42,7 +42,7 @@ export interface RelayDeps {
   /** Pause before asking an unreachable bot again. Default 2000. */
   botRetryMs?: number;
   /**
-   * Relays a localhost bot seat that the player relays as the host at the start, one of
+   * Relays a localhost bot seat that the player added as the host, one of
    * `GenerationState.relayed_bots`, rather than the player's own bot: each turn is delivered
    * whatever the player's own bot and `submitted` say, and the deadline is left to the
    * player's own relay.

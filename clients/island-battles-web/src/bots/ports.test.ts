@@ -6,10 +6,11 @@ import {
   buildRoom,
   choiceFromValue,
   describeBot,
-  hostPorts,
   localhostSeats,
   memberSettingsBot,
   seatSettingsFromValue,
+  yourPorts,
+  yourSeats,
 } from "../ui/lobby/roomModel";
 import {
   BotError,
@@ -109,11 +110,16 @@ const member = (
   ...extra,
 });
 
-const seat = (id: string, teamId: string, port: number | string) =>
+const seat = (
+  id: string,
+  teamId: string,
+  port: number | string,
+  relay = "p1",
+) =>
   member(id, teamId, {
     kind: "seat",
     display_name: `Localhost bot (port ${port})`,
-    seat_settings: { bot_localhost_port: port },
+    seat_settings: { bot_localhost_port: port, bot_relay_player_id: relay },
   });
 
 const lobby = {
@@ -132,6 +138,7 @@ const lobby = {
     { id: "t2", name: "Blue", order: 2 },
     { id: "t3", name: "Green", order: 3 },
     { id: "t4", name: "Gold", order: 4 },
+    { id: "t5", name: "Teal", order: 5 },
   ],
   members: [
     member("p1", "t1", {
@@ -142,6 +149,8 @@ const lobby = {
     member("p4", "t4", {
       member_settings: { bot: { kind: "localhost", port: 41415 } },
     }),
+    // Added by a host who left since: nobody relays it.
+    seat("s5", "t5", 41417, "p9"),
   ],
 } as unknown as Snapshot;
 
@@ -159,13 +168,35 @@ describe("localhost bots in the room", () => {
       { kind: "localhost", port: 41415 },
       { kind: "localhost", port: 41416 },
       { kind: "localhost", port: 41415 },
+      { kind: "localhost", port: 41417 },
     ]);
-    // The host relays their own bot and the seats; another person's port is on their machine.
-    expect(hostPorts(model)).toEqual([41420, 41415, 41416]);
+    // The host relays their own bot and the seats they added; another person's port is on their
+    // machine, and a seat whose adder left is nobody's.
+    const p1 = { playerId: "p1", name: "p1", isYou: true };
+    expect(yourPorts(model)).toEqual([41420, 41415, 41416]);
     expect(localhostSeats(model)).toEqual([
-      { name: "Localhost bot (port 41415)", port: 41415 },
-      { name: "Localhost bot (port 41416)", port: 41416 },
+      { name: "Localhost bot (port 41415)", port: 41415, relay: p1 },
+      { name: "Localhost bot (port 41416)", port: 41416, relay: p1 },
+      { name: "Localhost bot (port 41417)", port: 41417, relay: null },
     ]);
+    expect(yourSeats(model).map((seat) => seat.port)).toEqual([41415, 41416]);
+    expect(model.teams[4]?.members[0]?.relay).toBeNull();
+  });
+
+  test("a player relays only the seats they added, whoever the host is", () => {
+    // p4 is now the host; p1 still relays the seats that p1 added.
+    const model = buildRoom(
+      { ...lobby, lobby: { ...lobby.lobby, host_player_id: "p4" } },
+      "p4",
+    );
+    expect(model.isHost).toBe(true);
+    expect(yourPorts(model)).toEqual([41415]);
+    expect(yourSeats(model)).toEqual([]);
+    expect(model.teams[1]?.members[0]?.relay).toEqual({
+      playerId: "p1",
+      name: "p1",
+      isYou: false,
+    });
   });
 
   test("words and choices for a port", () => {
@@ -175,8 +206,18 @@ describe("localhost bots in the room", () => {
     expect(describeBot({ kind: "localhost", port: 41414 })).toBe(
       "Own bot (localhost)",
     );
-    expect(describeBot({ kind: "localhost", port: 41416 }, true)).toBe(
-      "Localhost bot on the host's port 41416",
+    const relay = { playerId: "p1", name: "Alex", isYou: false };
+    expect(describeBot({ kind: "localhost", port: 41416 }, relay)).toBe(
+      "Localhost bot on Alex's port 41416",
+    );
+    expect(
+      describeBot(
+        { kind: "localhost", port: 41416 },
+        { ...relay, isYou: true },
+      ),
+    ).toBe("Localhost bot on your port 41416");
+    expect(describeBot({ kind: "localhost", port: 41416 }, null)).toBe(
+      "Localhost bot on port 41416, not relayed: whoever added it left",
     );
     expect(choiceFromValue("localhost", "", 41415)).toEqual({
       kind: "localhost",
@@ -185,10 +226,13 @@ describe("localhost bots in the room", () => {
     expect(choiceFromValue("localhost", "", 41414)).toEqual({
       kind: "localhost",
     });
-    expect(seatSettingsFromValue("localhost", "", " 41417 ")).toEqual({
+    expect(seatSettingsFromValue("localhost", "", " 41417 ", "p1")).toEqual({
       bot_localhost_port: 41417,
+      bot_relay_player_id: "p1",
     });
-    expect(seatSettingsFromValue("localhost", "", "80")).toBeNull();
+    expect(seatSettingsFromValue("localhost", "", "80", "p1")).toBeNull();
+    // Without the host's player ID there's nobody to relay it.
+    expect(seatSettingsFromValue("localhost", "", "41417")).toBeNull();
   });
 });
 

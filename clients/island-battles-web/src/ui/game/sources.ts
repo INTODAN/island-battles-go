@@ -18,7 +18,7 @@ export interface LiveTurn {
   /** A roster player's team and the bot that plays their seat; a watcher's turns have neither. */
   team_color?: number;
   bot?: BotChoice;
-  /** The localhost bot seats that a host at the start relays. */
+  /** The localhost bot seats that the player added as the host, which only they relay. */
   relayed_bots?: RelayedBot[];
 }
 

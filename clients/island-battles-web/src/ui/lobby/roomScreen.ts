@@ -25,8 +25,6 @@ import {
   countPeople,
   describeBot,
   describeSettings,
-  hostPorts,
-  localhostSeats,
   type MemberRow,
   type RoomModel,
   seatBody,
@@ -34,6 +32,8 @@ import {
   startBlocker,
   type TeamRow,
   teamTaken,
+  yourPorts,
+  yourSeats,
 } from "./roomModel";
 import { mountWatchersPanel } from "./watchersPanel";
 
@@ -259,8 +259,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     takenPorts() {
       const snapshot = realtime.lobby.get();
       if (!snapshot) return [];
-      const model = room(snapshot);
-      return model.isHost ? localhostSeats(model).map((seat) => seat.port) : [];
+      return yourSeats(room(snapshot)).map((seat) => seat.port);
     },
     onPackages(items) {
       const key = (list: BotPackage[]) =>
@@ -370,13 +369,18 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
   const addBot = (teamId: string) => {
     const choice = seatChoice(teamId);
     const snapshot = realtime.lobby.get();
-    const taken = snapshot ? hostPorts(room(snapshot)) : [];
+    const taken = snapshot ? yourPorts(room(snapshot)) : [];
     const port = seatPorts.get(teamId) ?? String(nextFreePort(taken));
     const portRefused =
       choice === "localhost" ? portProblem(port, taken) : null;
     const settings = portRefused
       ? null
-      : seatSettingsFromValue(choice, seatUrls.get(teamId) ?? "", port);
+      : seatSettingsFromValue(
+          choice,
+          seatUrls.get(teamId) ?? "",
+          port,
+          realtime.session.get()?.playerId ?? "",
+        );
     if (!settings) {
       problems.seat = {
         teamId,
@@ -453,17 +457,14 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
 
   /**
    * A seat is a bot: always ready, with no lease, and the host may remove it while waiting. The
-   * host sees whether each localhost bot seat's bot answers on its port.
+   * player who added a localhost bot seat, whose tab relays it, sees whether its bot answers on
+   * its port; everyone sees a localhost bot seat that nobody relays.
    */
-  function memberItem(
-    member: MemberRow,
-    remove?: () => void,
-    isHost = false,
-  ): HTMLElement {
+  function memberItem(member: MemberRow, remove?: () => void): HTMLElement {
     const seat = member.kind === "seat";
     const ready = seat || member.ready;
     const localPort =
-      seat && isHost && member.bot?.kind === "localhost"
+      seat && member.relay?.isYou && member.bot?.kind === "localhost"
         ? member.bot.port
         : undefined;
     const up = localPort === undefined ? undefined : seatHealth.get(localPort);
@@ -487,7 +488,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
       h(
         "span",
         { class: `bot-label${member.bot ? "" : " none"}` },
-        describeBot(member.bot, seat),
+        describeBot(member.bot, member.relay),
         localPort === undefined
           ? null
           : h(
@@ -561,7 +562,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
             type: "text",
             class: "bot-port",
             value:
-              seatPorts.get(team.id) ?? String(nextFreePort(hostPorts(model))),
+              seatPorts.get(team.id) ?? String(nextFreePort(yourPorts(model))),
             attrs: {
               "aria-label": `Localhost bot port for ${team.name}`,
               inputmode: "numeric",
@@ -670,7 +671,6 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
                 editSeats && member.kind === "seat"
                   ? () => void removeBot(member, team.id)
                   : undefined,
-                model.isHost,
               ),
             ),
           )
@@ -786,14 +786,16 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     realtime.connection.subscribe(() => render()),
   ];
 
-  /** Asks the host's localhost bot seats' ports whether their bots run, while the room shows. */
+  /**
+   * Asks the ports of the localhost bot seats that you added whether their bots run, while the
+   * room shows. Nobody else's seats: their ports are on their machines.
+   */
   async function checkSeats(): Promise<void> {
     const snapshot = realtime.lobby.get();
     if (disposed || document.hidden || !snapshot) return;
-    const model = room(snapshot);
-    const ports = model.isHost
-      ? [...new Set(localhostSeats(model).map((seat) => seat.port))]
-      : [];
+    const ports = [
+      ...new Set(yourSeats(room(snapshot)).map((seat) => seat.port)),
+    ];
     if (ports.length === 0 && seatHealth.size === 0) return;
     const answers = await Promise.all(
       ports.map((port) => checkBotHealth({ port })),

@@ -55,7 +55,7 @@ export function mountBotPicker(options: {
   onPackages?(items: BotPackage[]): void;
   /** Gets why uploaded bots can't be chosen this month, or null, for the host's Add bot. */
   onCompute?(spent: string | null): void;
-  /** The ports of the localhost bot seats that you relay as the host, which yours must differ from. */
+  /** The ports of the localhost bot seats that you added and relay, which yours must differ from. */
   takenPorts?(): number[];
 }): BotPicker {
   const { actions } = options;
