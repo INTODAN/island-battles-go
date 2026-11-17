@@ -35,8 +35,8 @@ const BOT_RETRY_MS = 2000;
 // GenerationState.bot names: it reads the player's turn delivery and posts it
 // to the bot, which submits the turn itself; the page submits nothing. A
 // player with a default bot level is only followed, since the backend plays
-// for them. The host at the start also relays the localhost bot seats that
-// they added, GenerationState.relayed_bots, each to its own port (seat
+// for them. A player also relays the localhost bot seats that they added as
+// the host, GenerationState.relayed_bots, each to its own port (seat
 // relays, below). In both, a player that isn't playing a turn, or whose bot
 // has the turn, asks the server to apply its deadline.
 //
@@ -166,8 +166,8 @@ export class ExamplePlayer {
     this.onStatus(title, [detail, ...lines].filter(Boolean).join(" · "));
   }
 
-  // The seat relays: outside a demo, the host at the start delivers each
-  // localhost bot seat's turn to the seat's bot, on the seat's port, as it
+  // The seat relays: outside a demo, the player who added each
+  // localhost bot seat delivers its turn to its bot, on the seat's port, as it
   // does its own. Each seat's turn is read with player_id, and the seat's bot
   // submits it with the seat's submit token. A seat's bot that isn't running
   // is asked again until it is; one that refused the turn waits for the next.

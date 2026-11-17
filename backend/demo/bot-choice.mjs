@@ -10,8 +10,9 @@
 // each bot seat's bot from its seat_settings. The host can also seat a bot
 // on a team, through the lobby page's seat controls, which seatOptions
 // fills: among them localhost bots on the host's machine, each on its own
-// port, which the host's page relays. Below the choice, bot-packages.mjs
-// lists the lobby's bot packages and uploads the player's.
+// port, which only the page of the host who added them relays. Below the
+// choice, bot-packages.mjs lists the lobby's bot packages and uploads the
+// player's.
 
 import { describePackage, PackagesPanel, packagesPath } from "./bot-packages.mjs";
 import { checkBotHealth, defaultBotPort, nextFreePort, parseBotPort, portProblem, serveCommandFor } from "./localhost-bot.mjs";
@@ -56,12 +57,14 @@ export function urlHost(url) {
   }
 }
 
-// A few words naming a member's bot.
-export function describeBot(bot) {
+// A few words naming a member's bot. A localhost bot seat's names the person
+// who relays it, relayer, or says that nobody does when relayer is null.
+export function describeBot(bot, relayer) {
   if (!bot) return "no bot yet";
   switch (bot.kind) {
     case "localhost":
-      if (bot.relayed) return `localhost bot on the host's port ${bot.port}`;
+      if (bot.relayed && relayer === null) return `localhost bot on port ${bot.port}, not relayed: whoever added it left`;
+      if (bot.relayed) return `localhost bot on ${relayer ? `${relayer}'s` : "the host's"} port ${bot.port}`;
       return bot.port && bot.port !== defaultBotPort ? `own bot (localhost:${bot.port})` : "own bot (localhost)";
     case "hosted": return `hosted bot (${urlHost(bot.url ?? "")})`;
     case "uploaded": return "uploaded bot";
@@ -71,14 +74,15 @@ export function describeBot(bot) {
 
 // A snapshot member's bot: a person's from their member settings, a bot
 // seat's from its seat settings (a default bot of its level, a localhost bot
-// on a port of the host's machine, relayed: true, a hosted bot's URL or an
-// uploaded package), or null for a person who hasn't chosen.
+// on a port of the machine of the host who added it, relayed: true, with
+// relay, their player ID, a hosted bot's URL or an uploaded package), or null
+// for a person who hasn't chosen.
 export function memberBot(member) {
   if (member.kind === "seat") {
     const settings = member.seat_settings ?? {};
     if (Number.isInteger(settings.bot_level)) return { kind: "default", level: settings.bot_level };
     const port = parseBotPort(settings.bot_localhost_port);
-    if (port !== null) return { kind: "localhost", port, relayed: true };
+    if (port !== null) return { kind: "localhost", port, relayed: true, relay: settings.bot_relay_player_id ?? null };
     if (typeof settings.bot_url === "string") return { kind: "hosted", url: settings.bot_url };
     if (typeof settings.bot_package_id === "string") return { kind: "uploaded", package_id: settings.bot_package_id };
     return null;
@@ -87,10 +91,21 @@ export function memberBot(member) {
   return bot && typeof bot.kind === "string" ? bot : null;
 }
 
+// The display name of the person in the lobby who relays a localhost bot
+// seat, bot, or null when they left: nobody relays it then.
+export function seatRelayer(members, bot) {
+  const relayer = members.find((member) => member.player_id === bot.relay && member.kind !== "seat" && member.active !== false);
+  return relayer ? relayer.display_name : null;
+}
+
 // One line listing every member's bot, such as "Alex: own bot (localhost) ·
 // Sam (you): level 2 bot", from the snapshot's members.
 export function describeChoices(members, playerID) {
-  return members.map((member) => `${member.display_name}${member.player_id === playerID ? " (you)" : ""}: ${describeBot(memberBot(member))}`).join(" · ");
+  return members.map((member) => {
+    const bot = memberBot(member);
+    const relayer = bot?.relayed ? seatRelayer(members, bot) : undefined;
+    return `${member.display_name}${member.player_id === playerID ? " (you)" : ""}: ${describeBot(bot, relayer)}`;
+  }).join(" · ");
 }
 
 // The default bots' levels, and whether the server offers hosted and
@@ -145,17 +160,25 @@ async function loadPackages(lobbyID, request) {
   return answer.status === 200 ? answer.body.packages : [];
 }
 
+// The player of each room panel, by lobby ID: the lobby page asks for the
+// seat options without saying who asks, after it builds the room's panel.
+const roomPlayers = new Map();
+
 // The bot seats that the host can add to a team, whose seat_settings the
 // lobby page sends with POST …/seats: a default bot of each level, which the
 // backend plays, a localhost bot on the port of the host's machine that the
-// host types, which the host's page relays, and, when the server offers
-// them, any package of the lobby and a hosted bot at the URL that the host
-// types, which the server plays. The packages are greyed out (disabled) once
-// the month's compute is spent.
-export async function seatOptions({ lobbyID, request, gameURL = "", options = loadOptions, packages = loadPackages, compute = loadCompute } = {}) {
+// host types, which only the host's own page relays, as the seat's
+// bot_relay_player_id, playerID, records, and, when the server offers them,
+// any package of the lobby and a hosted bot at the URL that the host types,
+// which the server plays. The packages are greyed out (disabled) once the
+// month's compute is spent. Without the player's ID, from the room's panel,
+// there's no localhost bot seat.
+export async function seatOptions({ lobbyID, request, gameURL = "", playerID = roomPlayers.get(lobbyID), options = loadOptions, packages = loadPackages, compute = loadCompute } = {}) {
   const { levels, serverBots } = await options(gameURL);
   const choices = levels.map((level) => ({ label: `Default bot, level ${level}`, settings: { bot_level: level } }));
-  choices.push({ label: "My localhost bot (port)", settings: {}, input: { name: "bot_localhost_port", label: "Port", placeholder: String(defaultBotPort + 1) } });
+  if (playerID) {
+    choices.push({ label: "My localhost bot (port)", settings: { bot_relay_player_id: playerID }, input: { name: "bot_localhost_port", label: "Port", placeholder: String(defaultBotPort + 1) } });
+  }
   if (serverBots) {
     const [items, usage] = await Promise.all([packages(lobbyID, request).catch(() => []), compute(gameURL).catch(() => null)]);
     const spent = computeSpentMessage(usage) !== null;
@@ -172,14 +195,15 @@ export function describeHealth(running, port = defaultBotPort) {
   return running ? `Connected: your bot is running on 127.0.0.1:${port}.` : "Not running: start your bot with the command below.";
 }
 
-// The localhost bot seats that the host relays, from a snapshot: each
-// active seat with bot_localhost_port, {name, port}, in team order of the
+// The localhost bot seats of a snapshot: each active seat with
+// bot_localhost_port, {name, port, relay}, where relay is the player ID of
+// the host who added it, whose page alone relays it, in the order of the
 // snapshot's members.
 export function localhostSeats(snapshot) {
   return (snapshot?.members ?? []).flatMap((member) => {
     if (member.kind !== "seat" || member.active === false) return [];
     const bot = memberBot(member);
-    return bot?.kind === "localhost" ? [{ name: member.display_name, port: bot.port }] : [];
+    return bot?.kind === "localhost" ? [{ name: member.display_name, port: bot.port, relay: bot.relay }] : [];
   });
 }
 
@@ -229,6 +253,7 @@ export class RoomPanel {
     this.polling = null;
     this.lobbyID = lobbyID;
     this.playerID = playerID;
+    roomPlayers.set(lobbyID, playerID);
     this.saveMemberSettings = saveMemberSettings;
     this.refreshSeatOptions = refreshSeatOptions;
     this.chosen = null;
@@ -254,10 +279,11 @@ export class RoomPanel {
     this.spentNote.hidden = true;
     this.local = this.buildLocalHelp();
     this.hosted = this.buildHostedHelp();
-    // The localhost bot seats that the player relays as the host, each with
-    // its own indicator, and their ports' health as last read.
+    // The localhost bot seats that the player added, which they relay, each
+    // with its own indicator, and their ports' health as last read; and the
+    // seats whose adder left, which nobody relays.
     this.seats = [];
-    this.isHost = false;
+    this.orphanSeats = [];
     this.seatHealth = new Map();
     this.localSeats = document.createElement("div");
     this.localSeats.className = "local-seats";
@@ -399,9 +425,9 @@ export class RoomPanel {
     return this.chosen?.kind === "localhost" && this.chosen.port ? this.chosen.port : defaultBotPort;
   }
 
-  // The ports of the localhost bot seats that the player relays as the host.
+  // The ports of the localhost bot seats that the player added and relays.
   seatPorts() {
-    return this.isHost ? this.seats.map((seat) => seat.port) : [];
+    return this.seats.map((seat) => seat.port);
   }
 
   async copyCommand() {
@@ -421,12 +447,22 @@ export class RoomPanel {
     this.health.textContent = running === null ? "Checking for your bot…" : describeHealth(running, this.chosenPort());
   }
 
-  // The localhost bot seats that the host relays, each with its indicator
-  // and the command that serves it, and a warning for a port taken twice.
+  // The localhost bot seats that the player relays, each with its indicator
+  // and the command that serves it, and a warning for a port taken twice;
+  // and, for everyone, the seats that nobody relays.
   showSeats() {
-    const seats = this.isHost ? this.seats : [];
-    this.localSeats.hidden = seats.length === 0;
-    if (seats.length === 0) return;
+    const seats = this.seats;
+    const orphans = this.orphanSeats.map((seat) => {
+      const row = document.createElement("p");
+      row.className = "hint seat-orphan";
+      row.textContent = `${seat.name} is not relayed: the player who added it left, so it will lose every turn. The host can remove it and add it again from their own page.`;
+      return row;
+    });
+    this.localSeats.hidden = seats.length === 0 && orphans.length === 0;
+    if (seats.length === 0) {
+      this.localSeats.replaceChildren(...orphans);
+      return;
+    }
     const heading = document.createElement("p");
     heading.className = "hint";
     heading.textContent = "Your localhost bot seats. This page relays each one's turns to its port, as it does your own bot's, so keep it open during the game:";
@@ -448,7 +484,7 @@ export class RoomPanel {
       warning.textContent = `Port ${taken} is used by two of your localhost bots, so the game won't start: change your own port, or remove a seat and add it on another port.`;
       rows.push(warning);
     }
-    this.localSeats.replaceChildren(heading, ...rows);
+    this.localSeats.replaceChildren(heading, ...rows, ...orphans);
   }
 
   // The localhost bot's help and indicator show for the saved choice, and the
@@ -558,8 +594,9 @@ export class RoomPanel {
     const you = snapshot.members.find((member) => member.player_id === this.playerID);
     const before = choiceValue(this.chosen);
     this.chosen = you ? memberBot(you) : null;
-    this.isHost = snapshot.lobby?.host_player_id === this.playerID;
-    this.seats = localhostSeats(snapshot);
+    const seats = localhostSeats(snapshot);
+    this.seats = seats.filter((seat) => seat.relay === this.playerID);
+    this.orphanSeats = seats.filter((seat) => seatRelayer(snapshot.members, seat) === null);
     // A changed choice may need an option of its own, such as a package
     // that was replaced since.
     if (this.serverBots && choiceValue(this.chosen) !== before) this.fillSelect();

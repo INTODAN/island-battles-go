@@ -1,4 +1,4 @@
-// The host at the start relays the localhost bot seats that they added, each
+// A player relays the localhost bot seats that they added as the host, each
 // to its own port, next to their own bot.
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";

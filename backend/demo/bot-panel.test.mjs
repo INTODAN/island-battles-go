@@ -238,12 +238,19 @@ test("the panel adds its styles to the page once", async () => {
   addPanelStyles({ createElement: page.createElement });
 });
 
-// A lobby whose host is the player, with their own bot and the seats.
+// A localhost bot seat on port, which relay added.
+const localhostSeat = (port, index, relay = "me") => ({
+  player_id: `seat-${index}`, display_name: `Localhost bot (port ${port})`, kind: "seat", active: true,
+  seat_settings: { bot_localhost_port: port, bot_relay_player_id: relay }, member_settings: null,
+});
+
+// A lobby whose host is the player, with their own bot and the seats they
+// added.
 const hostedSnapshot = (settings, seats = []) => ({
   lobby: { host_player_id: "me" },
   members: [
     { player_id: "me", display_name: "Alex", kind: "human", seat_settings: null, member_settings: settings },
-    ...seats.map((port, index) => ({ player_id: `seat-${index}`, display_name: `Localhost bot (port ${port})`, kind: "seat", active: true, seat_settings: { bot_localhost_port: port }, member_settings: null })),
+    ...seats.map((port, index) => localhostSeat(port, index)),
   ],
 });
 
@@ -304,9 +311,41 @@ test("the host sees each localhost bot seat's indicator and command, and keeps t
   instance.stopPolling();
 });
 
-test("a player who isn't the host relays no seats and sees none", async () => {
-  const { instance } = panel();
-  instance.update({ ...hostedSnapshot({ bot: { kind: "default", level: 1 } }, [41415]), lobby: { host_player_id: "someone" } });
+test("a player relays only the seats they added, whoever the host is", async () => {
+  const { instance, checks } = panel({ health: async () => true });
+  const members = (seats) => [
+    { player_id: "me", display_name: "Alex", kind: "human", active: true, member_settings: { bot: { kind: "default", level: 1 } } },
+    { player_id: "sam", display_name: "Sam", kind: "human", active: true, member_settings: { bot: { kind: "default", level: 1 } } },
+    ...seats,
+  ];
+  // Sam's seat is Sam's to relay, even though Alex is the host.
+  instance.update({ lobby: { host_player_id: "me" }, members: members([localhostSeat(41415, 0, "sam")]) });
   assert.equal(instance.localSeats.hidden, true);
   assert.equal(instance.polling, null);
+  assert.match(instance.summary.textContent, /Localhost bot \(port 41415\): localhost bot on Sam's port 41415/);
+  // A seat that Alex added while host is still Alex's after Sam takes over.
+  instance.update({ lobby: { host_player_id: "sam" }, members: members([localhostSeat(41416, 1)]) });
+  assert.equal(instance.localSeats.hidden, false);
+  await delay(20);
+  assert.deepEqual([...new Set(checks.ports)], [41416]);
+  instance.stopPolling();
+});
+
+test("everyone sees a localhost bot seat whose adder left, which nobody relays", async () => {
+  const { instance, checks } = panel();
+  const gone = { player_id: "gone", display_name: "Kim", kind: "human", active: false, member_settings: null };
+  instance.update({ lobby: { host_player_id: "sam" }, members: [
+    { player_id: "me", display_name: "Alex", kind: "human", active: true, member_settings: { bot: { kind: "default", level: 1 } } },
+    gone, localhostSeat(41415, 0, "gone"), localhostSeat(41416, 1, "never-here"),
+  ] });
+  assert.equal(instance.localSeats.hidden, false);
+  assert.deepEqual(instance.localSeats.children.map((row) => row.textContent), [
+    "Localhost bot (port 41415) is not relayed: the player who added it left, so it will lose every turn. The host can remove it and add it again from their own page.",
+    "Localhost bot (port 41416) is not relayed: the player who added it left, so it will lose every turn. The host can remove it and add it again from their own page.",
+  ]);
+  assert.match(instance.summary.textContent, /Localhost bot \(port 41415\): localhost bot on port 41415, not relayed: whoever added it left/);
+  // This page contacts no port of theirs.
+  assert.equal(instance.polling, null);
+  await delay(20);
+  assert.deepEqual(checks.ports, []);
 });
