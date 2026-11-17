@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { choiceFromValue, choiceValue, computeSpentMessage, describeBot, describeChoices, memberBot, prepareDemo, seatOptions } from "./bot-choice.mjs";
+import { choiceFromValue, choiceValue, computeSpentMessage, describeBot, describeChoices, localhostSeats, memberBot, prepareDemo, seatOptions } from "./bot-choice.mjs";
 
 test("select values stand for choices and back", () => {
   for (const choice of [{ kind: "localhost" }, { kind: "default", level: 1 }, { kind: "default", level: 3 }, { kind: "uploaded", package_id: "p-1" }]) {
@@ -15,6 +15,29 @@ test("select values stand for choices and back", () => {
   assert.equal(choiceValue({ kind: "hosted", url: "https://bot.example.com/turn" }), "hosted");
   assert.deepEqual(choiceFromValue("hosted", " https://bot.example.com/turn "), { kind: "hosted", url: "https://bot.example.com/turn" });
   assert.equal(choiceFromValue("hosted", " "), null);
+  // A localhost bot takes the port next to it, left out when it is the default one.
+  assert.deepEqual(choiceFromValue("localhost", "", 41415), { kind: "localhost", port: 41415 });
+  assert.deepEqual(choiceFromValue("localhost", "", 41414), { kind: "localhost" });
+  assert.equal(choiceValue({ kind: "localhost", port: 41415 }), "localhost");
+});
+
+test("a localhost bot is named with its port, and a localhost seat is the host's", () => {
+  assert.equal(describeBot({ kind: "localhost" }), "own bot (localhost)");
+  assert.equal(describeBot({ kind: "localhost", port: 41414 }), "own bot (localhost)");
+  assert.equal(describeBot({ kind: "localhost", port: 41415 }), "own bot (localhost:41415)");
+  // The lobby page's text field sends the port as digits.
+  for (const port of [41416, "41416"]) {
+    const seat = { player_id: "b", display_name: "Localhost bot (port 41416)", kind: "seat", seat_settings: { bot_localhost_port: port }, member_settings: null };
+    assert.deepEqual(memberBot(seat), { kind: "localhost", port: 41416, relayed: true });
+    assert.equal(describeBot(memberBot(seat)), "localhost bot on the host's port 41416");
+  }
+  const snapshot = { members: [
+    { player_id: "a", display_name: "Alex", kind: "human", member_settings: { bot: { kind: "localhost" } } },
+    { player_id: "b", display_name: "Localhost bot (port 41415)", kind: "seat", active: true, seat_settings: { bot_localhost_port: "41415" } },
+    { player_id: "c", display_name: "Bot (level 1)", kind: "seat", active: true, seat_settings: { bot_level: 1 } },
+    { player_id: "d", display_name: "Localhost bot (port 41416)", kind: "seat", active: false, seat_settings: { bot_localhost_port: 41416 } },
+  ] };
+  assert.deepEqual(localhostSeats(snapshot), [{ name: "Localhost bot (port 41415)", port: 41415 }]);
 });
 
 test("every member's choice is named, from the snapshot's members", () => {
@@ -53,6 +76,7 @@ test("the host can seat a default bot of each level", async () => {
     choices: [
       { label: "Default bot, level 1", settings: { bot_level: 1 } },
       { label: "Default bot, level 2", settings: { bot_level: 2 } },
+      { label: "My localhost bot (port)", settings: {}, input: { name: "bot_localhost_port", label: "Port", placeholder: "41415" } },
     ],
   });
 });
@@ -73,6 +97,7 @@ test("with server bots the host can also seat any package of the lobby and a hos
     label: "Add bot",
     choices: [
       { label: "Default bot, level 1", settings: { bot_level: 1 } },
+      { label: "My localhost bot (port)", settings: {}, input: { name: "bot_localhost_port", label: "Port", placeholder: "41415" } },
       { label: "Uploaded: Uma's bot (python)", settings: { bot_package_id: "p-1" } },
       { label: "Uploaded: Sam's bot (native)", settings: { bot_package_id: "p-2" } },
       { label: "Hosted bot (URL)", settings: {}, input: { name: "bot_url", label: "Bot URL", placeholder: "https://bot.example.com/turn" } },
@@ -80,7 +105,7 @@ test("with server bots the host can also seat any package of the lobby and a hos
   });
   // Packages that can't be read leave the other choices.
   const withoutPackages = await seatOptions({ options: async () => ({ levels: [1], serverBots: true }), packages: async () => { throw new Error("offline"); }, compute: async () => null });
-  assert.deepEqual(withoutPackages.choices.map((choice) => choice.label), ["Default bot, level 1", "Hosted bot (URL)"]);
+  assert.deepEqual(withoutPackages.choices.map((choice) => choice.label), ["Default bot, level 1", "My localhost bot (port)", "Hosted bot (URL)"]);
 });
 
 test("once the month's compute is spent, the host's packages are greyed out and nothing else", async () => {
@@ -91,7 +116,7 @@ test("once the month's compute is spent, the host's packages are greyed out and 
   });
   const spent = await seat(async () => ({ month: "2026-11", used_gb_seconds: 300000, budget_gb_seconds: 300000, available: false }));
   assert.deepEqual(spent.choices.map((choice) => [choice.label, choice.disabled === true]), [
-    ["Default bot, level 1", false], ["Uploaded: Uma's bot (python)", true], ["Hosted bot (URL)", false],
+    ["Default bot, level 1", false], ["My localhost bot (port)", false], ["Uploaded: Uma's bot (python)", true], ["Hosted bot (URL)", false],
   ]);
   // Available, or unknown, greys out nothing.
   for (const compute of [async () => ({ month: "2026-11", available: true }), async () => null, async () => { throw new Error("offline"); }]) {

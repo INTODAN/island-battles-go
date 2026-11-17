@@ -43,7 +43,7 @@ globalThis.Option = class { constructor(text, value) { this.text = text; this.va
 globalThis.fetch = async () => new Response(JSON.stringify({ bots: [{ level: 1 }, { level: 2 }] }), { headers: { "Content-Type": "application/json" } });
 
 const { RoomPanel, describeHealth, healthPollMilliseconds, safariNote } = await import("./bot-choice.mjs");
-const { serveCommand } = await import("./localhost-bot.mjs");
+const { serveCommand, serveCommandFor } = await import("./localhost-bot.mjs");
 
 // A lobby snapshot whose one member, the player, has settings.
 const snapshotWith = (settings) => ({ members: [{ player_id: "me", display_name: "Alex", kind: "human", seat_settings: null, member_settings: settings }] });
@@ -52,7 +52,7 @@ function panel({ health = async () => true, refuse = null, serverBots = undefine
   const container = new FakeElement("div");
   const saved = [];
   const copied = [];
-  const checks = { count: 0 };
+  const checks = { count: 0, ports: [] };
   const instance = new RoomPanel({
     container, lobbyID: "lobby", playerID: "me",
     ...(compute ? { compute } : {}),
@@ -63,7 +63,7 @@ function panel({ health = async () => true, refuse = null, serverBots = undefine
       if (refuse) throw new Error(refuse);
       return snapshotWith(settings);
     },
-    checkHealth: async () => { checks.count++; return health(); },
+    checkHealth: async ({ port } = {}) => { checks.count++; checks.ports.push(port); return health(port); },
     copy: async (text) => { copied.push(text); },
   });
   return { instance, container, saved, copied, checks };
@@ -236,4 +236,77 @@ test("the panel adds its styles to the page once", async () => {
   assert.match(panelStyles, /\.bot-health\[data-state="connected"\]/);
   // Without a page head, such as in these tests' stand-in, it adds nothing.
   addPanelStyles({ createElement: page.createElement });
+});
+
+// A lobby whose host is the player, with their own bot and the seats.
+const hostedSnapshot = (settings, seats = []) => ({
+  lobby: { host_player_id: "me" },
+  members: [
+    { player_id: "me", display_name: "Alex", kind: "human", seat_settings: null, member_settings: settings },
+    ...seats.map((port, index) => ({ player_id: `seat-${index}`, display_name: `Localhost bot (port ${port})`, kind: "seat", active: true, seat_settings: { bot_localhost_port: port }, member_settings: null })),
+  ],
+});
+
+test("your localhost bot takes a port, which the indicator, the command and the save use", async () => {
+  const { instance, saved, copied, checks } = panel({ health: async (port) => port === 41415 });
+  instance.update(snapshotWith({ bot: { kind: "localhost" } }));
+  assert.equal(instance.port.value, "41414");
+  for (const invalid of ["80", "70000", "41 415", ""]) {
+    instance.port.value = invalid;
+    await instance.save("localhost");
+    assert.match(instance.summary.textContent, /Type a port from 1024 to 65535/);
+  }
+  assert.deepEqual(saved, []);
+  instance.port.value = "41415";
+  await instance.save("localhost");
+  assert.deepEqual(saved, [{ bot: { kind: "localhost", port: 41415 } }]);
+  assert.match(instance.summary.textContent, /Alex \(you\): own bot \(localhost:41415\)/);
+  assert.equal(instance.command.textContent, serveCommandFor(41415));
+  await instance.copyCommand();
+  assert.deepEqual(copied, ["uv run island-battles-bot serve --port 41415 mybot:play"]);
+  instance.stopPolling();
+  instance.poll();
+  await delay(20);
+  assert.equal(checks.ports.at(-1), 41415);
+  assert.equal(instance.health.textContent, "Connected: your bot is running on 127.0.0.1:41415.");
+  // The same port again sends nothing; the default one is saved without a port.
+  await instance.save("localhost");
+  assert.equal(saved.length, 1);
+  instance.port.value = "41414";
+  await instance.save("localhost");
+  assert.deepEqual(saved[1], { bot: { kind: "localhost" } });
+  instance.stopPolling();
+});
+
+test("the host sees each localhost bot seat's indicator and command, and keeps their ports apart", async () => {
+  const { instance, saved, checks } = panel({ health: async (port) => port !== 41416 });
+  instance.update(hostedSnapshot({ bot: { kind: "localhost" } }, [41415, 41416]));
+  assert.equal(instance.localSeats.hidden, false);
+  await delay(20);
+  assert.deepEqual(new Set(checks.ports), new Set([41414, 41415, 41416]));
+  const rows = instance.localSeats.children.slice(1);
+  assert.deepEqual(rows.map((row) => [row.children[0], row.dataset.state, row.children[1].textContent]), [
+    ["Localhost bot (port 41415): connected ", "connected", serveCommandFor(41415)],
+    ["Localhost bot (port 41416): not running ", "stopped", serveCommandFor(41416)],
+  ]);
+  // Your own port can't be a seat's.
+  instance.port.value = "41416";
+  await instance.save("localhost");
+  assert.deepEqual(saved, []);
+  assert.match(instance.summary.textContent, /Port 41416 is taken by another of your localhost bots/);
+  // A first choice of the localhost bot takes the first free port.
+  instance.update(hostedSnapshot(null, [41414, 41415]));
+  await instance.save("localhost");
+  assert.deepEqual(saved, [{ bot: { kind: "localhost", port: 41416 } }]);
+  // A port taken twice, after the host's own changed, is pointed out.
+  instance.update(hostedSnapshot({ bot: { kind: "localhost", port: 41415 } }, [41415]));
+  assert.match(instance.localSeats.children.at(-1).textContent, /Port 41415 is used by two of your localhost bots, so the game won't start/);
+  instance.stopPolling();
+});
+
+test("a player who isn't the host relays no seats and sees none", async () => {
+  const { instance } = panel();
+  instance.update({ ...hostedSnapshot({ bot: { kind: "default", level: 1 } }, [41415]), lobby: { host_player_id: "someone" } });
+  assert.equal(instance.localSeats.hidden, true);
+  assert.equal(instance.polling, null);
 });
