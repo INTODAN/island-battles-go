@@ -370,7 +370,8 @@ func TestOnlyStandingUnfinishedServerBotsGetTheirTurn(t *testing.T) {
 		{PlayerID: "localhost", TeamColor: 7, BotKind: models.LocalhostBot},
 	}
 	game := &models.Game{Model: gorm.Model{ID: 7}}
-	generation := &models.Generation{Model: gorm.Model{ID: 41, CreatedAt: time.Now()}}
+	// Numbered as the DAL's loaders number a game's generations.
+	generation := &models.Generation{Model: gorm.Model{ID: 41, CreatedAt: time.Now()}, Number: 3}
 	for color := uint(1); color <= 7; color++ {
 		game.Teams = append(game.Teams, models.GameTeam{Color: color})
 		// Team 3 has nothing left on the board.
