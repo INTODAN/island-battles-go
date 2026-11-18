@@ -107,9 +107,8 @@ describe("bot tutorial", () => {
       expect(tutorialSteps(system)[1]?.commands).toEqual([serveCommand]);
     }
     expect(read("README.md")).toContain(serveCommand);
-    expect(readdirSync(new URL("scripts/", template))).not.toContain(
-      "serve.sh",
-    );
+    const scripts = readdirSync(new URL("scripts/", template));
+    expect(scripts.filter((file) => file.startsWith("serve."))).toEqual([]);
   });
 
   test("packages the bot with the SDK's command", () => {

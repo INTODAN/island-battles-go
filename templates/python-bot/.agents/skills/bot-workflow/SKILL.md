@@ -11,7 +11,7 @@ All scripts are in `scripts/`, run from any directory, and use `uv`. Serving the
 |---|---|
 | `scripts/check.sh` | Format check, lint, types, tests and a fixture turn. **Run it before you finish and before you play.** |
 | `scripts/format.sh` | Fix formatting and safe lint errors, then run `check.sh`. |
-| `uv run island-battles-bot serve bot:play` | Serve the bot on `http://127.0.0.1:41414` for a browser game (`--port N` for another port). |
+| `uv run island-battles-bot serve bot:play` | Not a script: run it in the project's folder to serve the bot on `http://127.0.0.1:41414` for a browser game (`--port N` for another port). |
 | `scripts/run.sh` | Play a seat of a started lobby without a browser (needs the game's and the lobby's URLs, a token and a lobby id). |
 | `scripts/fixture.sh [file]` | Write the fixture turn (default `turn.json`) to edit and replay. |
 | `scripts/build.sh` | Build the package (wheel and source archive) into `dist/`. |

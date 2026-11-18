@@ -70,5 +70,5 @@ test("a port is a whole number from 1024 to 65535, and each of a player's bots n
 test("the serve command names the port unless it is the default one", () => {
   assert.equal(serveCommandFor(), "uv run island-battles-bot serve bot:play");
   assert.equal(serveCommandFor(41414), "uv run island-battles-bot serve bot:play");
-  assert.equal(serveCommandFor(41415), "uv run island-battles-bot serve --port 41415 bot:play");
+  assert.equal(serveCommandFor(41415), "uv run island-battles-bot serve bot:play --port 41415");
 });

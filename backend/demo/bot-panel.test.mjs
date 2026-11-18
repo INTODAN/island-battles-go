@@ -270,7 +270,7 @@ test("your localhost bot takes a port, which the indicator, the command and the 
   assert.match(instance.summary.textContent, /Alex \(you\): own bot \(localhost:41415\)/);
   assert.equal(instance.command.textContent, serveCommandFor(41415));
   await instance.copyCommand();
-  assert.deepEqual(copied, ["uv run island-battles-bot serve --port 41415 bot:play"]);
+  assert.deepEqual(copied, ["uv run island-battles-bot serve bot:play --port 41415"]);
   instance.stopPolling();
   instance.poll();
   await delay(20);

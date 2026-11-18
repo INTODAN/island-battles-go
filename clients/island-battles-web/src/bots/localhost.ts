@@ -56,7 +56,7 @@ export function nextFreePort(taken: readonly number[] = []): number {
 export function serveCommandFor(port: number = defaultBotPort): string {
   return port === defaultBotPort
     ? "uv run island-battles-bot serve bot:play"
-    : `uv run island-battles-bot serve --port ${port} bot:play`;
+    : `uv run island-battles-bot serve bot:play --port ${port}`;
 }
 
 /** The command for the default port. */

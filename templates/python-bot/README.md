@@ -13,7 +13,9 @@ The bot is in `bot.py`. It buys speed upgrades, attacks the nearest castle that 
 
 ## Scripts
 
-All run from any directory. Serving the bot has no script: it is one command, `uv run island-battles-bot serve bot:play`, the same on every system and the one the lobby page shows (add `--port 41415` for another port). On Windows, run each script's `.cmd` twin from PowerShell or cmd, with the same arguments: `scripts\check.cmd`, `scripts\package.cmd`, and so on. (In Git Bash or WSL, the `.sh` scripts work as they are.)
+All run from any directory. On Windows, run each script's `.cmd` twin from PowerShell or cmd, with the same arguments: `scripts\check.cmd`, `scripts\package.cmd`, and so on. (In Git Bash or WSL, the `.sh` scripts work as they are.)
+
+Serving the bot has no script: it is one command, `uv run island-battles-bot serve bot:play`, run in the project's folder, the same on every system and the one the lobby page shows (add `--port 41415` for another port).
 
 | Script | What it does |
 |---|---|

@@ -87,7 +87,7 @@ describe("a localhost bot's port", () => {
       "uv run island-battles-bot serve bot:play",
     );
     expect(serveCommandFor(41415)).toBe(
-      "uv run island-battles-bot serve --port 41415 bot:play",
+      "uv run island-battles-bot serve bot:play --port 41415",
     );
   });
 });
