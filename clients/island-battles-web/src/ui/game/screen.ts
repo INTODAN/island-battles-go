@@ -19,6 +19,7 @@ import {
 import { teamColorHex } from "../../scene/palette";
 import { installBoardControls } from "../../scene/picking";
 import { showBoardLoading } from "../boardLoading";
+import { rulesButton } from "../rules/rulesDialog";
 import { type AgentGame, agentPrompt, copyText } from "./agentPrompt";
 import { clashSummary } from "./clashes";
 import { GameController, type ViewState } from "./controller";
@@ -196,6 +197,7 @@ export class GameScreen {
       open,
       save,
       ask,
+      rulesButton("gv-button"),
       file,
     );
 

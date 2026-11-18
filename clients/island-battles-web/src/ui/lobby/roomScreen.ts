@@ -3,6 +3,7 @@ import { offeredChoice, seatOptions } from "../../bots/compute";
 import { webClientUrl } from "../../platform";
 import type { Realtime, Snapshot } from "../../realtime";
 import { copyText, h } from "../dom";
+import { rulesButton } from "../rules/rulesDialog";
 import {
   type BotPackage,
   type DefaultBot,
@@ -838,7 +839,13 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     h(
       "header",
       { class: "room-head panel" },
-      h("div", { class: "room-title" }, title, settingsLine, changeButton),
+      h(
+        "div",
+        { class: "room-title" },
+        title,
+        settingsLine,
+        h("div", { class: "actions" }, changeButton, rulesButton()),
+      ),
       h(
         "div",
         { class: "invite" },
