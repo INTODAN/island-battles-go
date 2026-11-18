@@ -3,6 +3,7 @@
 // demo file. They are entry points for the app shell (#98), which supplies the container and
 // what the back button does.
 
+import type { HandPlay } from "../../play";
 import type { Realtime } from "../../realtime";
 import { mountDemo, mountDemoFile } from "./demo";
 import { mountLive } from "./live";
@@ -16,6 +17,12 @@ export interface GameViewOptions {
   /** The lobby round whose game to show; the lobby plays one game per round. */
   round: number;
   realtime: Realtime;
+  /**
+   * The player's hand play (`src/play/`), which the app shell starts and stops with the game, so
+   * it outlives the view. Its status is `idle` unless the player plays by hand. The view's
+   * controls give orders through it and show its state; watchers and demos have none.
+   */
+  handPlay?: HandPlay;
   onBack: () => void;
 }
 

@@ -2,6 +2,7 @@ import { createApiClients } from "../../api/client";
 import { ApiError } from "../../api/errors";
 import { type BotRelays, startBotRelays } from "../../bots";
 import { tabStorage } from "../../platform";
+import { playsByHand, startHandPlay } from "../../play";
 import type { Realtime } from "../../realtime";
 import { h } from "../dom";
 import { mountDemoView, mountGameView, mountWatchView } from "../game/index";
@@ -136,7 +137,7 @@ export function mountLobbyApp(options: {
         setReopened(reopened: boolean): void;
         /**
          * Hides the game behind the read-only room, or shows it again. The game,
-         * the relay of a localhost bot and the view go on while it is hidden.
+         * the relay of a localhost bot, hand play and the view go on while it is hidden.
          */
         setHidden(hidden: boolean): void;
         stop(): void;
@@ -270,7 +271,15 @@ export function mountLobbyApp(options: {
     stage.hidden = true;
     gameHost.hidden = false;
     realtime.followGame(lobbyId, round);
-    const relay: BotRelays = startBotRelays({ realtime, lobbyId });
+    // Hand play keeps the turn's deadline for a player who plays by hand, and the relay's own
+    // deadline watch stands down for exactly that player (the same predicate). Both go on while
+    // the game is hidden behind the room, and stop with `stop()`.
+    const relay: BotRelays = startBotRelays({
+      realtime,
+      lobbyId,
+      standDown: playsByHand,
+    });
+    const handPlay = startHandPlay({ realtime, lobbyId });
     const banner = mountRelayBanner(relay);
     const { gameApi } = createApiClients({
       getAccessToken: () => realtime.session.get()?.accessToken,
@@ -301,6 +310,7 @@ export function mountLobbyApp(options: {
         lobbyId,
         round,
         realtime: { ...realtime, leaveGame() {} },
+        handPlay,
         onBack: () => closeGame(lobbyId, round),
       });
     };
@@ -385,6 +395,7 @@ export function mountLobbyApp(options: {
         stopOnProblem();
         watcher.stop();
         relay.dispose();
+        handPlay.dispose();
         banner.dispose();
         watchers.dispose();
         view?.dispose();
