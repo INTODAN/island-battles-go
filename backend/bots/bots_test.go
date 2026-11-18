@@ -39,7 +39,7 @@ func fullTurn() models.BotTurn {
 	return models.BotTurn{
 		GameID:         7,
 		TurnNumber:     12,
-		MaxGenerations: 300,
+		MaxGenerations: models.DefaultMaxGenerations,
 		TeamColor:      2,
 		Upgrades:       models.UpgradeTable(),
 		Memory:         models.BotMemory(`{"plans":[{"target":3,"at":1e3}],"name":"é","big":123456789012345678901234567890}`),

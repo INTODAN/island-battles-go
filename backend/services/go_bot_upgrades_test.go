@@ -39,8 +39,9 @@ func TestGoBotTurnNeedsANumberedGeneration(t *testing.T) {
 	if _, err := services.NewGoBotTurn(&models.Game{}, &models.Generation{}, 1, nil); err == nil {
 		t.Fatal("built a turn of a generation without a number")
 	}
-	turn, err := services.NewGoBotTurn(&models.Game{}, &models.Generation{Number: 7}, 1, nil)
-	if err != nil || turn.TurnNumber != 7 || turn.MaxGenerations != services.MaxGenerations {
+	// The turn carries the game's own limit.
+	turn, err := services.NewGoBotTurn(&models.Game{MaxGenerations: 50}, &models.Generation{Number: 7}, 1, nil)
+	if err != nil || turn.TurnNumber != 7 || turn.MaxGenerations != 50 {
 		t.Fatalf("turn %d of %d (%v)", turn.TurnNumber, turn.MaxGenerations, err)
 	}
 }
