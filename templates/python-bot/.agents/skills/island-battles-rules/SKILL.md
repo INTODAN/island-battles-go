@@ -9,7 +9,7 @@ Island Battles is a turn-based strategy game on a 2D map. Each team is played by
 
 ## A turn is a generation
 
-The game is a list of **generations**, numbered from 1. In each one, every player sees the board and answers with commands (this is what `play(turn)` does). When all players have answered, the server computes the next generation. The steps run in this order:
+The game is a list of **generations**. `turn.turn_number` counts them: the game's first generation is turn 1, and each turn adds one, as the replay's "Turn n / m" does. (`turn.generation.id` is the server's ID of the generation, not the turn number: it only increases and doesn't start at 1.) In each one, every player sees the board and answers with commands (this is what `play(turn)` does). When all players have answered, the server computes the next generation. The steps run in this order:
 
 1. **Your commands**, in the order you list them.
 2. **Movement**: every soldier group moves, and enemy groups that meet clash.
@@ -66,7 +66,7 @@ A castle can't burst while it has `burst_debt`, nor twice in one turn. A capture
 A team is **out** when it has no castles and no groups. The game ends when:
 
 - **One team is left**: it wins. Neutral castles do not need to be captured. If the last teams go out in the same turn, it is a **draw**.
-- **Generation 300 is created**: the team with the most castles wins; equal counts are a draw. A game never lasts more than 300 generations.
+- **Generation `turn.max_generations` is created** (300 today): the team with the most castles wins; equal counts are a draw. So the last turn a bot plays is `turn.max_generations - 1`, and `turn.max_generations - turn.turn_number` turns are left, this one included. Read the limit from the turn rather than hard-coding it.
 - **A turn passes its deadline** before every player answered: each team with a late player **loses** and the game ends at once. The team with the most castles among the others wins.
 
 The host sets the turn timeout: 30 seconds unless the lobby chose 5 to 600 seconds or no limit. `turn.turn_deadline_at` says when this turn ends (`None` for no limit). One slow answer loses the whole game, so answer fast.
