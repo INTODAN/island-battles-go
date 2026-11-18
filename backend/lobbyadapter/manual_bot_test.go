@@ -12,7 +12,15 @@ import (
 )
 
 func TestAMemberChoosesToPlayByHand(t *testing.T) {
-	stack := newLobbyStack(t)
+	for name, stack := range map[string]*lobbyStack{"server bots off": newLobbyStack(t), "server bots on": newServerBotStack(t)} {
+		t.Run(name, func(t *testing.T) {
+			stack.t = t
+			checkChoosingToPlayByHand(t, stack)
+		})
+	}
+}
+
+func checkChoosingToPlayByHand(t *testing.T, stack *lobbyStack) {
 	alice, bob := stack.guest("Alice"), stack.guest("Bob")
 	room := stack.room(lobbyadapter.GameKey, alice, bob)
 

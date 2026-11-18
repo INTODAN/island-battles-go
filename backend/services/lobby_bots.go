@@ -103,7 +103,7 @@ func memberSettingsShape(serverBots bool) string {
 }
 
 // MemberBot reads a person's member settings and returns their bot, checking
-// its shape only: {"bot": {"kind": "localhost"}}, {"bot": {"kind":
+// its shape only: {"bot": {"kind": "manual"}}, {"bot": {"kind": "localhost"}}, {"bot": {"kind":
 // "default", "level": N}} with a level that GET /bots/defaults lists, and,
 // with serverBots, {"bot": {"kind": "hosted", "url": "…"}} or {"bot":
 // {"kind": "uploaded", "package_id": "…"}}. It reads nothing, so it checks

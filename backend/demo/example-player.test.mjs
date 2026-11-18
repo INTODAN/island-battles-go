@@ -32,6 +32,27 @@ test("a manual player's panel says to play the seat in the 3D client and submits
   assert.equal(serverBotStatus({ kind: "localhost" }), null);
 });
 
+test("an ExamplePlayer of a manual state shows the panel's message and submits nothing", async (context) => {
+  const subscription = new Subscription();
+  const requests = [];
+  const statuses = [];
+  const state = { ...initial(), bot: { kind: "manual" } };
+  const player = new ExamplePlayer({ lobbyID: "room", playerID: "player", subscription, demo: false,
+    onStatus: (...status) => statuses.push(status),
+    deliver: async () => { requests.push("deliver"); },
+    fetcher: async (url, options) => {
+      requests.push(options.method);
+      return { ok: true, json: async () => state };
+    },
+  });
+  context.after(() => player.stop());
+  player.start();
+  await until(() => requests.includes("GET"));
+  await delay(30);
+  assert.deepEqual(requests.filter((request) => request !== "GET"), []);
+  assert.ok(JSON.stringify(statuses).includes("Play this seat in the 3D client"));
+});
+
 test("one soldier from the first available owned castle to the first enemy", () => {
   assert.deepEqual(singleSoldierCommands(initial()), [{ command_type: "send_soldier_group", parameters: {
     origin_castle_id: 0, destination_castle_id: 1, soldier_amount: 1,
