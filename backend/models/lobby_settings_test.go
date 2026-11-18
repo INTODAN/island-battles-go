@@ -11,7 +11,7 @@ import (
 
 func TestParseLobbySettingsReadsOneMapChoice(t *testing.T) {
 	defaultTimeout := uint(DefaultTurnTimeoutSeconds)
-	if settings, err := ParseLobbySettings(json.RawMessage(`{"map_template_id":7}`)); err != nil || !reflect.DeepEqual(settings, LobbySettings{MapTemplateID: 7, TurnTimeoutSeconds: &defaultTimeout, MaxGenerations: DefaultMaxGenerations}) {
+	if settings, err := ParseLobbySettings(json.RawMessage(`{"map_template_id":7}`)); err != nil || !reflect.DeepEqual(settings, LobbySettings{MapTemplateID: 7, TurnTimeoutSeconds: &defaultTimeout, MaxGenerations: DefaultMaxGenerations, TurnPaceMilliseconds: DefaultTurnPaceMilliseconds}) {
 		t.Fatalf("template settings = %+v, %v", settings, err)
 	}
 	settings, err := ParseLobbySettings(json.RawMessage(`{"map":` + exampleMapFile + `}`))
@@ -37,6 +37,15 @@ func TestParseLobbySettingsReadsMaxGenerations(t *testing.T) {
 		parsed, err := ParseLobbySettings(json.RawMessage(settings))
 		if err != nil || parsed.MaxGenerations != want {
 			t.Fatalf("%s: max_generations = %d, %v", settings, parsed.MaxGenerations, err)
+		}
+	}
+}
+
+func TestParseLobbySettingsReadsTheTurnPace(t *testing.T) {
+	for settings, want := range map[string]uint{`{"map_template_id":1}`: 1000, `{"map_template_id":1,"turn_pace_milliseconds":500}`: 500, `{"map_template_id":1,"turn_pace_milliseconds":5000}`: 5000, `{"turn_pace_milliseconds": 2000, "map_template_id": 3}`: 2000} {
+		parsed, err := ParseLobbySettings(json.RawMessage(settings))
+		if err != nil || parsed.TurnPaceMilliseconds != want {
+			t.Fatalf("%s: turn_pace_milliseconds = %d, %v", settings, parsed.TurnPaceMilliseconds, err)
 		}
 	}
 }
@@ -71,6 +80,11 @@ func TestParseLobbySettingsLocatesEveryRejection(t *testing.T) {
 		{"fractional game length", `{"map_template_id":1,"max_generations":50.5}`, []string{"game_settings.max_generations"}},
 		{"string game length", `{"map_template_id":1,"max_generations":"300"}`, []string{"game_settings.max_generations"}},
 		{"null game length", `{"map_template_id":1,"max_generations":null}`, []string{"game_settings.max_generations"}},
+		{"turn pace below the minimum", `{"map_template_id":1,"turn_pace_milliseconds":499}`, []string{"game_settings.turn_pace_milliseconds"}},
+		{"turn pace above the maximum", `{"map_template_id":1,"turn_pace_milliseconds":5001}`, []string{"game_settings.turn_pace_milliseconds"}},
+		{"fractional turn pace", `{"map_template_id":1,"turn_pace_milliseconds":1.5}`, []string{"game_settings.turn_pace_milliseconds"}},
+		{"string turn pace", `{"map_template_id":1,"turn_pace_milliseconds":"1000"}`, []string{"game_settings.turn_pace_milliseconds"}},
+		{"null turn pace", `{"map_template_id":1,"turn_pace_milliseconds":null}`, []string{"game_settings.turn_pace_milliseconds"}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

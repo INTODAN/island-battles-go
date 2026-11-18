@@ -81,7 +81,7 @@ test("a new lobby starts on the first default map", async () => {
   await loaded();
   assert.equal(created.select.value, "template:4");
   assert.ok(!created.select.options.includes(created.noMap));
-  assert.deepEqual(created.choice(), { settings: { map_template_id: 4, turn_timeout_seconds: 30, max_generations: 300 }, teams: ["Blue", "Red", "Green"] });
+  assert.deepEqual(created.choice(), { settings: { map_template_id: 4, turn_timeout_seconds: 30, turn_pace_milliseconds: 1000, max_generations: 300 }, teams: ["Blue", "Red", "Green"] });
   assert.equal(created.status.text, "Teams: Blue, Red, Green.");
 });
 
@@ -90,7 +90,7 @@ test("the chosen map sets the teams", async () => {
   await loaded();
   created.select.value = "template:7";
   created.select.dispatch("change");
-  assert.deepEqual(created.choice(), { settings: { map_template_id: 7, turn_timeout_seconds: 30, max_generations: 300 }, teams: ["Blue", "Red"] });
+  assert.deepEqual(created.choice(), { settings: { map_template_id: 7, turn_timeout_seconds: 30, turn_pace_milliseconds: 1000, max_generations: 300 }, teams: ["Blue", "Red"] });
   created.select.value = "file";
   created.select.dispatch("change");
   assert.throws(() => created.choice(), /Choose a map file/);
@@ -116,7 +116,7 @@ test("the room's form shows the lobby's map, and the first default map for setti
   assert.equal(chosen.select.value, "template:7");
   const old = form({ current: { turn_timeout_seconds: 10 } });
   await loaded();
-  assert.deepEqual(old.choice(), { settings: { map_template_id: 4, turn_timeout_seconds: 10, max_generations: 300 }, teams: ["Blue", "Red", "Green"] });
+  assert.deepEqual(old.choice(), { settings: { map_template_id: 4, turn_timeout_seconds: 10, turn_pace_milliseconds: 1000, max_generations: 300 }, teams: ["Blue", "Red", "Green"] });
 });
 
 test("the game length is sent, and the room's form shows the lobby's current one", async () => {
@@ -134,4 +134,21 @@ test("the game length is sent, and the room's form shows the lobby's current one
   const odd = form({ current: { map_template_id: 7, max_generations: 50 } });
   await loaded();
   assert.equal(odd.choice().settings.max_generations, 50);
+});
+
+test("the turn pace is sent, and the room's form shows the lobby's current one", async () => {
+  const created = form();
+  await loaded();
+  assert.deepEqual([...created.pace.options].map((option) => option.value), ["500", "1000", "2000"]);
+  assert.equal(created.pace.value, "1000");
+  created.pace.value = "500";
+  assert.equal(created.choice().settings.turn_pace_milliseconds, 500);
+  const room = form({ current: { map_template_id: 7, turn_pace_milliseconds: 2000 } });
+  await loaded();
+  assert.equal(room.pace.value, "2000");
+  assert.equal(room.choice().settings.turn_pace_milliseconds, 2000);
+  // A pace that the select doesn't offer is kept.
+  const odd = form({ current: { map_template_id: 7, turn_pace_milliseconds: 1500 } });
+  await loaded();
+  assert.equal(odd.choice().settings.turn_pace_milliseconds, 1500);
 });

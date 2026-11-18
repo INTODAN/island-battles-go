@@ -64,6 +64,7 @@ func (fake *fakeServer) stateOf(generationID uint, submitted bool, outcome map[s
 		"game_id": 7, "lobby_id": testLobbyID, "lobby_round": 1, "generation_id": generationID, "player_id": testPlayerID,
 		"team_color": 1, "channel": "player:" + testPlayerID, "submitted": submitted, "generation": turn.Generation, "turn_number": generationID, "max_generations": 300,
 		"log_lines_stored": 0, "memory": nil, "bot": map[string]any{"kind": "localhost", "port": 41414}, "relayed_bots": []any{}, "turn_deadline_at": nil,
+		"turn_pace_milliseconds": nil,
 	}
 	if outcome != nil {
 		state["outcome"] = outcome
@@ -672,6 +673,31 @@ func TestStateNeverGoesBackwards(t *testing.T) {
 	client.mutex.Unlock()
 	if !errors.Is(err, ErrProtocol) {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestStatesCarryTheTurnPace(t *testing.T) {
+	server := newFakeServer(t)
+	parse := func(change func(map[string]any)) (generationState, error) {
+		state := server.stateOf(2, false, nil)
+		change(state)
+		data, _ := json.Marshal(state)
+		return parseState(data)
+	}
+	if state, err := parse(func(state map[string]any) { state["turn_pace_milliseconds"] = 1000 }); err != nil || state.TurnPaceMilliseconds == nil || *state.TurnPaceMilliseconds != 1000 {
+		t.Fatalf("a real-time state = %+v, %v", state.TurnPaceMilliseconds, err)
+	}
+	if state, err := parse(func(map[string]any) {}); err != nil || state.TurnPaceMilliseconds != nil {
+		t.Fatalf("a state that waits = %+v, %v", state.TurnPaceMilliseconds, err)
+	}
+	for name, change := range map[string]func(map[string]any){
+		"no pace field":  func(state map[string]any) { delete(state, "turn_pace_milliseconds") },
+		"a pace too low": func(state map[string]any) { state["turn_pace_milliseconds"] = 499 },
+		"a string pace":  func(state map[string]any) { state["turn_pace_milliseconds"] = "1000" },
+	} {
+		if _, err := parse(change); !errors.Is(err, ErrProtocol) {
+			t.Errorf("%s: got %v", name, err)
+		}
 	}
 }
 

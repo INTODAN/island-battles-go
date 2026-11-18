@@ -90,7 +90,7 @@ func TestWatchersGetEveryTurnInThePlayersPushAndNoPlayerFields(t *testing.T) {
 		keys = append(keys, key)
 	}
 	slices.Sort(keys)
-	if !reflect.DeepEqual(keys, []string{"channel", "game_id", "generation", "generation_id", "lobby_id", "lobby_round", "teams", "turn_deadline_at"}) {
+	if !reflect.DeepEqual(keys, []string{"channel", "game_id", "generation", "generation_id", "lobby_id", "lobby_round", "teams", "turn_deadline_at", "turn_pace_milliseconds"}) {
 		t.Fatalf("watch state fields = %v", keys)
 	}
 	for _, player := range fixture.players {

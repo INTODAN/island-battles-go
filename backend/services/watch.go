@@ -30,7 +30,7 @@ func watchState(game *models.Game, generation *models.Generation) (models.WatchS
 		teams = []models.GameTeam{}
 	}
 	return models.WatchState{GameID: game.ID, LobbyID: lobbyID(game), LobbyRound: game.LobbyRound, GenerationID: generation.ID, Channel: channel, Teams: teams,
-		Generation: GenerationView(generation), Outcome: outcomeView(game), TurnDeadlineAt: turnDeadline(game, generation)}, nil
+		Generation: GenerationView(generation), Outcome: outcomeView(game), TurnDeadlineAt: turnDeadline(game, generation), TurnPaceMilliseconds: game.TurnPaceMilliseconds}, nil
 }
 
 // watchEvent is the watch channel's event for a generation, which the turn

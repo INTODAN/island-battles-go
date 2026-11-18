@@ -71,6 +71,8 @@ A team is **out** when it has no castles and no groups. The game ends when:
 
 The host sets the turn timeout: 30 seconds unless the lobby chose 5 to 600 seconds or no limit. `turn.turn_deadline_at` says when this turn ends (`None` for no limit). One slow answer loses the whole game, so answer fast.
 
+**A game with a player who plays by hand is real-time.** Each turn then ends after the lobby's turn pace, 1 second unless the host chose 0.5 to 5 seconds, and `turn.turn_deadline_at` is that time. The server plays the turn with the orders that arrived by then: a bot that answers later passes the turn (its answer is refused as a stale generation), and nobody loses for a missed turn. The turn timeout doesn't apply.
+
 ## Rejected results
 
 The server checks all commands against the board and rejects the **whole result** if one is invalid: soldiers a castle does not have (counting what earlier commands in the result spend), a castle that is not yours or does not exist, an upgrade past the maximum level, a burst above the castle's burst potential or of a castle with debt, or sending to the same castle. The turn is not played. See `writing-a-bot`.

@@ -2,6 +2,7 @@ import { h } from "../dom";
 import type { LobbyActions, MapTemplateSummary } from "./actions";
 import {
   defaultGameLength,
+  defaultTurnPace,
   defaultTurnTimeout,
   type FormErrors,
   gameLengths,
@@ -13,6 +14,7 @@ import {
   minTeams,
   readMapFile,
   teamName,
+  turnPaces,
   turnTimeouts,
 } from "./form";
 import { createMapBuilderLink, mapBuilderAvailable } from "./mapBuilder";
@@ -110,6 +112,24 @@ export function mountMapFields(options: MapFieldsOptions): MapFields {
         ),
     ),
   );
+  const pace =
+    initial === undefined ? defaultTurnPace : initial.turnPaceMilliseconds;
+  const paceOptions = turnPaces.some((option) => option.milliseconds === pace)
+    ? turnPaces
+    : [...turnPaces, { milliseconds: pace, label: `${pace / 1000} s` }];
+  const paceSelect = h(
+    "select",
+    { id: id("turn-pace") },
+    ...paceOptions.map(
+      (option) =>
+        new Option(
+          option.label,
+          String(option.milliseconds),
+          false,
+          option.milliseconds === pace,
+        ),
+    ),
+  );
   const length =
     initial === undefined ? defaultGameLength : initial.maxGenerations;
   const lengthOptions = gameLengths.includes(length)
@@ -131,6 +151,7 @@ export function mountMapFields(options: MapFieldsOptions): MapFields {
   const errors = {
     map: errorOf("map"),
     turnTimeout: errorOf("turnTimeout"),
+    turnPace: errorOf("turnPace"),
     gameLength: errorOf("gameLength"),
   };
 
@@ -310,6 +331,14 @@ export function mountMapFields(options: MapFieldsOptions): MapFields {
       h("label", { htmlFor: id("turn-timeout") }, "Turn limit"),
       timeoutSelect,
       errors.turnTimeout,
+      h("label", { htmlFor: id("turn-pace") }, "Turn pace"),
+      paceSelect,
+      h(
+        "p",
+        { class: "hint" },
+        "Used when someone plays by hand: the game is then real-time, with a turn this often.",
+      ),
+      errors.turnPace,
       h("label", { htmlFor: id("game-length") }, "Game length"),
       lengthSelect,
       h(
@@ -323,10 +352,12 @@ export function mountMapFields(options: MapFieldsOptions): MapFields {
       map: mapChoice(),
       turnTimeoutSeconds:
         timeoutSelect.value === "none" ? null : Number(timeoutSelect.value),
+      turnPaceMilliseconds: Number(paceSelect.value),
       maxGenerations: Number(lengthSelect.value),
       ...(initial
         ? {
             currentTurnTimeoutSeconds: initial.turnTimeoutSeconds,
+            currentTurnPaceMilliseconds: initial.turnPaceMilliseconds,
             currentMaxGenerations: initial.maxGenerations,
           }
         : {}),

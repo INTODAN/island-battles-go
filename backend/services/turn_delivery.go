@@ -29,8 +29,9 @@ const submitTokenNoLimit = 24 * time.Hour
 // submit token for submitURL that submits exactly this turn. With seatID, a
 // roster player other than the caller, it builds that player's turn instead:
 // a localhost bot seat that the caller relays (models.RelayedBots), or a 403
-// for any other player. Like the state read, it first applies an overdue
-// turn deadline and lets Go bots catch up. A player with nothing to play
+// for any other player. Like the state read, it lets Go bots catch up and
+// then ends an overdue turn, so in a real-time game it delivers the turn that
+// follows. A player with nothing to play
 // gets a 409: the game has ended, with GameEndedProblemType, their team is
 // eliminated, or they have completed the turn.
 func (service *GenerationService) TurnDelivery(ctx context.Context, principal domain.Principal, lobbyID, seatID string, tokens *submittoken.Signer, submitURL string) (models.TurnDelivery, error) {
@@ -49,7 +50,7 @@ func (service *GenerationService) TurnDelivery(ctx context.Context, principal do
 		}
 	}
 	var delivery models.TurnDelivery
-	var events []Publication
+	var end turnEnd
 	// A turn that ends the game here still commits the ending.
 	var nothingToPlay error
 	err = dal.WithLockedGame(database, game.ID, func(transaction *gorm.DB, locked *models.Game) error {
@@ -71,9 +72,10 @@ func (service *GenerationService) TurnDelivery(ctx context.Context, principal do
 			return err
 		}
 		observability.Annotate(ctx, slog.Uint64("generation_id", uint64(generation.ID)))
-		if events, err = expireTurn(transaction, locked, generation, players, service.now()); err != nil {
+		if end, err = endTurn(ctx, transaction, locked, generation, players, service.now(), service.Bots); err != nil {
 			return err
 		}
+		generation = end.generation
 		if locked.Outcome != nil {
 			nothingToPlay = &GenerationError{Status: 409, Detail: "the game has ended: " + describeOutcome(locked), Type: GameEndedProblemType}
 			return nil
@@ -100,7 +102,7 @@ func (service *GenerationService) TurnDelivery(ctx context.Context, principal do
 	if err != nil {
 		return models.TurnDelivery{}, err
 	}
-	service.publish(ctx, events)
+	service.afterTurnEnd(ctx, game.ID, end)
 	if nothingToPlay != nil {
 		return models.TurnDelivery{}, nothingToPlay
 	}

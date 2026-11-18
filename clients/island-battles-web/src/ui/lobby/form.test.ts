@@ -40,6 +40,7 @@ const values = (extra: Partial<CreateFormValues> = {}): CreateFormValues => ({
   lobbyName: "Alex's lobby",
   map: { kind: "template", templateId: 4 },
   turnTimeoutSeconds: 30,
+  turnPaceMilliseconds: 1000,
   maxGenerations: 300,
   ...extra,
 });
@@ -53,6 +54,7 @@ describe("the create form", () => {
       gameSettings: {
         map_template_id: 4,
         turn_timeout_seconds: 30,
+        turn_pace_milliseconds: 1000,
         max_generations: 300,
       },
     });
@@ -220,6 +222,8 @@ describe("the room's Change map form", () => {
       map: { kind: "none" },
       turnTimeoutSeconds: 30,
       currentTurnTimeoutSeconds: 30,
+      turnPaceMilliseconds: 1000,
+      currentTurnPaceMilliseconds: 1000,
       maxGenerations: 300,
       currentMaxGenerations: 300,
     });
@@ -234,6 +238,8 @@ describe("the room's Change map form", () => {
       map: { kind: "file", map: map as unknown as MapTemplate },
       turnTimeoutSeconds: 120,
       currentTurnTimeoutSeconds: 120,
+      turnPaceMilliseconds: 1000,
+      currentTurnPaceMilliseconds: 1000,
       maxGenerations: 300,
       currentMaxGenerations: 300,
     });
@@ -244,6 +250,7 @@ describe("the room's Change map form", () => {
       {
         map: { kind: "template", templateId: 4 },
         turnTimeoutSeconds: 600,
+        turnPaceMilliseconds: 2000,
         maxGenerations: 600,
       },
       templates,
@@ -255,6 +262,7 @@ describe("the room's Change map form", () => {
         game_settings: {
           map_template_id: 4,
           turn_timeout_seconds: 600,
+          turn_pace_milliseconds: 2000,
           max_generations: 600,
         },
       });
@@ -273,6 +281,21 @@ describe("the room's Change map form", () => {
     expect(
       validateMapSettings({ ...values, turnTimeoutSeconds: 46 }, templates),
     ).toMatchObject({ ok: false, errors: { turnTimeout: expect.any(String) } });
+  });
+
+  test("keeps a turn pace the list lacks only when it is the lobby's own", () => {
+    const values = lobbyMapSettings({
+      map_template_id: 4,
+      turn_pace_milliseconds: 1500,
+    });
+    expect(values.turnPaceMilliseconds).toBe(1500);
+    expect(validateMapSettings(values, templates)).toMatchObject({
+      ok: true,
+      gameSettings: { turn_pace_milliseconds: 1500 },
+    });
+    expect(
+      validateMapSettings({ ...values, turnPaceMilliseconds: 700 }, templates),
+    ).toMatchObject({ ok: false, errors: { turnPace: expect.any(String) } });
   });
 
   test("refuses a lobby's default map that is no longer listed", () => {
