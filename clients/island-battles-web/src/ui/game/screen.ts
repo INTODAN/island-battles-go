@@ -31,7 +31,13 @@ import {
   teamStats,
   turnLabel,
 } from "./history";
-import { hiddenNotice, type LogBook, LogFetchScheduler } from "./logs";
+import {
+  chooseLogs,
+  hiddenNotice,
+  type LogBook,
+  LogFetchScheduler,
+  openGenerationId,
+} from "./logs";
 
 export interface ScreenOptions {
   /** True when new turns can arrive: the live view. */
@@ -611,16 +617,36 @@ export class GameScreen {
     const running = this.running;
     const frame = state.frames[state.index];
     if (!running || !frame) return;
-    const logs = this.options.logs.get(frame.id);
     const ended = state.outcome !== null;
-    this.logsSummary.textContent = `Bot logs · ${turnLabel(state.index, state.frames.length)}`;
+    const book = this.options.logs;
+    const choice = chooseLogs(
+      {
+        frames: state.frames,
+        index: state.index,
+        ended,
+        live: state.live,
+        watching: this.options.watching === true,
+      },
+      book,
+    );
+    const logs = choice.logs;
+    const target = state.frames[choice.target];
+    this.logsSummary.textContent = `Bot logs · ${turnLabel(choice.shown < 0 ? state.index : choice.shown, state.frames.length)}`;
     this.logScheduler.update({
       open: this.logsBox.open,
-      generationId: frame.id,
+      generationId: target?.id ?? frame.id,
       ended,
-      needsFetch: this.options.logs.needsFetch(frame.id, ended),
+      needsFetch:
+        target !== undefined &&
+        book.needsFetch(target.id, {
+          ended,
+          open: target.id === openGenerationId(state.frames, ended),
+        }),
     });
     const parts: HTMLElement[] = [];
+    if (choice.openNote) {
+      parts.push(element("p", "gv-logs-note", choice.openNote));
+    }
     const notice = hiddenNotice(logs, {
       ended,
       live: state.live,
@@ -628,7 +654,9 @@ export class GameScreen {
     });
     if (notice) parts.push(element("p", "gv-logs-note", notice));
     if (!logs) {
-      parts.push(element("p", "gv-logs-note", "Loading the logs…"));
+      if (choice.shown >= 0) {
+        parts.push(element("p", "gv-logs-note", "Loading the logs…"));
+      }
     } else {
       for (const team of running.teams) {
         const players = logs.players.filter(
