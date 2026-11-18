@@ -17,7 +17,7 @@ import {
   saveGraphics,
 } from "../../scene/graphics";
 import { teamColorHex } from "../../scene/palette";
-import { installBoardControls } from "../../scene/picking";
+import { fitBoard, installBoardControls } from "../../scene/picking";
 import { showBoardLoading } from "../boardLoading";
 import { rulesButton } from "../rules/rulesDialog";
 import { type AgentGame, agentPrompt, copyText } from "./agentPrompt";
@@ -123,6 +123,7 @@ export class GameScreen {
   private readonly overlay = element("div", "gv-overlay");
   private readonly overlayText = element("p");
   private readonly overlayAction = button("Try again", "Try again");
+  private readonly fitButton = element("button", "gv-fit");
   private readonly teamsBox = element("div", "gv-teams");
   /** Your team's colour, from your seat's turn; a watcher has none. */
   private yourTeamColor: number | undefined;
@@ -150,6 +151,7 @@ export class GameScreen {
     { soldiers: HTMLElement; castles: HTMLElement }
   >();
   private running: Running | undefined;
+  private scene: Scene | undefined;
   private disposed = false;
   private retry: (() => void) | undefined;
 
@@ -279,6 +281,16 @@ export class GameScreen {
       this.banner,
       this.clashes,
     );
+    // Touch screens have no F key: this button refits the board, as F does.
+    this.fitButton.type = "button";
+    this.fitButton.setAttribute("aria-label", "Fit the board (F)");
+    this.fitButton.title = "Fit the board (F)";
+    this.fitButton.innerHTML =
+      '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    this.fitButton.addEventListener("click", () => {
+      if (this.scene) fitBoard(this.scene);
+    });
+    topStack.append(this.fitButton);
     const bottomStack = element("div", "gv-stack gv-stack-bottom");
     bottomStack.append(this.logsBox, timeline);
     root.append(this.canvas, topStack, bottomStack, this.overlay);
@@ -395,6 +407,7 @@ export class GameScreen {
       preserveDrawingBuffer: true,
     });
     const scene = new Scene(engine);
+    this.scene = scene;
     installBoardControls(scene);
     // The board's art loads behind a loading screen; the board draws placeholders meanwhile.
     const loading = showBoardLoading(this.root);
@@ -495,6 +508,7 @@ export class GameScreen {
   private stop(): void {
     this.running?.dispose();
     this.running = undefined;
+    this.scene = undefined;
   }
 
   /**

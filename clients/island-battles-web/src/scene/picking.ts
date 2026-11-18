@@ -49,6 +49,12 @@ export function touchTapTarget(
   return pointerType === "touch" ? picked : undefined;
 }
 
+/** Moves the camera back to show the whole board, in 450 ms: what the F key and the board's Fit button do. */
+export function fitBoard(scene: Scene): void {
+  const field = battlefieldOf(scene);
+  if (field) fitCamera(scene, field.camera, field.bounds, 450);
+}
+
 /**
  * Hover highlight and tooltip (a tap on a touch screen), double-click to focus a castle, and F to refit the board. Returns
  * a function that removes the listeners.
@@ -161,8 +167,7 @@ export function installBoardControls(scene: Scene): () => void {
       event.target instanceof HTMLTextAreaElement
     )
       return;
-    const field = battlefieldOf(scene);
-    if (field) fitCamera(scene, field.camera, field.bounds, 450);
+    fitBoard(scene);
   };
   window.addEventListener("keydown", onKey);
   // The hovered entity may have moved or gone when a new generation is drawn.
