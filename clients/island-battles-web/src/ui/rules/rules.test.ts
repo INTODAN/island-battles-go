@@ -10,8 +10,10 @@ import {
   clashRadius,
   commandOrder,
   commandRules,
+  defaultGameLength,
   defaultTurnSeconds,
-  maxGenerations,
+  maxGameLength,
+  minGameLength,
   turnSteps,
   upgradeOrder,
   upgradeRules,
@@ -117,8 +119,15 @@ describe("game rules page", () => {
   });
 
   test("uses the backend's numbers", () => {
-    expect(maxGenerations, skill).toBe(
-      goConstant("backend/services/generation_input.go", "MaxGenerations"),
+    const lobbySettings = "backend/models/lobby_settings.go";
+    expect(defaultGameLength, skill).toBe(
+      goConstant(lobbySettings, "DefaultMaxGenerations"),
+    );
+    expect(minGameLength, skill).toBe(
+      goConstant(lobbySettings, "MinMaxGenerations"),
+    );
+    expect(maxGameLength, skill).toBe(
+      goConstant(lobbySettings, "MaxMaxGenerations"),
     );
     expect(defaultTurnSeconds, skill).toBe(
       goConstant(
