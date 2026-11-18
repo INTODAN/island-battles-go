@@ -84,10 +84,10 @@ describe("a localhost bot's port", () => {
     expect(portProblem("80")).toMatch(/from 1024 to 65535/);
     expect(nextFreePort([41414, 41415, 41417])).toBe(41416);
     expect(serveCommandFor(41414)).toBe(
-      "uv run island-battles-bot serve mybot:play",
+      "uv run island-battles-bot serve bot:play",
     );
     expect(serveCommandFor(41415)).toBe(
-      "uv run island-battles-bot serve --port 41415 mybot:play",
+      "uv run island-battles-bot serve bot:play --port 41415",
     );
   });
 });

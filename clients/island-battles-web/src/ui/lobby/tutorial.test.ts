@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
+import { serveCommand } from "../../bots/localhost";
 import {
   commandText,
   detectSystem,
@@ -65,9 +66,7 @@ describe("bot tutorial", () => {
           (match) => match[0],
         );
         expect(named).toEqual(
-          ["check", "serve", "package"].map((name) =>
-            scriptCommand(system, name),
-          ),
+          ["check", "package"].map((name) => scriptCommand(system, name)),
         );
         for (const script of named) {
           read(script.replace("\\", "/"));
@@ -102,10 +101,17 @@ describe("bot tutorial", () => {
     expect(check).toContain(`install=(${installCommand})`);
   });
 
-  test("serves and packages the bot with the SDK's commands", () => {
-    expect(read("scripts/serve.sh")).toContain(
-      "island-battles-bot serve bot:play",
-    );
+  test("serves the bot one way: the bot picker's command, on every system", () => {
+    expect(serveCommand).toBe("uv run island-battles-bot serve bot:play");
+    for (const system of tutorialSystems) {
+      expect(tutorialSteps(system)[1]?.commands).toEqual([serveCommand]);
+    }
+    expect(read("README.md")).toContain(serveCommand);
+    const scripts = readdirSync(new URL("scripts/", template));
+    expect(scripts.filter((file) => file.startsWith("serve."))).toEqual([]);
+  });
+
+  test("packages the bot with the SDK's command", () => {
     expect(read("scripts/package.sh")).toContain("island-battles-bot package");
   });
 
