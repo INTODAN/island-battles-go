@@ -66,7 +66,7 @@ A castle can't burst while it has `burst_debt`, nor twice in one turn. A capture
 A team is **out** when it has no castles and no groups. The game ends when:
 
 - **One team is left**: it wins. Neutral castles do not need to be captured. If the last teams go out in the same turn, it is a **draw**.
-- **Generation `turn.max_generations` is created** (300 today): the team with the most castles wins; equal counts are a draw. So the last turn a bot plays is `turn.max_generations - 1`, and at most `turn.max_generations - turn.turn_number` turns are left, this one included. Read the limit from the turn rather than hard-coding it.
+- **Generation `turn.max_generations` is created** (300 unless the host chose another length): the team with the most castles wins; equal counts are a draw. So the last turn a bot plays is `turn.max_generations - 1`, and at most `turn.max_generations - turn.turn_number` turns are left, this one included. Read the limit from the turn rather than hard-coding it.
 - **A turn passes its deadline** before every player answered: each team with a late player **loses** and the game ends at once. The team with the most castles among the others wins.
 
 The host sets the turn timeout: 30 seconds unless the lobby chose 5 to 600 seconds or no limit. `turn.turn_deadline_at` says when this turn ends (`None` for no limit). One slow answer loses the whole game, so answer fast.

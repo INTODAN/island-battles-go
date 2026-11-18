@@ -40,6 +40,7 @@ const values = (extra: Partial<CreateFormValues> = {}): CreateFormValues => ({
   lobbyName: "Alex's lobby",
   map: { kind: "template", templateId: 4 },
   turnTimeoutSeconds: 30,
+  maxGenerations: 300,
   ...extra,
 });
 
@@ -49,7 +50,11 @@ describe("the create form", () => {
     expect(validateCreateForm(values(), templates)).toEqual({
       ok: true,
       teams: [{ name: "Blue" }, { name: "Red" }, { name: "Green" }],
-      gameSettings: { map_template_id: 4, turn_timeout_seconds: 30 },
+      gameSettings: {
+        map_template_id: 4,
+        turn_timeout_seconds: 30,
+        max_generations: 300,
+      },
     });
 
     const map = {
@@ -215,6 +220,8 @@ describe("the room's Change map form", () => {
       map: { kind: "none" },
       turnTimeoutSeconds: 30,
       currentTurnTimeoutSeconds: 30,
+      maxGenerations: 300,
+      currentMaxGenerations: 300,
     });
     expect(
       lobbyMapSettings({ map_template_id: 4, turn_timeout_seconds: null }),
@@ -227,6 +234,8 @@ describe("the room's Change map form", () => {
       map: { kind: "file", map: map as unknown as MapTemplate },
       turnTimeoutSeconds: 120,
       currentTurnTimeoutSeconds: 120,
+      maxGenerations: 300,
+      currentMaxGenerations: 300,
     });
   });
 
@@ -235,6 +244,7 @@ describe("the room's Change map form", () => {
       {
         map: { kind: "template", templateId: 4 },
         turnTimeoutSeconds: 600,
+        maxGenerations: 600,
       },
       templates,
     );
@@ -242,7 +252,11 @@ describe("the room's Change map form", () => {
     if (result.ok) {
       expect(changeSettingsBody(result)).toEqual({
         teams: [{ name: "Blue" }, { name: "Red" }, { name: "Green" }],
-        game_settings: { map_template_id: 4, turn_timeout_seconds: 600 },
+        game_settings: {
+          map_template_id: 4,
+          turn_timeout_seconds: 600,
+          max_generations: 600,
+        },
       });
     }
   });
@@ -307,5 +321,27 @@ describe("create requests", () => {
     expect(requests.idFor({ name: "A", teams: 2 })).toBe(first);
     // A different lobby is a different create.
     expect(requests.idFor({ name: "A", teams: 4 })).not.toBe(first);
+  });
+});
+
+describe("the game length", () => {
+  test("is sent, and the room's form starts from the lobby's own", () => {
+    expect(
+      validateCreateForm(values({ maxGenerations: 1200 }), templates),
+    ).toMatchObject({ ok: true, gameSettings: { max_generations: 1200 } });
+    expect(lobbyMapSettings({ map_template_id: 4 }).maxGenerations).toBe(300);
+    const current = lobbyMapSettings({
+      map_template_id: 4,
+      max_generations: 50,
+    });
+    expect(current.maxGenerations).toBe(50);
+    // A length the list lacks is accepted only as the lobby's own.
+    expect(validateMapSettings(current, templates)).toMatchObject({
+      ok: true,
+      gameSettings: { max_generations: 50 },
+    });
+    expect(
+      validateMapSettings({ ...current, maxGenerations: 51 }, templates),
+    ).toMatchObject({ ok: false, errors: { gameLength: expect.any(String) } });
   });
 });

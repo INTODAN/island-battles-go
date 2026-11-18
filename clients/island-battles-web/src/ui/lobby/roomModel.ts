@@ -6,7 +6,7 @@ import type {
   MapTemplateSummary,
   MemberBot,
 } from "./actions";
-import { describeTurnTimeout } from "./form";
+import { describeGameLength, describeTurnTimeout } from "./form";
 
 export interface MemberRow {
   /** The member ID; for a seat, the seat ID that removing it takes. */
@@ -413,7 +413,7 @@ export function startBlocker(
   return null;
 }
 
-/** One line naming the map and the turn limit a lobby's settings chose. */
+/** One line naming the map and the turn limit a lobby's settings chose, and its game length when that isn't 300 turns. */
 export function describeSettings(
   settings: Record<string, unknown> | undefined,
   templates: MapTemplateSummary[],
@@ -429,5 +429,5 @@ export function describeSettings(
     const found = templates.find((item) => item.map_template_id === id);
     map = found ? `Map: ${found.map_name}` : `Map: default map #${id}`;
   }
-  return `${map} · ${limit}`;
+  return [map, limit, describeGameLength(settings)].filter(Boolean).join(" · ");
 }

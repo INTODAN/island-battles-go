@@ -21,7 +21,11 @@ type Game struct {
 	// lobby's settings. It is saved with the teams when the game is
 	// initialized. Nil means turns have no time limit.
 	TurnTimeoutSeconds *uint `json:"-"`
-	Generations        []Generation
+	// MaxGenerations is the game's last generation, from the lobby's settings.
+	// It is saved with the teams when the game is initialized. The column's
+	// default gives games stored before the setting the old limit of 300.
+	MaxGenerations int `gorm:"not null;default:300" json:"-"`
+	Generations    []Generation
 }
 
 // GameTeam is a team that took part in the battle, with its lobby name and

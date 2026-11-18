@@ -345,3 +345,12 @@ describe("what keeps the host from starting", () => {
     ).toBeNull();
   });
 });
+
+test("a room names the game length when it isn't 300 turns", () => {
+  expect(
+    describeSettings({ map_template_id: 4, max_generations: 300 }, []),
+  ).toBe("Map: default map #4 · Turn limit: 30 s");
+  expect(
+    describeSettings({ map_template_id: 4, max_generations: 600 }, []),
+  ).toBe("Map: default map #4 · Turn limit: 30 s · Game length: 600 turns");
+});

@@ -753,6 +753,10 @@ class LobbySettings(GameModel):
     """
     Start on this default map, a map_template_id from GET /map/templates. Give this or map, not both.
     """
+    max_generations: Annotated[StrictInt | None, Field(ge=50, le=1200)] = 300
+    """
+    The most turns the game may last, a whole number from 50 to 1200; 300 when left out. The turn that creates generation max_generations ends the game, if nothing has ended it before, and the team with the most castles wins.
+    """
     turn_timeout_seconds: Annotated[StrictInt | None, Field(ge=5, le=600)] = 30
     """
     How long each turn lasts, in whole seconds from 5 to 600, counted from when its generation was created; 30 when left out. null means no limit, for example while debugging a bot. When a turn's deadline passes before every player has completed it, each team with a player who hadn't loses, and the game ends.

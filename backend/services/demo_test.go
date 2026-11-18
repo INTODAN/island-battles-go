@@ -268,7 +268,7 @@ func TestAFullLengthTwoPlayerDemoWithFullLogsFitsTheLobbyPage(t *testing.T) {
 		Teams: []models.GameTeam{{Color: 1, Name: "Blue", Players: []string{"Alex"}}, {Color: 2, Name: "Red", Players: []string{"Sam"}}}}
 	// A busy board of a large map: 20 castles, 20 groups on the move and 4
 	// clashes in every generation.
-	for generation := range services.MaxGenerations {
+	for generation := range models.DefaultMaxGenerations {
 		frame := models.GenerationView{ID: uint(1_000_000 + generation)}
 		for castle := range 20 {
 			frame.Castles = append(frame.Castles, models.CastleView{ID: uint(castle), TeamColor: uint(castle % 3), Soldiers: 1234, X: -12.345678, Y: 6.789012, Upgrades: upgrades})
@@ -294,7 +294,7 @@ func TestAFullLengthTwoPlayerDemoWithFullLogsFitsTheLobbyPage(t *testing.T) {
 	if err := services.WriteCompressedDemo(&packed, demo); err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("a %d-generation two-player demo with full logs has %.1f MiB, and %.1f MiB packed", services.MaxGenerations,
+	t.Logf("a %d-generation two-player demo with full logs has %.1f MiB, and %.1f MiB packed", models.DefaultMaxGenerations,
 		float64(size.bytes)/1024/1024, float64(packed.bytes)/1024/1024)
 	if size.bytes > relayLimit {
 		t.Fatalf("the demo has %d bytes, more than the lobby page's %d", size.bytes, relayLimit)

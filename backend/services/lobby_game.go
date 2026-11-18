@@ -48,7 +48,7 @@ func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 	// The lobby checked the settings when they were set, under the rules of
 	// that time, so they are checked again. A default map is loaded from its
 	// template here.
-	chosenMap, turnTimeout, err := LobbyGameSettings(database, snapshot.Lobby.GameSettings, len(snapshot.Teams))
+	gameSettings, err := LobbyGameSettings(database, snapshot.Lobby.GameSettings, len(snapshot.Teams))
 	if err != nil {
 		return models.BindingResult{}, fmt.Errorf("lobby settings: %w", err)
 	}
@@ -94,7 +94,7 @@ func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 		if err := dal.StoreFrozenPlayers(transaction, players); err != nil {
 			return err
 		}
-		generation := models.Generation{GameID: binding.GameID, Map: models.BuildMap(chosenMap)}
+		generation := models.Generation{GameID: binding.GameID, Map: models.BuildMap(gameSettings.Map)}
 		generationID, err := dal.CreateGeneration(transaction, &generation)
 		if err != nil {
 			return err
@@ -103,7 +103,7 @@ func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 		if err != nil {
 			return err
 		}
-		if err := dal.SaveGameStart(transaction, game, teams, turnTimeout); err != nil {
+		if err := dal.SaveGameStart(transaction, game, teams, gameSettings.TurnTimeoutSeconds, gameSettings.MaxGenerations); err != nil {
 			return err
 		}
 		inputs, err := playGoBots(ctx, transaction, game, current, players, nil)

@@ -53,11 +53,6 @@ const (
 	BurstAbovePotentialProblemType = "urn:island-battles:problem:burst-above-potential"
 )
 
-// MaxGenerations caps a game. Turns are not paced, so bots play as fast as round
-// trips allow. The turn that creates the last generation ends the game, so no
-// game grows past it.
-const MaxGenerations = 300
-
 // Publisher pushes committed game events to Centrifugo right after their
 // transaction. The host's publisher retries briefly and logs what still
 // fails; clients recover a missed event by re-reading their state over HTTP.
@@ -410,7 +405,7 @@ func generationState(game *models.Game, generation *models.Generation, players [
 		return models.GenerationState{}, err
 	}
 	state := models.GenerationState{GameID: game.ID, LobbyID: *game.LobbyID, LobbyRound: game.LobbyRound, GenerationID: generation.ID, PlayerID: player.PlayerID, TeamColor: player.TeamColor, Channel: channel,
-		Generation: GenerationView(generation), TurnNumber: generation.Number, MaxGenerations: MaxGenerations, Outcome: outcomeView(game), Memory: memory, TurnDeadlineAt: turnDeadline(game, generation), Bot: models.FrozenBot(player),
+		Generation: GenerationView(generation), TurnNumber: generation.Number, MaxGenerations: game.MaxGenerations, Outcome: outcomeView(game), Memory: memory, TurnDeadlineAt: turnDeadline(game, generation), Bot: models.FrozenBot(player),
 		RelayedBots: models.RelayedBots(players, player.PlayerID)}
 	for _, input := range inputs {
 		if input.PlayerID == player.PlayerID {

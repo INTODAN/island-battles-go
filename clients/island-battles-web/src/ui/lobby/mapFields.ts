@@ -1,8 +1,10 @@
 import { h } from "../dom";
 import type { LobbyActions, MapTemplateSummary } from "./actions";
 import {
+  defaultGameLength,
   defaultTurnTimeout,
   type FormErrors,
+  gameLengths,
   type MapChoice,
   type MapSettingsValues,
   type MapTemplate,
@@ -108,6 +110,19 @@ export function mountMapFields(options: MapFieldsOptions): MapFields {
         ),
     ),
   );
+  const length =
+    initial === undefined ? defaultGameLength : initial.maxGenerations;
+  const lengthOptions = gameLengths.includes(length)
+    ? gameLengths
+    : [...gameLengths, length];
+  const lengthSelect = h(
+    "select",
+    { id: id("game-length") },
+    ...lengthOptions.map(
+      (turns) =>
+        new Option(`${turns} turns`, String(turns), false, turns === length),
+    ),
+  );
   const errorOf = (field: string) =>
     h("p", {
       class: "field-error",
@@ -116,6 +131,7 @@ export function mountMapFields(options: MapFieldsOptions): MapFields {
   const errors = {
     map: errorOf("map"),
     turnTimeout: errorOf("turnTimeout"),
+    gameLength: errorOf("gameLength"),
   };
 
   function mapChoice(): MapChoice {
@@ -294,13 +310,25 @@ export function mountMapFields(options: MapFieldsOptions): MapFields {
       h("label", { htmlFor: id("turn-timeout") }, "Turn limit"),
       timeoutSelect,
       errors.turnTimeout,
+      h("label", { htmlFor: id("game-length") }, "Game length"),
+      lengthSelect,
+      h(
+        "p",
+        { class: "hint" },
+        "The game ends after this many turns; the team with the most castles wins.",
+      ),
+      errors.gameLength,
     ],
     values: () => ({
       map: mapChoice(),
       turnTimeoutSeconds:
         timeoutSelect.value === "none" ? null : Number(timeoutSelect.value),
+      maxGenerations: Number(lengthSelect.value),
       ...(initial
-        ? { currentTurnTimeoutSeconds: initial.turnTimeoutSeconds }
+        ? {
+            currentTurnTimeoutSeconds: initial.turnTimeoutSeconds,
+            currentMaxGenerations: initial.maxGenerations,
+          }
         : {}),
     }),
     templates: () => templates,
