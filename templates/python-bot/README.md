@@ -61,4 +61,4 @@ To play two versions of your bot against each other, or against yourself, serve 
 ## Where next
 
 - The SDK, its helpers and the `island-battles-bot` command: [island-battles-python on PyPI](https://pypi.org/project/island-battles-python/).
-- Ideas: attack weak neutral castles first, defend a castle that a group is walking to, store a plan in the memory, buy `clash_stop_generations`, change plans near the end of the game (`turn.max_generations - turn.turn_number` turns are left, this one included).
+- Ideas: attack weak neutral castles first, defend a castle that a group is walking to, store a plan in the memory, buy `clash_stop_generations`, change plans near the end of the game (at most `turn.max_generations - turn.turn_number` turns are left, this one included).

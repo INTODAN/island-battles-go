@@ -10,7 +10,7 @@ A bot is one function in `bot.py`, `play(turn: BotTurn) -> BotTurnResult`, sync 
 ## What `play` receives
 
 - `turn.generation.castles` and `.soldier_groups`: the board (`.clashes` lists last turn's fights). `turn.generation.id` is the server's ID of the generation, **not the turn number**: every game shares the server's IDs, so a game's first turn can have ID 5538. Use it only to tell generations apart.
-- `turn.turn_number`: this turn's number in the game, 1 on the first turn and one more each turn, as the replay's "Turn n / m" counts. `turn.max_generations`: the game's last generation (300 today). The turn that creates it ends the game, so the last turn your bot plays is `turn.max_generations - 1`, and `turn.max_generations - turn.turn_number` turns are left, this one included. Read both from the turn; don't hard-code 300 or count turns in memory.
+- `turn.turn_number`: this turn's number in the game, 1 on the first turn and one more each turn, as the replay numbers them. `turn.max_generations`: the game's last generation (300 today). The turn that creates it ends the game, so the last turn your bot plays is `turn.max_generations - 1`, and at most `turn.max_generations - turn.turn_number` turns are left, this one included (fewer if the game ends earlier). Read both from the turn; don't hard-code 300 or count turns in memory.
 - `turn.team_color`: your team. Castle: `id`, `team_color`, `soldiers`, `x`, `y`, `upgrades` (`castle.upgrades["speed"]`), and `burst_debt`. Group: also `origin_castle_id`, `destination_castle_id`, `clash_radius`.
 - `turn.upgrades`: the upgrade cost table. `turn.memory`: what you returned last turn, or `None`. `turn.turn_deadline_at`: when the turn times out, or `None`.
 
@@ -62,6 +62,6 @@ return turn_result(commands, memory={"target": target})
 
 ## Deterministic and fast
 
-The same `BotTurn` must give the same result: no `random` without a seed stored in memory, no clocks, no network or file access. Sort before choosing (`sorted(castles, key=lambda c: c.id)`) so ties don't depend on order. That is what makes a bot testable with `fixture_turn()` and the turns `tests/test_bot.py` builds. Its builder gives turns server-like generation IDs (from 5538) with `turn_number` from 1, so a bot that reads the ID as the turn number fails its tests: keep that in turns you build.
+The same `BotTurn` must give the same result: no `random` without a seed stored in memory, no clocks, no network or file access. Sort before choosing (`sorted(castles, key=lambda c: c.id)`) so ties don't depend on order. That is what makes a bot testable with `fixture_turn()` and the turns `tests/test_bot.py` builds. Its builder gives turns server-like generation IDs (from 5538) with `turn_number` from 1, so that reading the ID as the turn number shows up in tests: keep that in turns you build, and add a test of a late turn (for example `game_turn(299, ...)`) when your bot plans for the end of the game.
 
 A slow bot loses the game: the turn timeout is 5 to 600 seconds (30 by default), and `serve` answers 504 after 8 seconds. Aim for well under one second. No loops that grow with the number of turns.

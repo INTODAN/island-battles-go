@@ -13,7 +13,7 @@ from bot import play
 
 # The server's generation IDs are shared by every game and only increase, so a
 # game's first turn can have ID 5538. The turns below have IDs like that, so a
-# bot that reads `turn.generation.id` as the turn number fails these tests.
+# bot that reads `turn.generation.id` as the turn number shows it here.
 FIRST_GENERATION_ID = 5538
 
 
