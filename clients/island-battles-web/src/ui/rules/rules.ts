@@ -193,7 +193,7 @@ export const rulesSections: readonly RulesSection[] = [
     id: "turns",
     title: "Your turn",
     paragraphs: [
-      `Everyone plays each turn at the same time. Give your orders and finish your turn before its time runs out: the lobby's host picks the turn limit, ${defaultTurnSeconds} seconds unless they choose another or no limit. Orders that a castle can't afford, counting what you have already ordered this turn, are refused, and nothing of that batch is kept.`,
+      `Everyone plays each turn at the same time. Give your orders and finish your turn before its time runs out: the lobby's host picks the turn limit, ${defaultTurnSeconds} seconds unless they choose another or no limit. Orders that a castle can't afford, counting what your team has already ordered this turn, are refused, and nothing of that batch is kept.`,
       "Once every player has finished, the turn runs in this order:",
     ],
     items: turnSteps.map((step) => step.text),
@@ -204,8 +204,8 @@ export const rulesSections: readonly RulesSection[] = [
     title: "Clashes",
     paragraphs: [
       `Groups of different teams clash when they come within ${clashRadius} world units of each other on their way. Groups of the same team pass each other, and a group never fights a castle on its way, only the castle it was sent to.`,
-      "In a clash, every team loses as many soldiers as all its enemies in that clash have together. The bigger side survives with the difference, and equal sides wipe each other out. Groups that meet at the same moment all fight in one clash.",
-      "A close clash, where the smaller side has at least half as many soldiers as the bigger one, stops every surviving group where they met. A stopped group stays there for as many turns as its Recovery upgrade says, and can still be attacked by other groups.",
+      "In a clash, every team loses as many soldiers as all its enemies in that clash have together. A team survives only if it has more soldiers than all the teams against it combined, and keeps the difference. Groups that meet at the same moment all fight in one clash.",
+      "A close clash stops every group in it where they met. A clash is close when two groups of different teams in it were close in size: the smaller had at least half as many soldiers as the bigger one, counted before the fight. A stopped group stays there for as many turns as its Recovery upgrade says, and can still be attacked by other groups.",
     ],
   },
   {
@@ -230,7 +230,7 @@ export const rulesSections: readonly RulesSection[] = [
     items: [
       "A team that has no castles and no soldier groups left is out. When only one team is left, it wins. Neutral castles don't need to be captured.",
       "When the last teams are knocked out in the same turn, the game is a draw.",
-      `The game lasts at most ${maxGenerations} generations. Then the team with the most castles wins, and teams tied for the most castles draw.`,
+      `The game ends when generation ${maxGenerations} is reached, so turn ${maxGenerations - 1} is the last one played. Then the team with the most castles wins, and teams tied for the most castles draw.`,
       "When a turn's time runs out before every player has finished it, every team with a player who hadn't finished loses. Of the other teams still in the game, the one with the most castles wins, and a tie is a draw.",
     ],
   },
