@@ -22,7 +22,7 @@ dev = [
 # The shared lobby acceptance runner executes integration/island_battles here.
 integration = [
     # The lobby's client at the version go.mod pins (README.md, "The lobby's version").
-    "mpl-lobby-client==0.3.0",
+    "mpl-lobby-client==0.4.0",
     "pytest>=8.0,<9",
     "pytest-asyncio>=0.24,<1",
 ]

@@ -120,8 +120,8 @@ func recordingFailures(registration domain.GameRegistration) domain.GameRegistra
 		}
 	}
 	if validate := registration.ValidateSeat; validate != nil {
-		registration.ValidateSeat = func(ctx context.Context, lobbyID string, settings json.RawMessage) (string, error) {
-			name, err := validate(ctx, lobbyID, settings)
+		registration.ValidateSeat = func(ctx context.Context, lobbyID, playerID string, settings json.RawMessage) (string, error) {
+			name, err := validate(ctx, lobbyID, playerID, settings)
 			return name, recordUnavailable(ctx, err)
 		}
 	}

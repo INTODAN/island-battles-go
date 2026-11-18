@@ -752,17 +752,20 @@ func UploadedBotSeatName(ownerName string) string {
 // "Hosted bot", or any ready package of the lobby, named after its owner.
 // Whatever the server bots, a seat may be a localhost bot on a port of the
 // host's machine, named after its port, such as "Localhost bot (port
-// 41415)". Its settings name the host who adds it, bot_relay_player_id,
+// 41415)". Its settings name the player who adds it, bot_relay_player_id,
 // since the lobby records no seat's adder: only that player's game client
 // relays it, so a later host is never sent to ports that someone else chose.
-// Through Lobbies it checks that they are the lobby's host, and that the port
-// differs from their own localhost bot's and every other localhost bot
-// seat's that they added, unless the seat is already there with these
-// settings, when the host sends its request again. The start checks the
-// ports again, since the host can change their own port later. A host who
-// sends another's player ID while the host changes, within the moment
-// between this check and the lobby's, can still name them.
-func (rules BotRules) ValidateBotSeat(ctx context.Context, lobbyID string, settings json.RawMessage) (string, error) {
+// The lobby passes the player who adds the seat as playerID and checks that
+// they are the host of a waiting lobby only afterwards, in its transaction,
+// so bot_relay_player_id must be playerID. A lobby older than INTODAN/mpl
+// v0.4.0 passes no playerID; then bot_relay_player_id must be the lobby's
+// current host, read through Lobbies, as it was before. Through Lobbies it
+// also checks that the port differs from the adder's own localhost bot's and
+// every other localhost bot seat's that they added, unless the seat is
+// already there with these settings, when the host sends its request again.
+// The start checks the ports again, since the host can change their own port
+// later.
+func (rules BotRules) ValidateBotSeat(ctx context.Context, lobbyID, playerID string, settings json.RawMessage) (string, error) {
 	decoded, err := seatSettings(settings, rules.ServerBots.Enabled)
 	if err != nil {
 		return "", err
@@ -771,14 +774,20 @@ func (rules BotRules) ValidateBotSeat(ctx context.Context, lobbyID string, setti
 	case decoded.BotLevel != nil:
 		return BotSeatName(*decoded.BotLevel), nil
 	case decoded.BotLocalhostPort != nil:
+		const notTheAdder = "bot_relay_player_id must be your own player ID, as the lobby's host: only the tab of the host who adds a localhost bot seat relays it"
+		if playerID != "" && decoded.BotRelayPlayerID != playerID {
+			return "", reject(422, notTheAdder)
+		}
 		lobby, err := rules.snapshot(ctx, lobbyID)
 		if err != nil {
 			return "", err
 		}
 		port := *decoded.BotLocalhostPort
 		if lobby != nil {
-			if lobby.Lobby.HostPlayerID == nil || *lobby.Lobby.HostPlayerID != decoded.BotRelayPlayerID {
-				return "", reject(422, "bot_relay_player_id must be your own player ID, as the lobby's host: only the tab of the host who adds a localhost bot seat relays it")
+			// Production's lobby is deployed on its own, and one older than
+			// v0.4.0 names nobody, so the adder must be the current host.
+			if playerID == "" && (lobby.Lobby.HostPlayerID == nil || *lobby.Lobby.HostPlayerID != decoded.BotRelayPlayerID) {
+				return "", reject(422, notTheAdder)
 			}
 			if sameLocalhostSeat(*lobby, decoded) {
 				return LocalhostBotSeatName(port), nil

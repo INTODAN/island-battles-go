@@ -52,6 +52,9 @@ type lobbyStack struct {
 	// hookCallCount.
 	hookCalls     map[string]int
 	hookCallsLock sync.Mutex
+	// hooksURL serves Island Battles' hooks, for a test that calls them as
+	// another lobby would.
+	hooksURL string
 }
 
 // hookCallCount is how many times the lobby called hook.
@@ -88,6 +91,7 @@ func newLobbyStackWith(t *testing.T, serverBots services.ServerBots) *lobbyStack
 		hooks.ServeHTTP(response, request)
 	}))
 	t.Cleanup(hooksServer.Close)
+	stack.hooksURL = hooksServer.URL + lobbyadapter.HooksPath
 	gameAPIServer := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		gameAPI.ServeHTTP(response, request)
 	}))
