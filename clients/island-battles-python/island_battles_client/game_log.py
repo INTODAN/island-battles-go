@@ -195,6 +195,18 @@ def report_server_limit(generation_id: int, detail: str) -> None:
     )
 
 
+def report_passed_turn(generation_id: int, pace_milliseconds: int) -> None:
+    """Write to stdout and the file that a real-time turn was played without
+    the bot's answer, which came after the turn pace."""
+    _sdk_logger.warning(
+        "the bot was slower than the turn pace of %g s on generation %d, so the "
+        "turn was played without its answer and it passed this turn",
+        pace_milliseconds / 1000,
+        generation_id,
+        extra={_NOT_FOR_GAME_LOG: True},
+    )
+
+
 class _OwnerFilter(logging.Filter):
     """Pass records of one client's code, and records logged outside any client."""
 

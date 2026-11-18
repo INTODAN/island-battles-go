@@ -36,6 +36,7 @@ from .errors import (
     GameTransportError,
     InsufficientSoldiersError,
     InvalidBotResultError,
+    StaleGenerationError,
     UpgradeMaxLevelError,
 )
 from .models import (
@@ -83,6 +84,7 @@ __all__ = [
     "Play",
     "PublicGenerationCommand",
     "SoldierGroup",
+    "StaleGenerationError",
     "TeamType",
     "Upgrade",
     "UpgradeLevel",

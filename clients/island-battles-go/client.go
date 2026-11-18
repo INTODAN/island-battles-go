@@ -996,6 +996,9 @@ func (client *Client) playTurn(state generationState, stored int) error {
 	}
 	result, err := client.callBot(turnLog, turn)
 	turnLog.close()
+	// A bot that fails once its context ended at a real-time turn's end
+	// was slower than the pace.
+	tooSlow := err != nil && state.TurnPaceMilliseconds != nil && turn.TurnDeadlineAt != nil && !time.Now().Before(*turn.TurnDeadlineAt)
 	if err == nil {
 		turnLog.addResult(result)
 		if client.isClosed() {
@@ -1005,9 +1008,18 @@ func (client *Client) playTurn(state generationState, stored int) error {
 		if err == nil {
 			return nil
 		}
+		tooSlow = state.TurnPaceMilliseconds != nil && errors.Is(err, ErrStaleGeneration)
 	}
 	if client.isClosed() || errors.Is(err, ErrGameEnded) || errors.Is(err, ErrTransport) || errors.Is(err, ErrAuthentication) || errors.Is(err, ErrClientClosed) {
 		return err
+	}
+	if tooSlow {
+		// The server played the real-time turn without the bot's answer, so
+		// the bot passed it. Reading the state plays the next turn.
+		client.sdkLog.Warn(fmt.Sprintf("the bot was slower than the turn pace of %s on generation %d, so the turn was played without its answer and it passed this turn",
+			time.Duration(*state.TurnPaceMilliseconds)*time.Millisecond, state.GenerationID))
+		client.signalWakeup()
+		return nil
 	}
 	// The bot failed, returned an invalid result, or the server rejected
 	// the result. The turn stays open, and the client stops after the error
