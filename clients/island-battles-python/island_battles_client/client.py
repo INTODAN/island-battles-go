@@ -70,12 +70,14 @@ def _is_lobby_path(path: str) -> bool:
 
 
 def played_by_server(bot: BotChoice) -> str:
-    """Says which bot the server plays a seat with, for a seat whose bot is
-    not the player's localhost bot, and how to play it with this client."""
+    """Says who plays a seat whose bot is not the player's localhost bot, and,
+    for a server bot, how to play it with this client."""
     instead = (
         "; to play it with your own bot here, choose your localhost bot "
         "in the lobby before getting ready"
     )
+    if bot.kind == "manual":
+        return "this seat is played by hand in the 3D client"
     if bot.kind == "default":
         return f"the backend plays this seat with its level {bot.level} default bot{instead}"
     if bot.kind == "hosted":

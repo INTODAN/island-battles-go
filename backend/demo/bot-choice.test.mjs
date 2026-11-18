@@ -7,6 +7,9 @@ test("select values stand for choices and back", () => {
     assert.deepEqual(choiceFromValue(choiceValue(choice)), choice);
   }
   assert.equal(choiceValue(null), "");
+  // Play by hand is the 3D client's to choose: its value never builds a choice here.
+  assert.equal(choiceValue({ kind: "manual" }), "manual");
+  assert.equal(choiceFromValue("manual"), null);
   assert.equal(choiceFromValue(""), null);
   assert.equal(choiceFromValue("level-0"), null);
   assert.equal(choiceFromValue("level-x"), null);
@@ -19,6 +22,12 @@ test("select values stand for choices and back", () => {
   assert.deepEqual(choiceFromValue("localhost", "", 41415), { kind: "localhost", port: 41415 });
   assert.deepEqual(choiceFromValue("localhost", "", 41414), { kind: "localhost" });
   assert.equal(choiceValue({ kind: "localhost", port: 41415 }), "localhost");
+});
+
+test("a member who chose to play by hand in the 3D client is named for it", () => {
+  assert.equal(describeBot({ kind: "manual" }), "plays by hand");
+  const members = [{ display_name: "Alex", player_id: "p1", member_settings: { bot: { kind: "manual" } } }];
+  assert.equal(describeChoices(members, "p1"), "Alex (you): plays by hand");
 });
 
 test("a localhost bot is named with its port, and a localhost seat with whoever added it", () => {

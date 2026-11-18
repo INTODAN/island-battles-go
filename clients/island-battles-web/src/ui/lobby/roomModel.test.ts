@@ -79,6 +79,9 @@ describe("a bot in the member settings", () => {
     expect(
       memberSettingsBot({ bot: { kind: "uploaded", package_id: "pkg-1" } }),
     ).toEqual({ kind: "uploaded", package_id: "pkg-1" });
+    expect(memberSettingsBot({ bot: { kind: "manual" } })).toEqual({
+      kind: "manual",
+    });
     for (const settings of [
       null,
       undefined,
@@ -229,6 +232,22 @@ describe("bot choices", () => {
     expect(describeBot({ kind: "uploaded", package_id: "pkg-1" })).toBe(
       "Uploaded bot",
     );
+    expect(describeBot({ kind: "manual" })).toBe("Plays by hand");
+  });
+
+  test("a manual choice is named in the room and is the select's current value", () => {
+    const manual = {
+      ...snapshot,
+      members: (snapshot.members ?? []).map((entry) =>
+        entry.player_id === "p1"
+          ? { ...entry, member_settings: { bot: { kind: "manual" } } }
+          : entry,
+      ),
+    } as unknown as Snapshot;
+    const you = buildRoom(manual, "p1").you;
+    expect(you?.bot).toEqual({ kind: "manual" });
+    expect(describeBot(you?.bot)).toBe("Plays by hand");
+    expect(choiceValue(you?.bot)).toBe("manual");
   });
 });
 

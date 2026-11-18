@@ -4,6 +4,8 @@ A 3D browser client for Island Battles, written in TypeScript with [Babylon.js](
 
 The tooling is [Bun](https://bun.sh/) (runtime, package manager, bundler, dev server and test runner) and [Biome](https://biomejs.dev/) (lint, format and import sorting). Bun does not type-check, so `tsc` does.
 
+**A new bot kind, `manual`, a breaking change of the game API (#338).** `BotChoice.kind` and `MemberBot.kind` can be `manual`, a person who plays by hand: nothing plays or relays that seat. Until the bot picker offers it, a member who chose it elsewhere shows as "Plays by hand" in the room, and the game view's player list says "Plays by hand". What to do: regenerate the types (`bun run generate`) and upgrade.
+
 ## Prerequisites
 
 - [Bun](https://bun.sh/) 1.4.4, the version pinned in `packageManager` in `package.json`. CI reads the same field.

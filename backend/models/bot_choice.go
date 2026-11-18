@@ -36,6 +36,10 @@ const (
 	// UploadedBot is a bot package uploaded to the lobby, which the server's
 	// runners play, so no tab relays it.
 	UploadedBot BotKind = "uploaded"
+	// ManualBot is a person who plays by hand: nothing plays or relays the
+	// player, and their game client sends their commands with POST
+	// /generation/commands.
+	ManualBot BotKind = "manual"
 )
 
 // PlayedByServer reports whether the server, not the player's game client,
@@ -45,7 +49,7 @@ func (kind BotKind) PlayedByServer() bool { return kind == HostedBot || kind == 
 // BotChoiceView is a player's bot in a game, copied from their lobby choice
 // when the game started.
 type BotChoiceView struct {
-	Kind  BotKind `json:"kind" enum:"localhost,default,hosted,uploaded" doc:"localhost: the player's own bot, which island-battles-bot serve runs on their machine; their game client relays each turn to it. default: a default bot of GET /bots/defaults, which the backend plays itself, so the player's client submits nothing. hosted: the player's own bot server at a public URL, which the server sends each turn to; no client relays it. uploaded: a bot package uploaded to the lobby, which the server runs; no client relays it."`
+	Kind  BotKind `json:"kind" enum:"localhost,default,hosted,uploaded,manual" doc:"localhost: the player's own bot, which island-battles-bot serve runs on their machine; their game client relays each turn to it. default: a default bot of GET /bots/defaults, which the backend plays itself, so the player's client submits nothing. hosted: the player's own bot server at a public URL, which the server sends each turn to; no client relays it. uploaded: a bot package uploaded to the lobby, which the server runs; no client relays it. manual: a person who plays by hand in the 3D client; nothing plays or relays the player, and their client sends their commands."`
 	Level *uint   `json:"level,omitempty" minimum:"1" doc:"For kind default, the level of the default bot, one that GET /bots/defaults lists. Absent for the other kinds."`
 	Host  string  `json:"host,omitempty" doc:"For kind hosted, the host name of the bot's URL, such as bot.example.com; the rest of the URL is not shown. Absent for the other kinds."`
 	Port  *uint   `json:"port,omitempty" minimum:"1024" maximum:"65535" doc:"For kind localhost, the port on 127.0.0.1 where the player's client delivers each turn: the one they chose in the lobby, 41414 by default. Absent for the other kinds."`
@@ -54,7 +58,7 @@ type BotChoiceView struct {
 // MemberBotView is the bot that a person chooses for themselves, in their
 // lobby member settings, {"bot": {...}}.
 type MemberBotView struct {
-	Kind      BotKind `json:"kind" enum:"localhost,default,hosted,uploaded" doc:"localhost: your own bot, which island-battles-bot serve runs on your machine and your game client relays each turn to. default: a default bot of GET /bots/defaults, which the backend plays. hosted: your own bot server at url, which the server sends each turn to. uploaded: your own bot package in this lobby, package_id, which the server runs. hosted and uploaded are offered only when GET /bots/defaults says server_bots."`
+	Kind      BotKind `json:"kind" enum:"localhost,default,hosted,uploaded,manual" doc:"localhost: your own bot, which island-battles-bot serve runs on your machine and your game client relays each turn to. default: a default bot of GET /bots/defaults, which the backend plays. hosted: your own bot server at url, which the server sends each turn to. uploaded: your own bot package in this lobby, package_id, which the server runs. manual: you play by hand in the 3D client; no bot plays for you. hosted and uploaded are offered only when GET /bots/defaults says server_bots."`
 	Level     *uint   `json:"level,omitempty" minimum:"1" doc:"For kind default only: a level that GET /bots/defaults lists."`
 	URL       string  `json:"url,omitempty" maxLength:"2048" doc:"For kind hosted only: where the server POSTs each TurnDelivery. https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public."`
 	PackageID string  `json:"package_id,omitempty" format:"uuid" doc:"For kind uploaded only: a package of yours in this lobby, from GET /game/lobbies/{lobby_id}/bot-packages."`
@@ -110,6 +114,8 @@ func FrozenBot(player FrozenGamePlayer) BotChoiceView {
 		return view
 	case UploadedBot:
 		return BotChoiceView{Kind: UploadedBot}
+	case ManualBot:
+		return BotChoiceView{Kind: ManualBot}
 	default:
 		port := LocalhostPort(player.BotPort)
 		return BotChoiceView{Kind: LocalhostBot, Port: &port}

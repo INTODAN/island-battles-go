@@ -64,13 +64,15 @@ type relayedBot struct {
 }
 
 // botKinds are the contract's BotChoice kinds.
-var botKinds = []string{"localhost", "default", "hosted", "uploaded"}
+var botKinds = []string{"localhost", "default", "hosted", "uploaded", "manual"}
 
 // playedByServer says which bot the server plays a seat with, and how to
 // play the seat with a Client instead.
 func (bot botChoice) playedByServer() string {
 	const instead = "; to play it with your own bot here, choose your localhost bot in the lobby before getting ready"
 	switch bot.Kind {
+	case "manual":
+		return "this seat is played by hand in the 3D client"
 	case "default":
 		level := uint(0)
 		if bot.Level != nil {

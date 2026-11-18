@@ -129,12 +129,12 @@ func TestServerBotsAreRefusedWhileTheFlagIsOff(t *testing.T) {
 	stack := newLobbyStack(t)
 	alice, bob := stack.guest("Alice"), stack.guest("Bob")
 	room := stack.room(lobbyadapter.GameKey, alice, bob)
-	shape := `member_settings must be {"bot": {"kind": "localhost"}}, with an optional "port" from 1024 to 65535, or {"bot": {"kind": "default", "level": N}} with a level that GET /bots/defaults lists`
+	shape := `member_settings must be {"bot": {"kind": "manual"}}, {"bot": {"kind": "localhost"}}, with an optional "port" from 1024 to 65535, or {"bot": {"kind": "default", "level": N}} with a level that GET /bots/defaults lists`
 	for settings, detail := range map[string]string{
 		`{"bot":{"kind":"hosted","url":"https://bot.example.com/turn"}}`:      shape,
 		`{"bot":{"kind":"uploaded","package_id":"` + uuid.NewString() + `"}}`: shape,
-		`{"bot":{"kind":"hosted"}}`:                                           "kind must be localhost or default",
-		`{"bot":{"kind":"uploaded"}}`:                                         "kind must be localhost or default",
+		`{"bot":{"kind":"hosted"}}`:                                           "kind must be manual, localhost or default",
+		`{"bot":{"kind":"uploaded"}}`:                                         "kind must be manual, localhost or default",
 	} {
 		var refusal problem
 		stack.expect(stack.setMemberSettings(room, alice, settings), http.StatusUnprocessableEntity, &refusal)
@@ -196,7 +196,7 @@ func TestAHostedBotURLFollowsEveryRule(t *testing.T) {
 		`{"bot":{"kind":"localhost","url":"https://bot.example.com"}}`:        "url is only for kind hosted",
 		`{"bot":{"kind":"uploaded"}}`:                                         "kind uploaded needs a package_id: one of your packages in this lobby",
 		`{"bot":{"kind":"default","level":1,"package_id":"x"}}`:               "package_id is only for kind uploaded",
-		`{"bot":{"kind":"remote"}}`:                                           "kind must be localhost, default, hosted or uploaded",
+		`{"bot":{"kind":"remote"}}`:                                           "kind must be manual, localhost, default, hosted or uploaded",
 	} {
 		var refusal problem
 		stack.expect(stack.setMemberSettings(room, alice, settings), http.StatusUnprocessableEntity, &refusal)
