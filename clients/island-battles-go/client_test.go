@@ -734,7 +734,10 @@ func TestRunPlaysASeatToTheEnd(t *testing.T) {
 	play := func(ctx context.Context, turn Turn) (Result, error) {
 		Logger(ctx).Debug("not logged at info")
 		Logger(ctx).Info("playing", "generation", turn.Generation.ID)
-		go realtime.publish(gameEndedEvent, server.stateOf(2, false, map[string]any{"reason": "generation_cap", "winner_team_color": nil, "summary": "Draw"}))
+		// The end names the final turn's number, not its generation's ID.
+		final := server.stateOf(2, false, map[string]any{"reason": "generation_cap", "winner_team_color": nil, "summary": "Draw"})
+		final["turn_number"] = 300
+		go realtime.publish(gameEndedEvent, final)
 		return Result{}, nil
 	}
 	var stdout, stderr bytes.Buffer
@@ -742,7 +745,7 @@ func TestRunPlaysASeatToTheEnd(t *testing.T) {
 		name: "mybot", play: play, stdout: &syncWriter{writer: &stdout}, stderr: &stderr,
 		clientOptions: []ClientOption{func(client *Client) { client.dial = realtime.dial }},
 	}, []string{"run", "--base-url", server.server.URL, "--token=good", "--lobby-id", testLobbyID, "--log-file", logFile})
-	if status != 0 || !strings.Contains(stdout.String(), "INFO island_battles.player: playing generation=1\n") || !strings.HasSuffix(stdout.String(), "game ended at generation 2: Draw\n") || strings.Contains(stdout.String(), "not logged") {
+	if status != 0 || !strings.Contains(stdout.String(), "INFO island_battles.player: playing generation=1\n") || !strings.HasSuffix(stdout.String(), "game ended at generation 300: Draw\n") || strings.Contains(stdout.String(), "not logged") {
 		t.Fatalf("got status %d, stdout %q, stderr %q", status, stdout.String(), stderr.String())
 	}
 	written, err := os.ReadFile(logFile)

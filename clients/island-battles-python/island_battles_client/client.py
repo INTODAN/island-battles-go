@@ -253,6 +253,15 @@ class IslandBattlesClient:
         return self._state.generation if self._state is not None else None
 
     @property
+    def turn_number(self) -> int | None:
+        """The latest generation's turn number in the game, from 1.
+
+        None before the first state read. After the game ends, it is the
+        final generation's.
+        """
+        return self._state.turn_number if self._state is not None else None
+
+    @property
     def team_color(self) -> int | None:
         """The player's frozen team color, known after the first state read."""
         return self._expected_identity[3] if self._expected_identity else None
