@@ -1,5 +1,6 @@
 import { ApiError } from "../../api/errors";
 import { h } from "../dom";
+import { rulesButton } from "../rules/rulesDialog";
 import type { LobbyActions } from "./actions";
 import {
   CreateRequests,
@@ -236,6 +237,8 @@ export function mountMenuScreen(options: MenuScreenOptions): Screen {
         },
         "Change name",
       ),
+      " · ",
+      rulesButton("link"),
     ),
   );
   const el = h(
