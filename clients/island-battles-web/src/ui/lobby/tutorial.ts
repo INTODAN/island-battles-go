@@ -1,3 +1,4 @@
+import { serveCommand } from "../../bots/localhost";
 import { copyText, h } from "../dom";
 
 /** Where the template is published: the repository's `templates/python-bot` folder. */
@@ -69,7 +70,8 @@ export function tutorialSteps(system: TutorialSystem): TutorialStep[] {
     {
       title: "2. Run it on your computer",
       intro: "Serve your bot on http://127.0.0.1:41414 and leave it running:",
-      commands: [scriptCommand(system, "serve")],
+      // The same command on every system, and the one the bot picker shows.
+      commands: [serveCommand],
       after:
         "Create a lobby, add a default bot seat for the other team, choose My localhost bot as your bot, get ready and start. This tab hands each turn to your bot. Saving bot.py reloads it.",
     },

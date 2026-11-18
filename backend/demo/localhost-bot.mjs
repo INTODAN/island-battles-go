@@ -50,10 +50,10 @@ export function nextFreePort(taken = []) {
   return port;
 }
 
-// The command a player runs to serve their bot on port; mybot:play names
-// their module and function.
+// The command a player runs to serve their bot on port; bot:play is the bot
+// template's module and function.
 export function serveCommandFor(port = defaultBotPort) {
-  return port === defaultBotPort ? "uv run island-battles-bot serve mybot:play" : `uv run island-battles-bot serve --port ${port} mybot:play`;
+  return port === defaultBotPort ? "uv run island-battles-bot serve bot:play" : `uv run island-battles-bot serve bot:play --port ${port}`;
 }
 
 // The command for the default port.
