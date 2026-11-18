@@ -45,6 +45,23 @@ export function describeTurnTimeout(
   return `Turn limit: ${seconds % 60 === 0 ? `${seconds / 60} min` : `${seconds} s`}`;
 }
 
+/**
+ * The turn paces the form offers, as `turn_pace_milliseconds`: how long each
+ * turn of a real-time game lasts, a game where someone plays by hand.
+ */
+export const turnPaces: { milliseconds: number; label: string }[] = [
+  { milliseconds: 500, label: "0.5 s" },
+  { milliseconds: 1000, label: "1 s" },
+  { milliseconds: 2000, label: "2 s" },
+];
+export const defaultTurnPace = 1000;
+
+/** A lobby's turn pace from its `game_settings`; 1000 ms when it sets none. */
+function turnPaceOf(settings: Record<string, unknown> | undefined): number {
+  const milliseconds = settings?.turn_pace_milliseconds;
+  return typeof milliseconds === "number" ? milliseconds : defaultTurnPace;
+}
+
 /** The game lengths the form offers, as `max_generations`: the most turns of a game. */
 export const gameLengths = [150, 300, 600, 1200];
 export const defaultGameLength = 300;
@@ -71,7 +88,7 @@ export type MapChoice =
   /** A map file's parsed JSON once `POST /map/validate` accepted it, or null with the problem to show. */
   | { kind: "file"; map: MapTemplate | null; error?: string };
 
-/** The map, turn limit and game length fields, which the create form and the room's Change map form share. */
+/** The map, turn limit, turn pace and game length fields, which the create form and the room's Change map form share. */
 export interface MapSettingsValues {
   map: MapChoice;
   /** Seconds, or null for no limit. */
@@ -81,6 +98,10 @@ export interface MapSettingsValues {
    * accepted even when the list lacks it, as one set through the API may be.
    */
   currentTurnTimeoutSeconds?: number | null;
+  /** How long each turn of a real-time game lasts, `turn_pace_milliseconds`. */
+  turnPaceMilliseconds: number;
+  /** The lobby's current turn pace, accepted even when the list lacks it. */
+  currentTurnPaceMilliseconds?: number;
   /** The most turns of the game, `max_generations`. */
   maxGenerations: number;
   /** The lobby's current game length, accepted even when the list lacks it. */
@@ -91,7 +112,12 @@ export interface CreateFormValues extends MapSettingsValues {
   lobbyName: string;
 }
 
-export type FormField = "lobbyName" | "map" | "turnTimeout" | "gameLength";
+export type FormField =
+  | "lobbyName"
+  | "map"
+  | "turnTimeout"
+  | "turnPace"
+  | "gameLength";
 
 export type FormErrors = Partial<Record<FormField, string>>;
 
@@ -192,6 +218,8 @@ export function lobbyMapSettings(
     map,
     turnTimeoutSeconds,
     currentTurnTimeoutSeconds: turnTimeoutSeconds,
+    turnPaceMilliseconds: turnPaceOf(settings),
+    currentTurnPaceMilliseconds: turnPaceOf(settings),
     maxGenerations: gameLengthOf(settings),
     currentMaxGenerations: gameLengthOf(settings),
   };
@@ -227,6 +255,14 @@ export function validateMapSettings(
     errors.turnTimeout = "Pick one of the listed turn limits.";
   }
   if (
+    values.turnPaceMilliseconds !== values.currentTurnPaceMilliseconds &&
+    !turnPaces.some(
+      (option) => option.milliseconds === values.turnPaceMilliseconds,
+    )
+  ) {
+    errors.turnPace = "Pick one of the listed turn paces.";
+  }
+  if (
     values.maxGenerations !== values.currentMaxGenerations &&
     !gameLengths.includes(values.maxGenerations)
   ) {
@@ -238,6 +274,7 @@ export function validateMapSettings(
 
   const gameSettings: Record<string, unknown> = {
     turn_timeout_seconds: values.turnTimeoutSeconds,
+    turn_pace_milliseconds: values.turnPaceMilliseconds,
     max_generations: values.maxGenerations,
   };
   if (choice.kind === "template") {

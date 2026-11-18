@@ -33,6 +33,7 @@ function state(
     turn_number: generationId,
     max_generations: 300,
     turn_deadline_at: null,
+    turn_pace_milliseconds: null,
     ...extra,
   } as GenerationState;
 }

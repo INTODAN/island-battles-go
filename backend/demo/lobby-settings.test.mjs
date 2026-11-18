@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { builderHello, builderWindowAction, changeSettingsLabel, describeGameLength, describeSettings, describeTurnTimeout, loadDefaultMaps, mapFromBuilderMessage, readMapFile, settingsSelection, teamNames, turnTimeouts } from "./lobby-settings.mjs";
+import { builderHello, builderWindowAction, changeSettingsLabel, describeGameLength, describeSettings, describeTurnPace, describeTurnTimeout, loadDefaultMaps, mapFromBuilderMessage, readMapFile, settingsSelection, teamNames, turnPaces, turnTimeouts } from "./lobby-settings.mjs";
 
 test("a map's teams are named after the board's team colours", () => {
   assert.deepEqual(teamNames(2), ["Blue", "Red"]);
@@ -25,14 +25,14 @@ test("the room names the chosen map", async (context) => {
     if (!available) return new Response("", { status: 503 });
     return Response.json({ maps: [{ map_template_id: 4, map_name: "Strait", team_count: 2, plane_size_x: 10, plane_size_y: 6, castle_count: 3 }] });
   });
-  assert.equal(await describeSettings({}), "No map chosen · Turn limit: 30 s");
-  assert.equal(await describeSettings({ map: { map_name: "Loaded" }, turn_timeout_seconds: 10 }), "Map: Loaded · Turn limit: 10 s");
+  assert.equal(await describeSettings({}), "No map chosen · Turn limit: 30 s · Turn pace: 1 s");
+  assert.equal(await describeSettings({ map: { map_name: "Loaded" }, turn_timeout_seconds: 10 }), "Map: Loaded · Turn limit: 10 s · Turn pace: 1 s");
   assert.equal(requests, 0);
   // A failed list falls back to the ID and is fetched again next time.
-  assert.equal(await describeSettings({ map_template_id: 4 }), "Map: default map #4 · Turn limit: 30 s");
+  assert.equal(await describeSettings({ map_template_id: 4 }), "Map: default map #4 · Turn limit: 30 s · Turn pace: 1 s");
   available = true;
-  assert.equal(await describeSettings({ map_template_id: 4, turn_timeout_seconds: null }), "Map: Strait · No turn limit");
-  assert.equal(await describeSettings({ map_template_id: 9 }), "Map: default map #9 · Turn limit: 30 s");
+  assert.equal(await describeSettings({ map_template_id: 4, turn_timeout_seconds: null }), "Map: Strait · No turn limit · Turn pace: 1 s");
+  assert.equal(await describeSettings({ map_template_id: 9 }), "Map: default map #9 · Turn limit: 30 s · Turn pace: 1 s");
   assert.equal((await loadDefaultMaps()).length, 1);
   assert.equal(requests, 2);
 });
@@ -100,16 +100,16 @@ test("the room reads the default maps from the game's site", async (context) => 
     urls.push(url);
     return Response.json({ maps: [{ map_template_id: 7, map_name: "Bay", team_count: 2, plane_size_x: 10, plane_size_y: 6, castle_count: 3 }] });
   });
-  assert.equal(await describeSettings({ map_template_id: 7 }, { gameURL: "https://game.example" }), "Map: Bay · Turn limit: 30 s");
+  assert.equal(await describeSettings({ map_template_id: 7 }, { gameURL: "https://game.example" }), "Map: Bay · Turn limit: 30 s · Turn pace: 1 s");
   assert.deepEqual(urls, ["https://game.example/map/templates"]);
 });
 
 test("the room's form shows the lobby's current map and turn timeout", () => {
-  assert.deepEqual(settingsSelection({}), { map: "", file: null, timeout: "30", length: "300" });
-  assert.deepEqual(settingsSelection(null), { map: "", file: null, timeout: "30", length: "300" });
-  assert.deepEqual(settingsSelection({ map_template_id: 4, turn_timeout_seconds: null }), { map: "template:4", file: null, timeout: "none", length: "300" });
+  assert.deepEqual(settingsSelection({}), { map: "", file: null, timeout: "30", pace: "1000", length: "300" });
+  assert.deepEqual(settingsSelection(null), { map: "", file: null, timeout: "30", pace: "1000", length: "300" });
+  assert.deepEqual(settingsSelection({ map_template_id: 4, turn_timeout_seconds: null }), { map: "template:4", file: null, timeout: "none", pace: "1000", length: "300" });
   const map = { map_name: "Loaded", player_amount: 3 };
-  assert.deepEqual(settingsSelection({ map, turn_timeout_seconds: 120 }), { map: "file", file: map, timeout: "120", length: "300" });
+  assert.deepEqual(settingsSelection({ map, turn_timeout_seconds: 120 }), { map: "file", file: map, timeout: "120", pace: "1000", length: "300" });
   // A timeout the form doesn't offer, set through the API, is still shown.
   assert.equal(settingsSelection({ turn_timeout_seconds: 45 }).timeout, "45");
   assert.equal(changeSettingsLabel, "Change map");
@@ -120,6 +120,16 @@ test("a room names the game length when it isn't 300 turns", async () => {
   assert.equal(describeGameLength(null), "");
   assert.equal(describeGameLength({ max_generations: 300 }), "");
   assert.equal(describeGameLength({ max_generations: 600 }), "Game length: 600 turns");
-  assert.equal(await describeSettings({ map: { map_name: "Loaded" }, max_generations: 1200 }), "Map: Loaded · Turn limit: 30 s · Game length: 1200 turns");
+  assert.equal(await describeSettings({ map: { map_name: "Loaded" }, max_generations: 1200 }), "Map: Loaded · Turn limit: 30 s · Turn pace: 1 s · Game length: 1200 turns");
   assert.equal(settingsSelection({ max_generations: 150 }).length, "150");
+});
+
+test("a room names the turn pace of a real-time game", async () => {
+  assert.deepEqual(turnPaces.map(({ milliseconds }) => milliseconds), [500, 1000, 2000]);
+  assert.equal(describeTurnPace({}), "Turn pace: 1 s");
+  assert.equal(describeTurnPace(null), "Turn pace: 1 s");
+  assert.equal(describeTurnPace({ turn_pace_milliseconds: 500 }), "Turn pace: 0.5 s");
+  assert.equal(await describeSettings({ map: { map_name: "Loaded" }, turn_pace_milliseconds: 2000 }), "Map: Loaded · Turn limit: 30 s · Turn pace: 2 s");
+  assert.equal(settingsSelection({ turn_pace_milliseconds: 500 }).pace, "500");
+  assert.equal(settingsSelection({}).pace, "1000");
 });

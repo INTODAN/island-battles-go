@@ -11,6 +11,7 @@ import {
   commandOrder,
   commandRules,
   defaultGameLength,
+  defaultTurnPaceMilliseconds,
   defaultTurnSeconds,
   maxGameLength,
   minGameLength,
@@ -134,6 +135,9 @@ describe("game rules page", () => {
         "backend/models/lobby_settings.go",
         "DefaultTurnTimeoutSeconds",
       ),
+    );
+    expect(defaultTurnPaceMilliseconds, skill).toBe(
+      goConstant(lobbySettings, "DefaultTurnPaceMilliseconds"),
     );
     expect(clashRadius, skill).toBe(
       goConstant("backend/models/soldier_group.go", "DefaultClashRadius"),

@@ -25,6 +25,9 @@ export const maxGameLength = 1200;
 /** A turn's time limit when the lobby's host sets none (`DefaultTurnTimeoutSeconds`), in seconds. */
 export const defaultTurnSeconds = 30;
 
+/** A real-time game's turn pace when the lobby's host sets none (`DefaultTurnPaceMilliseconds`), in milliseconds. */
+export const defaultTurnPaceMilliseconds = 1000;
+
 /** How close enemy groups come before they clash, in world units (`DefaultClashRadius`). */
 export const clashRadius = 0.25;
 
@@ -139,7 +142,7 @@ export const commandOrder: readonly PlayerCommandType[] = [
 ];
 
 /**
- * What happens once every player has finished their turn, in order. The keys
+ * What happens when a turn ends, in order. The keys
  * after `commands` are the commands that `EndOfTurnCommands` in
  * `backend/simulation/commands.go` runs, in its order.
  */
@@ -197,8 +200,10 @@ export const rulesSections: readonly RulesSection[] = [
     id: "turns",
     title: "Your turn",
     paragraphs: [
-      `Everyone plays each turn at the same time. Give your orders and finish your turn before its time runs out: the lobby's host picks the turn limit, ${defaultTurnSeconds} seconds unless they choose another or no limit. Orders that a castle can't afford, counting what your team has already ordered this turn, are refused, and nothing of that batch is kept.`,
-      "Once every player has finished, the turn runs in this order:",
+      "Everyone plays each turn at the same time. Orders that a castle can't afford, counting what your team has already ordered this turn, are refused, and nothing of that batch is kept.",
+      `In a game of bots, a turn waits until every player has finished it. Finish yours before its time runs out: the lobby's host picks the turn limit, ${defaultTurnSeconds} seconds unless they choose another or no limit.`,
+      `When someone plays by hand, the game is real-time: each turn ends after the turn pace, ${defaultTurnPaceMilliseconds / 1000} second unless the host chooses another, with the orders given by then. A player who gave none passes, and nobody loses for a missed turn. A turn ends sooner when every player has finished it.`,
+      "When the turn ends, it runs in this order:",
     ],
     items: turnSteps.map((step) => step.text),
     ordered: true,
@@ -235,7 +240,7 @@ export const rulesSections: readonly RulesSection[] = [
       "A team that has no castles and no soldier groups left is out. When only one team is left, it wins. Neutral castles don't need to be captured.",
       "When the last teams are knocked out in the same turn, the game is a draw.",
       `The lobby's host picks the game's length N: ${defaultGameLength} generations unless they choose another, from ${minGameLength} to ${maxGameLength}. The game ends when generation N is reached, so turn N - 1 is the last one played. Then the team with the most castles wins, and teams tied for the most castles draw.`,
-      "When a turn's time runs out before every player has finished it, every team with a player who hadn't finished loses. Of the other teams still in the game, the one with the most castles wins, and a tie is a draw.",
+      "In a game of bots, when a turn's time runs out before every player has finished it, every team with a player who hadn't finished loses. Of the other teams still in the game, the one with the most castles wins, and a tie is a draw.",
     ],
   },
 ];
