@@ -1,11 +1,14 @@
 package lobbyadapter_test
 
 import (
+	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/INTODAN/mpl/domain"
+	"github.com/INTODAN/mpl/gamehooks"
 	"github.com/google/uuid"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/lobbyadapter"
@@ -132,6 +135,47 @@ func TestALocalhostBotsPortIsChecked(t *testing.T) {
 	state := stack.state(room, bob)
 	if state.Bot.Port == nil || *state.Bot.Port != 50000 || len(state.RelayedBots) != 0 {
 		t.Fatalf("Bob's state = %+v", state)
+	}
+}
+
+// The lobby tells the seat check who adds the seat, so the seat names that
+// player and the lobby's own check decides whether they are the host (#302).
+// A lobby older than INTODAN/mpl v0.4.0 tells nobody, and then the seat must
+// name the current host.
+func TestALocalhostSeatNamesThePlayerWhoAddsIt(t *testing.T) {
+	stack := newLobbyStack(t)
+	alice, bob := stack.guest("Alice"), stack.guest("Bob")
+	room := stack.teamsRoom(alice, "Red", "Blue", "Green")
+	stack.join(room, bob, 2)
+
+	// Bob names himself, which the seat check accepts, but he isn't the host.
+	var refusal problem
+	stack.expect(stack.addSeat(room, bob, 1, localhostSeat(41415, bob)), http.StatusForbidden, &refusal)
+	if refusal.Code != "not_host" {
+		t.Fatalf("Bob's seat = %+v", refusal)
+	}
+	stack.expect(stack.addSeat(room, alice, 1, localhostSeat(41415, bob)), http.StatusUnprocessableEntity, &refusal)
+	if refusal.Code != "invalid_seat_settings" || !strings.Contains(refusal.Detail, "bot_relay_player_id must be your own player ID") {
+		t.Fatalf("Alice's seat for Bob = %+v", refusal)
+	}
+
+	// An older lobby's validate-seat has no player_id.
+	client, err := gamehooks.NewClient(lobbyadapter.GameKey, stack.hooksURL, hookSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seat := func(adder guest) json.RawMessage {
+		settings, err := json.Marshal(localhostSeat(41415, adder))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return settings
+	}
+	if name, err := client.ValidateSeat(t.Context(), room.Lobby.ID, "", seat(alice)); err != nil || name != "Localhost bot (port 41415)" {
+		t.Fatalf("the host's seat without player_id = %q, %v", name, err)
+	}
+	if _, err := client.ValidateSeat(t.Context(), room.Lobby.ID, "", seat(bob)); err == nil || errors.Is(err, domain.ErrUnavailable) || !strings.Contains(err.Error(), "bot_relay_player_id must be your own player ID") {
+		t.Fatalf("Bob's seat without player_id = %v", err)
 	}
 }
 
