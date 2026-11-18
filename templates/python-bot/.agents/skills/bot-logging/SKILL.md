@@ -13,7 +13,7 @@ A bot's logs are how a player sees what it thought, in the game's log panel, aft
 from island_battles_client import logger  # a logging.Logger named "island_battles.player"
 
 def play(turn: BotTurn) -> BotTurnResult:
-    logger.info("generation %d: %d own castles", turn.generation.id, len(own))
+    logger.info("turn %d: %d own castles", turn.turn_number, len(own))  # not generation.id
     logger.warning("castle %d is under attack", castle.id)
     logger.exception("planner failed")  # inside `except`: keeps the traceback
 ```

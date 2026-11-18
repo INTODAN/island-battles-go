@@ -52,9 +52,12 @@ def play(turn: BotTurn) -> BotTurnResult:
         commands.append(send_soldier_group(castle.id, target.id, amount))
         sent_total += amount
 
+    # The turn's number in the game, from 1. Not `turn.generation.id`: that is
+    # the server's ID of the generation, which doesn't start at 1.
     logger.info(
-        "generation %d: %d commands, %d soldiers sent so far",
-        turn.generation.id,
+        "turn %d of %d: %d commands, %d soldiers sent so far",
+        turn.turn_number,
+        turn.max_generations - 1,
         len(commands),
         sent_total,
     )

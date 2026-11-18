@@ -17,6 +17,7 @@ Read the one that applies before changing the bot. They are in `.agents/skills/`
 - Every script in `scripts/` has a bash version (`.sh`) and a Windows one (`.cmd`). Change both together.
 - **Never keep state outside the memory.** The bot keeps nothing in globals, attributes, files or caches between turns. What it must remember goes in the `memory` JSON of the result (under 64 KiB).
 - The same `BotTurn` must always give the same result: no unseeded randomness, clocks, network or file access.
+- The turn's number is `turn.turn_number` (from 1) and the game's last generation `turn.max_generations`. `turn.generation.id` is the server's ID, not the turn number: never use it as one.
 - Keep the bot typed and documented. `ruff` and `ty` run in `check.sh`; fix their findings instead of ignoring them.
 - Change behavior together with a test in `tests/test_bot.py`.
 - Keep a turn well under a second: a late answer loses the game.
