@@ -1,0 +1,4 @@
+# cmd.exe misreads batch files with bare LF line endings, and bash misreads
+# scripts with CRLF ones (a Windows checkout with core.autocrlf), so pin both.
+*.cmd text eol=crlf
+*.sh text eol=lf
