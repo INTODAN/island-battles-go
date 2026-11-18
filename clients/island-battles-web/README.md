@@ -238,6 +238,10 @@ Recordings: [a clash](docs/screenshots/art-clash.gif), [a capture](docs/screensh
 
 Screenshots of each screen at desktop width and at 450 px are in [`docs/screenshots/`](docs/screenshots/) (`lobby-*.png`), including the room with bot seats (`lobby-seats-*.png`).
 
+## Game rules page
+
+A **Game rules** button on the start screen (beside **Change name**), in the lobby room (under its title) and in the game view's top bar opens the rules of the game in a modal dialog over the screen (`src/ui/rules/`): the goal, the board, a turn and its steps in order, the three orders a castle can get, clashes, reaching a castle, the upgrades with a table of every level's effect and cost, and how a game ends. Escape, **Close** or a click outside closes it. The text is written by hand in `rules.ts` and needs no server, so it also opens beside a demo file. `rules.test.ts` compares its upgrade levels and costs, its lists of upgrades and commands, the turn's steps and its numbers with the Go sources and `backend/api/openapi.json`. Any change to the rules updates the page in the same pull request, as the [game-rules skill](../../.agents/skills/game-rules/SKILL.md) says.
+
 ## The game view
 
 `src/ui/game/` is the screen a player sees once their lobby starts: the 3D board with a HUD, a timeline, the outcome and the bot logs. `mountGameView(container, { lobbyId, round, realtime, onBack })` shows the game of a lobby round live; `mountDemoView(container, { file, onBack })` opens a saved demo file with no server. Both return `{ dispose() }`. The lobby screens ([#98](https://github.com/INTODAN/island-battles-go/issues/98)) own the app shell and call them (an **Open demo file** button on the name and create-or-join screens opens a demo; the shell follows the game for the relay and passes the view a `realtime` whose `leaveGame()` does nothing, so the relay keeps running while the view mounts, swaps to a demo or goes away); [#103](https://github.com/INTODAN/island-battles-go/issues/103) reuses the same screen for spectators. `/?game=<lobby_id>` (for the guest session saved in the tab's `sessionStorage`) and `/?demo` or `/?demo=<fixture.json>` open them alone from the dev server, beside the app shell.
@@ -282,7 +286,7 @@ Someone outside the roster can watch a game live and scrub its history with only
 - `index.html`, `src/main.ts`, `src/styles.css`: the page and the Babylon scene. `src/main.ts` starts the dev page when the URL has `?fixture=`, and the lobby app otherwise. `@babylonjs/core` is imported from its ES module paths so the bundle tree-shakes; add the side-effect imports a feature needs (for example `StandardMaterial`) instead of importing the package root.
 - `src/realtime/`: the Centrifugo session, described above.
 - `src/bots/`: the localhost bot relay.
-- `src/ui/lobby/`: the lobby screens and the app shell's flow; `src/ui/game/`: the game view, described above.
+- `src/ui/lobby/`: the lobby screens and the app shell's flow; `src/ui/game/`: the game view; `src/ui/rules/`: the Game rules page; all described above.
 - `src/scene/`: the 3D board, described above.
 - `dev.ts` and `proxy.ts`: the dev server and its proxy rules.
 - `assets/`: files the client loads (the castle models and atlas, and the environment texture), each with a row in `assets/LICENSES.md`; `tools/castles/`: the script that makes the castle files; `tools/environment/`: the script that makes the environment texture.
