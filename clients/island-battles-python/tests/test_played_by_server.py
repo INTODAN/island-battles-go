@@ -26,3 +26,8 @@ def test_the_client_names_the_bot_the_server_plays(
     assert message.endswith(
         "choose your localhost bot in the lobby before getting ready"
     )
+
+
+def test_the_client_says_a_manual_seat_is_played_by_hand() -> None:
+    message = played_by_server(BotChoice.model_validate({"kind": "manual"}))
+    assert message == "this seat is played by hand in the 3D client"

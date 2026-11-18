@@ -9,6 +9,7 @@ describe("the bot that plays your seat", () => {
       true,
     );
     expect(playedByServer({ kind: "uploaded" })).toBe(true);
+    expect(playedByServer({ kind: "manual" })).toBe(false);
   });
 
   test("is named for the game view's player list", () => {
@@ -35,5 +36,6 @@ describe("the bot that plays your seat", () => {
     expect(describeGameBot({ kind: "uploaded" })).toBe(
       "Played by the server: your uploaded bot",
     );
+    expect(describeGameBot({ kind: "manual" })).toBe("Plays by hand");
   });
 });

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
-import { ExamplePlayer, GAME_ENDED_PROBLEM, singleSoldierCommands } from "./example-player.mjs";
+import { ExamplePlayer, GAME_ENDED_PROBLEM, serverBotStatus, singleSoldierCommands } from "./example-player.mjs";
 
 const initial = () => ({
   lobby_id: "room", player_id: "player", game_id: 1, generation_id: 1, team_color: 1, submitted: false,
@@ -26,6 +26,11 @@ async function until(predicate) {
   }
   assert.fail("expected event did not arrive");
 }
+
+test("a manual player's panel says to play the seat in the 3D client and submits nothing", () => {
+  assert.equal(serverBotStatus({ kind: "manual" })[0], "Play this seat in the 3D client");
+  assert.equal(serverBotStatus({ kind: "localhost" }), null);
+});
 
 test("one soldier from the first available owned castle to the first enemy", () => {
   assert.deepEqual(singleSoldierCommands(initial()), [{ command_type: "send_soldier_group", parameters: {

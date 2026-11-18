@@ -48,9 +48,11 @@ const BOT_RETRY_MS = 2000;
 // It reads and writes the game through fetcher, which the lobby page passes
 // with the player's token for the game; the player sends no credential of
 // its own.
-// The status of a player whose hosted or uploaded bot the server plays, as
+// The status of a player whom this page does not play: a hosted or uploaded
+// bot that the server plays, or a person who plays by hand, as
 // [title, detail], or null for another bot.
 export function serverBotStatus(bot) {
+  if (bot?.kind === "manual") return ["Play this seat in the 3D client", "This seat is played by hand in the 3D client; this page submits nothing for it."];
   if (bot?.kind === "hosted") return ["Played by the server", `The server sends each turn to your hosted bot${bot.host ? ` at ${bot.host}` : ""}; this page relays nothing.`];
   if (bot?.kind === "uploaded") return ["Played by the server", "The server runs your uploaded bot each turn; this page relays nothing."];
   return null;

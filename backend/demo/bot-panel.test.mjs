@@ -73,8 +73,25 @@ test("the select offers the localhost bot and every default level", async () => 
   const { instance } = panel();
   await delay(10);
   assert.deepEqual(instance.select.children.map((option) => [option.text, option.value]), [
-    ["Choose your bot", ""], ["My localhost bot", "localhost"], ["Default bot, level 1", "level-1"], ["Default bot, level 2", "level-2"],
+    ["Choose your bot", ""], ["My localhost bot", "localhost"], ["Play by hand (3D client only)", "manual"], ["Default bot, level 1", "level-1"], ["Default bot, level 2", "level-2"],
   ]);
+  instance.stopPolling();
+});
+
+test("Play by hand is listed disabled, can't be saved, and shows as the current choice of a member who chose it elsewhere", async () => {
+  const { instance, saved } = panel();
+  await delay(10);
+  const manual = instance.select.children.find((option) => option.value === "manual");
+  assert.equal(manual.text, "Play by hand (3D client only)");
+  assert.equal(manual.disabled, true);
+  await instance.save("manual");
+  assert.deepEqual(saved, []);
+  instance.update(snapshotWith({ bot: { kind: "manual" } }));
+  assert.equal(instance.select.value, "manual");
+  assert.match(instance.summary.textContent, /Alex \(you\): plays by hand/);
+  // Choosing any other option replaces it, as today.
+  await instance.save("level-1");
+  assert.deepEqual(saved, [{ bot: { kind: "default", level: 1 } }]);
   instance.stopPolling();
 });
 
@@ -145,7 +162,7 @@ test("without server bots the select offers no hosted or uploaded bot", async ()
   const { instance } = panel({ serverBots: false });
   await delay(10);
   instance.listed(packages);
-  assert.deepEqual(instance.select.children.map((option) => option.value), ["", "localhost", "level-1"]);
+  assert.deepEqual(instance.select.children.map((option) => option.value), ["", "localhost", "manual", "level-1"]);
   instance.stopPolling();
 });
 
@@ -155,7 +172,7 @@ test("with server bots the select offers your hosted bot and your own packages",
   await delay(10);
   instance.listed(packages);
   assert.deepEqual(instance.select.children.map((option) => [option.text, option.value]), [
-    ["Choose your bot", ""], ["My localhost bot", "localhost"], ["Default bot, level 1", "level-1"],
+    ["Choose your bot", ""], ["My localhost bot", "localhost"], ["Play by hand (3D client only)", "manual"], ["Default bot, level 1", "level-1"],
     ["My hosted bot (URL)", "hosted"], ["Uploaded: python · bot:play · 1.0 MiB", "package-p-mine"],
   ]);
   // The host's Add bot is told that the lobby's packages changed, once.
@@ -201,7 +218,7 @@ test("once the month's compute is spent, your uploaded bots are greyed out and t
   instance.listed(packages);
   instance.update(snapshotWith({ bot: { kind: "uploaded", package_id: "p-old" } }));
   assert.deepEqual(instance.select.children.map((option) => [option.value, option.disabled === true]), [
-    ["", false], ["localhost", false], ["level-1", false], ["hosted", false], ["package-p-mine", true], ["package-p-old", true],
+    ["", false], ["localhost", false], ["manual", true], ["level-1", false], ["hosted", false], ["package-p-mine", true], ["package-p-old", true],
   ]);
   assert.equal(instance.spentNote.hidden, false);
   assert.equal(instance.spentNote.textContent, "Uploaded bots have used this month's free compute. They're back on 1 December.");
@@ -212,7 +229,8 @@ test("while the month's compute lasts, nothing is greyed out or said", async () 
   const { instance } = panel({ serverBots: true, compute: async () => ({ month: "2026-11", used_gb_seconds: 1200, budget_gb_seconds: 300000, available: true }) });
   await delay(10);
   instance.listed(packages);
-  assert.ok(instance.select.children.every((option) => option.disabled !== true));
+  // Only "Play by hand", which this page can't choose, is disabled.
+  assert.ok(instance.select.children.every((option) => option.disabled !== true || option.value === "manual"));
   assert.equal(instance.spentNote.hidden, true);
   instance.stopPolling();
 });

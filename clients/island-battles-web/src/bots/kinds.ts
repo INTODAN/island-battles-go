@@ -1,7 +1,7 @@
 /**
  * The kinds of bot that play a player's seat in a game, as `GenerationState.bot` reports the
  * one copied at the start. Only a localhost bot is relayed by the player's client; the server
- * plays the others.
+ * plays the others, and nothing plays a manual player, who plays by hand.
  */
 
 import type { components } from "../api/generated/game";
@@ -25,6 +25,8 @@ export function describeGameBot(bot: BotChoice): string {
       return `Played by the server: your hosted bot${bot.host ? ` at ${bot.host}` : ""}`;
     case "uploaded":
       return "Played by the server: your uploaded bot";
+    case "manual":
+      return "Plays by hand";
   }
 }
 

@@ -77,6 +77,7 @@ export function memberSettingsBot(
   const bot = settings?.bot;
   if (typeof bot !== "object" || bot === null) return undefined;
   const { kind, level, url, package_id, port } = bot as Record<string, unknown>;
+  if (kind === "manual") return { kind };
   if (kind === "localhost") {
     return typeof port === "number" ? { kind, port } : { kind };
   }
@@ -198,6 +199,8 @@ export function describeBot(
       return `Hosted bot (${urlHost(bot.url ?? "")})`;
     case "uploaded":
       return "Uploaded bot";
+    case "manual":
+      return "Plays by hand";
   }
 }
 
@@ -213,6 +216,8 @@ export function choiceValue(bot: MemberBot | undefined): string {
       return "hosted";
     case "uploaded":
       return `package-${bot.package_id}`;
+    case "manual":
+      return "manual";
   }
 }
 
