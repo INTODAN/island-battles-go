@@ -14,17 +14,29 @@ import (
 // LobbySettings are the Island Battles settings a host chooses when creating a
 // lobby, its game_settings object. The lobby hands them back in the started
 // snapshot. They hold exactly one map choice: a default map by its template
-// ID, or a whole map file. They also set the turn timeout and the game's length.
+// ID, or a whole map file. They also set the turn timeout, the game's length
+// and the turn pace of a real-time game.
 type LobbySettings struct {
 	MapTemplateID uint             `json:"map_template_id,omitempty" minimum:"1" doc:"Start on this default map, a map_template_id from GET /map/templates. Give this or map, not both."`
 	Map           *MapTemplateView `json:"map,omitempty" doc:"Start on this map file. Give this or map_template_id, not both."`
 	// TurnTimeoutSeconds is nil for no limit. ParseLobbySettings fills in
 	// DefaultTurnTimeoutSeconds when the settings leave it out.
-	TurnTimeoutSeconds *uint `json:"turn_timeout_seconds,omitempty" minimum:"5" maximum:"600" nullable:"true" default:"30" doc:"How long each turn lasts, in whole seconds from 5 to 600, counted from when its generation was created; 30 when left out. null means no limit, for example while debugging a bot. When a turn's deadline passes before every player has completed it, each team with a player who hadn't loses, and the game ends."`
+	TurnTimeoutSeconds *uint `json:"turn_timeout_seconds,omitempty" minimum:"5" maximum:"600" nullable:"true" default:"30" doc:"How long each turn lasts, in whole seconds from 5 to 600, counted from when its generation was created; 30 when left out. null means no limit, for example while debugging a bot. When a turn's deadline passes before every player has completed it, each team with a player who hadn't loses, and the game ends. A real-time game, see turn_pace_milliseconds, has no turn timeout."`
 	// MaxGenerations is always set by ParseLobbySettings, to
 	// DefaultMaxGenerations when the settings leave it out.
 	MaxGenerations int `json:"max_generations,omitempty" minimum:"50" maximum:"1200" default:"300" doc:"The most turns the game may last, a whole number from 50 to 1200; 300 when left out. The turn that creates generation max_generations ends the game, if nothing has ended it before, and the team with the most castles wins."`
+	// TurnPaceMilliseconds is always set by ParseLobbySettings, to
+	// DefaultTurnPaceMilliseconds when the settings leave it out.
+	TurnPaceMilliseconds uint `json:"turn_pace_milliseconds,omitempty" minimum:"500" maximum:"5000" default:"1000" doc:"How long each turn lasts in a real-time game, in whole milliseconds from 500 to 5000; 1000 when left out. A game is real-time when a player on its roster plays by hand: each turn then ends this long after its generation was created, and the server plays it with the commands that arrived, so a player who sent nothing passes. A game of bots only doesn't use it and waits for every player."`
 }
+
+// The turn paces a lobby may set for a real-time game, in milliseconds, and
+// the pace of a lobby that sets none.
+const (
+	MinTurnPaceMilliseconds     = 500
+	MaxTurnPaceMilliseconds     = 5000
+	DefaultTurnPaceMilliseconds = 1000
+)
 
 // Turn timeouts a lobby may set, in seconds, and the timeout of a lobby that
 // sets none.
@@ -80,9 +92,11 @@ func NewLobbySettingsError(field, message string) *LobbySettingsError {
 // rejects, and a turn timeout that is neither null nor a whole number of
 // seconds from MinTurnTimeoutSeconds to MaxTurnTimeoutSeconds, and a
 // max_generations that is not a whole number from MinMaxGenerations to
-// MaxMaxGenerations. Settings without a turn timeout get
-// DefaultTurnTimeoutSeconds, and without max_generations
-// DefaultMaxGenerations. Whether a template
+// MaxMaxGenerations, and a turn_pace_milliseconds that is not a whole number
+// from MinTurnPaceMilliseconds to MaxTurnPaceMilliseconds. Settings without a
+// turn timeout get DefaultTurnTimeoutSeconds, without max_generations
+// DefaultMaxGenerations, and without a pace DefaultTurnPaceMilliseconds.
+// Whether a template
 // exists, and whether a map fits the lobby's teams, are checked separately.
 // Every rejection is a *LobbySettingsError.
 func ParseLobbySettings(raw json.RawMessage) (LobbySettings, error) {
@@ -91,8 +105,8 @@ func ParseLobbySettings(raw json.RawMessage) (LobbySettings, error) {
 		return LobbySettings{}, &LobbySettingsError{Details: []*huma.ErrorDetail{{Location: LobbySettingsLocation, Message: "must be a JSON object"}}}
 	}
 	for _, field := range slices.Sorted(maps.Keys(fields)) {
-		if field != "map_template_id" && field != "map" && field != "turn_timeout_seconds" && field != "max_generations" {
-			return LobbySettings{}, NewLobbySettingsError(field, "is not an Island Battles setting; the settings are map_template_id, map, turn_timeout_seconds and max_generations")
+		if field != "map_template_id" && field != "map" && field != "turn_timeout_seconds" && field != "max_generations" && field != "turn_pace_milliseconds" {
+			return LobbySettings{}, NewLobbySettingsError(field, "is not an Island Battles setting; the settings are map_template_id, map, turn_timeout_seconds, max_generations and turn_pace_milliseconds")
 		}
 	}
 	rawTemplateID, hasTemplateID := fields["map_template_id"]
@@ -113,7 +127,11 @@ func ParseLobbySettings(raw json.RawMessage) (LobbySettings, error) {
 	if err != nil {
 		return LobbySettings{}, err
 	}
-	settings := LobbySettings{TurnTimeoutSeconds: timeout, MaxGenerations: maxGenerations}
+	pace, err := parseTurnPace(fields)
+	if err != nil {
+		return LobbySettings{}, err
+	}
+	settings := LobbySettings{TurnTimeoutSeconds: timeout, MaxGenerations: maxGenerations, TurnPaceMilliseconds: pace}
 	if hasTemplateID {
 		if err := json.Unmarshal(rawTemplateID, &settings.MapTemplateID); err != nil || settings.MapTemplateID == 0 {
 			return LobbySettings{}, NewLobbySettingsError("map_template_id", "must be the positive integer ID of a default map")
@@ -168,6 +186,21 @@ func parseMaxGenerations(fields map[string]json.RawMessage) (int, error) {
 		return 0, NewLobbySettingsError("max_generations", fmt.Sprintf("must be a whole number of turns from %d to %d", MinMaxGenerations, MaxMaxGenerations))
 	}
 	return generations, nil
+}
+
+// parseTurnPace reads turn_pace_milliseconds from the settings' fields, and
+// DefaultTurnPaceMilliseconds when absent. It must be a JSON whole number:
+// 1.5, "1000" and null are rejected.
+func parseTurnPace(fields map[string]json.RawMessage) (uint, error) {
+	raw, present := fields["turn_pace_milliseconds"]
+	if !present {
+		return DefaultTurnPaceMilliseconds, nil
+	}
+	var pace uint
+	if err := json.Unmarshal(raw, &pace); err != nil || pace < MinTurnPaceMilliseconds || pace > MaxTurnPaceMilliseconds {
+		return 0, NewLobbySettingsError("turn_pace_milliseconds", fmt.Sprintf("must be a whole number of milliseconds from %d to %d", MinTurnPaceMilliseconds, MaxTurnPaceMilliseconds))
+	}
+	return pace, nil
 }
 
 // MapTeamCount returns the number of teams a map is made for: its

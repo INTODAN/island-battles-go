@@ -25,7 +25,13 @@ type Game struct {
 	// It is saved with the teams when the game is initialized. The column's
 	// default gives games stored before the setting the old limit of 300.
 	MaxGenerations int `gorm:"not null;default:300" json:"-"`
-	Generations    []Generation
+	// TurnPaceMilliseconds makes the game real-time: each turn ends this long
+	// after its generation was created, and the server then plays it with the
+	// commands that arrived. It is the lobby's turn pace, saved at the start
+	// only when a frozen roster player plays by hand (ManualBot). Nil means
+	// the game waits for every player, and TurnTimeoutSeconds applies.
+	TurnPaceMilliseconds *uint `json:"-"`
+	Generations          []Generation
 }
 
 // GameTeam is a team that took part in the battle, with its lobby name and

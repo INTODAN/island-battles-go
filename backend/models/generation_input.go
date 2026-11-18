@@ -156,7 +156,10 @@ type GenerationState struct {
 
 	// TurnDeadlineAt is nil when the lobby set no turn timeout, and once the
 	// game has ended.
-	TurnDeadlineAt *time.Time `json:"turn_deadline_at" nullable:"true" doc:"When this generation's turn times out: the generation's creation time plus the lobby's turn_timeout_seconds. Null when turns have no time limit, and once the game has ended. If a player of a team hasn't completed the turn by then, the team loses and the game ends. A client waiting for other players calls POST /game/from-lobby/{lobby_id}/deadline about a second after it, because the server runs no timers."`
+	TurnDeadlineAt *time.Time `json:"turn_deadline_at" nullable:"true" doc:"When this generation's turn ends. In a real-time game (turn_pace_milliseconds isn't null) it is the generation's creation time plus the turn pace: the server then plays the turn with the commands that arrived, and a player who sent nothing passes. Otherwise it is the creation time plus the lobby's turn_timeout_seconds, when the turn times out: if a player of a team hasn't completed it by then, the team loses and the game ends. Null when turns have no time limit, and once the game has ended. A client waiting for the turn to end calls POST /game/from-lobby/{lobby_id}/deadline once it has passed, because the server runs no timers."`
+	// TurnPaceMilliseconds is Game.TurnPaceMilliseconds: nil when the game
+	// waits for every player.
+	TurnPaceMilliseconds *uint `json:"turn_pace_milliseconds" nullable:"true" minimum:"500" maximum:"5000" doc:"The game's turn pace in milliseconds when the game is real-time, because a player on its roster plays by hand: each turn ends this long after its generation was created, at turn_deadline_at, and plays with the commands that arrived, without waiting for anyone. It still plays early once every player completed it. Null when the game waits for every player to complete each turn."`
 }
 
 // GameOutcomeView is how a finished game ended.

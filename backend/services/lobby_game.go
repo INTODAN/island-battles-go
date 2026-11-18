@@ -103,7 +103,7 @@ func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 		if err != nil {
 			return err
 		}
-		if err := dal.SaveGameStart(transaction, game, teams, gameSettings.TurnTimeoutSeconds, gameSettings.MaxGenerations); err != nil {
+		if err := dal.SaveGameStart(transaction, game, teams, gameSettings.TurnTimeoutSeconds, gameSettings.MaxGenerations, realTimePace(players, gameSettings.TurnPaceMilliseconds)); err != nil {
 			return err
 		}
 		inputs, err := playGoBots(ctx, transaction, game, current, players, nil)
@@ -175,4 +175,15 @@ func startDisplayName(snapshot domain.Snapshot, index int) string {
 		}
 	}
 	return fmt.Sprintf("Player %d", index+1)
+}
+
+// realTimePace is the turn pace a game stores at the start: the lobby's pace
+// when a frozen roster player plays by hand, which makes the game real-time,
+// and nil otherwise, for a game that waits for every player. Nothing else
+// reads the players' kinds for this.
+func realTimePace(players []models.FrozenGamePlayer, pace uint) *uint {
+	if !slices.ContainsFunc(players, func(player models.FrozenGamePlayer) bool { return player.BotKind == models.ManualBot }) {
+		return nil
+	}
+	return &pace
 }

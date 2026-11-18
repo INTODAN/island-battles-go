@@ -36,11 +36,13 @@ var NewGoBotTurn = newGoBotTurn
 
 // ServerBot is a bot that the server plays for a roster player in
 // RunLobbyGameWithServerBots: a default bot of Level, a hosted bot at URL, or
-// the lobby's uploaded package PackageID.
+// the lobby's uploaded package PackageID. Manual is a player who plays by
+// hand instead, whom nothing plays.
 type ServerBot struct {
 	Level     uint
 	URL       string
 	PackageID string
+	Manual    bool
 }
 
 // RunLobbyGameWithServerBots starts a lobby's game with the bots that the
@@ -50,6 +52,8 @@ func RunLobbyGameWithServerBots(ctx context.Context, database *gorm.DB, publishe
 	chosen := make(map[string]frozenBot, len(chosenBots))
 	for playerID, bot := range chosenBots {
 		switch {
+		case bot.Manual:
+			chosen[playerID] = frozenBot{Kind: models.ManualBot}
 		case bot.Level != 0:
 			chosen[playerID] = defaultBot(bot.Level)
 		case bot.URL != "":

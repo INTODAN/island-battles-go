@@ -20,7 +20,9 @@ type WatchState struct {
 	Outcome *GameOutcomeView `json:"outcome,omitempty" doc:"How the game ended. Absent while the game runs."`
 	// TurnDeadlineAt is nil when the lobby set no turn timeout, and once the
 	// game has ended.
-	TurnDeadlineAt *time.Time `json:"turn_deadline_at" nullable:"true" doc:"When this generation's turn times out, as in GenerationState. Null when turns have no time limit, and once the game has ended. Watchers never apply a deadline themselves."`
+	TurnDeadlineAt *time.Time `json:"turn_deadline_at" nullable:"true" doc:"When this generation's turn ends, as in GenerationState: after the turn pace in a real-time game, otherwise when it times out. Null when turns have no time limit, and once the game has ended. Watchers never apply a deadline themselves."`
+	// TurnPaceMilliseconds is GenerationState.TurnPaceMilliseconds.
+	TurnPaceMilliseconds *uint `json:"turn_pace_milliseconds" nullable:"true" minimum:"500" maximum:"5000" doc:"The game's turn pace in milliseconds when the game is real-time, as in GenerationState; null when the game waits for every player."`
 }
 
 // WatchGenerationEvent is published on the lobby's watch channel after a turn

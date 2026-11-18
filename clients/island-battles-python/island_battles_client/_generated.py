@@ -212,7 +212,7 @@ class BotTurn(GameModel):
     team_color: Annotated[StrictInt, Field(ge=1)]
     turn_deadline_at: AwareDatetime | None
     """
-    When the turn times out, GenerationState.turn_deadline_at, or null when turns have no time limit. A bot that hasn't answered by then makes its whole team lose.
+    When the turn ends, GenerationState.turn_deadline_at, or null when turns have no time limit. In a game that waits for every player, a bot that hasn't answered by then makes its whole team lose. In a real-time game, where a player plays by hand, the server plays the turn then without the bot's answer: the bot passes, and a later answer is refused as a stale generation.
     """
     turn_number: Annotated[StrictInt, Field(ge=1)]
     """
@@ -674,11 +674,15 @@ class GenerationState(GameModel):
     team_color: Annotated[StrictInt, Field(ge=1)]
     turn_deadline_at: AwareDatetime | None
     """
-    When this generation's turn times out: the generation's creation time plus the lobby's turn_timeout_seconds. Null when turns have no time limit, and once the game has ended. If a player of a team hasn't completed the turn by then, the team loses and the game ends. A client waiting for other players calls POST /game/from-lobby/{lobby_id}/deadline about a second after it, because the server runs no timers.
+    When this generation's turn ends. In a real-time game (turn_pace_milliseconds isn't null) it is the generation's creation time plus the turn pace: the server then plays the turn with the commands that arrived, and a player who sent nothing passes. Otherwise it is the creation time plus the lobby's turn_timeout_seconds, when the turn times out: if a player of a team hasn't completed it by then, the team loses and the game ends. Null when turns have no time limit, and once the game has ended. A client waiting for the turn to end calls POST /game/from-lobby/{lobby_id}/deadline once it has passed, because the server runs no timers.
     """
     turn_number: Annotated[StrictInt, Field(ge=1)]
     """
     This generation's turn number in the game, from 1: the game's first generation is turn 1, and every turn adds one, the n of the replay's Turn n / m. generation_id is not the turn number: it is the server's ID of the generation, which increases with every turn but doesn't start at 1. BotTurn.turn_number is the same number.
+    """
+    turn_pace_milliseconds: Annotated[StrictInt | None, Field(ge=500, le=5000)]
+    """
+    The game's turn pace in milliseconds when the game is real-time, because a player on its roster plays by hand: each turn ends this long after its generation was created, at turn_deadline_at, and plays with the commands that arrived, without waiting for anyone. It still plays early once every player completed it. Null when the game waits for every player to complete each turn.
     """
 
 
@@ -757,9 +761,13 @@ class LobbySettings(GameModel):
     """
     The most turns the game may last, a whole number from 50 to 1200; 300 when left out. The turn that creates generation max_generations ends the game, if nothing has ended it before, and the team with the most castles wins.
     """
+    turn_pace_milliseconds: Annotated[StrictInt | None, Field(ge=500, le=5000)] = 1000
+    """
+    How long each turn lasts in a real-time game, in whole milliseconds from 500 to 5000; 1000 when left out. A game is real-time when a player on its roster plays by hand: each turn then ends this long after its generation was created, and the server plays it with the commands that arrived, so a player who sent nothing passes. A game of bots only doesn't use it and waits for every player.
+    """
     turn_timeout_seconds: Annotated[StrictInt | None, Field(ge=5, le=600)] = 30
     """
-    How long each turn lasts, in whole seconds from 5 to 600, counted from when its generation was created; 30 when left out. null means no limit, for example while debugging a bot. When a turn's deadline passes before every player has completed it, each team with a player who hadn't loses, and the game ends.
+    How long each turn lasts, in whole seconds from 5 to 600, counted from when its generation was created; 30 when left out. null means no limit, for example while debugging a bot. When a turn's deadline passes before every player has completed it, each team with a player who hadn't loses, and the game ends. A real-time game, see turn_pace_milliseconds, has no turn timeout.
     """
 
 
@@ -1038,7 +1046,7 @@ class TurnSubmit(GameModel):
     )
     deadline_at: AwareDatetime | None
     """
-    When the turn times out, the BotTurn's turn_deadline_at, or null when turns have no time limit. An answer must be submitted before it.
+    When the turn ends, the BotTurn's turn_deadline_at, or null when turns have no time limit. An answer must be submitted before it: in a real-time game a later one is refused as a stale generation, and the bot passes the turn.
     """
     token: StrictStr
     """
@@ -1176,5 +1184,9 @@ class WatchState(GameModel):
     """
     turn_deadline_at: AwareDatetime | None
     """
-    When this generation's turn times out, as in GenerationState. Null when turns have no time limit, and once the game has ended. Watchers never apply a deadline themselves.
+    When this generation's turn ends, as in GenerationState: after the turn pace in a real-time game, otherwise when it times out. Null when turns have no time limit, and once the game has ended. Watchers never apply a deadline themselves.
+    """
+    turn_pace_milliseconds: Annotated[StrictInt | None, Field(ge=500, le=5000)]
+    """
+    The game's turn pace in milliseconds when the game is real-time, as in GenerationState; null when the game waits for every player.
     """

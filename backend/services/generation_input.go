@@ -80,9 +80,10 @@ type GenerationService struct {
 	Bots *TurnSender
 }
 
-// Current returns the caller's state of the lobby's game, after applying an
-// overdue turn deadline, which ends the game. Go bots catch up for at most
-// goBotReadBudget first.
+// Current returns the caller's state of the lobby's game, after ending an
+// overdue turn (endTurn): a real-time game plays it, and in a game that waits
+// for every player it times out, which ends the game. Go bots catch up for at
+// most goBotReadBudget first.
 func (service *GenerationService) Current(ctx context.Context, principal domain.Principal, lobbyID string) (models.GenerationState, error) {
 	return service.current(ctx, principal, lobbyID, goBotReadBudget)
 }
@@ -104,7 +105,7 @@ func (service *GenerationService) current(ctx context.Context, principal domain.
 		}
 	}
 	var state models.GenerationState
-	var events []Publication
+	var end turnEnd
 	err = dal.WithLockedGame(database, game.ID, func(transaction *gorm.DB, locked *models.Game) error {
 		players, err := dal.LoadFrozenPlayers(transaction, locked.ID)
 		if err != nil {
@@ -119,9 +120,10 @@ func (service *GenerationService) current(ctx context.Context, principal domain.
 			return err
 		}
 		observability.Annotate(ctx, slog.Uint64("generation_id", uint64(generation.ID)))
-		if events, err = expireTurn(transaction, locked, generation, players, service.now()); err != nil {
+		if end, err = endTurn(ctx, transaction, locked, generation, players, service.now(), service.Bots); err != nil {
 			return err
 		}
+		generation = end.generation
 		inputs, err := dal.LoadGenerationInputs(transaction, generation.ID)
 		if err != nil {
 			return err
@@ -138,15 +140,16 @@ func (service *GenerationService) current(ctx context.Context, principal domain.
 	if err != nil {
 		return models.GenerationState{}, err
 	}
-	service.publish(ctx, events)
+	service.afterTurnEnd(ctx, game.ID, end)
 	return state, nil
 }
 
-// ApplyDeadline applies the deadline of the lobby game's open turn once it
-// has passed, and returns the caller's state, as Current does. Clients that
-// wait for other players call it at the deadline, because the server runs no
-// timers. Applying it again changes nothing. Go bots catch up for at most
-// goBotWriteBudget first.
+// ApplyDeadline ends the lobby game's open turn once its time is up, and
+// returns the caller's state, as Current does: in a real-time game it plays
+// the turn, and in a game that waits for every player the turn times out.
+// Clients call it at the turn's end, because the server runs no timers.
+// Calling it before, or again after, changes nothing. Go bots catch up for at
+// most goBotWriteBudget first.
 func (service *GenerationService) ApplyDeadline(ctx context.Context, principal domain.Principal, lobbyID string) (models.GenerationState, error) {
 	return service.current(ctx, principal, lobbyID, goBotWriteBudget)
 }
@@ -200,8 +203,10 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 	var state models.GenerationState
 	var events []Publication
 	var turns []turnToSend
-	// A batch that comes after its turn's deadline is rejected, but the
-	// transaction that applied the deadline still commits.
+	// end is what ending an overdue turn did before the batch.
+	var end turnEnd
+	// A batch that comes after its turn's end is rejected, but the
+	// transaction that ended the turn still commits.
 	var late error
 	// goBotsOnly is set when this batch's turn left a turn that only Go bots
 	// play, and has already completed.
@@ -223,13 +228,16 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 		if err != nil {
 			return err
 		}
-		if events, err = expireTurn(transaction, locked, generation, players, service.now()); err != nil {
+		// The overdue turn ends first: a real-time game plays it, and a game
+		// that waits for every player times out. Then the batch is judged.
+		if end, err = endTurn(ctx, transaction, locked, generation, players, service.now(), service.Bots); err != nil {
 			return err
 		}
-		// After this request ended the game, its rejection must not roll the
-		// ending back.
+		generation = end.generation
+		// After this request ended the turn, its rejection must not roll the
+		// end back.
 		rejectAfterDeadline := func(rejection error) error {
-			if len(events) > 0 {
+			if end.played || len(end.events) > 0 {
 				late = rejection
 				return nil
 			}
@@ -255,8 +263,10 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 		if locked.Outcome != nil {
 			return rejectAfterDeadline(&GenerationError{Status: 409, Detail: "the game has ended: " + describeOutcome(locked), Type: GameEndedProblemType})
 		}
-		if generation.ID != request.GenerationID {
-			return reject(409, "generation is no longer current")
+		// A turn that this request ended is over for its batch, whichever
+		// generation the batch names.
+		if end.played || generation.ID != request.GenerationID {
+			return rejectAfterDeadline(staleGeneration(locked))
 		}
 		input := models.GenerationInput{GenerationID: generation.ID, PlayerID: principal.PlayerID, Commands: []byte("[]")}
 		for _, candidate := range inputs {
@@ -322,7 +332,8 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 	if err != nil {
 		return models.GenerationState{}, err
 	}
-	// The turn, or the deadline, has committed.
+	// The ended turn, and the batch's own turn, have committed.
+	service.afterTurnEnd(ctx, game.ID, end)
 	service.publish(ctx, events)
 	service.Bots.send(ctx, database, turns)
 	if late != nil {
@@ -336,6 +347,16 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 		}
 	}
 	return state, nil
+}
+
+// staleGeneration rejects a batch for a generation whose turn is over. In a
+// real-time game its detail says that the turn ended after the pace, so a
+// bot's author sees why a slow bot passed.
+func staleGeneration(game *models.Game) error {
+	if game.TurnPaceMilliseconds == nil {
+		return reject(409, "generation is no longer current")
+	}
+	return reject(409, fmt.Sprintf("generation is no longer current: in this real-time game each turn ends %s after its generation was created and plays with the commands that arrived by then, so this batch came too late and the turn was played without it", describePace(*game.TurnPaceMilliseconds)))
 }
 
 func commandPayloadHash(request models.RegisterGenerationCommands) (string, error) {
@@ -405,7 +426,7 @@ func generationState(game *models.Game, generation *models.Generation, players [
 		return models.GenerationState{}, err
 	}
 	state := models.GenerationState{GameID: game.ID, LobbyID: *game.LobbyID, LobbyRound: game.LobbyRound, GenerationID: generation.ID, PlayerID: player.PlayerID, TeamColor: player.TeamColor, Channel: channel,
-		Generation: GenerationView(generation), TurnNumber: generation.Number, MaxGenerations: game.MaxGenerations, Outcome: outcomeView(game), Memory: memory, TurnDeadlineAt: turnDeadline(game, generation), Bot: models.FrozenBot(player),
+		Generation: GenerationView(generation), TurnNumber: generation.Number, MaxGenerations: game.MaxGenerations, Outcome: outcomeView(game), Memory: memory, TurnDeadlineAt: turnDeadline(game, generation), TurnPaceMilliseconds: game.TurnPaceMilliseconds, Bot: models.FrozenBot(player),
 		RelayedBots: models.RelayedBots(players, player.PlayerID)}
 	for _, input := range inputs {
 		if input.PlayerID == player.PlayerID {
