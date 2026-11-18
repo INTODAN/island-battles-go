@@ -37,6 +37,11 @@ func reject(status int, detail string) error { return &GenerationError{Status: s
 // for a finished game.
 const GameEndedProblemType = "urn:island-battles:problem:game-ended"
 
+// StaleGenerationProblemType is the problem type of the 409 that rejects a
+// new batch for a generation whose turn is over, so that a client tells a
+// real-time turn that ended without its batch from other conflicts.
+const StaleGenerationProblemType = "urn:island-battles:problem:stale-generation"
+
 // Problem types of command rejections that clients map to their own errors.
 // send_soldier_group, upgrade_castle and burst_castle share them.
 const (
@@ -88,7 +93,8 @@ func (service *GenerationService) Current(ctx context.Context, principal domain.
 	return service.current(ctx, principal, lobbyID, goBotReadBudget)
 }
 
-// current is Current, with the time Go bots may play for first.
+// current is Current, with the time Go bots may play for first, and again
+// after a real-time turn it played left only them.
 func (service *GenerationService) current(ctx context.Context, principal domain.Principal, lobbyID string, goBotBudget time.Duration) (models.GenerationState, error) {
 	database := service.Database.WithContext(ctx)
 	game, err := dal.FindLobbyGame(database, lobbyID)
@@ -140,7 +146,7 @@ func (service *GenerationService) current(ctx context.Context, principal domain.
 	if err != nil {
 		return models.GenerationState{}, err
 	}
-	service.afterTurnEnd(ctx, game.ID, end)
+	service.afterTurnEnd(ctx, game.ID, end, goBotBudget)
 	return state, nil
 }
 
@@ -333,7 +339,7 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 		return models.GenerationState{}, err
 	}
 	// The ended turn, and the batch's own turn, have committed.
-	service.afterTurnEnd(ctx, game.ID, end)
+	service.afterTurnEnd(ctx, game.ID, end, goBotWriteBudget)
 	service.publish(ctx, events)
 	service.Bots.send(ctx, database, turns)
 	if late != nil {
@@ -353,10 +359,11 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 // real-time game its detail says that the turn ended after the pace, so a
 // bot's author sees why a slow bot passed.
 func staleGeneration(game *models.Game) error {
-	if game.TurnPaceMilliseconds == nil {
-		return reject(409, "generation is no longer current")
+	detail := "generation is no longer current"
+	if game.TurnPaceMilliseconds != nil {
+		detail += fmt.Sprintf(": in this real-time game each turn ends %s after its generation was created and plays with the commands that arrived by then, so this batch came too late and the turn was played without it", describePace(*game.TurnPaceMilliseconds))
 	}
-	return reject(409, fmt.Sprintf("generation is no longer current: in this real-time game each turn ends %s after its generation was created and plays with the commands that arrived by then, so this batch came too late and the turn was played without it", describePace(*game.TurnPaceMilliseconds)))
+	return &GenerationError{Status: 409, Detail: detail, Type: StaleGenerationProblemType}
 }
 
 func commandPayloadHash(request models.RegisterGenerationCommands) (string, error) {
