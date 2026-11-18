@@ -193,7 +193,8 @@ func TestTheStartSendsTheFirstTurnOfEachHostedAndUploadedBot(t *testing.T) {
 			t.Error("a turn was sent before the generation that holds it committed")
 		}
 		delivery := invoked.event.Delivery
-		if delivery.Turn.GameID != game.gameID || delivery.Turn.Generation.ID != generation.ID || delivery.Submit.URL != serverBotSubmitURL ||
+		if delivery.Turn.GameID != game.gameID || delivery.Turn.Generation.ID != generation.ID || delivery.Turn.TurnNumber != 1 ||
+			delivery.Turn.MaxGenerations != services.MaxGenerations || delivery.Submit.URL != serverBotSubmitURL ||
 			delivery.Submit.DeadlineAt == nil || delivery.Turn.TurnDeadlineAt == nil || !delivery.Submit.DeadlineAt.Equal(*delivery.Turn.TurnDeadlineAt) {
 			t.Errorf("unexpected delivery %+v", delivery.Submit)
 		}
@@ -256,7 +257,8 @@ func TestEachSubmissionSendsTheNextTurn(t *testing.T) {
 		}
 		sent = game.runners.take()
 		for _, invoked := range sent {
-			if invoked.event.Delivery.Turn.Generation.ID != state.GenerationID || !invoked.committed {
+			if invoked.event.Delivery.Turn.Generation.ID != state.GenerationID || invoked.event.Delivery.Turn.TurnNumber != turn+2 ||
+				state.TurnNumber != turn+2 || !invoked.committed {
 				t.Fatalf("turn %d: sent %+v", turn, invoked)
 			}
 		}
@@ -368,7 +370,8 @@ func TestOnlyStandingUnfinishedServerBotsGetTheirTurn(t *testing.T) {
 		{PlayerID: "localhost", TeamColor: 7, BotKind: models.LocalhostBot},
 	}
 	game := &models.Game{Model: gorm.Model{ID: 7}}
-	generation := &models.Generation{Model: gorm.Model{ID: 41, CreatedAt: time.Now()}}
+	// Numbered as the DAL's loaders number a game's generations.
+	generation := &models.Generation{Model: gorm.Model{ID: 41, CreatedAt: time.Now()}, Number: 3}
 	for color := uint(1); color <= 7; color++ {
 		game.Teams = append(game.Teams, models.GameTeam{Color: color})
 		// Team 3 has nothing left on the board.

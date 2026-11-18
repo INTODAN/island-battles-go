@@ -14,4 +14,9 @@ type Generation struct {
 	Commands      []Command
 	SoldierGroups []SoldierGroup
 	Clashes       []Clash `gorm:"serializer:json;type:jsonb"`
+	// Number is the generation's position in its game, from 1: its turn
+	// number. It isn't stored: the DAL's loaders, GetGeneration,
+	// GetLatestGenerationForGame, RefreshGeneration and LoadGameGenerations,
+	// count it, and a generation loaded another way has 0.
+	Number int `gorm:"-"`
 }

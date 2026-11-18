@@ -246,8 +246,8 @@ The replay shows the game log in a **Logs** panel below the board, for the gener
 A bot is a **stateless function**. Each turn it gets a `BotTurn` and answers with a `BotTurnResult`; both are schemas in the [player API document](#player-api-document), so every client generates them:
 
 ```json
-{"game_id": 7, "generation": {"id": 41, "castles": [], "soldier_groups": [], "clashes": []}, "team_color": 1,
- "memory": {"target": 3}, "turn_deadline_at": "2026-11-07T12:00:30Z"}
+{"game_id": 7, "generation": {"id": 5578, "castles": [], "soldier_groups": [], "clashes": []}, "turn_number": 41,
+ "max_generations": 300, "team_color": 1, "memory": {"target": 3}, "turn_deadline_at": "2026-11-07T12:00:30Z"}
 ```
 
 ```json
@@ -257,6 +257,8 @@ A bot is a **stateless function**. Each turn it gets a `BotTurn` and answers wit
 ```
 
 - `generation` is the generation of `GenerationState`, and `team_color` is the bot's team. There are no previous generations: a generation is 10 to 25 KB of JSON, so a whole game would be megabytes per turn. A bot that needs history keeps what it needs in its memory.
+- `turn_number` is the turn's number in the game, from 1: the game's first generation is turn 1, and every turn adds one, as the replay counts them. `generation.id` is not the turn number: it is the server's ID of the generation, which every game shares, so it increases with every turn but doesn't start at 1. `GenerationState.turn_number` is the same number.
+- `max_generations` is the game's last generation, 300, also in `GenerationState`. The turn that creates it ends the game, if nothing has ended it before, so the last turn a bot plays is `max_generations - 1`, and `max_generations - turn_number` turns are left, this one included.
 - `memory` is the memory the bot returned last turn: any JSON object, or `null` on its first turn. The bot returns its new memory, or `null` for none.
 - `turn_deadline_at` is when the turn times out, `GenerationState.turn_deadline_at`, or `null` when the lobby set no limit. A bot that hasn't answered by then makes its whole team lose; see [turn deadlines](#turn-deadlines).
 - `commands` and `logs` have the shapes of `POST /generation/commands`, and the same rules apply.

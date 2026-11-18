@@ -217,8 +217,10 @@ func recordUnstartedTurn(ctx context.Context, database *gorm.DB, turn turnToSend
 // this turn, among inputs, left unreserved, and a submit token for submitURL
 // that submits exactly this turn.
 func newTurnDelivery(game *models.Game, generation *models.Generation, player models.FrozenGamePlayer, inputs []models.GenerationInput, memory models.BotMemory, tokens *submittoken.Signer, submitURL string) (models.TurnDelivery, error) {
-	turn := newGoBotTurn(game, generation, player.TeamColor, memory)
-	var err error
+	turn, err := newGoBotTurn(game, generation, player.TeamColor, memory)
+	if err != nil {
+		return models.TurnDelivery{}, err
+	}
 	if turn.Generation, err = goBotGeneration(generation, player.TeamColor, inputs); err != nil {
 		return models.TurnDelivery{}, err
 	}

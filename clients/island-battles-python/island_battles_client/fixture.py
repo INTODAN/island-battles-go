@@ -81,9 +81,15 @@ def _castle(
 
 
 def fixture_turn_data() -> dict[str, Any]:
-    """A ``BotTurn`` as JSON: team 1 against team 2, a neutral castle, one group."""
+    """A ``BotTurn`` as JSON: team 1 against team 2, a neutral castle, one group.
+
+    It is the game's first turn, ``turn_number`` 1, so it has no memory. Its
+    generation's ``id`` is 12, as the server's generation IDs don't start at 1.
+    """
     return {
         "game_id": 1,
+        "turn_number": 1,
+        "max_generations": 300,
         "team_color": 1,
         "upgrades": deepcopy(_UPGRADE_TABLE),
         "memory": None,

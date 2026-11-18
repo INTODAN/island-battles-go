@@ -694,10 +694,15 @@ def run(args: argparse.Namespace) -> int:
     game_url, lobby_url = seat_urls(args)
     play = load_play(args.bot)
 
-    def ended(outcome: GameOutcome, generation: Generation) -> None:
-        print(f"game ended at generation {generation.id}: {outcome.summary}")
+    client: IslandBattlesClient | None = None
+
+    def ended(outcome: GameOutcome, _: Generation) -> None:
+        # The final state's turn number, not its generation's server ID.
+        number = client.turn_number if client is not None else None
+        print(f"game ended at generation {number}: {outcome.summary}")
 
     async def main() -> None:
+        nonlocal client
         client = IslandBattlesClient(
             args.token,
             args.lobby_id,

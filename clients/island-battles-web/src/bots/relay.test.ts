@@ -30,6 +30,8 @@ function state(
     player_id: "p1",
     submitted: false,
     team_color: 2,
+    turn_number: generationId,
+    max_generations: 300,
     turn_deadline_at: null,
     ...extra,
   } as GenerationState;
@@ -41,6 +43,8 @@ function deliveryOf(current: GenerationState): TurnDelivery {
     turn: {
       game_id: current.game_id,
       generation: current.generation,
+      turn_number: current.turn_number,
+      max_generations: current.max_generations,
       team_color: current.team_color,
       memory: current.memory,
       upgrades: [],

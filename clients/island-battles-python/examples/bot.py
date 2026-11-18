@@ -64,7 +64,10 @@ def play(turn: BotTurn) -> BotTurnResult:
         commands,
         # Lines returned here are stored like those logged with ``logger``.
         logs=[
-            log_line(f"generation {turn.generation.id}: {sent} soldiers sent so far")
+            log_line(
+                f"turn {turn.turn_number} of {turn.max_generations - 1}: "
+                f"{sent} soldiers sent so far"
+            )
         ],
         memory={"sent": sent},
     )

@@ -102,6 +102,8 @@ class Adapter:
                 "memory": turn.memory,
                 "team_color": turn.team_color,
                 "game_id": turn.game_id,
+                "turn_number": turn.turn_number,
+                "max_generations": turn.max_generations,
                 "upgrades": [
                     upgrade.model_dump(mode="json") for upgrade in turn.upgrades
                 ],

@@ -402,12 +402,15 @@ func validateCommands(generation *models.Generation, teamColor uint, inputs []mo
 // generationState builds a player's state, one of players. memory is the
 // memory sent with the player's latest completed turn.
 func generationState(game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer, player models.FrozenGamePlayer, inputs []models.GenerationInput, memory models.BotMemory) (models.GenerationState, error) {
+	if err := requireNumber(generation); err != nil {
+		return models.GenerationState{}, err
+	}
 	channel, err := domain.PlayerChannel(player.PlayerID)
 	if err != nil {
 		return models.GenerationState{}, err
 	}
 	state := models.GenerationState{GameID: game.ID, LobbyID: *game.LobbyID, LobbyRound: game.LobbyRound, GenerationID: generation.ID, PlayerID: player.PlayerID, TeamColor: player.TeamColor, Channel: channel,
-		Generation: GenerationView(generation), Outcome: outcomeView(game), Memory: memory, TurnDeadlineAt: turnDeadline(game, generation), Bot: models.FrozenBot(player),
+		Generation: GenerationView(generation), TurnNumber: generation.Number, MaxGenerations: MaxGenerations, Outcome: outcomeView(game), Memory: memory, TurnDeadlineAt: turnDeadline(game, generation), Bot: models.FrozenBot(player),
 		RelayedBots: models.RelayedBots(players, player.PlayerID)}
 	for _, input := range inputs {
 		if input.PlayerID == player.PlayerID {
