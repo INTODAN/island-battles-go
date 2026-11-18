@@ -41,6 +41,7 @@ When your change needs a step after it merges (a plan and apply, an apply-role s
   - `backend-development`: Huma endpoints, services and GORM persistence
   - `breaking-changes`: any change to the player or lobby API, events, stored data or client SDKs
   - `browser-testing`: checking the lobby page, demo or replay in a browser
+  - `game-rules`: any change to the game's rules (an upgrade, a command, a cost, how a turn runs or a game ends), which the 3D client's Game rules page must follow in the same change
   - `game-state-testing`: generation, command and game-state tests
 - The lobby lives in [`INTODAN/mpl`](https://github.com/INTODAN/mpl); lobby changes go there first. This repository uses it at the version that README.md's [The lobby's version](README.md#the-lobbys-version) names, and changes the pin only to take a lobby change that is merged there. Island Battles specifics belong in `backend/`.
 - **The repository is public.** Never commit a secret, not even for local development: `.env.example` holds placeholders only, and production's secrets live in the deploy bucket.
