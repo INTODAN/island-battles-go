@@ -753,6 +753,30 @@ select:focus-visible {
   min-height: 24px;
 }
 
+.tutorial-system {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 16px;
+  margin: 8px 0 12px;
+  padding: 0;
+  border: 0;
+}
+
+.tutorial-system legend {
+  float: left;
+  padding: 0;
+  font-weight: 600;
+}
+
+.tutorial-system label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  cursor: pointer;
+}
+
 .tutorial-steps {
   margin: 0;
   padding: 0;
