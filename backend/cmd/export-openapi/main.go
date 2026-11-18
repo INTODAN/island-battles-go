@@ -35,7 +35,7 @@ const (
 		"players calls `POST /game/from-lobby/{lobby_id}/deadline` about a second after it. `MapTemplate` is the map file format, which `POST /map/create` accepts. `LobbySettings` is the " +
 		"`game_settings` object of an Island Battles lobby create request; `GET /map/templates` lists the default maps it can choose. " +
 		"`GET /game/upgrades` lists what each castle upgrade level costs, and `GET /bots/defaults` the default bots that the backend plays. Before getting ready in a lobby, every member chooses " +
-		"their bot in their lobby member settings with the lobby's `setLobbyMemberSettings`: `{\"bot\": {\"kind\": \"localhost\"}}`, their own bot, whose turns their client relays, " +
+		"their bot in their lobby member settings with the lobby's `setLobbyMemberSettings`: `{\"bot\": {\"kind\": \"manual\"}}`, a person who plays by hand in the 3D client, `{\"bot\": {\"kind\": \"localhost\"}}`, their own bot, whose turns their client relays, " +
 		"or `{\"bot\": {\"kind\": \"default\", \"level\": N}}`, a default bot level; `GenerationState.bot` reports it during the game. `Demo` is the demo file format, which " +
 		"`GET /game/from-lobby/{lobby_id}/demo` returns and the demo viewer at `/game/demo-viewer/` opens. " +
 		"People outside the roster watch a game with its lobby's join code (`POST /lobby/v1/watches`): the lobby's watch channel `watch:island-battles:{lobby_id}` receives a `WatchGenerationEvent` after every turn and a `WatchGameEndedEvent` after the last, " +

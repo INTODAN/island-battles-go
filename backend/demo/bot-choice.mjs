@@ -25,12 +25,21 @@ export const healthPollMilliseconds = 2000;
 // read.
 const fallbackLevels = [1, 2, 3];
 
+// The option for playing by hand, which only the 3D client can choose: listed
+// here disabled, so a member who chose it there sees it as their choice.
+function manualOption() {
+  const option = new Option("Play by hand (3D client only)", "manual");
+  option.disabled = true;
+  return option;
+}
+
 // The select's value for a choice, "" for none. A hosted bot's URL is not in
 // it.
 export function choiceValue(bot) {
   if (!bot) return "";
   switch (bot.kind) {
     case "localhost": return "localhost";
+    case "manual": return "manual";
     case "hosted": return "hosted";
     case "uploaded": return `package-${bot.package_id}`;
     default: return `level-${bot.level}`;
@@ -68,6 +77,7 @@ export function describeBot(bot, relayer) {
       return bot.port && bot.port !== defaultBotPort ? `own bot (localhost:${bot.port})` : "own bot (localhost)";
     case "hosted": return `hosted bot (${urlHost(bot.url ?? "")})`;
     case "uploaded": return "uploaded bot";
+    case "manual": return "plays by hand";
     default: return `level ${bot.level} bot`;
   }
 }
@@ -265,10 +275,14 @@ export class RoomPanel {
     // The select shows "hosted" while the player types a URL to save.
     this.typingURL = false;
     this.select = document.createElement("select");
-    this.select.append(new Option("Choose your bot", ""), new Option("My localhost bot", "localhost"));
+    this.select.append(new Option("Choose your bot", ""), new Option("My localhost bot", "localhost"), manualOption());
     this.levelOptions = [];
     const label = document.createElement("label");
     label.append("Your bot", this.select);
+    // Only the 3D client plays by hand, so this page lists the option disabled.
+    const manualHint = document.createElement("p");
+    manualHint.className = "hint";
+    manualHint.textContent = "To play by hand, choose Play by hand in the 3D client; this page can't play a seat.";
     this.summary = document.createElement("p");
     this.summary.className = "hint";
     this.summary.setAttribute("role", "status");
@@ -288,7 +302,7 @@ export class RoomPanel {
     this.localSeats = document.createElement("div");
     this.localSeats.className = "local-seats";
     this.localSeats.hidden = true;
-    container.append(label, this.spentNote, this.local, this.hosted, this.localSeats, this.summary);
+    container.append(label, manualHint, this.spentNote, this.local, this.hosted, this.localSeats, this.summary);
     // The lobby's bot packages, which the page's room requests reach.
     this.packages = request ? new PackagesPanel({ container, lobbyID, playerID, request, gameURL, copy, onList: (items) => this.listed(items), ...(postToStorage ? { post: postToStorage } : {}) }) : null;
     this.select.addEventListener("change", () => {
@@ -320,7 +334,7 @@ export class RoomPanel {
   // The select's options: the localhost bot, the default levels, and, when
   // the server offers them, the hosted bot and the player's packages.
   fillSelect() {
-    const options = [new Option("Choose your bot", ""), new Option("My localhost bot", "localhost"), ...this.levelOptions];
+    const options = [new Option("Choose your bot", ""), new Option("My localhost bot", "localhost"), manualOption(), ...this.levelOptions];
     if (this.serverBots) {
       options.push(new Option("My hosted bot (URL)", "hosted"));
       const uploaded = this.ownPackages.map((item) => new Option(`Uploaded: ${describePackage(item)}`, `package-${item.package_id}`));

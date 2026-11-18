@@ -373,10 +373,10 @@ export interface components {
             /** @description For kind hosted, the host name of the bot's URL, such as bot.example.com; the rest of the URL is not shown. Absent for the other kinds. */
             host?: string;
             /**
-             * @description localhost: the player's own bot, which island-battles-bot serve runs on their machine; their game client relays each turn to it. default: a default bot of GET /bots/defaults, which the backend plays itself, so the player's client submits nothing. hosted: the player's own bot server at a public URL, which the server sends each turn to; no client relays it. uploaded: a bot package uploaded to the lobby, which the server runs; no client relays it.
+             * @description localhost: the player's own bot, which island-battles-bot serve runs on their machine; their game client relays each turn to it. default: a default bot of GET /bots/defaults, which the backend plays itself, so the player's client submits nothing. hosted: the player's own bot server at a public URL, which the server sends each turn to; no client relays it. uploaded: a bot package uploaded to the lobby, which the server runs; no client relays it. manual: a person who plays by hand in the 3D client; nothing plays or relays the player, and their client sends their commands.
              * @enum {string}
              */
-            kind: "localhost" | "default" | "hosted" | "uploaded";
+            kind: "localhost" | "default" | "hosted" | "uploaded" | "manual";
             /**
              * Format: int64
              * @description For kind default, the level of the default bot, one that GET /bots/defaults lists. Absent for the other kinds.
@@ -844,7 +844,7 @@ export interface components {
              * @example https://example.com/GenerationState.json
              */
             readonly $schema?: string;
-            /** @description Your bot in this game, the one you chose in the lobby, copied when the game started. For kind localhost your client delivers each turn to your bot, on bot.port, which submits its answer. For kind default the backend plays your turns itself as soon as each generation is created. For kinds hosted and uploaded the server plays your turns with your bot, without your client. Only for kind localhost, and for relayed_bots, does your client relay anything. */
+            /** @description Your bot in this game, the one you chose in the lobby, copied when the game started. For kind localhost your client delivers each turn to your bot, on bot.port, which submits its answer. For kind default the backend plays your turns itself as soon as each generation is created. For kinds hosted and uploaded the server plays your turns with your bot, without your client. For kind manual you play by hand in the 3D client, which sends your commands; nothing plays or relays you. Only for kind localhost, and for relayed_bots, does your client relay anything. */
             bot: components["schemas"]["BotChoice"];
             /** @description Your personal Centrifugo channel, which receives GenerationEvent after each turn and GameEndedEvent after the last one. */
             channel: string;
@@ -994,13 +994,13 @@ export interface components {
              */
             team_count: number;
         };
-        /** @description The bot you choose for yourself. Send only the field of its kind: level for default, url for hosted, package_id for uploaded, and port, or none, for localhost. A localhost bot's port is from 1024 to 65535, 41414 when left out. A hosted bot's URL is https://, at most 2048 characters, without credentials, on port 443 or none, and names a host, not an IP address, whose addresses are all public: not loopback, private, link-local or unique-local. The server resolves it when you choose it, and again before it sends each turn. An uploaded bot is one of your ready packages in the lobby; if you replace or delete it, choose it again before getting ready. */
+        /** @description The bot you choose for yourself. Send only the field of its kind: level for default, url for hosted, package_id for uploaded, and port, or none, for localhost; manual takes no other field. A localhost bot's port is from 1024 to 65535, 41414 when left out. A hosted bot's URL is https://, at most 2048 characters, without credentials, on port 443 or none, and names a host, not an IP address, whose addresses are all public: not loopback, private, link-local or unique-local. The server resolves it when you choose it, and again before it sends each turn. An uploaded bot is one of your ready packages in the lobby; if you replace or delete it, choose it again before getting ready. */
         MemberBot: {
             /**
-             * @description localhost: your own bot, which island-battles-bot serve runs on your machine and your game client relays each turn to. default: a default bot of GET /bots/defaults, which the backend plays. hosted: your own bot server at url, which the server sends each turn to. uploaded: your own bot package in this lobby, package_id, which the server runs. hosted and uploaded are offered only when GET /bots/defaults says server_bots.
+             * @description localhost: your own bot, which island-battles-bot serve runs on your machine and your game client relays each turn to. default: a default bot of GET /bots/defaults, which the backend plays. hosted: your own bot server at url, which the server sends each turn to. uploaded: your own bot package in this lobby, package_id, which the server runs. manual: you play by hand in the 3D client; no bot plays for you. hosted and uploaded are offered only when GET /bots/defaults says server_bots.
              * @enum {string}
              */
-            kind: "localhost" | "default" | "hosted" | "uploaded";
+            kind: "localhost" | "default" | "hosted" | "uploaded" | "manual";
             /**
              * Format: int64
              * @description For kind default only: a level that GET /bots/defaults lists.
@@ -1019,7 +1019,7 @@ export interface components {
             /** @description For kind hosted only: where the server POSTs each TurnDelivery. https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public. */
             url?: string;
         };
-        /** @description Island Battles member_settings for setLobbyMemberSettings: the bot that plays for you. {"bot": {"kind": "localhost"}} is your own bot, which island-battles-bot serve runs on your machine and your game client relays each turn to, on port 41414 or on the port you add, {"bot": {"kind": "localhost", "port": 41415}}, and {"bot": {"kind": "default", "level": N}} a default bot of a level that GET /bots/defaults lists, which the backend plays itself. When GET /bots/defaults says server_bots, also {"bot": {"kind": "hosted", "url": "https://…"}}, your own bot server at a public URL, or {"bot": {"kind": "uploaded", "package_id": "…"}}, one of your bot packages in the lobby; the server plays both, without your game client. Anything else is invalid_member_settings. You choose a bot before getting ready, and can change it while the lobby waits: getting ready without one is refused with game_requirement of type urn:island-battles:problem:bot-not-chosen, and an uploaded bot that is no longer a ready package of yours in the lobby, replaced, deleted or someone else's, with type urn:island-battles:problem:bot-package-gone. The start checks every roster player and bot seat the same way. It then initializes one playable generation, which waits for every frozen roster player to complete their turn, and copies each roster player's bot, and each bot seat's, which GenerationState.bot reports from then on. */
+        /** @description Island Battles member_settings for setLobbyMemberSettings: the bot that plays for you. {"bot": {"kind": "manual"}} is you, playing by hand in the 3D client: no bot plays or relays for you, and your client sends your commands with POST /generation/commands. {"bot": {"kind": "localhost"}} is your own bot, which island-battles-bot serve runs on your machine and your game client relays each turn to, on port 41414 or on the port you add, {"bot": {"kind": "localhost", "port": 41415}}, and {"bot": {"kind": "default", "level": N}} a default bot of a level that GET /bots/defaults lists, which the backend plays itself. When GET /bots/defaults says server_bots, also {"bot": {"kind": "hosted", "url": "https://…"}}, your own bot server at a public URL, or {"bot": {"kind": "uploaded", "package_id": "…"}}, one of your bot packages in the lobby; the server plays both, without your game client. Anything else is invalid_member_settings. You choose a bot before getting ready, and can change it while the lobby waits: getting ready without one is refused with game_requirement of type urn:island-battles:problem:bot-not-chosen, and an uploaded bot that is no longer a ready package of yours in the lobby, replaced, deleted or someone else's, with type urn:island-battles:problem:bot-package-gone. The start checks every roster player and bot seat the same way. It then initializes one playable generation, which waits for every frozen roster player to complete their turn, and copies each roster player's bot, and each bot seat's, which GenerationState.bot reports from then on. */
         MemberSettings: {
             bot: components["schemas"]["MemberBot"];
         };

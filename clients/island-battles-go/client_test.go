@@ -523,6 +523,7 @@ func TestClientDoesNotPlayTheServersSeats(t *testing.T) {
 		{map[string]any{"kind": "default", "level": 2}, "level 2 default bot"},
 		{map[string]any{"kind": "hosted", "host": "bot.example.com"}, "your hosted bot at bot.example.com"},
 		{map[string]any{"kind": "uploaded"}, "your uploaded bot"},
+		{map[string]any{"kind": "manual"}, "this seat is played by hand in the 3D client"},
 	} {
 		server, realtime := newFakeServer(t), &fakeRealtime{}
 		state := server.stateOf(1, false, nil)

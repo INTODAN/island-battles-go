@@ -44,7 +44,7 @@ const LocalhostPortTakenProblemType = "urn:island-battles:problem:localhost-port
 const LocalhostSeatRelayGoneProblemType = "urn:island-battles:problem:localhost-seat-relay-gone"
 
 // botNotChosenMessage tells the player what to do; the lobby shows it.
-const botNotChosenMessage = "Choose your bot before getting ready: your localhost bot or a default bot level."
+const botNotChosenMessage = "Choose how you play before getting ready: by hand, your localhost bot or a default bot level."
 
 // packageGoneMessage tells a member whose uploaded bot is gone what to do.
 const packageGoneMessage = "Your uploaded bot was replaced; choose it again."
@@ -95,7 +95,7 @@ type MemberSettings struct {
 
 // memberSettingsShape names the member settings that the server takes.
 func memberSettingsShape(serverBots bool) string {
-	shape := `member_settings must be {"bot": {"kind": "localhost"}}, with an optional "port" from 1024 to 65535, or {"bot": {"kind": "default", "level": N}} with a level that GET /bots/defaults lists`
+	shape := `member_settings must be {"bot": {"kind": "manual"}}, {"bot": {"kind": "localhost"}}, with an optional "port" from 1024 to 65535, or {"bot": {"kind": "default", "level": N}} with a level that GET /bots/defaults lists`
 	if serverBots {
 		shape += `, {"bot": {"kind": "hosted", "url": "https://…"}} or {"bot": {"kind": "uploaded", "package_id": "<your package in this lobby>"}}`
 	}
@@ -103,7 +103,7 @@ func memberSettingsShape(serverBots bool) string {
 }
 
 // MemberBot reads a person's member settings and returns their bot, checking
-// its shape only: {"bot": {"kind": "localhost"}}, {"bot": {"kind":
+// its shape only: {"bot": {"kind": "manual"}}, {"bot": {"kind": "localhost"}}, {"bot": {"kind":
 // "default", "level": N}} with a level that GET /bots/defaults lists, and,
 // with serverBots, {"bot": {"kind": "hosted", "url": "…"}} or {"bot":
 // {"kind": "uploaded", "package_id": "…"}}. It reads nothing, so it checks
@@ -131,12 +131,12 @@ func checkMemberBotShape(bot models.MemberBotView, serverBots bool) error {
 		return errors.New(memberSettingsShape(false))
 	}
 	switch {
-	case bot.Kind == models.LocalhostBot, bot.Kind == models.DefaultBot:
+	case bot.Kind == models.LocalhostBot, bot.Kind == models.DefaultBot, bot.Kind == models.ManualBot:
 	case serverBots && (bot.Kind == models.HostedBot || bot.Kind == models.UploadedBot):
 	case serverBots:
-		return reject(422, "kind must be localhost, default, hosted or uploaded")
+		return reject(422, "kind must be manual, localhost, default, hosted or uploaded")
 	default:
-		return reject(422, "kind must be localhost or default")
+		return reject(422, "kind must be manual, localhost or default")
 	}
 	switch {
 	case bot.Port != nil && bot.Kind != models.LocalhostBot:
@@ -517,7 +517,7 @@ func checkMembersReady(members []domain.ReadyMember, atStart, serverBots bool, o
 
 // botNotChosenAtStartMessage names the members that the host is waiting for.
 func botNotChosenAtStartMessage(names []string) string {
-	return "Waiting for " + strings.Join(names, ", ") + " to choose a bot: their localhost bot or a default bot level."
+	return "Waiting for " + strings.Join(names, ", ") + " to choose how they play: by hand, their localhost bot or a default bot level."
 }
 
 // frozenBot is the bot that a roster player plays with, as the start copies

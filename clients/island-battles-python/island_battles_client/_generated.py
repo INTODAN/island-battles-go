@@ -33,9 +33,9 @@ class BotChoice(GameModel):
     """
     For kind hosted, the host name of the bot's URL, such as bot.example.com; the rest of the URL is not shown. Absent for the other kinds.
     """
-    kind: Literal["localhost", "default", "hosted", "uploaded"]
+    kind: Literal["localhost", "default", "hosted", "uploaded", "manual"]
     """
-    localhost: the player's own bot, which island-battles-bot serve runs on their machine; their game client relays each turn to it. default: a default bot of GET /bots/defaults, which the backend plays itself, so the player's client submits nothing. hosted: the player's own bot server at a public URL, which the server sends each turn to; no client relays it. uploaded: a bot package uploaded to the lobby, which the server runs; no client relays it.
+    localhost: the player's own bot, which island-battles-bot serve runs on their machine; their game client relays each turn to it. default: a default bot of GET /bots/defaults, which the backend plays itself, so the player's client submits nothing. hosted: the player's own bot server at a public URL, which the server sends each turn to; no client relays it. uploaded: a bot package uploaded to the lobby, which the server runs; no client relays it. manual: a person who plays by hand in the 3D client; nothing plays or relays the player, and their client sends their commands.
     """
     level: Annotated[StrictInt | None, Field(ge=1)] = None
     """
@@ -632,7 +632,7 @@ class GenerationState(GameModel):
     """
     bot: BotChoice
     """
-    Your bot in this game, the one you chose in the lobby, copied when the game started. For kind localhost your client delivers each turn to your bot, on bot.port, which submits its answer. For kind default the backend plays your turns itself as soon as each generation is created. For kinds hosted and uploaded the server plays your turns with your bot, without your client. Only for kind localhost, and for relayed_bots, does your client relay anything.
+    Your bot in this game, the one you chose in the lobby, copied when the game started. For kind localhost your client delivers each turn to your bot, on bot.port, which submits its answer. For kind default the backend plays your turns itself as soon as each generation is created. For kinds hosted and uploaded the server plays your turns with your bot, without your client. For kind manual you play by hand in the 3D client, which sends your commands; nothing plays or relays you. Only for kind localhost, and for relayed_bots, does your client relay anything.
     """
     channel: StrictStr
     """
@@ -818,9 +818,9 @@ class MemberBot(GameModel):
     model_config = ConfigDict(
         extra="ignore",
     )
-    kind: Literal["localhost", "default", "hosted", "uploaded"]
+    kind: Literal["localhost", "default", "hosted", "uploaded", "manual"]
     """
-    localhost: your own bot, which island-battles-bot serve runs on your machine and your game client relays each turn to. default: a default bot of GET /bots/defaults, which the backend plays. hosted: your own bot server at url, which the server sends each turn to. uploaded: your own bot package in this lobby, package_id, which the server runs. hosted and uploaded are offered only when GET /bots/defaults says server_bots.
+    localhost: your own bot, which island-battles-bot serve runs on your machine and your game client relays each turn to. default: a default bot of GET /bots/defaults, which the backend plays. hosted: your own bot server at url, which the server sends each turn to. uploaded: your own bot package in this lobby, package_id, which the server runs. manual: you play by hand in the 3D client; no bot plays for you. hosted and uploaded are offered only when GET /bots/defaults says server_bots.
     """
     level: Annotated[StrictInt | None, Field(ge=1)] = None
     """
