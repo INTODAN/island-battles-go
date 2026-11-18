@@ -385,15 +385,15 @@ export class SettingsForm {
     if (this.pendingTemplate) {
       throw new Error(this.mapsError ? "Could not load the default maps. Pick another map, or reload the page." : "The default maps are still loading. Try again in a moment.");
     }
-    const timeout = { turn_timeout_seconds: this.timeout.value === "none" ? null : Number(this.timeout.value), max_generations: Number(this.length.value) };
+    const limits = { turn_timeout_seconds: this.timeout.value === "none" ? null : Number(this.timeout.value), max_generations: Number(this.length.value) };
     if (this.select.value === "file") {
       if (!this.file) throw new Error(this.fileError || "Choose a map file to load, or pick another map.");
-      return { settings: { map: this.file, ...timeout }, teams: teamNames(this.file.player_amount) };
+      return { settings: { map: this.file, ...limits }, teams: teamNames(this.file.player_amount) };
     }
     if (!this.select.value) {
       throw new Error(this.mapsError || (this.mapsLoaded ? "Pick a default map, or load a map file." : "The default maps are still loading. Try again in a moment."));
     }
     const map = this.chosenDefaultMap();
-    return { settings: { map_template_id: map.map_template_id, ...timeout }, teams: teamNames(map.team_count) };
+    return { settings: { map_template_id: map.map_template_id, ...limits }, teams: teamNames(map.team_count) };
   }
 }
