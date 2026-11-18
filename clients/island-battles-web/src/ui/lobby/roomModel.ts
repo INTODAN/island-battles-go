@@ -6,7 +6,12 @@ import type {
   MapTemplateSummary,
   MemberBot,
 } from "./actions";
-import { describeGameLength, describeTurnTimeout } from "./form";
+import {
+  describeGameLength,
+  describePace,
+  describeTurnTimeout,
+  turnPaceOf,
+} from "./form";
 
 export interface MemberRow {
   /** The member ID; for a seat, the seat ID that removing it takes. */
@@ -236,6 +241,7 @@ export function choiceFromValue(
       ? { kind: "localhost" }
       : { kind: "localhost", port };
   }
+  if (value === "manual") return { kind: "manual" };
   if (value === "hosted") {
     const trimmed = url.trim();
     return trimmed ? { kind: "hosted", url: trimmed } : null;
@@ -418,12 +424,34 @@ export function startBlocker(
   return null;
 }
 
-/** One line naming the map and the turn limit a lobby's settings chose, and its game length when that isn't 300 turns. */
+/** Whether any member, person or seat, plays by hand, which makes the game real-time. */
+export function anyPlaysByHand(room: RoomModel): boolean {
+  return [
+    ...room.teams.flatMap((team) => team.members),
+    ...room.unassigned,
+  ].some((member) => member.bot?.kind === "manual");
+}
+
+/** "Real time: a turn every 1 s": what a game with a hand player is, from the lobby's turn pace. */
+export function describeRealTime(
+  settings: Record<string, unknown> | undefined,
+): string {
+  return `Real time: a turn every ${describePace(turnPaceOf(settings))}`;
+}
+
+/**
+ * One line naming the map and the turn limit a lobby's settings chose, and its game length when
+ * that isn't 300 turns. A game where someone plays by hand is real-time and has no turn limit, so
+ * `realTime` swaps the limit's phrase for the turn pace's.
+ */
 export function describeSettings(
   settings: Record<string, unknown> | undefined,
   templates: MapTemplateSummary[],
+  realTime = false,
 ): string {
-  const limit = describeTurnTimeout(settings);
+  const limit = realTime
+    ? describeRealTime(settings)
+    : describeTurnTimeout(settings);
   // Only a lobby created before every lobby needed a map has none.
   let map = "No map chosen";
   const file = settings?.map;
