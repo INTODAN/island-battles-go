@@ -62,11 +62,14 @@ func runSeat(ctx context.Context, program invocation, arguments []string) int {
 		flags.Usage()
 		return 2
 	}
+	// The end reports the final state's turn number, not its generation's
+	// server ID.
+	var client *Client
 	options := []ClientOption{
 		WithLogLevel(level),
 		WithLogOutput(program.stdout),
-		WithGameEnded(func(_ context.Context, outcome GameOutcome, generation Generation) {
-			_, _ = fmt.Fprintf(program.stdout, "game ended at generation %d: %s\n", generation.ID, outcome.Summary)
+		WithGameEnded(func(_ context.Context, outcome GameOutcome, _ Generation) {
+			_, _ = fmt.Fprintf(program.stdout, "game ended at generation %d: %s\n", client.TurnNumber(), outcome.Summary)
 		}),
 	}
 	if *logFile != "" {

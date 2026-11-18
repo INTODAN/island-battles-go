@@ -53,6 +53,9 @@ async def test_bot_receives_the_authoritative_turn_and_answers_with_one_batch(
     turn = alice.received[-1]
     assert turn["team_color"] == state["team_color"]
     assert turn["game_id"] == state["game_id"]
+    # The game's first turn is turn 1, whatever its generation's server ID.
+    assert turn["turn_number"] == state["turn_number"] == 1
+    assert turn["max_generations"] == state["max_generations"] >= 2
     assert turn["memory"] is None
     # The table is the one the server lists, and every turn has the same one.
     assert (
@@ -119,6 +122,7 @@ async def test_memory_is_stored_with_the_turn_and_given_back_next_turn(
     await match.complete(match.bob)
     await alice.expect("generation")
     assert alice.received[-1]["memory"] == {"target": 3, "seen": [1, 2]}
+    assert alice.received[-1]["turn_number"] == 2
     assert (await match.read(match.alice))["memory"] == {"target": 3, "seen": [1, 2]}
     # A turn that returns no memory clears it.
     await finish(alice)

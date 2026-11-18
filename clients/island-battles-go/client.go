@@ -259,6 +259,17 @@ func (client *Client) Generation() (Generation, bool) {
 	return client.state.Generation, true
 }
 
+// TurnNumber is the latest generation's turn number in the game, from 1, and
+// 0 before the first read. After the game ends it is the final generation's.
+func (client *Client) TurnNumber() int {
+	client.mutex.Lock()
+	defer client.mutex.Unlock()
+	if client.state == nil {
+		return 0
+	}
+	return client.state.TurnNumber
+}
+
 // TeamColor is the player's team, known after Start, and 0 before.
 func (client *Client) TeamColor() uint {
 	client.mutex.Lock()
@@ -976,6 +987,8 @@ func (client *Client) playTurn(state generationState, stored int) error {
 	turn := Turn{
 		GameID:         state.GameID,
 		Generation:     state.Generation,
+		TurnNumber:     state.TurnNumber,
+		MaxGenerations: state.MaxGenerations,
 		TeamColor:      state.TeamColor,
 		Upgrades:       client.upgrades,
 		Memory:         state.Memory,

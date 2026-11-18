@@ -128,6 +128,10 @@ func DecodeTurn(data []byte) (Turn, error) {
 		return Turn{}, errors.New("game_id must be at least 1")
 	case turn.TeamColor < 1:
 		return Turn{}, errors.New("team_color must be at least 1")
+	case turn.TurnNumber < 1:
+		return Turn{}, errors.New("turn_number must be at least 1")
+	case turn.MaxGenerations < 2:
+		return Turn{}, errors.New("max_generations must be at least 2")
 	}
 	if err := checkMemoryObject(turn.Memory); err != nil {
 		return Turn{}, err

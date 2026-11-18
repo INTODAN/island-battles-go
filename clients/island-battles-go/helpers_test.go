@@ -218,7 +218,8 @@ func TestValidateResult(t *testing.T) {
 
 func TestDecodeTurn(t *testing.T) {
 	turn, err := DecodeTurn(fixtureTurnJSON)
-	if err != nil || turn.Generation.ID != 12 || len(turn.Generation.Castles) != 4 || turn.Memory != nil || turn.TurnDeadlineAt != nil {
+	if err != nil || turn.Generation.ID != 12 || turn.TurnNumber != 1 || turn.MaxGenerations != 300 || len(turn.Generation.Castles) != 4 || turn.Memory != nil ||
+		turn.TurnDeadlineAt != nil {
 		t.Fatalf("got %+v (%v)", turn, err)
 	}
 	fixture := func(change func(map[string]any)) []byte {
@@ -233,17 +234,20 @@ func TestDecodeTurn(t *testing.T) {
 		t.Fatalf("an unknown field and memory gave %v", err)
 	}
 	for name, body := range map[string][]byte{
-		"not JSON":          []byte("{"),
-		"an array":          []byte("[]"),
-		"no game":           fixture(func(data map[string]any) { delete(data, "game_id") }),
-		"game 0":            fixture(func(data map[string]any) { data["game_id"] = 0 }),
-		"team 0":            fixture(func(data map[string]any) { data["team_color"] = 0 }),
-		"no memory field":   fixture(func(data map[string]any) { delete(data, "memory") }),
-		"no deadline field": fixture(func(data map[string]any) { delete(data, "turn_deadline_at") }),
-		"null upgrades":     fixture(func(data map[string]any) { data["upgrades"] = nil }),
-		"memory an array":   fixture(func(data map[string]any) { data["memory"] = []int{1} }),
-		"no castles":        fixture(func(data map[string]any) { delete(generation(data), "castles") }),
-		"castle without x":  fixture(func(data map[string]any) { delete(generation(data)["castles"].([]any)[0].(map[string]any), "x") }),
+		"not JSON":           []byte("{"),
+		"an array":           []byte("[]"),
+		"no game":            fixture(func(data map[string]any) { delete(data, "game_id") }),
+		"game 0":             fixture(func(data map[string]any) { data["game_id"] = 0 }),
+		"team 0":             fixture(func(data map[string]any) { data["team_color"] = 0 }),
+		"no turn number":     fixture(func(data map[string]any) { delete(data, "turn_number") }),
+		"turn number 0":      fixture(func(data map[string]any) { data["turn_number"] = 0 }),
+		"no last generation": fixture(func(data map[string]any) { delete(data, "max_generations") }),
+		"no memory field":    fixture(func(data map[string]any) { delete(data, "memory") }),
+		"no deadline field":  fixture(func(data map[string]any) { delete(data, "turn_deadline_at") }),
+		"null upgrades":      fixture(func(data map[string]any) { data["upgrades"] = nil }),
+		"memory an array":    fixture(func(data map[string]any) { data["memory"] = []int{1} }),
+		"no castles":         fixture(func(data map[string]any) { delete(generation(data), "castles") }),
+		"castle without x":   fixture(func(data map[string]any) { delete(generation(data)["castles"].([]any)[0].(map[string]any), "x") }),
 		"a string soldiers": fixture(func(data map[string]any) {
 			generation(data)["castles"].([]any)[0].(map[string]any)["soldiers"] = "many"
 		}),

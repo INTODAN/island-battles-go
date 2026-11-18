@@ -99,6 +99,8 @@ type generationState struct {
 	Channel        string       `json:"channel"`
 	Submitted      bool         `json:"submitted"`
 	Generation     Generation   `json:"generation"`
+	TurnNumber     int          `json:"turn_number"`
+	MaxGenerations int          `json:"max_generations"`
 	LogLinesStored uint         `json:"log_lines_stored"`
 	Memory         Memory       `json:"memory"`
 	Bot            botChoice    `json:"bot"`
@@ -192,6 +194,10 @@ func (state generationState) validate() error {
 		return errors.New("generation_id must be at least 1")
 	case state.TeamColor < 1:
 		return errors.New("team_color must be at least 1")
+	case state.TurnNumber < 1:
+		return errors.New("turn_number must be at least 1")
+	case state.MaxGenerations < 2:
+		return errors.New("max_generations must be at least 2")
 	case !slices.Contains(botKinds, state.Bot.Kind):
 		return fmt.Errorf("unknown bot kind %q", state.Bot.Kind)
 	}

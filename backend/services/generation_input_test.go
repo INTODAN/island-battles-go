@@ -346,6 +346,12 @@ func TestGenerationCapEndsTheGame(t *testing.T) {
 	if penultimate.Outcome != nil || last.Outcome == nil || *last.Outcome != draw {
 		t.Fatalf("outcome before the cap = %+v, at the cap = %+v", penultimate.Outcome, last.Outcome)
 	}
+	// The last turn played is max_generations - 1, and it creates the last
+	// generation.
+	if penultimate.TurnNumber != services.MaxGenerations-1 || last.TurnNumber != services.MaxGenerations ||
+		penultimate.MaxGenerations != services.MaxGenerations || last.MaxGenerations != services.MaxGenerations {
+		t.Fatalf("turns %d and %d of %d and %d", penultimate.TurnNumber, last.TurnNumber, penultimate.MaxGenerations, last.MaxGenerations)
+	}
 	if ended := fixture.publisher.GameEndedEvents(t); len(ended) != len(fixture.players) || ended[0].State.GenerationID != last.GenerationID {
 		t.Fatalf("game.ended events = %+v", ended)
 	}

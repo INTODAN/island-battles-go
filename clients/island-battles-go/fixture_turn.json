@@ -1,5 +1,7 @@
 {
   "game_id": 1,
+  "turn_number": 1,
+  "max_generations": 300,
   "team_color": 1,
   "upgrades": [
     {

@@ -16,7 +16,10 @@ func TestGoBotTurnCarriesTheUpgradeTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn := services.NewGoBotTurn(&models.Game{}, &models.Generation{}, 1, nil)
+	turn, err := services.NewGoBotTurn(&models.Game{}, &models.Generation{Number: 1}, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	want, err := json.Marshal(response.Body.Upgrades)
 	if err != nil {
 		t.Fatal(err)
@@ -27,5 +30,17 @@ func TestGoBotTurnCarriesTheUpgradeTable(t *testing.T) {
 	}
 	if string(got) != string(want) || len(turn.Upgrades) == 0 {
 		t.Fatalf("turn upgrades = %s, want %s", got, want)
+	}
+}
+
+// A generation that no DAL loader numbered fails, instead of giving the bot
+// turn number 0.
+func TestGoBotTurnNeedsANumberedGeneration(t *testing.T) {
+	if _, err := services.NewGoBotTurn(&models.Game{}, &models.Generation{}, 1, nil); err == nil {
+		t.Fatal("built a turn of a generation without a number")
+	}
+	turn, err := services.NewGoBotTurn(&models.Game{}, &models.Generation{Number: 7}, 1, nil)
+	if err != nil || turn.TurnNumber != 7 || turn.MaxGenerations != services.MaxGenerations {
+		t.Fatalf("turn %d of %d (%v)", turn.TurnNumber, turn.MaxGenerations, err)
 	}
 }

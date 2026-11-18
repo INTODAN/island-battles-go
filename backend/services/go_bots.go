@@ -189,7 +189,10 @@ func playGoBots(ctx context.Context, transaction *gorm.DB, game *models.Game, ge
 		if passesEveryTurn(player) {
 			played = goBotTurn{memory: memories[player.PlayerID], logs: []models.GenerationLogLine{{Level: models.GenerationLogError, Logger: GoBotLogger, Message: packageGoneLine}}}
 		} else {
-			turn := newGoBotTurn(game, generation, player.TeamColor, memories[player.PlayerID])
+			turn, numberErr := newGoBotTurn(game, generation, player.TeamColor, memories[player.PlayerID])
+			if numberErr != nil {
+				return nil, numberErr
+			}
 			played, err = runGoBot(ctx, *player.BotLevel, turn, generation, inputs)
 		}
 		if err != nil {
@@ -284,19 +287,15 @@ func playTurn(ctx context.Context, transaction *gorm.DB, game *models.Game, play
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	generations, err := dal.CountGenerationsForGame(transaction, game.ID)
+	generation, err := dal.GetGeneration(transaction, generationID)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 	// A game that ends keeps this generation as its last one.
-	if outcome := simulation.Outcome(board, game.Teams, generations >= MaxGenerations); outcome != nil {
+	if outcome := simulation.Outcome(board, game.Teams, generation.Number >= MaxGenerations); outcome != nil {
 		if err := dal.SaveGameOutcome(transaction, game, *outcome); err != nil {
 			return nil, nil, nil, nil, err
 		}
-	}
-	generation, err := dal.GetGeneration(transaction, generationID)
-	if err != nil {
-		return nil, nil, nil, nil, err
 	}
 	inputs, err = playGoBots(ctx, transaction, game, generation, players, nil)
 	if err != nil {
@@ -383,7 +382,22 @@ func (service *GenerationService) playGoBotTurns(ctx context.Context, gameID uin
 }
 
 // newGoBotTurn builds the turn a Go bot is given. Its upgrade table is the one
-// GET /game/upgrades lists, as the turns of relayed bots carry it.
-func newGoBotTurn(game *models.Game, generation *models.Generation, teamColor uint, memory models.BotMemory) models.BotTurn {
-	return models.BotTurn{GameID: game.ID, TeamColor: teamColor, Upgrades: models.UpgradeTable(), Memory: memory, TurnDeadlineAt: turnDeadline(game, generation)}
+// GET /game/upgrades lists, as the turns of relayed bots carry it. Its turn
+// number is the generation's Number, which the DAL's loaders fill in; a
+// generation without one is an error, rather than a turn numbered 0.
+func newGoBotTurn(game *models.Game, generation *models.Generation, teamColor uint, memory models.BotMemory) (models.BotTurn, error) {
+	if err := requireNumber(generation); err != nil {
+		return models.BotTurn{}, err
+	}
+	return models.BotTurn{GameID: game.ID, TurnNumber: generation.Number, MaxGenerations: MaxGenerations, TeamColor: teamColor, Upgrades: models.UpgradeTable(), Memory: memory,
+		TurnDeadlineAt: turnDeadline(game, generation)}, nil
+}
+
+// requireNumber fails for a generation that wasn't loaded through one of the
+// DAL's loaders, which number it, so that a player never gets turn number 0.
+func requireNumber(generation *models.Generation) error {
+	if generation.Number < 1 {
+		return fmt.Errorf("generation %d has no turn number: it wasn't loaded through a loader that numbers it", generation.ID)
+	}
+	return nil
 }

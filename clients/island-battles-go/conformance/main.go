@@ -208,7 +208,8 @@ func (adapter *adapter) play(ctx context.Context, turn islandbattles.Turn) (isla
 	}
 	adapter.emit(map[string]any{
 		"type": "generation", "generation": turn.Generation, "memory": turn.Memory,
-		"team_color": turn.TeamColor, "game_id": turn.GameID, "upgrades": turn.Upgrades, "turn_deadline_at": deadline,
+		"team_color": turn.TeamColor, "game_id": turn.GameID, "turn_number": turn.TurnNumber, "max_generations": turn.MaxGenerations,
+		"upgrades": turn.Upgrades, "turn_deadline_at": deadline,
 	})
 	logger := islandbattles.Logger(ctx)
 	done := ctx.Done()

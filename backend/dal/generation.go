@@ -19,7 +19,23 @@ func WithFullGeneration(db *gorm.DB) *gorm.DB {
 }
 
 func RefreshGeneration(db *gorm.DB, generation *models.Generation) error {
-	return db.Scopes(WithFullGeneration).First(&generation, generation.ID).Error
+	if err := db.Scopes(WithFullGeneration).First(&generation, generation.ID).Error; err != nil {
+		return err
+	}
+	return numberGeneration(db, generation)
+}
+
+// numberGeneration fills in a loaded generation's Number, its position in
+// its game: how many of the game's generations there are up to and including
+// it. Generation IDs increase with every turn, but every game shares them.
+func numberGeneration(db *gorm.DB, generation *models.Generation) error {
+	var count int64
+	err := db.Session(&gorm.Session{NewDB: true}).Model(&models.Generation{}).
+		Where(&models.Generation{GameID: generation.GameID}).
+		Where(clause.Lte{Column: clause.Column{Name: "id"}, Value: generation.ID}).
+		Count(&count).Error
+	generation.Number = int(count)
+	return err
 }
 
 func CreateGeneration(db *gorm.DB, generation *models.Generation) (uint, error) {
@@ -36,6 +52,9 @@ func GetGeneration(db *gorm.DB, generationID uint) (*models.Generation, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := numberGeneration(db, &generation); err != nil {
+		return nil, err
+	}
 	return &generation, nil
 }
 
@@ -46,6 +65,9 @@ func GetLatestGenerationForGame(db *gorm.DB, gameID uint) (*models.Generation, e
 		Order(clause.OrderByColumn{Column: clause.Column{Name: "id"}, Desc: true}).
 		First(&generation).Error
 	if err != nil {
+		return nil, err
+	}
+	if err := numberGeneration(db, &generation); err != nil {
 		return nil, err
 	}
 	return &generation, nil
@@ -75,11 +97,12 @@ func CountGenerationsForGame(db *gorm.DB, gameID uint) (int64, error) {
 	return count, err
 }
 
-// LoadGameGenerations returns every generation of a game in ID order, with
-// what the board view reads: the map's castles and the soldier groups, whose
-// OriginCastle and DestinationCastle are filled in from those castles in
-// memory. Commands are not loaded. Preloads are batched across generations,
-// so the number of queries does not grow with the length of the game.
+// LoadGameGenerations returns every generation of a game in ID order, numbered
+// from 1, with what the board view reads: the map's castles and the soldier
+// groups, whose OriginCastle and DestinationCastle are filled in from those
+// castles in memory. Commands are not loaded. Preloads are batched across
+// generations, so the number of queries does not grow with the length of the
+// game.
 func LoadGameGenerations(db *gorm.DB, gameID uint) ([]models.Generation, error) {
 	// GORM drops zero-valued struct conditions, which would match every game.
 	if gameID == 0 {
@@ -94,6 +117,9 @@ func LoadGameGenerations(db *gorm.DB, gameID uint) ([]models.Generation, error) 
 		return nil, err
 	}
 	castles := map[uint]models.Castle{}
+	for index := range generations {
+		generations[index].Number = index + 1
+	}
 	for _, generation := range generations {
 		for _, castle := range generation.Map.Castles {
 			castles[castle.ID] = castle
