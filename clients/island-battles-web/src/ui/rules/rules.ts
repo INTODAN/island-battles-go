@@ -15,8 +15,12 @@ export type UpgradeType = components["schemas"]["UpgradeType"];
 export type PlayerCommandType =
   components["schemas"]["PublicGenerationCommand"]["command_type"];
 
-/** The last generation of a game (`MaxGenerations` in `backend/services/generation_input.go`). */
-export const maxGenerations = 300;
+/** The game length when the lobby's host sets none, in generations (`DefaultMaxGenerations` in `backend/models/lobby_settings.go`). */
+export const defaultGameLength = 300;
+
+/** The shortest and the longest game length a lobby may set (`MinMaxGenerations` and `MaxMaxGenerations`). */
+export const minGameLength = 50;
+export const maxGameLength = 1200;
 
 /** A turn's time limit when the lobby's host sets none (`DefaultTurnTimeoutSeconds`), in seconds. */
 export const defaultTurnSeconds = 30;
@@ -230,7 +234,7 @@ export const rulesSections: readonly RulesSection[] = [
     items: [
       "A team that has no castles and no soldier groups left is out. When only one team is left, it wins. Neutral castles don't need to be captured.",
       "When the last teams are knocked out in the same turn, the game is a draw.",
-      `The game ends when generation ${maxGenerations} is reached, so turn ${maxGenerations - 1} is the last one played. Then the team with the most castles wins, and teams tied for the most castles draw.`,
+      `The lobby's host picks the game's length N: ${defaultGameLength} generations unless they choose another, from ${minGameLength} to ${maxGameLength}. The game ends when generation N is reached, so turn N - 1 is the last one played. Then the team with the most castles wins, and teams tied for the most castles draw.`,
       "When a turn's time runs out before every player has finished it, every team with a player who hadn't finished loses. Of the other teams still in the game, the one with the most castles wins, and a tie is a draw.",
     ],
   },

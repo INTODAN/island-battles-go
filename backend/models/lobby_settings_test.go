@@ -11,7 +11,7 @@ import (
 
 func TestParseLobbySettingsReadsOneMapChoice(t *testing.T) {
 	defaultTimeout := uint(DefaultTurnTimeoutSeconds)
-	if settings, err := ParseLobbySettings(json.RawMessage(`{"map_template_id":7}`)); err != nil || !reflect.DeepEqual(settings, LobbySettings{MapTemplateID: 7, TurnTimeoutSeconds: &defaultTimeout}) {
+	if settings, err := ParseLobbySettings(json.RawMessage(`{"map_template_id":7}`)); err != nil || !reflect.DeepEqual(settings, LobbySettings{MapTemplateID: 7, TurnTimeoutSeconds: &defaultTimeout, MaxGenerations: DefaultMaxGenerations}) {
 		t.Fatalf("template settings = %+v, %v", settings, err)
 	}
 	settings, err := ParseLobbySettings(json.RawMessage(`{"map":` + exampleMapFile + `}`))
@@ -28,6 +28,15 @@ func TestParseLobbySettingsReadsTheTurnTimeout(t *testing.T) {
 		parsed, err := ParseLobbySettings(json.RawMessage(settings))
 		if err != nil || !reflect.DeepEqual(parsed.TurnTimeoutSeconds, want) {
 			t.Fatalf("%s: timeout = %v, %v", settings, parsed.TurnTimeoutSeconds, err)
+		}
+	}
+}
+
+func TestParseLobbySettingsReadsMaxGenerations(t *testing.T) {
+	for settings, want := range map[string]int{`{"map_template_id":1}`: 300, `{"map_template_id":1,"max_generations":50}`: 50, `{"map_template_id":1,"max_generations":1200}`: 1200, `{"max_generations": 600, "map_template_id": 3}`: 600} {
+		parsed, err := ParseLobbySettings(json.RawMessage(settings))
+		if err != nil || parsed.MaxGenerations != want {
+			t.Fatalf("%s: max_generations = %d, %v", settings, parsed.MaxGenerations, err)
 		}
 	}
 }
@@ -57,6 +66,11 @@ func TestParseLobbySettingsLocatesEveryRejection(t *testing.T) {
 		{"negative timeout", `{"map_template_id":1,"turn_timeout_seconds":-30}`, []string{"game_settings.turn_timeout_seconds"}},
 		{"fractional timeout", `{"map_template_id":1,"turn_timeout_seconds":30.5}`, []string{"game_settings.turn_timeout_seconds"}},
 		{"string timeout", `{"map_template_id":1,"turn_timeout_seconds":"30"}`, []string{"game_settings.turn_timeout_seconds"}},
+		{"game length below the minimum", `{"map_template_id":1,"max_generations":49}`, []string{"game_settings.max_generations"}},
+		{"game length above the maximum", `{"map_template_id":1,"max_generations":1201}`, []string{"game_settings.max_generations"}},
+		{"fractional game length", `{"map_template_id":1,"max_generations":50.5}`, []string{"game_settings.max_generations"}},
+		{"string game length", `{"map_template_id":1,"max_generations":"300"}`, []string{"game_settings.max_generations"}},
+		{"null game length", `{"map_template_id":1,"max_generations":null}`, []string{"game_settings.max_generations"}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

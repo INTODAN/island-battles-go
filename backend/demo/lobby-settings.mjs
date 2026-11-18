@@ -1,8 +1,9 @@
-// Island Battles' map choice and turn timeout for the lobby frontend's create
-// form. The host picks a default map from GET /map/templates, the first one
+// Island Battles' map choice, turn timeout and game length for the lobby
+// frontend's create form. The host picks a default map from GET /map/templates, the first one
 // unless they pick another, or loads a map file made with the map builder.
 // The chosen map sets the lobby's teams: one per team colour, named after the
-// colour the board draws. The turn timeout sets how long each turn lasts.
+// colour the board draws. The turn timeout sets how long each turn lasts, and the game length the most
+// turns of the game.
 //
 // The lobby page passes gameURL, the game's site, which is not the lobby
 // page's origin when the lobby runs on its own: the form reads the default
@@ -38,6 +39,19 @@ export function describeTurnTimeout(settings) {
   const seconds = settings && "turn_timeout_seconds" in settings ? settings.turn_timeout_seconds : defaultTurnTimeout;
   if (seconds === null) return "No turn limit";
   return `Turn limit: ${seconds % 60 === 0 ? `${seconds / 60} min` : `${seconds} s`}`;
+}
+
+// The game lengths the form offers, as game_settings.max_generations: the
+// most turns a game may last. The server accepts 50 to 1200 and, when the
+// settings leave it out, uses 300.
+export const gameLengths = [150, 300, 600, 1200];
+const defaultGameLength = 300;
+
+// A short line naming a lobby's game length when it isn't the default, from
+// its game_settings, and "" when it is.
+export function describeGameLength(settings) {
+  const turns = settings?.max_generations ?? defaultGameLength;
+  return turns === defaultGameLength ? "" : `Game length: ${turns} turns`;
 }
 
 // The default maps by the game's URL, loaded once per page and shared by the
@@ -123,9 +137,9 @@ function describeMap(name, teamCount, width, height) {
 }
 
 // A short line for the room, naming the map that a lobby's settings chose and
-// its turn timeout.
+// its turn timeout, and its game length when that isn't 300 turns.
 export async function describeSettings(settings, { gameURL = "" } = {}) {
-  return `${await describeMapChoice(settings, gameURL)} · ${describeTurnTimeout(settings)}`;
+  return [await describeMapChoice(settings, gameURL), describeTurnTimeout(settings), describeGameLength(settings)].filter(Boolean).join(" · ");
 }
 
 async function describeMapChoice(settings, gameURL) {
@@ -150,13 +164,13 @@ export const changeSettingsLabel = "Change map";
 // settingsSelection reads a lobby's game_settings as the form shows them: the
 // map select's value ("template:ID", "file", or "" for no map), the
 // map file the settings carry, and the turn timeout select's value ("none" for
-// no limit).
+// no limit), and the game length select's value.
 export function settingsSelection(settings) {
   const seconds = settings && "turn_timeout_seconds" in settings ? settings.turn_timeout_seconds : defaultTurnTimeout;
   let map = "";
   if (settings?.map) map = "file";
   else if (settings?.map_template_id) map = `template:${settings.map_template_id}`;
-  return { map, file: settings?.map || null, timeout: seconds === null ? "none" : String(seconds) };
+  return { map, file: settings?.map || null, timeout: seconds === null ? "none" : String(seconds), length: String(settings?.max_generations ?? defaultGameLength) };
 }
 
 function node(tag, properties = {}, ...children) {
@@ -165,7 +179,7 @@ function node(tag, properties = {}, ...children) {
   return element;
 }
 
-// The create form's map and turn timeout controls. The lobby page constructs
+// The create form's map, turn timeout and game length controls. The lobby page constructs
 // it with a container for its controls and an onChange callback, and calls
 // choice() when the host creates a lobby. The room's form for changing a
 // waiting lobby's settings is the same, constructed with current, the lobby's
@@ -202,9 +216,13 @@ export class SettingsForm {
     this.builderButton = node("button", { type: "button", className: "secondary" }, "Build a map…");
     this.timeout = node("select", {},
       ...turnTimeouts.map(({ seconds, label }) => new Option(label, seconds === null ? "none" : String(seconds), false, seconds === defaultTurnTimeout)));
+    this.length = node("select", {},
+      ...gameLengths.map((turns) => new Option(`${turns} turns`, String(turns), false, turns === defaultGameLength)));
     container.append(node("label", {}, "Map", this.select), this.fileInput, this.builderButton, this.status,
       node("label", {}, "Turn timeout", this.timeout),
-      node("p", { className: "hint" }, "A team whose player doesn’t finish a turn in time loses the game."));
+      node("p", { className: "hint" }, "A team whose player doesn’t finish a turn in time loses the game."),
+      node("label", {}, "Game length", this.length),
+      node("p", { className: "hint" }, "The game ends after this many turns; the team with the most castles wins."));
     this.builderButton.addEventListener("click", () => this.openBuilder());
     window.addEventListener("message", (event) => this.receive(event), { signal: this.listening.signal });
     this.select.addEventListener("change", () => {
@@ -222,7 +240,7 @@ export class SettingsForm {
     this.listening.abort();
   }
 
-  // showCurrent selects the map and turn timeout of a lobby's settings. A
+  // showCurrent selects the map, turn timeout and game length of a lobby's settings. A
   // default map is selected once the default maps load.
   showCurrent(settings) {
     const selection = settingsSelection(settings);
@@ -230,6 +248,10 @@ export class SettingsForm {
       this.timeout.append(new Option(`${selection.timeout} s`, selection.timeout));
     }
     this.timeout.value = selection.timeout;
+    if (![...this.length.options].some((option) => option.value === selection.length)) {
+      this.length.append(new Option(`${selection.length} turns`, selection.length));
+    }
+    this.length.value = selection.length;
     if (selection.file) {
       this.file = selection.file;
       this.fileSource = "lobby";
@@ -363,15 +385,15 @@ export class SettingsForm {
     if (this.pendingTemplate) {
       throw new Error(this.mapsError ? "Could not load the default maps. Pick another map, or reload the page." : "The default maps are still loading. Try again in a moment.");
     }
-    const timeout = { turn_timeout_seconds: this.timeout.value === "none" ? null : Number(this.timeout.value) };
+    const limits = { turn_timeout_seconds: this.timeout.value === "none" ? null : Number(this.timeout.value), max_generations: Number(this.length.value) };
     if (this.select.value === "file") {
       if (!this.file) throw new Error(this.fileError || "Choose a map file to load, or pick another map.");
-      return { settings: { map: this.file, ...timeout }, teams: teamNames(this.file.player_amount) };
+      return { settings: { map: this.file, ...limits }, teams: teamNames(this.file.player_amount) };
     }
     if (!this.select.value) {
       throw new Error(this.mapsError || (this.mapsLoaded ? "Pick a default map, or load a map file." : "The default maps are still loading. Try again in a moment."));
     }
     const map = this.chosenDefaultMap();
-    return { settings: { map_template_id: map.map_template_id, ...timeout }, teams: teamNames(map.team_count) };
+    return { settings: { map_template_id: map.map_template_id, ...limits }, teams: teamNames(map.team_count) };
   }
 }

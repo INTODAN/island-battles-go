@@ -84,7 +84,7 @@ func TestTurnDeliveryIsSubmittedWithItsToken(t *testing.T) {
 	}
 	delivery := readDelivery(t, api, lobbyID, players[0])
 	turn := delivery.Turn
-	if turn.GameID == 0 || turn.TeamColor != 1 || turn.Generation.ID == 0 || turn.TurnNumber != 1 || turn.MaxGenerations != services.MaxGenerations || len(turn.Upgrades) == 0 ||
+	if turn.GameID == 0 || turn.TeamColor != 1 || turn.Generation.ID == 0 || turn.TurnNumber != 1 || turn.MaxGenerations != models.DefaultMaxGenerations || len(turn.Upgrades) == 0 ||
 		turn.Memory != nil || turn.TurnDeadlineAt == nil {
 		t.Fatalf("turn=%+v", turn)
 	}

@@ -123,7 +123,7 @@ func playTournamentGame(t *testing.T, gameID uint, gameMap models.Map, levels []
 		if state, _, err = simulation.Simulate(state, decoded); err != nil {
 			t.Fatalf("generation %d: %v", generations, err)
 		}
-		if outcome := simulation.Outcome(state, teams, generations+1 >= MaxGenerations); outcome != nil {
+		if outcome := simulation.Outcome(state, teams, generations+1 >= models.DefaultMaxGenerations); outcome != nil {
 			return outcome, generations + 1
 		}
 	}

@@ -153,7 +153,7 @@ func gameOver(ctx context.Context, database *gorm.DB, lobbyID string, round int6
 // for the lobby's teams. A failed database read is reported as unavailable
 // rather than as invalid settings.
 func validateSettings(ctx context.Context, database *gorm.DB, settings json.RawMessage, teams []domain.TeamDefinition) error {
-	_, _, err := services.LobbyGameSettings(database.WithContext(ctx), settings, len(teams))
+	_, err := services.LobbyGameSettings(database.WithContext(ctx), settings, len(teams))
 	var invalidSettings *models.LobbySettingsError
 	switch {
 	case err == nil, errors.As(err, &invalidSettings):

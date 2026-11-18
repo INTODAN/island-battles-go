@@ -14,13 +14,16 @@ import (
 // LobbySettings are the Island Battles settings a host chooses when creating a
 // lobby, its game_settings object. The lobby hands them back in the started
 // snapshot. They hold exactly one map choice: a default map by its template
-// ID, or a whole map file. They also set the turn timeout.
+// ID, or a whole map file. They also set the turn timeout and the game's length.
 type LobbySettings struct {
 	MapTemplateID uint             `json:"map_template_id,omitempty" minimum:"1" doc:"Start on this default map, a map_template_id from GET /map/templates. Give this or map, not both."`
 	Map           *MapTemplateView `json:"map,omitempty" doc:"Start on this map file. Give this or map_template_id, not both."`
 	// TurnTimeoutSeconds is nil for no limit. ParseLobbySettings fills in
 	// DefaultTurnTimeoutSeconds when the settings leave it out.
 	TurnTimeoutSeconds *uint `json:"turn_timeout_seconds,omitempty" minimum:"5" maximum:"600" nullable:"true" default:"30" doc:"How long each turn lasts, in whole seconds from 5 to 600, counted from when its generation was created; 30 when left out. null means no limit, for example while debugging a bot. When a turn's deadline passes before every player has completed it, each team with a player who hadn't loses, and the game ends."`
+	// MaxGenerations is always set by ParseLobbySettings, to
+	// DefaultMaxGenerations when the settings leave it out.
+	MaxGenerations int `json:"max_generations,omitempty" minimum:"50" maximum:"1200" default:"300" doc:"The most turns the game may last, a whole number from 50 to 1200; 300 when left out. The turn that creates generation max_generations ends the game, if nothing has ended it before, and the team with the most castles wins."`
 }
 
 // Turn timeouts a lobby may set, in seconds, and the timeout of a lobby that
@@ -29,6 +32,14 @@ const (
 	MinTurnTimeoutSeconds     = 5
 	MaxTurnTimeoutSeconds     = 600
 	DefaultTurnTimeoutSeconds = 30
+)
+
+// The game lengths a lobby may set, in generations, and the length of a lobby
+// that sets none. The turn that creates the last generation ends the game.
+const (
+	MinMaxGenerations     = 50
+	MaxMaxGenerations     = 1200
+	DefaultMaxGenerations = 300
 )
 
 // LobbySettingsLocation is where the settings sit in a lobby create request.
@@ -67,8 +78,11 @@ func NewLobbySettingsError(field, message string) *LobbySettingsError {
 // ParseLobbySettings decodes a lobby's game settings. It rejects unknown
 // fields, settings without a map choice or with both, an inline map that DecodeMapTemplate
 // rejects, and a turn timeout that is neither null nor a whole number of
-// seconds from MinTurnTimeoutSeconds to MaxTurnTimeoutSeconds. Settings
-// without a turn timeout get DefaultTurnTimeoutSeconds. Whether a template
+// seconds from MinTurnTimeoutSeconds to MaxTurnTimeoutSeconds, and a
+// max_generations that is not a whole number from MinMaxGenerations to
+// MaxMaxGenerations. Settings without a turn timeout get
+// DefaultTurnTimeoutSeconds, and without max_generations
+// DefaultMaxGenerations. Whether a template
 // exists, and whether a map fits the lobby's teams, are checked separately.
 // Every rejection is a *LobbySettingsError.
 func ParseLobbySettings(raw json.RawMessage) (LobbySettings, error) {
@@ -77,8 +91,8 @@ func ParseLobbySettings(raw json.RawMessage) (LobbySettings, error) {
 		return LobbySettings{}, &LobbySettingsError{Details: []*huma.ErrorDetail{{Location: LobbySettingsLocation, Message: "must be a JSON object"}}}
 	}
 	for _, field := range slices.Sorted(maps.Keys(fields)) {
-		if field != "map_template_id" && field != "map" && field != "turn_timeout_seconds" {
-			return LobbySettings{}, NewLobbySettingsError(field, "is not an Island Battles setting; the settings are map_template_id, map and turn_timeout_seconds")
+		if field != "map_template_id" && field != "map" && field != "turn_timeout_seconds" && field != "max_generations" {
+			return LobbySettings{}, NewLobbySettingsError(field, "is not an Island Battles setting; the settings are map_template_id, map, turn_timeout_seconds and max_generations")
 		}
 	}
 	rawTemplateID, hasTemplateID := fields["map_template_id"]
@@ -95,7 +109,11 @@ func ParseLobbySettings(raw json.RawMessage) (LobbySettings, error) {
 	if err != nil {
 		return LobbySettings{}, err
 	}
-	settings := LobbySettings{TurnTimeoutSeconds: timeout}
+	maxGenerations, err := parseMaxGenerations(fields)
+	if err != nil {
+		return LobbySettings{}, err
+	}
+	settings := LobbySettings{TurnTimeoutSeconds: timeout, MaxGenerations: maxGenerations}
 	if hasTemplateID {
 		if err := json.Unmarshal(rawTemplateID, &settings.MapTemplateID); err != nil || settings.MapTemplateID == 0 {
 			return LobbySettings{}, NewLobbySettingsError("map_template_id", "must be the positive integer ID of a default map")
@@ -135,6 +153,21 @@ func parseTurnTimeout(fields map[string]json.RawMessage) (*uint, error) {
 		return nil, NewLobbySettingsError("turn_timeout_seconds", fmt.Sprintf("must be a whole number of seconds from %d to %d, or null for no limit", MinTurnTimeoutSeconds, MaxTurnTimeoutSeconds))
 	}
 	return &timeout, nil
+}
+
+// parseMaxGenerations reads max_generations from the settings' fields, and
+// DefaultMaxGenerations when absent. Like the turn timeout, it must be a JSON
+// whole number: 50.5 and "300" are rejected.
+func parseMaxGenerations(fields map[string]json.RawMessage) (int, error) {
+	raw, present := fields["max_generations"]
+	if !present {
+		return DefaultMaxGenerations, nil
+	}
+	var generations int
+	if err := json.Unmarshal(raw, &generations); err != nil || generations < MinMaxGenerations || generations > MaxMaxGenerations {
+		return 0, NewLobbySettingsError("max_generations", fmt.Sprintf("must be a whole number of turns from %d to %d", MinMaxGenerations, MaxMaxGenerations))
+	}
+	return generations, nil
 }
 
 // MapTeamCount returns the number of teams a map is made for: its

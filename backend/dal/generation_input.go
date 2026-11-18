@@ -95,11 +95,11 @@ func StoreGenerationRequest(database *gorm.DB, request *models.GenerationRequest
 	return database.Create(request).Error
 }
 
-// SaveGameStart stores the replay's teams and the turn timeout, nil for no
-// limit, when the game is initialized.
-func SaveGameStart(database *gorm.DB, game *models.Game, teams []models.GameTeam, turnTimeoutSeconds *uint) error {
-	game.Teams, game.TurnTimeoutSeconds = teams, turnTimeoutSeconds
-	return database.Model(game).Select("Teams", "TurnTimeoutSeconds").Updates(game).Error
+// SaveGameStart stores the replay's teams, the turn timeout, nil for no
+// limit, and the game's last generation when the game is initialized.
+func SaveGameStart(database *gorm.DB, game *models.Game, teams []models.GameTeam, turnTimeoutSeconds *uint, maxGenerations int) error {
+	game.Teams, game.TurnTimeoutSeconds, game.MaxGenerations = teams, turnTimeoutSeconds, maxGenerations
+	return database.Model(game).Select("Teams", "TurnTimeoutSeconds", "MaxGenerations").Updates(game).Error
 }
 
 // SaveGameOutcome records how the game ended. The replay shows it from then on.

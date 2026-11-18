@@ -292,7 +292,7 @@ func playTurn(ctx context.Context, transaction *gorm.DB, game *models.Game, play
 		return nil, nil, nil, nil, err
 	}
 	// A game that ends keeps this generation as its last one.
-	if outcome := simulation.Outcome(board, game.Teams, generation.Number >= MaxGenerations); outcome != nil {
+	if outcome := simulation.Outcome(board, game.Teams, generation.Number >= game.MaxGenerations); outcome != nil {
 		if err := dal.SaveGameOutcome(transaction, game, *outcome); err != nil {
 			return nil, nil, nil, nil, err
 		}
@@ -389,7 +389,7 @@ func newGoBotTurn(game *models.Game, generation *models.Generation, teamColor ui
 	if err := requireNumber(generation); err != nil {
 		return models.BotTurn{}, err
 	}
-	return models.BotTurn{GameID: game.ID, TurnNumber: generation.Number, MaxGenerations: MaxGenerations, TeamColor: teamColor, Upgrades: models.UpgradeTable(), Memory: memory,
+	return models.BotTurn{GameID: game.ID, TurnNumber: generation.Number, MaxGenerations: game.MaxGenerations, TeamColor: teamColor, Upgrades: models.UpgradeTable(), Memory: memory,
 		TurnDeadlineAt: turnDeadline(game, generation)}, nil
 }
 

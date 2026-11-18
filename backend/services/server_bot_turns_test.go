@@ -194,7 +194,7 @@ func TestTheStartSendsTheFirstTurnOfEachHostedAndUploadedBot(t *testing.T) {
 		}
 		delivery := invoked.event.Delivery
 		if delivery.Turn.GameID != game.gameID || delivery.Turn.Generation.ID != generation.ID || delivery.Turn.TurnNumber != 1 ||
-			delivery.Turn.MaxGenerations != services.MaxGenerations || delivery.Submit.URL != serverBotSubmitURL ||
+			delivery.Turn.MaxGenerations != models.DefaultMaxGenerations || delivery.Submit.URL != serverBotSubmitURL ||
 			delivery.Submit.DeadlineAt == nil || delivery.Turn.TurnDeadlineAt == nil || !delivery.Submit.DeadlineAt.Equal(*delivery.Turn.TurnDeadlineAt) {
 			t.Errorf("unexpected delivery %+v", delivery.Submit)
 		}

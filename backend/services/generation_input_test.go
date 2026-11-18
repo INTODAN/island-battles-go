@@ -26,11 +26,18 @@ type turnFixture struct {
 
 func newTurnFixture(t *testing.T) turnFixture {
 	t.Helper()
+	return newTurnFixtureWithSettings(t, "")
+}
+
+// newTurnFixtureWithSettings starts the fixture's lobby with these game
+// settings besides the map, a JSON object or "" for none.
+func newTurnFixtureWithSettings(t *testing.T, settings string) turnFixture {
+	t.Helper()
 	database := testutils.InitTestDB(t)
 	lobbyID := uuid.NewString()
 	teamOne, teamTwo := uuid.NewString(), uuid.NewString()
 	players := []domain.Principal{{PlayerID: uuid.NewString()}, {PlayerID: uuid.NewString()}}
-	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted, GameSettings: testutils.CircleMapSettings(2, "")}, Teams: []domain.Team{{ID: teamOne, Order: 1, Name: "Blue"}, {ID: teamTwo, Order: 2, Name: "Red"}}, StartRoster: domain.StartRoster{{PlayerID: players[0].PlayerID, TeamID: teamOne}, {PlayerID: players[1].PlayerID, TeamID: teamTwo}}}
+	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: lobbyID, GameKey: "island-battles", Phase: domain.PhaseStarted, GameSettings: testutils.CircleMapSettings(2, settings)}, Teams: []domain.Team{{ID: teamOne, Order: 1, Name: "Blue"}, {ID: teamTwo, Order: 2, Name: "Red"}}, StartRoster: domain.StartRoster{{PlayerID: players[0].PlayerID, TeamID: teamOne}, {PlayerID: players[1].PlayerID, TeamID: teamTwo}}}
 	publisher := &testutils.RecordedPublisher{}
 	if _, err := services.RunLobbyGame(context.Background(), database, publisher, nil, snapshot); err != nil {
 		t.Fatal(err)
@@ -312,17 +319,22 @@ func TestGenerationPushFailureKeepsCommittedTurn(t *testing.T) {
 	}
 }
 
-// The turn that creates the last generation ends the game, and with equal
-// castle counts the game is a draw.
+// The turn that creates the last generation of the lobby's max_generations
+// ends the game, and with equal castle counts the game is a draw.
 func TestGenerationCapEndsTheGame(t *testing.T) {
-	fixture := newTurnFixture(t)
+	const limit = 50
+	fixture := newTurnFixtureWithSettings(t, `{"max_generations":50}`)
+	var stored models.Game
+	if err := fixture.database.First(&stored, fixture.state.GameID).Error; err != nil || stored.MaxGenerations != limit || fixture.state.MaxGenerations != limit {
+		t.Fatalf("the game stores %d and its first state says %d (%v), want %d", stored.MaxGenerations, fixture.state.MaxGenerations, err, limit)
+	}
 	ctx := context.Background()
 	initial, err := dal.GetGeneration(fixture.database, fixture.state.GenerationID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Earlier turns only need to exist, so these stand-ins share the board.
-	played := make([]models.Generation, services.MaxGenerations-2)
+	played := make([]models.Generation, limit-2)
 	for index := range played {
 		played[index] = models.Generation{GameID: fixture.state.GameID, MapID: initial.MapID}
 	}
@@ -348,8 +360,8 @@ func TestGenerationCapEndsTheGame(t *testing.T) {
 	}
 	// The last turn played is max_generations - 1, and it creates the last
 	// generation.
-	if penultimate.TurnNumber != services.MaxGenerations-1 || last.TurnNumber != services.MaxGenerations ||
-		penultimate.MaxGenerations != services.MaxGenerations || last.MaxGenerations != services.MaxGenerations {
+	if penultimate.TurnNumber != limit-1 || last.TurnNumber != limit ||
+		penultimate.MaxGenerations != limit || last.MaxGenerations != limit {
 		t.Fatalf("turns %d and %d of %d and %d", penultimate.TurnNumber, last.TurnNumber, penultimate.MaxGenerations, last.MaxGenerations)
 	}
 	if ended := fixture.publisher.GameEndedEvents(t); len(ended) != len(fixture.players) || ended[0].State.GenerationID != last.GenerationID {
@@ -361,8 +373,8 @@ func TestGenerationCapEndsTheGame(t *testing.T) {
 	if err := fixture.database.Model(&models.Generation{}).Where(&models.Generation{GameID: fixture.state.GameID}).Count(&generations).Error; err != nil {
 		t.Fatal(err)
 	}
-	if generations != services.MaxGenerations {
-		t.Fatalf("game has %d generations, want %d", generations, services.MaxGenerations)
+	if generations != limit {
+		t.Fatalf("game has %d generations, want %d", generations, limit)
 	}
 	if current, err := fixture.service.Current(ctx, fixture.players[1], fixture.state.LobbyID); err != nil || current.GenerationID != last.GenerationID || current.Submitted {
 		t.Fatalf("capped game cannot be read: %+v %v", current, err)

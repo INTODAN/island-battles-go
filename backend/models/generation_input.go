@@ -138,7 +138,7 @@ type GenerationState struct {
 	Submitted    bool           `json:"submitted" doc:"Whether you completed this generation's turn."`
 	Generation   GenerationView `json:"generation"`
 	// TurnNumber is the generation's position in its game, from 1, as the DAL
-	// numbers it; MaxGenerations is services.MaxGenerations.
+	// numbers it; MaxGenerations is the game's max_generations.
 	TurnNumber     int `json:"turn_number" minimum:"1" doc:"This generation's turn number in the game, from 1: the game's first generation is turn 1, and every turn adds one, the n of the replay's Turn n / m. generation_id is not the turn number: it is the server's ID of the generation, which increases with every turn but doesn't start at 1. BotTurn.turn_number is the same number."`
 	MaxGenerations int `json:"max_generations" minimum:"2" doc:"The game's last generation, the same for the whole game. The turn that creates generation max_generations ends the game, if nothing has ended it before, so turn max_generations - 1 is the last one players play. BotTurn.max_generations is the same number."`
 	// Outcome is nil, and left out, while the game runs.

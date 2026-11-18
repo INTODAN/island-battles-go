@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { builderHello, builderWindowAction, changeSettingsLabel, describeSettings, describeTurnTimeout, loadDefaultMaps, mapFromBuilderMessage, readMapFile, settingsSelection, teamNames, turnTimeouts } from "./lobby-settings.mjs";
+import { builderHello, builderWindowAction, changeSettingsLabel, describeGameLength, describeSettings, describeTurnTimeout, loadDefaultMaps, mapFromBuilderMessage, readMapFile, settingsSelection, teamNames, turnTimeouts } from "./lobby-settings.mjs";
 
 test("a map's teams are named after the board's team colours", () => {
   assert.deepEqual(teamNames(2), ["Blue", "Red"]);
@@ -105,12 +105,21 @@ test("the room reads the default maps from the game's site", async (context) => 
 });
 
 test("the room's form shows the lobby's current map and turn timeout", () => {
-  assert.deepEqual(settingsSelection({}), { map: "", file: null, timeout: "30" });
-  assert.deepEqual(settingsSelection(null), { map: "", file: null, timeout: "30" });
-  assert.deepEqual(settingsSelection({ map_template_id: 4, turn_timeout_seconds: null }), { map: "template:4", file: null, timeout: "none" });
+  assert.deepEqual(settingsSelection({}), { map: "", file: null, timeout: "30", length: "300" });
+  assert.deepEqual(settingsSelection(null), { map: "", file: null, timeout: "30", length: "300" });
+  assert.deepEqual(settingsSelection({ map_template_id: 4, turn_timeout_seconds: null }), { map: "template:4", file: null, timeout: "none", length: "300" });
   const map = { map_name: "Loaded", player_amount: 3 };
-  assert.deepEqual(settingsSelection({ map, turn_timeout_seconds: 120 }), { map: "file", file: map, timeout: "120" });
+  assert.deepEqual(settingsSelection({ map, turn_timeout_seconds: 120 }), { map: "file", file: map, timeout: "120", length: "300" });
   // A timeout the form doesn't offer, set through the API, is still shown.
   assert.equal(settingsSelection({ turn_timeout_seconds: 45 }).timeout, "45");
   assert.equal(changeSettingsLabel, "Change map");
+});
+
+test("a room names the game length when it isn't 300 turns", async () => {
+  assert.equal(describeGameLength({}), "");
+  assert.equal(describeGameLength(null), "");
+  assert.equal(describeGameLength({ max_generations: 300 }), "");
+  assert.equal(describeGameLength({ max_generations: 600 }), "Game length: 600 turns");
+  assert.equal(await describeSettings({ map: { map_name: "Loaded" }, max_generations: 1200 }), "Map: Loaded · Turn limit: 30 s · Game length: 1200 turns");
+  assert.equal(settingsSelection({ max_generations: 150 }).length, "150");
 });

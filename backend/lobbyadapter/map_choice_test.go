@@ -49,7 +49,7 @@ func TestRegistrationValidatesTheMapChoice(t *testing.T) {
 	twoTeams := []domain.TeamDefinition{{Name: "Blue"}, {Name: "Red"}}
 	threeTeams := slices.Concat(twoTeams, []domain.TeamDefinition{{Name: "Green"}})
 	ctx := context.Background()
-	for _, settings := range []string{fmt.Sprintf(`{"map_template_id":%d}`, templateID), `{"map":` + twoTeamMapFile + `}`, `{"map":` + twoTeamMapFile + `,"turn_timeout_seconds":null}`, fmt.Sprintf(`{"map_template_id":%d,"turn_timeout_seconds":600}`, templateID)} {
+	for _, settings := range []string{fmt.Sprintf(`{"map_template_id":%d}`, templateID), `{"map":` + twoTeamMapFile + `}`, `{"map":` + twoTeamMapFile + `,"turn_timeout_seconds":null}`, fmt.Sprintf(`{"map_template_id":%d,"turn_timeout_seconds":600}`, templateID), fmt.Sprintf(`{"map_template_id":%d,"max_generations":50}`, templateID), fmt.Sprintf(`{"map_template_id":%d,"max_generations":1200}`, templateID)} {
 		if _, err := policy.ValidateGameSettings(ctx, lobbyadapter.GameKey, "", json.RawMessage(settings), twoTeams); err != nil {
 			t.Errorf("settings %s rejected: %v", settings, err)
 		}
@@ -66,6 +66,10 @@ func TestRegistrationValidatesTheMapChoice(t *testing.T) {
 		{fmt.Sprintf(`{"map_template_id":%d,"map":%s}`, templateID, twoTeamMapFile), twoTeams, "game_settings.map: cannot be combined with map_template_id"},
 		{`{"map":"Strait"}`, twoTeams, "game_settings.map: expected object"},
 		{fmt.Sprintf(`{"map_template_id":%d,"turn_timeout_seconds":3}`, templateID), twoTeams, "game_settings.turn_timeout_seconds: must be a whole number of seconds from 5 to 600, or null for no limit"},
+		{fmt.Sprintf(`{"map_template_id":%d,"max_generations":49}`, templateID), twoTeams, "game_settings.max_generations: must be a whole number of turns from 50 to 1200"},
+		{fmt.Sprintf(`{"map_template_id":%d,"max_generations":1201}`, templateID), twoTeams, "game_settings.max_generations: must be a whole number of turns from 50 to 1200"},
+		{fmt.Sprintf(`{"map_template_id":%d,"max_generations":50.5}`, templateID), twoTeams, "game_settings.max_generations: must be a whole number of turns from 50 to 1200"},
+		{fmt.Sprintf(`{"map_template_id":%d,"max_generations":"300"}`, templateID), twoTeams, "game_settings.max_generations: must be a whole number of turns from 50 to 1200"},
 		// Every game starts on a default map or a map file.
 		{``, twoTeams, noMap},
 		{`{}`, twoTeams, noMap},
