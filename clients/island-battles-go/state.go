@@ -108,7 +108,12 @@ type generationState struct {
 	Bot            botChoice    `json:"bot"`
 	RelayedBots    []relayedBot `json:"relayed_bots"`
 	TurnDeadlineAt *time.Time   `json:"turn_deadline_at"`
-	Outcome        *GameOutcome `json:"outcome,omitempty"`
+	// TurnPaceMilliseconds is the pace of a real-time game, in which a
+	// player plays by hand: each turn ends this long after its generation
+	// was created, whether the bot answered or not. Nil when the game waits
+	// for every player.
+	TurnPaceMilliseconds *uint        `json:"turn_pace_milliseconds"`
+	Outcome              *GameOutcome `json:"outcome,omitempty"`
 }
 
 // generationEvent is the GenerationEvent and the GameEndedEvent, which the
@@ -200,6 +205,8 @@ func (state generationState) validate() error {
 		return errors.New("turn_number must be at least 1")
 	case state.MaxGenerations < 2:
 		return errors.New("max_generations must be at least 2")
+	case state.TurnPaceMilliseconds != nil && (*state.TurnPaceMilliseconds < 500 || *state.TurnPaceMilliseconds > 5000):
+		return errors.New("turn_pace_milliseconds must be from 500 to 5000, or null")
 	case !slices.Contains(botKinds, state.Bot.Kind):
 		return fmt.Errorf("unknown bot kind %q", state.Bot.Kind)
 	}
