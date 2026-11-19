@@ -288,8 +288,10 @@ select:focus-visible {
   /*
    * Capped so the box never reaches the top stack when the bottom stack is tall (the logs open
    * on a short screen): what is left between the two stacks, whose heights the view publishes
-   * (screen.ts), less a 12 px gap, and never under a summary and its hint. The box scrolls
-   * inside the cap. The 240 px fallback is the top stack's height at a phone's width.
+   * (screen.ts), less the 12 px above the bottom stack, the box's own 18 px of padding and border
+   * (the cap is its content's) and an 8 px gap below the top stack, and never under a summary and
+   * its hint. The box scrolls inside the cap. The 220 px fallback is the top stack's height at a
+   * phone's width.
    */
   max-height: min(
     40vh,
@@ -298,8 +300,10 @@ select:focus-visible {
       calc(
         100% -
         var(--gv-bottom-height, 84px) -
-        var(--gv-top-height, 240px) -
-        12px
+        var(--gv-top-height, 220px) -
+        12px -
+        18px -
+        8px
       )
     )
   );
