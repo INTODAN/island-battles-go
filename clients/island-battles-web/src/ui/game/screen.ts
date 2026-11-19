@@ -11,6 +11,7 @@ import { createScenePlayer } from "../../scene/animation";
 import { battlefieldOf } from "../../scene/battlefield";
 import { loadBoardAssets } from "../../scene/boardAssets";
 import { fitCamera } from "../../scene/camera";
+import { castleScreenPoint } from "../../scene/castleMenuInput";
 import {
   applyGraphics,
   type Graphics,
@@ -23,6 +24,7 @@ import { showBoardLoading } from "../boardLoading";
 import { rulesButton } from "../rules/rulesDialog";
 import { type AgentGame, agentPrompt, copyText } from "./agentPrompt";
 import { AmountBar } from "./amountBar";
+import { CastleMenu } from "./castleMenu";
 import { clashSummary } from "./clashes";
 import { GameController, showsNewestTurn, type ViewState } from "./controller";
 import { installGameViewDebug } from "./debug";
@@ -507,6 +509,8 @@ export class GameScreen {
     const scene = new Scene(engine);
     this.scene = scene;
     const handPlay = this.options.handPlay ?? null;
+    // The castle menu (#344) is built once the controller exists; the board asks it to open.
+    let castleMenu: CastleMenu | null = null;
     const removeControls = installBoardControls(scene, {
       handPlay,
       // Read lazily: the controller and the hand surface are made below.
@@ -516,6 +520,9 @@ export class GameScreen {
       ...(this.amountBar ? { amountControl: this.amountBar } : {}),
       showOrderFeedback: (sentence, orderId) =>
         this.handSurface?.showOrderFeedback(sentence, orderId),
+      onCastleMenu:
+        handPlay &&
+        ((castleId, opener) => castleMenu?.open(castleId, opener) ?? false),
     });
     // The board's art loads behind a loading screen; the board draws placeholders meanwhile.
     const loading = showBoardLoading(this.root);
@@ -552,6 +559,22 @@ export class GameScreen {
       setNotice: (text) => this.setNotice(text),
       showOrderFeedback: (sentence) => this.showOrderFeedback(sentence),
     };
+    castleMenu =
+      handPlay &&
+      new CastleMenu({
+        host: this.root,
+        handPlay,
+        showsNewestTurn: () => showsNewestTurn(controller.state),
+        subscribeView: (listener) => controller.subscribe(listener),
+        locate: (castleId) => castleScreenPoint(scene, castleId),
+        onFrame: (run) => {
+          const observer = scene.onAfterRenderObservable.add(run);
+          return () => scene.onAfterRenderObservable.remove(observer);
+        },
+        fallbackFocus: this.canvas,
+        showOrderFeedback: (sentence, orderId) =>
+          this.handSurface?.showOrderFeedback(sentence, orderId),
+      });
     // Scrubbed back, a hand player is told that orders are given from the newest turn.
     const showHandStatus = () => {
       this.handStatus.hidden = !(
@@ -611,6 +634,7 @@ export class GameScreen {
       teams: sorted,
       dispose: () => {
         unsubscribe();
+        castleMenu?.dispose();
         for (const stop of handStatusStops) stop();
         this.handStatus.hidden = true;
         clearTimeout(this.orderNoticeTimer);
