@@ -284,7 +284,8 @@ export class CastleMenu {
   }
 
   /** Closes the menu when it may no longer be open, or redraws it. */
-  private update(): void {
+  /** Closes the menu if it may no longer be open, else draws it again. */
+  update(): void {
     const castleId = this.castleId;
     if (castleId === null) return;
     if (!this.allowed(castleId)) {

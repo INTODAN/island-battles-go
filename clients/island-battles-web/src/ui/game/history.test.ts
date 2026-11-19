@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { mergeGenerations, sortTeams, teamStats, turnLabel } from "./history";
+import {
+  departureText,
+  mergeDepartures,
+  mergeGenerations,
+  sortTeams,
+  teamStats,
+  teamsDepartedAt,
+  turnLabel,
+} from "./history";
 import { generation, sampleDemo } from "./testing";
 
 const ids = (frames: readonly { id: number }[]) =>
@@ -70,5 +78,40 @@ describe("teamStats", () => {
   test("sortTeams orders by colour", () => {
     const teams = [...sampleDemo().teams].reverse();
     expect(sortTeams(teams).map((team) => team.color)).toEqual([1, 2]);
+  });
+});
+
+describe("departures", () => {
+  const resigned = {
+    team_color: 2,
+    kind: "resigned" as const,
+    players: ["Sam"],
+    turn_number: 4,
+  };
+  const left = {
+    team_color: 3,
+    kind: "left" as const,
+    players: ["Kim"],
+    turn_number: 6,
+  };
+
+  test("a card says Resigned or Left the game", () => {
+    expect(departureText(resigned)).toBe("Resigned");
+    expect(departureText(left)).toBe("Left the game");
+  });
+
+  test("the teams that left in a turn, or undefined with no departures to go by", () => {
+    expect(teamsDepartedAt([], 4)).toBeUndefined();
+    expect(teamsDepartedAt([resigned, left], 4)).toEqual(new Set([2]));
+    expect(teamsDepartedAt([resigned, left], 5)).toEqual(new Set());
+  });
+
+  test("lists merge by team, the first naming a team wins, and a missing list is empty", () => {
+    expect(mergeDepartures([resigned], [left, resigned])).toEqual([
+      resigned,
+      left,
+    ]);
+    expect(mergeDepartures(undefined, [left])).toEqual([left]);
+    expect(mergeDepartures()).toEqual([]);
   });
 });

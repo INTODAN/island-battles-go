@@ -6,8 +6,9 @@ import { ApiError } from "../../api/errors";
 import type { BotChoice, RelayedBot } from "../../bots/kinds";
 import type { Realtime, RealtimeProblem } from "../../realtime";
 import type { Demo } from "./demoFile";
-import type { GameOutcome, Generation } from "./history";
+import type { Departure, GameOutcome, Generation } from "./history";
 import type { GenerationLogs } from "./logs";
+import { type ResignResult, requestResign } from "./resign";
 import { type DemoDownload, downloadDemo } from "./saveDemo";
 
 /** One turn as it arrives live, from a player's or a watcher's state. */
@@ -20,6 +21,8 @@ export interface LiveTurn {
   bot?: BotChoice;
   /** The localhost bot seats that the player added as the host, which only they relay. */
   relayed_bots?: RelayedBot[];
+  /** The teams out of the game so far (resigned or left), as the state lists them. */
+  departures?: Departure[];
 }
 
 export interface LiveSource {
@@ -48,6 +51,11 @@ export interface LiveSource {
   readLogs(generationId: number): Promise<GenerationLogs>;
   /** The lobby's join code, for "Ask your AI agent", when it is known. */
   lobbyCode(): string | undefined;
+  /**
+   * Resigns the player's team and installs the server's answer. Only a roster player's source
+   * has it: a watcher cannot resign.
+   */
+  resign?(): Promise<ResignResult>;
 }
 
 function required<T>(data: T | undefined): T {
@@ -103,6 +111,25 @@ export function playerSource(
       return snapshot?.lobby.id === lobbyId
         ? snapshot.lobby.join_code
         : undefined;
+    },
+    async resign() {
+      const result = await requestResign({
+        call: async () => {
+          const { data } = await gameApi.POST(
+            "/game/from-lobby/{lobby_id}/resign",
+            { params: { path: { lobby_id: lobbyId } } },
+          );
+          return required(data);
+        },
+        sleep: (milliseconds) =>
+          new Promise((resolve) => setTimeout(resolve, milliseconds)),
+      });
+      // The answer is the next state when the turn played in the request; otherwise the view
+      // learns of the team's exit from the turn that plays it.
+      if (result.kind === "resigned") realtime.adoptGame(result.state);
+      // The game ended or the team is out already: read what the view hasn't received.
+      if (result.kind === "already") realtime.refreshGame();
+      return result;
     },
   };
 }
