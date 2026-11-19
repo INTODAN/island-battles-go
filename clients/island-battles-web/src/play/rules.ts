@@ -102,7 +102,12 @@ export type Refusal =
   /** The castle still repays its last burst: `debt` soldiers left. */
   | { kind: "burst-debt"; castleId: number; debt: number }
   /** A burst of this castle is already ordered this turn. */
-  | { kind: "burst-ordered"; castleId: number };
+  | { kind: "burst-ordered"; castleId: number }
+  /**
+   * A burst by `{share}` of the burst potential, which is unknown until `GET /game/upgrades` has
+   * loaded. An exact amount is not refused for this: the server checks it.
+   */
+  | { kind: "upgrades-not-loaded"; castleId: number };
 
 /** One castle of your team as the open turn's orders leave it. */
 export interface CastleLedger {
@@ -433,8 +438,13 @@ export function checkOrder(
       const castle = owned(board, ledger, spec.castleId);
       if (isRefusal(castle)) return { refusal: castle };
       const potential = castle.burstPotential;
-      // Until the table has loaded the potential is unknown: a share then resolves to 1 soldier,
-      // and the server checks the amount.
+      // Until the table has loaded the potential is unknown, so a share of it can't be resolved
+      // (it would come out as 1 soldier). An exact amount goes on: the server checks it.
+      if (potential === null && typeof spec.amount === "object") {
+        return {
+          refusal: { kind: "upgrades-not-loaded", castleId: castle.id },
+        };
+      }
       const soldiers = resolveAmount(spec.amount, potential ?? 0);
       if (potential !== null && soldiers > potential) {
         return {
@@ -505,6 +515,8 @@ export function refusalSentence(refusal: Refusal): string {
       return `This castle is still repaying its last burst: ${soldiersWord(refusal.debt)} left.`;
     case "burst-ordered":
       return "This castle already bursts this turn.";
+    case "upgrades-not-loaded":
+      return "The upgrade details haven't loaded yet; try the burst again in a moment.";
   }
 }
 
