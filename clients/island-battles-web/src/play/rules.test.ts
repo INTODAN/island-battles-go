@@ -457,7 +457,9 @@ describe("the server's refusals", () => {
         "burst-above-potential",
         "That burst is larger than the castle's burst potential.",
       ],
+      [409, "team-out", "Your team is out of the game."],
       [422, "game-log-limit", "The server refused the order."],
+      [409, "a-type-added-later", "The server refused the order."],
     ];
     for (const [status, type, sentence] of cases) {
       expect(

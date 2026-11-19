@@ -544,6 +544,8 @@ export function rejectionSentence(error: ApiError): string {
   switch (error.problemType?.slice(problemPrefix.length)) {
     case "game-ended":
       return "The game ended before the order arrived.";
+    case "team-out":
+      return "Your team is out of the game.";
     case "castle-not-found":
       return "That castle isn't on the board.";
     case "castle-not-owned":

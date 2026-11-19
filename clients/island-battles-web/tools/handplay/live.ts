@@ -67,7 +67,7 @@ const { data: created } = await lobbyApi.POST("/lobby/v1/lobbies", {
 if (!created) throw new Error("no lobby");
 const lobbyId = created.lobby.id;
 const path = { game_key: "island-battles", lobby_id: lobbyId };
-const [red, blue] = created.teams;
+const [red, blue] = created.teams ?? [];
 if (!red || !blue) throw new Error("the lobby has no two teams");
 await lobbyApi.POST("/lobby/v1/games/{game_key}/lobbies/{lobby_id}/seats", {
   params: { path },

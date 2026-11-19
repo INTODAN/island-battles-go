@@ -152,6 +152,29 @@ describe("status", () => {
     });
   });
 
+  test("a team that resigned or left, with no castle and no group, is eliminated", async () => {
+    const env = setup({ initial: handState(10) });
+    const out = handState(11);
+    out.generation.castles = out.generation.castles.map((castle) =>
+      castle.team_color === 1 ? { ...castle, team_color: 0 } : castle,
+    );
+    env.game.set(out);
+    expect(env.play.state.get().status).toBe("eliminated");
+    expect(env.play.state.get().castles.size).toBe(0);
+    await env.clock.advance(10_000);
+    expect(env.deadlines).toHaveLength(0);
+  });
+
+  test("a refused batch of a team that is out drops the order", async () => {
+    const env = setup({ initial: handState(10) });
+    const given = env.play.send(1, 4, 5);
+    env.posts[0]?.reject(problem(409, "team-out"));
+    expect(given.ok && (await given.settled)).toMatchObject({
+      state: "rejected",
+      sentence: "Your team is out of the game.",
+    });
+  });
+
   test("the upgrade table is read once", async () => {
     const env = setup({ initial: handState(10) });
     env.game.set(handState(11));

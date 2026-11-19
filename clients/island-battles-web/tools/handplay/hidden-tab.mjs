@@ -179,14 +179,17 @@ const page = await connect(
     }
   },
 );
-const evaluate = async (expression) =>
-  (
-    await page.send("Runtime.evaluate", {
-      expression,
-      returnByValue: true,
-      awaitPromise: true,
-    })
-  ).result?.result?.value;
+async function evaluate(expression) {
+  const answer = await page.send("Runtime.evaluate", {
+    expression,
+    returnByValue: true,
+    awaitPromise: true,
+  });
+  if (answer.error || answer.result?.exceptionDetails) {
+    console.error("evaluate failed:", JSON.stringify(answer).slice(0, 500));
+  }
+  return answer.result?.result?.value;
+}
 await page.send("Network.enable");
 await sleep(500);
 await evaluate(
@@ -234,9 +237,15 @@ for (let minute = 1; minute <= minutes; minute++) {
   console.log(`minute ${minute}: ${deadlines.length} deadline calls`);
 }
 const hiddenUntil = Date.now();
-const after = await evaluate(
-  "({ visibility: document.visibilityState, discarded: document.wasDiscarded, control: window.controlTicks, turn: window.islandBattles?.realtime.game.get()?.turn_number })",
-);
+// Read twice if need be: an evaluation can fail while the page is busy (it did once, in a trial).
+let after;
+for (let attempt = 0; attempt < 5 && !after?.control; attempt++) {
+  after = await evaluate(
+    "({ visibility: document.visibilityState, discarded: document.wasDiscarded, control: window.controlTicks ?? [], turn: window.islandBattles?.realtime.game.get()?.turn_number ?? null })",
+  );
+  if (!after?.control) await sleep(1000);
+}
+after ??= { control: [] };
 
 const gapsOf = (times) =>
   times.slice(1).map((time, index) => time - times[index]);
