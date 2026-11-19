@@ -55,6 +55,88 @@ export function isRightClick(
 }
 
 /**
+ * How long a finger's second tap may come after the first and still be a double-tap. Babylon's own
+ * double tap (`InputManager.DoubleClickDelay`) allows 300 ms, short for a finger; a second touch tap
+ * on the same castle up to this long after the first opens the menu too.
+ */
+export const TOUCH_DOUBLE_TAP_MS = 450;
+
+/** One press or tap as the board's controls see it: the button, the pointer, and the castle under it. */
+export interface MenuPointer {
+  /** `PointerEvent.button`: 0 primary, 2 right. */
+  button: number;
+  pointerType: string;
+  /** The castle under the pointer, or null. */
+  castleId: number | null;
+  /** Client coordinates, in CSS pixels. */
+  x: number;
+  y: number;
+  /** Milliseconds, from any clock that only goes forward. */
+  at: number;
+}
+
+/**
+ * Which of Babylon's pointer events open the menu. The board's controls feed it every right-button
+ * press (`down`), every tap (`tap`, Babylon's POINTERTAP) and every double tap (`doubleTap`,
+ * POINTERDOUBLETAP), and open the menu with the opener it answers.
+ *
+ * - A right-click opens it when the pointer moved less than 8 px since the press (Babylon's tap
+ *   allows 10).
+ * - A double-click or double-tap opens it only when both presses were on the same castle: Babylon
+ *   counts two quick presses anywhere as a double tap.
+ * - A finger's second tap on the same castle up to `TOUCH_DOUBLE_TAP_MS` after the first is a
+ *   double-tap too.
+ */
+export class MenuGestures {
+  /** Where the right button went down, while it is down. */
+  private rightDown: { x: number; y: number } | null = null;
+  /** The last primary tap that could start a double-click. */
+  private lastTap: MenuPointer | null = null;
+
+  down(pointer: MenuPointer): void {
+    if (pointer.button === 2) this.rightDown = { x: pointer.x, y: pointer.y };
+  }
+
+  tap(pointer: MenuPointer): MenuOpener | null {
+    if (pointer.button === 2) {
+      const down = this.rightDown;
+      this.rightDown = null;
+      this.lastTap = null;
+      return down && pointer.castleId !== null && isRightClick(down, pointer)
+        ? "right-click"
+        : null;
+    }
+    if (pointer.button !== 0) return null;
+    const last = this.lastTap;
+    if (
+      pointer.pointerType === "touch" &&
+      last?.pointerType === "touch" &&
+      pointer.castleId !== null &&
+      last.castleId === pointer.castleId &&
+      pointer.at - last.at <= TOUCH_DOUBLE_TAP_MS
+    ) {
+      this.lastTap = null;
+      return "double-tap";
+    }
+    this.lastTap = pointer;
+    return null;
+  }
+
+  doubleTap(pointer: MenuPointer): MenuOpener | null {
+    const last = this.lastTap;
+    this.lastTap = null;
+    if (
+      pointer.button !== 0 ||
+      pointer.castleId === null ||
+      last?.castleId !== pointer.castleId
+    ) {
+      return null;
+    }
+    return pointer.pointerType === "touch" ? "double-tap" : "double-click";
+  }
+}
+
+/**
  * Whether a double-click or double-tap on a castle focuses the camera on it. Not for a hand player
  * while they play: there it opens the menu on their own castle and does nothing on any other.
  * Watchers, demos, players with a bot, and a hand player whose team is out or whose game has ended

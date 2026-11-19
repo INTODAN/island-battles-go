@@ -3,15 +3,16 @@ import { PointerEventTypes } from "@babylonjs/core/Events/pointerEvents";
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { Scene } from "@babylonjs/core/scene";
 import type { HandPlay } from "../play";
-import { doubleClickFocuses } from "../play/castleMenu";
+import {
+  doubleClickFocuses,
+  MenuGestures,
+  type MenuOpener,
+  type MenuPointer,
+} from "../play/castleMenu";
 import { createFlatRing, type PickTarget } from "./art";
 import { type Battlefield, battlefieldOf } from "./battlefield";
 import { CASTLE_RADIUS } from "./board";
 import { fitCamera, focusCamera } from "./camera";
-import {
-  type CastleMenuHooks,
-  installCastleMenuOpeners,
-} from "./castleMenuInput";
 import { toWorld, toWorldDistance } from "./coordinates";
 import { castleTooltip, groupTooltip } from "./format";
 import { CLASH_COLOR } from "./palette";
@@ -70,9 +71,11 @@ export interface BoardControlsOptions {
   handPlay?: HandPlay | null;
   /**
    * The castle menu (#344): a right-click that didn't drag, a double-click or a double-tap on a
-   * castle asks it to open there. Absent, those gestures do what they do for a watcher.
+   * castle (`MenuGestures`) asks it to open there; it answers whether it opened. Given, the
+   * browser's context menu never shows over the board. Absent, those gestures do what they do for
+   * a watcher.
    */
-  castleMenu?: CastleMenuHooks | null;
+  onCastleMenu?: ((castleId: number, opener: MenuOpener) => boolean) | null;
 }
 
 /**
@@ -145,14 +148,47 @@ export function installBoardControls(
     highlight.position.set(world.x, 0.2, world.z);
   };
 
+  const menuGestures = new MenuGestures();
+  /** The castle menu's view of a pointer event, with the castle under the pointer. */
+  const menuPointer = (
+    event: PointerEvent,
+    target: PickTarget | null,
+  ): MenuPointer => ({
+    button: event.button,
+    pointerType: event.pointerType,
+    castleId: target?.kind === "castle" ? target.id : null,
+    x: event.clientX,
+    y: event.clientY,
+    at: performance.now(),
+  });
+  /** Opens the castle menu when the gesture is one of its openers; returns whether it opened. */
+  const openCastleMenu = (
+    opener: MenuOpener | null,
+    castleId: number | null,
+  ): boolean => {
+    if (!opener || castleId === null || !options.onCastleMenu) return false;
+    if (!options.onCastleMenu(castleId, opener)) return false;
+    hide();
+    return true;
+  };
+
   const pointerObserver = scene.onPointerObservable.add((info) => {
     const field = battlefieldOf(scene);
     if (!field) return;
-    if (info.type === PointerEventTypes.POINTERTAP) {
-      const tapped = touchTapTarget(
-        (info.event as PointerEvent).pointerType,
-        pickTargetAt(scene),
-      );
+    if (info.type === PointerEventTypes.POINTERDOWN) {
+      // Only the right button's press, for the castle menu's right-click (no pick needed).
+      const event = info.event as PointerEvent;
+      if (event.button === 2 && options.onCastleMenu) {
+        menuGestures.down(menuPointer(event, null));
+      }
+    } else if (info.type === PointerEventTypes.POINTERTAP) {
+      const event = info.event as PointerEvent;
+      const picked = pickTargetAt(scene);
+      if (options.onCastleMenu) {
+        const pointer = menuPointer(event, picked);
+        if (openCastleMenu(menuGestures.tap(pointer), pointer.castleId)) return;
+      }
+      const tapped = touchTapTarget(event.pointerType, picked);
       if (tapped === undefined) return;
       hovered = tapped;
       if (tapped) show(field, tapped);
@@ -166,10 +202,16 @@ export function installBoardControls(
       hovered = target;
       show(field, target);
     } else if (info.type === PointerEventTypes.POINTERDOUBLETAP) {
-      // A hand player's double-click opens the castle menu (castleMenuInput.ts) and never moves the camera.
+      const target = pickTargetAt(scene);
+      if (options.onCastleMenu) {
+        const pointer = menuPointer(info.event as PointerEvent, target);
+        if (openCastleMenu(menuGestures.doubleTap(pointer), pointer.castleId))
+          return;
+      }
+      // For a hand player who plays, a double-click never moves the camera (it opens the castle
+      // menu on their own castle, above, and does nothing on any other).
       const status = options.handPlay?.state.get().status ?? null;
       if (!doubleClickFocuses(status)) return;
-      const target = pickTargetAt(scene);
       const castle =
         target?.kind === "castle"
           ? field.generation?.castles.find((entry) => entry.id === target.id)
@@ -197,9 +239,11 @@ export function installBoardControls(
     fitBoard(scene);
   };
   window.addEventListener("keydown", onKey);
-  const removeMenuOpeners = options.castleMenu
-    ? installCastleMenuOpeners(scene, options.castleMenu, hide)
-    : () => {};
+  // The right button belongs to the castle menu (and to panning): no context menu over the board.
+  const noContextMenu = (event: Event) => event.preventDefault();
+  if (options.onCastleMenu) {
+    canvas.addEventListener("contextmenu", noContextMenu);
+  }
   // The hovered entity may have moved or gone when a new generation is drawn.
   const frameObserver = scene.onBeforeRenderObservable.add(() => {
     const field = battlefieldOf(scene);
@@ -210,7 +254,7 @@ export function installBoardControls(
     scene.onBeforeRenderObservable.remove(frameObserver);
     canvas.removeEventListener("pointerleave", onLeave);
     window.removeEventListener("keydown", onKey);
-    removeMenuOpeners();
+    canvas.removeEventListener("contextmenu", noContextMenu);
     tooltip.remove();
     highlight?.dispose();
   };

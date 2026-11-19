@@ -5,11 +5,93 @@ import {
   doubleClickFocuses,
   isRightClick,
   LOADING_REASON,
+  MenuGestures,
   type MenuPlay,
+  type MenuPointer,
   menuAllowed,
   menuReason,
   placeMenu,
+  TOUCH_DOUBLE_TAP_MS,
 } from "./castleMenu";
+
+describe("the menu's gestures", () => {
+  const pointer = (extra: Partial<MenuPointer>): MenuPointer => ({
+    button: 0,
+    pointerType: "mouse",
+    castleId: 1,
+    x: 100,
+    y: 100,
+    at: 0,
+    ...extra,
+  });
+
+  test("a right-click on a castle opens it; a right-click that moved 8 px or more doesn't", () => {
+    const gestures = new MenuGestures();
+    gestures.down(pointer({ button: 2 }));
+    expect(gestures.tap(pointer({ button: 2, x: 105 }))).toBe("right-click");
+    gestures.down(pointer({ button: 2 }));
+    expect(gestures.tap(pointer({ button: 2, x: 109 }))).toBeNull();
+  });
+
+  test("a right-click needs its press, and a castle", () => {
+    const gestures = new MenuGestures();
+    expect(gestures.tap(pointer({ button: 2 }))).toBeNull();
+    gestures.down(pointer({ button: 2 }));
+    expect(gestures.tap(pointer({ button: 2, castleId: null }))).toBeNull();
+  });
+
+  test("a double-click opens it when both presses were on the same castle", () => {
+    const gestures = new MenuGestures();
+    expect(gestures.tap(pointer({}))).toBeNull();
+    expect(gestures.doubleTap(pointer({ at: 200 }))).toBe("double-click");
+  });
+
+  test("Babylon's double tap over two castles opens nothing", () => {
+    const gestures = new MenuGestures();
+    gestures.tap(pointer({ castleId: 1 }));
+    expect(gestures.doubleTap(pointer({ castleId: 2, at: 200 }))).toBeNull();
+    gestures.tap(pointer({ castleId: null }));
+    expect(gestures.doubleTap(pointer({ castleId: 1, at: 200 }))).toBeNull();
+  });
+
+  test("a double-tap with a finger, within Babylon's 300 ms or within the longer touch window", () => {
+    const gestures = new MenuGestures();
+    gestures.tap(pointer({ pointerType: "touch" }));
+    expect(gestures.doubleTap(pointer({ pointerType: "touch", at: 250 }))).toBe(
+      "double-tap",
+    );
+    // 300 to 450 ms: Babylon raises a second tap; it is a double-tap on the same castle.
+    gestures.tap(pointer({ pointerType: "touch", at: 1000 }));
+    expect(
+      gestures.tap(
+        pointer({ pointerType: "touch", at: 1000 + TOUCH_DOUBLE_TAP_MS }),
+      ),
+    ).toBe("double-tap");
+    // Slower, or a mouse, or another castle: two single taps.
+    gestures.tap(pointer({ pointerType: "touch", at: 3000 }));
+    expect(
+      gestures.tap(
+        pointer({ pointerType: "touch", at: 3001 + TOUCH_DOUBLE_TAP_MS }),
+      ),
+    ).toBeNull();
+    gestures.tap(pointer({ at: 5000 }));
+    expect(gestures.tap(pointer({ at: 5350 }))).toBeNull();
+    gestures.tap(pointer({ pointerType: "touch", at: 7000 }));
+    expect(
+      gestures.tap(pointer({ pointerType: "touch", castleId: 2, at: 7350 })),
+    ).toBeNull();
+  });
+
+  test("a third tap doesn't open it again", () => {
+    const gestures = new MenuGestures();
+    gestures.tap(pointer({ pointerType: "touch" }));
+    expect(gestures.tap(pointer({ pointerType: "touch", at: 350 }))).toBe(
+      "double-tap",
+    );
+    expect(gestures.tap(pointer({ pointerType: "touch", at: 500 }))).toBeNull();
+  });
+});
+
 import type { PlayOrder } from "./handPlay";
 import {
   type Board,

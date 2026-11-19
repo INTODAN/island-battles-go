@@ -33,6 +33,11 @@ export interface CastleMenuOptions {
   onFrame(run: () => void): () => void;
   /** Where the focus goes back to when the menu closes and nothing else had it: the canvas. */
   fallbackFocus: HTMLElement;
+  /**
+   * Shows a refused or rejected order's sentence in the game view's order feedback line
+   * (`HandSurface.showOrderFeedback`), which announces it; the menu shows it too, as plain text.
+   */
+  showOrderFeedback(sentence: string, orderId?: number): void;
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(
@@ -146,13 +151,20 @@ export class CastleMenu {
     controls.append(this.burstSlider, this.burstButton);
     burst.append(burstName, this.burstSummary, controls, this.burstReason);
 
-    this.error.setAttribute("role", "alert");
+    // Plain text: the order feedback line announces the sentence.
     this.error.hidden = true;
     root.append(head, list, burst, this.error);
     options.host.append(root);
 
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || this.castleId === null) return;
+      // A drag to send (#343) takes Esc first, in the capture phase, and marks it handled.
+      if (
+        event.key !== "Escape" ||
+        event.defaultPrevented ||
+        this.castleId === null
+      ) {
+        return;
+      }
       event.preventDefault();
       this.close();
     };
@@ -299,13 +311,15 @@ export class CastleMenu {
   private follow(castleId: number, result: OrderResult): void {
     if (!result.ok) {
       this.showError(result.sentence);
+      this.options.showOrderFeedback(result.sentence);
       return;
     }
     this.showError(null);
     void result.settled.then((order) => {
-      if (order.state === "rejected" && this.castleId === castleId) {
-        this.showError(order.sentence ?? "The server refused the order.");
-      }
+      if (order.state !== "rejected") return;
+      const sentence = order.sentence ?? "The server refused the order.";
+      if (this.castleId === castleId) this.showError(sentence);
+      this.options.showOrderFeedback(sentence, order.id);
     });
   }
 

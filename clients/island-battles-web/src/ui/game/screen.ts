@@ -449,9 +449,9 @@ export class GameScreen {
     let castleMenu: CastleMenu | null = null;
     const removeControls = installBoardControls(scene, {
       handPlay,
-      castleMenu: handPlay && {
-        open: (castleId, opener) => castleMenu?.open(castleId, opener) ?? false,
-      },
+      onCastleMenu:
+        handPlay &&
+        ((castleId, opener) => castleMenu?.open(castleId, opener) ?? false),
     });
     // The board's art loads behind a loading screen; the board draws placeholders meanwhile.
     const loading = showBoardLoading(this.root);
@@ -500,6 +500,8 @@ export class GameScreen {
           return () => scene.onAfterRenderObservable.remove(observer);
         },
         fallbackFocus: this.canvas,
+        // PLACEHOLDER344: HandSurface.showOrderFeedback (#343's second wiring commit).
+        showOrderFeedback: () => {},
       });
     let aspect =
       engine.getRenderWidth() / Math.max(1, engine.getRenderHeight());
