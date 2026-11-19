@@ -614,7 +614,7 @@ func TestLocalhostBotsLeaveWhenTheirSubmissionsStop(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, err = game.service.Register(ctx, principal, models.RegisterGenerationCommands{GameID: game.gameID, GenerationID: missed.GenerationID, RequestID: uuid.NewString(), Commands: []models.PublicGenerationCommand{}})
-			assertTurnStatus(t, err, 409)
+			assertProblem(t, err, 409, services.StaleGenerationProblemType, "")
 			if state := game.current(t, bluePlayer); state.Outcome != nil || castleOf(state, red) == nil {
 				t.Fatalf("turn %d: the late bot was taken out: %+v", turn, state.Outcome)
 			}

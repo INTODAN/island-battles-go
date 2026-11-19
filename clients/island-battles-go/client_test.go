@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -469,6 +470,198 @@ func TestClientResendsABatchWithoutTheLinesTheServerRefuses(t *testing.T) {
 	}
 }
 
+// staleRealTimeGame is a fake server whose first turn ends while the bot
+// plays it: the bot's completing batch for generation 1 is the request that
+// plays the turn, so it is refused as a stale generation and generation 2
+// is open. pace is the game's turn pace, or nil for a game that waits.
+func staleRealTimeGame(t *testing.T, pace any) *fakeServer {
+	server := newFakeServer(t)
+	stateOf := func(generationID uint) map[string]any {
+		state := server.stateOf(generationID, false, nil)
+		state["turn_pace_milliseconds"] = pace
+		return state
+	}
+	server.setState(stateOf(1))
+	server.answer = func(writer http.ResponseWriter, _ *http.Request, body []byte) bool {
+		var batch map[string]any
+		_ = json.Unmarshal(body, &batch)
+		if batch["generation_id"] != 1.0 {
+			return false
+		}
+		server.setState(stateOf(2))
+		writeJSON(writer, 409, map[string]any{"type": "urn:island-battles:problem:stale-generation", "title": "Conflict", "status": 409,
+			"detail": "generation is no longer current: in this real-time game each turn ends 1 s after its generation was created"})
+		return true
+	}
+	return server
+}
+
+// generationsSent lists each batch's generation and completion.
+func generationsSent(server *fakeServer) []string {
+	sent := []string{}
+	for _, batch := range server.batchesSent() {
+		sent = append(sent, fmt.Sprintf("%v:%v", batch["generation_id"], batch["complete"]))
+	}
+	return sent
+}
+
+func TestClientPassesARealTimeTurnThatEndedWhileTheBotPlayed(t *testing.T) {
+	server, realtime := staleRealTimeGame(t, 1000), &fakeRealtime{}
+	var console bytes.Buffer
+	client := testClient(t, server, realtime, func(context.Context, Turn) (Result, error) {
+		return Result{Commands: []Command{SendSoldierGroup(0, 1, 4)}}, nil
+	}, WithLogOutput(&syncWriter{writer: &console}))
+	if _, err := client.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// The client reads the state again and plays generation 2; no batch
+	// sends the passed turn's failure.
+	eventually(t, func() bool { return len(server.batchesSent()) == 2 })
+	if sent := generationsSent(server); !slices.Equal(sent, []string{"1:true", "2:true"}) {
+		t.Fatalf("sent %v", sent)
+	}
+	realtime.publish(gameEndedEvent, server.stateOf(2, true, map[string]any{"reason": "last_team_standing", "winner_team_color": 1, "summary": "Team 1 won"}))
+	if err := waitFor(t, client); err != nil {
+		t.Fatal(err)
+	}
+	if output := console.String(); strings.Count(output, "the bot was slower than the turn pace of 1s on generation 1, so it passes this turn") != 1 {
+		t.Fatalf("got %q", output)
+	}
+}
+
+func TestClientStopsOnAStaleBatchInAGameThatWaits(t *testing.T) {
+	server, realtime := staleRealTimeGame(t, nil), &fakeRealtime{}
+	client := testClient(t, server, realtime, func(context.Context, Turn) (Result, error) { return Result{}, nil })
+	if _, err := client.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// As before the stale generation had a type: the client sends the
+	// error's lines and stops on a rejection.
+	if err := waitFor(t, client); !errors.Is(err, ErrStaleGeneration) || !errors.Is(err, ErrRejected) {
+		t.Fatalf("got %v", err)
+	}
+	if sent := generationsSent(server); !slices.Equal(sent, []string{"1:true", "1:false"}) {
+		t.Fatalf("sent %v", sent)
+	}
+}
+
+// realTimeTurn is the fake server's state of a real-time generation whose
+// turn ends after deadline.
+func realTimeTurn(server *fakeServer, generationID uint, deadline time.Duration) map[string]any {
+	state := server.stateOf(generationID, false, nil)
+	state["turn_pace_milliseconds"] = 500
+	state["turn_deadline_at"] = time.Now().Add(deadline)
+	return state
+}
+
+// Nobody else calls the server, as once the last hand player is out, and
+// the server's clock is behind this machine's: the client that passed the
+// turn asks the server to end it until it does, and plays the next turn.
+func TestClientEndsARealTimeTurnItPassedAtTheDeadline(t *testing.T) {
+	server, realtime := newFakeServer(t), &fakeRealtime{}
+	first := realTimeTurn(server, 1, 150*time.Millisecond)
+	server.setState(first)
+	calls := 0
+	server.deadline = func() map[string]any {
+		calls++
+		if calls == 1 {
+			// Not yet due by the server's clock.
+			return first
+		}
+		return realTimeTurn(server, 2, time.Minute)
+	}
+	console := &syncWriter{writer: &bytes.Buffer{}}
+	client := testClient(t, server, realtime, func(ctx context.Context, turn Turn) (Result, error) {
+		if turn.Generation.ID == 1 {
+			// A bot that honours its context stops when it ends.
+			<-ctx.Done()
+			return Result{}, ctx.Err()
+		}
+		return Result{}, nil
+	}, WithLogOutput(console))
+	if _, err := client.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, func() bool { return len(server.batchesSent()) == 1 })
+	if sent := generationsSent(server); !slices.Equal(sent, []string{"2:true"}) {
+		t.Fatalf("sent %v", sent)
+	}
+	if server.mutex.Lock(); server.deadlines < 2 {
+		t.Fatalf("%d deadline calls", server.deadlines)
+	}
+	server.mutex.Unlock()
+	realtime.publish(gameEndedEvent, server.stateOf(2, true, map[string]any{"reason": "last_team_standing", "winner_team_color": 1, "summary": "Team 1 won"}))
+	if err := waitFor(t, client); err != nil {
+		t.Fatal(err)
+	}
+	// One pass line, and no failure: the bot's error is its context's.
+	if output := console.String(); strings.Count(output, "the bot was slower than the turn pace of 500ms on generation 1, so it passes this turn") != 1 || strings.Contains(output, "the bot failed") {
+		t.Fatalf("got %q", output)
+	}
+}
+
+// A bot that fails for its own reason after its time passes the real-time
+// turn too, but the client says why it failed.
+func TestClientLogsABotThatPanicsAfterItsTime(t *testing.T) {
+	server, realtime := newFakeServer(t), &fakeRealtime{}
+	server.setState(realTimeTurn(server, 1, 100*time.Millisecond))
+	console := &syncWriter{writer: &bytes.Buffer{}}
+	client := testClient(t, server, realtime, func(ctx context.Context, turn Turn) (Result, error) {
+		<-ctx.Done()
+		panic(errors.New("boom after the deadline"))
+	}, WithLogOutput(console))
+	if _, err := client.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, func() bool { return strings.Contains(console.String(), "so it passes this turn") })
+	_ = client.Close(context.Background())
+	output := console.String()
+	if !strings.Contains(output, "the bot failed on generation 1") || !strings.Contains(output, "panic: boom after the deadline") || !strings.Contains(output, "Traceback") {
+		t.Fatalf("got %q", output)
+	}
+	if batches := server.batchesSent(); len(batches) != 0 {
+		t.Fatalf("sent %v", batches)
+	}
+}
+
+// String is what was written, while the client may still be writing.
+func (writer *syncWriter) String() string {
+	writer.mutex.Lock()
+	defer writer.mutex.Unlock()
+	return writer.writer.(*bytes.Buffer).String()
+}
+
+// Under run, the bot's ctx ends before the turn's deadline by serve's
+// margin, so a bot that answers when it ends is in time.
+func TestRunStopsTheBotBeforeTheDeadline(t *testing.T) {
+	server, realtime := newFakeServer(t), &fakeRealtime{}
+	first := realTimeTurn(server, 1, time.Second)
+	deadline := first["turn_deadline_at"].(time.Time)
+	server.setState(first)
+	var answered time.Time
+	var mutex sync.Mutex
+	client := testClient(t, server, realtime, func(ctx context.Context, _ Turn) (Result, error) {
+		<-ctx.Done()
+		mutex.Lock()
+		answered = time.Now()
+		mutex.Unlock()
+		return Result{}, nil
+	})
+	if _, err := client.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, func() bool { return len(server.batchesSent()) == 1 })
+	mutex.Lock()
+	defer mutex.Unlock()
+	// Three quarters of the second left.
+	if early := deadline.Sub(answered); early < 200*time.Millisecond || early > 300*time.Millisecond {
+		t.Fatalf("the bot's ctx ended %s before the deadline", early)
+	}
+	if sent := generationsSent(server); !slices.Equal(sent, []string{"1:true"}) {
+		t.Fatalf("sent %v", sent)
+	}
+}
+
 // syncWriter makes a buffer safe for the client's goroutines.
 type syncWriter struct {
 	mutex  sync.Mutex
@@ -743,6 +936,7 @@ func TestResponseErrorsMapOntoKinds(t *testing.T) {
 		{409, "urn:island-battles:problem:burst-unavailable", ErrBurstUnavailable},
 		{409, "urn:island-battles:problem:burst-above-potential", ErrBurstAbovePotential},
 		{409, "urn:island-battles:problem:game-ended", ErrGameEnded},
+		{409, "urn:island-battles:problem:stale-generation", ErrStaleGeneration},
 		{422, "urn:island-battles:problem:game-log-limit", ErrGameLogLimit},
 		{422, "urn:island-battles:problem:bot-memory-too-large", ErrMemoryTooLarge},
 		{422, "about:blank", ErrRejected},

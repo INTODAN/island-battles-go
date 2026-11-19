@@ -245,7 +245,9 @@ test("a stale turn is retried for the new generation, but a repeated conflict st
       commands.push(command);
       // The first turn went stale before it arrived; every later one conflicts again.
       if (commands.length === 1) generation = 2;
-      return conflict(null, commands.length === 1 ? "generation is no longer current" : "insufficient soldiers after accepted team reservations");
+      return commands.length === 1
+        ? conflict("urn:island-battles:problem:stale-generation", "generation is no longer current")
+        : conflict(null, "insufficient soldiers after accepted team reservations");
     },
   });
   context.after(() => player.stop());

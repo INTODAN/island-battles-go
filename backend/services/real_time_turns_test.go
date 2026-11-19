@@ -346,7 +346,7 @@ func TestABatchAfterItsTurnEndedIsStaleAndTheTurnHasPlayed(t *testing.T) {
 
 	_, err := game.service.Register(context.Background(), manual, batch(first, false, attack(t, first, 2)))
 	var rejection *services.GenerationError
-	if !errors.As(err, &rejection) || rejection.Status != 409 || rejection.Type != "" || !strings.Contains(rejection.Detail, "generation is no longer current") || !strings.Contains(rejection.Detail, "2 s") {
+	if !errors.As(err, &rejection) || rejection.Status != 409 || rejection.Type != services.StaleGenerationProblemType || !strings.Contains(rejection.Detail, "generation is no longer current") || !strings.Contains(rejection.Detail, "2 s") {
 		t.Fatalf("late batch error = %v", err)
 	}
 	// The request played the turn it missed, with the batch that arrived in
@@ -374,8 +374,31 @@ func TestABatchAfterItsTurnEndedIsStaleAndTheTurnHasPlayed(t *testing.T) {
 	// A batch for a turn that has ended is stale too when a later request
 	// is the one that finds it.
 	_, err = game.service.Register(context.Background(), manual, batch(first, true))
-	if !errors.As(err, &rejection) || rejection.Status != 409 || !strings.Contains(rejection.Detail, "2 s") {
+	if !errors.As(err, &rejection) || rejection.Status != 409 || rejection.Type != services.StaleGenerationProblemType || !strings.Contains(rejection.Detail, "2 s") {
 		t.Fatalf("a batch for an older generation = %v", err)
+	}
+}
+
+func TestARetryOfAnAcceptedBatchAfterItsTurnEndedGetsItsState(t *testing.T) {
+	game := startClockGame(t, ``, services.ServerBot{Manual: true}, services.ServerBot{Level: 2})
+	manual := game.players[0]
+	first := game.current(t, manual)
+	accepted := batch(first, false, attack(t, first, 3))
+	game.register(t, manual, accepted)
+	*game.clock = game.turnEnd(t).Add(time.Millisecond)
+	// The retry is the request that finds the turn over: it plays the turn
+	// once and answers the state, not a stale generation.
+	for range 2 {
+		state := game.register(t, manual, accepted)
+		if state.TurnNumber != 2 || !hasGroup(state, first.TeamColor, 3) || game.generationCount(t) != 2 {
+			t.Fatalf("retry = turn %d, %d generations", state.TurnNumber, game.generationCount(t))
+		}
+	}
+	// A new batch for the ended turn is stale.
+	_, err := game.service.Register(context.Background(), manual, batch(first, true))
+	var rejection *services.GenerationError
+	if !errors.As(err, &rejection) || rejection.Status != 409 || rejection.Type != services.StaleGenerationProblemType {
+		t.Fatalf("new batch for the ended turn = %v", err)
 	}
 }
 
@@ -488,25 +511,7 @@ func TestGoBotsPlayOnAfterARealTimeTurnLeavesOnlyThem(t *testing.T) {
 	services.SetGoBotTimeBudgets(t, 0, 0)
 	game := startClockGame(t, ``, services.ServerBot{Manual: true}, services.ServerBot{Level: 1}, services.ServerBot{Level: 1})
 	manual := game.players[0]
-	first := game.open(t)
-	// The manual player's team has no castle left, and its last group, one
-	// soldier, reaches a castle of 30 in this turn, so the turn the clock
-	// plays eliminates it.
-	var origin, target models.Castle
-	for _, castle := range first.Map.Castles {
-		switch castle.TeamColor {
-		case 1:
-			origin = castle
-		case 2:
-			target = castle
-		}
-	}
-	if err := game.database.Model(&models.Castle{}).Where(&models.Castle{Model: gorm.Model{ID: origin.ID}}).Update("TeamColor", models.NeutralTeamColor).Error; err != nil {
-		t.Fatal(err)
-	}
-	group := models.SoldierGroup{SoldierGroupFields: models.SoldierGroupFields{OriginCastleID: origin.ID, DestinationCastleID: target.ID, SoldierAmount: 1},
-		TeamColor: 1, GenerationID: first.ID, Position: pgtype.Point{P: target.Position.P, Valid: true}}
-	testutils.CreateSoldierGroupForTest(t, game.database, &group)
+	eliminateOnTheClocksTurn(t, game)
 
 	*game.clock = game.turnEnd(t)
 	state := game.applyDeadline(t, manual)
@@ -532,5 +537,49 @@ func TestGoBotsPlayOnAfterARealTimeTurnLeavesOnlyThem(t *testing.T) {
 	// whatever the clock says.
 	if next := game.current(t, manual); next.TurnNumber != 4 {
 		t.Fatalf("the next request reached turn %d", next.TurnNumber)
+	}
+}
+
+// eliminateOnTheClocksTurn sets up the open turn of a game whose first
+// player is manual so that the turn the clock plays eliminates that player:
+// their team has no castle left, and its last group, one soldier, reaches a
+// castle of 30 in this turn.
+func eliminateOnTheClocksTurn(t *testing.T, game clockGame) {
+	t.Helper()
+	first := game.open(t)
+	var origin, target models.Castle
+	for _, castle := range first.Map.Castles {
+		switch castle.TeamColor {
+		case 1:
+			origin = castle
+		case 2:
+			target = castle
+		}
+	}
+	if err := game.database.Model(&models.Castle{}).Where(&models.Castle{Model: gorm.Model{ID: origin.ID}}).Update("TeamColor", models.NeutralTeamColor).Error; err != nil {
+		t.Fatal(err)
+	}
+	group := models.SoldierGroup{SoldierGroupFields: models.SoldierGroupFields{OriginCastleID: origin.ID, DestinationCastleID: target.ID, SoldierAmount: 1},
+		TeamColor: 1, GenerationID: first.ID, Position: pgtype.Point{P: target.Position.P, Valid: true}}
+	testutils.CreateSoldierGroupForTest(t, game.database, &group)
+}
+
+// A state read that plays the clock's turn, which leaves only Go bots, lets
+// them play on for the read budget only, not the write budget.
+func TestAStateReadThatLeavesOnlyGoBotsKeepsToTheReadBudget(t *testing.T) {
+	services.SetGoBotTimeBudgets(t, 3*time.Second, 0)
+	game := startClockGame(t, `{"max_generations":1200}`, services.ServerBot{Manual: true}, services.ServerBot{Level: 1}, services.ServerBot{Level: 1})
+	manual := game.players[0]
+	eliminateOnTheClocksTurn(t, game)
+	*game.clock = game.turnEnd(t)
+	started := time.Now()
+	state := game.current(t, manual)
+	if elapsed := time.Since(started); elapsed > 1500*time.Millisecond {
+		t.Fatalf("the read took %s", elapsed)
+	}
+	// The clock's turn, then one turn of the Go bots: a zero budget plays
+	// one turn per request.
+	if state.TurnNumber != 2 || game.generationCount(t) != 3 {
+		t.Fatalf("the read answered turn %d, and the game has %d generations", state.TurnNumber, game.generationCount(t))
 	}
 }

@@ -107,7 +107,7 @@ func (service *GenerationService) TurnDelivery(ctx context.Context, principal do
 	if err != nil {
 		return models.TurnDelivery{}, err
 	}
-	service.afterTurnEnd(ctx, game.ID, end)
+	service.afterTurnEnd(ctx, game.ID, end, goBotReadBudget)
 	if nothingToPlay != nil {
 		return models.TurnDelivery{}, nothingToPlay
 	}

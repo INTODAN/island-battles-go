@@ -272,6 +272,35 @@ func TestServeStopsTheBotBeforeTheDeadline(t *testing.T) {
 	}
 }
 
+// A real-time game's deadline is one pace away, from 0.5 s. A bot that
+// answers at once is submitted however short the turn; one that takes more
+// of it than it has passes.
+func TestServeSubmitsAQuickAnswerBeforeAShortDeadline(t *testing.T) {
+	for _, away := range []time.Duration{500 * time.Millisecond, time.Second, 2 * time.Second} {
+		api := startAPI(t)
+		server, _ := startBot(t, sender, time.Minute)
+		deadline := time.Now().Add(away)
+		if response, _ := request(t, server, http.MethodPost, "/turn", bytes.NewReader(deliveryJSON(t, api.url(), &deadline)), jsonHeaders); response.StatusCode != http.StatusAccepted {
+			t.Fatalf("%s: got %d", away, response.StatusCode)
+		}
+		if batch := api.wait(t, 1)[0].batch; len(batch.Commands) != 1 || string(batch.Memory) != `{"turns":1}` {
+			t.Errorf("deadline %s away: submitted %+v", away, batch)
+		}
+	}
+	api := startAPI(t)
+	server, _ := startBot(t, func(ctx context.Context, turn Turn) (Result, error) {
+		time.Sleep(time.Second)
+		return sender(ctx, turn)
+	}, time.Minute)
+	deadline := time.Now().Add(time.Second)
+	if response, _ := request(t, server, http.MethodPost, "/turn", bytes.NewReader(deliveryJSON(t, api.url(), &deadline)), jsonHeaders); response.StatusCode != http.StatusAccepted {
+		t.Fatalf("got %d", response.StatusCode)
+	}
+	if message := passLine(t, api.wait(t, 1)[0].batch); !regexp.MustCompile(`^The bot took longer than 7\d\dms on generation 12, so it passes this turn\.`).MatchString(message) {
+		t.Fatalf("a slow bot passed with %q", message)
+	}
+}
+
 func TestServePassesARejectedAnswer(t *testing.T) {
 	api := startAPI(t, fakeAnswer{409, `{"type":"urn:island-battles:problem:insufficient-soldiers","detail":"castle 0 has 1 soldier left"}`})
 	server, _ := startBot(t, sender, time.Second)

@@ -33,16 +33,6 @@ import (
 // commands. It is then out wherever the code asks which teams are still
 // standing, and the end rule runs as after any turn.
 
-// Problem types of the 409s that tell a real-time game's rules apart.
-const (
-	// NotRealTimeProblemType refuses a resignation in a game that waits for
-	// every player: only a real-time game can be resigned.
-	NotRealTimeProblemType = "urn:island-battles:problem:not-real-time"
-	// TeamOutProblemType refuses a batch, a turn delivery or a resignation of
-	// a player whose team resigned, left the game, or was eliminated.
-	TeamOutProblemType = "urn:island-battles:problem:team-out"
-)
-
 // SeenWriteInterval is how often, at most, the server records that it heard
 // from a player (FrozenGamePlayer.LastSeenAt).
 const SeenWriteInterval = 2 * time.Second
@@ -335,7 +325,7 @@ func (service *GenerationService) Resign(ctx context.Context, principal domain.P
 	if err != nil {
 		return models.GenerationState{}, err
 	}
-	service.afterTurnEnd(ctx, game.ID, end)
+	service.afterTurnEnd(ctx, game.ID, end, goBotReadBudget)
 	service.publish(ctx, events)
 	service.Bots.send(ctx, database, turns)
 	if refused != nil {

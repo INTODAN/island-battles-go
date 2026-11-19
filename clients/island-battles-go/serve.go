@@ -64,7 +64,9 @@ const (
 	// refusal.
 	drainBytes = 64 * 1024
 	// submitMargin is how long before the turn's deadline the bot stops, so
-	// that its answer reaches the server in time.
+	// that its answer reaches the server in time: at most a quarter of the
+	// time left, so a bot gets three quarters of a real-time game's short
+	// turn (submitBudget).
 	submitMargin = time.Second
 	// submitAttempts is how often an answer is sent when no answer, or a
 	// server error, comes back; submitTimeout bounds each attempt.
@@ -93,7 +95,7 @@ func (origins *originsFlag) Set(origin string) error {
 func serve(ctx context.Context, program invocation, arguments []string) int {
 	flags := newFlags(program, "serve", fmt.Sprintf("Serves the bot on http://%s:<port> for a game client in the browser: POST /turn\ntakes a TurnDelivery, answers 202 at once, plays the turn and submits the answer\nitself with the delivery's submit token. GET /health says the bot is there.\nGo doesn't reload code: after changing the bot, stop the server and start it again.", serveHost))
 	port := flags.Int("port", DefaultPort, "the `port` to serve on")
-	turnTimeout := flags.Duration("turn-timeout", DefaultTurnTimeout, "pass the turn when the bot takes longer than this `duration`, or than the time left before the turn's deadline less 1s. A lobby's turn timeout is 30s by default, and its host can set it from 5s to 600s or to none")
+	turnTimeout := flags.Duration("turn-timeout", DefaultTurnTimeout, "pass the turn when the bot takes longer than this `duration`, or than the time left before the turn's deadline less 1s, or less a quarter of it when it is under 4s. A lobby's turn timeout is 30s by default, and its host can set it from 5s to 600s or to none")
 	var allowedOrigins, submitHosts originsFlag
 	flags.Var(&allowedOrigins, "allow-origin", "also answer this browser `origin`, such as https://game.example.org (repeatable; always allowed: "+strings.Join(DefaultOrigins, ", ")+")")
 	flags.Var(&submitHosts, "allow-submit-host", "also submit turns to https://`host`, such as a self-hosted game server (repeatable; always allowed: https://"+OfficialSubmitHost+", and http://localhost and http://127.0.0.1 on any port)")
@@ -372,13 +374,13 @@ func (server *botServer) turn(writer http.ResponseWriter, request *http.Request)
 }
 
 // playTurn plays a delivered turn for at most the server's turn timeout, and
-// not past the turn's deadline less submitMargin. A bot that returns an error,
+// not past the turn's deadline less its margin (submitBudget). A bot that returns an error,
 // panics, returns an invalid result or runs out of time passes the turn.
 func (server *botServer) playTurn(delivery TurnDelivery) Result {
 	turn := delivery.Turn
 	budget := server.turnTimeout
 	if delivery.Submit.DeadlineAt != nil {
-		budget = max(0, min(budget, time.Until(*delivery.Submit.DeadlineAt)-submitMargin))
+		budget = min(budget, submitBudget(time.Until(*delivery.Submit.DeadlineAt)))
 	}
 	// The lines the bot logs come first in the result's logs, within the
 	// game log's limits.
@@ -419,6 +421,14 @@ func (server *botServer) playTurn(delivery TurnDelivery) Result {
 	}
 	server.logf("generation %d: %s", turn.Generation.ID, message)
 	return passResult(turn, message)
+}
+
+// submitBudget is how long a bot may play when left is the time before the
+// turn's deadline: left less submitMargin, or less a quarter of left when
+// that is shorter, so a bot has 375 ms of a 0.5 s turn and 750 ms of a 1 s
+// one.
+func submitBudget(left time.Duration) time.Duration {
+	return max(0, left-min(submitMargin, left/4))
 }
 
 // passResult is the answer of a bot that passes its turn: no commands, the
