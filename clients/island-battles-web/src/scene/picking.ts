@@ -3,10 +3,15 @@ import { PointerEventTypes } from "@babylonjs/core/Events/pointerEvents";
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { Scene } from "@babylonjs/core/scene";
 import type { HandPlay } from "../play";
+import { doubleClickFocuses } from "../play/castleMenu";
 import { createFlatRing, type PickTarget } from "./art";
 import { type Battlefield, battlefieldOf } from "./battlefield";
 import { CASTLE_RADIUS } from "./board";
 import { fitCamera, focusCamera } from "./camera";
+import {
+  type CastleMenuHooks,
+  installCastleMenuOpeners,
+} from "./castleMenuInput";
 import { toWorld, toWorldDistance } from "./coordinates";
 import { castleTooltip, groupTooltip } from "./format";
 import { CLASH_COLOR } from "./palette";
@@ -63,15 +68,21 @@ export interface BoardControlsOptions {
    * the board's controls are a watcher's.
    */
   handPlay?: HandPlay | null;
+  /**
+   * The castle menu (#344): a right-click that didn't drag, a double-click or a double-tap on a
+   * castle asks it to open there. Absent, those gestures do what they do for a watcher.
+   */
+  castleMenu?: CastleMenuHooks | null;
 }
 
 /**
- * Hover highlight and tooltip (a tap on a touch screen), double-click to focus a castle, and F to refit the board. Returns
+ * Hover highlight and tooltip (a tap on a touch screen), double-click to focus a castle (not for a
+ * hand player who plays: `doubleClickFocuses`), the castle menu's gestures, and F to refit the board. Returns
  * a function that removes the listeners, the tooltip and the highlight: call it before the scene is disposed.
  */
 export function installBoardControls(
   scene: Scene,
-  _options: BoardControlsOptions = {},
+  options: BoardControlsOptions = {},
 ): () => void {
   const canvas = scene.getEngine().getRenderingCanvas();
   if (!canvas) throw new Error("the scene's engine has no canvas");
@@ -155,6 +166,9 @@ export function installBoardControls(
       hovered = target;
       show(field, target);
     } else if (info.type === PointerEventTypes.POINTERDOUBLETAP) {
+      // A hand player's double-click opens the castle menu (castleMenuInput.ts) and never moves the camera.
+      const status = options.handPlay?.state.get().status ?? null;
+      if (!doubleClickFocuses(status)) return;
       const target = pickTargetAt(scene);
       const castle =
         target?.kind === "castle"
@@ -183,6 +197,9 @@ export function installBoardControls(
     fitBoard(scene);
   };
   window.addEventListener("keydown", onKey);
+  const removeMenuOpeners = options.castleMenu
+    ? installCastleMenuOpeners(scene, options.castleMenu, hide)
+    : () => {};
   // The hovered entity may have moved or gone when a new generation is drawn.
   const frameObserver = scene.onBeforeRenderObservable.add(() => {
     const field = battlefieldOf(scene);
@@ -193,6 +210,7 @@ export function installBoardControls(
     scene.onBeforeRenderObservable.remove(frameObserver);
     canvas.removeEventListener("pointerleave", onLeave);
     window.removeEventListener("keydown", onKey);
+    removeMenuOpeners();
     tooltip.remove();
     highlight?.dispose();
   };

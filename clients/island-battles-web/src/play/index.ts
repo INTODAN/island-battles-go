@@ -8,6 +8,22 @@ import { createHandPlay, type HandPlay } from "./handPlay";
 import { type Schedule, workerSchedule } from "./ticker";
 
 export {
+  type BurstRow,
+  burstAmount,
+  type CastleMenuModel,
+  castleMenuModel,
+  doubleClickFocuses,
+  isRightClick,
+  type MenuGate,
+  type MenuOpener,
+  type MenuPlay,
+  menuAllowed,
+  menuReason,
+  menuUpgradeOrder,
+  placeMenu,
+  type UpgradeRow,
+} from "./castleMenu";
+export {
   type CheckResult,
   createHandPlay,
   type HandPlay,

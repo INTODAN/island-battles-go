@@ -11,6 +11,7 @@ import { createScenePlayer } from "../../scene/animation";
 import { battlefieldOf } from "../../scene/battlefield";
 import { loadBoardAssets } from "../../scene/boardAssets";
 import { fitCamera } from "../../scene/camera";
+import { castleScreenPoint } from "../../scene/castleMenuInput";
 import {
   applyGraphics,
   type Graphics,
@@ -22,6 +23,7 @@ import { fitBoard, installBoardControls } from "../../scene/picking";
 import { showBoardLoading } from "../boardLoading";
 import { rulesButton } from "../rules/rulesDialog";
 import { type AgentGame, agentPrompt, copyText } from "./agentPrompt";
+import { CastleMenu } from "./castleMenu";
 import { clashSummary } from "./clashes";
 import { GameController, showsNewestTurn, type ViewState } from "./controller";
 import "./game.css";
@@ -443,7 +445,14 @@ export class GameScreen {
     const scene = new Scene(engine);
     this.scene = scene;
     const handPlay = this.options.handPlay ?? null;
-    const removeControls = installBoardControls(scene, { handPlay });
+    // The castle menu (#344) is built once the controller exists; the board asks it to open.
+    let castleMenu: CastleMenu | null = null;
+    const removeControls = installBoardControls(scene, {
+      handPlay,
+      castleMenu: handPlay && {
+        open: (castleId, opener) => castleMenu?.open(castleId, opener) ?? false,
+      },
+    });
     // The board's art loads behind a loading screen; the board draws placeholders meanwhile.
     const loading = showBoardLoading(this.root);
     loadBoardAssets(scene, (progress) => loading.update(progress)).then(
@@ -478,6 +487,20 @@ export class GameScreen {
       bottomStack: this.bottomStack,
       setNotice: (text) => this.setNotice(text),
     };
+    castleMenu =
+      handPlay &&
+      new CastleMenu({
+        host: this.root,
+        handPlay,
+        showsNewestTurn: () => showsNewestTurn(controller.state),
+        subscribeView: (listener) => controller.subscribe(listener),
+        locate: (castleId) => castleScreenPoint(scene, castleId),
+        onFrame: (run) => {
+          const observer = scene.onAfterRenderObservable.add(run);
+          return () => scene.onAfterRenderObservable.remove(observer);
+        },
+        fallbackFocus: this.canvas,
+      });
     let aspect =
       engine.getRenderWidth() / Math.max(1, engine.getRenderHeight());
     const resize = new ResizeObserver(() => {
@@ -522,6 +545,7 @@ export class GameScreen {
       teams: sorted,
       dispose: () => {
         unsubscribe();
+        castleMenu?.dispose();
         removeControls();
         resize.disconnect();
         engine.stopRenderLoop();
