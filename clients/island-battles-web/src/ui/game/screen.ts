@@ -60,6 +60,7 @@ import {
 import { createOrderNotices } from "./notices";
 import {
   confirmationKey,
+  givesOrders,
   type ResignResult,
   resignControl,
   resignQuestion,
@@ -220,6 +221,8 @@ export class GameScreen {
   private readonly confirmKeep = button("Keep playing", "Keep playing");
   /** The top bar's first button, where the focus goes when the Resign button can't have it. */
   private backToLobby: HTMLButtonElement | undefined;
+  /** Tells the hand player's view that a resignation is pending; set while a game runs. */
+  private onResignPending: (() => void) | undefined;
   private resignSending = false;
   private resignDone = false;
   /** What had the focus when the confirmation opened, to give it back when it closes. */
@@ -589,6 +592,8 @@ export class GameScreen {
     if (this.disposed) return;
     if (result.kind === "resigned" || result.kind === "already") {
       this.resignDone = true;
+      // The board stops taking orders and the status row stops asking to return to live.
+      this.onResignPending?.();
     } else {
       // A refused resignation is feedback on an order of the player's (the notice contract).
       this.handSurface?.showOrderFeedback(result.sentence);
@@ -713,8 +718,11 @@ export class GameScreen {
       handPlay,
       // Read lazily: the controller and the hand surface are made below.
       canOrder: () =>
-        handPlay?.state.get().status === "playing" &&
-        this.handSurface?.showsNewestTurn() === true,
+        givesOrders({
+          status: handPlay?.state.get().status ?? "idle",
+          showsNewestTurn: this.handSurface?.showsNewestTurn() === true,
+          resigned: this.resignDone,
+        }),
       ...(this.amountBar ? { amountControl: this.amountBar } : {}),
       showOrderFeedback: (sentence, orderId) =>
         this.handSurface?.showOrderFeedback(sentence, orderId),
@@ -781,12 +789,17 @@ export class GameScreen {
       showOrderFeedback: (sentence, orderId) =>
         this.orderNotices.show(sentence, orderId),
     };
+    this.onResignPending = () => {
+      showHand();
+      castleMenu?.update();
+    };
     castleMenu =
       handPlay &&
       new CastleMenu({
         host: this.root,
         handPlay,
-        showsNewestTurn: () => showsNewestTurn(controller.state),
+        showsNewestTurn: () =>
+          showsNewestTurn(controller.state) && !this.resignDone,
         subscribeView: (listener) => controller.subscribe(listener),
         locate: (castleId) => castleScreenPoint(scene, castleId),
         onFrame: (run) => {
@@ -805,7 +818,7 @@ export class GameScreen {
       controller.scrubTo(controller.state.frames.length - 1);
     const showHand = () => {
       const state = handPlay?.state.get() ?? null;
-      hand = handView(state, controller.state);
+      hand = handView(state, controller.state, this.resignDone);
       player.setLivePace(hand.livePaceMs);
       player.setLiveTiming(hand.timing);
       this.markYourTeam(hand.hand ? hand.yourTeam : null);
@@ -910,6 +923,7 @@ export class GameScreen {
       dispose: () => {
         unsubscribe();
         castleMenu?.dispose();
+        this.onResignPending = undefined;
         this.closeConfirmation("none");
         this.resignButton.hidden = true;
         this.resigned.hidden = true;

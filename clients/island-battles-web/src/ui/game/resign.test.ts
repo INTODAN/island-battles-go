@@ -3,6 +3,7 @@ import { ApiError } from "../../api/errors";
 import type { components } from "../../api/generated/game";
 import {
   confirmationKey,
+  givesOrders,
   requestResign,
   resignControl,
   resignQuestion,
@@ -145,5 +146,19 @@ describe("requestResign", () => {
       kind: "refused",
       sentence: "Your session has ended. Sign in again.",
     });
+  });
+});
+
+describe("givesOrders", () => {
+  test("the board takes orders only while playing, on the newest turn, with no resignation pending", () => {
+    const base = {
+      status: "playing" as const,
+      showsNewestTurn: true,
+      resigned: false,
+    };
+    expect(givesOrders(base)).toBe(true);
+    expect(givesOrders({ ...base, resigned: true })).toBe(false);
+    expect(givesOrders({ ...base, showsNewestTurn: false })).toBe(false);
+    expect(givesOrders({ ...base, status: "eliminated" })).toBe(false);
   });
 });

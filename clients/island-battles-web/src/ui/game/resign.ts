@@ -9,6 +9,19 @@ import { isTransientError } from "../../play/rules";
 
 type GenerationState = components["schemas"]["GenerationState"];
 
+/**
+ * Whether the board takes orders (the drag, the castle menu): the hand play plays, the view shows
+ * the newest turn, and no resignation is pending. After a resignation's 200 the status stays
+ * `playing` until the turn plays, and an order would be refused with `team-out`.
+ */
+export function givesOrders(input: {
+  status: PlayStatus;
+  showsNewestTurn: boolean;
+  resigned: boolean;
+}): boolean {
+  return input.status === "playing" && input.showsNewestTurn && !input.resigned;
+}
+
 /** What the in-page confirmation asks. */
 export const resignQuestion = "Resign? Your team loses this game.";
 

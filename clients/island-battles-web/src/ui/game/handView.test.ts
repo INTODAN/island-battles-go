@@ -177,3 +177,15 @@ describe("jumpsOnReturn", () => {
     );
   });
 });
+
+describe("a pending resignation (#348)", () => {
+  test("no pace bar, and no 'Return to live to give orders' while it waits for the turn", () => {
+    const behind = handView(play("playing"), view(0), true);
+    expect(behind.status).toBeNull();
+    expect(behind.pace).toBeNull();
+    expect(handView(play("playing"), view(2), true).pace).toBeNull();
+    // Without one pending, both show as before.
+    expect(handView(play("playing"), view(0)).status).toBe("return-to-live");
+    expect(handView(play("playing"), view(2)).pace).toBe(turn);
+  });
+});
