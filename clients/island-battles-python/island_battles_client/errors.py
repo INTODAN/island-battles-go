@@ -86,11 +86,34 @@ class GameEndedError(GameError):
     """
 
 
+class TeamOutError(GameError):
+    """The server refused a batch because the player's team resigned or left a
+    real-time game, so it has no more turns to play.
+
+    The client handles it itself: it logs that the team is out and stops,
+    without failing.
+    """
+
+
+class StaleGenerationError(GameError):
+    """The server refused a batch because its generation's turn is over.
+
+    In a real-time game the turn ends one turn pace after its generation was
+    created, and the server plays it with the commands that arrived by then,
+    so a bot slower than the pace passes that turn. The client handles it
+    itself there: it writes one line, reads the new state and plays on. In a
+    game that waits for every player the client stops on it, as on any
+    other rejection.
+    """
+
+
 # The server's problem types that clients tell apart: the command rejections,
-# shared by every command, the game's end, the game log limit and the bot
-# memory limit.
+# shared by every command, the game's end, a stale generation, the game log
+# limit and the bot memory limit.
 PROBLEM_TYPE_ERRORS: dict[str, type[GameError]] = {
     "urn:island-battles:problem:game-ended": GameEndedError,
+    "urn:island-battles:problem:team-out": TeamOutError,
+    "urn:island-battles:problem:stale-generation": StaleGenerationError,
     "urn:island-battles:problem:castle-not-found": CastleNotFoundError,
     "urn:island-battles:problem:castle-not-owned": CastleNotOwnedError,
     "urn:island-battles:problem:upgrade-max-level": UpgradeMaxLevelError,

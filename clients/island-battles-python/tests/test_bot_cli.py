@@ -2,6 +2,7 @@
 
 import http.client
 import json
+import re
 import socket
 import subprocess
 import sys
@@ -377,11 +378,41 @@ def test_the_turns_deadline_cuts_the_bots_time(
             post_turn(bot_server, api.url, deadline_at=deadline.isoformat())[0] == 202
         )
         message = pass_line(api.wait(1)[0])
-        # 8 s by default, but the deadline leaves 2 s less the 1 s margin.
+        # 8 s by default, but the deadline leaves 2 s less the 0.5 s margin.
         assert time.monotonic() - started < 4
         assert "so it passes this turn" in message
     finally:
         stop.touch()
+
+
+@pytest.mark.parametrize("seconds", [0.5, 1.0, 2.0])
+def test_a_quick_answer_is_submitted_before_a_short_deadline(
+    server: tuple[BotServer, Path], api: FakeAPI, seconds: float
+) -> None:
+    # A real-time game's deadline is one pace away, from 0.5 s.
+    bot_server, _ = server
+    deadline = datetime.now(UTC) + timedelta(seconds=seconds)
+    assert post_turn(bot_server, api.url, deadline_at=deadline.isoformat())[0] == 202
+    [batch] = api.wait(1)
+    assert batch["memory"] == {"answer": 1}
+    assert [line["message"] for line in batch["logs"]] == ["answer 1"]
+
+
+def test_a_bot_slower_than_a_short_deadline_passes(
+    server: tuple[BotServer, Path], api: FakeAPI
+) -> None:
+    bot_server, file = server
+    file.write_text(
+        "import time\nfrom island_battles_client import turn_result\n"
+        "def play(turn):\n    time.sleep(1.5)\n    return turn_result(memory={'slow': 1})\n"
+    )
+    deadline = datetime.now(UTC) + timedelta(seconds=1)
+    assert post_turn(bot_server, api.url, deadline_at=deadline.isoformat())[0] == 202
+    # Three quarters of the second left.
+    assert re.match(
+        r"The bot took longer than 0\.7\d* s on generation 12, so it passes this turn\.",
+        pass_line(api.wait(1)[0]),
+    )
 
 
 def test_a_rejected_answer_passes_the_turn(

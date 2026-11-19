@@ -57,9 +57,6 @@ func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 	if err != nil {
 		return models.BindingResult{}, err
 	}
-	// started is the game's start: its first generation's creation, and when
-	// the server last heard from each player, for the silence rule.
-	started := time.Now()
 	var events []Publication
 	var turns []turnToSend
 	// goBotsOnly is set when Go bots alone play the first turn, and have
@@ -70,6 +67,10 @@ func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 		if len(game.Teams) > 0 {
 			return nil
 		}
+		// started is the game's start, taken once the game is locked: its
+		// first generation's creation, and when the server last heard from
+		// each player, for the silence rule.
+		started := time.Now()
 		if len(snapshot.StartRoster) == 0 {
 			return fmt.Errorf("cannot initialize an empty roster")
 		}

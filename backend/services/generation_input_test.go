@@ -127,7 +127,8 @@ func TestGenerationTurnsAtomicReservationsRetriesAndRestart(t *testing.T) {
 		t.Fatalf("seal=%+v err=%v", sealed, err)
 	}
 	_, err = fixture.service.Register(ctx, fixture.players[0], batch(fixture.state, false))
-	assertTurnStatus(t, err, 409)
+	// A completed turn isn't a stale generation.
+	assertProblem(t, err, 409, "", "player turn is already complete")
 	// Frozen player two is still required even with no active snapshot members.
 	final := batch(fixture.state, true)
 	next, err := fixture.service.Register(ctx, fixture.players[1], final)
@@ -144,8 +145,9 @@ func TestGenerationTurnsAtomicReservationsRetriesAndRestart(t *testing.T) {
 	if err != nil || retry.GenerationID != next.GenerationID {
 		t.Fatalf("retry=%+v err=%v", retry, err)
 	}
+	// A new batch for the old generation is stale, in a game that waits too.
 	_, err = fixture.service.Register(ctx, fixture.players[0], batch(fixture.state, true))
-	assertTurnStatus(t, err, 409)
+	assertProblem(t, err, 409, services.StaleGenerationProblemType, "generation is no longer current")
 	assertTurnCounts(t, fixture, 2, 2, 4, 4)
 	// Each roster player was pushed the initial generation, then the next one.
 	recipients := map[uint]map[string]bool{}
@@ -198,7 +200,7 @@ func TestGenerationCommandValidationAndAuthorization(t *testing.T) {
 	stale := batch(fixture.state, true)
 	stale.GenerationID += 100
 	_, err = fixture.service.Register(ctx, fixture.players[0], stale)
-	assertTurnStatus(t, err, 409)
+	assertProblem(t, err, 409, services.StaleGenerationProblemType, "generation is no longer current")
 	detachedID, err := dal.CreateGame(fixture.database)
 	if err != nil {
 		t.Fatal(err)

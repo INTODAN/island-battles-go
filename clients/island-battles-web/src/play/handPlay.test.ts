@@ -187,6 +187,7 @@ describe("status", () => {
 describe("orders", () => {
   test("each order is its own batch, not completing, for the open generation", async () => {
     const env = setup({ initial: handState(10) });
+    await flush();
     const given = env.play.send(1, 4, 5);
     expect(given).toMatchObject({
       ok: true,
@@ -333,7 +334,7 @@ describe("orders", () => {
     expect(env.settled).toHaveLength(0);
   });
 
-  test("after 5 s without an answer, the order and those behind it are dropped", async () => {
+  test("when another attempt could run past 5 s, the order and those behind it are dropped", async () => {
     const env = setup({ initial: handState(10) });
     env.play.send(1, 4, 5);
     env.play.send(1, 3, 5);
@@ -347,9 +348,10 @@ describe("orders", () => {
     expect(
       env.posts.every((post) => post.body.request_id === "request-1"),
     ).toBe(true);
-    // Sent at 0, 100, 300, 700, 1500, 2500, 3500 and 4500 ms; the next would be past 5 s.
+    // Sent at 0, 100, 300, 700, 1500 and 2500 ms; one more, with its 2 s to answer, could end
+    // after 5 s.
     expect(env.posts.map((post) => post.at - 1_000_000)).toEqual([
-      0, 100, 300, 700, 1500, 2500, 3500, 4500,
+      0, 100, 300, 700, 1500, 2500,
     ]);
     expect(
       env.settled.map((order) => [order.id, order.state, order.sentence]),
@@ -373,6 +375,52 @@ describe("orders", () => {
     // The next order goes out.
     env.play.send(1, 4, 1);
     expect(env.posts.at(-1)?.body.request_id).toBe("request-2");
+  });
+
+  test("with every request timing out, no order is in flight past 5 s", async () => {
+    const env = setup({ initial: handState(10) });
+    env.play.send(1, 4, 5);
+    env.play.send(1, 3, 5);
+    let deadlinesAnswered = 0;
+    while (env.settled.length === 0 && env.clock.now() < 1_020_000) {
+      while (deadlinesAnswered < env.deadlines.length)
+        env.deadlines[deadlinesAnswered++]?.resolve(handState(10));
+      await env.clock.advance(10);
+    }
+    expect(env.posts.map((post) => post.at - 1_000_000)).toEqual([0, 2100]);
+    expect(env.clock.now() - 1_000_000).toBeLessThanOrEqual(5000);
+    expect(env.settled.map((order) => order.id)).toEqual([1, 2]);
+  });
+
+  test("a turn that ended while the state reads fail drops the order and those behind it", async () => {
+    const env = setup({ initial: handState(10) });
+    env.play.send(1, 4, 5);
+    env.play.send(1, 3, 5);
+    env.play.upgrade(2, "speed");
+    env.posts[0]?.reject(stale(true));
+    let answered = 0;
+    let deadlinesAnswered = 0;
+    while (env.settled.length === 0 && env.clock.now() < 1_020_000) {
+      while (answered < env.reads.length)
+        env.reads[answered++]?.reject(transport());
+      while (deadlinesAnswered < env.deadlines.length)
+        env.deadlines[deadlinesAnswered++]?.resolve(handState(10));
+      await env.clock.advance(10);
+    }
+    const late = "The turn ended before the order arrived.";
+    expect(
+      env.settled.map((order) => [order.id, order.state, order.sentence]),
+    ).toEqual([
+      [1, "rejected", late],
+      [2, "rejected", late],
+      [3, "rejected", late],
+    ]);
+    expect(env.posts).toHaveLength(1);
+    expect(env.play.state.get().orders.map((order) => order.state)).toEqual([
+      "rejected",
+      "rejected",
+      "rejected",
+    ]);
   });
 
   for (const typed of [true, false]) {
@@ -529,6 +577,39 @@ describe("orders", () => {
       "You left the game.",
     );
     expect(env.play.state.get()).toMatchObject({ status: "idle", turn: null });
+  });
+
+  test("a burst by share is refused until the upgrade table has loaded; an exact one goes", async () => {
+    let load: (table: UpgradeTable) => void = () => {};
+    const env = setup({
+      initial: handState(10),
+      loadUpgrades: () =>
+        new Promise<UpgradeTable>((resolve) => {
+          load = resolve;
+        }),
+    });
+    expect(env.play.state.get().upgrades).toBeNull();
+    const refused = env.play.burst(1, { share: 1 });
+    expect(refused).toMatchObject({
+      ok: false,
+      refusal: { kind: "upgrades-not-loaded", castleId: 1 },
+    });
+    expect(
+      env.play.check({ kind: "burst", castleId: 1, amount: { share: 1 } }),
+    ).toMatchObject({ ok: false });
+    expect(env.posts).toHaveLength(0);
+    const exact = env.play.burst(1, 1);
+    expect(exact.ok).toBe(true);
+    expect(env.posts[0]?.body.commands[0]).toMatchObject({
+      command_type: "burst_castle",
+      parameters: { soldier_amount: 1 },
+    });
+    load(upgradeTable);
+    await flush();
+    expect(env.play.state.get().upgrades).not.toBeNull();
+    accept(env, 0);
+    await flush();
+    expect(env.play.burst(2, { share: 1 }).ok).toBe(true);
   });
 
   test("the orders of a turn leave the store when the next generation arrives", async () => {
@@ -700,6 +781,23 @@ describe("the turn clock", () => {
       await env.clock.advance(60_000);
       expect(env.deadlines).toHaveLength(0);
     }
+  });
+
+  test("an outcome on the open generation clears the turn's end", async () => {
+    const env = setup({ initial: handState(10) });
+    expect(env.play.state.get().turn?.endsAt).toBe(1_001_000);
+    env.game.set(
+      handState(10, {
+        outcome: { reason: "turn_timeout", summary: "", winner_team_color: 2 },
+        turn_deadline_at: null,
+      } as Partial<GenerationState>),
+    );
+    expect(env.play.state.get()).toMatchObject({
+      status: "ended",
+      turn: { generationId: 10, paceMs: 1000, endsAt: null, startsAt: null },
+    });
+    await env.clock.advance(20_000);
+    expect(env.deadlines).toHaveLength(0);
   });
 
   test("a turn's end time stays as it was when a later state of the same turn arrives", async () => {
