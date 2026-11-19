@@ -642,7 +642,11 @@ function updateClashes(field: Battlefield, generation: Generation): void {
  * its number of corners and its triangles, only the positions are written into the existing
  * buffer; a new buffer is made only when the shape changes.
  */
-function setRibbon(mesh: Mesh, points: number[], indices: number[]): void {
+export function setRibbon(
+  mesh: Mesh,
+  points: number[],
+  indices: number[],
+): void {
   const positions = new Array<number>((points.length / 2) * 3);
   for (let index = 0; index < points.length; index += 2) {
     const world = toWorld({ x: points[index] ?? 0, y: points[index + 1] ?? 0 });
@@ -670,7 +674,7 @@ function setRibbon(mesh: Mesh, points: number[], indices: number[]): void {
 }
 
 /** The rendering group of the heading lines; it keeps the depth of group 0. */
-const HEADING_GROUP = 1;
+export const HEADING_GROUP = 1;
 
 /**
  * Draws the heading lines of a generation at rest. `held` are the groups that are not moving;

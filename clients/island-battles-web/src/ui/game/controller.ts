@@ -28,6 +28,20 @@ export interface ViewState {
   live: boolean;
 }
 
+/**
+ * Whether the view shows the newest turn of a running live game: where a hand player gives
+ * orders. False for a demo, after the end, before a load, and once the user scrubs back or
+ * pauses while newer turns arrive.
+ */
+export function showsNewestTurn(state: ViewState): boolean {
+  return (
+    state.live &&
+    state.outcome === null &&
+    state.index >= 0 &&
+    state.index === state.frames.length - 1
+  );
+}
+
 export interface ControllerOptions {
   live: boolean;
 }

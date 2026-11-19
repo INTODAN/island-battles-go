@@ -287,6 +287,80 @@
   color: #8a1c10;
 }
 
+/* Drag to send's amount: Half, the slider, All and what it sends (#343). */
+.gv-amount {
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  width: min(420px, 100%);
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  touch-action: none;
+}
+
+.gv-amount-button {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid #b6c0cf;
+  border-radius: 8px;
+  background: #fff;
+  color: #202d40;
+  cursor: pointer;
+}
+
+.gv-amount-slider {
+  flex: 1;
+  min-width: 60px;
+  margin: 0;
+}
+
+.gv-amount-text {
+  flex: none;
+  min-width: 5.5em;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.gv-amount-button:focus-visible,
+.gv-amount-slider:focus-visible {
+  outline: 2px solid #3464e0;
+  outline-offset: 2px;
+}
+
+@media (pointer: coarse) {
+  .gv-amount-button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .gv-amount-slider {
+    height: 44px;
+  }
+}
+
+/* A hand player's status row above the timeline (#343, #345). */
+.gv-hand-status {
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(560px, 100%);
+  box-sizing: border-box;
+  padding: 6px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  font-weight: 600;
+}
+
 .gv-summary {
   align-self: flex-start;
   max-width: 100%;

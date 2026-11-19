@@ -5,6 +5,7 @@
 import { Engine } from "@babylonjs/core/Engines/engine";
 import { Scene } from "@babylonjs/core/scene";
 import { gameBaseUrl, lobbyBaseUrl } from "../../platform";
+import type { HandPlay } from "../../play";
 import type { ConnectionState } from "../../realtime";
 import { createScenePlayer } from "../../scene/animation";
 import { battlefieldOf } from "../../scene/battlefield";
@@ -21,8 +22,10 @@ import { fitBoard, installBoardControls } from "../../scene/picking";
 import { showBoardLoading } from "../boardLoading";
 import { rulesButton } from "../rules/rulesDialog";
 import { type AgentGame, agentPrompt, copyText } from "./agentPrompt";
+import { AmountBar } from "./amountBar";
 import { clashSummary } from "./clashes";
-import { GameController, type ViewState } from "./controller";
+import { GameController, showsNewestTurn, type ViewState } from "./controller";
+import { installGameViewDebug } from "./debug";
 import "./game.css";
 import {
   type GameOutcome,
@@ -60,7 +63,38 @@ export interface ScreenOptions {
   onSaveDemo?: () => Promise<void>;
   /** Called when the shown turn's logs are not held or hide teams that have since been revealed. */
   requestLogs?: (generationId: number, ended: boolean) => void;
+  /**
+   * A roster player's hand play (`src/play/`), which the app shell owns: the screen never
+   * disposes it. Null or absent for a watcher and a demo. A player whose bot plays has one whose
+   * status isn't `playing`, so its controls stay off.
+   */
+  handPlay?: HandPlay | null;
 }
+
+/**
+ * What the hand player's controls on the board build on: drag to send (#343), the castle menu
+ * (#344) and the hand player's view (#345). `GameScreen.hand` holds it while a game is started
+ * with a hand play.
+ */
+export interface HandSurface {
+  readonly handPlay: HandPlay;
+  /** Whether the view shows the newest turn of the running game (`showsNewestTurn`): orders are given only then. */
+  showsNewestTurn(): boolean;
+  /** Hears every change of the view (the turn shown, Follow live, the outcome); returns the unsubscribe. */
+  subscribeView(listener: (state: ViewState) => void): () => void;
+  /** The overlay's bottom stack: the logs panel, then the timeline. */
+  readonly bottomStack: HTMLElement;
+  /** The notice line under the top bar (`GameScreen.setNotice`); null clears it. */
+  setNotice(text: string | null): void;
+  /**
+   * Shows a sentence about one of the player's orders for 5 s, on its own line under the notice.
+   * `orderId` is the PlayOrder's id: one order is shown once. Callers never clear the line.
+   */
+  showOrderFeedback(sentence: string, orderId?: number): void;
+}
+
+/** How long `showOrderFeedback` shows a sentence. */
+const ORDER_FEEDBACK_MS = 5000;
 
 /** `stopped`: a watcher the host removed, who receives no more turns. */
 export type ConnectionLabel = ConnectionState | "saved" | "stopped";
@@ -114,6 +148,18 @@ export class GameScreen {
   private readonly connectionLabel = element("span");
   private readonly turn = element("span", "gv-turn");
   private readonly notice = element("p", "gv-notice");
+  /** Feedback on the hand player's orders (`HandSurface.showOrderFeedback`). */
+  private readonly orderNotice = element("p", "gv-notice gv-order-notice");
+  private orderNoticeTimer: ReturnType<typeof setTimeout> | undefined;
+  /** A hand player's status row above the timeline, such as "Return to live to give orders". */
+  /** The amount bar of drag to send (#343), for a view with a hand play. */
+  private readonly amountBar: AmountBar | null;
+  private readonly handStatus = element("div", "gv-hand-status");
+  private readonly handStatusText = element(
+    "span",
+    "gv-hand-status-text",
+    "Return to live to give orders",
+  );
   private readonly summary = element("p", "gv-summary");
   private readonly saveError = element("p", "gv-notice");
   private readonly askStatus = element("p", "gv-summary gv-ask-status");
@@ -150,8 +196,11 @@ export class GameScreen {
     number,
     { soldiers: HTMLElement; castles: HTMLElement }
   >();
+  private readonly bottomStack = element("div", "gv-stack gv-stack-bottom");
   private running: Running | undefined;
   private scene: Scene | undefined;
+  /** What `hand` returns. */
+  private handSurface: HandSurface | null = null;
   private disposed = false;
   private retry: (() => void) | undefined;
 
@@ -205,6 +254,11 @@ export class GameScreen {
 
     this.notice.setAttribute("role", "alert");
     this.notice.hidden = true;
+    this.orderNotice.setAttribute("role", "alert");
+    this.orderNotice.hidden = true;
+    this.handStatusText.setAttribute("role", "status");
+    this.handStatus.append(this.handStatusText);
+    this.handStatus.hidden = true;
     this.summary.hidden = true;
     this.saveError.setAttribute("role", "alert");
     this.saveError.hidden = true;
@@ -273,6 +327,7 @@ export class GameScreen {
     topStack.append(
       top,
       this.notice,
+      this.orderNotice,
       this.saveError,
       this.askStatus,
       this.askText,
@@ -291,11 +346,24 @@ export class GameScreen {
       if (this.scene) fitBoard(this.scene);
     });
     topStack.append(this.fitButton);
-    const bottomStack = element("div", "gv-stack gv-stack-bottom");
-    bottomStack.append(this.logsBox, timeline);
-    root.append(this.canvas, topStack, bottomStack, this.overlay);
+    this.amountBar = this.options.handPlay ? new AmountBar() : null;
+    this.bottomStack.append(
+      this.logsBox,
+      ...(this.amountBar ? [this.amountBar.element] : []),
+      this.handStatus,
+      timeline,
+    );
+    root.append(this.canvas, topStack, this.bottomStack, this.overlay);
     this.container.replaceChildren(root);
     this.setConnection(this.options.live ? "connecting" : "saved");
+  }
+
+  /**
+   * The hand player's surface while a game is started with a hand play: null before `start`,
+   * after `stop`, and for a watcher or a demo.
+   */
+  get hand(): HandSurface | null {
+    return this.handSurface;
   }
 
   setTitle(text: string): void {
@@ -317,6 +385,36 @@ export class GameScreen {
   setNotice(text: string | null): void {
     this.notice.textContent = text ?? "";
     this.notice.hidden = !text;
+  }
+
+  /**
+   * Publishes the bottom stack's height as `--gv-bottom-height` on the view's parent, where the
+   * lobby's Watchers box, a sibling of the view (`app.ts`), reads it to sit above the stack.
+   */
+  private publishBottomHeight(): () => void {
+    const parent = this.container.parentElement;
+    if (!parent) return () => {};
+    const observer = new ResizeObserver(() => {
+      parent.style.setProperty(
+        "--gv-bottom-height",
+        // The stack's height and its 8 px from the bottom.
+        `${Math.ceil(this.bottomStack.offsetHeight) + 8}px`,
+      );
+    });
+    observer.observe(this.bottomStack);
+    return () => {
+      observer.disconnect();
+      parent.style.removeProperty("--gv-bottom-height");
+    };
+  }
+
+  private showOrderFeedback(sentence: string): void {
+    clearTimeout(this.orderNoticeTimer);
+    this.orderNotice.textContent = sentence;
+    this.orderNotice.hidden = false;
+    this.orderNoticeTimer = setTimeout(() => {
+      this.orderNotice.hidden = true;
+    }, ORDER_FEEDBACK_MS);
   }
 
   private async saveDemo(save: HTMLButtonElement): Promise<void> {
@@ -408,7 +506,17 @@ export class GameScreen {
     });
     const scene = new Scene(engine);
     this.scene = scene;
-    installBoardControls(scene);
+    const handPlay = this.options.handPlay ?? null;
+    const removeControls = installBoardControls(scene, {
+      handPlay,
+      // Read lazily: the controller and the hand surface are made below.
+      canOrder: () =>
+        handPlay?.state.get().status === "playing" &&
+        this.handSurface?.showsNewestTurn() === true,
+      ...(this.amountBar ? { amountControl: this.amountBar } : {}),
+      showOrderFeedback: (sentence, orderId) =>
+        this.handSurface?.showOrderFeedback(sentence, orderId),
+    });
     // The board's art loads behind a loading screen; the board draws placeholders meanwhile.
     const loading = showBoardLoading(this.root);
     loadBoardAssets(scene, (progress) => loading.update(progress)).then(
@@ -436,6 +544,27 @@ export class GameScreen {
     );
     onIdle = () => controller.tick();
     scene.onBeforeRenderObservable.add(() => controller.tick());
+    this.handSurface = handPlay && {
+      handPlay,
+      showsNewestTurn: () => showsNewestTurn(controller.state),
+      subscribeView: (listener) => controller.subscribe(listener),
+      bottomStack: this.bottomStack,
+      setNotice: (text) => this.setNotice(text),
+      showOrderFeedback: (sentence) => this.showOrderFeedback(sentence),
+    };
+    // Scrubbed back, a hand player is told that orders are given from the newest turn.
+    const showHandStatus = () => {
+      this.handStatus.hidden = !(
+        handPlay?.state.get().status === "playing" &&
+        !showsNewestTurn(controller.state)
+      );
+    };
+    const handStatusStops = handPlay
+      ? [
+          handPlay.state.subscribe(showHandStatus),
+          controller.subscribe(showHandStatus),
+        ]
+      : [];
     let aspect =
       engine.getRenderWidth() / Math.max(1, engine.getRenderHeight());
     const resize = new ResizeObserver(() => {
@@ -450,6 +579,8 @@ export class GameScreen {
       }
     });
     resize.observe(this.container);
+    const stopBottomHeight = this.publishBottomHeight();
+    const removeDebug = installGameViewDebug(scene);
 
     this.buildTeams(sorted);
     const unsubscribe = controller.subscribe((state) => this.render(state));
@@ -480,13 +611,21 @@ export class GameScreen {
       teams: sorted,
       dispose: () => {
         unsubscribe();
+        for (const stop of handStatusStops) stop();
+        this.handStatus.hidden = true;
+        clearTimeout(this.orderNoticeTimer);
+        this.orderNotice.hidden = true;
+        removeControls();
         resize.disconnect();
+        stopBottomHeight();
+        removeDebug();
         engine.stopRenderLoop();
         scene.dispose();
         engine.dispose();
       },
     };
     this.render(controller.state);
+    showHandStatus();
     return controller;
   }
 
@@ -509,6 +648,8 @@ export class GameScreen {
     this.running?.dispose();
     this.running = undefined;
     this.scene = undefined;
+    // The hand play itself belongs to the app shell: the screen only lets go of it.
+    this.handSurface = null;
   }
 
   /**
