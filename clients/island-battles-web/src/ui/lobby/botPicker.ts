@@ -17,12 +17,18 @@ import {
 import { gameBaseUrl } from "../../platform";
 import { copyText, h } from "../dom";
 import type { DefaultBot, LobbyActions, MemberBot } from "./actions";
+import { describePace, turnPaceOf } from "./form";
 import { choiceFromValue, choiceValue } from "./roomModel";
 
 export interface BotPicker {
   el: HTMLElement;
   /** Shows the saved choice, from the server, and whether choosing is still possible. */
-  update(chosen: MemberBot | undefined, locked: boolean): void;
+  update(
+    chosen: MemberBot | undefined,
+    locked: boolean,
+    /** The lobby's `game_settings`, whose turn pace the Play by hand line names. */
+    gameSettings?: Record<string, unknown>,
+  ): void;
   dispose(): void;
 }
 
@@ -92,6 +98,28 @@ export function mountBotPicker(options: {
       copy.textContent = "Copy command";
     }, 1500);
   });
+  const manualHint = h("span", { class: "hint" });
+  const manualLabel = h(
+    "label",
+    { class: "bot-option", htmlFor: "bot-manual" },
+    h("input", {
+      type: "radio",
+      name: "bot",
+      value: "manual",
+      id: "bot-manual",
+    }),
+    h(
+      "span",
+      { class: "bot-text" },
+      h("strong", {}, "Play by hand"),
+      manualHint,
+    ),
+  );
+  /** Names the pace of the lobby's real-time game in the Play by hand line. */
+  function showPace(settings: Record<string, unknown> | undefined): void {
+    manualHint.textContent = `You command your castles yourself in this client. The game is then real-time: a turn every ${describePace(turnPaceOf(settings))}.`;
+  }
+  showPace(undefined);
   const local = h("input", {
     type: "radio",
     name: "bot",
@@ -205,6 +233,7 @@ export function mountBotPicker(options: {
     "section",
     { class: "card bot-picker" },
     h("h2", {}, "Your bot"),
+    manualLabel,
     localLabel,
     localHelp,
     h(
@@ -429,7 +458,8 @@ export function mountBotPicker(options: {
 
   return {
     el,
-    update(next, isLocked) {
+    update(next, isLocked, gameSettings) {
+      showPace(gameSettings);
       const before = chosenPort();
       chosen = next;
       locked = isLocked;
