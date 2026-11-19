@@ -7,7 +7,15 @@
 // castles), and hand play, which records the orders it is given. The castles stand at (-3, 0),
 // (3, 0) and (0, 3.5) in world units; castles 1 and 2 are yours, 8 is an enemy's.
 
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  test,
+} from "bun:test";
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { NullEngine } from "@babylonjs/core/Engines/nullEngine";
 import {
@@ -24,13 +32,25 @@ import { BoardPointersInput } from "./camera";
 import { toMap } from "./coordinates";
 
 const fields = new WeakMap<object, unknown>();
-const realBattlefield = await import("./battlefield");
+// A copy: Bun updates the module's own namespace when it is mocked.
+const realBattlefield = { ...(await import("./battlefield")) };
+/** How many times the line's ribbon was written. */
+let ribbonWrites = 0;
 mock.module("./battlefield", () => ({
   ...realBattlefield,
+  setRibbon: (...args: Parameters<typeof realBattlefield.setRibbon>) => {
+    ribbonWrites++;
+    return realBattlefield.setRibbon(...args);
+  },
   battlefieldOf: (scene: object) => fields.get(scene),
   setLabel: () => {},
   anchorFor: () => null,
 }));
+// `mock.module` is process-wide and `bun test` runs every file in one process: put the real module
+// back when this file is done, so no other file sees the mock.
+afterAll(() => {
+  mock.module("./battlefield", () => realBattlefield);
+});
 const { installDragControls } = await import("./dragControls");
 const { installBoardControls } = await import("./picking");
 
@@ -882,5 +902,67 @@ describe("the drag's drawing", () => {
     board.pointer(POINTERMOVE, at(board.at(2)));
     board.scene.render();
     expect(picks.length).toBeGreaterThan(0);
+  });
+});
+
+describe("what each frame leaves alone", () => {
+  /** How many times the drag line's ribbon is written while `frames` render. */
+  const lineWrites = (board: Board, frames: number) => {
+    const before = ribbonWrites;
+    for (let frame = 0; frame < frames; frame++) board.scene.render();
+    // Two ribbons (the line and its casing) a drawing.
+    return (ribbonWrites - before) / 2;
+  };
+
+  test("the line is not drawn again while nothing it shows has changed", () => {
+    const board = setup();
+    dragOverEnemy(board);
+    board.scene.render();
+    expect(lineWrites(board, 5)).toBe(0);
+    // A move that changes the line draws it again (at the event or in the next frame).
+    const before = ribbonWrites;
+    board.pointer(POINTERMOVE, at(board.at(2)));
+    board.scene.render();
+    expect(ribbonWrites).toBeGreaterThan(before);
+  });
+
+  test("the pointer is looked up again when the canvas is resized under it", () => {
+    const board = setup();
+    dragOverEnemy(board);
+    board.scene.render();
+    const picks: number[] = [];
+    const pick = board.scene.pick.bind(board.scene);
+    board.scene.pick = ((...args: Parameters<typeof pick>) => {
+      picks.push(1);
+      return pick(...args);
+    }) as typeof board.scene.pick;
+    board.scene.render();
+    expect(picks).toEqual([]);
+    // The page resized the canvas: the engine now reports another height.
+    (
+      board.scene.getEngine() as unknown as { getRenderHeight: () => number }
+    ).getRenderHeight = () => HEIGHT - 100;
+    board.scene.render();
+    expect(picks.length).toBeGreaterThan(0);
+  });
+
+  test("a new drag starts with no memory of where the last one ended", () => {
+    const board = setup();
+    // A wide view, so the top of the canvas looks above the horizon.
+    board.field.camera.fov = 2;
+    board.scene.render();
+    const origin = board.at(MINE);
+    // The first drag ends over the board and is cancelled with Esc.
+    board.pointer(POINTERDOWN, at(origin));
+    board.pointer(POINTERMOVE, at(origin, 40, 40));
+    board.scene.render();
+    expect(board.drawn()).toContain("drag-line");
+    board.windowEvent("keydown", { key: "Escape", target: null });
+    board.pointer(POINTERUP, released(at(origin, 40, 40)));
+    // The second goes straight to the sky: there is no point on the board to draw to yet.
+    board.pointer(POINTERDOWN, at(origin));
+    board.pointer(POINTERMOVE, { clientX: origin.x, clientY: 0 });
+    board.scene.render();
+    expect(board.drawn()).toEqual([]);
   });
 });

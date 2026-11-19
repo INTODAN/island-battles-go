@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/INTODAN/mpl/httpapi"
@@ -21,7 +20,28 @@ import (
 // replay pages are HTML. A new route belongs in PlayerOperations, or here with its reason.
 var unpublishedOperations = []string{"getIslandLobbyReplay", "watchIslandLobbyReplay"}
 
+// unpublishedPaths are registered routes with no operation ID, which no client is generated from:
+// the map builder's admin routes. Their bodies are published as the MapTemplate schema only.
+var unpublishedPaths = []string{"/map/create", "/map/validate"}
+
 func TestEveryRegisteredOperationIsPublishedOrExcluded(t *testing.T) {
+	// The lobby's routes have their own document (api/lobby/openapi.json); every other route is a
+	// player route and is published here or excluded with a reason.
+	lobbyConfig := routes.NewAPIConfig(apiTitle, apiVersion)
+	lobbyConfig.OpenAPIPath = ""
+	lobbyConfig.DocsPath = ""
+	lobbyConfig.SchemasPath = ""
+	lobbyAPI := humachi.New(chi.NewRouter(), lobbyConfig)
+	httpapi.Register(lobbyAPI, nil, nil, nil, nil, nil)
+	lobbyOperations := map[string]bool{}
+	for _, item := range lobbyAPI.OpenAPI().Paths {
+		for _, operation := range []*huma.Operation{item.Get, item.Post, item.Put, item.Patch, item.Delete} {
+			if operation != nil {
+				lobbyOperations[operation.OperationID] = true
+			}
+		}
+	}
+
 	config := routes.NewAPIConfig(apiTitle, apiVersion)
 	config.OpenAPIPath = ""
 	config.DocsPath = ""
@@ -31,19 +51,20 @@ func TestEveryRegisteredOperationIsPublishedOrExcluded(t *testing.T) {
 	httpapi.Register(api, nil, nil, nil, nil, nil)
 	routes.SetupGameRoutes(api, &handlers.LobbyGame{})
 	routes.SetupBotPackageRoutes(api, &handlers.BotPackages{})
+	checked := 0
 	for path, item := range api.OpenAPI().Paths {
-		// The lobby's routes have their own document; the game's player routes are all here.
-		if !strings.HasPrefix(path, "/game/") {
-			continue
-		}
 		for _, operation := range []*huma.Operation{item.Get, item.Post, item.Put, item.Patch, item.Delete} {
-			if operation == nil {
+			if operation == nil || lobbyOperations[operation.OperationID] || slices.Contains(unpublishedPaths, path) {
 				continue
 			}
+			checked++
 			if !slices.Contains(PlayerOperations, operation.OperationID) && !slices.Contains(unpublishedOperations, operation.OperationID) {
 				t.Errorf("%s (%s) is registered but neither in PlayerOperations nor in unpublishedOperations", operation.OperationID, path)
 			}
 		}
+	}
+	if checked < len(PlayerOperations) {
+		t.Errorf("checked %d operations, fewer than the %d published ones: the routes were not all registered", checked, len(PlayerOperations))
 	}
 }
 
