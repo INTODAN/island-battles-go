@@ -48,6 +48,10 @@ var (
 	// The Client handles it itself: it reads the final state and reports
 	// the end.
 	ErrGameEnded = errors.New("game ended")
+	// ErrTeamOut: the server refused a batch because the player's team
+	// resigned or left a real-time game, so it has no more turns to play.
+	// The Client handles it itself: it logs that the team is out and stops.
+	ErrTeamOut = errors.New("team out of the game")
 	// ErrGameLogLimit: the server refused a batch's game log lines, which
 	// would pass its limit. The Client handles it itself: it sends the
 	// batch again without the lines.
@@ -62,6 +66,7 @@ var (
 // log limit and the bot memory limit.
 var problemKinds = map[string]error{
 	"urn:island-battles:problem:game-ended":            ErrGameEnded,
+	"urn:island-battles:problem:team-out":              ErrTeamOut,
 	"urn:island-battles:problem:castle-not-found":      ErrCastleNotFound,
 	"urn:island-battles:problem:castle-not-owned":      ErrCastleNotOwned,
 	"urn:island-battles:problem:upgrade-max-level":     ErrUpgradeMaxLevel,

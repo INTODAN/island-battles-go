@@ -841,3 +841,33 @@ func TestStatesCarryTheDepartures(t *testing.T) {
 		t.Fatalf("a state without departures: %v", err)
 	}
 }
+
+// A team that resigned or left a real-time game has no more turns: when the
+// server refuses the bot's batch with team-out, the client logs one line and
+// stops without an error, and sends no failure batch.
+func TestClientStopsCleanlyWhenItsTeamIsOut(t *testing.T) {
+	server, realtime := newFakeServer(t), &fakeRealtime{}
+	server.answer = func(writer http.ResponseWriter, _ *http.Request, _ []byte) bool {
+		writeJSON(writer, 409, map[string]any{"type": "urn:island-battles:problem:team-out", "title": "Conflict", "status": 409, "detail": "your team resigned, so it is out of the game"})
+		return true
+	}
+	var console strings.Builder
+	client := testClient(t, server, realtime, func(context.Context, Turn) (Result, error) {
+		return Result{Commands: []Command{}}, nil
+	}, WithLogOutput(&syncWriter{writer: &console}))
+	if _, err := client.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitFor(t, client); err != nil {
+		t.Fatalf("got %v", err)
+	}
+	if batches := server.batchesSent(); len(batches) != 1 {
+		t.Fatalf("got batches %v", batches)
+	}
+	if !strings.Contains(console.String(), "the team is out of the game, so the bot stops: HTTP 409: your team resigned, so it is out of the game") {
+		t.Fatalf("console = %q", console.String())
+	}
+	if !errors.Is(responseError(409, "urn:island-battles:problem:team-out", "out"), ErrTeamOut) {
+		t.Fatal("team-out isn't ErrTeamOut")
+	}
+}
