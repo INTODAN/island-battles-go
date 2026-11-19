@@ -29,23 +29,47 @@ function iconButton(label: string, title: string, icon: string) {
   return button;
 }
 
+/**
+ * What a screen reader is told when the bar's view changes: the drag starting (with the amount it
+ * sends) or ending, never the steps of `w`, `s` and the slider in between. Null for no news.
+ */
+export function announcement(
+  before: SliderView | null,
+  after: SliderView | null,
+): string | null {
+  const dragging = (view: SliderView | null) => view?.mode === "soldiers";
+  if (dragging(after) && !dragging(before)) {
+    return `Sending ${after?.text ?? ""}`;
+  }
+  if (dragging(before) && !dragging(after)) return "Drag ended";
+  return null;
+}
+
 export class AmountBar implements AmountControl {
   readonly element = document.createElement("div");
   private readonly slider = document.createElement("input");
   private readonly text = document.createElement("output");
+  /** Tells a drag's start and end to screen readers (`announcement`). */
+  private readonly status = document.createElement("span");
   private readonly listeners = new Set<(amount: DragAmount) => void>();
   private view: SliderView | null = null;
 
   constructor() {
-    const { element, slider, text } = this;
+    const { element, slider, text, status } = this;
     element.className = "gv-amount";
     element.setAttribute("role", "group");
     element.setAttribute("aria-label", "Soldiers to send");
     element.hidden = true;
     slider.type = "range";
     slider.className = "gv-amount-slider";
-    slider.setAttribute("aria-label", "Soldiers to send");
+    // A name of its own, not the group's.
+    slider.setAttribute("aria-label", "Amount");
     text.className = "gv-amount-text";
+    // The slider's value text is read on a step; the output beside it must not announce every
+    // step a second time.
+    text.setAttribute("aria-live", "off");
+    status.className = "gv-visually-hidden";
+    status.setAttribute("role", "status");
     const half = iconButton("Half", "Half (A)", HALF_ICON);
     const all = iconButton("All", "All (D)", ALL_ICON);
     half.addEventListener("click", () => this.emit(HALF));
@@ -53,10 +77,12 @@ export class AmountBar implements AmountControl {
     slider.addEventListener("input", () => {
       if (this.view) this.emit(sliderAmount(this.view, Number(slider.value)));
     });
-    element.append(half, slider, all, text);
+    element.append(half, slider, all, text, status);
   }
 
   render(view: SliderView | null): void {
+    const told = announcement(this.view, view);
+    if (told !== null) this.status.textContent = told;
     this.view = view;
     this.element.hidden = view === null;
     if (!view) return;

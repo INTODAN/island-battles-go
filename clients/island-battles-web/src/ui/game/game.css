@@ -330,6 +330,15 @@
   text-align: right;
 }
 
+.gv-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .gv-amount-button:focus-visible,
 .gv-amount-slider:focus-visible {
   outline: 2px solid #3464e0;

@@ -27,7 +27,8 @@ export type DragSegment = Pick<
  * The line from `origin` to `end` (the pointer, in map units), or to `target`'s shore when one is
  * under the pointer: it starts at the origin's shore and ends with an arrowhead, with gaps where
  * it passes other castles. Null while it would be too short to show a shaft and a head (the
- * pointer is still over the origin's island).
+ * pointer is still over the origin's island). Between castles too close for a head it is a stub
+ * of shaft alone; with less than the least shaft between their shores there is none.
  */
 export function dragLineSegment(
   origin: LineCastle,
@@ -42,7 +43,18 @@ export function dragLineSegment(
   const tip = target ? shorePoint(target, origin, bridged) : end;
   const length = Math.hypot(tip.x - start.x, tip.y - start.y);
   const head = toMapDistance(style.arrowLength);
-  if (length < head + toMapDistance(style.minShaft)) return null;
+  const minShaft = toMapDistance(style.minShaft);
+  if (length < head + minShaft) {
+    if (!target) return null;
+    // Snapped to a castle so close that there is no room for a head: a headless stub, so the
+    // line does not vanish as it snaps and the pending line stays to be seen.
+    // The shores may have passed each other (the tip behind the start): no line then.
+    const forward =
+      (tip.x - start.x) * (target.x - origin.x) +
+      (tip.y - start.y) * (target.y - origin.y);
+    if (length < minShaft || forward <= 0) return null;
+    return { start, tip, base: tip, arrowhead: false, gaps: [] };
+  }
   // The pointer went back over the origin's island: no line.
   if (
     !target &&

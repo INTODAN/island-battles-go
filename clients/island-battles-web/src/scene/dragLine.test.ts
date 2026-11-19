@@ -52,6 +52,26 @@ describe("the drag's line", () => {
     ).toBeNull();
   });
 
+  test("between castles too close for an arrowhead it is a headless stub", () => {
+    const neighbour = { id: 5, x: 1.9, y: 0 };
+    const segment = dragLineSegment(origin, neighbour, neighbour, [
+      origin,
+      neighbour,
+    ]);
+    expect(segment).not.toBeNull();
+    expect(segment?.arrowhead).toBe(false);
+    expect(segment?.base).toEqual(segment?.tip ?? origin);
+    expect(segment?.gaps).toEqual([]);
+    expect(segment?.tip.x).toBeGreaterThan(segment?.start.x ?? 0);
+  });
+
+  test("castles whose shores nearly meet have no line", () => {
+    const touching = { id: 6, x: 1.6, y: 0 };
+    expect(
+      dragLineSegment(origin, touching, touching, [origin, touching]),
+    ).toBeNull();
+  });
+
   test("the chip's label is never taken for a gone castle's", () => {
     expect(staleLabel("drag:amount", new Set(), new Set())).toBe(false);
   });
