@@ -26,7 +26,7 @@ export function describeGameBot(bot: BotChoice): string {
     case "uploaded":
       return "Played by the server: your uploaded bot";
     case "manual":
-      return "Plays by hand";
+      return "You play by hand";
   }
 }
 

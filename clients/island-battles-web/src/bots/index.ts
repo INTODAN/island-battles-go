@@ -94,6 +94,8 @@ export function startBotRelay(options: {
   realtime: Realtime;
   lobbyId: string;
   fetch?: typeof fetch;
+  /** See `RelayDeps.standDown`. */
+  standDown?: (state: GenerationState) => boolean;
 }): BotRelay {
   const calls = relayCalls(options);
   const game = options.realtime.game;
@@ -102,6 +104,9 @@ export function startBotRelay(options: {
     ...calls(),
     deliver: (delivery) =>
       deliverTurn(delivery, { port: game.get()?.bot.port ?? defaultBotPort }),
+    ...(options.standDown === undefined
+      ? {}
+      : { standDown: options.standDown }),
   });
 }
 
@@ -115,6 +120,8 @@ export function startBotRelays(options: {
   realtime: Realtime;
   lobbyId: string;
   fetch?: typeof fetch;
+  /** Given to the player's own relay: see `RelayDeps.standDown`. */
+  standDown?: (state: GenerationState) => boolean;
 }): BotRelays {
   const own = startBotRelay(options);
   const calls = relayCalls(options);

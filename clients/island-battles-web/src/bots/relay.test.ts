@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ApiError } from "../api/errors";
+import { playsByHand } from "../play/rules";
 import { createStore } from "../realtime/store";
 import { BotError, type GenerationState, type TurnDelivery } from "./localhost";
 import {
@@ -399,6 +400,68 @@ describe("the bot relay", () => {
       await flush();
       await time.advance(2000);
       expect(log.deadlines).toBe(1);
+    });
+
+    describe("a player who plays by hand", () => {
+      const manual = (generationId: number, team = 2) =>
+        state(generationId, {
+          bot: { kind: "manual" },
+          team_color: team,
+          turn_pace_milliseconds: 1000,
+          turn_deadline_at: new Date(1_000_000 + 1000).toISOString(),
+          generation: {
+            id: generationId,
+            castles: [
+              {
+                id: 1,
+                team_color: 2,
+                soldiers: 5,
+                burst_debt: 0,
+                upgrades: {},
+                x: 0,
+                y: 0,
+              },
+            ],
+            soldier_groups: [],
+            clashes: [],
+          },
+        });
+
+      test("leaves the deadline to hand play while it stands down", async () => {
+        const { game, time, log } = setup({ standDown: playsByHand });
+        game.set(manual(1));
+        await flush();
+        await time.advance(60_000);
+        expect(log.deadlines).toBe(0);
+      });
+
+      test("keeps the game moving again once the team is out", async () => {
+        const { game, time, log } = setup({ standDown: playsByHand });
+        game.set(manual(1));
+        await flush();
+        game.set(manual(2, 5));
+        await flush();
+        await time.advance(2000);
+        expect(log.deadlines).toBe(1);
+      });
+
+      test("stands down for a turn whose state changes while it waits", async () => {
+        let standing = false;
+        const { game, time, log } = setup({ standDown: () => standing });
+        game.set(manual(1, 5));
+        await flush();
+        standing = true;
+        await time.advance(60_000);
+        expect(log.deadlines).toBe(0);
+      });
+
+      test("a relay without hand play keeps today's watch", async () => {
+        const { game, time, log } = setup();
+        game.set(manual(1));
+        await flush();
+        await time.advance(2000);
+        expect(log.deadlines).toBe(1);
+      });
     });
   });
 

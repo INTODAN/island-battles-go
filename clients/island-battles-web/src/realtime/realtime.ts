@@ -82,6 +82,12 @@ export interface Realtime {
   followGame(lobbyId: string, round: number): void;
   /** Reads the followed game again now, for a caller that learned the game exists. */
   refreshGame(): void;
+  /**
+   * Installs a `GenerationState` that an HTTP call answered (a command batch, the deadline call,
+   * resign), as a state read does: only for the followed game's round and player, and only when it
+   * is newer than the held state. Ignored while no game is followed.
+   */
+  adoptGame(state: GenerationState): void;
   leaveGame(): void;
   /**
    * Watches a lobby's game on its watch channel (from `POST /lobby/v1/watches`), reading
@@ -671,6 +677,10 @@ export function createRealtime(options: RealtimeOptions = {}): Realtime {
 
     refreshGame() {
       gameFollow?.reconciler.request();
+    },
+
+    adoptGame(state) {
+      if (gameFollow) installGame(gameFollow, state);
     },
 
     leaveGame,

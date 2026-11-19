@@ -739,6 +739,19 @@ describe("game subscription", () => {
     expect(h.realtime.game.get()?.submitted).toBe(true);
   });
 
+  test("adoptGame installs a state an HTTP call answered, by the same rules", async () => {
+    const h = await followedGame();
+    h.realtime.adoptGame(state(7));
+    expect(h.realtime.game.get()?.generation_id).toBe(7);
+    h.realtime.adoptGame(state(6));
+    h.realtime.adoptGame(state(8, { lobby_round: 2 }));
+    h.realtime.adoptGame(state(8, { player_id: "someone-else" }));
+    expect(h.realtime.game.get()?.generation_id).toBe(7);
+    h.realtime.leaveGame();
+    h.realtime.adoptGame(state(9));
+    expect(h.realtime.game.get()).toBeNull();
+  });
+
   test("accepts events only for the expected game, lobby, player and channel", async () => {
     const h = await followedGame();
     const sub = h.client().sub(CHANNEL);
