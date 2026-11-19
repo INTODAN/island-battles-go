@@ -36,6 +36,6 @@ describe("the bot that plays your seat", () => {
     expect(describeGameBot({ kind: "uploaded" })).toBe(
       "Played by the server: your uploaded bot",
     );
-    expect(describeGameBot({ kind: "manual" })).toBe("Plays by hand");
+    expect(describeGameBot({ kind: "manual" })).toBe("You play by hand");
   });
 });
