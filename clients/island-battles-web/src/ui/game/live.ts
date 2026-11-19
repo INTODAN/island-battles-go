@@ -66,10 +66,13 @@ export function mountLive(
   const { watching } = source;
   const failureText = watching ? watchFailureText : loadFailureText;
   const logs = new LogBook();
+  // Only a roster player with a hand play can resign; the screen shows the button by its status.
+  const resign = options.handPlay ? source.resign?.bind(source) : undefined;
   const screen = new GameScreen(container, {
     live: true,
     watching,
     handPlay: options.handPlay,
+    ...(resign ? { onResign: resign } : {}),
     logs,
     onBack: options.onBack,
     ...(source.backLabel === undefined ? {} : { backLabel: source.backLabel }),
@@ -162,6 +165,7 @@ export function mountLive(
   }
 
   function installTurn(turn: LiveTurn): void {
+    screen.setDepartures(turn.departures ?? []);
     if (gameId === undefined) {
       pending.push(turn);
       return;
@@ -199,6 +203,7 @@ export function mountLive(
         watching ? `Watching game ${demo.game_id}` : `Game ${demo.game_id}`,
       );
       controller = screen.start(demo.teams, frames, outcome);
+      screen.setDepartures(held?.departures ?? []);
       showYourBot(held);
       screen.hideOverlay();
     } catch (error) {

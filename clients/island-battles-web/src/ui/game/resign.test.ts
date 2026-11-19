@@ -75,9 +75,9 @@ describe("resignControl", () => {
 
 describe("confirmationKey", () => {
   test("Esc keeps playing, only while the confirmation is open", () => {
-    const escape = { key: "Escape", defaultPrevented: false };
-    expect(confirmationKey(true, escape)).toBe("keep-playing");
-    expect(confirmationKey(false, escape)).toBeNull();
+    const esc = { key: "Escape", defaultPrevented: false };
+    expect(confirmationKey(true, esc)).toBe("keep-playing");
+    expect(confirmationKey(false, esc)).toBeNull();
   });
 
   test("another feature's Esc is left alone, and other keys do nothing", () => {
