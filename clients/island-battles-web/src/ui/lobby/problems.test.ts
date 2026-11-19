@@ -85,7 +85,7 @@ describe("problem sentences", () => {
       detail: "Choose your bot before getting ready.",
     });
     expect(describeProblem(error, "ready").message).toBe(
-      "Choose your bot first: your localhost bot or a default level.",
+      "Choose your bot first: play by hand, your localhost bot or a default level.",
     );
     // At the start the server names who is missing a bot.
     const atStart = lobby("game_requirement", {

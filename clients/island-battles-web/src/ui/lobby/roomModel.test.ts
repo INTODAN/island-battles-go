@@ -2,11 +2,13 @@ import { describe, expect, test } from "bun:test";
 import type { Snapshot } from "../../realtime";
 
 import {
+  anyPlaysByHand,
   buildRoom,
   canChangeSettings,
   choiceFromValue,
   choiceValue,
   describeBot,
+  describeRealTime,
   describeSettings,
   memberSettingsBot,
   startBlocker,
@@ -248,6 +250,59 @@ describe("bot choices", () => {
     expect(you?.bot).toEqual({ kind: "manual" });
     expect(describeBot(you?.bot)).toBe("Plays by hand");
     expect(choiceValue(you?.bot)).toBe("manual");
+  });
+});
+
+describe("playing by hand in the room", () => {
+  const hand = { member_settings: { bot: { kind: "manual" } } };
+  const roomOf = (members: unknown[]) =>
+    buildRoom({ ...snapshot, members } as unknown as Snapshot, "p1");
+
+  test("the picker's value maps to the manual choice and back", () => {
+    expect(choiceFromValue("manual")).toEqual({ kind: "manual" });
+    expect(choiceValue(choiceFromValue("manual") ?? undefined)).toBe("manual");
+  });
+
+  test("a member who plays by hand shows it, and the summary is real-time", () => {
+    const room = roomOf([
+      member("p1", "t-blue", hand),
+      member("p2", "t-red", levelTwo),
+    ]);
+    expect(describeBot(room.you?.bot)).toBe("Plays by hand");
+    expect(anyPlaysByHand(room)).toBe(true);
+    expect(
+      describeSettings(
+        { turn_pace_milliseconds: 500 },
+        [],
+        anyPlaysByHand(room),
+      ),
+    ).toBe("No map chosen · Real time: a turn every 0.5 s");
+  });
+
+  test("any member counts, even one who has no team yet", () => {
+    const room = roomOf([
+      member("p1", "t-blue", levelTwo),
+      member("p2", null, hand),
+    ]);
+    expect(anyPlaysByHand(room)).toBe(true);
+  });
+
+  test("without a hand player the summary keeps the turn limit", () => {
+    const room = roomOf([
+      member("p1", "t-blue", levelTwo),
+      member("p2", "t-red", localhost),
+    ]);
+    expect(anyPlaysByHand(room)).toBe(false);
+    expect(describeSettings({}, [], anyPlaysByHand(room))).toBe(
+      "No map chosen · Turn limit: 30 s",
+    );
+  });
+
+  test("the pace defaults to 1 s and shows seconds", () => {
+    expect(describeRealTime({})).toBe("Real time: a turn every 1 s");
+    expect(describeRealTime({ turn_pace_milliseconds: 2000 })).toBe(
+      "Real time: a turn every 2 s",
+    );
   });
 });
 
