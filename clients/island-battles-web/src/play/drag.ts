@@ -466,3 +466,12 @@ export function step(
       return done(state);
   }
 }
+
+/**
+ * The amount bar as the board's controls see it (the DOM bar is `src/ui/game/amountBar.ts`): they
+ * draw it with `render` (null hides it) and hear its changes, already turned into amounts.
+ */
+export interface AmountControl {
+  render(view: SliderView | null): void;
+  onChange(listener: (amount: DragAmount) => void): () => void;
+}

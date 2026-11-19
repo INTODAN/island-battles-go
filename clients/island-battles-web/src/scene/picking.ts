@@ -3,11 +3,13 @@ import { PointerEventTypes } from "@babylonjs/core/Events/pointerEvents";
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { Scene } from "@babylonjs/core/scene";
 import type { HandPlay } from "../play";
+import type { AmountControl } from "../play/drag";
 import { createFlatRing, type PickTarget } from "./art";
 import { type Battlefield, battlefieldOf } from "./battlefield";
 import { CASTLE_RADIUS } from "./board";
 import { fitCamera, focusCamera } from "./camera";
 import { toWorld, toWorldDistance } from "./coordinates";
+import { installDragControls } from "./dragControls";
 import { castleTooltip, groupTooltip } from "./format";
 import { CLASH_COLOR } from "./palette";
 
@@ -63,15 +65,26 @@ export interface BoardControlsOptions {
    * the board's controls are a watcher's.
    */
   handPlay?: HandPlay | null;
+  /**
+   * Whether orders can be given now: the hand play's status is `playing` and the view shows the
+   * newest turn. Read each frame; false when absent.
+   */
+  canOrder?: () => boolean;
+  /** The amount bar of drag to send (#343). */
+  amountControl?: AmountControl;
+  /** Shows a refused order's sentence (`HandSurface.showOrderFeedback`). */
+  showOrderFeedback?: (sentence: string, orderId?: number) => void;
 }
 
 /**
- * Hover highlight and tooltip (a tap on a touch screen), double-click to focus a castle, and F to refit the board. Returns
- * a function that removes the listeners, the tooltip and the highlight: call it before the scene is disposed.
+ * Hover highlight and tooltip (a tap on a touch screen), double-click to focus a castle, F to refit
+ * the board, and for a hand player drag to send (`dragControls.ts`). Returns a function that
+ * removes the listeners, the tooltip, the highlight and the drag's meshes: call it before the
+ * scene is disposed.
  */
 export function installBoardControls(
   scene: Scene,
-  _options: BoardControlsOptions = {},
+  options: BoardControlsOptions = {},
 ): () => void {
   const canvas = scene.getEngine().getRenderingCanvas();
   if (!canvas) throw new Error("the scene's engine has no canvas");
@@ -81,6 +94,13 @@ export function installBoardControls(
   canvas.parentElement?.append(tooltip);
   let highlight: Mesh | null = null;
   let hovered: PickTarget | null = null;
+  /**
+   * The gesture going on is a drag to send, or one that a drag's cancel ended (Esc, a right
+   * button): it is no click or tap. Set by the drag; cleared by the press that starts the next
+   * gesture. The tap and double-tap branches below start with a guard on it, and every opener
+   * of those gestures (the castle menu, #344) goes below that guard.
+   */
+  let dragGesture = false;
 
   const hide = () => {
     tooltip.hidden = true;
@@ -138,6 +158,7 @@ export function installBoardControls(
     const field = battlefieldOf(scene);
     if (!field) return;
     if (info.type === PointerEventTypes.POINTERTAP) {
+      if (dragGesture) return;
       const tapped = touchTapTarget(
         (info.event as PointerEvent).pointerType,
         pickTargetAt(scene),
@@ -155,6 +176,7 @@ export function installBoardControls(
       hovered = target;
       show(field, target);
     } else if (info.type === PointerEventTypes.POINTERDOUBLETAP) {
+      if (dragGesture) return;
       const target = pickTargetAt(scene);
       const castle =
         target?.kind === "castle"
@@ -183,12 +205,26 @@ export function installBoardControls(
     fitBoard(scene);
   };
   window.addEventListener("keydown", onKey);
+  const handPlay = options.handPlay;
+  const removeDrag = handPlay
+    ? installDragControls(scene, {
+        handPlay,
+        canOrder: options.canOrder ?? (() => false),
+        amountControl: options.amountControl,
+        showOrderFeedback: options.showOrderFeedback,
+        hideHover: hide,
+        setTaken: (taken) => {
+          dragGesture = taken;
+        },
+      })
+    : () => {};
   // The hovered entity may have moved or gone when a new generation is drawn.
   const frameObserver = scene.onBeforeRenderObservable.add(() => {
     const field = battlefieldOf(scene);
     if (hovered && field && !describeTarget(field, hovered)) hide();
   });
   return () => {
+    removeDrag();
     scene.onPointerObservable.remove(pointerObserver);
     scene.onBeforeRenderObservable.remove(frameObserver);
     canvas.removeEventListener("pointerleave", onLeave);

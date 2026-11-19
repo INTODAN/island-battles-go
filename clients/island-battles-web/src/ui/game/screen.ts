@@ -22,8 +22,10 @@ import { fitBoard, installBoardControls } from "../../scene/picking";
 import { showBoardLoading } from "../boardLoading";
 import { rulesButton } from "../rules/rulesDialog";
 import { type AgentGame, agentPrompt, copyText } from "./agentPrompt";
+import { AmountBar } from "./amountBar";
 import { clashSummary } from "./clashes";
 import { GameController, showsNewestTurn, type ViewState } from "./controller";
+import { installGameViewDebug } from "./debug";
 import "./game.css";
 import {
   type GameOutcome,
@@ -150,6 +152,8 @@ export class GameScreen {
   private readonly orderNotice = element("p", "gv-notice gv-order-notice");
   private orderNoticeTimer: ReturnType<typeof setTimeout> | undefined;
   /** A hand player's status row above the timeline, such as "Return to live to give orders". */
+  /** The amount bar of drag to send (#343), for a view with a hand play. */
+  private readonly amountBar: AmountBar | null;
   private readonly handStatus = element("div", "gv-hand-status");
   private readonly handStatusText = element(
     "span",
@@ -342,7 +346,13 @@ export class GameScreen {
       if (this.scene) fitBoard(this.scene);
     });
     topStack.append(this.fitButton);
-    this.bottomStack.append(this.logsBox, this.handStatus, timeline);
+    this.amountBar = this.options.handPlay ? new AmountBar() : null;
+    this.bottomStack.append(
+      this.logsBox,
+      ...(this.amountBar ? [this.amountBar.element] : []),
+      this.handStatus,
+      timeline,
+    );
     root.append(this.canvas, topStack, this.bottomStack, this.overlay);
     this.container.replaceChildren(root);
     this.setConnection(this.options.live ? "connecting" : "saved");
@@ -375,6 +385,27 @@ export class GameScreen {
   setNotice(text: string | null): void {
     this.notice.textContent = text ?? "";
     this.notice.hidden = !text;
+  }
+
+  /**
+   * Publishes the bottom stack's height as `--gv-bottom-height` on the view's parent, where the
+   * lobby's Watchers box, a sibling of the view (`app.ts`), reads it to sit above the stack.
+   */
+  private publishBottomHeight(): () => void {
+    const parent = this.container.parentElement;
+    if (!parent) return () => {};
+    const observer = new ResizeObserver(() => {
+      parent.style.setProperty(
+        "--gv-bottom-height",
+        // The stack's height and its 8 px from the bottom.
+        `${Math.ceil(this.bottomStack.offsetHeight) + 8}px`,
+      );
+    });
+    observer.observe(this.bottomStack);
+    return () => {
+      observer.disconnect();
+      parent.style.removeProperty("--gv-bottom-height");
+    };
   }
 
   private showOrderFeedback(sentence: string): void {
@@ -476,7 +507,16 @@ export class GameScreen {
     const scene = new Scene(engine);
     this.scene = scene;
     const handPlay = this.options.handPlay ?? null;
-    const removeControls = installBoardControls(scene, { handPlay });
+    const removeControls = installBoardControls(scene, {
+      handPlay,
+      // Read lazily: the controller and the hand surface are made below.
+      canOrder: () =>
+        handPlay?.state.get().status === "playing" &&
+        this.handSurface?.showsNewestTurn() === true,
+      ...(this.amountBar ? { amountControl: this.amountBar } : {}),
+      showOrderFeedback: (sentence, orderId) =>
+        this.handSurface?.showOrderFeedback(sentence, orderId),
+    });
     // The board's art loads behind a loading screen; the board draws placeholders meanwhile.
     const loading = showBoardLoading(this.root);
     loadBoardAssets(scene, (progress) => loading.update(progress)).then(
@@ -539,6 +579,8 @@ export class GameScreen {
       }
     });
     resize.observe(this.container);
+    const stopBottomHeight = this.publishBottomHeight();
+    const removeDebug = installGameViewDebug(scene);
 
     this.buildTeams(sorted);
     const unsubscribe = controller.subscribe((state) => this.render(state));
@@ -575,6 +617,8 @@ export class GameScreen {
         this.orderNotice.hidden = true;
         removeControls();
         resize.disconnect();
+        stopBottomHeight();
+        removeDebug();
         engine.stopRenderLoop();
         scene.dispose();
         engine.dispose();
