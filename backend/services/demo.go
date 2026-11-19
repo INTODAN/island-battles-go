@@ -47,7 +47,7 @@ func (service *GenerationService) Demo(ctx context.Context, principal domain.Pri
 // the game has ended.
 func (service *GenerationService) demo(ctx context.Context, game *models.Game, caller models.FrozenGamePlayer) (models.Demo, error) {
 	database := service.Database.WithContext(ctx)
-	game, err := service.applyOverdueDeadline(ctx, game)
+	game, err := service.applyOverdueDeadline(ctx, game, caller.PlayerID)
 	if err != nil {
 		return models.Demo{}, err
 	}

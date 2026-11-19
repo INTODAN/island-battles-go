@@ -31,17 +31,17 @@ describe("the controls table", () => {
     const touch = controlRows(true);
     const how = (rows: typeof mouse, action: string) =>
       rows.find((row) => row.action === action)?.how;
-    expect(how(mouse, "All")).toBe("D while dragging");
-    expect(how(mouse, "Half")).toBe("A while dragging");
-    expect(how(mouse, "More, fewer")).toContain("W and S");
-    expect(how(mouse, "An exact number")).toContain("Type it");
+    expect(how(mouse, "All")).toBe("[d] while dragging");
+    expect(how(mouse, "Half")).toBe("[a] while dragging");
+    expect(how(mouse, "More, fewer")).toContain("[w] and [s]");
+    expect(how(mouse, "An exact number")).toContain("[Backspace]");
     expect(how(mouse, "Castle menu: upgrades and burst")).toBe(
       "Right-click or double-click your castle",
     );
-    expect(how(mouse, "Cancel")).toContain("Esc");
-    expect(how(mouse, "Fit the board")).toContain("F,");
-    expect(how(touch, "All")).toBe("Tap the all icon, right of the slider");
-    expect(how(touch, "Half")).toBe("Tap the half icon, left of the slider");
+    expect(how(mouse, "Cancel")).toContain("[Esc]");
+    expect(how(mouse, "Fit the board")).toContain("[F],");
+    expect(how(touch, "All")).toBe("Tap All, right of the amount slider");
+    expect(how(touch, "Half")).toBe("Tap Half, left of the amount slider");
     expect(how(touch, "More, fewer")).toBeUndefined();
     expect(how(touch, "An exact number")).toBeUndefined();
     expect(how(touch, "Castle menu: upgrades and burst")).toBe(
@@ -104,27 +104,27 @@ describe("the first hand game", () => {
 });
 
 describe("controlParts", () => {
-  test("marks the keys of a row", () => {
+  test("draws the bracketed words as keys", () => {
     const keys = (how: string) =>
       controlParts(how)
         .filter((part) => part.key)
         .map((part) => part.text);
-    expect(keys("D while dragging")).toEqual(["D"]);
+    expect(keys("[d] while dragging")).toEqual(["d"]);
+    expect(keys("[w] and [s] while dragging")).toEqual(["w", "s"]);
     expect(
-      keys("W and S while dragging, one soldier at a time; hold to repeat"),
-    ).toEqual(["W", "S"]);
-    expect(keys("Type it while dragging; Backspace edits it")).toEqual([
-      "Backspace",
+      keys("[Esc], the right button, or release away from a castle"),
+    ).toEqual(["Esc"]);
+    expect(controlParts("[a] while dragging")).toEqual([
+      { text: "a", key: true },
+      { text: " while dragging", key: false },
     ]);
-    expect(keys("Esc, a right-click, or release away from a castle")).toEqual([
-      "Esc",
-    ]);
-    expect(keys("F, or the fit button at the top right")).toEqual(["F"]);
+    // A touch screen has no keys; no row is left with a bracket.
     for (const row of controlRows(true)) expect(keys(row.how)).toEqual([]);
-    expect(
-      controlParts("A while dragging")
+    for (const row of [...controlRows(true), ...controlRows(false)]) {
+      const text = controlParts(row.how)
         .map((part) => part.text)
-        .join(""),
-    ).toBe("A while dragging");
+        .join("");
+      expect(text).not.toMatch(/[[\]]/);
+    }
   });
 });

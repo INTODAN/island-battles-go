@@ -67,6 +67,7 @@ export function sampleDemo(): Demo {
       reason: "last_team_standing",
       winner_team_color: 1,
       summary: "Blue wins as the last team standing",
+      departures: [],
     },
     frames: [generation(41), second],
     logs: [

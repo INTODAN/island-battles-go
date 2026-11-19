@@ -128,7 +128,7 @@ type RosterPlayer struct {
 
 // Outcome is how a finished game ended.
 type Outcome struct {
-	Reason          string  `json:"reason" jsonschema:"last_team_standing, all_eliminated (a draw), generation_cap or turn_timeout (a turn passed its deadline)."`
+	Reason          string  `json:"reason" jsonschema:"last_team_standing, all_eliminated (a draw), generation_cap, turn_timeout (a turn passed its deadline) or abandoned (nobody played a real-time game for its turn limit)."`
 	WinnerTeamColor *uint   `json:"winner_team_color" jsonschema:"The winning team, or null for a draw."`
 	WinnerTeamName  *string `json:"winner_team_name"`
 }

@@ -202,7 +202,7 @@ export const rulesSections: readonly RulesSection[] = [
     paragraphs: [
       "Everyone plays each turn at the same time. Orders that a castle can't afford, counting what your team has already ordered this turn, are refused, and nothing of that batch is kept.",
       `In a game of bots, a turn waits until every player has finished it. Finish yours before its time runs out: the lobby's host picks the turn limit, ${defaultTurnSeconds} seconds unless they choose another or no limit.`,
-      `When someone plays by hand, the game is real-time: each turn ends after the turn pace, ${defaultTurnPaceMilliseconds / 1000} second unless the host chooses another, with the orders given by then. A player who gave none passes, and nobody loses for a missed turn. A turn ends sooner when every player has finished it.`,
+      `When someone plays by hand, the game is real-time: each turn ends after the turn pace, ${defaultTurnPaceMilliseconds / 1000} second unless the host chooses another, with the orders given by then. A player who gave none passes, and nobody loses for a missed turn. A turn ends sooner when every player has finished it. Playing by hand, you can resign; and if the game doesn't hear from you for the turn limit, you have left it (see How the game ends).`,
       "When the turn ends, it runs in this order:",
     ],
     items: turnSteps.map((step) => step.text),
@@ -241,6 +241,9 @@ export const rulesSections: readonly RulesSection[] = [
       "When the last teams are knocked out in the same turn, the game is a draw.",
       `The lobby's host picks the game's length N: ${defaultGameLength} generations unless they choose another, from ${minGameLength} to ${maxGameLength}. The game ends when generation N is reached, so turn N - 1 is the last one played. Then the team with the most castles wins, and teams tied for the most castles draw.`,
       "In a game of bots, when a turn's time runs out before every player has finished it, every team with a player who hadn't finished loses. Of the other teams still in the game, the one with the most castles wins, and a tie is a draw.",
+      "In a real-time game, a player can resign. Their team is out when the turn ends: its castles turn neutral and keep their soldiers, its soldier groups vanish, and its orders of that turn don't happen. With two teams, the other team wins; with more, the game goes on without it.",
+      "In a real-time game, a player the game hasn't heard from for the turn limit (or for one turn and 5 more seconds, if that is longer) has left, and their team is out at the end of that turn, as if they had resigned. A player whose game is open stays in, even without giving orders. With no turn limit, nobody leaves this way.",
+      "A real-time game that nobody plays for the turn limit is abandoned: it ends where it stands, and the team with the most castles wins, a tie being a draw. A team that resigned can't win it.",
     ],
   },
 ];

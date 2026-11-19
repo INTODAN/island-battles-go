@@ -45,7 +45,7 @@ export function teamName(
   );
 }
 
-export function castleTitle(castle: Castle): string {
+export function castleTitle(castle: Pick<Castle, "id">): string {
   return `Castle ${castle.id + 1}`;
 }
 

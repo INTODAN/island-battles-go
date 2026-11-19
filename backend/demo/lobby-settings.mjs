@@ -244,7 +244,7 @@ export class SettingsForm {
       ...gameLengths.map((turns) => new Option(`${turns} turns`, String(turns), false, turns === defaultGameLength)));
     container.append(node("label", {}, "Map", this.select), this.fileInput, this.builderButton, this.status,
       node("label", {}, "Turn timeout", this.timeout),
-      node("p", { className: "hint" }, "A team whose player doesn’t finish a turn in time loses the game."),
+      node("p", { className: "hint" }, "In a game of bots, a team whose bot doesn’t answer in this time loses. In a real-time game, a player who doesn’t respond for this long has left."),
       node("label", {}, "Turn pace", this.pace),
       node("p", { className: "hint" }, "Used when someone plays by hand: the game is then real-time, with a turn this often."),
       node("label", {}, "Game length", this.length),

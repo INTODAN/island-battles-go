@@ -15,8 +15,9 @@ type IncreaseSoldierAmountParams struct{}
 // any debt first, and what is left over grows the castle. A neutral castle
 // produces nothing and keeps its soldiers until a team captures it. The step
 // runs before the turn's arrivals, so a castle captured this turn was still
-// neutral here: it produces from the next turn on. No castle becomes neutral
-// again, so nothing else stops a castle from growing.
+// neutral here: it produces from the next turn on. A castle of a team that
+// left a real-time game turned neutral earlier in the turn (RemoveTeamParams),
+// so it produces nothing from that turn on.
 func (IncreaseSoldierAmountParams) apply(state *GameState, events []Event) ([]Event, error) {
 	for _, castle := range state.SortedCastles() {
 		if castle.OrderedBurst > 0 {

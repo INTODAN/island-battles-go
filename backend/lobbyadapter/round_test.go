@@ -1,8 +1,10 @@
 package lobbyadapter_test
 
 import (
+	"context"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/INTODAN/mpl/domain"
 	"github.com/INTODAN/mpl/gamehooks"
@@ -10,6 +12,7 @@ import (
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/lobbyadapter"
 	"islandBattles/backend/models"
+	"islandBattles/backend/services"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -137,7 +140,7 @@ func TestALobbyPlaysASecondGameAfterTheFirstEnds(t *testing.T) {
 
 // The game of a round is over once it has an outcome. A round whose start
 // bound no game counts as over, so its lobby can be reopened.
-func TestLobbyRoundEnded(t *testing.T) {
+func TestEndAbandonedRound(t *testing.T) {
 	stack := newLobbyStack(t)
 	lobbyID := uuid.NewString()
 	for round, outcome := range map[int64]*models.GameOutcome{1: {Reason: models.GameOutcomeAllEliminated}, 2: nil} {
@@ -147,7 +150,7 @@ func TestLobbyRoundEnded(t *testing.T) {
 		}
 	}
 	for round, want := range map[int64]bool{1: true, 2: false, 3: true} {
-		if ended, err := dal.LobbyRoundEnded(stack.database, lobbyID, round); err != nil || ended != want {
+		if ended, err := services.EndAbandonedRound(context.Background(), stack.database, nil, lobbyID, round, time.Now()); err != nil || ended != want {
 			t.Fatalf("round %d ended = %v, %v; want %v", round, ended, err, want)
 		}
 	}

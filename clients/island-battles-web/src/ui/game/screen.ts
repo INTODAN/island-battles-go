@@ -11,6 +11,7 @@ import { createScenePlayer } from "../../scene/animation";
 import { battlefieldOf } from "../../scene/battlefield";
 import { loadBoardAssets } from "../../scene/boardAssets";
 import { fitCamera } from "../../scene/camera";
+import { castleScreenPoint } from "../../scene/castleMenuInput";
 import {
   applyGraphics,
   type Graphics,
@@ -22,8 +23,11 @@ import { fitBoard, installBoardControls } from "../../scene/picking";
 import { showBoardLoading } from "../boardLoading";
 import { rulesButton } from "../rules/rulesDialog";
 import { type AgentGame, agentPrompt, copyText } from "./agentPrompt";
+import { AmountBar } from "./amountBar";
+import { CastleMenu } from "./castleMenu";
 import { clashSummary } from "./clashes";
 import { GameController, showsNewestTurn, type ViewState } from "./controller";
+import { installGameViewDebug } from "./debug";
 import "./game.css";
 import { markControlsSeen, shouldOpenControls } from "./controls";
 import { ControlsPanel, PaceBar } from "./handHud";
@@ -168,6 +172,8 @@ export class GameScreen {
       return () => clearTimeout(timer);
     },
   });
+  /** The amount bar of drag to send (#343), for a view with a hand play. */
+  private readonly amountBar: AmountBar | null;
   /**
    * A hand player's status row above the timeline: "Return to live to give orders" with a
    * button, or that the team is out (`handView`).
@@ -371,7 +377,13 @@ export class GameScreen {
       if (this.scene) fitBoard(this.scene);
     });
     topStack.append(this.controls.panel, this.fitButton);
-    this.bottomStack.append(this.logsBox, this.handStatus, timeline);
+    this.amountBar = this.options.handPlay ? new AmountBar() : null;
+    this.bottomStack.append(
+      this.logsBox,
+      ...(this.amountBar ? [this.amountBar.element] : []),
+      this.handStatus,
+      timeline,
+    );
     root.append(this.canvas, topStack, this.bottomStack, this.overlay);
     this.container.replaceChildren(root);
     this.setConnection(this.options.live ? "connecting" : "saved");
@@ -404,6 +416,27 @@ export class GameScreen {
   setNotice(text: string | null): void {
     this.notice.textContent = text ?? "";
     this.notice.hidden = !text;
+  }
+
+  /**
+   * Publishes the bottom stack's height as `--gv-bottom-height` on the view's parent, where the
+   * lobby's Watchers box, a sibling of the view (`app.ts`), reads it to sit above the stack.
+   */
+  private publishBottomHeight(): () => void {
+    const parent = this.container.parentElement;
+    if (!parent) return () => {};
+    const observer = new ResizeObserver(() => {
+      parent.style.setProperty(
+        "--gv-bottom-height",
+        // The stack's height and its 8 px from the bottom.
+        `${Math.ceil(this.bottomStack.offsetHeight) + 8}px`,
+      );
+    });
+    observer.observe(this.bottomStack);
+    return () => {
+      observer.disconnect();
+      parent.style.removeProperty("--gv-bottom-height");
+    };
   }
 
   private async saveDemo(save: HTMLButtonElement): Promise<void> {
@@ -496,7 +529,21 @@ export class GameScreen {
     const scene = new Scene(engine);
     this.scene = scene;
     const handPlay = this.options.handPlay ?? null;
-    const removeControls = installBoardControls(scene, { handPlay });
+    // The castle menu (#344) is built once the controller exists; the board asks it to open.
+    let castleMenu: CastleMenu | null = null;
+    const removeControls = installBoardControls(scene, {
+      handPlay,
+      // Read lazily: the controller and the hand surface are made below.
+      canOrder: () =>
+        handPlay?.state.get().status === "playing" &&
+        this.handSurface?.showsNewestTurn() === true,
+      ...(this.amountBar ? { amountControl: this.amountBar } : {}),
+      showOrderFeedback: (sentence, orderId) =>
+        this.handSurface?.showOrderFeedback(sentence, orderId),
+      onCastleMenu:
+        handPlay &&
+        ((castleId, opener) => castleMenu?.open(castleId, opener) ?? false),
+    });
     // The board's art loads behind a loading screen; the board draws placeholders meanwhile.
     const loading = showBoardLoading(this.root);
     loadBoardAssets(scene, (progress) => loading.update(progress)).then(
@@ -541,6 +588,22 @@ export class GameScreen {
       showOrderFeedback: (sentence, orderId) =>
         this.orderNotices.show(sentence, orderId),
     };
+    castleMenu =
+      handPlay &&
+      new CastleMenu({
+        host: this.root,
+        handPlay,
+        showsNewestTurn: () => showsNewestTurn(controller.state),
+        subscribeView: (listener) => controller.subscribe(listener),
+        locate: (castleId) => castleScreenPoint(scene, castleId),
+        onFrame: (run) => {
+          const observer = scene.onAfterRenderObservable.add(run);
+          return () => scene.onAfterRenderObservable.remove(observer);
+        },
+        fallbackFocus: this.canvas,
+        showOrderFeedback: (sentence, orderId) =>
+          this.handSurface?.showOrderFeedback(sentence, orderId),
+      });
     // A hand player's HUD (#345): what `handView` decides from hand play and the view.
     let hand: HandView = NO_HAND;
     let controlsChecked = false;
@@ -612,6 +675,8 @@ export class GameScreen {
       }
     });
     resize.observe(this.container);
+    const stopBottomHeight = this.publishBottomHeight();
+    const removeDebug = installGameViewDebug(scene);
 
     this.buildTeams(sorted);
     const unsubscribe = controller.subscribe((state) => this.render(state));
@@ -645,6 +710,7 @@ export class GameScreen {
       teams: sorted,
       dispose: () => {
         unsubscribe();
+        castleMenu?.dispose();
         for (const stop of handStops) stop();
         document.removeEventListener("visibilitychange", onVisible);
         this.handStatus.hidden = true;
@@ -656,6 +722,8 @@ export class GameScreen {
         this.markYourTeam(null);
         removeControls();
         resize.disconnect();
+        stopBottomHeight();
+        removeDebug();
         engine.stopRenderLoop();
         scene.dispose();
         engine.dispose();

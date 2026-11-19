@@ -12,7 +12,7 @@ export interface ControlRow {
 
 /**
  * The controls of hand play: drag to send and the amount (#343), the castle menu (#344), the fit
- * button (#346) and the camera. Keys are written as they are pressed, in capitals.
+ * button (#346) and the camera. Keys are written in brackets, `[d]`, so the panel draws them as keys.
  */
 export const controlTable: readonly ControlRow[] = [
   {
@@ -24,22 +24,23 @@ export const controlTable: readonly ControlRow[] = [
   },
   {
     action: "All",
-    mouse: "D while dragging",
-    touch: "Tap the all icon, right of the slider",
+    mouse: "[d] while dragging",
+    touch: "Tap All, right of the amount slider",
   },
   {
     action: "Half",
-    mouse: "A while dragging",
-    touch: "Tap the half icon, left of the slider",
+    mouse: "[a] while dragging",
+    touch: "Tap Half, left of the amount slider",
   },
   {
     action: "More, fewer",
-    mouse: "W and S while dragging, one soldier at a time; hold to repeat",
+    mouse:
+      "[w] and [s] while dragging, one soldier more or fewer; hold to repeat",
     touch: null,
   },
   {
     action: "An exact number",
-    mouse: "Type it while dragging; Backspace edits it",
+    mouse: "Type the digits while dragging; [Backspace] edits them",
     touch: null,
   },
   {
@@ -56,13 +57,13 @@ export const controlTable: readonly ControlRow[] = [
   },
   {
     action: "Cancel",
-    mouse: "Esc, a right-click, or release away from a castle",
+    mouse: "[Esc], the right button, or release away from a castle",
     touch:
       "Lift your finger away from a castle, or touch the board with a second finger",
   },
   {
     action: "Fit the board",
-    mouse: "F, or the fit button at the top right",
+    mouse: "[F], or the fit button at the top right",
     touch: "The fit button at the top right",
   },
   {
@@ -126,8 +127,8 @@ export function markControlsSeen(storage: () => Storage | null): void {
   }
 }
 
-/** A key as the table writes it: a single capital letter, `Esc` or `Backspace`. */
-const keyPattern = /\b(Esc|Backspace|[ADWSF])\b/g;
+/** A key as the table writes it: in brackets. */
+const keyPattern = /\[([^\]]+)\]/g;
 
 /** A row's text in parts, the keys apart, so the panel can draw them as keys. */
 export function controlParts(how: string): { text: string; key: boolean }[] {
@@ -136,7 +137,7 @@ export function controlParts(how: string): { text: string; key: boolean }[] {
   for (const match of how.matchAll(keyPattern)) {
     const index = match.index ?? 0;
     if (index > at) parts.push({ text: how.slice(at, index), key: false });
-    parts.push({ text: match[0], key: true });
+    parts.push({ text: match[1] ?? "", key: true });
     at = index + match[0].length;
   }
   if (at < how.length) parts.push({ text: how.slice(at), key: false });

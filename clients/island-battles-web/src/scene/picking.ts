@@ -3,11 +3,19 @@ import { PointerEventTypes } from "@babylonjs/core/Events/pointerEvents";
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { Scene } from "@babylonjs/core/scene";
 import type { HandPlay } from "../play";
+import {
+  doubleClickFocuses,
+  MenuGestures,
+  type MenuOpener,
+  type MenuPointer,
+} from "../play/castleMenu";
+import type { AmountControl } from "../play/drag";
 import { createFlatRing, type PickTarget } from "./art";
 import { type Battlefield, battlefieldOf } from "./battlefield";
 import { CASTLE_RADIUS } from "./board";
 import { fitCamera, focusCamera } from "./camera";
 import { toWorld, toWorldDistance } from "./coordinates";
+import { installDragControls } from "./dragControls";
 import { castleTooltip, groupTooltip } from "./format";
 import { CLASH_COLOR } from "./palette";
 
@@ -63,15 +71,33 @@ export interface BoardControlsOptions {
    * the board's controls are a watcher's.
    */
   handPlay?: HandPlay | null;
+  /**
+   * Whether orders can be given now: the hand play's status is `playing` and the view shows the
+   * newest turn. Read each frame; false when absent.
+   */
+  canOrder?: () => boolean;
+  /** The amount bar of drag to send (#343). */
+  amountControl?: AmountControl;
+  /** Shows a refused order's sentence (`HandSurface.showOrderFeedback`). */
+  showOrderFeedback?: (sentence: string, orderId?: number) => void;
+  /**
+   * The castle menu (#344): a right-click that didn't drag, a double-click or a double-tap on a
+   * castle (`MenuGestures`) asks it to open there; it answers whether it opened. Given, the
+   * browser's context menu doesn't show over the board while the hand player plays. Absent, those
+   * gestures do what they do for a watcher.
+   */
+  onCastleMenu?: ((castleId: number, opener: MenuOpener) => boolean) | null;
 }
 
 /**
- * Hover highlight and tooltip (a tap on a touch screen), double-click to focus a castle, and F to refit the board. Returns
- * a function that removes the listeners, the tooltip and the highlight: call it before the scene is disposed.
+ * Hover highlight and tooltip (a tap on a touch screen), double-click to focus a castle (not for a
+ * hand player who plays: `doubleClickFocuses`), F to refit the board, and for a hand player drag to
+ * send (`dragControls.ts`) and the castle menu's gestures. Returns a function that removes the
+ * listeners, the tooltip, the highlight and the drag's meshes: call it before the scene is disposed.
  */
 export function installBoardControls(
   scene: Scene,
-  _options: BoardControlsOptions = {},
+  options: BoardControlsOptions = {},
 ): () => void {
   const canvas = scene.getEngine().getRenderingCanvas();
   if (!canvas) throw new Error("the scene's engine has no canvas");
@@ -81,6 +107,13 @@ export function installBoardControls(
   canvas.parentElement?.append(tooltip);
   let highlight: Mesh | null = null;
   let hovered: PickTarget | null = null;
+  /**
+   * The gesture going on is a drag to send, or one that a drag's cancel ended (Esc, a right
+   * button): it is no click or tap. Set by the drag; cleared by the press that starts the next
+   * gesture. The tap and double-tap branches below start with a guard on it, and every opener
+   * of those gestures (the castle menu, #344) goes below that guard.
+   */
+  let dragGesture = false;
 
   const hide = () => {
     tooltip.hidden = true;
@@ -134,14 +167,52 @@ export function installBoardControls(
     highlight.position.set(world.x, 0.2, world.z);
   };
 
+  const menuGestures = new MenuGestures();
+  /** The castle menu's view of a pointer event, with the castle under the pointer. */
+  const menuPointer = (
+    event: PointerEvent,
+    target: PickTarget | null,
+  ): MenuPointer => ({
+    button: event.button,
+    pointerType: event.pointerType,
+    castleId: target?.kind === "castle" ? target.id : null,
+    x: event.clientX,
+    y: event.clientY,
+    at: performance.now(),
+  });
+  /** Opens the castle menu when the gesture is one of its openers; returns whether it opened. */
+  const openCastleMenu = (
+    opener: MenuOpener | null,
+    castleId: number | null,
+  ): boolean => {
+    if (!opener || castleId === null || !options.onCastleMenu) return false;
+    if (!options.onCastleMenu(castleId, opener)) return false;
+    hide();
+    return true;
+  };
+
   const pointerObserver = scene.onPointerObservable.add((info) => {
     const field = battlefieldOf(scene);
     if (!field) return;
-    if (info.type === PointerEventTypes.POINTERTAP) {
-      const tapped = touchTapTarget(
-        (info.event as PointerEvent).pointerType,
-        pickTargetAt(scene),
-      );
+    if (info.type === PointerEventTypes.POINTERDOWN) {
+      // Only the right button's press, for the castle menu's right-click (no pick needed).
+      const event = info.event as PointerEvent;
+      if (event.button === 2 && options.onCastleMenu) {
+        menuGestures.down(menuPointer(event, null));
+      }
+    } else if (info.type === PointerEventTypes.POINTERTAP) {
+      if (dragGesture) {
+        // A drag's tap starts no double-click either.
+        menuGestures.reset();
+        return;
+      }
+      const event = info.event as PointerEvent;
+      const picked = pickTargetAt(scene);
+      if (options.onCastleMenu) {
+        const pointer = menuPointer(event, picked);
+        if (openCastleMenu(menuGestures.tap(pointer), pointer.castleId)) return;
+      }
+      const tapped = touchTapTarget(event.pointerType, picked);
       if (tapped === undefined) return;
       hovered = tapped;
       if (tapped) show(field, tapped);
@@ -155,7 +226,20 @@ export function installBoardControls(
       hovered = target;
       show(field, target);
     } else if (info.type === PointerEventTypes.POINTERDOUBLETAP) {
+      if (dragGesture) {
+        menuGestures.reset();
+        return;
+      }
       const target = pickTargetAt(scene);
+      if (options.onCastleMenu) {
+        const pointer = menuPointer(info.event as PointerEvent, target);
+        if (openCastleMenu(menuGestures.doubleTap(pointer), pointer.castleId))
+          return;
+      }
+      // For a hand player who plays, a double-click never moves the camera (it opens the castle
+      // menu on their own castle, above, and does nothing on any other).
+      const status = options.handPlay?.state.get().status ?? null;
+      if (!doubleClickFocuses(status)) return;
       const castle =
         target?.kind === "castle"
           ? field.generation?.castles.find((entry) => entry.id === target.id)
@@ -183,16 +267,41 @@ export function installBoardControls(
     fitBoard(scene);
   };
   window.addEventListener("keydown", onKey);
+  // The right button belongs to the castle menu (and to panning): no context menu over the board.
+  // Only while the hand player plays: a player whose bot plays keeps the browser's menu.
+  const noContextMenu = (event: Event) => {
+    if (options.handPlay?.state.get().status === "playing") {
+      event.preventDefault();
+    }
+  };
+  if (options.onCastleMenu) {
+    canvas.addEventListener("contextmenu", noContextMenu);
+  }
+  const handPlay = options.handPlay;
+  const removeDrag = handPlay
+    ? installDragControls(scene, {
+        handPlay,
+        canOrder: options.canOrder ?? (() => false),
+        amountControl: options.amountControl,
+        showOrderFeedback: options.showOrderFeedback,
+        hideHover: hide,
+        setTaken: (taken) => {
+          dragGesture = taken;
+        },
+      })
+    : () => {};
   // The hovered entity may have moved or gone when a new generation is drawn.
   const frameObserver = scene.onBeforeRenderObservable.add(() => {
     const field = battlefieldOf(scene);
     if (hovered && field && !describeTarget(field, hovered)) hide();
   });
   return () => {
+    removeDrag();
     scene.onPointerObservable.remove(pointerObserver);
     scene.onBeforeRenderObservable.remove(frameObserver);
     canvas.removeEventListener("pointerleave", onLeave);
     window.removeEventListener("keydown", onKey);
+    canvas.removeEventListener("contextmenu", noContextMenu);
     tooltip.remove();
     highlight?.dispose();
   };

@@ -46,7 +46,7 @@ async def test_a_localhost_bot_plays_a_default_level_to_the_end(guests):
         await alice.set_ready(scope, True)
     assert (refused.value.code, refused.value.status, refused.value.problem_type) == (
         "game_requirement", 409, "urn:island-battles:problem:bot-not-chosen")
-    assert "Choose your bot" in refused.value.detail
+    assert "Choose how you play before getting ready" in refused.value.detail
 
     await choose_bot(alice, scope.lobby_id, {"kind": "localhost"})
     chosen = await choose_bot(bob, scope.lobby_id, {"kind": "default", "level": 2})
@@ -84,5 +84,7 @@ async def test_a_localhost_bot_plays_a_default_level_to_the_end(guests):
             headers={"Authorization": f"Bearer {bob.credential}"},
         )
         assert (late.status_code, late.json()["code"]) == (409, "phase_conflict"), late.text
-    assert [state["bot"] for state in states] == [{"kind": "localhost"}, {"kind": "default", "level": 2}]
+    # A localhost bot's state names the port its client delivers to, 41414
+    # unless the player chose another.
+    assert [state["bot"] for state in states] == [{"kind": "localhost", "port": 41414}, {"kind": "default", "level": 2}]
     assert all(state["outcome"] is not None for state in states)

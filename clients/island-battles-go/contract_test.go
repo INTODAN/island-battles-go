@@ -247,6 +247,7 @@ func TestLimitsMatchTheOpenAPIDocument(t *testing.T) {
 var clientSchemaTypes = map[string]reflect.Type{
 	"GenerationState":            reflect.TypeFor[generationState](),
 	"GameOutcome":                reflect.TypeFor[GameOutcome](),
+	"Departure":                  reflect.TypeFor[Departure](),
 	"BotChoice":                  reflect.TypeFor[botChoice](),
 	"RelayedBot":                 reflect.TypeFor[relayedBot](),
 	"GenerationEvent":            reflect.TypeFor[generationEvent](),
@@ -310,7 +311,7 @@ func TestClientTypesMatchTheOpenAPIDocument(t *testing.T) {
 	if err := json.Unmarshal(encoded, &enums); err != nil {
 		t.Fatal(err)
 	}
-	reasons := []string{string(LastTeamStanding), string(AllEliminated), string(GenerationCap), string(TurnTimeout)}
+	reasons := []string{string(LastTeamStanding), string(AllEliminated), string(GenerationCap), string(TurnTimeout), string(Abandoned)}
 	if !slices.Equal(enums.Reason.Enum, reasons) {
 		t.Errorf("GameOutcome.reason is %v in the document, %v in the SDK", enums.Reason.Enum, reasons)
 	}
@@ -325,5 +326,12 @@ func TestClientTypesMatchTheOpenAPIDocument(t *testing.T) {
 	}
 	if !slices.Equal(kinds.Kind.Enum, botKinds) {
 		t.Errorf("BotChoice.kind is %v in the document", kinds.Kind.Enum)
+	}
+	encoded, _ = json.Marshal(schemas["Departure"].Properties)
+	if err := json.Unmarshal(encoded, &kinds); err != nil {
+		t.Fatal(err)
+	}
+	if departureKinds := []string{string(Resigned), string(Left)}; !slices.Equal(kinds.Kind.Enum, departureKinds) {
+		t.Errorf("Departure.kind is %v in the document, %v in the SDK", kinds.Kind.Enum, departureKinds)
 	}
 }

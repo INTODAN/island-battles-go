@@ -72,7 +72,8 @@ CHECK_SECONDS = 2.0
 # ends at its deadline: 8 s suits the default, and the deadline cuts it shorter.
 DEFAULT_TURN_TIMEOUT = 8.0
 # How long before the turn's deadline the bot stops playing, so its answer
-# reaches the server in time.
+# reaches the server in time: at most a quarter of the time left, so a bot gets
+# three quarters of a real-time game's short turn (submit_budget).
 SUBMIT_MARGIN_SECONDS = 1.0
 # How often, and for how long each time, the answer is sent again when no
 # answer or a server error comes back.
@@ -273,6 +274,14 @@ def submit_refusal(url: str, extra_hosts: frozenset[str] = frozenset()) -> str |
     )
 
 
+def submit_budget(left: float) -> float:
+    """How many seconds a bot may play when left seconds remain before the
+    turn's deadline: left less SUBMIT_MARGIN_SECONDS, or less a quarter of left
+    when that is shorter, so a bot has 0.375 s of a 0.5 s turn and 0.75 s of a
+    1 s one."""
+    return max(0.0, left - min(SUBMIT_MARGIN_SECONDS, left / 4))
+
+
 def pass_result(turn: BotTurn, message: str) -> BotTurnResult:
     """The answer of a bot that passes its turn: no commands, the old memory
     and one error line that says why."""
@@ -346,7 +355,7 @@ class BotServer(ThreadingHTTPServer):
         seconds = self.turn_timeout
         if delivery.submit.deadline_at is not None:
             left = (delivery.submit.deadline_at - datetime.now(UTC)).total_seconds()
-            seconds = max(0.0, min(seconds, left - SUBMIT_MARGIN_SECONDS))
+            seconds = min(seconds, submit_budget(left))
         generation = turn.generation.id
         try:
             play = self.bot.get()
@@ -764,8 +773,9 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SECONDS",
         help="pass the turn when the bot takes longer than this (default "
         f"{DEFAULT_TURN_TIMEOUT:g}), or than the time left before the turn's "
-        f"deadline less {SUBMIT_MARGIN_SECONDS:g} s. A lobby's turn timeout is "
-        "30 s by default, and its host can set it from 5 to 600 s or to none",
+        f"deadline less {SUBMIT_MARGIN_SECONDS:g} s, or less a quarter of it "
+        f"when it is under {SUBMIT_MARGIN_SECONDS * 4:g} s. A lobby's turn "
+        "timeout is 30 s by default, and its host can set it from 5 to 600 s or to none",
     )
     serving.set_defaults(handler=serve)
 

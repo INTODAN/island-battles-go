@@ -25,4 +25,7 @@ const (
 	MoveSoldierGroups          CommandType = "move_soldier_groups"
 	SendSoldierGroup           CommandType = "send_soldier_group"
 	RemoveArrivedSoldierGroups CommandType = "remove_arrived_soldier_groups"
+	// RemoveTeam takes a team that resigned or left a real-time game out, first
+	// in the turn. Only the server adds it; it is never a player command.
+	RemoveTeam CommandType = "remove_team"
 )

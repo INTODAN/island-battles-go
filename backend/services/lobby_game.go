@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/dal"
@@ -66,6 +67,10 @@ func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 		if len(game.Teams) > 0 {
 			return nil
 		}
+		// started is the game's start, taken once the game is locked: its
+		// first generation's creation, and when the server last heard from
+		// each player, for the silence rule.
+		started := time.Now()
 		if len(snapshot.StartRoster) == 0 {
 			return fmt.Errorf("cannot initialize an empty roster")
 		}
@@ -82,7 +87,7 @@ func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 			if color == models.NeutralTeamColor {
 				return fmt.Errorf("frozen player has no team binding")
 			}
-			player := models.FrozenGamePlayer{GameID: binding.GameID, PlayerID: entry.PlayerID, TeamColor: color, DisplayName: startDisplayName(snapshot, index)}
+			player := models.FrozenGamePlayer{GameID: binding.GameID, PlayerID: entry.PlayerID, TeamColor: color, DisplayName: startDisplayName(snapshot, index), LastSeenAt: started}
 			player.BotKind = models.LocalhostBot
 			if bot, found := chosen[entry.PlayerID]; found {
 				if err := bot.freeze(transaction, snapshot.Lobby.ID, &player); err != nil {
@@ -95,6 +100,7 @@ func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 			return err
 		}
 		generation := models.Generation{GameID: binding.GameID, Map: models.BuildMap(gameSettings.Map)}
+		generation.CreatedAt = started
 		generationID, err := dal.CreateGeneration(transaction, &generation)
 		if err != nil {
 			return err
