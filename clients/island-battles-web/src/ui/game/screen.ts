@@ -474,6 +474,7 @@ export class GameScreen {
     this.resigned.hidden = control.kind !== "resigned";
     if (control.kind === "button") {
       this.resignButton.textContent = control.label;
+      this.resignButton.setAttribute("aria-label", control.label);
       this.resignButton.disabled = control.disabled;
     }
     if (control.kind === "resigned") this.resigned.textContent = control.text;
