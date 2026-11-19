@@ -340,9 +340,11 @@ export function installDragControls(
       live = null;
       return;
     }
-    const result = handPlay.send(effect.origin, effect.target, effect.amount);
+    // Taken before the order is given: hand play tells its subscribers at once, and the
+    // drawing of an idle drag would hide the line.
     const meshes = live;
     live = null;
+    const result = handPlay.send(effect.origin, effect.target, effect.amount);
     if (!result.ok) {
       if (meshes) flash(meshes);
       options.showOrderFeedback?.(result.sentence);
