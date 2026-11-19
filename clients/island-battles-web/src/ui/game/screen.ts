@@ -265,6 +265,7 @@ export class GameScreen {
     number,
     { soldiers: HTMLElement; castles: HTMLElement; status: HTMLElement }
   >();
+  private readonly topStack = element("div", "gv-stack gv-stack-top");
   private readonly bottomStack = element("div", "gv-stack gv-stack-bottom");
   private running: Running | undefined;
   private scene: Scene | undefined;
@@ -436,7 +437,7 @@ export class GameScreen {
     // Logs are fetched only while the panel is open; opening it asks for the turn on screen.
     this.logsBox.addEventListener("toggle", () => this.refreshLogs());
 
-    const topStack = element("div", "gv-stack gv-stack-top");
+    const topStack = this.topStack;
     topStack.append(
       top,
       this.notice,
@@ -462,7 +463,9 @@ export class GameScreen {
     this.amountBar = this.options.handPlay ? new AmountBar() : null;
     this.bottomStack.append(
       this.logsBox,
-      ...(this.amountBar ? [this.amountBar.element] : []),
+      ...(this.amountBar
+        ? [this.amountBar.element, this.amountBar.status]
+        : []),
       this.handStatus,
       timeline,
     );
@@ -617,22 +620,30 @@ export class GameScreen {
   }
 
   /**
-   * Publishes the bottom stack's height as `--gv-bottom-height` on the view's parent, where the
-   * lobby's Watchers box, a sibling of the view (`app.ts`), reads it to sit above the stack.
+   * Publishes the top and bottom stacks' heights as `--gv-top-height` and `--gv-bottom-height` on
+   * the view's parent, where the lobby's Watchers box, a sibling of the view (`app.ts`), reads
+   * them to sit above the bottom stack and stay under the top one. The top stack grows with the
+   * hand player's rows, the order feedback and the outcome banner, so it is measured, not assumed.
    */
-  private publishBottomHeight(): () => void {
+  private publishStackHeights(): () => void {
     const parent = this.container.parentElement;
     if (!parent) return () => {};
     const observer = new ResizeObserver(() => {
+      // Each stack's height and its 8 px from the edge.
+      parent.style.setProperty(
+        "--gv-top-height",
+        `${Math.ceil(this.topStack.offsetHeight) + 8}px`,
+      );
       parent.style.setProperty(
         "--gv-bottom-height",
-        // The stack's height and its 8 px from the bottom.
         `${Math.ceil(this.bottomStack.offsetHeight) + 8}px`,
       );
     });
+    observer.observe(this.topStack);
     observer.observe(this.bottomStack);
     return () => {
       observer.disconnect();
+      parent.style.removeProperty("--gv-top-height");
       parent.style.removeProperty("--gv-bottom-height");
     };
   }
@@ -908,7 +919,7 @@ export class GameScreen {
       }
     });
     resize.observe(this.container);
-    const stopBottomHeight = this.publishBottomHeight();
+    const stopStackHeights = this.publishStackHeights();
     const removeDebug = installGameViewDebug(scene);
 
     this.buildTeams(sorted);
@@ -960,7 +971,7 @@ export class GameScreen {
         this.markYourTeam(null);
         removeControls();
         resize.disconnect();
-        stopBottomHeight();
+        stopStackHeights();
         removeDebug();
         engine.stopRenderLoop();
         scene.dispose();

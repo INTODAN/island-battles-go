@@ -283,7 +283,6 @@ export class CastleMenu {
     this.root.remove();
   }
 
-  /** Closes the menu when it may no longer be open, or redraws it. */
   /** Closes the menu if it may no longer be open, else draws it again. */
   update(): void {
     const castleId = this.castleId;

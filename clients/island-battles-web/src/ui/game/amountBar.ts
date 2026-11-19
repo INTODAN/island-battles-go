@@ -17,15 +17,57 @@ const HALF_ICON =
 const ALL_ICON =
   '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8" fill="currentColor" stroke="currentColor" stroke-width="2"/></svg>';
 
-function iconButton(label: string, title: string, icon: string) {
+function iconButton(
+  label: string,
+  title: string,
+  icon: string,
+  onPress: () => void,
+) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "gv-amount-button";
   button.setAttribute("aria-label", label);
   button.title = title;
   button.innerHTML = icon;
-  // A tap on it never takes the focus from the board, so the drag's keys keep working.
+  // A press on it never takes the focus from the board: Babylon's canvas `blur` listener makes up a
+  // release for every pressed pointer, which would drop a drag a finger holds while another taps
+  // here. It also keeps the drag's keys working.
   button.addEventListener("pointerdown", (event) => event.preventDefault());
+  // A browser fires `click` for a finger that is the only one down, not for a second one: a tap
+  // of a second finger, while the first holds a drag, is `pointerdown` and `pointerup` alone. So
+  // that tap presses the button on its `pointerup`. A touch stays attached to the button it
+  // pressed, so only a lift inside the button counts, as a click's would. A `click` some browser
+  // still adds after the tap (a pointer's, `detail > 0`) is skipped once; a keyboard's or an
+  // assistive technology's (`detail` 0) never is.
+  const secondFingers = new Set<number>();
+  let skipNextClick = false;
+  button.addEventListener("pointerdown", (event) => {
+    skipNextClick = false;
+    if (event.pointerType === "touch" && !event.isPrimary) {
+      secondFingers.add(event.pointerId);
+    }
+  });
+  button.addEventListener("pointerup", (event) => {
+    if (!secondFingers.delete(event.pointerId)) return;
+    const box = button.getBoundingClientRect();
+    const inside =
+      event.clientX >= box.left &&
+      event.clientX <= box.right &&
+      event.clientY >= box.top &&
+      event.clientY <= box.bottom;
+    if (!inside) return;
+    skipNextClick = true;
+    onPress();
+  });
+  button.addEventListener("pointercancel", (event) => {
+    secondFingers.delete(event.pointerId);
+  });
+  button.addEventListener("click", (event) => {
+    const skip = skipNextClick && event.detail > 0;
+    skipNextClick = false;
+    if (skip) return;
+    onPress();
+  });
   return button;
 }
 
@@ -49,8 +91,12 @@ export class AmountBar implements AmountControl {
   readonly element = document.createElement("div");
   private readonly slider = document.createElement("input");
   private readonly text = document.createElement("output");
-  /** Tells a drag's start and end to screen readers (`announcement`). */
-  private readonly status = document.createElement("span");
+  /**
+   * Tells a drag's start and end to screen readers (`announcement`). It stands beside `element`,
+   * not inside it, so the end of a drag is still announced when `render` hides the bar; whoever
+   * adds `element` to the page adds this too.
+   */
+  readonly status = document.createElement("span");
   private readonly listeners = new Set<(amount: DragAmount) => void>();
   private view: SliderView | null = null;
 
@@ -70,14 +116,22 @@ export class AmountBar implements AmountControl {
     text.setAttribute("aria-live", "off");
     status.className = "gv-visually-hidden";
     status.setAttribute("role", "status");
-    const half = iconButton("Half", "Half (A)", HALF_ICON);
-    const all = iconButton("All", "All (D)", ALL_ICON);
-    half.addEventListener("click", () => this.emit(HALF));
-    all.addEventListener("click", () => this.emit(ALL));
+    const half = iconButton("Half", "Half (A)", HALF_ICON, () =>
+      this.emit(HALF),
+    );
+    const all = iconButton("All", "All (D)", ALL_ICON, () => this.emit(ALL));
+    // A finger on the slider keeps the focus on the board, for the reason the buttons do. Only a
+    // touch: cancelling a mouse's or pen's pointerdown stops the browser dragging the slider, and
+    // a mouse cannot hold a drag with one hand and move the slider with another anyway. A touch
+    // still drags the slider (the browser reads it from the touch events), and the keyboard still
+    // moves it once it has the focus (Tab).
+    slider.addEventListener("pointerdown", (event) => {
+      if (event.pointerType === "touch") event.preventDefault();
+    });
     slider.addEventListener("input", () => {
       if (this.view) this.emit(sliderAmount(this.view, Number(slider.value)));
     });
-    element.append(half, slider, all, text, status);
+    element.append(half, slider, all, text);
   }
 
   render(view: SliderView | null): void {

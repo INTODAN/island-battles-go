@@ -568,10 +568,14 @@ export function installDragControls(
       if (state.hold) apply({ type: "tick", now });
       const field = battlefieldOf(scene);
       if (pointer && field && state.phase === "dragging") {
-        // The camera may have zoomed under a still pointer: look again only when the pointer, the
-        // camera or the drawn board changed.
+        // The camera may have zoomed under a still pointer, or the canvas been resized under it
+        // (a phone turned around, the logs opened): look again only when the pointer, the camera,
+        // the canvas size or the drawn board changed.
         const { alpha, beta, radius, target } = field.camera;
+        const engine = scene.getEngine();
         const key = JSON.stringify([
+          engine.getRenderWidth(),
+          engine.getRenderHeight(),
           pointer.clientX,
           pointer.clientY,
           alpha,
