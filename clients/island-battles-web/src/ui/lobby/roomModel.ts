@@ -424,7 +424,7 @@ export function startBlocker(
   return null;
 }
 
-/** Whether any member, person or seat, plays by hand, which makes the game real-time. */
+/** Whether any member plays by hand, which makes the game real-time. Only people can: a bot seat never plays by hand. */
 export function anyPlaysByHand(room: RoomModel): boolean {
   return [
     ...room.teams.flatMap((team) => team.members),
