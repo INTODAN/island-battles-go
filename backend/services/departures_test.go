@@ -509,18 +509,18 @@ func TestTheRoundEndedHookEndsOnlyAnAbandonedGame(t *testing.T) {
 // With turn_timeout_seconds null nobody leaves by silence and no game is
 // abandoned, after an hour of fake time, and nothing is written.
 func TestNoLimitNeverLeavesOrAbandons(t *testing.T) {
-	game := startClockGame(t, `{"turn_timeout_seconds":null,"turn_pace_milliseconds":5000,"max_generations":1200}`, services.ServerBot{Manual: true}, services.ServerBot{Manual: true})
+	game := startClockGame(t, `{"turn_timeout_seconds":null}`, services.ServerBot{Manual: true}, services.ServerBot{Manual: true})
 	writes := countSeenWrites(t, game.database)
-	// An hour of turns of 5 s, with only Blue calling.
-	for range 720 {
-		game.toTurnEnd(t, game.players[0])
-	}
-	// One request an hour late plays one turn.
-	before := game.generationCount(t)
-	*game.clock = game.turnEnd(t).Add(time.Hour)
-	state := game.applyDeadline(t, game.players[0])
-	if state.Outcome != nil || castleOf(state, red) == nil || game.generationCount(t) != before+1 {
-		t.Fatalf("after an hour: %+v", state.Outcome)
+	started := game.open(t).CreatedAt
+	// An hour in which only Blue calls, once a minute; each call plays one
+	// turn, however late it is.
+	for minute := 1; minute <= 60; minute++ {
+		before := game.generationCount(t)
+		*game.clock = started.Add(time.Duration(minute) * time.Minute)
+		state := game.applyDeadline(t, game.players[0])
+		if state.Outcome != nil || castleOf(state, red) == nil || game.generationCount(t) != before+1 {
+			t.Fatalf("after %d minutes: outcome %+v, %d turns played", minute, state.Outcome, game.generationCount(t)-before)
+		}
 	}
 	if ended, err := services.EndAbandonedRound(context.Background(), game.database, nil, game.lobbyID, 1, game.clock.Add(time.Hour)); err != nil || ended {
 		t.Fatalf("round ended = %v, %v", ended, err)
