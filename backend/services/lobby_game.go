@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/dal"
@@ -56,6 +57,9 @@ func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 	if err != nil {
 		return models.BindingResult{}, err
 	}
+	// started is the game's start: its first generation's creation, and when
+	// the server last heard from each player, for the silence rule.
+	started := time.Now()
 	var events []Publication
 	var turns []turnToSend
 	// goBotsOnly is set when Go bots alone play the first turn, and have
@@ -82,7 +86,7 @@ func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 			if color == models.NeutralTeamColor {
 				return fmt.Errorf("frozen player has no team binding")
 			}
-			player := models.FrozenGamePlayer{GameID: binding.GameID, PlayerID: entry.PlayerID, TeamColor: color, DisplayName: startDisplayName(snapshot, index)}
+			player := models.FrozenGamePlayer{GameID: binding.GameID, PlayerID: entry.PlayerID, TeamColor: color, DisplayName: startDisplayName(snapshot, index), LastSeenAt: started}
 			player.BotKind = models.LocalhostBot
 			if bot, found := chosen[entry.PlayerID]; found {
 				if err := bot.freeze(transaction, snapshot.Lobby.ID, &player); err != nil {
@@ -95,6 +99,7 @@ func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 			return err
 		}
 		generation := models.Generation{GameID: binding.GameID, Map: models.BuildMap(gameSettings.Map)}
+		generation.CreatedAt = started
 		generationID, err := dal.CreateGeneration(transaction, &generation)
 		if err != nil {
 			return err

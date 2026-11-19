@@ -253,15 +253,17 @@ func truncateLogMessage(message string) string {
 // turnComplete reports whether every roster player of a team still in the
 // game has completed the open turn, generation, whose inputs are given.
 // Players of eliminated teams have nothing to play, so the turn doesn't wait
-// for them.
+// for them, nor for a team whose resignation waits for this turn: its
+// commands won't be played.
 func turnComplete(game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer, inputs []models.GenerationInput) bool {
 	completed := map[string]bool{}
 	for _, input := range inputs {
 		completed[input.PlayerID] = input.Completed
 	}
 	standing := standingTeams(generation, game.Teams)
+	leaving := pendingDepartures(game)
 	for _, player := range players {
-		if !completed[player.PlayerID] && slices.Contains(standing, player.TeamColor) {
+		if !completed[player.PlayerID] && slices.Contains(standing, player.TeamColor) && !slices.Contains(leaving, player.TeamColor) {
 			return false
 		}
 	}
@@ -269,21 +271,32 @@ func turnComplete(game *models.Game, generation *models.Generation, players []mo
 }
 
 // playTurn plays a completed turn: it applies every player's commands and the
-// end-of-turn steps as the next generation, ends the game when the end rule
-// says so, and has the Go bots play the new generation at once. It returns
-// the new generation, its inputs, which are the Go bots', and what to do once
-// the transaction commits: push the events and send the turns of the hosted
-// and uploaded bots with sender.
-func playTurn(ctx context.Context, transaction *gorm.DB, game *models.Game, players []models.FrozenGamePlayer, inputs []models.GenerationInput, sender *TurnSender) (*models.Generation, []models.GenerationInput, []Publication, []turnToSend, error) {
-	allCommands := []models.CommandFields{}
+// end-of-turn steps as the next generation, created at now, ends the game when
+// the end rule says so, and has the Go bots play the new generation at once.
+// The teams whose departure waits for this turn leave first, and their own
+// commands are dropped (simulation.TurnCommands). It returns the new
+// generation, its inputs, which are the Go bots', and what to do once the
+// transaction commits: push the events and send the turns of the hosted and
+// uploaded bots with sender.
+func playTurn(ctx context.Context, transaction *gorm.DB, game *models.Game, players []models.FrozenGamePlayer, inputs []models.GenerationInput, now time.Time, sender *TurnSender) (*models.Generation, []models.GenerationInput, []Publication, []turnToSend, error) {
+	teams := map[string]uint{}
+	for _, player := range players {
+		teams[player.PlayerID] = player.TeamColor
+	}
+	batches := make([]simulation.TeamBatch, 0, len(inputs))
 	for _, input := range inputs {
 		var playerCommands []models.CommandFields
 		if err := json.Unmarshal(input.Commands, &playerCommands); err != nil {
 			return nil, nil, nil, nil, err
 		}
-		allCommands = append(allCommands, playerCommands...)
+		batches = append(batches, simulation.TeamBatch{Color: teams[input.PlayerID], Commands: playerCommands})
 	}
-	generationID, board, err := migrateGeneration(transaction, game.ID, allCommands)
+	leaving := pendingDepartures(game)
+	allCommands, err := simulation.TurnCommands(leaving, batches)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	generationID, board, err := migrateGeneration(transaction, game.ID, allCommands, now)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -291,8 +304,14 @@ func playTurn(ctx context.Context, transaction *gorm.DB, game *models.Game, play
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
+	if len(leaving) > 0 {
+		if err := applyDepartures(transaction, game, generation.Number); err != nil {
+			return nil, nil, nil, nil, err
+		}
+	}
 	// A game that ends keeps this generation as its last one.
 	if outcome := simulation.Outcome(board, game.Teams, generation.Number >= game.MaxGenerations); outcome != nil {
+		outcome.Departures = slices.Clone(game.Departures)
 		if err := dal.SaveGameOutcome(transaction, game, *outcome); err != nil {
 			return nil, nil, nil, nil, err
 		}
@@ -354,6 +373,12 @@ func (service *GenerationService) playGoBotTurns(ctx context.Context, gameID uin
 			if err != nil {
 				return err
 			}
+			// A game that nobody played for its turn limit ends before the
+			// Go bots replace its open generation.
+			if abandoned(game, generation, service.now()) {
+				events, err = abandonGame(transaction, game, generation, players)
+				return err
+			}
 			inputs, err := dal.LoadGenerationInputs(transaction, generation.ID)
 			if err != nil {
 				return err
@@ -364,7 +389,7 @@ func (service *GenerationService) playGoBotTurns(ctx context.Context, gameID uin
 			if !turnComplete(game, generation, players, inputs) {
 				return nil
 			}
-			_, _, events, turns, err = playTurn(ctx, transaction, game, players, inputs, service.Bots)
+			_, _, events, turns, err = playTurn(ctx, transaction, game, players, inputs, service.now(), service.Bots)
 			next = game.Outcome == nil
 			return err
 		})

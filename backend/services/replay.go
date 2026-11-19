@@ -62,21 +62,45 @@ func outcomeView(game *models.Game) *models.GameOutcomeView {
 	if game.Outcome == nil {
 		return nil
 	}
-	return &models.GameOutcomeView{Reason: game.Outcome.Reason, WinnerTeamColor: game.Outcome.WinnerTeamColor, Summary: describeOutcome(game)}
+	return &models.GameOutcomeView{Reason: game.Outcome.Reason, WinnerTeamColor: game.Outcome.WinnerTeamColor, Summary: describeOutcome(game),
+		Departures: departureViews(game.Outcome.Departures, false)}
 }
 
-// describeOutcome sums up the outcome of a game that has ended.
+// describeOutcome sums up the outcome of a game that has ended. The teams
+// that resigned or left a real-time game come first, then the result.
 func describeOutcome(game *models.Game) string {
 	outcome := game.Outcome
-	if outcome.Reason == models.GameOutcomeTurnTimeout {
+	var result string
+	switch outcome.Reason {
+	case models.GameOutcomeTurnTimeout:
 		return describeTimeoutOutcome(game)
+	case models.GameOutcomeAbandoned:
+		result = describeAbandonedOutcome(game)
+	default:
+		result = describeResult(game)
 	}
+	clauses := make([]string, 0, len(outcome.Departures)+1)
+	for _, departure := range outcome.Departures {
+		clauses = append(clauses, describeDeparture(game, departure))
+	}
+	if len(clauses) > 0 && outcome.Reason == models.GameOutcomeAbandoned {
+		result = "t" + strings.TrimPrefix(result, "T")
+	}
+	return strings.Join(append(clauses, result), "; ")
+}
+
+// describeResult names the winner of a game that ended by the end rule, or
+// says why it is a draw.
+func describeResult(game *models.Game) string {
+	outcome := game.Outcome
 	// Without a winner the game is a draw, whatever its reason.
 	if outcome.WinnerTeamColor == nil {
-		switch outcome.Reason {
-		case models.GameOutcomeAllEliminated:
+		switch {
+		case outcome.Reason == models.GameOutcomeAllEliminated && len(outcome.Departures) > 0:
+			return "Draw: no team is left"
+		case outcome.Reason == models.GameOutcomeAllEliminated:
 			return "Draw: the last teams were eliminated in the same turn"
-		case models.GameOutcomeGenerationCap:
+		case outcome.Reason == models.GameOutcomeGenerationCap:
 			return "Draw: equal castle counts at the generation limit"
 		}
 		return "Draw"
@@ -89,6 +113,39 @@ func describeOutcome(game *models.Game) string {
 		return winner + " wins with the most castles at the generation limit"
 	}
 	return winner + " wins"
+}
+
+// describeAbandonedOutcome sums up a real-time game that nobody played for its
+// turn limit: "The game was abandoned: nobody played for 30 s; Blue wins with
+// the most castles".
+func describeAbandonedOutcome(game *models.Game) string {
+	outcome := game.Outcome
+	result := "draw with equal castle counts"
+	switch {
+	case outcome.WinnerTeamColor != nil:
+		result = teamName(game, *outcome.WinnerTeamColor) + " wins with the most castles"
+	case len(outcome.Survivors) == 0:
+		result = "draw: no team is left"
+	}
+	limit := ""
+	if game.TurnTimeoutSeconds != nil {
+		limit = " for " + describeTimeout(*game.TurnTimeoutSeconds)
+	}
+	return fmt.Sprintf("The game was abandoned: nobody played%s; %s", limit, result)
+}
+
+// describeDeparture names a team that resigned or left a real-time game, such
+// as "Red resigned" or "Red left the game: Sam didn't respond for 30 s".
+func describeDeparture(game *models.Game, departure models.Departure) string {
+	team := teamName(game, departure.Color)
+	if departure.Kind == models.DepartureResigned {
+		return team + " resigned"
+	}
+	within := ""
+	if game.TurnTimeoutSeconds != nil {
+		within = " for " + describeDuration(silenceLimit(game))
+	}
+	return fmt.Sprintf("%s left the game: %s didn't respond%s", team, joinNames(departure.Players), within)
 }
 
 // describeTimeoutOutcome sums up a game that ended at a turn's deadline: each

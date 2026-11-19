@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/dal"
@@ -142,7 +143,7 @@ func TestStartWithoutAMapChoiceIsRefused(t *testing.T) {
 		if gameID, err := start(t, client, snapshot); err == nil {
 			t.Fatalf("settings %q started game %d", settings, gameID)
 		}
-		ended, err := dal.LobbyRoundEnded(database, snapshot.Lobby.ID, snapshot.Lobby.Round)
+		ended, err := services.EndAbandonedRound(context.Background(), database, nil, snapshot.Lobby.ID, snapshot.Lobby.Round, time.Now())
 		if err != nil || !ended {
 			t.Fatalf("settings %q: round ended = %v, %v; want a round without a game", settings, ended, err)
 		}

@@ -32,7 +32,8 @@ const submitTokenNoLimit = 24 * time.Hour
 // for any other player. Like the state read, it lets Go bots catch up and
 // then ends an overdue turn, so in a real-time game it delivers the turn that
 // follows. A player with nothing to play
-// gets a 409: the game has ended, with GameEndedProblemType, their team is
+// gets a 409: the game has ended, with GameEndedProblemType, their team
+// resigned or left a real-time game, with TeamOutProblemType, their team is
 // eliminated, or they have completed the turn.
 func (service *GenerationService) TurnDelivery(ctx context.Context, principal domain.Principal, lobbyID, seatID string, tokens *submittoken.Signer, submitURL string) (models.TurnDelivery, error) {
 	database := service.Database.WithContext(ctx)
@@ -72,12 +73,16 @@ func (service *GenerationService) TurnDelivery(ctx context.Context, principal do
 			return err
 		}
 		observability.Annotate(ctx, slog.Uint64("generation_id", uint64(generation.ID)))
-		if end, err = endTurn(ctx, transaction, locked, generation, players, service.now(), service.Bots); err != nil {
+		if end, err = endTurn(ctx, transaction, locked, generation, players, principal.PlayerID, service.now(), service.Bots); err != nil {
 			return err
 		}
 		generation = end.generation
 		if locked.Outcome != nil {
 			nothingToPlay = &GenerationError{Status: 409, Detail: "the game has ended: " + describeOutcome(locked), Type: GameEndedProblemType}
+			return nil
+		}
+		if departure := teamDeparture(locked, player.TeamColor); departure != nil {
+			nothingToPlay = teamOut(locked, *departure)
 			return nil
 		}
 		if !slices.Contains(standingTeams(generation, locked.Teams), player.TeamColor) {
