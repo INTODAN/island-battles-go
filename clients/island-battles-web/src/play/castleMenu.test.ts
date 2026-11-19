@@ -33,6 +33,20 @@ describe("the menu's gestures", () => {
     expect(gestures.tap(pointer({ button: 2, x: 109 }))).toBeNull();
   });
 
+  test("a quick second right-click, which Babylon raises as a double tap, is a right-click", () => {
+    const gestures = new MenuGestures();
+    gestures.down(pointer({ button: 2 }));
+    expect(gestures.tap(pointer({ button: 2 }))).toBe("right-click");
+    gestures.down(pointer({ button: 2, at: 150 }));
+    expect(gestures.doubleTap(pointer({ button: 2, at: 200 }))).toBe(
+      "right-click",
+    );
+    gestures.down(pointer({ button: 2, at: 400 }));
+    expect(
+      gestures.doubleTap(pointer({ button: 2, x: 120, at: 450 })),
+    ).toBeNull();
+  });
+
   test("a right-click needs its press, and a castle", () => {
     const gestures = new MenuGestures();
     expect(gestures.tap(pointer({ button: 2 }))).toBeNull();

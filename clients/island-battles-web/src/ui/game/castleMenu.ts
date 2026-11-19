@@ -88,6 +88,8 @@ export class CastleMenu {
     null;
   private placed = { left: Number.NaN, top: Number.NaN };
   private readonly removers: (() => void)[] = [];
+  /** Set by `dispose`: an order that settles later shows nothing. */
+  private disposed = false;
 
   constructor(private readonly options: CastleMenuOptions) {
     const id = `gv-cm-${nextMenuId++}`;
@@ -147,6 +149,12 @@ export class CastleMenu {
     });
     this.burstButton.type = "button";
     this.burstButton.addEventListener("click", () => this.orderBurst());
+    // The burst's potential and, when it can't be ordered, why: read with the slider and the button.
+    this.burstSummary.id = `${id}-burst-summary`;
+    this.burstReason.id = `${id}-burst-reason`;
+    const burstDescription = `${this.burstSummary.id} ${this.burstReason.id}`;
+    this.burstSlider.setAttribute("aria-describedby", burstDescription);
+    this.burstButton.setAttribute("aria-describedby", burstDescription);
     const controls = element("div", "gv-cm-burst-controls");
     controls.append(this.burstSlider, this.burstButton);
     burst.append(burstName, this.burstSummary, controls, this.burstReason);
@@ -170,6 +178,11 @@ export class CastleMenu {
     };
     // Captured, so a press reaches the menu before the board's controls act on it.
     const onDown = (event: PointerEvent) => {
+      // A second finger while one is down (a pinch) is no click outside.
+      if (this.outsideDown && this.outsideDown.pointerId !== event.pointerId) {
+        this.outsideDown = null;
+        return;
+      }
       this.outsideDown =
         this.castleId !== null && !root.contains(event.target as Node)
           ? { x: event.clientX, y: event.clientY, pointerId: event.pointerId }
@@ -265,6 +278,7 @@ export class CastleMenu {
   }
 
   dispose(): void {
+    this.disposed = true;
     for (const remove of this.removers.splice(0)) remove();
     this.root.remove();
   }
@@ -316,7 +330,7 @@ export class CastleMenu {
     }
     this.showError(null);
     void result.settled.then((order) => {
-      if (order.state !== "rejected") return;
+      if (order.state !== "rejected" || this.disposed) return;
       const sentence = order.sentence ?? "The server refused the order.";
       if (this.castleId === castleId) this.showError(sentence);
       this.options.showOrderFeedback(sentence, order.id);

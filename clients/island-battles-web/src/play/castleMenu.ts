@@ -123,6 +123,8 @@ export class MenuGestures {
   }
 
   doubleTap(pointer: MenuPointer): MenuOpener | null {
+    // Babylon raises a quick second right-click as a double tap: it is a right-click too.
+    if (pointer.button === 2) return this.tap(pointer);
     const last = this.lastTap;
     this.lastTap = null;
     if (

@@ -240,7 +240,12 @@ export function installBoardControls(
   };
   window.addEventListener("keydown", onKey);
   // The right button belongs to the castle menu (and to panning): no context menu over the board.
-  const noContextMenu = (event: Event) => event.preventDefault();
+  // Only while the hand player plays: a player whose bot plays keeps the browser's menu.
+  const noContextMenu = (event: Event) => {
+    if (options.handPlay?.state.get().status === "playing") {
+      event.preventDefault();
+    }
+  };
   if (options.onCastleMenu) {
     canvas.addEventListener("contextmenu", noContextMenu);
   }
