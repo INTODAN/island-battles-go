@@ -64,7 +64,7 @@ func (fake *fakeServer) stateOf(generationID uint, submitted bool, outcome map[s
 	state := map[string]any{
 		"game_id": 7, "lobby_id": testLobbyID, "lobby_round": 1, "generation_id": generationID, "player_id": testPlayerID,
 		"team_color": 1, "channel": "player:" + testPlayerID, "submitted": submitted, "generation": turn.Generation, "turn_number": generationID, "max_generations": 300,
-		"log_lines_stored": 0, "memory": nil, "bot": map[string]any{"kind": "localhost", "port": 41414}, "relayed_bots": []any{}, "turn_deadline_at": nil,
+		"log_lines_stored": 0, "memory": nil, "bot": map[string]any{"kind": "localhost", "port": 41414}, "relayed_bots": []any{}, "departures": []any{}, "turn_deadline_at": nil,
 		"turn_pace_milliseconds": nil,
 	}
 	if outcome != nil {
@@ -1013,5 +1013,55 @@ func TestLoggerAttributesAndLevels(t *testing.T) {
 	logger.Info("after the turn")
 	if lines, _ := turn.gameLog.batch(true); len(lines) != 3 {
 		t.Fatalf("a line logged after the turn was filed: %v", lines)
+	}
+}
+
+// A real-time game's final state reads with the abandoned reason and the
+// teams that resigned or left (#347); a state without departures is refused.
+func TestStatesCarryTheDepartures(t *testing.T) {
+	server := newFakeServer(t)
+	departures := []any{map[string]any{"team_color": 2, "kind": "resigned", "players": []any{"Sam"}, "turn_number": nil}}
+	state := server.stateOf(2, false, map[string]any{"reason": "abandoned", "winner_team_color": 1,
+		"summary": "Red resigned; the game was abandoned: nobody played for 30 s; Blue wins with the most castles", "departures": departures})
+	data, _ := json.Marshal(state)
+	parsed, err := parseState(data)
+	if err != nil || parsed.Outcome == nil || parsed.Outcome.Reason != Abandoned || len(parsed.Outcome.Departures) != 1 ||
+		parsed.Outcome.Departures[0].Kind != Resigned || parsed.Outcome.Departures[0].TurnNumber != nil {
+		t.Fatalf("an abandoned game's state = %+v, %v", parsed.Outcome, err)
+	}
+	delete(state, "departures")
+	data, _ = json.Marshal(state)
+	if _, err := parseState(data); !errors.Is(err, ErrProtocol) {
+		t.Fatalf("a state without departures: %v", err)
+	}
+}
+
+// A team that resigned or left a real-time game has no more turns: when the
+// server refuses the bot's batch with team-out, the client logs one line and
+// stops without an error, and sends no failure batch.
+func TestClientStopsCleanlyWhenItsTeamIsOut(t *testing.T) {
+	server, realtime := newFakeServer(t), &fakeRealtime{}
+	server.answer = func(writer http.ResponseWriter, _ *http.Request, _ []byte) bool {
+		writeJSON(writer, 409, map[string]any{"type": "urn:island-battles:problem:team-out", "title": "Conflict", "status": 409, "detail": "your team resigned, so it is out of the game"})
+		return true
+	}
+	var console strings.Builder
+	client := testClient(t, server, realtime, func(context.Context, Turn) (Result, error) {
+		return Result{Commands: []Command{}}, nil
+	}, WithLogOutput(&syncWriter{writer: &console}))
+	if _, err := client.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitFor(t, client); err != nil {
+		t.Fatalf("got %v", err)
+	}
+	if batches := server.batchesSent(); len(batches) != 1 {
+		t.Fatalf("got batches %v", batches)
+	}
+	if !strings.Contains(console.String(), "the team is out of the game, so the bot stops: HTTP 409: your team resigned, so it is out of the game") {
+		t.Fatalf("console = %q", console.String())
+	}
+	if !errors.Is(responseError(409, "urn:island-battles:problem:team-out", "out"), ErrTeamOut) {
+		t.Fatal("team-out isn't ErrTeamOut")
 	}
 }

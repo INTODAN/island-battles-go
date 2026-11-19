@@ -41,6 +41,7 @@ from .errors import (
     GameProtocolError,
     GameTransportError,
     StaleGenerationError,
+    TeamOutError,
 )
 from .game_log import (
     SDK_LOGGER,
@@ -662,6 +663,7 @@ class IslandBattlesClient:
                             )
                     except (
                         GameEndedError,
+                        TeamOutError,
                         GameTransportError,
                         GameAuthenticationError,
                         GameClientClosedError,
@@ -691,6 +693,12 @@ class IslandBattlesClient:
                 # ended. Reconciling reads the final state, which queues
                 # on_game_ended, instead of failing the client.
                 self._wakeup.set()
+            except TeamOutError as error:
+                # The team resigned or left a real-time game: it has no more
+                # turns, so the client stops without failing.
+                _sdk_logger.info("the team is out of the game, so the bot stops: %s", error)
+                self._stopped.set()
+                return
             finally:
                 self._game_log = None
                 self._callbacks.task_done()

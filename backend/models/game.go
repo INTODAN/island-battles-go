@@ -31,7 +31,11 @@ type Game struct {
 	// only when a frozen roster player plays by hand (ManualBot). Nil means
 	// the game waits for every player, and TurnTimeoutSeconds applies.
 	TurnPaceMilliseconds *uint `json:"-"`
-	Generations          []Generation
+	// Departures lists the teams that left a real-time game, by resigning or
+	// by going silent, in the order they left. A resignation waits here, with
+	// a nil Turn, for the turn that takes the team out.
+	Departures  []Departure `gorm:"serializer:json;type:jsonb" json:"-"`
+	Generations []Generation
 }
 
 // GameTeam is a team that took part in the battle, with its lobby name and
@@ -59,6 +63,12 @@ const (
 	// standing, the team with the most castles won, and equal castle counts,
 	// or no team left, are a draw.
 	GameOutcomeTurnTimeout GameOutcomeReason = "turn_timeout"
+	// GameOutcomeAbandoned means nobody played a real-time game for its turn
+	// limit, so it ended on its open generation. Among the teams still in it,
+	// leaving out a team whose resignation was waiting for the turn, the team
+	// with the most castles won, and equal castle counts, or no team left,
+	// are a draw.
+	GameOutcomeAbandoned GameOutcomeReason = "abandoned"
 )
 
 // GameOutcome is how a finished game ended.
@@ -74,6 +84,40 @@ type GameOutcome struct {
 	// one of them, or they drew; without any, every team still in the game
 	// timed out, which is a draw.
 	Survivors []uint `json:"survivors,omitempty"`
+	// Departures lists the teams that resigned or left a real-time game, as
+	// Game.Departures had them when it ended. A resignation still waiting for
+	// its turn when the game was abandoned keeps a nil Turn.
+	Departures []Departure `json:"departures,omitempty"`
+	// FinalTurn is the number of the game's last generation when a turn
+	// ended it (playTurn), and 0 for an outcome saved without a turn. It
+	// tells a draw of teams that left in the last turn from one of teams
+	// eliminated.
+	FinalTurn int `json:"final_turn,omitempty"`
+}
+
+// DepartureKind says how a team left a real-time game.
+type DepartureKind string
+
+const (
+	// DepartureResigned means a player of the team resigned.
+	DepartureResigned DepartureKind = "resigned"
+	// DepartureLeft means the server didn't hear from a player of the team
+	// for the game's silence limit.
+	DepartureLeft DepartureKind = "left"
+)
+
+// Departure is a team that left a real-time game. Its castles turned neutral
+// and kept their soldiers, and its soldier groups were removed, in the turn
+// that created generation Turn.
+type Departure struct {
+	Color uint          `json:"color"`
+	Kind  DepartureKind `json:"kind"`
+	// Players are the display names, from the start, of the player who
+	// resigned or of the players who went silent.
+	Players []string `json:"players"`
+	// Turn is the number of the generation in which the team is out, or nil
+	// while a resignation waits for the open turn to play.
+	Turn *int `json:"turn"`
 }
 
 // TimedOutTeam is a team that lost because some of its players didn't

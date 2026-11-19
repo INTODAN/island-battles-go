@@ -30,7 +30,7 @@ func watchState(game *models.Game, generation *models.Generation) (models.WatchS
 		teams = []models.GameTeam{}
 	}
 	return models.WatchState{GameID: game.ID, LobbyID: lobbyID(game), LobbyRound: game.LobbyRound, GenerationID: generation.ID, Channel: channel, Teams: teams,
-		Generation: GenerationView(generation), Outcome: outcomeView(game), TurnDeadlineAt: turnDeadline(game, generation), TurnPaceMilliseconds: game.TurnPaceMilliseconds}, nil
+		Generation: GenerationView(generation), Outcome: outcomeView(game), TurnDeadlineAt: turnDeadline(game, generation), TurnPaceMilliseconds: game.TurnPaceMilliseconds, Departures: departureViews(game.Departures, true)}, nil
 }
 
 // watchEvent is the watch channel's event for a generation, which the turn
@@ -97,7 +97,7 @@ func (service *GenerationService) Watch(ctx context.Context, principal domain.Pr
 	if err != nil {
 		return models.WatchState{}, err
 	}
-	if game, err = service.applyOverdueDeadline(ctx, game); err != nil {
+	if game, err = service.applyOverdueDeadline(ctx, game, principal.PlayerID); err != nil {
 		return models.WatchState{}, err
 	}
 	generation, err := dal.GetLatestGenerationForGame(service.Database.WithContext(ctx), game.ID)
@@ -128,7 +128,7 @@ func (service *GenerationService) WatchReplay(ctx context.Context, principal dom
 	if err != nil {
 		return GameReplay{}, err
 	}
-	if game, err = service.applyOverdueDeadline(ctx, game); err != nil {
+	if game, err = service.applyOverdueDeadline(ctx, game, principal.PlayerID); err != nil {
 		return GameReplay{}, err
 	}
 	generations, err := dal.LoadGameGenerations(service.Database.WithContext(ctx), game.ID)

@@ -283,6 +283,26 @@ function checkDemo(demo: Obj): void {
       count(outcome.winner_team_color, "outcome.winner_team_color", 1);
     }
     string(outcome.summary, "outcome.summary");
+    // A demo saved before departures existed has none: read it as empty.
+    if (outcome.departures === undefined) {
+      outcome.departures = [];
+    }
+    array(outcome.departures, "outcome.departures").forEach((raw, index) => {
+      const path = `outcome.departures[${index}]`;
+      const departure = object(raw, path);
+      count(departure.team_color, `${path}.team_color`, 1);
+      if (departure.kind !== "resigned" && departure.kind !== "left") {
+        throw new Problem(`${path}.kind must be resigned or left`);
+      }
+      array(departure.players, `${path}.players`).forEach(
+        (player, playerIndex) => {
+          string(player, `${path}.players[${playerIndex}]`);
+        },
+      );
+      if (departure.turn_number !== null) {
+        count(departure.turn_number, `${path}.turn_number`, 1);
+      }
+    });
   }
   const frames = array(demo.frames, "frames");
   if (!frames.length) {

@@ -179,7 +179,7 @@ func TestReplayShowsTheRecordedOutcome(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := &models.GameOutcomeView{Reason: test.outcome.Reason, WinnerTeamColor: test.outcome.WinnerTeamColor, Summary: test.text}
+		want := &models.GameOutcomeView{Reason: test.outcome.Reason, WinnerTeamColor: test.outcome.WinnerTeamColor, Summary: test.text, Departures: []models.DepartureView{}}
 		if !reflect.DeepEqual(replay.Outcome, want) {
 			t.Fatalf("outcome %+v shows %+v, want %+v", test.outcome, replay.Outcome, want)
 		}

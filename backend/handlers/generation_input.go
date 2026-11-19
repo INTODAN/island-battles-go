@@ -59,6 +59,25 @@ func (handler *LobbyGame) ApplyTurnDeadline(ctx context.Context, input *struct {
 	return &GenerationStateResponse{Body: state}, nil
 }
 
+// Resign records that the caller's team resigns the lobby's real-time game and
+// answers the caller's state; see services.GenerationService.Resign.
+func (handler *LobbyGame) Resign(ctx context.Context, input *struct {
+	LobbyID       string `path:"lobby_id" format:"uuid"`
+	Authorization string `header:"Authorization"`
+}) (*GenerationStateResponse, error) {
+	defer handler.runRetention(ctx)
+	principal, err := handler.authenticate(ctx, input.Authorization)
+	if err != nil {
+		return nil, err
+	}
+	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher, Bots: handler.Bots}
+	state, err := service.Resign(ctx, principal, input.LobbyID)
+	if err != nil {
+		return nil, generationHTTPError(ctx, err)
+	}
+	return &GenerationStateResponse{Body: state}, nil
+}
+
 func (handler *LobbyGame) RegisterGenerationCommands(ctx context.Context, input *RegisterGenerationCommandsRequest) (*GenerationStateResponse, error) {
 	defer handler.runRetention(ctx)
 	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher, Bots: handler.Bots}

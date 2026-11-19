@@ -14,7 +14,7 @@ function demo() {
     saved_at: "2026-10-31T12:00:00Z",
     game_id: 12,
     teams: [{ color: 1, name: "Blue", players: ["Alex"] }, { color: 2, name: "Red", players: ["Sam"] }],
-    outcome: { reason: "last_team_standing", winner_team_color: 1, summary: "Blue wins as the last team standing" },
+    outcome: { reason: "last_team_standing", winner_team_color: 1, summary: "Blue wins as the last team standing", departures: [] },
     frames: [
       { id: 41, castles: [castle(0, 1, 30, -2), castle(1, 2, 30, 2)], soldier_groups: [], clashes: [] },
       {
@@ -46,6 +46,23 @@ test("a demo opens as it was saved", () => {
   assert.deepEqual(readDemo(JSON.stringify(running), expected), running);
   // Formatting doesn't matter.
   assert.deepEqual(readDemo(JSON.stringify(demo(), null, 2), expected), demo());
+});
+
+test("a version 2 demo saved before departures opens with none", () => {
+  const older = demo();
+  delete older.outcome.departures;
+  assert.deepEqual(readDemo(JSON.stringify(older), expected), demo());
+});
+
+test("a demo names the teams that resigned or left", () => {
+  const resigned = demo();
+  resigned.outcome = { reason: "last_team_standing", winner_team_color: 1, summary: "Red resigned; Blue wins as the last team standing",
+    departures: [{ team_color: 2, kind: "resigned", players: ["Sam"], turn_number: 2 }] };
+  assert.deepEqual(readDemo(JSON.stringify(resigned), expected), resigned);
+  resigned.outcome.departures[0].turn_number = null;
+  assert.deepEqual(readDemo(JSON.stringify(resigned), expected), resigned);
+  resigned.outcome.departures[0].kind = "quit";
+  rejects(resigned, /outcome\.departures\[0\]\.kind must be resigned or left/, "an unknown kind");
 });
 
 test("files that aren't demos are refused plainly", () => {

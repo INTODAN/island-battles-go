@@ -39,6 +39,36 @@ describe("readDemo", () => {
     );
   });
 
+  test("a version 2 demo saved before departures opens with none", () => {
+    const older = sampleDemo();
+    if (!older.outcome) throw new Error("the sample has an outcome");
+    delete older.outcome.departures;
+    expect(readDemo(JSON.stringify(older))).toEqual(sampleDemo());
+  });
+
+  test("a demo names the teams that resigned or left", () => {
+    const resigned = sampleDemo();
+    if (!resigned.outcome) throw new Error("the sample has an outcome");
+    resigned.outcome.summary =
+      "Red resigned; Blue wins as the last team standing";
+    resigned.outcome.departures = [
+      { team_color: 2, kind: "resigned", players: ["Sam"], turn_number: 2 },
+    ];
+    expect(readDemo(JSON.stringify(resigned))).toEqual(resigned);
+    const pending = structuredClone(resigned);
+    if (!pending.outcome?.departures?.[0]) throw new Error("no departure");
+    pending.outcome.departures[0].turn_number = null;
+    expect(readDemo(JSON.stringify(pending))).toEqual(pending);
+    const wrong = structuredClone(resigned);
+    if (!wrong.outcome?.departures?.[0]) throw new Error("no departure");
+    (wrong.outcome.departures[0] as { kind: string }).kind = "quit";
+    rejects(
+      wrong,
+      /outcome\.departures\[0\]\.kind must be resigned or left/,
+      "an unknown kind",
+    );
+  });
+
   test("files that aren't demos are refused plainly", () => {
     const files: Record<string, string> = {
       "empty file": "",

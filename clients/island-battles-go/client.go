@@ -964,6 +964,13 @@ func (client *Client) turnWorker() error {
 			client.signalWakeup()
 			continue
 		}
+		if errors.Is(err, ErrTeamOut) {
+			// The team resigned or left a real-time game: it has no more
+			// turns, so the client stops without an error.
+			client.sdkLog.Info("the team is out of the game, so the bot stops: " + err.Error())
+			client.stop()
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -1023,7 +1030,7 @@ func (client *Client) playTurn(state generationState, stored int) error {
 		}
 		tooSlow = state.TurnPaceMilliseconds != nil && errors.Is(err, ErrStaleGeneration)
 	}
-	if client.isClosed() || errors.Is(err, ErrGameEnded) || errors.Is(err, ErrTransport) || errors.Is(err, ErrAuthentication) || errors.Is(err, ErrClientClosed) {
+	if client.isClosed() || errors.Is(err, ErrGameEnded) || errors.Is(err, ErrTeamOut) || errors.Is(err, ErrTransport) || errors.Is(err, ErrAuthentication) || errors.Is(err, ErrClientClosed) {
 		return err
 	}
 	if tooSlow {

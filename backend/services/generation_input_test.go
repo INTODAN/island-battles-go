@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -356,8 +357,8 @@ func TestGenerationCapEndsTheGame(t *testing.T) {
 	if last.GenerationID == penultimate.GenerationID {
 		t.Fatal("the generation before the cap did not advance")
 	}
-	draw := models.GameOutcomeView{Reason: models.GameOutcomeGenerationCap, Summary: "Draw: equal castle counts at the generation limit"}
-	if penultimate.Outcome != nil || last.Outcome == nil || *last.Outcome != draw {
+	draw := models.GameOutcomeView{Reason: models.GameOutcomeGenerationCap, Summary: "Draw: equal castle counts at the generation limit", Departures: []models.DepartureView{}}
+	if penultimate.Outcome != nil || last.Outcome == nil || !reflect.DeepEqual(*last.Outcome, draw) {
 		t.Fatalf("outcome before the cap = %+v, at the cap = %+v", penultimate.Outcome, last.Outcome)
 	}
 	// The last turn played is max_generations - 1, and it creates the last

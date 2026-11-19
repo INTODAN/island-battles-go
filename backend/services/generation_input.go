@@ -42,6 +42,16 @@ const GameEndedProblemType = "urn:island-battles:problem:game-ended"
 // real-time turn that ended without its batch from other conflicts.
 const StaleGenerationProblemType = "urn:island-battles:problem:stale-generation"
 
+// NotRealTimeProblemType is the problem type of the 409 that refuses a
+// resignation in a game that waits for every player: only a real-time game
+// can be resigned.
+const NotRealTimeProblemType = "urn:island-battles:problem:not-real-time"
+
+// TeamOutProblemType is the problem type of the 409 that refuses a batch, a
+// turn delivery or a resignation of a player whose team resigned or left a
+// real-time game, or, for a resignation, was eliminated.
+const TeamOutProblemType = "urn:island-battles:problem:team-out"
+
 // Problem types of command rejections that clients map to their own errors.
 // send_soldier_group, upgrade_castle and burst_castle share them.
 const (
@@ -126,7 +136,7 @@ func (service *GenerationService) current(ctx context.Context, principal domain.
 			return err
 		}
 		observability.Annotate(ctx, slog.Uint64("generation_id", uint64(generation.ID)))
-		if end, err = endTurn(ctx, transaction, locked, generation, players, service.now(), service.Bots); err != nil {
+		if end, err = endTurn(ctx, transaction, locked, generation, players, principal.PlayerID, service.now(), service.Bots); err != nil {
 			return err
 		}
 		generation = end.generation
@@ -173,6 +183,16 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 	if request.GameID == 0 || request.GenerationID == 0 {
 		return models.GenerationState{}, reject(422, "game_id and generation_id must be positive")
 	}
+	// The game comes first, so that a batch refused for its body still tells
+	// the server that its player is there (markSeen).
+	database := service.Database.WithContext(ctx)
+	game, err := dal.FindGame(database, request.GameID)
+	if err != nil {
+		return models.GenerationState{}, err
+	}
+	if err = service.authorize(ctx, principal, game); err != nil {
+		return models.GenerationState{}, err
+	}
 	identifier, err := uuid.Parse(request.RequestID)
 	if err != nil {
 		return models.GenerationState{}, reject(422, "request_id must be a UUID")
@@ -192,14 +212,6 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 	payloadHash, err := commandPayloadHash(request)
 	if err != nil {
 		return models.GenerationState{}, reject(422, "invalid command parameters")
-	}
-	database := service.Database.WithContext(ctx)
-	game, err := dal.FindGame(database, request.GameID)
-	if err != nil {
-		return models.GenerationState{}, err
-	}
-	if err = service.authorize(ctx, principal, game); err != nil {
-		return models.GenerationState{}, err
 	}
 	if game.Outcome == nil {
 		if _, err = service.playGoBotTurns(ctx, game.ID, goBotWriteBudget); err != nil {
@@ -236,7 +248,7 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 		}
 		// The overdue turn ends first: a real-time game plays it, and a game
 		// that waits for every player times out. Then the batch is judged.
-		if end, err = endTurn(ctx, transaction, locked, generation, players, service.now(), service.Bots); err != nil {
+		if end, err = endTurn(ctx, transaction, locked, generation, players, principal.PlayerID, service.now(), service.Bots); err != nil {
 			return err
 		}
 		generation = end.generation
@@ -273,6 +285,10 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 		// generation the batch names.
 		if end.played || generation.ID != request.GenerationID {
 			return rejectAfterDeadline(staleGeneration(locked))
+		}
+		// A team that resigned or left plays no more commands.
+		if departure := teamDeparture(locked, player.TeamColor); departure != nil {
+			return rejectAfterDeadline(teamOut(locked, *departure))
 		}
 		input := models.GenerationInput{GenerationID: generation.ID, PlayerID: principal.PlayerID, Commands: []byte("[]")}
 		for _, candidate := range inputs {
@@ -323,7 +339,7 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 			return err
 		}
 		if turnComplete(locked, generation, players, inputs) {
-			if generation, inputs, events, turns, err = playTurn(ctx, transaction, locked, players, inputs, service.Bots); err != nil {
+			if generation, inputs, events, turns, err = playTurn(ctx, transaction, locked, players, inputs, service.now(), service.Bots); err != nil {
 				return err
 			}
 			// When only Go bots are left to play, they play on after this
@@ -434,7 +450,7 @@ func generationState(game *models.Game, generation *models.Generation, players [
 	}
 	state := models.GenerationState{GameID: game.ID, LobbyID: *game.LobbyID, LobbyRound: game.LobbyRound, GenerationID: generation.ID, PlayerID: player.PlayerID, TeamColor: player.TeamColor, Channel: channel,
 		Generation: GenerationView(generation), TurnNumber: generation.Number, MaxGenerations: game.MaxGenerations, Outcome: outcomeView(game), Memory: memory, TurnDeadlineAt: turnDeadline(game, generation), TurnPaceMilliseconds: game.TurnPaceMilliseconds, Bot: models.FrozenBot(player),
-		RelayedBots: models.RelayedBots(players, player.PlayerID)}
+		RelayedBots: models.RelayedBots(players, player.PlayerID), Departures: departureViews(game.Departures, true)}
 	for _, input := range inputs {
 		if input.PlayerID == player.PlayerID {
 			state.Submitted = input.Completed

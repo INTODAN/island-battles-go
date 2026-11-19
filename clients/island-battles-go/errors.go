@@ -63,6 +63,11 @@ var (
 	// line, reads the new state and plays on. In a game that waits for every
 	// player the Client stops on it, as on any other rejection.
 	ErrStaleGeneration = fmt.Errorf("stale generation: %w", ErrRejected)
+	// ErrTeamOut: the server refused a batch because the player's team
+	// resigned or left a real-time game, so it has no more turns to play.
+	// It wraps ErrRejected. The Client handles it itself: it logs that the
+	// team is out and stops without an error.
+	ErrTeamOut = fmt.Errorf("team out of the game: %w", ErrRejected)
 )
 
 // problemKinds are the server's problem types that the client tells apart:
@@ -70,6 +75,7 @@ var (
 // generation, the game log limit and the bot memory limit.
 var problemKinds = map[string]error{
 	"urn:island-battles:problem:game-ended":            ErrGameEnded,
+	"urn:island-battles:problem:team-out":              ErrTeamOut,
 	"urn:island-battles:problem:stale-generation":      ErrStaleGeneration,
 	"urn:island-battles:problem:castle-not-found":      ErrCastleNotFound,
 	"urn:island-battles:problem:castle-not-owned":      ErrCastleNotOwned,

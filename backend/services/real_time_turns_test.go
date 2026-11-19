@@ -271,8 +271,9 @@ func TestAManualPlayerWhoSendsNothingStaysInTheGame(t *testing.T) {
 	game := startClockGame(t, `{"turn_timeout_seconds":5}`, services.ServerBot{Manual: true}, services.ServerBot{Level: 2})
 	manual := game.players[0]
 	for turn := range 10 {
-		// Far past the turn limit: one request still plays one turn.
-		*game.clock = game.turnEnd(t).Add(time.Minute)
+		// At each turn's end the client's deadline call plays the turn. It
+		// sends no command, and isn't silent: it calls.
+		*game.clock = game.turnEnd(t)
 		state := game.applyDeadline(t, manual)
 		if state.TurnNumber != turn+2 || state.Outcome != nil {
 			t.Fatalf("turn %d: state %+v", turn, state)

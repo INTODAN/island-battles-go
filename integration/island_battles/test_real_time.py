@@ -100,3 +100,27 @@ async def test_a_real_time_game_plays_each_turn_at_its_pace(guests):
             assert response.status_code == 200, response.text
             state = response.json()
             assert state["turn_number"] == previous + 1 and state.get("outcome") is None, state
+
+
+async def test_a_hand_player_resigns_against_a_bot(guests):
+    """A hand player resigns against a default bot (#347): the bot has played
+    the turn already, so it plays in the resign request itself, the game ends
+    and the lobby reopens for another game."""
+    alice, _, scope = await started_lobby(
+        guests, "island-battles", {}, bots=({"kind": "manual"}, {"kind": "default", "level": 2}))
+    async with httpx.AsyncClient(base_url=GAME, headers=await game_auth(alice)) as http:
+        response = await http.post(f"/game/from-lobby/{scope.lobby_id}/resign")
+        assert response.status_code == 200, response.text
+        state = response.json()
+        outcome = state.get("outcome")
+        assert outcome is not None and outcome["reason"] == "last_team_standing", state
+        assert outcome["summary"].startswith("Team 1 resigned; ") or " resigned; " in outcome["summary"], outcome
+        assert [departure["kind"] for departure in outcome["departures"]] == ["resigned"], outcome
+        assert outcome["departures"][0]["team_color"] == state["team_color"]
+        assert state["departures"] == outcome["departures"]
+
+        response = await http.post(f"/game/from-lobby/{scope.lobby_id}/resign")
+        assert response.status_code == 409, response.text
+        assert response.json()["type"] == "urn:island-battles:problem:game-ended", response.text
+    reopened = await alice.reopen(scope)
+    assert reopened.lobby.phase == "waiting" and reopened.lobby.round_ == 2

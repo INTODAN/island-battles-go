@@ -198,7 +198,7 @@ func TestTheIncompletePlayersTeamLosesAtTheDeadline(t *testing.T) {
 	pushed := len(fixture.publisher.Publications())
 
 	state := fixture.applyDeadline(t, alex)
-	want := models.GameOutcomeView{Reason: models.GameOutcomeTurnTimeout, WinnerTeamColor: colour(1), Summary: "Red lost: Sam's bot didn't answer within 30 s; Blue wins"}
+	want := models.GameOutcomeView{Reason: models.GameOutcomeTurnTimeout, WinnerTeamColor: colour(1), Summary: "Red lost: Sam's bot didn't answer within 30 s; Blue wins", Departures: []models.DepartureView{}}
 	if !reflect.DeepEqual(state.Outcome, &want) || state.GenerationID != first.GenerationID || !state.Submitted || state.TurnDeadlineAt != nil {
 		t.Fatalf("state after the deadline = %+v, outcome %+v", state, state.Outcome)
 	}

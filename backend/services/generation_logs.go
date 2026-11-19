@@ -118,7 +118,7 @@ func (service *GenerationService) WatchLogs(ctx context.Context, principal domai
 func (service *GenerationService) logs(ctx context.Context, game *models.Game, generationID uint, callerID string) (models.GenerationLogs, error) {
 	database := service.Database.WithContext(ctx)
 	observability.Annotate(ctx, slog.Uint64("generation_id", uint64(generationID)))
-	game, err := service.applyOverdueDeadline(ctx, game)
+	game, err := service.applyOverdueDeadline(ctx, game, callerID)
 	if err != nil {
 		return models.GenerationLogs{}, err
 	}
