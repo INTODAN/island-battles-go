@@ -316,6 +316,16 @@ describe("the amount", () => {
     ).toEqual(ALL);
   });
 
+  test("Backspace with nothing typed leaves the amount as it is", () => {
+    expect(run([...startDrag, key("Backspace")]).state.amount).toEqual(ALL);
+    expect(
+      run([...startDrag, key("a"), key("Backspace")]).state.amount,
+    ).toEqual(HALF);
+    expect(
+      run([...startDrag, key("s"), key("Backspace")]).state.amount,
+    ).toMatchObject({ kind: "exact", soldiers: 22 });
+  });
+
   test("d is all, a is half", () => {
     expect(run([...startDrag, key("7"), key("d")]).state.amount).toEqual(ALL);
     expect(run([...startDrag, key("A")]).state.amount).toEqual(HALF);

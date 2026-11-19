@@ -452,9 +452,18 @@ export function installDragControls(
   // On the window in the capture phase, so they run before Babylon's own listeners on the canvas
   // make up a release for the same cancel.
   const onCancel = (event: Event) => {
-    if (event.type === "blur") touches.clear();
-    if (event instanceof PointerEvent && event.pointerType === "touch") {
-      touches.delete(event.pointerId);
+    // A blur is heard from every element on the page; only the window's own means the page lost
+    // the focus, and fingers may still be down for any other.
+    if (event.type === "blur") {
+      if (event.target !== window) return;
+      touches.clear();
+    }
+    if (event instanceof PointerEvent) {
+      if (event.pointerType === "touch") touches.delete(event.pointerId);
+      // Another pointer's cancel (a second finger on the amount bar) leaves the drag alone.
+      if (event.type === "pointercancel" && event.pointerId !== state.held) {
+        return;
+      }
     }
     if (event.type === "visibilitychange" && !document.hidden) return;
     if (
