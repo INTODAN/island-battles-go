@@ -84,5 +84,7 @@ async def test_a_localhost_bot_plays_a_default_level_to_the_end(guests):
             headers={"Authorization": f"Bearer {bob.credential}"},
         )
         assert (late.status_code, late.json()["code"]) == (409, "phase_conflict"), late.text
-    assert [state["bot"] for state in states] == [{"kind": "localhost"}, {"kind": "default", "level": 2}]
+    # A localhost bot's state names the port its client delivers to, 41414
+    # unless the player chose another.
+    assert [state["bot"] for state in states] == [{"kind": "localhost", "port": 41414}, {"kind": "default", "level": 2}]
     assert all(state["outcome"] is not None for state in states)
