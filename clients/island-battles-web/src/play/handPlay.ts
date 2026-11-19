@@ -82,14 +82,18 @@ export interface PlayTurn {
 /** What hand play shows: `HandPlay.state`. */
 export interface PlayState {
   status: PlayStatus;
-  /** Your team, or null with no game. */
+  /**
+   * Your team, or null with no game. Like `castles` and `turn`, it only means something while
+   * `status` isn't `idle`: a player who doesn't play by hand has them filled but makes no request.
+   */
   teamColor: number | null;
-  /** The open turn, or null with no game. */
+  /** The open turn, or null with no game. Only meaningful while `status` isn't `idle`. */
   turn: PlayTurn | null;
   /**
    * Your castles in the open generation, by castle ID, counting the orders of this turn that the
    * server accepted and those still being sent: a castle is here exactly while your team owns it.
-   * `soldiers` is the server's count, not the animated board's.
+   * `soldiers` is the server's count, not the animated board's. Only meaningful while `status`
+   * isn't `idle`.
    */
   castles: Ledger;
   /**
@@ -146,7 +150,10 @@ export interface HandPlayDeps {
   newRequestId(): string;
   /** How long a request may take before it counts as unanswered. Default 2000. */
   requestTimeoutMs?: number;
-  /** How long an order is sent again after failures without an answer. Default 5000. */
+  /**
+   * How long an order may be tried, from its first attempt: it is not sent again if the retry delay
+   * plus `requestTimeoutMs` for the new attempt could run past this. Default 5000.
+   */
   orderBudgetMs?: number;
 }
 
@@ -166,7 +173,9 @@ export interface HandPlay {
   /**
    * Orders a burst of one of your castles: it adds `amount` soldiers in the next generation and
    * owes them back from its production. It takes no soldiers now, so `{share}` is of the castle's
-   * burst potential (`{share: 1}` is the largest burst).
+   * burst potential (`{share: 1}` is the largest burst). While `GET /game/upgrades` hasn't loaded
+   * (`PlayState.upgrades` is null) the potential is unknown, so a `{share}` is refused with
+   * `upgrades-not-loaded`; an exact amount is let through and the server checks it.
    */
   burst(castleId: number, amount: Amount): OrderResult;
   /**
@@ -174,9 +183,17 @@ export interface HandPlay {
    * with the soldiers resolved. For disabled controls and their reasons.
    */
   check(spec: OrderSpec): CheckResult;
-  /** Calls `listener` once for every order when it is accepted or rejected. Returns the unsubscribe. */
+  /**
+   * Calls `listener` once for every order when it is accepted or rejected. Returns the
+   * unsubscribe. After `dispose()` no listener is called, not even for the orders that `dispose()`
+   * drops (their `settled` promises still resolve, as `rejected`).
+   */
   onSettled(listener: (order: PlayOrder) => void): () => void;
-  /** Stops: no more requests or timers; the orders not settled yet settle as rejected. */
+  /**
+   * Stops: no more requests or timers; the orders not settled yet settle as rejected, which
+   * resolves their `settled` promises but calls no `onSettled` listener. `state` keeps its last
+   * value (orders still `sending` stay so): nothing is published after `dispose()`.
+   */
   dispose(): void;
 }
 
@@ -539,9 +556,10 @@ export function createHandPlay(deps: HandPlayDeps): HandPlay {
         return;
       }
       const delay = retryDelay(entry.attempt++);
-      if (deps.now() + delay - entry.started > budgetMs) {
-        // The server didn't answer for the order's whole budget: the orders behind it would go
-        // out many seconds late, against a board the player no longer sees.
+      if (deps.now() + delay + timeoutMs - entry.started > budgetMs) {
+        // Another attempt could run past the order's budget (its retry delay and its own
+        // timeout both count): the orders behind it would go out many seconds late, against a
+        // board the player no longer sees.
         inflight = null;
         settle(entry, "rejected", noAnswerSentence);
         rejectQueued(noAnswerSentence);
@@ -604,10 +622,12 @@ export function createHandPlay(deps: HandPlayDeps): HandPlay {
     const again = () => {
       entry.reading = false;
       const delay = retryDelay(entry.attempt++);
-      if (deps.now() + delay - entry.started > budgetMs) {
+      if (deps.now() + delay + timeoutMs - entry.started > budgetMs) {
+        // As a transport failure does: the orders behind it would go out just as late.
         inflight = null;
         settle(entry, "rejected", lateSentence);
-        pump();
+        rejectQueued(lateSentence);
+        publish();
         return;
       }
       entry.cancel = deps.schedule(() => {
@@ -877,6 +897,14 @@ export function createHandPlay(deps: HandPlayDeps): HandPlay {
       shown = [];
       accepted = { key, orders: [] };
       newTurn(state);
+    } else if (state.outcome && turn?.endsAt != null) {
+      // The game ended on the open generation (a turn timeout, an abandoned game): no turn ends
+      // after this, so the pace bar has nothing to count down to.
+      turn = { ...turn, endsAt: null, startsAt: null };
+      if (clock) {
+        clock.timer?.();
+        delete clock.timer;
+      }
     }
     if (statusOf(state) !== "playing") {
       rejectQueued(statusSentence());
