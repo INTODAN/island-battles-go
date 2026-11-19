@@ -897,31 +897,73 @@ describe("a watcher's lag (#361)", () => {
     });
   }
 
-  for (const turns of [5, 7, 9]) {
-    test(`${turns} turns that arrive together after a ${turns} s stall play at no more than 2x the pace, and don't run dry`, () => {
-      // A reconnect: turn 20 comes `turns` seconds late, and the next ones with it.
-      const run = live(
-        (index) =>
-          index === 20
-            ? turns * 1000
-            : index > 20 && index < 20 + turns
-              ? 0
-              : 1000,
-        80_000,
-      );
-      const from = 500 + (19 + turns) * 1000;
-      // The turns that arrived together don't collapse the turn length the catch-up doubles.
-      expect(fastest(run, from, 1000)).toBeLessThan(2.1);
-      expect(Math.max(...run.speeds)).toBeLessThanOrEqual(2);
-      // The board doesn't overshoot into its buffer, and gives the lag back.
-      for (const lag of lagsFrom(run, from + 100)) {
-        expect(lag).toBeGreaterThan(buffer - 0.1);
-      }
-      for (const lag of lagsFromTurn(run, 20 + turns + 22)) {
-        expect(lag).toBeLessThan(buffer + 0.15);
-      }
-    });
+  // A game that waits for its bots (no pace, 1 s gaps), and real-time games whose pace the view
+  // gives the player.
+  for (const [pace, given] of [
+    [1000, false],
+    [500, true],
+    [1000, true],
+    [2000, true],
+  ] as const) {
+    for (const turns of [5, 7, 9]) {
+      test(`${turns} turns that arrive together after a ${turns}-turn stall at ${pace} ms${given ? " with the pace" : ""} play at no more than 2x the pace`, () => {
+        // A reconnect: turn 20 comes `turns` turns late, and the next ones with it.
+        const run = live(
+          (index) =>
+            index === 20
+              ? turns * pace
+              : index > 20 && index < 20 + turns
+                ? 0
+                : pace,
+          (60 + turns) * pace,
+          given ? { paceMs: pace } : {},
+        );
+        const from = 500 + (19 + turns) * pace;
+        // The turns that arrived together don't make the catch-up faster than twice the pace.
+        expect(fastest(run, from, pace)).toBeLessThan(2.1);
+        expect(Math.max(...run.speeds)).toBeLessThanOrEqual(2);
+        // At 1 s, the board doesn't overshoot into its buffer, and gives the lag back.
+        if (pace === 1000) {
+          for (const lag of lagsFrom(run, from + 100)) {
+            expect(lag).toBeGreaterThan(buffer - 0.1);
+          }
+          for (const lag of lagsFromTurn(run, 20 + turns + 22)) {
+            expect(lag).toBeLessThan(buffer + 0.15);
+          }
+        }
+      });
+    }
   }
+
+  test("a hand player who reaches live with a turn queued doesn't replay at 4x once out", () => {
+    // Played to the newest turn (one queued as following starts), then out while hidden 9.5 s.
+    const stage = new PositionStage();
+    let now = 0;
+    const player = new TurnPlayer(stage, {
+      now: () => now,
+      liveTiming: PLAYING,
+    });
+    player.setLivePace(1000);
+    player.seek(long[0] as Generation);
+    player.play(long[0] as Generation, long[1] as Generation);
+    player.setLive(true);
+    let next = 1;
+    const speeds: number[] = [];
+    for (; now < 60_000; now += FRAME_MS) {
+      if (now >= 500 + next * 1000) {
+        player.play(long[next] as Generation, long[next + 1] as Generation);
+        next++;
+      }
+      if (now >= 24_000 && player.liveTiming !== WATCHING) {
+        player.setLiveTiming(WATCHING);
+      }
+      if (now >= 20_000 && now < 29_500) continue;
+      player.tick(FRAME_MS);
+      if (now >= 29_500) speeds.push(player.catchUpSpeed);
+    }
+    expect(Math.max(...speeds)).toBeGreaterThan(1.9);
+    expect(Math.max(...speeds)).toBeLessThanOrEqual(2);
+  });
 
   test("a turn 3 s late in a real-time game counts as half a turn more than usual", () => {
     // Turn 21 comes 3 s late at a 1 s pace; the view gives a watcher the game's pace.

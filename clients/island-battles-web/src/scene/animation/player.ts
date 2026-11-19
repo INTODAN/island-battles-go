@@ -298,7 +298,9 @@ export class TurnPlayer {
     this.arrivalGap = null;
     this.arrivalSpread = 0;
     this.paced = 0;
-    this.replaying = live && this.queue.length > 0;
+    // Only a watcher's board replays: a hand player's catches up by its own rule.
+    this.replaying =
+      live && this.queue.length > 0 && this.timing.follows === "arrivals";
     this.seededPace = this.knownPace();
     this.liveTurnMs =
       this.seededPace ?? clamp(this.turnMs, MIN_LIVE_TURN_MS, MAX_LIVE_TURN_MS);
@@ -314,6 +316,8 @@ export class TurnPlayer {
       // (a hidden tab): keep at most one, as after a skip.
       this.paced = Math.min(this.paced, 1);
     }
+    // A replay belongs to the timing it started in.
+    if (timing.follows !== this.timing.follows) this.replaying = false;
     this.timing = timing;
     this.seedPace();
   }
@@ -503,14 +507,21 @@ export class TurnPlayer {
       const beyond = backlog - expected - spread;
       // A lag beyond the target, in time, over the time it should take to give back.
       const lag = (beyond * this.liveTurnMs) / ARRIVALS_GIVE_BACK_MS;
+      // A lag of the board's own plays at no more than twice the pace: twice the turn's length,
+      // or with the game's pace known, twice the pace, so turns that arrived together and
+      // shortened the turn don't make it faster.
+      const pace = this.gamePace();
+      const own =
+        ARRIVALS_MAX_CATCH_UP_SPEED *
+        (pace === null ? 1 : Math.min(1, this.liveTurnMs / pace));
       // A replay ends once it is down to what a lag of the board's own may play.
-      if (1 + lag <= ARRIVALS_MAX_CATCH_UP_SPEED) this.replaying = false;
+      if (1 + lag <= own) this.replaying = false;
       return clamp(
         1 + lag,
         slowest,
         this.replaying
           ? this.maxCatchUpSpeed
-          : Math.min(ARRIVALS_MAX_CATCH_UP_SPEED, this.maxCatchUpSpeed),
+          : Math.min(own, this.maxCatchUpSpeed),
       );
     }
     return clamp(
