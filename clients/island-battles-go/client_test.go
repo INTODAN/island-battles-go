@@ -63,7 +63,7 @@ func (fake *fakeServer) stateOf(generationID uint, submitted bool, outcome map[s
 	state := map[string]any{
 		"game_id": 7, "lobby_id": testLobbyID, "lobby_round": 1, "generation_id": generationID, "player_id": testPlayerID,
 		"team_color": 1, "channel": "player:" + testPlayerID, "submitted": submitted, "generation": turn.Generation, "turn_number": generationID, "max_generations": 300,
-		"log_lines_stored": 0, "memory": nil, "bot": map[string]any{"kind": "localhost", "port": 41414}, "relayed_bots": []any{}, "turn_deadline_at": nil,
+		"log_lines_stored": 0, "memory": nil, "bot": map[string]any{"kind": "localhost", "port": 41414}, "relayed_bots": []any{}, "departures": []any{}, "turn_deadline_at": nil,
 		"turn_pace_milliseconds": nil,
 	}
 	if outcome != nil {
