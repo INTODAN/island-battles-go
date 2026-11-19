@@ -85,7 +85,16 @@ function installGlobals(canvas: object) {
   ]) {
     globals[name] = class {};
   }
-  const tooltip = { hidden: true, className: "", remove() {} };
+  const tooltip = {
+    hidden: true,
+    className: "",
+    style: {},
+    offsetWidth: 100,
+    offsetHeight: 40,
+    textContent: "",
+    replaceChildren() {},
+    remove() {},
+  };
   globals.document = {
     hidden: false,
     elementFromPoint: () => canvas,
@@ -174,12 +183,18 @@ function setup(options: BoardOptions = {}) {
   const castles = Object.entries(CASTLES).map(([id, world]) => ({
     id: Number(id),
     ...toMap(world),
+    // What a castle's tooltip reads.
+    team_color: 1,
+    soldiers: 10,
+    upgrades: {},
+    burst_debt: 0,
   }));
   const overlayColors: string[] = [];
   const field = {
     scene,
     camera,
     bounds: { halfWidth: 6, halfDepth: 4 },
+    teams: [{ color: 1, name: "Blue" }],
     generation: { id: 10, castles },
     castles: new Map(
       castles.map((castle) => [
@@ -530,7 +545,7 @@ describe("a second finger", () => {
     board.pointer(POINTERDOWN, {
       ...touch,
       pointerId: 6,
-      ...at(origin, 300, 200),
+      ...at(board.at(2)),
     });
     expect(board.drawn()).toEqual([]);
     expect(board.held()).toBeNull();
@@ -676,11 +691,11 @@ describe("the cancel listener", () => {
 
 describe("the tap and double tap that a drag took", () => {
   /** A tap on your castle, as Babylon raises it after a press and release. */
-  function tapOnCastle(board: Board) {
+  function tapOnCastle(board: Board, pointerType = "mouse") {
     const castle = board.at(MINE);
     board.scene.pointerX = castle.x;
     board.scene.pointerY = castle.y;
-    board.pointer(POINTERTAP, { ...at(castle), buttons: 0 });
+    board.pointer(POINTERTAP, { ...at(castle), pointerType, buttons: 0 });
   }
   function doubleTapOnCastle(board: Board) {
     const castle = board.at(MINE);
@@ -704,13 +719,12 @@ describe("the tap and double tap that a drag took", () => {
     expect(board.menus).toEqual([MINE]);
   });
 
-  test("a tap that follows a drag opens no menu, and starts no double tap", () => {
+  test("a finger's tap that follows a drag is no second tap of a double tap", () => {
     const board = setup({ board: true });
-    tapOnCastle(board);
+    tapOnCastle(board, "touch");
     cancelledDrag(board);
-    // Would be a touch's double tap, or a click's, on the castle just tapped.
-    tapOnCastle(board);
-    doubleTapOnCastle(board);
+    // Without the guard this is a second tap on the castle just tapped, within 450 ms.
+    tapOnCastle(board, "touch");
     expect(board.menus).toEqual([]);
   });
 
