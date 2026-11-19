@@ -88,6 +88,11 @@ type GameOutcome struct {
 	// Game.Departures had them when it ended. A resignation still waiting for
 	// its turn when the game was abandoned keeps a nil Turn.
 	Departures []Departure `json:"departures,omitempty"`
+	// FinalTurn is the number of the game's last generation when a turn
+	// ended it (playTurn), and 0 for an outcome saved without a turn. It
+	// tells a draw of teams that left in the last turn from one of teams
+	// eliminated.
+	FinalTurn int `json:"final_turn,omitempty"`
 }
 
 // DepartureKind says how a team left a real-time game.

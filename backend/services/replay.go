@@ -83,8 +83,11 @@ func describeOutcome(game *models.Game) string {
 	for _, departure := range outcome.Departures {
 		clauses = append(clauses, describeDeparture(game, departure))
 	}
-	if len(clauses) > 0 && outcome.Reason == models.GameOutcomeAbandoned {
-		result = "t" + strings.TrimPrefix(result, "T")
+	// After a departure the result continues the sentence: "Red resigned;
+	// the game was abandoned: …", "Red resigned; draw: no team is left". A
+	// winner's team name keeps its capital.
+	if len(clauses) > 0 && (strings.HasPrefix(result, "The game") || strings.HasPrefix(result, "Draw")) {
+		result = strings.ToLower(result[:1]) + result[1:]
 	}
 	return strings.Join(append(clauses, result), "; ")
 }
@@ -96,7 +99,7 @@ func describeResult(game *models.Game) string {
 	// Without a winner the game is a draw, whatever its reason.
 	if outcome.WinnerTeamColor == nil {
 		switch {
-		case outcome.Reason == models.GameOutcomeAllEliminated && len(outcome.Departures) > 0:
+		case outcome.Reason == models.GameOutcomeAllEliminated && leftInFinalTurn(outcome):
 			return "Draw: no team is left"
 		case outcome.Reason == models.GameOutcomeAllEliminated:
 			return "Draw: the last teams were eliminated in the same turn"
@@ -113,6 +116,17 @@ func describeResult(game *models.Game) string {
 		return winner + " wins with the most castles at the generation limit"
 	}
 	return winner + " wins"
+}
+
+// leftInFinalTurn reports whether a team resigned or left in the turn that
+// ended the game, so that "eliminated" wouldn't say how the last teams went.
+func leftInFinalTurn(outcome *models.GameOutcome) bool {
+	for _, departure := range outcome.Departures {
+		if departure.Turn != nil && *departure.Turn == outcome.FinalTurn {
+			return true
+		}
+	}
+	return false
 }
 
 // describeAbandonedOutcome sums up a real-time game that nobody played for its

@@ -311,7 +311,7 @@ func playTurn(ctx context.Context, transaction *gorm.DB, game *models.Game, play
 	}
 	// A game that ends keeps this generation as its last one.
 	if outcome := simulation.Outcome(board, game.Teams, generation.Number >= game.MaxGenerations); outcome != nil {
-		outcome.Departures = slices.Clone(game.Departures)
+		outcome.Departures, outcome.FinalTurn = slices.Clone(game.Departures), generation.Number
 		if err := dal.SaveGameOutcome(transaction, game, *outcome); err != nil {
 			return nil, nil, nil, nil, err
 		}

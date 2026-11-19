@@ -284,8 +284,42 @@ func TestBothTeamsResigningInOneTurnIsADraw(t *testing.T) {
 	game.resign(t, game.players[0])
 	state := game.resign(t, game.players[1])
 	if state.Outcome == nil || state.Outcome.Reason != models.GameOutcomeAllEliminated || state.Outcome.WinnerTeamColor != nil ||
-		state.Outcome.Summary != "Blue resigned; Red resigned; Draw: no team is left" {
+		state.Outcome.Summary != "Blue resigned; Red resigned; draw: no team is left" {
 		t.Fatalf("outcome = %+v", state.Outcome)
+	}
+}
+
+// A team that resigned and keeps calling, and a team that went silent, leave
+// in the same turn: a draw, not an abandoned game, since the server still
+// heard from the team that resigned.
+func TestAResigningTeamAndASilentTeamLeaveTogether(t *testing.T) {
+	game := startClockGame(t, `{"turn_timeout_seconds":10}`, services.ServerBot{Manual: true}, services.ServerBot{Manual: true})
+	redPlayer := game.players[1]
+	started := game.open(t).CreatedAt
+	for game.turnEnd(t).Add(time.Second).Sub(started) <= 10*time.Second {
+		game.toTurnEnd(t, redPlayer)
+	}
+	game.resign(t, redPlayer)
+	state := game.toTurnEnd(t, redPlayer)
+	want := "Red resigned; Blue left the game: Player 1 didn't respond for 10 s; draw: no team is left"
+	if state.Outcome == nil || state.Outcome.Reason != models.GameOutcomeAllEliminated || state.Outcome.Summary != want {
+		t.Fatalf("outcome = %+v, want %q", state.Outcome, want)
+	}
+}
+
+// When a team resigned earlier and the last two teams are eliminated later
+// in the same turn, the draw says so, as without the resignation.
+func TestAnEarlierResignationDoesNotChangeHowTheLastTeamsWent(t *testing.T) {
+	game := startClockGame(t, ``, services.ServerBot{Manual: true}, services.ServerBot{Manual: true}, services.ServerBot{Manual: true})
+	bluePlayer := game.players[0]
+	game.resign(t, game.players[1])
+	game.toTurnEnd(t, bluePlayer)
+	setCastles(t, game, blue, "TeamColor", models.NeutralTeamColor)
+	setCastles(t, game, green, "TeamColor", models.NeutralTeamColor)
+	state := game.toTurnEnd(t, bluePlayer)
+	want := "Red resigned; draw: the last teams were eliminated in the same turn"
+	if state.Outcome == nil || state.Outcome.Reason != models.GameOutcomeAllEliminated || state.Outcome.Summary != want {
+		t.Fatalf("outcome = %+v, want %q", state.Outcome, want)
 	}
 }
 
