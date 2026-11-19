@@ -501,8 +501,13 @@ interface LiveRun {
   hidden?: readonly [number, number];
   /** Switches the timing at this time, in ms. */
   switchTo?: { at: number; timing: LiveTiming };
-  /** The game's turn pace, given to the player (`setLivePace`), as the game view does. */
+  /**
+   * The game's turn pace, given to the player (`setLivePace`) before following and again at
+   * every arrival, as the game view does at every change of the view.
+   */
   paceMs?: number;
+  /** Gives the pace only once, before following. */
+  paceOnce?: boolean;
   /** Jumps to the newest turn at this time, in ms, as Return to live does after a scrub back. */
   jumpAt?: number;
 }
@@ -544,6 +549,9 @@ function live(gap: (index: number) => number, ms: number, run: LiveRun = {}) {
         lag: player.waiting + (player.busy ? 1 - (player.progress ?? 0) : 0),
       });
       player.play(long[next] as Generation, long[next + 1] as Generation);
+      if (run.paceMs !== undefined && !run.paceOnce) {
+        player.setLivePace(run.paceMs);
+      }
       next++;
       arrival += gap(next);
     }
@@ -818,6 +826,21 @@ describe("a hand player's timing with the game's pace (#345)", () => {
       timing: PLAYING,
     });
     expect(Math.max(...lagsFromTurn(run, 23))).toBeGreaterThan(0.3);
+  });
+
+  test("the pace given at every arrival or once gives the same board", () => {
+    for (const ratio of [1.04, 1.3, 0.7]) {
+      const every = live(() => ratio * 1000, 120_000, {
+        timing: PLAYING,
+        paceMs: 1000,
+      });
+      const once = live(() => ratio * 1000, 120_000, {
+        timing: PLAYING,
+        paceMs: 1000,
+        paceOnce: true,
+      });
+      expect(every.trace).toEqual(once.trace);
+    }
   });
 
   test("the pace changes nothing for a watcher", () => {

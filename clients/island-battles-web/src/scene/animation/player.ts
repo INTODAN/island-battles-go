@@ -171,6 +171,8 @@ export class TurnPlayer {
   private timing: LiveTiming;
   /** The game's turn pace, when the server keeps one (`setLivePace`). */
   private livePaceMs: number | null = null;
+  /** The pace the turn length was last seeded with (`seedPace`), so a repeat doesn't reseed it. */
+  private seededPace: number | null = null;
 
   constructor(
     private readonly stage: Stage,
@@ -250,9 +252,9 @@ export class TurnPlayer {
     this.burst = 1;
     this.arrivalGap = null;
     this.paced = 0;
+    this.seededPace = this.knownPace();
     this.liveTurnMs =
-      this.knownPace() ??
-      clamp(this.turnMs, MIN_LIVE_TURN_MS, MAX_LIVE_TURN_MS);
+      this.seededPace ?? clamp(this.turnMs, MIN_LIVE_TURN_MS, MAX_LIVE_TURN_MS);
   }
 
   /**
@@ -266,6 +268,7 @@ export class TurnPlayer {
       this.paced = Math.min(this.paced, 1);
     }
     this.timing = timing;
+    this.seedPace();
   }
 
   /**
@@ -278,7 +281,18 @@ export class TurnPlayer {
    */
   setLivePace(paceMs: number | null): void {
     this.livePaceMs = paceMs !== null && paceMs > 0 ? paceMs : null;
+    this.seedPace();
+  }
+
+  /**
+   * Starts the turn length at the pace the timing uses, when that pace changes. The game view
+   * passes the pace at every change of the view, so the same pace again must not reset a turn
+   * length that has settled on the time between arrivals.
+   */
+  private seedPace(): void {
     const known = this.knownPace();
+    if (known === this.seededPace) return;
+    this.seededPace = known;
     if (this.live && known !== null) this.liveTurnMs = known;
   }
 
