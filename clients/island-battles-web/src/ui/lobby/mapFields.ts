@@ -330,6 +330,11 @@ export function mountMapFields(options: MapFieldsOptions): MapFields {
       errors.map,
       h("label", { htmlFor: id("turn-timeout") }, "Turn limit"),
       timeoutSelect,
+      h(
+        "p",
+        { class: "hint" },
+        "In a game of bots, a team whose bot doesn't answer in this time loses. In a real-time game, a player who doesn't respond for this long has left.",
+      ),
       errors.turnTimeout,
       h("label", { htmlFor: id("turn-pace") }, "Turn pace"),
       paceSelect,

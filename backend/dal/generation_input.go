@@ -1,6 +1,8 @@
 package dal
 
 import (
+	"time"
+
 	"github.com/INTODAN/mpl/domain"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -18,17 +20,6 @@ func FindLobbyGame(database *gorm.DB, lobbyID string) (*models.Game, error) {
 		return nil, domain.ErrNotFound
 	}
 	return &games[0], nil
-}
-
-// LobbyRoundEnded reports whether the game of a lobby round has an outcome.
-// A round without a game, whose start failed before it bound one, counts as
-// ended, so that its lobby can be reopened.
-func LobbyRoundEnded(database *gorm.DB, lobbyID string, round int64) (bool, error) {
-	var games []models.Game
-	if err := database.Select("ID", "Outcome").Where(&models.Game{LobbyID: &lobbyID, LobbyRound: round}).Limit(1).Find(&games).Error; err != nil {
-		return false, err
-	}
-	return len(games) == 0 || games[0].Outcome != nil, nil
 }
 
 // WithLockedGame is the serialization boundary for initialization, reads and turns.
@@ -107,6 +98,37 @@ func SaveGameStart(database *gorm.DB, game *models.Game, teams []models.GameTeam
 func SaveGameOutcome(database *gorm.DB, game *models.Game, outcome models.GameOutcome) error {
 	game.Outcome = &outcome
 	return database.Model(game).Select("Outcome").Updates(game).Error
+}
+
+// SaveGameDepartures stores the teams that resigned or left a real-time game,
+// Game.Departures, under the game lock.
+func SaveGameDepartures(database *gorm.DB, game *models.Game) error {
+	return database.Model(game).Select("Departures").Updates(game).Error
+}
+
+// MarkPlayerSeen records that the server heard from a roster player at now,
+// when the time it recorded last is at or before staleSince, so that requests
+// close together write once. It reports whether it wrote.
+func MarkPlayerSeen(database *gorm.DB, gameID uint, playerID string, now, staleSince time.Time) (bool, error) {
+	if gameID == 0 || playerID == "" {
+		return false, nil
+	}
+	result := database.Model(&models.FrozenGamePlayer{}).Where(&models.FrozenGamePlayer{GameID: gameID, PlayerID: playerID}).
+		Where(clause.Lte{Column: clause.Column{Name: "last_seen_at"}, Value: staleSince}).Update("last_seen_at", now)
+	return result.RowsAffected > 0, result.Error
+}
+
+// FindLobbyRoundGame returns the game of a lobby round, or nil when the
+// round's start bound none.
+func FindLobbyRoundGame(database *gorm.DB, lobbyID string, round int64) (*models.Game, error) {
+	var games []models.Game
+	if err := database.Where(&models.Game{LobbyID: &lobbyID, LobbyRound: round}).Limit(1).Find(&games).Error; err != nil {
+		return nil, err
+	}
+	if len(games) == 0 {
+		return nil, nil
+	}
+	return &games[0], nil
 }
 
 func FindGame(database *gorm.DB, gameID uint) (*models.Game, error) {

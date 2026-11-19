@@ -26,9 +26,13 @@ const (
 	// GenerationCap: the game reached its last generation; the team with the
 	// most castles won, and equal counts are a draw.
 	GenerationCap OutcomeReason = "generation_cap"
-	// TurnTimeout: a turn passed its deadline; every team with a player who
-	// hadn't completed it lost.
+	// TurnTimeout: in a game that waits for every player, a turn passed its
+	// deadline; every team with a player who hadn't completed it lost.
 	TurnTimeout OutcomeReason = "turn_timeout"
+	// Abandoned: nobody played a real-time game for its turn limit, so it
+	// ended on its open generation; the team with the most castles won, and
+	// equal counts are a draw.
+	Abandoned OutcomeReason = "abandoned"
 )
 
 // GameOutcome is how a game ended. It is the contract's GameOutcome.
@@ -36,8 +40,39 @@ type GameOutcome struct {
 	Reason OutcomeReason `json:"reason"`
 	// WinnerTeamColor is the winning team, or nil for a draw.
 	WinnerTeamColor *uint `json:"winner_team_color"`
-	// Summary is the outcome in one sentence, naming the winning team.
+	// Summary is the outcome in one sentence, naming the winning team and
+	// the teams that resigned or left a real-time game.
 	Summary string `json:"summary"`
+	// Departures are the teams that resigned or left a real-time game, in
+	// the order they left. The server always sends it; a demo saved before
+	// it existed has none.
+	Departures []Departure `json:"departures,omitempty"`
+}
+
+// DepartureKind says how a team left a real-time game.
+type DepartureKind string
+
+// The ways a team leaves a real-time game.
+const (
+	// Resigned: its player resigned.
+	Resigned DepartureKind = "resigned"
+	// Left: the server didn't hear from its player for the game's turn
+	// limit.
+	Left DepartureKind = "left"
+)
+
+// Departure is a team that left a real-time game: its castles turned
+// neutral and kept their soldiers, and its soldier groups were removed. It
+// is the contract's Departure.
+type Departure struct {
+	TeamColor uint          `json:"team_color"`
+	Kind      DepartureKind `json:"kind"`
+	// Players are the display names its player had at the start.
+	Players []string `json:"players"`
+	// TurnNumber is the first turn in which the team is out, or nil for a
+	// resignation that was still waiting for its turn when the game was
+	// abandoned.
+	TurnNumber *int `json:"turn_number"`
 }
 
 // botChoice is who plays a seat: the player's own bot (localhost), which a
@@ -114,6 +149,9 @@ type generationState struct {
 	// for every player.
 	TurnPaceMilliseconds *uint        `json:"turn_pace_milliseconds"`
 	Outcome              *GameOutcome `json:"outcome,omitempty"`
+	// Departures are the teams that have resigned or left a real-time game
+	// so far.
+	Departures []Departure `json:"departures"`
 }
 
 // generationEvent is the GenerationEvent and the GameEndedEvent, which the
@@ -221,7 +259,7 @@ func (state generationState) validate() error {
 	}
 	if state.Outcome != nil {
 		switch state.Outcome.Reason {
-		case LastTeamStanding, AllEliminated, GenerationCap, TurnTimeout:
+		case LastTeamStanding, AllEliminated, GenerationCap, TurnTimeout, Abandoned:
 		default:
 			return fmt.Errorf("unknown outcome reason %q", state.Outcome.Reason)
 		}

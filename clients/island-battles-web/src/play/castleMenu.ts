@@ -93,6 +93,12 @@ export class MenuGestures {
   /** The last primary tap that could start a double-click. */
   private lastTap: MenuPointer | null = null;
 
+  /** Forgets the presses so far: a tap that a drag to send took (#343) starts no double-click. */
+  reset(): void {
+    this.rightDown = null;
+    this.lastTap = null;
+  }
+
   down(pointer: MenuPointer): void {
     if (pointer.button === 2) this.rightDown = { x: pointer.x, y: pointer.y };
   }

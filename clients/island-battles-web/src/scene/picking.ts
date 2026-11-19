@@ -9,11 +9,13 @@ import {
   type MenuOpener,
   type MenuPointer,
 } from "../play/castleMenu";
+import type { AmountControl } from "../play/drag";
 import { createFlatRing, type PickTarget } from "./art";
 import { type Battlefield, battlefieldOf } from "./battlefield";
 import { CASTLE_RADIUS } from "./board";
 import { fitCamera, focusCamera } from "./camera";
 import { toWorld, toWorldDistance } from "./coordinates";
+import { installDragControls } from "./dragControls";
 import { castleTooltip, groupTooltip } from "./format";
 import { CLASH_COLOR } from "./palette";
 
@@ -70,18 +72,28 @@ export interface BoardControlsOptions {
    */
   handPlay?: HandPlay | null;
   /**
+   * Whether orders can be given now: the hand play's status is `playing` and the view shows the
+   * newest turn. Read each frame; false when absent.
+   */
+  canOrder?: () => boolean;
+  /** The amount bar of drag to send (#343). */
+  amountControl?: AmountControl;
+  /** Shows a refused order's sentence (`HandSurface.showOrderFeedback`). */
+  showOrderFeedback?: (sentence: string, orderId?: number) => void;
+  /**
    * The castle menu (#344): a right-click that didn't drag, a double-click or a double-tap on a
    * castle (`MenuGestures`) asks it to open there; it answers whether it opened. Given, the
-   * browser's context menu never shows over the board. Absent, those gestures do what they do for
-   * a watcher.
+   * browser's context menu doesn't show over the board while the hand player plays. Absent, those
+   * gestures do what they do for a watcher.
    */
   onCastleMenu?: ((castleId: number, opener: MenuOpener) => boolean) | null;
 }
 
 /**
  * Hover highlight and tooltip (a tap on a touch screen), double-click to focus a castle (not for a
- * hand player who plays: `doubleClickFocuses`), the castle menu's gestures, and F to refit the board. Returns
- * a function that removes the listeners, the tooltip and the highlight: call it before the scene is disposed.
+ * hand player who plays: `doubleClickFocuses`), F to refit the board, and for a hand player drag to
+ * send (`dragControls.ts`) and the castle menu's gestures. Returns a function that removes the
+ * listeners, the tooltip, the highlight and the drag's meshes: call it before the scene is disposed.
  */
 export function installBoardControls(
   scene: Scene,
@@ -95,6 +107,13 @@ export function installBoardControls(
   canvas.parentElement?.append(tooltip);
   let highlight: Mesh | null = null;
   let hovered: PickTarget | null = null;
+  /**
+   * The gesture going on is a drag to send, or one that a drag's cancel ended (Esc, a right
+   * button): it is no click or tap. Set by the drag; cleared by the press that starts the next
+   * gesture. The tap and double-tap branches below start with a guard on it, and every opener
+   * of those gestures (the castle menu, #344) goes below that guard.
+   */
+  let dragGesture = false;
 
   const hide = () => {
     tooltip.hidden = true;
@@ -182,6 +201,11 @@ export function installBoardControls(
         menuGestures.down(menuPointer(event, null));
       }
     } else if (info.type === PointerEventTypes.POINTERTAP) {
+      if (dragGesture) {
+        // A drag's tap starts no double-click either.
+        menuGestures.reset();
+        return;
+      }
       const event = info.event as PointerEvent;
       const picked = pickTargetAt(scene);
       if (options.onCastleMenu) {
@@ -202,6 +226,10 @@ export function installBoardControls(
       hovered = target;
       show(field, target);
     } else if (info.type === PointerEventTypes.POINTERDOUBLETAP) {
+      if (dragGesture) {
+        menuGestures.reset();
+        return;
+      }
       const target = pickTargetAt(scene);
       if (options.onCastleMenu) {
         const pointer = menuPointer(info.event as PointerEvent, target);
@@ -249,12 +277,26 @@ export function installBoardControls(
   if (options.onCastleMenu) {
     canvas.addEventListener("contextmenu", noContextMenu);
   }
+  const handPlay = options.handPlay;
+  const removeDrag = handPlay
+    ? installDragControls(scene, {
+        handPlay,
+        canOrder: options.canOrder ?? (() => false),
+        amountControl: options.amountControl,
+        showOrderFeedback: options.showOrderFeedback,
+        hideHover: hide,
+        setTaken: (taken) => {
+          dragGesture = taken;
+        },
+      })
+    : () => {};
   // The hovered entity may have moved or gone when a new generation is drawn.
   const frameObserver = scene.onBeforeRenderObservable.add(() => {
     const field = battlefieldOf(scene);
     if (hovered && field && !describeTarget(field, hovered)) hide();
   });
   return () => {
+    removeDrag();
     scene.onPointerObservable.remove(pointerObserver);
     scene.onBeforeRenderObservable.remove(frameObserver);
     canvas.removeEventListener("pointerleave", onLeave);

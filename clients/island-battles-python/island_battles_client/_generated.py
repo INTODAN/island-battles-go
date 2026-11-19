@@ -452,6 +452,25 @@ class Demo(GameModel):
     """
 
 
+class Departure(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    kind: Literal["resigned", "left"]
+    """
+    resigned: its player resigned. left: the server didn't hear from its player for the game's turn limit (or one turn plus 5 seconds, when that is longer) by the time a turn ended.
+    """
+    players: Sequence[StrictStr]
+    """
+    The display name the player who resigned or went silent had at the start.
+    """
+    team_color: Annotated[StrictInt, Field(ge=1)]
+    turn_number: Annotated[StrictInt | None, Field(ge=1)]
+    """
+    The turn number of the first generation in which the team is out: its castles turned neutral, keeping their soldiers, and its soldier groups were removed. Null only in an abandoned game's outcome, for a resignation that was still waiting for its turn to play.
+    """
+
+
 class ErrorDetail(GameModel):
     model_config = ConfigDict(
         extra="ignore",
@@ -529,15 +548,23 @@ class GameOutcome(GameModel):
     model_config = ConfigDict(
         extra="ignore",
     )
+    departures: Sequence[Departure] | None = None
+    """
+    The teams that resigned or left a real-time game, in the order they left. Always present, and empty for most games; a demo saved before this field existed has none, which reads as empty.
+    """
     reason: Literal[
-        "last_team_standing", "all_eliminated", "generation_cap", "turn_timeout"
+        "last_team_standing",
+        "all_eliminated",
+        "generation_cap",
+        "turn_timeout",
+        "abandoned",
     ]
     """
-    last_team_standing: one team was left after every other team lost all its castles and soldier groups. all_eliminated: the last teams were eliminated in the same turn, a draw. generation_cap: the game reached its last generation; the team with the most castles won, and equal counts are a draw. turn_timeout: a turn passed its deadline; every team with a player who hadn't completed it lost, and among the other teams still standing the team with the most castles won, while equal counts, or no team left, are a draw.
+    last_team_standing: one team was left after every other team lost all its castles and soldier groups, or resigned or left the game. all_eliminated: the last teams were eliminated, or left, in the same turn, a draw. generation_cap: the game reached its last generation; the team with the most castles won, and equal counts are a draw. turn_timeout: in a game that waits for every player, a turn passed its deadline; every team with a player who hadn't completed it lost, and among the other teams still standing the team with the most castles won, while equal counts, or no team left, are a draw. abandoned: nobody played a real-time game for its turn limit, so it ended on its open generation; among the teams still in it, except one whose resignation was waiting for the turn, the team with the most castles won, and equal counts, or no team left, are a draw.
     """
     summary: StrictStr
     """
-    The outcome in one sentence, naming the winning team, and for turn_timeout the teams that lost and their players who didn't answer.
+    The outcome in one sentence, naming the winning team, the teams that resigned or left a real-time game, and for turn_timeout the teams that lost and their players who didn't answer.
     """
     winner_team_color: Annotated[StrictInt | None, Field(ge=1)]
     """
@@ -637,6 +664,10 @@ class GenerationState(GameModel):
     channel: StrictStr
     """
     Your personal Centrifugo channel, which receives GenerationEvent after each turn and GameEndedEvent after the last one.
+    """
+    departures: Sequence[Departure]
+    """
+    The teams that have resigned or left this real-time game so far, in the order they left, from the turn that took them out. Empty in every other game. A resignation shows here once the turn that applies it has played; before that, the answer of POST /game/from-lobby/{lobby_id}/resign is its only sign.
     """
     game_id: Annotated[StrictInt, Field(ge=1)]
     generation: Generation
@@ -767,7 +798,7 @@ class LobbySettings(GameModel):
     """
     turn_timeout_seconds: Annotated[StrictInt | None, Field(ge=5, le=600)] = 30
     """
-    How long each turn lasts, in whole seconds from 5 to 600, counted from when its generation was created; 30 when left out. null means no limit, for example while debugging a bot. When a turn's deadline passes before every player has completed it, each team with a player who hadn't loses, and the game ends. A real-time game, see turn_pace_milliseconds, has no turn timeout.
+    How long each turn lasts, in whole seconds from 5 to 600, counted from when its generation was created; 30 when left out. null means no limit, for example while debugging a bot. When a turn's deadline passes before every player has completed it, each team with a player who hadn't loses, and the game ends. In a real-time game, see turn_pace_milliseconds, no turn times out; instead a player the server hasn't heard from for this long, or for one turn plus 5 seconds when that is longer, by the end of a turn has left the game and their team is out, and a game that no request reaches for this long after its open turn's end is abandoned: the team with the most castles wins. null turns both rules off.
     """
 
 
@@ -1165,6 +1196,10 @@ class WatchState(GameModel):
     channel: StrictStr
     """
     The lobby's watch channel, watch:island-battles:<lobby_id>, which receives WatchGenerationEvent after each turn and WatchGameEndedEvent after the last one.
+    """
+    departures: Sequence[Departure]
+    """
+    The teams that have resigned or left this real-time game so far, as in GenerationState.
     """
     game_id: Annotated[StrictInt, Field(ge=1)]
     generation: Generation

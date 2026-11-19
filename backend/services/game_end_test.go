@@ -75,7 +75,7 @@ func TestGameEndsWithTheLastTeamStanding(t *testing.T) {
 	if game.Outcome == nil || game.Outcome.Reason != models.GameOutcomeLastTeamStanding || game.Outcome.WinnerTeamColor == nil || *game.Outcome.WinnerTeamColor != fixture.state.TeamColor || winner.Color != fixture.state.TeamColor {
 		t.Fatalf("saved outcome = %+v, teams = %+v", game.Outcome, game.Teams)
 	}
-	want := models.GameOutcomeView{Reason: models.GameOutcomeLastTeamStanding, WinnerTeamColor: game.Outcome.WinnerTeamColor, Summary: winner.Name + " wins as the last team standing"}
+	want := models.GameOutcomeView{Reason: models.GameOutcomeLastTeamStanding, WinnerTeamColor: game.Outcome.WinnerTeamColor, Summary: winner.Name + " wins as the last team standing", Departures: []models.DepartureView{}}
 	if !reflect.DeepEqual(current.Outcome, &want) || current.Submitted {
 		t.Fatalf("final state outcome = %+v submitted=%v, want %+v", current.Outcome, current.Submitted, want)
 	}

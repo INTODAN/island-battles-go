@@ -96,6 +96,13 @@ describe("the menu's gestures", () => {
     ).toBeNull();
   });
 
+  test("after a reset (a drag's tap) the next tap starts no double-click", () => {
+    const gestures = new MenuGestures();
+    gestures.tap(pointer({}));
+    gestures.reset();
+    expect(gestures.doubleTap(pointer({ at: 200 }))).toBeNull();
+  });
+
   test("a third tap doesn't open it again", () => {
     const gestures = new MenuGestures();
     gestures.tap(pointer({ pointerType: "touch" }));

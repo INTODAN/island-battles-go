@@ -1,4 +1,6 @@
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
+import { ArcRotateCameraPointersInput } from "@babylonjs/core/Cameras/Inputs/arcRotateCameraPointersInput";
+import type { PointerTouch } from "@babylonjs/core/Events/pointerEvents";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import type { Scene } from "@babylonjs/core/scene";
 import type { BoardBounds } from "./board";
@@ -92,6 +94,35 @@ export function fitRadius(
   return far;
 }
 
+/**
+ * The camera's pointer input, which can ignore one pointer: a drag that started on your own castle
+ * (#343) holds its pointer, so the board doesn't turn or pan for it. The input still sees every
+ * event of that pointer, so when a second finger lands and the hold ends, the pinch and the
+ * two-finger pan start from where the fingers really are.
+ */
+export class BoardPointersInput extends ArcRotateCameraPointersInput {
+  /** The pointer whose one-pointer moves the camera ignores, or null. */
+  held: number | null = null;
+
+  override onTouch(
+    point: PointerTouch | null,
+    offsetX: number,
+    offsetY: number,
+  ): void {
+    if (point !== null && point.pointerId === this.held) return;
+    super.onTouch(point, offsetX, offsetY);
+  }
+}
+
+/** Makes the camera ignore the one-pointer moves of `pointerId` (null: ignore none). */
+export function holdCameraPointer(
+  camera: ArcRotateCamera,
+  pointerId: number | null,
+): void {
+  const input = camera.inputs.attached.pointers;
+  if (input instanceof BoardPointersInput) input.held = pointerId;
+}
+
 interface CameraState {
   bounds: BoardBounds;
   stopTween: () => void;
@@ -111,6 +142,9 @@ export function createBoardCamera(
     Vector3.Zero(),
     scene,
   );
+  // Before the sensibility settings below, which write to the pointer input.
+  camera.inputs.removeByType("ArcRotateCameraPointersInput");
+  camera.inputs.add(new BoardPointersInput());
   camera.fov = CAMERA.fov;
   camera.minZ = 0.1;
   camera.maxZ = MIN_FAR_PLANE;
