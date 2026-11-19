@@ -11,6 +11,7 @@ import { createScenePlayer } from "../../scene/animation";
 import { battlefieldOf } from "../../scene/battlefield";
 import { loadBoardAssets } from "../../scene/boardAssets";
 import { fitCamera } from "../../scene/camera";
+import { castleScreenPoint } from "../../scene/castleMenuInput";
 import {
   applyGraphics,
   type Graphics,
@@ -22,9 +23,21 @@ import { fitBoard, installBoardControls } from "../../scene/picking";
 import { showBoardLoading } from "../boardLoading";
 import { rulesButton } from "../rules/rulesDialog";
 import { type AgentGame, agentPrompt, copyText } from "./agentPrompt";
+import { AmountBar } from "./amountBar";
+import { CastleMenu } from "./castleMenu";
 import { clashSummary } from "./clashes";
 import { GameController, showsNewestTurn, type ViewState } from "./controller";
+import { installGameViewDebug } from "./debug";
 import "./game.css";
+import { markControlsSeen, shouldOpenControls } from "./controls";
+import { ControlsPanel, PaceBar } from "./handHud";
+import {
+  type HandView,
+  handView,
+  jumpsOnReturn,
+  NO_HAND,
+  statusText,
+} from "./handView";
 import {
   type Departure,
   departureText,
@@ -44,6 +57,7 @@ import {
   LogFetchScheduler,
   openGenerationId,
 } from "./logs";
+import { createOrderNotices } from "./notices";
 import {
   confirmationKey,
   type ResignResult,
@@ -106,8 +120,8 @@ export interface HandSurface {
   showOrderFeedback(sentence: string, orderId?: number): void;
 }
 
-/** How long `showOrderFeedback` shows a sentence. */
-const ORDER_FEEDBACK_MS = 5000;
+/** Where the Controls panel remembers that it opened by itself. */
+const controlsStorage = () => globalThis.localStorage ?? null;
 
 /** `stopped`: a watcher the host removed, who receives no more turns. */
 export type ConnectionLabel = ConnectionState | "saved" | "stopped";
@@ -163,14 +177,31 @@ export class GameScreen {
   private readonly notice = element("p", "gv-notice");
   /** Feedback on the hand player's orders (`HandSurface.showOrderFeedback`). */
   private readonly orderNotice = element("p", "gv-notice gv-order-notice");
-  private orderNoticeTimer: ReturnType<typeof setTimeout> | undefined;
-  /** A hand player's status row above the timeline, such as "Return to live to give orders". */
+  private readonly orderNotices = createOrderNotices({
+    render: (text) => {
+      this.orderNotice.textContent = text ?? "";
+      this.orderNotice.hidden = text === null;
+    },
+    schedule: (run, ms) => {
+      const timer = setTimeout(run, ms);
+      return () => clearTimeout(timer);
+    },
+  });
+  /** The amount bar of drag to send (#343), for a view with a hand play. */
+  private readonly amountBar: AmountBar | null;
+  /**
+   * A hand player's status row above the timeline: "Return to live to give orders" with a
+   * button, or that the team is out (`handView`).
+   */
   private readonly handStatus = element("div", "gv-hand-status");
-  private readonly handStatusText = element(
-    "span",
-    "gv-hand-status-text",
-    "Return to live to give orders",
-  );
+  private readonly handStatusText = element("span", "gv-hand-status-text");
+  private readonly returnButton = button("Return to live", "Return to live");
+  /** The turn pace bar beside the turn, for a hand player. */
+  private readonly paceBar = new PaceBar();
+  /** The Controls button of the top bar and its panel, for a hand player. */
+  private readonly controls = new ControlsPanel();
+  /** The team marked as yours: a hand player's. */
+  private markedTeam: number | null = null;
   private readonly summary = element("p", "gv-summary");
   /** The Resign button, or "You resigned" in its place (`resign.ts` says which). */
   private readonly resignButton = button(
@@ -280,11 +311,13 @@ export class GameScreen {
       back,
       this.title,
       this.turn,
+      this.paceBar.element,
       this.connection,
       open,
       save,
       ask,
       rulesButton("gv-button"),
+      this.controls.button,
       this.resignButton,
       this.resigned,
       file,
@@ -328,7 +361,9 @@ export class GameScreen {
     this.orderNotice.setAttribute("role", "alert");
     this.orderNotice.hidden = true;
     this.handStatusText.setAttribute("role", "status");
-    this.handStatus.append(this.handStatusText);
+    // The button sits beside the live region, not in it: it isn't read out with each change.
+    this.handStatus.append(this.handStatusText, this.returnButton);
+    this.returnButton.hidden = true;
     this.handStatus.hidden = true;
     this.summary.hidden = true;
     this.saveError.setAttribute("role", "alert");
@@ -416,8 +451,14 @@ export class GameScreen {
     this.fitButton.addEventListener("click", () => {
       if (this.scene) fitBoard(this.scene);
     });
-    topStack.append(this.fitButton);
-    this.bottomStack.append(this.logsBox, this.handStatus, timeline);
+    topStack.append(this.controls.panel, this.fitButton);
+    this.amountBar = this.options.handPlay ? new AmountBar() : null;
+    this.bottomStack.append(
+      this.logsBox,
+      ...(this.amountBar ? [this.amountBar.element] : []),
+      this.handStatus,
+      timeline,
+    );
     root.append(
       this.canvas,
       topStack,
@@ -550,18 +591,30 @@ export class GameScreen {
       this.resignDone = true;
     } else {
       // A refused resignation is feedback on an order of the player's (the notice contract).
-      this.hand?.showOrderFeedback(result.sentence);
+      this.handSurface?.showOrderFeedback(result.sentence);
     }
     this.renderResign();
   }
 
-  private showOrderFeedback(sentence: string): void {
-    clearTimeout(this.orderNoticeTimer);
-    this.orderNotice.textContent = sentence;
-    this.orderNotice.hidden = false;
-    this.orderNoticeTimer = setTimeout(() => {
-      this.orderNotice.hidden = true;
-    }, ORDER_FEEDBACK_MS);
+  /**
+   * Publishes the bottom stack's height as `--gv-bottom-height` on the view's parent, where the
+   * lobby's Watchers box, a sibling of the view (`app.ts`), reads it to sit above the stack.
+   */
+  private publishBottomHeight(): () => void {
+    const parent = this.container.parentElement;
+    if (!parent) return () => {};
+    const observer = new ResizeObserver(() => {
+      parent.style.setProperty(
+        "--gv-bottom-height",
+        // The stack's height and its 8 px from the bottom.
+        `${Math.ceil(this.bottomStack.offsetHeight) + 8}px`,
+      );
+    });
+    observer.observe(this.bottomStack);
+    return () => {
+      observer.disconnect();
+      parent.style.removeProperty("--gv-bottom-height");
+    };
   }
 
   private async saveDemo(save: HTMLButtonElement): Promise<void> {
@@ -654,7 +707,21 @@ export class GameScreen {
     const scene = new Scene(engine);
     this.scene = scene;
     const handPlay = this.options.handPlay ?? null;
-    const removeControls = installBoardControls(scene, { handPlay });
+    // The castle menu (#344) is built once the controller exists; the board asks it to open.
+    let castleMenu: CastleMenu | null = null;
+    const removeControls = installBoardControls(scene, {
+      handPlay,
+      // Read lazily: the controller and the hand surface are made below.
+      canOrder: () =>
+        handPlay?.state.get().status === "playing" &&
+        this.handSurface?.showsNewestTurn() === true,
+      ...(this.amountBar ? { amountControl: this.amountBar } : {}),
+      showOrderFeedback: (sentence, orderId) =>
+        this.handSurface?.showOrderFeedback(sentence, orderId),
+      onCastleMenu:
+        handPlay &&
+        ((castleId, opener) => castleMenu?.open(castleId, opener) ?? false),
+    });
     // The board's art loads behind a loading screen; the board draws placeholders meanwhile.
     const loading = showBoardLoading(this.root);
     loadBoardAssets(scene, (progress) => loading.update(progress)).then(
@@ -682,6 +749,14 @@ export class GameScreen {
               index + 1,
             );
       },
+      liveTiming: handView(handPlay?.state.get() ?? null, {
+        frames: [],
+        index: -1,
+        follow: false,
+        playing: false,
+        outcome: null,
+        live: this.options.live,
+      }).timing,
     });
     const controller = new GameController(
       {
@@ -703,22 +778,88 @@ export class GameScreen {
       subscribeView: (listener) => controller.subscribe(listener),
       bottomStack: this.bottomStack,
       setNotice: (text) => this.setNotice(text),
-      showOrderFeedback: (sentence) => this.showOrderFeedback(sentence),
+      showOrderFeedback: (sentence, orderId) =>
+        this.orderNotices.show(sentence, orderId),
     };
-    // Scrubbed back, a hand player is told that orders are given from the newest turn.
-    const showHandStatus = () => {
-      this.handStatus.hidden = !(
-        handPlay?.state.get().status === "playing" &&
-        !showsNewestTurn(controller.state)
-      );
+    castleMenu =
+      handPlay &&
+      new CastleMenu({
+        host: this.root,
+        handPlay,
+        showsNewestTurn: () => showsNewestTurn(controller.state),
+        subscribeView: (listener) => controller.subscribe(listener),
+        locate: (castleId) => castleScreenPoint(scene, castleId),
+        onFrame: (run) => {
+          const observer = scene.onAfterRenderObservable.add(run);
+          return () => scene.onAfterRenderObservable.remove(observer);
+        },
+        fallbackFocus: this.canvas,
+        showOrderFeedback: (sentence, orderId) =>
+          this.handSurface?.showOrderFeedback(sentence, orderId),
+      });
+    // A hand player's HUD (#345): what `handView` decides from hand play and the view.
+    let hand: HandView = NO_HAND;
+    let controlsChecked = false;
+    // Returning to live jumps to the newest turn, so orders are given against it at once.
+    const jumpToNewest = () =>
+      controller.scrubTo(controller.state.frames.length - 1);
+    const showHand = () => {
+      const state = handPlay?.state.get() ?? null;
+      hand = handView(state, controller.state);
+      player.setLivePace(hand.livePaceMs);
+      player.setLiveTiming(hand.timing);
+      this.markYourTeam(hand.hand ? hand.yourTeam : null);
+      if (hand.yourTeam !== null) {
+        this.paceBar.element.style.setProperty(
+          "--team",
+          teamColorHex(hand.yourTeam),
+        );
+      }
+      this.paceBar.show(hand.pace);
+      this.handStatus.hidden = hand.status === null;
+      this.handStatusText.textContent = hand.status
+        ? statusText(hand.status)
+        : "";
+      this.returnButton.hidden = hand.status !== "return-to-live";
+      this.speed.hidden = hand.hideSpeed;
+      this.controls.button.hidden = !hand.hand;
+      if (!hand.hand) this.controls.close();
+      if (!controlsChecked && state?.status === "playing") {
+        // The first time someone plays by hand, the panel opens by itself, once.
+        controlsChecked = true;
+        if (shouldOpenControls(controlsStorage)) {
+          markControlsSeen(controlsStorage);
+          this.controls.open(false);
+        }
+      }
     };
-    const handStatusStops = handPlay
+    this.returnButton.onclick = () => {
+      jumpToNewest();
+      // The button hides once the view is live again: the focus goes to Follow live beside it.
+      this.follow.focus();
+    };
+    const onVisible = () => {
+      if (
+        document.visibilityState === "visible" &&
+        jumpsOnReturn(hand, controller.state.follow, player.waiting)
+      ) {
+        jumpToNewest();
+      }
+    };
+    const handStops = handPlay
       ? [
-          handPlay.state.subscribe(showHandStatus),
-          controller.subscribe(showHandStatus),
+          handPlay.state.subscribe(showHand),
+          controller.subscribe(showHand),
           handPlay.state.subscribe(() => this.renderResign()),
+          // The one subscription that shows every rejection, also of orders whose control is gone.
+          handPlay.onSettled((order) => {
+            if (order.state === "rejected" && order.sentence) {
+              this.orderNotices.show(order.sentence, order.id);
+            }
+          }),
         ]
       : [];
+    if (handPlay) document.addEventListener("visibilitychange", onVisible);
     let aspect =
       engine.getRenderWidth() / Math.max(1, engine.getRenderHeight());
     const resize = new ResizeObserver(() => {
@@ -733,6 +874,8 @@ export class GameScreen {
       }
     });
     resize.observe(this.container);
+    const stopBottomHeight = this.publishBottomHeight();
+    const removeDebug = installGameViewDebug(scene);
 
     this.buildTeams(sorted);
     const unsubscribe = controller.subscribe((state) => this.render(state));
@@ -740,7 +883,10 @@ export class GameScreen {
     this.backButton.onclick = () => controller.step(-1);
     this.forwardButton.onclick = () => controller.step(1);
     this.playButton.onclick = () => controller.togglePlay();
-    this.follow.onchange = () => controller.setFollow(this.follow.checked);
+    this.follow.onchange = () => {
+      if (this.follow.checked && hand.jumpToLive) jumpToNewest();
+      else controller.setFollow(this.follow.checked);
+    };
     this.speed.onchange = () => player.setSpeed(Number(this.speed.value));
     player.setSpeed(Number(this.speed.value));
     const setGraphics = (value: Graphics) => {
@@ -763,22 +909,30 @@ export class GameScreen {
       teams: sorted,
       dispose: () => {
         unsubscribe();
-        for (const stop of handStatusStops) stop();
+        castleMenu?.dispose();
         this.closeConfirmation("none");
         this.resignButton.hidden = true;
         this.resigned.hidden = true;
+        for (const stop of handStops) stop();
+        document.removeEventListener("visibilitychange", onVisible);
         this.handStatus.hidden = true;
-        clearTimeout(this.orderNoticeTimer);
-        this.orderNotice.hidden = true;
+        this.orderNotices.dispose();
+        this.paceBar.show(null);
+        this.controls.close();
+        this.controls.button.hidden = true;
+        this.speed.hidden = false;
+        this.markYourTeam(null);
         removeControls();
         resize.disconnect();
+        stopBottomHeight();
+        removeDebug();
         engine.stopRenderLoop();
         scene.dispose();
         engine.dispose();
       },
     };
     this.render(controller.state);
-    showHandStatus();
+    showHand();
     this.renderResign();
     return controller;
   }
@@ -793,6 +947,7 @@ export class GameScreen {
     if (this.disposed) return;
     this.disposed = true;
     this.logScheduler.cancel();
+    this.paceBar.dispose();
     clearTimeout(this.askTimer);
     this.stop();
     this.container.replaceChildren();
@@ -830,6 +985,13 @@ export class GameScreen {
     this.showYourBot();
   }
 
+  /** Marks `team` as yours, or no team for null: a hand player's (#345). */
+  private markYourTeam(team: number | null): void {
+    if (team === this.markedTeam) return;
+    this.markedTeam = team;
+    this.showYourBot();
+  }
+
   private showYourBot(): void {
     for (const card of this.teamsBox.querySelectorAll<HTMLElement>(
       ".gv-team",
@@ -838,6 +1000,10 @@ export class GameScreen {
       const text = this.yourBots.get(Number(card.dataset.team));
       if (line) line.hidden = text === undefined;
       if (line && text !== undefined) line.textContent = text;
+      const yours = Number(card.dataset.team) === this.markedTeam;
+      card.classList.toggle("gv-team-yours", yours);
+      const tag = card.querySelector<HTMLElement>(".gv-you");
+      if (tag) tag.hidden = !yours;
     }
   }
 
@@ -848,7 +1014,14 @@ export class GameScreen {
       const card = element("div", "gv-team");
       card.dataset.team = String(team.color);
       const name = element("div", "gv-team-name");
-      name.append(swatch(team.color), element("strong", undefined, team.name));
+      const you = element("span", "gv-you", "You");
+      you.hidden = true;
+      name.append(
+        swatch(team.color),
+        element("strong", undefined, team.name),
+        you,
+      );
+      card.style.setProperty("--team", teamColorHex(team.color));
       const players = element(
         "div",
         "gv-team-players",

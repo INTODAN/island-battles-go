@@ -185,7 +185,7 @@ export const rulesSections: readonly RulesSection[] = [
     title: "The goal",
     paragraphs: [
       "Island Battles is played by two or more teams on a map of castles. Capture castles, outgrow your enemies, and be the last team left with castles or soldiers.",
-      "You can play each turn yourself, or let a bot play for you: one of the game's default bots, or one you write.",
+      "You can play by hand: choose Play by hand in the lobby room, and in the game the Controls button lists how to give orders. Or let a bot play for you: one of the game's default bots, or one you write.",
     ],
   },
   {
