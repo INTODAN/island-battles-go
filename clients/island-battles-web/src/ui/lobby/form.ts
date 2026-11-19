@@ -57,9 +57,16 @@ export const turnPaces: { milliseconds: number; label: string }[] = [
 export const defaultTurnPace = 1000;
 
 /** A lobby's turn pace from its `game_settings`; 1000 ms when it sets none. */
-function turnPaceOf(settings: Record<string, unknown> | undefined): number {
+export function turnPaceOf(
+  settings: Record<string, unknown> | undefined,
+): number {
   const milliseconds = settings?.turn_pace_milliseconds;
   return typeof milliseconds === "number" ? milliseconds : defaultTurnPace;
+}
+
+/** A turn pace in seconds, as the lobby shows it: 500 is "0.5 s", 1000 is "1 s". */
+export function describePace(milliseconds: number): string {
+  return `${milliseconds / 1000} s`;
 }
 
 /** The game lengths the form offers, as `max_generations`: the most turns of a game. */

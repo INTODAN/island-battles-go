@@ -21,6 +21,7 @@ import { type MapFields, mountMapFields } from "./mapFields";
 import type { Screen } from "./nameScreen";
 import { describeProblem, type ProblemContext } from "./problems";
 import {
+  anyPlaysByHand,
   buildRoom,
   canChangeSettings,
   countPeople,
@@ -706,6 +707,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     settingsLine.textContent = describeSettings(
       snapshot.lobby.game_settings,
       templates,
+      anyPlaysByHand(model),
     );
     const changing = canChangeSettings(model);
     if (!changing && changeFields) closeChange();
@@ -739,6 +741,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     picker.update(
       model.you?.kind === "human" ? model.you.bot : undefined,
       started,
+      snapshot.lobby.game_settings,
     );
     readyButton.textContent = model.you?.ready ? "Cancel ready" : "I'm ready";
     readyButton.classList.toggle("is-ready", model.you?.ready === true);
