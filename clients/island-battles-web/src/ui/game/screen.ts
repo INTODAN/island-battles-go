@@ -271,6 +271,10 @@ export class GameScreen {
   private scene: Scene | undefined;
   /** What `hand` returns. */
   private handSurface: HandSurface | null = null;
+  /** The game's turn pace from the live state, for a watcher's board (`setGamePace`). */
+  private gamePaceMs: number | null = null;
+  /** Gives the board the pace again, while a game runs. */
+  private applyGamePace: (() => void) | undefined;
   private disposed = false;
   private retry: (() => void) | undefined;
 
@@ -503,6 +507,17 @@ export class GameScreen {
   setNotice(text: string | null): void {
     this.notice.textContent = text ?? "";
     this.notice.hidden = !text;
+  }
+
+  /**
+   * The game's turn pace from the live state (`turn_pace_milliseconds`), or null when the game
+   * waits for every player. With it, a watcher's board counts one late turn as at most half a
+   * turn more than usual; a hand player's board takes the pace from hand play.
+   */
+  setGamePace(paceMs: number | null): void {
+    if (paceMs === this.gamePaceMs) return;
+    this.gamePaceMs = paceMs;
+    this.applyGamePace?.();
   }
 
   /** The teams that are out of the game so far, from the live state; the outcome adds the rest. */
@@ -827,10 +842,16 @@ export class GameScreen {
     // Returning to live jumps to the newest turn, so orders are given against it at once.
     const jumpToNewest = () =>
       controller.scrubTo(controller.state.frames.length - 1);
+    // A hand player's board takes the pace from hand play; anyone else's from the live state.
+    const livePace = () =>
+      player.setLivePace(
+        hand.timing.follows === "newest" ? hand.livePaceMs : this.gamePaceMs,
+      );
+    this.applyGamePace = livePace;
     const showHand = () => {
       const state = handPlay?.state.get() ?? null;
       hand = handView(state, controller.state, this.resignDone);
-      player.setLivePace(hand.livePaceMs);
+      livePace();
       player.setLiveTiming(hand.timing);
       this.markYourTeam(hand.hand ? hand.yourTeam : null);
       if (hand.yourTeam !== null) {
@@ -935,6 +956,7 @@ export class GameScreen {
         unsubscribe();
         castleMenu?.dispose();
         this.onResignPending = undefined;
+        this.applyGamePace = undefined;
         this.closeConfirmation("none");
         this.resignButton.hidden = true;
         this.resigned.hidden = true;
