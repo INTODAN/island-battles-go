@@ -304,6 +304,12 @@ A hand player buys upgrades and orders bursts from a menu on one of their castle
 - **Keyboard, touch and screen readers.** The menu is a non-modal dialog named after its castle; it takes the focus when it opens (its first row), `Tab` moves through the rows, the slider and the buttons. A disabled row stays focusable, marked `aria-disabled`, so a screen reader reads its reason. Rows and buttons are at least 44 px high.
 - **Code.** The rules, with no DOM and no Babylon, are `src/play/castleMenu.ts` (`menuAllowed`, `MenuGestures`, `doubleClickFocuses`, `castleMenuModel`, `placeMenu`), tested in `castleMenu.test.ts`; the numbers and refusals come from hand play's ledger, `check` and upgrade table. `installBoardControls` (`src/scene/picking.ts`) feeds `MenuGestures` from its right-button presses, its taps (Babylon's `POINTERTAP`, a right-click among them) and its double taps, and calls its `onCastleMenu` option. Babylon counts two presses within 300 ms anywhere as a double tap, so the menu opens only when both were on the same castle, and a finger's second tap on the same castle up to 450 ms after the first counts too. `src/scene/castleMenuInput.ts` projects the castle onto the screen, as `LabelLayer` places its labels; `src/ui/game/castleMenu.ts` draws the menu in the game view's overlay and moves it after every frame, so it follows its castle while the camera moves and turns play.
 
+![The castle menu of a castle at Speed 4 with 18 soldiers: Speed is at its maximum level and Burst 4 costs too much](docs/screenshots/castle-menu-desktop.png)
+
+![The castle menu after a burst this turn](docs/screenshots/castle-menu-burst-ordered.png)
+
+![The castle menu at 450 px, opened with a double-tap, with Burst 2 ordered this turn](docs/screenshots/castle-menu-450.png)
+
 ## Watching a game
 
 Someone outside the roster can watch a game live and scrub its history with only its join code ([#103](https://github.com/INTODAN/island-battles-go/issues/103)). **Watch a game** on the start screen takes a code, and `/play/?watch=CODE` (or `/?watch=CODE` in dev) asks for a name and then watches that game.
