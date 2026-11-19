@@ -821,3 +821,23 @@ func TestLoggerAttributesAndLevels(t *testing.T) {
 		t.Fatalf("a line logged after the turn was filed: %v", lines)
 	}
 }
+
+// A real-time game's final state reads with the abandoned reason and the
+// teams that resigned or left (#347); a state without departures is refused.
+func TestStatesCarryTheDepartures(t *testing.T) {
+	server := newFakeServer(t)
+	departures := []any{map[string]any{"team_color": 2, "kind": "resigned", "players": []any{"Sam"}, "turn_number": nil}}
+	state := server.stateOf(2, false, map[string]any{"reason": "abandoned", "winner_team_color": 1,
+		"summary": "Red resigned; the game was abandoned: nobody played for 30 s; Blue wins with the most castles", "departures": departures})
+	data, _ := json.Marshal(state)
+	parsed, err := parseState(data)
+	if err != nil || parsed.Outcome == nil || parsed.Outcome.Reason != Abandoned || len(parsed.Outcome.Departures) != 1 ||
+		parsed.Outcome.Departures[0].Kind != Resigned || parsed.Outcome.Departures[0].TurnNumber != nil {
+		t.Fatalf("an abandoned game's state = %+v, %v", parsed.Outcome, err)
+	}
+	delete(state, "departures")
+	data, _ = json.Marshal(state)
+	if _, err := parseState(data); !errors.Is(err, ErrProtocol) {
+		t.Fatalf("a state without departures: %v", err)
+	}
+}

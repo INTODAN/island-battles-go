@@ -44,8 +44,9 @@ type GameOutcome struct {
 	// the teams that resigned or left a real-time game.
 	Summary string `json:"summary"`
 	// Departures are the teams that resigned or left a real-time game, in
-	// the order they left.
-	Departures []Departure `json:"departures"`
+	// the order they left. The server always sends it; a demo saved before
+	// it existed has none.
+	Departures []Departure `json:"departures,omitempty"`
 }
 
 // DepartureKind says how a team left a real-time game.
