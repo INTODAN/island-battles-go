@@ -282,16 +282,18 @@ export function installDragControls(
     }
     if (target) {
       if (!ring) {
+        // Over the island's top, drawn with the lines so the island never hides it.
         ring = createFlatRing(
           scene,
           "drag-target-ring",
-          CASTLE_RADIUS + 0.12,
-          0.05,
+          CASTLE_RADIUS + 0.3,
+          0.07,
         );
         ring.material = field.materials.flat("#ffffff");
+        ring.renderingGroupId = HEADING_GROUP;
       }
       const world = toWorld(target);
-      ring.position.set(world.x, 0.2, world.z);
+      ring.position.set(world.x, LINE_HEIGHT, world.z);
       ring.setEnabled(true);
     } else {
       ring?.setEnabled(false);

@@ -270,6 +270,10 @@ A player who chose **Play by hand** gives orders on the board of the game view w
 
 The rules live in `src/play/drag.ts` (pure, tested in `drag.test.ts`): a press on your castle holds its pointer (`holdCameraPointer` in `src/scene/camera.ts`, whose `BoardPointersInput` ignores that pointer's one-pointer moves) until it is released, whatever happens to the drag; more than 8 px makes it a drag. `src/scene/dragControls.ts` feeds it Babylon's pointer events, keys and the bar, draws the line (`dragLine.ts`, with the heading arrows' `ribbonGeometry`), and gives the order with `handPlay.send`, as a share of the unreserved soldiers resolved when it is sent, or an exact number. A release only counts from a real `PointerEvent` of the main button: Babylon makes up a release for a cancelled pointer and a blur, and those cancel.
 
+![A drag in progress at desktop width: a line from the castle marked "33 of 67" to a neutral castle with a white ring, and the amount bar at 33 of 67 above the timeline](../../docs/screenshots/drag-to-send-desktop.png)
+
+Recording: [a send, with `a` for half during the drag](../../docs/screenshots/drag-to-send.gif). At 450 px: [a drag](../../docs/screenshots/drag-to-send-450.png) and [the bar after a tap on Half](../../docs/screenshots/drag-to-send-bar-450.png); at desktop width: [the bar before a drag](../../docs/screenshots/drag-to-send-bar-desktop.png) and [during one](../../docs/screenshots/drag-to-send-bar-dragging-desktop.png).
+
 With `debug=1` in the page's URL, `window.gameViewDebug` (`src/ui/game/debug.ts`) gives browser tests the castles' screen positions, the camera and the board's labels.
 
 ## Hand play
