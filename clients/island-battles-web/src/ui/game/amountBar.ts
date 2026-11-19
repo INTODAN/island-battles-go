@@ -12,9 +12,6 @@ import {
   sliderAmount,
 } from "../../play/drag";
 
-/** A `click` this soon after a second finger's tap on a button is the same tap. */
-const SECOND_FINGER_CLICK_MS = 500;
-
 const HALF_ICON =
   '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 4a8 8 0 0 0 0 16z" fill="currentColor"/></svg>';
 const ALL_ICON =
@@ -38,25 +35,37 @@ function iconButton(
   button.addEventListener("pointerdown", (event) => event.preventDefault());
   // A browser fires `click` for a finger that is the only one down, not for a second one: a tap
   // of a second finger, while the first holds a drag, is `pointerdown` and `pointerup` alone. So
-  // that tap presses the button on its `pointerup`, and the `click` some browser may still add
-  // after it is ignored.
+  // that tap presses the button on its `pointerup`. A touch stays attached to the button it
+  // pressed, so only a lift inside the button counts, as a click's would. A `click` some browser
+  // still adds after the tap (a pointer's, `detail > 0`) is skipped once; a keyboard's or an
+  // assistive technology's (`detail` 0) never is.
   const secondFingers = new Set<number>();
-  let lastTapAt = Number.NEGATIVE_INFINITY;
+  let skipNextClick = false;
   button.addEventListener("pointerdown", (event) => {
+    skipNextClick = false;
     if (event.pointerType === "touch" && !event.isPrimary) {
       secondFingers.add(event.pointerId);
     }
   });
   button.addEventListener("pointerup", (event) => {
     if (!secondFingers.delete(event.pointerId)) return;
-    lastTapAt = event.timeStamp;
+    const box = button.getBoundingClientRect();
+    const inside =
+      event.clientX >= box.left &&
+      event.clientX <= box.right &&
+      event.clientY >= box.top &&
+      event.clientY <= box.bottom;
+    if (!inside) return;
+    skipNextClick = true;
     onPress();
   });
   button.addEventListener("pointercancel", (event) => {
     secondFingers.delete(event.pointerId);
   });
   button.addEventListener("click", (event) => {
-    if (event.timeStamp - lastTapAt < SECOND_FINGER_CLICK_MS) return;
+    const skip = skipNextClick && event.detail > 0;
+    skipNextClick = false;
+    if (skip) return;
     onPress();
   });
   return button;

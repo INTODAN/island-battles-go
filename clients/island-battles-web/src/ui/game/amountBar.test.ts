@@ -50,6 +50,9 @@ class FakeElement {
   type = "";
   value = "";
   children: FakeElement[] = [];
+  getBoundingClientRect() {
+    return { left: 100, right: 150, top: 200, bottom: 250 };
+  }
   readonly listeners = new Map<string, ((event: unknown) => void)[]>();
   constructor(readonly tag: string) {}
   setAttribute() {}
@@ -148,6 +151,8 @@ describe("a second finger's tap on Half or All", () => {
     pointerType: "touch",
     isPrimary: primary,
     pointerId: id,
+    clientX: 120,
+    clientY: 220,
   });
 
   test("presses the button on pointerup, as a browser fires no click for it, and once", async () => {
@@ -157,14 +162,57 @@ describe("a second finger's tap on Half or All", () => {
     const [half, all] = buttons as [FakeElement, FakeElement];
     half.fire("pointerdown", finger(false));
     expect(amounts).toEqual([]);
-    half.fire("pointerup", { ...finger(false), timeStamp: 1000 });
+    half.fire("pointerup", finger(false));
     expect(amounts).toEqual([{ kind: "share", share: 0.5 }]);
     // A browser that does add a click: the same tap.
-    half.fire("click", { timeStamp: 1100 });
+    half.fire("click", { detail: 1 });
     expect(amounts).toHaveLength(1);
     all.fire("pointerdown", finger(false, 8));
-    all.fire("pointerup", { ...finger(false, 8), timeStamp: 3000 });
+    all.fire("pointerup", finger(false, 8));
     expect(amounts.at(-1)).toEqual({ kind: "share", share: 1 });
+  });
+
+  test("a lift outside the button, where the finger slid to, presses nothing", async () => {
+    const { bar, buttons } = await barInAFakePage();
+    const amounts: unknown[] = [];
+    bar.onChange((amount) => amounts.push(amount));
+    const half = buttons[0] as FakeElement;
+    for (const [clientX, clientY] of [
+      [99, 220],
+      [151, 220],
+      [120, 199],
+      [120, 251],
+    ]) {
+      half.fire("pointerdown", finger(false));
+      half.fire("pointerup", { ...finger(false), clientX, clientY });
+    }
+    expect(amounts).toEqual([]);
+    // The edge counts as inside.
+    half.fire("pointerdown", finger(false));
+    half.fire("pointerup", { ...finger(false), clientX: 100, clientY: 250 });
+    expect(amounts).toHaveLength(1);
+  });
+
+  test("only the one click after the tap is skipped; a keyboard's click is not", async () => {
+    const { bar, buttons } = await barInAFakePage();
+    const amounts: unknown[] = [];
+    bar.onChange((amount) => amounts.push(amount));
+    const half = buttons[0] as FakeElement;
+    // A keyboard or assistive click right after the tap (detail 0) presses.
+    half.fire("pointerdown", finger(false));
+    half.fire("pointerup", finger(false));
+    half.fire("click", { detail: 0 });
+    expect(amounts).toHaveLength(2);
+    // The skip was used up: a late pointer click presses too.
+    half.fire("click", { detail: 1 });
+    expect(amounts).toHaveLength(3);
+    // The next press clears a skip that no click used.
+    half.fire("pointerdown", finger(false));
+    half.fire("pointerup", finger(false));
+    expect(amounts).toHaveLength(4);
+    half.fire("pointerdown", finger(true, 9));
+    half.fire("click", { detail: 1 });
+    expect(amounts).toHaveLength(5);
   });
 
   test("a finger that is the only one down, or a mouse, presses on click alone", async () => {
@@ -173,10 +221,10 @@ describe("a second finger's tap on Half or All", () => {
     bar.onChange((amount) => amounts.push(amount));
     const half = buttons[0] as FakeElement;
     half.fire("pointerdown", finger(true));
-    half.fire("pointerup", { ...finger(true), timeStamp: 1000 });
+    half.fire("pointerup", finger(true));
     expect(amounts).toEqual([]);
-    half.fire("click", { timeStamp: 1010 });
-    half.fire("click", { timeStamp: 9000 });
+    half.fire("click", { detail: 1 });
+    half.fire("click", { detail: 1 });
     expect(amounts).toHaveLength(2);
   });
 
@@ -187,7 +235,7 @@ describe("a second finger's tap on Half or All", () => {
     const half = buttons[0] as FakeElement;
     half.fire("pointerdown", finger(false));
     half.fire("pointercancel", finger(false));
-    half.fire("pointerup", { ...finger(false), timeStamp: 1000 });
+    half.fire("pointerup", finger(false));
     expect(amounts).toEqual([]);
   });
 });
