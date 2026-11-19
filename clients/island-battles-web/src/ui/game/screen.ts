@@ -613,6 +613,7 @@ export class GameScreen {
     const showHand = () => {
       const state = handPlay?.state.get() ?? null;
       hand = handView(state, controller.state);
+      player.setLivePace(hand.livePaceMs);
       player.setLiveTiming(hand.timing);
       this.markYourTeam(hand.hand ? hand.yourTeam : null);
       if (hand.yourTeam !== null) {
@@ -639,7 +640,11 @@ export class GameScreen {
         }
       }
     };
-    this.returnButton.onclick = jumpToNewest;
+    this.returnButton.onclick = () => {
+      jumpToNewest();
+      // The button hides once the view is live again: the focus goes to Follow live beside it.
+      this.follow.focus();
+    };
     const onVisible = () => {
       if (
         document.visibilityState === "visible" &&

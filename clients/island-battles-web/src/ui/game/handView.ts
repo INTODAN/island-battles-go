@@ -32,6 +32,8 @@ export interface HandView {
   readonly hideSpeed: boolean;
   /** How the board times live turns. */
   readonly timing: LiveTiming;
+  /** The game's turn pace for the board's timing (`TurnPlayer.setLivePace`), or null. */
+  readonly livePaceMs: number | null;
   /**
    * Returning to live jumps to the newest turn instead of replaying the turns missed, so orders
    * are given against the open generation at once.
@@ -47,6 +49,7 @@ export const NO_HAND: HandView = Object.freeze({
   status: null,
   hideSpeed: false,
   timing: WATCHING,
+  livePaceMs: null,
   jumpToLive: false,
 });
 
@@ -74,6 +77,7 @@ export function handView(play: PlayState | null, view: ViewState): HandView {
     status,
     hideSpeed: playing && view.follow,
     timing: playing ? PLAYING : WATCHING,
+    livePaceMs: playing ? (play.turn?.paceMs ?? null) : null,
     jumpToLive: playing,
   };
 }

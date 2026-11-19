@@ -501,6 +501,10 @@ interface LiveRun {
   hidden?: readonly [number, number];
   /** Switches the timing at this time, in ms. */
   switchTo?: { at: number; timing: LiveTiming };
+  /** The game's turn pace, given to the player (`setLivePace`), as the game view does. */
+  paceMs?: number;
+  /** Jumps to the newest turn at this time, in ms, as Return to live does after a scrub back. */
+  jumpAt?: number;
 }
 
 /**
@@ -517,6 +521,7 @@ function live(gap: (index: number) => number, ms: number, run: LiveRun = {}) {
     now: () => now,
     ...(run.timing ? { liveTiming: run.timing } : {}),
   });
+  if (run.paceMs !== undefined) player.setLivePace(run.paceMs);
   player.setLive(true);
   player.seek(long[0] as Generation);
   let next = 0;
@@ -524,7 +529,8 @@ function live(gap: (index: number) => number, ms: number, run: LiveRun = {}) {
   let frame = 0;
   let switched = false;
   const trace: number[] = [];
-  const lags: { at: number; lag: number }[] = [];
+  const lags: { at: number; index: number; lag: number }[] = [];
+  let jumped = false;
   const stops: { at: number; frames: number }[] = [];
   let still = 0;
   let last = stage.position;
@@ -534,11 +540,19 @@ function live(gap: (index: number) => number, ms: number, run: LiveRun = {}) {
     while (now >= arrival && next < long.length - 1) {
       lags.push({
         at: now,
+        index: next + 1,
         lag: player.waiting + (player.busy ? 1 - (player.progress ?? 0) : 0),
       });
       player.play(long[next] as Generation, long[next + 1] as Generation);
       next++;
       arrival += gap(next);
+    }
+    if (run.jumpAt !== undefined && !jumped && now >= run.jumpAt) {
+      // Scrubbed back, then Return to live: following stops, and the newest turn is shown at once.
+      player.setLive(false);
+      player.seek(long[next] as Generation);
+      player.setLive(true);
+      jumped = true;
     }
     if (run.switchTo && !switched && now >= run.switchTo.at) {
       player.setLiveTiming(run.switchTo.timing);
@@ -564,6 +578,10 @@ function live(gap: (index: number) => number, ms: number, run: LiveRun = {}) {
 /** The lengths of the stops that ended from `from` ms on, in frames. */
 const stopsFrom = (run: ReturnType<typeof live>, from: number) =>
   run.stops.filter((stop) => stop.at >= from).map((stop) => stop.frames);
+
+/** The lags as the turns from `index` on arrive. */
+const lagsFromTurn = (run: ReturnType<typeof live>, index: number) =>
+  run.lags.filter((entry) => entry.index >= index).map((entry) => entry.lag);
 
 /** The lags from `from` ms on. */
 const lagsFrom = (run: ReturnType<typeof live>, from: number) =>
@@ -712,5 +730,54 @@ describe("live timing (#345)", () => {
       expect(change).toBeLessThan(0.05);
     }
     for (const lag of lagsFrom(run, 40_000)) expect(lag).toBeLessThan(0.05);
+  });
+});
+
+describe("a hand player's timing with the game's pace (#345)", () => {
+  for (const pace of [500, 1000]) {
+    for (const late of [2000, 4000]) {
+      test(`at a ${pace} ms pace, a turn ${late} ms late leaves no lag two turns on`, () => {
+        // Turn 20 comes late; the server keeps its pace from there.
+        const run = live(
+          (index) => (index === 20 ? pace + late : pace),
+          (30 + late / pace) * pace + 30 * pace,
+          { timing: PLAYING, paceMs: pace },
+        );
+        // Before it, and from two turns after it, the board is with the open generation.
+        for (const lag of lagsFromTurn(run, 5).slice(0, 14)) {
+          expect(lag).toBeLessThan(0.1);
+        }
+        const after = run.lags.filter((entry) => entry.index >= 23);
+        expect(after.length).toBeGreaterThan(10);
+        for (const { lag } of after) expect(lag).toBeLessThan(0.1);
+        // The turn length stays the pace.
+        expect(run.player.turnDuration).toBe(pace);
+      });
+    }
+
+    test(`at a ${pace} ms pace, the first turns and the turns after a jump are on time`, () => {
+      const run = live(() => pace, 60 * pace, {
+        timing: PLAYING,
+        paceMs: pace,
+        jumpAt: 30 * pace + 250,
+      });
+      // From the second turn of the game on, including the turns right after the jump.
+      for (const lag of lagsFromTurn(run, 2)) expect(lag).toBeLessThan(0.1);
+    });
+  }
+
+  test("without the pace, a late turn stretches the turns after it (why the pace is passed)", () => {
+    const run = live((index) => (index === 20 ? 3000 : 1000), 50_000, {
+      timing: PLAYING,
+    });
+    expect(Math.max(...lagsFromTurn(run, 23))).toBeGreaterThan(0.3);
+  });
+
+  test("the pace changes nothing for a watcher", () => {
+    seed = 1;
+    const { trace } = live(() => 1000, 30_000, { paceMs: 1000 });
+    for (const [index, position] of trace.entries()) {
+      expect(position).toBeCloseTo(watchingTrace.steady[index] as number, 9);
+    }
   });
 });

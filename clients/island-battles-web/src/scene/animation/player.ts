@@ -164,6 +164,8 @@ export class TurnPlayer {
    */
   private paced = 0;
   private timing: LiveTiming;
+  /** The game's turn pace, when the server keeps one (`setLivePace`). */
+  private livePaceMs: number | null = null;
 
   constructor(
     private readonly stage: Stage,
@@ -243,7 +245,9 @@ export class TurnPlayer {
     this.burst = 1;
     this.arrivalGap = null;
     this.paced = 0;
-    this.liveTurnMs = clamp(this.turnMs, MIN_LIVE_TURN_MS, MAX_LIVE_TURN_MS);
+    this.liveTurnMs =
+      this.knownPace() ??
+      clamp(this.turnMs, MIN_LIVE_TURN_MS, MAX_LIVE_TURN_MS);
   }
 
   /**
@@ -257,6 +261,17 @@ export class TurnPlayer {
       this.paced = Math.min(this.paced, 1);
     }
     this.timing = timing;
+  }
+
+  /**
+   * The game's turn pace, in milliseconds, when it has one (a real-time game), or null. Following
+   * the newest turn, a known pace is the turn's length, from the first turn on, and a late turn
+   * doesn't stretch the turns after it; otherwise the turn's length follows the arrivals.
+   */
+  setLivePace(paceMs: number | null): void {
+    this.livePaceMs = paceMs !== null && paceMs > 0 ? paceMs : null;
+    const known = this.knownPace();
+    if (this.live && known !== null) this.liveTurnMs = known;
   }
 
   get liveTiming(): LiveTiming {
@@ -393,6 +408,14 @@ export class TurnPlayer {
     );
   }
 
+  /** The turn length the pace gives, when the timing uses it; null to follow the arrivals. */
+  private knownPace(): number | null {
+    if (this.timing.follows !== "newest" || this.livePaceMs === null) {
+      return null;
+    }
+    return clamp(this.livePaceMs, MIN_LIVE_TURN_MS, MAX_LIVE_TURN_MS);
+  }
+
   /** How much of the newest turn would still be to play had it started when it arrived. */
   private newestLeft(): number {
     if (this.lastArrival === null) return 0;
@@ -402,15 +425,20 @@ export class TurnPlayer {
   /** Eases the turn length and the catch-up speed by `deltaMs`. */
   private pace(deltaMs: number): void {
     if (this.live) {
-      const target =
-        this.arrivalGap === null
-          ? this.turnMs
-          : clamp(this.arrivalGap, MIN_LIVE_TURN_MS, MAX_LIVE_TURN_MS);
-      this.liveTurnMs = clamp(
-        ease(this.liveTurnMs, target, deltaMs, LIVE_PACE_EASE_MS),
-        MIN_LIVE_TURN_MS,
-        MAX_LIVE_TURN_MS,
-      );
+      const known = this.knownPace();
+      if (known !== null) {
+        this.liveTurnMs = known;
+      } else {
+        const target =
+          this.arrivalGap === null
+            ? this.turnMs
+            : clamp(this.arrivalGap, MIN_LIVE_TURN_MS, MAX_LIVE_TURN_MS);
+        this.liveTurnMs = clamp(
+          ease(this.liveTurnMs, target, deltaMs, LIVE_PACE_EASE_MS),
+          MIN_LIVE_TURN_MS,
+          MAX_LIVE_TURN_MS,
+        );
+      }
       this.paced = Math.max(0, this.paced - deltaMs / this.liveTurnMs);
     }
     this.catchUp = ease(

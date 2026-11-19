@@ -82,6 +82,7 @@ describe("handView", () => {
       status: null,
       hideSpeed: true,
       timing: PLAYING,
+      livePaceMs: 1000,
       jumpToLive: true,
     });
   });
@@ -120,6 +121,7 @@ describe("handView", () => {
       expect(shown.pace).toBeNull();
       expect(shown.hideSpeed).toBe(false);
       expect(shown.timing).toBe(WATCHING);
+      expect(shown.livePaceMs).toBeNull();
       expect(shown.jumpToLive).toBe(false);
       expect(shown.yourTeam).toBe(1);
     }

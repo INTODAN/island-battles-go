@@ -58,13 +58,16 @@ describe("order feedback", () => {
     expect(shown.at(-1)).toBeNull();
   });
 
-  test("the same sentence without an id isn't counted twice", () => {
+  test("a sentence without an id counts each time, so a repeat is announced", () => {
     const { notices, last } = setup();
-    notices.show("You can't send soldiers to the same castle.");
-    notices.show("You can't send soldiers to the same castle.");
-    expect(last()).toBe("You can't send soldiers to the same castle.");
+    notices.show("The castle has no soldiers to send.");
+    expect(last()).toBe("The castle has no soldiers to send.");
+    notices.show("The castle has no soldiers to send.");
+    expect(last()).toBe(
+      "The castle has no soldiers to send. (2 orders refused)",
+    );
     notices.show("A refused resignation.");
-    expect(last()).toBe("A refused resignation. (2 orders refused)");
+    expect(last()).toBe("A refused resignation. (3 orders refused)");
   });
 
   test("dispose hides the line and leaves no timer", () => {

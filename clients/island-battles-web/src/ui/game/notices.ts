@@ -4,7 +4,8 @@
 // The newest sentence shows for `ORDER_FEEDBACK_MS`, each call restarting the time. From the
 // second order refused within that time, a count follows the sentence, "(3 orders refused)", which
 // also makes a screen reader announce a sentence that repeats. One order is counted once: the drag
-// or the menu that gave it and hand play's `onSettled` may both report it, with its id.
+// or the menu that gave it and hand play's `onSettled` may both report it, with its id. A sentence
+// without an id (an order refused before it was sent) counts each time.
 
 /** How long one piece of feedback shows, in milliseconds. */
 export const ORDER_FEEDBACK_MS = 5000;
@@ -33,14 +34,12 @@ export function createOrderNotices(deps: OrderNoticeDeps): OrderNotices {
   /** The orders reported within the time, by id. */
   let ids = new Set<number>();
   let refused = 0;
-  let newest: string | null = null;
 
   function clear(): void {
     cancel?.();
     cancel = undefined;
     ids = new Set();
     refused = 0;
-    newest = null;
   }
 
   return {
@@ -50,10 +49,9 @@ export function createOrderNotices(deps: OrderNoticeDeps): OrderNotices {
         if (ids.has(orderId)) return;
         ids.add(orderId);
         refused += 1;
-      } else if (sentence !== newest || refused === 0) {
+      } else {
         refused += 1;
       }
-      newest = sentence;
       cancel?.();
       cancel = deps.schedule(() => {
         clear();
