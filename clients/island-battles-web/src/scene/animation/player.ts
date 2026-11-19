@@ -94,6 +94,11 @@ export const BURST_MS = 30;
 export const BURST_SHARE = 0.25;
 /** The most turns one burst counts; more close together are a fast game, not a burst. */
 export const MAX_BURST = 4;
+/**
+ * With the game's pace known, a gap between arrivals counts as at most this many times the larger
+ * of the pace and the running average.
+ */
+const OUTLIER_SHARE = 1.5;
 /** Catch-up speed per turn of backlog beyond the buffer. */
 const CATCH_UP_GAIN = 0.5;
 /** Following live, the slowest the catch-up plays to let a buffer build up. */
@@ -265,8 +270,11 @@ export class TurnPlayer {
 
   /**
    * The game's turn pace, in milliseconds, when it has one (a real-time game), or null. Following
-   * the newest turn, a known pace is the turn's length, from the first turn on, and a late turn
-   * doesn't stretch the turns after it; otherwise the turn's length follows the arrivals.
+   * the newest turn, a known pace is the turn's length from the first turn on (and after each
+   * `setLive(true)`) until the time between arrivals is known, and a single late turn counts as
+   * at most half a turn more than usual in that average; the turn's length still follows the
+   * arrivals, so a server slower or faster than its pace neither stops the board every turn nor
+   * leaves it behind.
    */
   setLivePace(paceMs: number | null): void {
     this.livePaceMs = paceMs !== null && paceMs > 0 ? paceMs : null;
@@ -350,7 +358,7 @@ export class TurnPlayer {
     this.paced += 1;
     const close = Math.max(
       BURST_MS,
-      BURST_SHARE * (this.arrivalGap ?? this.turnMs),
+      BURST_SHARE * (this.arrivalGap ?? this.knownPace() ?? this.turnMs),
     );
     if (
       this.lastArrival !== null &&
@@ -363,10 +371,20 @@ export class TurnPlayer {
     }
     if (this.burstStart !== null) {
       // A long wait (a paused server, a tab in the background) counts as a slow turn, no more.
-      const gap = Math.min(
+      let gap = Math.min(
         (now - this.burstStart) / this.burst,
         2 * MAX_LIVE_TURN_MS,
       );
+      const known = this.knownPace();
+      if (known !== null) {
+        // With the game's pace known, one late turn counts as at most half a turn more than
+        // usual, so it doesn't stretch the turns after it; gaps that stay long still raise the
+        // average step by step, and the turn then follows them.
+        gap = Math.min(
+          gap,
+          OUTLIER_SHARE * Math.max(known, this.arrivalGap ?? known),
+        );
+      }
       const weight = 1 - (1 - ARRIVAL_WEIGHT) ** this.burst;
       this.arrivalGap =
         this.arrivalGap === null
@@ -425,20 +443,16 @@ export class TurnPlayer {
   /** Eases the turn length and the catch-up speed by `deltaMs`. */
   private pace(deltaMs: number): void {
     if (this.live) {
-      const known = this.knownPace();
-      if (known !== null) {
-        this.liveTurnMs = known;
-      } else {
-        const target =
-          this.arrivalGap === null
-            ? this.turnMs
-            : clamp(this.arrivalGap, MIN_LIVE_TURN_MS, MAX_LIVE_TURN_MS);
-        this.liveTurnMs = clamp(
-          ease(this.liveTurnMs, target, deltaMs, LIVE_PACE_EASE_MS),
-          MIN_LIVE_TURN_MS,
-          MAX_LIVE_TURN_MS,
-        );
-      }
+      // Before the first gap is known: the game's pace when it has one.
+      const target =
+        this.arrivalGap === null
+          ? (this.knownPace() ?? this.turnMs)
+          : clamp(this.arrivalGap, MIN_LIVE_TURN_MS, MAX_LIVE_TURN_MS);
+      this.liveTurnMs = clamp(
+        ease(this.liveTurnMs, target, deltaMs, LIVE_PACE_EASE_MS),
+        MIN_LIVE_TURN_MS,
+        MAX_LIVE_TURN_MS,
+      );
       this.paced = Math.max(0, this.paced - deltaMs / this.liveTurnMs);
     }
     this.catchUp = ease(

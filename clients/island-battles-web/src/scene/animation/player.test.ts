@@ -734,35 +734,82 @@ describe("live timing (#345)", () => {
 });
 
 describe("a hand player's timing with the game's pace (#345)", () => {
+  /** After warming up: the lags, and the stops per 100 turns and the longest, in frames. */
+  const settled = (run: ReturnType<typeof live>) => {
+    const lags = lagsFrom(run, 20_000);
+    const stops = stopsFrom(run, 20_000);
+    return {
+      lags,
+      maxLag: Math.max(...lags),
+      stopsPer100: (stops.length / lags.length) * 100,
+      longestStop: Math.max(0, ...stops),
+    };
+  };
+
   for (const pace of [500, 1000]) {
+    const playing = { timing: PLAYING, paceMs: pace };
+
+    // A server rarely keeps its pace exactly: the turn follows the time between arrivals.
+    for (const ratio of [1, 1.04, 1.3, 0.7, 2]) {
+      test(`at a ${pace} ms pace, turns ${ratio}x the pace apart keep up without stopping each turn`, () => {
+        const run = settled(live(() => ratio * pace, 300 * pace, playing));
+        expect(run.maxLag).toBeLessThan(0.1);
+        expect(run.stopsPer100).toBeLessThanOrEqual(6);
+        expect(run.longestStop).toBeLessThanOrEqual(2);
+      });
+    }
+
+    test(`at a ${pace} ms pace, with ±40 ms of jitter, the stops are short`, () => {
+      let state = 7;
+      const jitter = () => {
+        state = (state * 1664525 + 1013904223) % 2 ** 32;
+        return state / 2 ** 32;
+      };
+      const run = settled(
+        live(() => 1.02 * pace + 80 * (jitter() - 0.5), 200 * pace, playing),
+      );
+      const sorted = [...run.lags].sort((a, b) => a - b);
+      expect(sorted[Math.floor(sorted.length * 0.95)] as number).toBeLessThan(
+        0.15,
+      );
+      expect(run.stopsPer100).toBeLessThan(25);
+      // A stop is a turn arriving late, as long as it is late: no more than a few frames.
+      expect(run.longestStop).toBeLessThanOrEqual(4);
+    });
+
     for (const late of [2000, 4000]) {
-      test(`at a ${pace} ms pace, a turn ${late} ms late leaves no lag two turns on`, () => {
+      test(`at a ${pace} ms pace, a turn ${late} ms late leaves a small lag that goes`, () => {
         // Turn 20 comes late; the server keeps its pace from there.
         const run = live(
           (index) => (index === 20 ? pace + late : pace),
-          (30 + late / pace) * pace + 30 * pace,
-          { timing: PLAYING, paceMs: pace },
+          60 * pace + late,
+          playing,
         );
-        // Before it, and from two turns after it, the board is with the open generation.
-        for (const lag of lagsFromTurn(run, 5).slice(0, 14)) {
-          expect(lag).toBeLessThan(0.1);
-        }
-        const after = run.lags.filter((entry) => entry.index >= 23);
-        expect(after.length).toBeGreaterThan(10);
-        for (const { lag } of after) expect(lag).toBeLessThan(0.1);
-        // The turn length stays the pace.
-        expect(run.player.turnDuration).toBe(pace);
+        const lags = run.lags.filter((entry) => entry.index >= 20);
+        expect(Math.max(...lags.map((entry) => entry.lag))).toBeLessThan(0.25);
+        const later = lags.filter((entry) => entry.index >= 30);
+        expect(later.length).toBeGreaterThan(10);
+        for (const { lag } of later) expect(lag).toBeLessThan(0.1);
       });
     }
 
     test(`at a ${pace} ms pace, the first turns and the turns after a jump are on time`, () => {
       const run = live(() => pace, 60 * pace, {
-        timing: PLAYING,
-        paceMs: pace,
+        ...playing,
         jumpAt: 30 * pace + 250,
       });
       // From the second turn of the game on, including the turns right after the jump.
       for (const lag of lagsFromTurn(run, 2)) expect(lag).toBeLessThan(0.1);
+    });
+
+    test(`at a ${pace} ms pace, five turns that arrive together are caught up within three turns`, () => {
+      const run = live(
+        (index) =>
+          index === 20 ? 5 * pace : index > 20 && index <= 24 ? 0 : pace,
+        60 * pace,
+        playing,
+      );
+      for (const lag of lagsFromTurn(run, 28)) expect(lag).toBeLessThan(0.1);
     });
   }
 
