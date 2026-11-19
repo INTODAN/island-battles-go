@@ -36,6 +36,14 @@ export interface PlayerOptions {
    * same frame, with the frame's time that is left, so it follows without a pause.
    */
   onIdle?: () => void;
+  /**
+   * The teams that left the game in the turn from `previous` to `next`, when the game's
+   * `departures` say; undefined when they are not known, and the plan goes by the castles.
+   */
+  departed?: (
+    previous: Generation,
+    next: Generation,
+  ) => ReadonlySet<number> | undefined;
   /** How a live turn is timed while following live; `WATCHING` when absent. */
   liveTiming?: LiveTiming;
 }
@@ -159,6 +167,7 @@ export class TurnPlayer {
   private readonly now: () => number;
   private readonly onShown: ((generation: Generation) => void) | undefined;
   private readonly onIdle: (() => void) | undefined;
+  private readonly departed: PlayerOptions["departed"];
   private queue: Turn[] = [];
   private running: Running | null = null;
   /** The generation the stage shows when no turn is running, or null when it is unknown. */
@@ -201,6 +210,7 @@ export class TurnPlayer {
     this.now = options.now ?? (() => performance.now());
     this.onShown = options.onShown;
     this.onIdle = options.onIdle;
+    this.departed = options.departed;
     this.liveTurnMs = clamp(this.turnMs, MIN_LIVE_TURN_MS, MAX_LIVE_TURN_MS);
     this.timing = options.liveTiming ?? WATCHING;
   }
@@ -239,7 +249,7 @@ export class TurnPlayer {
   scrub(previous: Generation, next: Generation, progress: number): void {
     this.queue = [];
     this.stage.settle(previous);
-    const plan = planTurn(previous, next);
+    const plan = planTurn(previous, next, this.departed?.(previous, next));
     this.stage.begin(plan);
     this.stage.apply(sampleTurn(plan, progress), plan);
     this.running = null;
@@ -511,7 +521,11 @@ export class TurnPlayer {
       this.stage.settle(turn.previous);
       this.shown = turn.previous;
     }
-    const plan = planTurn(turn.previous, turn.next);
+    const plan = planTurn(
+      turn.previous,
+      turn.next,
+      this.departed?.(turn.previous, turn.next),
+    );
     this.stage.begin(plan);
     this.stage.apply(sampleTurn(plan, 0), plan);
     this.running = { plan, progress: 0 };

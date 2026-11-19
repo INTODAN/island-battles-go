@@ -53,7 +53,16 @@ export const NO_HAND: HandView = Object.freeze({
   jumpToLive: false,
 });
 
-export function handView(play: PlayState | null, view: ViewState): HandView {
+/**
+ * `resigned`: the player's resignation is recorded and waits for the turn to play (#348). The
+ * status is still `playing` until then, but orders can't be given: no pace bar, and no "Return to
+ * live to give orders".
+ */
+export function handView(
+  play: PlayState | null,
+  view: ViewState,
+  resigned = false,
+): HandView {
   if (play === null || play.status === "idle") return NO_HAND;
   const playing = play.status === "playing";
   // A running live game that is loaded, shown on an older turn: the button can return to live.
@@ -68,12 +77,12 @@ export function handView(play: PlayState | null, view: ViewState): HandView {
     play.turn.endsAt !== null &&
     play.turn.startsAt !== null;
   let status: HandStatusRow = null;
-  if (playing && behind) status = "return-to-live";
+  if (playing && behind && !resigned) status = "return-to-live";
   else if (play.status === "eliminated") status = "team-out";
   return {
     hand: true,
     yourTeam: play.teamColor,
-    pace: playing && realTime ? play.turn : null,
+    pace: playing && realTime && !resigned ? play.turn : null,
     status,
     hideSpeed: playing && view.follow,
     timing: playing ? PLAYING : WATCHING,

@@ -394,7 +394,14 @@ interface Arrival {
  * Plans the turn between two consecutive generations as tracks over t in [0, 1]. At t = 1 every
  * position, count and team equals `next` exactly.
  */
-export function planTurn(previous: Generation, next: Generation): TurnPlan {
+export function planTurn(
+  previous: Generation,
+  next: Generation,
+  left?: ReadonlySet<number>,
+): TurnPlan {
+  // The teams that left in this turn: as the state's `departures` say, or, with none to go by (a
+  // demo saved before they existed), as the castles show (`departedTeams`).
+  const departed = left ?? departedTeams(previous, next);
   const tracks: Track[] = [];
   const transients: SoldierGroup[] = [];
   const previousGroups = new Map(previous.soldier_groups.map((g) => [g.id, g]));
@@ -514,6 +521,22 @@ export function planTurn(previous: Generation, next: Generation): TurnPlan {
   for (const group of previous.soldier_groups) {
     if (nextGroups.has(group.id)) continue;
     transients.push(group);
+    if (departed.has(group.team_color)) {
+      // Its team left: the server removed the group before the turn ran. It reaches no castle
+      // and fights no clash; the boat just goes under where it lies.
+      tracks.push({
+        kind: "move",
+        groupId: group.id,
+        keys: [{ t: 0, x: group.x, y: group.y }],
+      });
+      tracks.push({
+        kind: "groupCount",
+        groupId: group.id,
+        keys: groupCountKeys(group.soldiers, group.soldiers, []),
+      });
+      tracks.push(sinkAt(group.id, 0));
+      continue;
+    }
     const list = participations.get(group.id) ?? [];
     const keys: PathKey[] = [
       { t: 0, x: group.x, y: group.y },
@@ -656,13 +679,44 @@ export function planTurn(previous: Generation, next: Generation): TurnPlan {
   for (const { before, after } of castlePairs) {
     planCastle(
       tracks,
-      before,
+      departed.has(before.team_color) ? neutralized(before) : before,
       after,
       launched.get(after.id) ?? 0,
       arrivals.get(after.id) ?? [],
     );
   }
   return { previous, next, tracks, transients };
+}
+
+/**
+ * The teams that left the game this turn, found from the castles: a castle of theirs is
+ * neutral in `next`. A fallback for a demo without `departures`: it misses a team with no castle
+ * and one whose castles were all captured in the same turn.
+ * Fighting never
+ * makes a castle neutral (a capture gives it to the attacker, and a tie leaves it as it was), so
+ * this is the server taking a team out of a real-time game (resigned or left): its castles turn
+ * neutral, keeping their soldiers, and its soldier groups vanish with no clash and no landing.
+ */
+export function departedTeams(
+  previous: Generation,
+  next: Generation,
+): ReadonlySet<number> {
+  const nextCastles = new Map(next.castles.map((c) => [c.id, c]));
+  const teams = new Set<number>();
+  for (const castle of previous.castles) {
+    if (
+      castle.team_color !== NEUTRAL_TEAM &&
+      nextCastles.get(castle.id)?.team_color === NEUTRAL_TEAM
+    ) {
+      teams.add(castle.team_color);
+    }
+  }
+  return teams;
+}
+
+/** A castle of a team that left, as the server leaves it before the turn runs: neutral, with no burst debt. */
+function neutralized(castle: Castle): Castle {
+  return { ...castle, team_color: NEUTRAL_TEAM, burst_debt: 0 };
 }
 
 function mapDistance(

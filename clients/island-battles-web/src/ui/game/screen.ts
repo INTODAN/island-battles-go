@@ -39,11 +39,15 @@ import {
   statusText,
 } from "./handView";
 import {
+  type Departure,
+  departureText,
   type GameOutcome,
   type GameTeam,
   type Generation,
+  mergeDepartures,
   sortTeams,
   teamStats,
+  teamsDepartedAt,
   turnLabel,
 } from "./history";
 import {
@@ -54,6 +58,13 @@ import {
   openGenerationId,
 } from "./logs";
 import { createOrderNotices } from "./notices";
+import {
+  confirmationKey,
+  givesOrders,
+  type ResignResult,
+  resignControl,
+  resignQuestion,
+} from "./resign";
 
 export interface ScreenOptions {
   /** True when new turns can arrive: the live view. */
@@ -81,6 +92,11 @@ export interface ScreenOptions {
    * status isn't `playing`, so its controls stay off.
    */
   handPlay?: HandPlay | null;
+  /**
+   * Resigns the player's team (`POST .../resign`, retried, its answer installed). Absent for a
+   * watcher and a demo, which show no Resign button.
+   */
+  onResign?: () => Promise<ResignResult>;
 }
 
 /**
@@ -188,6 +204,32 @@ export class GameScreen {
   /** The team marked as yours: a hand player's. */
   private markedTeam: number | null = null;
   private readonly summary = element("p", "gv-summary");
+  /** The Resign button, or "You resigned" in its place (`resign.ts` says which). */
+  private readonly resignButton = button(
+    "Resign",
+    "Resign",
+    "gv-button gv-resign",
+  );
+  private readonly resigned = element("span", "gv-resigned", "You resigned");
+  private readonly confirmBackdrop = element("div", "gv-confirm-backdrop");
+  private readonly confirmBox = element("div", "gv-confirm");
+  private readonly confirmResign = button(
+    "Resign",
+    "Resign",
+    "gv-button gv-danger",
+  );
+  private readonly confirmKeep = button("Keep playing", "Keep playing");
+  /** The top bar's first button, where the focus goes when the Resign button can't have it. */
+  private backToLobby: HTMLButtonElement | undefined;
+  /** Tells the hand player's view that a resignation is pending; set while a game runs. */
+  private onResignPending: (() => void) | undefined;
+  private resignSending = false;
+  private resignDone = false;
+  /** What had the focus when the confirmation opened, to give it back when it closes. */
+  private confirmReturnFocus: HTMLElement | null = null;
+  private confirmKeyListener: ((event: KeyboardEvent) => void) | undefined;
+  /** The teams out so far, from the live state (the outcome lists them all at the end). */
+  private departures: readonly Departure[] = [];
   private readonly saveError = element("p", "gv-notice");
   private readonly askStatus = element("p", "gv-summary gv-ask-status");
   private readonly askText = element("textarea", "gv-ask-text");
@@ -221,7 +263,7 @@ export class GameScreen {
   );
   private teamRows = new Map<
     number,
-    { soldiers: HTMLElement; castles: HTMLElement }
+    { soldiers: HTMLElement; castles: HTMLElement; status: HTMLElement }
   >();
   private readonly bottomStack = element("div", "gv-stack gv-stack-bottom");
   private running: Running | undefined;
@@ -243,6 +285,7 @@ export class GameScreen {
     const top = element("header", "gv-top");
     const backLabel = this.options.backLabel ?? "Back to lobby";
     const back = button(backLabel, backLabel);
+    this.backToLobby = back;
     back.addEventListener("click", () => this.options.onBack());
     const open = button("Open demo file", "Open demo file");
     const file = element("input");
@@ -278,11 +321,46 @@ export class GameScreen {
       ask,
       rulesButton("gv-button"),
       this.controls.button,
+      this.resignButton,
+      this.resigned,
       file,
     );
 
     this.notice.setAttribute("role", "alert");
     this.notice.hidden = true;
+    this.resignButton.hidden = true;
+    this.resigned.hidden = true;
+    this.resigned.setAttribute("role", "status");
+    this.resignButton.addEventListener("click", () => this.openConfirmation());
+    this.confirmBackdrop.hidden = true;
+    this.confirmBox.setAttribute("role", "alertdialog");
+    this.confirmBox.setAttribute("aria-modal", "true");
+    this.confirmBox.setAttribute("aria-labelledby", "gv-confirm-question");
+    const question = element("p", "gv-confirm-question", resignQuestion);
+    question.id = "gv-confirm-question";
+    const actions = element("div", "gv-confirm-actions");
+    actions.append(this.confirmResign, this.confirmKeep);
+    this.confirmBox.append(question, actions);
+    this.confirmBackdrop.append(this.confirmBox);
+    this.confirmResign.addEventListener("click", () => void this.resign());
+    this.confirmKeep.addEventListener("click", () => this.closeConfirmation());
+    // A click outside the box keeps playing too.
+    this.confirmBackdrop.addEventListener("click", (event) => {
+      if (event.target === this.confirmBackdrop) this.closeConfirmation();
+    });
+    this.confirmBox.addEventListener("keydown", (event) => {
+      // Tab stays inside the dialog.
+      if (event.key !== "Tab") return;
+      const first = this.confirmResign;
+      const last = this.confirmKeep;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    });
     this.orderNotice.setAttribute("role", "alert");
     this.orderNotice.hidden = true;
     this.handStatusText.setAttribute("role", "status");
@@ -384,7 +462,13 @@ export class GameScreen {
       this.handStatus,
       timeline,
     );
-    root.append(this.canvas, topStack, this.bottomStack, this.overlay);
+    root.append(
+      this.canvas,
+      topStack,
+      this.bottomStack,
+      this.overlay,
+      this.confirmBackdrop,
+    );
     this.container.replaceChildren(root);
     this.setConnection(this.options.live ? "connecting" : "saved");
   }
@@ -416,6 +500,105 @@ export class GameScreen {
   setNotice(text: string | null): void {
     this.notice.textContent = text ?? "";
     this.notice.hidden = !text;
+  }
+
+  /** The teams that are out of the game so far, from the live state; the outcome adds the rest. */
+  setDepartures(departures: readonly Departure[]): void {
+    this.departures = departures;
+    const running = this.running;
+    if (running) this.render(running.controller.state);
+  }
+
+  /** The Resign button, "You resigned" or nothing, from the hand play's status. */
+  private renderResign(): void {
+    const control = resignControl({
+      status: this.options.onResign
+        ? (this.options.handPlay?.state.get().status ?? "idle")
+        : "idle",
+      sending: this.resignSending,
+      resigned: this.resignDone,
+    });
+    this.resignButton.hidden = control.kind !== "button";
+    this.resigned.hidden = control.kind !== "resigned";
+    if (control.kind === "button") {
+      this.resignButton.textContent = control.label;
+      this.resignButton.setAttribute("aria-label", control.label);
+      this.resignButton.disabled = control.disabled;
+    }
+    if (control.kind === "resigned") this.resigned.textContent = control.text;
+    // The team is out or the game over while the question was open: nothing is left to ask.
+    if (control.kind !== "button" && !this.confirmBackdrop.hidden) {
+      this.closeConfirmation("top-bar");
+    }
+  }
+
+  private openConfirmation(): void {
+    if (this.resignSending || !this.confirmBackdrop.hidden) return;
+    this.confirmReturnFocus =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : this.resignButton;
+    this.confirmBackdrop.hidden = false;
+    // Keep playing is the safe default.
+    this.confirmKeep.focus();
+    this.confirmKeyListener = (event) => {
+      if (confirmationKey(!this.confirmBackdrop.hidden, event) === null) return;
+      event.preventDefault();
+      this.closeConfirmation();
+    };
+    document.addEventListener("keydown", this.confirmKeyListener);
+  }
+
+  /**
+   * Closes the question. The focus goes back to what opened it (`opener`), to the top bar's first
+   * button when that can't have it (`top-bar`: the button is disabled or gone), or stays.
+   */
+  private closeConfirmation(
+    focus: "opener" | "top-bar" | "none" = "opener",
+  ): void {
+    if (this.confirmKeyListener) {
+      document.removeEventListener("keydown", this.confirmKeyListener);
+      this.confirmKeyListener = undefined;
+    }
+    this.confirmBackdrop.hidden = true;
+    const opener = this.confirmReturnFocus;
+    this.confirmReturnFocus = null;
+    if (focus === "none") return;
+    const usable =
+      focus === "opener" &&
+      opener?.isConnected === true &&
+      !(opener instanceof HTMLButtonElement && opener.disabled) &&
+      !opener.hidden;
+    (usable ? opener : this.backToLobby)?.focus();
+  }
+
+  private async resign(): Promise<void> {
+    const onResign = this.options.onResign;
+    if (!onResign || this.resignSending) return;
+    // The button is disabled while it runs: the focus goes to the top bar's first button.
+    this.closeConfirmation("top-bar");
+    this.resignSending = true;
+    this.renderResign();
+    let result: ResignResult;
+    try {
+      result = await onResign();
+    } catch {
+      result = {
+        kind: "unreachable",
+        sentence: "The resignation could not be sent. Try again.",
+      };
+    }
+    this.resignSending = false;
+    if (this.disposed) return;
+    if (result.kind === "resigned" || result.kind === "already") {
+      this.resignDone = true;
+      // The board stops taking orders and the status row stops asking to return to live.
+      this.onResignPending?.();
+    } else {
+      // A refused resignation is feedback on an order of the player's (the notice contract).
+      this.handSurface?.showOrderFeedback(result.sentence);
+    }
+    this.renderResign();
   }
 
   /**
@@ -535,8 +718,11 @@ export class GameScreen {
       handPlay,
       // Read lazily: the controller and the hand surface are made below.
       canOrder: () =>
-        handPlay?.state.get().status === "playing" &&
-        this.handSurface?.showsNewestTurn() === true,
+        givesOrders({
+          status: handPlay?.state.get().status ?? "idle",
+          showsNewestTurn: this.handSurface?.showsNewestTurn() === true,
+          resigned: this.resignDone,
+        }),
       ...(this.amountBar ? { amountControl: this.amountBar } : {}),
       showOrderFeedback: (sentence, orderId) =>
         this.handSurface?.showOrderFeedback(sentence, orderId),
@@ -555,8 +741,22 @@ export class GameScreen {
     );
     // A turn that ends asks for the next one at once, so playing on loses no time between turns.
     let onIdle = () => {};
+    let controllerOf: GameController | undefined;
     const { player } = createScenePlayer(scene, sorted, {
       onIdle: () => onIdle(),
+      // The turn that `next` is: its index in the history, from 1.
+      departed: (_previous, next) => {
+        const index = controllerOf?.state.frames.findIndex(
+          (frame) => frame.id === next.id,
+        );
+        const outcome = controllerOf?.state.outcome;
+        return index === undefined || index < 0
+          ? undefined
+          : teamsDepartedAt(
+              mergeDepartures(this.departures, outcome?.departures),
+              index + 1,
+            );
+      },
       liveTiming: handView(handPlay?.state.get() ?? null, {
         frames: [],
         index: -1,
@@ -577,6 +777,7 @@ export class GameScreen {
       },
       { live: this.options.live },
     );
+    controllerOf = controller;
     onIdle = () => controller.tick();
     scene.onBeforeRenderObservable.add(() => controller.tick());
     this.handSurface = handPlay && {
@@ -588,12 +789,17 @@ export class GameScreen {
       showOrderFeedback: (sentence, orderId) =>
         this.orderNotices.show(sentence, orderId),
     };
+    this.onResignPending = () => {
+      showHand();
+      castleMenu?.update();
+    };
     castleMenu =
       handPlay &&
       new CastleMenu({
         host: this.root,
         handPlay,
-        showsNewestTurn: () => showsNewestTurn(controller.state),
+        showsNewestTurn: () =>
+          showsNewestTurn(controller.state) && !this.resignDone,
         subscribeView: (listener) => controller.subscribe(listener),
         locate: (castleId) => castleScreenPoint(scene, castleId),
         onFrame: (run) => {
@@ -612,7 +818,7 @@ export class GameScreen {
       controller.scrubTo(controller.state.frames.length - 1);
     const showHand = () => {
       const state = handPlay?.state.get() ?? null;
-      hand = handView(state, controller.state);
+      hand = handView(state, controller.state, this.resignDone);
       player.setLivePace(hand.livePaceMs);
       player.setLiveTiming(hand.timing);
       this.markYourTeam(hand.hand ? hand.yourTeam : null);
@@ -657,6 +863,7 @@ export class GameScreen {
       ? [
           handPlay.state.subscribe(showHand),
           controller.subscribe(showHand),
+          handPlay.state.subscribe(() => this.renderResign()),
           // The one subscription that shows every rejection, also of orders whose control is gone.
           handPlay.onSettled((order) => {
             if (order.state === "rejected" && order.sentence) {
@@ -716,6 +923,10 @@ export class GameScreen {
       dispose: () => {
         unsubscribe();
         castleMenu?.dispose();
+        this.onResignPending = undefined;
+        this.closeConfirmation("none");
+        this.resignButton.hidden = true;
+        this.resigned.hidden = true;
         for (const stop of handStops) stop();
         document.removeEventListener("visibilitychange", onVisible);
         this.handStatus.hidden = true;
@@ -736,6 +947,7 @@ export class GameScreen {
     };
     this.render(controller.state);
     showHand();
+    this.renderResign();
     return controller;
   }
 
@@ -835,8 +1047,11 @@ export class GameScreen {
       const castles = element("span", "gv-count");
       const counts = element("div", "gv-team-counts");
       counts.append(soldiers, castles);
-      card.append(name, players, bot, counts);
-      this.teamRows.set(team.color, { soldiers, castles });
+      // "Resigned" or "Left the game", once the team is out of a real-time game.
+      const status = element("div", "gv-team-status");
+      status.hidden = true;
+      card.append(name, players, bot, status, counts);
+      this.teamRows.set(team.color, { soldiers, castles, status });
       rows.push(card);
     }
     this.teamsBox.replaceChildren(...rows);
@@ -861,7 +1076,7 @@ export class GameScreen {
     );
     this.follow.checked = state.follow;
     this.follow.disabled = !state.live || state.outcome !== null;
-    this.renderStats(running, frame);
+    this.renderStats(running, frame, state.outcome);
     this.renderOutcome(running, state.outcome);
     this.renderClashes(frame);
     this.renderLogs(state);
@@ -873,17 +1088,29 @@ export class GameScreen {
     this.clashes.hidden = text === "";
   }
 
-  private renderStats(running: Running, frame: Generation | undefined): void {
+  private renderStats(
+    running: Running,
+    frame: Generation | undefined,
+    outcome: GameOutcome | null,
+  ): void {
     if (!frame) return;
+    const departures = mergeDepartures(this.departures, outcome?.departures);
     for (const stats of teamStats(frame, running.teams)) {
       const row = this.teamRows.get(stats.team.color);
       if (!row) continue;
       row.soldiers.textContent = `${stats.soldiers} soldiers`;
       row.castles.textContent = `${stats.castles} ${stats.castles === 1 ? "castle" : "castles"}`;
+      const out = stats.castles === 0 && stats.soldiers === 0;
       row.soldiers.parentElement?.parentElement?.classList.toggle(
         "gv-out",
-        stats.castles === 0 && stats.soldiers === 0,
+        out,
       );
+      // Said while the team is out in the turn shown, so scrubbing back to before it left drops it.
+      const departure = out
+        ? departures.find((entry) => entry.team_color === stats.team.color)
+        : undefined;
+      row.status.hidden = departure === undefined;
+      row.status.textContent = departure ? departureText(departure) : "";
     }
   }
 

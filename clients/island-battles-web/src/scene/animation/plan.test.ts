@@ -11,6 +11,7 @@ import {
 } from "../shore";
 import {
   clashStops,
+  departedTeams,
   HELD_RATTLE_SPAN,
   isHeld,
   type MoveTrack,
@@ -846,6 +847,101 @@ describe("castle counts and growth", () => {
     });
     expect(countOf(later, 1).replayed).toBe(true);
     expect(countOf(later, 1).keys.map((key) => key.value)).toContain(7);
+  });
+
+  test("a team that left: its castles turn neutral at once and keep their soldiers, its groups sink with no landing and no clash", () => {
+    const previous: Generation = {
+      id: 1,
+      castles: [castle(0, 1, 30, 0), castle(1, 2, 20, 4), castle(2, 1, 5, 8)],
+      soldier_groups: [group()],
+      clashes: [],
+    };
+    // Team 1 resigned: both its castles are neutral and its group is gone; team 2's castle grew.
+    const next: Generation = {
+      id: 2,
+      castles: [castle(0, 0, 30, 0), castle(1, 2, 21, 4), castle(2, 0, 5, 8)],
+      soldier_groups: [],
+      clashes: [],
+    };
+    expect(departedTeams(previous, next)).toEqual(new Set([1]));
+    const plan = planTurn(previous, next);
+    for (const id of [0, 2]) {
+      expect(countOf(plan, id).replayed).toBe(true);
+      expect(new Set(countOf(plan, id).keys.map((key) => key.value))).toEqual(
+        new Set([id === 0 ? 30 : 5]),
+      );
+      const team = tracksOf(plan, "castleTeam").find((t) => t.castleId === id);
+      expect(team?.keys).toEqual([{ t: 0, team: 0 }]);
+    }
+    expect(countOf(plan, 1).replayed).toBe(true);
+    expect(tracksOf(plan, "merge")).toEqual([]);
+    expect(tracksOf(plan, "clash")).toEqual([]);
+    expect(tracksOf(plan, "sink").map((t) => [t.groupId, t.t0])).toEqual([
+      [5, 0],
+    ]);
+    // Nothing throws while sampling the whole turn.
+    for (const t of [0, 0.3, 0.7, 1]) {
+      expect(() => sampleTurn(plan, t)).not.toThrow();
+    }
+    expect(sampleTurn(plan, 1).castles.get(0)).toMatchObject({
+      team: 0,
+      count: 30,
+    });
+  });
+
+  test("a team with no castle that left: its boats sink, they don't land", () => {
+    const previous: Generation = {
+      id: 1,
+      castles: [castle(0, 2, 30, 0), castle(1, 3, 20, 4)],
+      soldier_groups: [{ ...group(), destination_castle_id: 1 }],
+      clashes: [],
+    };
+    const next: Generation = {
+      id: 2,
+      castles: [castle(0, 2, 31, 0), castle(1, 3, 21, 4)],
+      soldier_groups: [],
+      clashes: [],
+    };
+    // The castles show no departure; the state's departures say team 1 left.
+    expect(departedTeams(previous, next).size).toBe(0);
+    const plan = planTurn(previous, next, new Set([1]));
+    expect(tracksOf(plan, "merge")).toEqual([]);
+    expect(tracksOf(plan, "sink").map((t) => [t.groupId, t.t0])).toEqual([
+      [5, 0],
+    ]);
+    expect(countOf(plan, 1).replayed).toBe(true);
+  });
+
+  test("a team that left whose castle is captured in the same turn: the capture replays on a neutral castle", () => {
+    const previous: Generation = {
+      id: 1,
+      castles: [castle(0, 1, 30, 0), castle(1, 2, 20, 4)],
+      soldier_groups: [
+        {
+          ...group(),
+          id: 6,
+          team_color: 2,
+          soldiers: 40,
+          x: 0.5,
+          destination_castle_id: 0,
+          origin_castle_id: 1,
+        },
+      ],
+      clashes: [],
+    };
+    // Team 1 left; team 2's boat lands on its castle, now neutral, and takes it.
+    const next: Generation = {
+      id: 2,
+      castles: [castle(0, 2, 10, 0), castle(1, 2, 21, 4)],
+      soldier_groups: [],
+      clashes: [],
+    };
+    // The castles end up team 2's, so the castle check finds no departure.
+    expect(departedTeams(previous, next).size).toBe(0);
+    expect(() => planTurn(previous, next, new Set([1]))).not.toThrow();
+    const plan = planTurn(previous, next, new Set([1]));
+    const team = tracksOf(plan, "castleTeam").find((t) => t.castleId === 0);
+    expect(team?.keys[0]).toEqual({ t: 0, team: 0 });
   });
 });
 
