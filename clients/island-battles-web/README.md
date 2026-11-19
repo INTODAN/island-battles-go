@@ -327,7 +327,8 @@ A hand player can leave the game for good from the game view (#348). The **Resig
 
   ![Resigned at 450 px](docs/screenshots/resign-banner-resigned-phone.png) ![Left at 450 px](docs/screenshots/resign-banner-left-phone.png) ![Abandoned at 450 px](docs/screenshots/resign-banner-abandoned-phone.png)
 
-- **The animation.** When a team leaves, its castles are team colour 0 in the next generation with their soldiers, and its soldier groups are gone with no clash and no arrival. A group that vanishes without a clash would otherwise be planned as landing at its destination, so `planTurn` finds the teams that left (`departedTeams`: a castle of theirs is neutral in the next generation, which fighting never causes), turns their castles neutral at the start of the turn without growth, and sinks their groups where they lie.
+- **The animation.** When a team leaves, its castles are team colour 0 in the next generation with their soldiers, and its soldier groups are gone with no clash and no arrival. A group that vanishes without a clash would otherwise be planned as landing at its destination, so `planTurn` goes by the state's `departures` (`teamsDepartedAt`) to find the teams that left. Only for an old demo, saved before `departures` existed, does it fall back to the castles (`departedTeams`: a castle of theirs is neutral in the next generation, which fighting never causes). It turns their castles neutral at the start of the turn without growth, and sinks their groups where they lie.
+- **While a resignation is pending** (the request is running, or it succeeded and the turn has not played) the board stands down: the drag, the castle menu and the status row's ask to return to live stop taking input, because the team's orders are no longer taken.
 
 ## Hand play
 

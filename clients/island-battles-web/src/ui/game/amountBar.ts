@@ -24,7 +24,9 @@ function iconButton(label: string, title: string, icon: string) {
   button.setAttribute("aria-label", label);
   button.title = title;
   button.innerHTML = icon;
-  // A tap on it never takes the focus from the board, so the drag's keys keep working.
+  // A press on it never takes the focus from the board: Babylon's canvas `blur` listener makes up a
+  // release for every pressed pointer, which would drop a drag a finger holds while another taps
+  // here. It also keeps the drag's keys working.
   button.addEventListener("pointerdown", (event) => event.preventDefault());
   return button;
 }
@@ -49,8 +51,12 @@ export class AmountBar implements AmountControl {
   readonly element = document.createElement("div");
   private readonly slider = document.createElement("input");
   private readonly text = document.createElement("output");
-  /** Tells a drag's start and end to screen readers (`announcement`). */
-  private readonly status = document.createElement("span");
+  /**
+   * Tells a drag's start and end to screen readers (`announcement`). It stands beside `element`,
+   * not inside it, so the end of a drag is still announced when `render` hides the bar; whoever
+   * adds `element` to the page adds this too.
+   */
+  readonly status = document.createElement("span");
   private readonly listeners = new Set<(amount: DragAmount) => void>();
   private view: SliderView | null = null;
 
@@ -74,10 +80,18 @@ export class AmountBar implements AmountControl {
     const all = iconButton("All", "All (D)", ALL_ICON);
     half.addEventListener("click", () => this.emit(HALF));
     all.addEventListener("click", () => this.emit(ALL));
+    // A finger on the slider keeps the focus on the board, for the reason the buttons do. Only a
+    // touch: cancelling a mouse's or pen's pointerdown stops the browser dragging the slider, and
+    // a mouse cannot hold a drag with one hand and move the slider with another anyway. A touch
+    // still drags the slider (the browser reads it from the touch events), and the keyboard still
+    // moves it once it has the focus (Tab).
+    slider.addEventListener("pointerdown", (event) => {
+      if (event.pointerType === "touch") event.preventDefault();
+    });
     slider.addEventListener("input", () => {
       if (this.view) this.emit(sliderAmount(this.view, Number(slider.value)));
     });
-    element.append(half, slider, all, text, status);
+    element.append(half, slider, all, text);
   }
 
   render(view: SliderView | null): void {
