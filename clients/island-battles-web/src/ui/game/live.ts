@@ -8,6 +8,7 @@
 
 import { ApiError } from "../../api/errors";
 import { describeGameBot, describeRelayedBot } from "../../bots/kinds";
+import type { HandPlay } from "../../play";
 import type { Realtime } from "../../realtime";
 import type { GameController } from "./controller";
 import { type Demo, DemoFileError, readDemoFile } from "./demoFile";
@@ -20,8 +21,9 @@ import type { LiveSource, LiveTurn } from "./sources";
 export interface LiveOptions {
   realtime: Realtime;
   source: LiveSource;
+  /** The roster player's hand play, for the screen's controls; null for a watcher. */
+  handPlay: HandPlay | null;
   onBack: () => void;
-  /** A demo file the player opened was valid: show it in place of this view. */
   /** Shows a demo file the player opened, with its file name. */
   onDemo: (demo: Demo, fileName: string) => void;
 }
@@ -67,6 +69,7 @@ export function mountLive(
   const screen = new GameScreen(container, {
     live: true,
     watching,
+    handPlay: options.handPlay,
     logs,
     onBack: options.onBack,
     ...(source.backLabel === undefined ? {} : { backLabel: source.backLabel }),

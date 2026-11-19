@@ -56,6 +56,7 @@ export function mountGameView(
     options.realtime,
     playerSource(options.realtime, options.lobbyId, options.round),
     options.onBack,
+    options.handPlay ?? null,
   );
 }
 
@@ -76,6 +77,7 @@ export function mountWatchView(
       ...(options.joinCode === undefined ? {} : { joinCode: options.joinCode }),
     }),
     options.onBack,
+    null,
   );
 }
 
@@ -84,6 +86,7 @@ function mountSource(
   realtime: Realtime,
   source: LiveSource,
   onBack: () => void,
+  handPlay: HandPlay | null,
 ): { dispose(): void } {
   let current: { dispose(): void } | undefined;
   let disposed = false;
@@ -93,7 +96,9 @@ function mountSource(
     current = mountLive(container, {
       realtime,
       source,
+      handPlay,
       onBack,
+      // A demo file gives no orders: its view has no hand play.
       onDemo: (demo, fileName) => {
         current?.dispose();
         current = mountDemo(container, demo, {

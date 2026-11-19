@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { GameController, type PlayerPort } from "./controller";
+import { GameController, type PlayerPort, showsNewestTurn } from "./controller";
 import type { Generation } from "./history";
 import { generation } from "./testing";
 
@@ -268,5 +268,41 @@ describe("play, step and scrub", () => {
     stop();
     controller.scrubTo(1);
     expect(seen).toEqual([2, 0]);
+  });
+});
+
+describe("showing the newest turn, where a hand player gives orders", () => {
+  test("a live view on its newest turn does, while new turns play on", () => {
+    const { controller } = live(1, 2);
+    expect(showsNewestTurn(controller.state)).toBe(true);
+    controller.merge(frames(3));
+    expect(showsNewestTurn(controller.state)).toBe(true);
+  });
+
+  test("scrubbed back it doesn't, and back on the newest turn it does again", () => {
+    const { controller } = live(1, 2, 3);
+    controller.scrubTo(1);
+    expect(showsNewestTurn(controller.state)).toBe(false);
+    controller.scrubTo(2);
+    expect(showsNewestTurn(controller.state)).toBe(true);
+  });
+
+  test("paused, a newer turn leaves it behind", () => {
+    const { controller } = live(1, 2);
+    controller.togglePlay();
+    expect(showsNewestTurn(controller.state)).toBe(true);
+    controller.merge(frames(3));
+    expect(showsNewestTurn(controller.state)).toBe(false);
+  });
+
+  test("a finished game, a demo or an empty view doesn't", () => {
+    const ended = live(1, 2);
+    ended.controller.merge([], outcome);
+    expect(showsNewestTurn(ended.controller.state)).toBe(false);
+    const demo = new GameController(new FakePlayer(), { live: false });
+    demo.load(frames(1), null);
+    expect(showsNewestTurn(demo.state)).toBe(false);
+    const empty = new GameController(new FakePlayer(), { live: true });
+    expect(showsNewestTurn(empty.state)).toBe(false);
   });
 });

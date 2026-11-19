@@ -2,6 +2,7 @@ import "@babylonjs/core/Culling/ray";
 import { PointerEventTypes } from "@babylonjs/core/Events/pointerEvents";
 import type { Mesh } from "@babylonjs/core/Meshes/mesh";
 import type { Scene } from "@babylonjs/core/scene";
+import type { HandPlay } from "../play";
 import { createFlatRing, type PickTarget } from "./art";
 import { type Battlefield, battlefieldOf } from "./battlefield";
 import { CASTLE_RADIUS } from "./board";
@@ -55,11 +56,23 @@ export function fitBoard(scene: Scene): void {
   if (field) fitCamera(scene, field.camera, field.bounds, 450);
 }
 
+export interface BoardControlsOptions {
+  /**
+   * The hand player's orders (`src/play/`), or null for a watcher, a demo, or a game view given
+   * none. Orders are given only while its status is `playing`; with null, or any other status,
+   * the board's controls are a watcher's.
+   */
+  handPlay?: HandPlay | null;
+}
+
 /**
  * Hover highlight and tooltip (a tap on a touch screen), double-click to focus a castle, and F to refit the board. Returns
- * a function that removes the listeners.
+ * a function that removes the listeners, the tooltip and the highlight: call it before the scene is disposed.
  */
-export function installBoardControls(scene: Scene): () => void {
+export function installBoardControls(
+  scene: Scene,
+  _options: BoardControlsOptions = {},
+): () => void {
   const canvas = scene.getEngine().getRenderingCanvas();
   if (!canvas) throw new Error("the scene's engine has no canvas");
   const tooltip = document.createElement("div");
