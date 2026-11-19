@@ -48,6 +48,12 @@ export interface RelayDeps {
    * player's own relay.
    */
   seat?: boolean;
+  /**
+   * Whether another part of the client keeps this turn's deadline, so the relay doesn't call it:
+   * hand play does for a player who plays by hand (`playsByHand` in `src/play/`). Checked on every
+   * turn and before every call.
+   */
+  standDown?: (state: GenerationState) => boolean;
 }
 
 export interface BotRelay {
@@ -112,7 +118,7 @@ export function createBotRelay(deps: RelayDeps): BotRelay {
 
   /** Asks for the deadline to be applied until the turn moves on. */
   function watchDeadline(state: GenerationState): void {
-    if (!state.turn_deadline_at) return;
+    if (!state.turn_deadline_at || deps.standDown?.(state)) return;
     const key = turnKey(state);
     const myRun = run;
     let attempt = 0;
@@ -123,7 +129,8 @@ export function createBotRelay(deps: RelayDeps): BotRelay {
         run === myRun &&
         now !== null &&
         !now.outcome &&
-        turnKey(now) === key
+        turnKey(now) === key &&
+        !deps.standDown?.(now)
       );
     };
     const arm = (ms: number) => {
