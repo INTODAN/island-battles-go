@@ -6,6 +6,31 @@ import type { components } from "../../api/generated/game";
 export type Generation = components["schemas"]["Generation"];
 export type GameTeam = components["schemas"]["GameTeam"];
 export type GameOutcome = components["schemas"]["GameOutcome"];
+export type Departure = components["schemas"]["Departure"];
+
+/** What a team's card says about a team that left a real-time game. */
+export function departureText(departure: Pick<Departure, "kind">): string {
+  return departure.kind === "resigned" ? "Resigned" : "Left the game";
+}
+
+/**
+ * The departures from every source, one per team: the first list that names a team wins. The live
+ * state lists the teams out so far; a game's outcome lists all of them (and an old demo's has
+ * none).
+ */
+export function mergeDepartures(
+  ...lists: ReadonlyArray<readonly Departure[] | undefined>
+): Departure[] {
+  const byTeam = new Map<number, Departure>();
+  for (const list of lists) {
+    for (const departure of list ?? []) {
+      if (!byTeam.has(departure.team_color)) {
+        byTeam.set(departure.team_color, departure);
+      }
+    }
+  }
+  return [...byTeam.values()];
+}
 
 /**
  * Merges `incoming` generations into `held` by `id`: one already held is ignored (the held one
