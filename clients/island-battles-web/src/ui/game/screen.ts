@@ -86,7 +86,15 @@ export interface HandSurface {
   readonly bottomStack: HTMLElement;
   /** The notice line under the top bar (`GameScreen.setNotice`); null clears it. */
   setNotice(text: string | null): void;
+  /**
+   * Shows a sentence about one of the player's orders for 5 s, on its own line under the notice.
+   * `orderId` is the PlayOrder's id: one order is shown once. Callers never clear the line.
+   */
+  showOrderFeedback(sentence: string, orderId?: number): void;
 }
+
+/** How long `showOrderFeedback` shows a sentence. */
+const ORDER_FEEDBACK_MS = 5000;
 
 /** `stopped`: a watcher the host removed, who receives no more turns. */
 export type ConnectionLabel = ConnectionState | "saved" | "stopped";
@@ -140,6 +148,16 @@ export class GameScreen {
   private readonly connectionLabel = element("span");
   private readonly turn = element("span", "gv-turn");
   private readonly notice = element("p", "gv-notice");
+  /** Feedback on the hand player's orders (`HandSurface.showOrderFeedback`). */
+  private readonly orderNotice = element("p", "gv-notice gv-order-notice");
+  private orderNoticeTimer: ReturnType<typeof setTimeout> | undefined;
+  /** A hand player's status row above the timeline, such as "Return to live to give orders". */
+  private readonly handStatus = element("div", "gv-hand-status");
+  private readonly handStatusText = element(
+    "span",
+    "gv-hand-status-text",
+    "Return to live to give orders",
+  );
   private readonly summary = element("p", "gv-summary");
   private readonly saveError = element("p", "gv-notice");
   private readonly askStatus = element("p", "gv-summary gv-ask-status");
@@ -234,6 +252,11 @@ export class GameScreen {
 
     this.notice.setAttribute("role", "alert");
     this.notice.hidden = true;
+    this.orderNotice.setAttribute("role", "alert");
+    this.orderNotice.hidden = true;
+    this.handStatusText.setAttribute("role", "status");
+    this.handStatus.append(this.handStatusText);
+    this.handStatus.hidden = true;
     this.summary.hidden = true;
     this.saveError.setAttribute("role", "alert");
     this.saveError.hidden = true;
@@ -302,6 +325,7 @@ export class GameScreen {
     topStack.append(
       top,
       this.notice,
+      this.orderNotice,
       this.saveError,
       this.askStatus,
       this.askText,
@@ -320,7 +344,7 @@ export class GameScreen {
       if (this.scene) fitBoard(this.scene);
     });
     topStack.append(this.fitButton);
-    this.bottomStack.append(this.logsBox, timeline);
+    this.bottomStack.append(this.logsBox, this.handStatus, timeline);
     root.append(this.canvas, topStack, this.bottomStack, this.overlay);
     this.container.replaceChildren(root);
     this.setConnection(this.options.live ? "connecting" : "saved");
@@ -353,6 +377,15 @@ export class GameScreen {
   setNotice(text: string | null): void {
     this.notice.textContent = text ?? "";
     this.notice.hidden = !text;
+  }
+
+  private showOrderFeedback(sentence: string): void {
+    clearTimeout(this.orderNoticeTimer);
+    this.orderNotice.textContent = sentence;
+    this.orderNotice.hidden = false;
+    this.orderNoticeTimer = setTimeout(() => {
+      this.orderNotice.hidden = true;
+    }, ORDER_FEEDBACK_MS);
   }
 
   private async saveDemo(save: HTMLButtonElement): Promise<void> {
@@ -486,6 +519,7 @@ export class GameScreen {
       subscribeView: (listener) => controller.subscribe(listener),
       bottomStack: this.bottomStack,
       setNotice: (text) => this.setNotice(text),
+      showOrderFeedback: (sentence) => this.showOrderFeedback(sentence),
     };
     castleMenu =
       handPlay &&
@@ -500,9 +534,22 @@ export class GameScreen {
           return () => scene.onAfterRenderObservable.remove(observer);
         },
         fallbackFocus: this.canvas,
-        // PLACEHOLDER344: HandSurface.showOrderFeedback (#343's second wiring commit).
-        showOrderFeedback: () => {},
+        showOrderFeedback: (sentence, orderId) =>
+          this.handSurface?.showOrderFeedback(sentence, orderId),
       });
+    // Scrubbed back, a hand player is told that orders are given from the newest turn.
+    const showHandStatus = () => {
+      this.handStatus.hidden = !(
+        handPlay?.state.get().status === "playing" &&
+        !showsNewestTurn(controller.state)
+      );
+    };
+    const handStatusStops = handPlay
+      ? [
+          handPlay.state.subscribe(showHandStatus),
+          controller.subscribe(showHandStatus),
+        ]
+      : [];
     let aspect =
       engine.getRenderWidth() / Math.max(1, engine.getRenderHeight());
     const resize = new ResizeObserver(() => {
@@ -548,6 +595,10 @@ export class GameScreen {
       dispose: () => {
         unsubscribe();
         castleMenu?.dispose();
+        for (const stop of handStatusStops) stop();
+        this.handStatus.hidden = true;
+        clearTimeout(this.orderNoticeTimer);
+        this.orderNotice.hidden = true;
         removeControls();
         resize.disconnect();
         engine.stopRenderLoop();
@@ -556,6 +607,7 @@ export class GameScreen {
       },
     };
     this.render(controller.state);
+    showHandStatus();
     return controller;
   }
 
