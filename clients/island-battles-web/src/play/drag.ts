@@ -237,6 +237,8 @@ function typeKey(
 ): DragAmount {
   const typed = amount.kind === "exact" ? amount.typed : "";
   if (key === "Backspace") {
+    // Nothing typed (after a, d or the slider): there is nothing to take back.
+    if (typed === "") return amount;
     const shorter = typed.slice(0, -1);
     return shorter === "" ? ALL : withTyped(shorter, unreserved);
   }

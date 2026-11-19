@@ -115,6 +115,9 @@ export function installDragControls(
   } | null = null;
   /** The last point on the board the pointer was over, for a pointer above the horizon. */
   let lastEnd: MapPoint | null = null;
+  /** What the line and the target were last worked out for; the same again needs no new work. */
+  let drawnKey = "";
+  let pickedKey = "";
   let live: LineMeshes | null = null;
   let ring: Mesh | null = null;
   let chip = "";
@@ -247,6 +250,7 @@ export function installDragControls(
     const generation = field?.generation;
     const drag = state;
     if (drag.phase !== "dragging" || !field || !generation || !pointer) {
+      drawnKey = "";
       live?.line.setEnabled(false);
       live?.casing.setEnabled(false);
       ring?.setEnabled(false);
@@ -262,6 +266,15 @@ export function installDragControls(
         : (generation.castles.find((castle) => castle.id === targetId) ?? null);
     const end = boardPoint(pointer.x, pointer.y) ?? lastEnd;
     if (end) lastEnd = end;
+    const key = JSON.stringify([
+      drag.origin,
+      targetId,
+      end,
+      generation.id,
+      handPlay.state.get().teamColor,
+    ]);
+    if (key === drawnKey && live) return;
+    drawnKey = key;
     const segment =
       origin && end
         ? dragLineSegment(origin, end, target, generation.castles)
@@ -390,6 +403,10 @@ export function installDragControls(
       holdCameraPointer(field.camera, state.held);
     }
     if (before.phase !== "dragging" && state.phase === "dragging") {
+      // Nothing of an earlier drag carries over.
+      lastEnd = null;
+      drawnKey = "";
+      pickedKey = "";
       options.hideHover();
     }
     for (const effect of result.effects) run(effect);
@@ -452,9 +469,18 @@ export function installDragControls(
   // On the window in the capture phase, so they run before Babylon's own listeners on the canvas
   // make up a release for the same cancel.
   const onCancel = (event: Event) => {
-    if (event.type === "blur") touches.clear();
-    if (event instanceof PointerEvent && event.pointerType === "touch") {
-      touches.delete(event.pointerId);
+    // A blur is heard from every element on the page; only the window's own means the page lost
+    // the focus, and fingers may still be down for any other.
+    if (event.type === "blur") {
+      if (event.target !== window) return;
+      touches.clear();
+    }
+    if (event instanceof PointerEvent) {
+      if (event.pointerType === "touch") touches.delete(event.pointerId);
+      // Another pointer's cancel (a second finger on the amount bar) leaves the drag alone.
+      if (event.type === "pointercancel" && event.pointerId !== state.held) {
+        return;
+      }
     }
     if (event.type === "visibilitychange" && !document.hidden) return;
     if (
@@ -540,9 +566,25 @@ export function installDragControls(
     }
     if (state.phase === "dragging") {
       if (state.hold) apply({ type: "tick", now });
-      if (pointer && state.phase === "dragging") {
-        // The camera may have zoomed under a still pointer.
-        apply({ type: "target", target: targetAt(pointer) });
+      const field = battlefieldOf(scene);
+      if (pointer && field && state.phase === "dragging") {
+        // The camera may have zoomed under a still pointer: look again only when the pointer, the
+        // camera or the drawn board changed.
+        const { alpha, beta, radius, target } = field.camera;
+        const key = JSON.stringify([
+          pointer.clientX,
+          pointer.clientY,
+          alpha,
+          beta,
+          radius,
+          target.x,
+          target.z,
+          field.generation?.id,
+        ]);
+        if (key !== pickedKey) {
+          pickedKey = key;
+          apply({ type: "target", target: targetAt(pointer) });
+        }
       }
       drawLive();
     }

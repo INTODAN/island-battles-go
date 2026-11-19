@@ -153,9 +153,9 @@ export class GameScreen {
   /** Feedback on the hand player's orders (`HandSurface.showOrderFeedback`). */
   private readonly orderNotice = element("p", "gv-notice gv-order-notice");
   private orderNoticeTimer: ReturnType<typeof setTimeout> | undefined;
-  /** A hand player's status row above the timeline, such as "Return to live to give orders". */
   /** The amount bar of drag to send (#343), for a view with a hand play. */
   private readonly amountBar: AmountBar | null;
+  /** A hand player's status row above the timeline, such as "Return to live to give orders". */
   private readonly handStatus = element("div", "gv-hand-status");
   private readonly handStatusText = element(
     "span",
