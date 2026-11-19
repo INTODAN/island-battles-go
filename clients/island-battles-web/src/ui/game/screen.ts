@@ -5,6 +5,7 @@
 import { Engine } from "@babylonjs/core/Engines/engine";
 import { Scene } from "@babylonjs/core/scene";
 import { gameBaseUrl, lobbyBaseUrl } from "../../platform";
+import type { HandPlay } from "../../play";
 import type { ConnectionState } from "../../realtime";
 import { createScenePlayer } from "../../scene/animation";
 import { battlefieldOf } from "../../scene/battlefield";
@@ -22,7 +23,7 @@ import { showBoardLoading } from "../boardLoading";
 import { rulesButton } from "../rules/rulesDialog";
 import { type AgentGame, agentPrompt, copyText } from "./agentPrompt";
 import { clashSummary } from "./clashes";
-import { GameController, type ViewState } from "./controller";
+import { GameController, showsNewestTurn, type ViewState } from "./controller";
 import "./game.css";
 import {
   type GameOutcome,
@@ -60,6 +61,29 @@ export interface ScreenOptions {
   onSaveDemo?: () => Promise<void>;
   /** Called when the shown turn's logs are not held or hide teams that have since been revealed. */
   requestLogs?: (generationId: number, ended: boolean) => void;
+  /**
+   * A roster player's hand play (`src/play/`), which the app shell owns: the screen never
+   * disposes it. Null or absent for a watcher and a demo. A player whose bot plays has one whose
+   * status isn't `playing`, so its controls stay off.
+   */
+  handPlay?: HandPlay | null;
+}
+
+/**
+ * What the hand player's controls on the board build on: drag to send (#343), the castle menu
+ * (#344) and the hand player's view (#345). `GameScreen.hand` holds it while a game is started
+ * with a hand play.
+ */
+export interface HandSurface {
+  readonly handPlay: HandPlay;
+  /** Whether the view shows the newest turn of the running game (`showsNewestTurn`): orders are given only then. */
+  showsNewestTurn(): boolean;
+  /** Hears every change of the view (the turn shown, Follow live, the outcome); returns the unsubscribe. */
+  subscribeView(listener: (state: ViewState) => void): () => void;
+  /** The overlay's bottom stack: the logs panel, then the timeline. */
+  readonly bottomStack: HTMLElement;
+  /** The notice line under the top bar (`GameScreen.setNotice`); null clears it. */
+  setNotice(text: string | null): void;
 }
 
 /** `stopped`: a watcher the host removed, who receives no more turns. */
@@ -150,8 +174,11 @@ export class GameScreen {
     number,
     { soldiers: HTMLElement; castles: HTMLElement }
   >();
+  private readonly bottomStack = element("div", "gv-stack gv-stack-bottom");
   private running: Running | undefined;
   private scene: Scene | undefined;
+  /** What `hand` returns. */
+  private handSurface: HandSurface | null = null;
   private disposed = false;
   private retry: (() => void) | undefined;
 
@@ -291,11 +318,18 @@ export class GameScreen {
       if (this.scene) fitBoard(this.scene);
     });
     topStack.append(this.fitButton);
-    const bottomStack = element("div", "gv-stack gv-stack-bottom");
-    bottomStack.append(this.logsBox, timeline);
-    root.append(this.canvas, topStack, bottomStack, this.overlay);
+    this.bottomStack.append(this.logsBox, timeline);
+    root.append(this.canvas, topStack, this.bottomStack, this.overlay);
     this.container.replaceChildren(root);
     this.setConnection(this.options.live ? "connecting" : "saved");
+  }
+
+  /**
+   * The hand player's surface while a game is started with a hand play: null before `start`,
+   * after `stop`, and for a watcher or a demo.
+   */
+  get hand(): HandSurface | null {
+    return this.handSurface;
   }
 
   setTitle(text: string): void {
@@ -408,7 +442,8 @@ export class GameScreen {
     });
     const scene = new Scene(engine);
     this.scene = scene;
-    installBoardControls(scene);
+    const handPlay = this.options.handPlay ?? null;
+    const removeControls = installBoardControls(scene, { handPlay });
     // The board's art loads behind a loading screen; the board draws placeholders meanwhile.
     const loading = showBoardLoading(this.root);
     loadBoardAssets(scene, (progress) => loading.update(progress)).then(
@@ -436,6 +471,13 @@ export class GameScreen {
     );
     onIdle = () => controller.tick();
     scene.onBeforeRenderObservable.add(() => controller.tick());
+    this.handSurface = handPlay && {
+      handPlay,
+      showsNewestTurn: () => showsNewestTurn(controller.state),
+      subscribeView: (listener) => controller.subscribe(listener),
+      bottomStack: this.bottomStack,
+      setNotice: (text) => this.setNotice(text),
+    };
     let aspect =
       engine.getRenderWidth() / Math.max(1, engine.getRenderHeight());
     const resize = new ResizeObserver(() => {
@@ -480,6 +522,7 @@ export class GameScreen {
       teams: sorted,
       dispose: () => {
         unsubscribe();
+        removeControls();
         resize.disconnect();
         engine.stopRenderLoop();
         scene.dispose();
@@ -509,6 +552,8 @@ export class GameScreen {
     this.running?.dispose();
     this.running = undefined;
     this.scene = undefined;
+    // The hand play itself belongs to the app shell: the screen only lets go of it.
+    this.handSurface = null;
   }
 
   /**
