@@ -66,9 +66,9 @@ func LoadGameState(database *gorm.DB, gameID uint) (simulation.GameState, error)
 
 // SaveGeneration stores state as the game's next generation together with the
 // commands that produced it and the turn's clashes, created at createdAt, the
-// clock of the request that played the turn; the zero time is the database's
-// now. It writes each table with a single batched insert and returns the new
-// generation's ID.
+// clock of the request that played the turn; with the zero time, GORM sets
+// its own clock's now. It writes each table with a single batched insert and
+// returns the new generation's ID.
 func SaveGeneration(database *gorm.DB, gameID uint, state simulation.GameState, commands []models.CommandFields, clashes []models.Clash, createdAt time.Time) (uint, error) {
 	castles := state.SortedCastles()
 	gameMap := models.Map{MapFields: state.Map, Castles: make([]models.Castle, 0, len(castles))}

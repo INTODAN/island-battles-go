@@ -296,7 +296,9 @@ func TestAResigningTeamAndASilentTeamLeaveTogether(t *testing.T) {
 	game := startClockGame(t, `{"turn_timeout_seconds":10}`, services.ServerBot{Manual: true}, services.ServerBot{Manual: true})
 	redPlayer := game.players[1]
 	started := game.open(t).CreatedAt
-	for game.turnEnd(t).Add(time.Second).Sub(started) <= 10*time.Second {
+	// Red calls each turn's end until the open turn ends more than 10 s
+	// after Blue was last heard from.
+	for game.turnEnd(t).Sub(started) <= 10*time.Second {
 		game.toTurnEnd(t, redPlayer)
 	}
 	game.resign(t, redPlayer)
