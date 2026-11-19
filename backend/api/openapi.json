@@ -2516,6 +2516,61 @@
         ]
       }
     },
+    "/game/from-lobby/{lobby_id}/resign": {
+      "post": {
+        "description": "Requires a player token of a player on the game's frozen roster; the lobby is not consulted. Only a real-time game (GenerationState.turn_pace_milliseconds isn't null) can be resigned; in a game that waits for every player this is 409 with problem type urn:island-battles:problem:not-real-time and changes nothing. Like every game request, it first ends the turn once its deadline has passed. It then records that your team resigns, and returns your state, as GET /game/from-lobby/{lobby_id}/generation does. The resignation takes effect when the open turn plays, before that turn's commands: every castle of your team turns neutral, keeping its soldiers and losing its burst_debt, every soldier group of your team is removed without a clash, and your team's own commands of that turn are dropped. Then the game's end rule runs as after any turn: with two teams the other team wins in that turn, and with more the game goes on without you, and GenerationState.departures lists your team. The open turn no longer waits for your team, so when every other player has completed it, as default bots do at once, it plays in this request and the answer is the next generation's state, or the outcome; otherwise it plays at turn_deadline_at, at most one turn pace later. Calling it again before the turn plays changes nothing and returns your state. After the outcome it is 409 with problem type urn:island-battles:problem:game-ended, and once your team is out (it resigned, left the game, or was eliminated) 409 with problem type urn:island-battles:problem:team-out, as is every later batch of commands and turn delivery of a team that resigned or left. A lobby can play several games, one per round (lobby.round, raised by POST /lobby/v1/games/island-battles/lobbies/{lobby_id}/reopen once a game has ended); this route serves the lobby's newest game and its frozen roster, and an older game can't be reached once the next one starts.",
+        "operationId": "resignIslandLobbyGame",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "lobby_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerationState"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "PlayerToken": []
+          }
+        ],
+        "summary": "Resign your team from a real-time game",
+        "tags": [
+          "Island Battles"
+        ]
+      }
+    },
     "/game/from-lobby/{lobby_id}/turn-delivery": {
       "get": {
         "description": "Requires a place on the game's frozen roster; the lobby is not consulted. Returns the caller's turn of the current generation as a TurnDelivery: the BotTurn the server builds for their bot (the board, their team, the upgrade cost table, the memory their latest completed turn sent and the deadline), and how to submit the answer: submit.url, POST /generation/commands on the game's public URL, and submit.token, a submit token that submits exactly this player's turn of this generation. A game client relays it to the player's bot server, island-battles-bot serve, which answers 202 at once, plays the turn and submits its commands, logs and memory itself, with complete true and Authorization: Bearer \u003ctoken\u003e; the client submits nothing. Each call issues a new token for the same turn. With player_id, the player who added a localhost bot seat to the lobby reads the seat's turn instead, one of their GenerationState.relayed_bots, to relay it to the seat's bot on its own port; the delivery and its token are the seat's. A player_id that is not a localhost bot seat that the caller added is 403, for a later host too. Like every game request, it first ends the turn once its deadline has passed; in a real-time game it then delivers the turn that follows. When the player has nothing to play it returns 409: the game has ended (problem type urn:island-battles:problem:game-ended), their team resigned or left a real-time game (problem type urn:island-battles:problem:team-out), their team has been eliminated, or they have already completed the turn. A lobby can play several games, one per round (lobby.round, raised by POST /lobby/v1/games/island-battles/lobbies/{lobby_id}/reopen once a game has ended); this route serves the lobby's newest game and its frozen roster, and an older game can't be reached once the next one starts.",

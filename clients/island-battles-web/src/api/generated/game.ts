@@ -121,6 +121,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/game/from-lobby/{lobby_id}/resign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resign your team from a real-time game
+         * @description Requires a player token of a player on the game's frozen roster; the lobby is not consulted. Only a real-time game (GenerationState.turn_pace_milliseconds isn't null) can be resigned; in a game that waits for every player this is 409 with problem type urn:island-battles:problem:not-real-time and changes nothing. Like every game request, it first ends the turn once its deadline has passed. It then records that your team resigns, and returns your state, as GET /game/from-lobby/{lobby_id}/generation does. The resignation takes effect when the open turn plays, before that turn's commands: every castle of your team turns neutral, keeping its soldiers and losing its burst_debt, every soldier group of your team is removed without a clash, and your team's own commands of that turn are dropped. Then the game's end rule runs as after any turn: with two teams the other team wins in that turn, and with more the game goes on without you, and GenerationState.departures lists your team. The open turn no longer waits for your team, so when every other player has completed it, as default bots do at once, it plays in this request and the answer is the next generation's state, or the outcome; otherwise it plays at turn_deadline_at, at most one turn pace later. Calling it again before the turn plays changes nothing and returns your state. After the outcome it is 409 with problem type urn:island-battles:problem:game-ended, and once your team is out (it resigned, left the game, or was eliminated) 409 with problem type urn:island-battles:problem:team-out, as is every later batch of commands and turn delivery of a team that resigned or left. A lobby can play several games, one per round (lobby.round, raised by POST /lobby/v1/games/island-battles/lobbies/{lobby_id}/reopen once a game has ended); this route serves the lobby's newest game and its frozen roster, and an older game can't be reached once the next one starts.
+         */
+        post: operations["resignIslandLobbyGame"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/game/from-lobby/{lobby_id}/turn-delivery": {
         parameters: {
             query?: never;
@@ -1513,6 +1533,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GenerationLogs"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    resignIslandLobbyGame: {
+        parameters: {
+            query?: never;
+            header?: {
+                Authorization?: string;
+            };
+            path: {
+                lobby_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GenerationState"];
                 };
             };
             /** @description Error */
