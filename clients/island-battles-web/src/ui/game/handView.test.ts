@@ -130,7 +130,7 @@ describe("handView", () => {
     const shown = handView(play("ended"), view(2, { outcome, follow: false }));
     expect(shown.hand).toBe(true);
     expect(shown.status).toBeNull();
-    // An outcome on the open generation leaves endsAt set: the bar keys on the status.
+    // The bar keys on the status, whatever the turn holds.
     expect(shown.pace).toBeNull();
     expect(shown.timing).toBe(WATCHING);
   });

@@ -25,6 +25,15 @@ import { type AgentGame, agentPrompt, copyText } from "./agentPrompt";
 import { clashSummary } from "./clashes";
 import { GameController, showsNewestTurn, type ViewState } from "./controller";
 import "./game.css";
+import { markControlsSeen, shouldOpenControls } from "./controls";
+import { ControlsPanel, PaceBar } from "./handHud";
+import {
+  type HandView,
+  handView,
+  jumpsOnReturn,
+  NO_HAND,
+  statusText,
+} from "./handView";
 import {
   type GameOutcome,
   type GameTeam,
@@ -40,6 +49,7 @@ import {
   LogFetchScheduler,
   openGenerationId,
 } from "./logs";
+import { createOrderNotices } from "./notices";
 
 export interface ScreenOptions {
   /** True when new turns can arrive: the live view. */
@@ -91,8 +101,8 @@ export interface HandSurface {
   showOrderFeedback(sentence: string, orderId?: number): void;
 }
 
-/** How long `showOrderFeedback` shows a sentence. */
-const ORDER_FEEDBACK_MS = 5000;
+/** Where the Controls panel remembers that it opened by itself. */
+const controlsStorage = () => globalThis.localStorage ?? null;
 
 /** `stopped`: a watcher the host removed, who receives no more turns. */
 export type ConnectionLabel = ConnectionState | "saved" | "stopped";
@@ -148,14 +158,29 @@ export class GameScreen {
   private readonly notice = element("p", "gv-notice");
   /** Feedback on the hand player's orders (`HandSurface.showOrderFeedback`). */
   private readonly orderNotice = element("p", "gv-notice gv-order-notice");
-  private orderNoticeTimer: ReturnType<typeof setTimeout> | undefined;
-  /** A hand player's status row above the timeline, such as "Return to live to give orders". */
+  private readonly orderNotices = createOrderNotices({
+    render: (text) => {
+      this.orderNotice.textContent = text ?? "";
+      this.orderNotice.hidden = text === null;
+    },
+    schedule: (run, ms) => {
+      const timer = setTimeout(run, ms);
+      return () => clearTimeout(timer);
+    },
+  });
+  /**
+   * A hand player's status row above the timeline: "Return to live to give orders" with a
+   * button, or that the team is out (`handView`).
+   */
   private readonly handStatus = element("div", "gv-hand-status");
-  private readonly handStatusText = element(
-    "span",
-    "gv-hand-status-text",
-    "Return to live to give orders",
-  );
+  private readonly handStatusText = element("span", "gv-hand-status-text");
+  private readonly returnButton = button("Return to live", "Return to live");
+  /** The turn pace bar beside the turn, for a hand player. */
+  private readonly paceBar = new PaceBar();
+  /** The Controls button of the top bar and its panel, for a hand player. */
+  private readonly controls = new ControlsPanel();
+  /** The team marked as yours: a hand player's. */
+  private markedTeam: number | null = null;
   private readonly summary = element("p", "gv-summary");
   private readonly saveError = element("p", "gv-notice");
   private readonly askStatus = element("p", "gv-summary gv-ask-status");
@@ -240,11 +265,13 @@ export class GameScreen {
       back,
       this.title,
       this.turn,
+      this.paceBar.element,
       this.connection,
       open,
       save,
       ask,
       rulesButton("gv-button"),
+      this.controls.button,
       file,
     );
 
@@ -253,7 +280,9 @@ export class GameScreen {
     this.orderNotice.setAttribute("role", "alert");
     this.orderNotice.hidden = true;
     this.handStatusText.setAttribute("role", "status");
-    this.handStatus.append(this.handStatusText);
+    // The button sits beside the live region, not in it: it isn't read out with each change.
+    this.handStatus.append(this.handStatusText, this.returnButton);
+    this.returnButton.hidden = true;
     this.handStatus.hidden = true;
     this.summary.hidden = true;
     this.saveError.setAttribute("role", "alert");
@@ -341,7 +370,7 @@ export class GameScreen {
     this.fitButton.addEventListener("click", () => {
       if (this.scene) fitBoard(this.scene);
     });
-    topStack.append(this.fitButton);
+    topStack.append(this.controls.panel, this.fitButton);
     this.bottomStack.append(this.logsBox, this.handStatus, timeline);
     root.append(this.canvas, topStack, this.bottomStack, this.overlay);
     this.container.replaceChildren(root);
@@ -375,15 +404,6 @@ export class GameScreen {
   setNotice(text: string | null): void {
     this.notice.textContent = text ?? "";
     this.notice.hidden = !text;
-  }
-
-  private showOrderFeedback(sentence: string): void {
-    clearTimeout(this.orderNoticeTimer);
-    this.orderNotice.textContent = sentence;
-    this.orderNotice.hidden = false;
-    this.orderNoticeTimer = setTimeout(() => {
-      this.orderNotice.hidden = true;
-    }, ORDER_FEEDBACK_MS);
   }
 
   private async saveDemo(save: HTMLButtonElement): Promise<void> {
@@ -490,6 +510,14 @@ export class GameScreen {
     let onIdle = () => {};
     const { player } = createScenePlayer(scene, sorted, {
       onIdle: () => onIdle(),
+      liveTiming: handView(handPlay?.state.get() ?? null, {
+        frames: [],
+        index: -1,
+        follow: false,
+        playing: false,
+        outcome: null,
+        live: this.options.live,
+      }).timing,
     });
     const controller = new GameController(
       {
@@ -510,21 +538,66 @@ export class GameScreen {
       subscribeView: (listener) => controller.subscribe(listener),
       bottomStack: this.bottomStack,
       setNotice: (text) => this.setNotice(text),
-      showOrderFeedback: (sentence) => this.showOrderFeedback(sentence),
+      showOrderFeedback: (sentence, orderId) =>
+        this.orderNotices.show(sentence, orderId),
     };
-    // Scrubbed back, a hand player is told that orders are given from the newest turn.
-    const showHandStatus = () => {
-      this.handStatus.hidden = !(
-        handPlay?.state.get().status === "playing" &&
-        !showsNewestTurn(controller.state)
-      );
+    // A hand player's HUD (#345): what `handView` decides from hand play and the view.
+    let hand: HandView = NO_HAND;
+    let controlsChecked = false;
+    // Returning to live jumps to the newest turn, so orders are given against it at once.
+    const jumpToNewest = () =>
+      controller.scrubTo(controller.state.frames.length - 1);
+    const showHand = () => {
+      const state = handPlay?.state.get() ?? null;
+      hand = handView(state, controller.state);
+      player.setLiveTiming(hand.timing);
+      this.markYourTeam(hand.hand ? hand.yourTeam : null);
+      if (hand.yourTeam !== null) {
+        this.paceBar.element.style.setProperty(
+          "--team",
+          teamColorHex(hand.yourTeam),
+        );
+      }
+      this.paceBar.show(hand.pace);
+      this.handStatus.hidden = hand.status === null;
+      this.handStatusText.textContent = hand.status
+        ? statusText(hand.status)
+        : "";
+      this.returnButton.hidden = hand.status !== "return-to-live";
+      this.speed.hidden = hand.hideSpeed;
+      this.controls.button.hidden = !hand.hand;
+      if (!hand.hand) this.controls.close();
+      if (!controlsChecked && state?.status === "playing") {
+        // The first time someone plays by hand, the panel opens by itself, once.
+        controlsChecked = true;
+        if (shouldOpenControls(controlsStorage)) {
+          markControlsSeen(controlsStorage);
+          this.controls.open(false);
+        }
+      }
     };
-    const handStatusStops = handPlay
+    this.returnButton.onclick = jumpToNewest;
+    const onVisible = () => {
+      if (
+        document.visibilityState === "visible" &&
+        jumpsOnReturn(hand, controller.state.follow, player.waiting)
+      ) {
+        jumpToNewest();
+      }
+    };
+    const handStops = handPlay
       ? [
-          handPlay.state.subscribe(showHandStatus),
-          controller.subscribe(showHandStatus),
+          handPlay.state.subscribe(showHand),
+          controller.subscribe(showHand),
+          // The one subscription that shows every rejection, also of orders whose control is gone.
+          handPlay.onSettled((order) => {
+            if (order.state === "rejected" && order.sentence) {
+              this.orderNotices.show(order.sentence, order.id);
+            }
+          }),
         ]
       : [];
+    if (handPlay) document.addEventListener("visibilitychange", onVisible);
     let aspect =
       engine.getRenderWidth() / Math.max(1, engine.getRenderHeight());
     const resize = new ResizeObserver(() => {
@@ -546,7 +619,10 @@ export class GameScreen {
     this.backButton.onclick = () => controller.step(-1);
     this.forwardButton.onclick = () => controller.step(1);
     this.playButton.onclick = () => controller.togglePlay();
-    this.follow.onchange = () => controller.setFollow(this.follow.checked);
+    this.follow.onchange = () => {
+      if (this.follow.checked && hand.jumpToLive) jumpToNewest();
+      else controller.setFollow(this.follow.checked);
+    };
     this.speed.onchange = () => player.setSpeed(Number(this.speed.value));
     player.setSpeed(Number(this.speed.value));
     const setGraphics = (value: Graphics) => {
@@ -569,10 +645,15 @@ export class GameScreen {
       teams: sorted,
       dispose: () => {
         unsubscribe();
-        for (const stop of handStatusStops) stop();
+        for (const stop of handStops) stop();
+        document.removeEventListener("visibilitychange", onVisible);
         this.handStatus.hidden = true;
-        clearTimeout(this.orderNoticeTimer);
-        this.orderNotice.hidden = true;
+        this.orderNotices.dispose();
+        this.paceBar.show(null);
+        this.controls.close();
+        this.controls.button.hidden = true;
+        this.speed.hidden = false;
+        this.markYourTeam(null);
         removeControls();
         resize.disconnect();
         engine.stopRenderLoop();
@@ -581,7 +662,7 @@ export class GameScreen {
       },
     };
     this.render(controller.state);
-    showHandStatus();
+    showHand();
     return controller;
   }
 
@@ -595,6 +676,7 @@ export class GameScreen {
     if (this.disposed) return;
     this.disposed = true;
     this.logScheduler.cancel();
+    this.paceBar.dispose();
     clearTimeout(this.askTimer);
     this.stop();
     this.container.replaceChildren();
@@ -632,6 +714,13 @@ export class GameScreen {
     this.showYourBot();
   }
 
+  /** Marks `team` as yours, or no team for null: a hand player's (#345). */
+  private markYourTeam(team: number | null): void {
+    if (team === this.markedTeam) return;
+    this.markedTeam = team;
+    this.showYourBot();
+  }
+
   private showYourBot(): void {
     for (const card of this.teamsBox.querySelectorAll<HTMLElement>(
       ".gv-team",
@@ -640,6 +729,10 @@ export class GameScreen {
       const text = this.yourBots.get(Number(card.dataset.team));
       if (line) line.hidden = text === undefined;
       if (line && text !== undefined) line.textContent = text;
+      const yours = Number(card.dataset.team) === this.markedTeam;
+      card.classList.toggle("gv-team-yours", yours);
+      const tag = card.querySelector<HTMLElement>(".gv-you");
+      if (tag) tag.hidden = !yours;
     }
   }
 
@@ -650,7 +743,14 @@ export class GameScreen {
       const card = element("div", "gv-team");
       card.dataset.team = String(team.color);
       const name = element("div", "gv-team-name");
-      name.append(swatch(team.color), element("strong", undefined, team.name));
+      const you = element("span", "gv-you", "You");
+      you.hidden = true;
+      name.append(
+        swatch(team.color),
+        element("strong", undefined, team.name),
+        you,
+      );
+      card.style.setProperty("--team", teamColorHex(team.color));
       const players = element(
         "div",
         "gv-team-players",

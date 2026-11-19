@@ -125,3 +125,20 @@ export function markControlsSeen(storage: () => Storage | null): void {
     // Storage is blocked or full: the panel may open by itself again.
   }
 }
+
+/** A key as the table writes it: a single capital letter, `Esc` or `Backspace`. */
+const keyPattern = /\b(Esc|Backspace|[ADWSF])\b/g;
+
+/** A row's text in parts, the keys apart, so the panel can draw them as keys. */
+export function controlParts(how: string): { text: string; key: boolean }[] {
+  const parts: { text: string; key: boolean }[] = [];
+  let at = 0;
+  for (const match of how.matchAll(keyPattern)) {
+    const index = match.index ?? 0;
+    if (index > at) parts.push({ text: how.slice(at, index), key: false });
+    parts.push({ text: match[0], key: true });
+    at = index + match[0].length;
+  }
+  if (at < how.length) parts.push({ text: how.slice(at), key: false });
+  return parts;
+}

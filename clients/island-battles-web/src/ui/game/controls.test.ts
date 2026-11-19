@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  controlParts,
   controlRows,
   controlsSeenKey,
   controlTable,
@@ -99,5 +100,31 @@ describe("the first hand game", () => {
       },
     } as unknown as Storage;
     expect(() => markControlsSeen(() => full)).not.toThrow();
+  });
+});
+
+describe("controlParts", () => {
+  test("marks the keys of a row", () => {
+    const keys = (how: string) =>
+      controlParts(how)
+        .filter((part) => part.key)
+        .map((part) => part.text);
+    expect(keys("D while dragging")).toEqual(["D"]);
+    expect(
+      keys("W and S while dragging, one soldier at a time; hold to repeat"),
+    ).toEqual(["W", "S"]);
+    expect(keys("Type it while dragging; Backspace edits it")).toEqual([
+      "Backspace",
+    ]);
+    expect(keys("Esc, a right-click, or release away from a castle")).toEqual([
+      "Esc",
+    ]);
+    expect(keys("F, or the fit button at the top right")).toEqual(["F"]);
+    for (const row of controlRows(true)) expect(keys(row.how)).toEqual([]);
+    expect(
+      controlParts("A while dragging")
+        .map((part) => part.text)
+        .join(""),
+    ).toBe("A while dragging");
   });
 });

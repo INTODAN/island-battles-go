@@ -1,9 +1,8 @@
 // What the game view shows a player who plays by hand (#345): no DOM and no Babylon, so every
 // rule is tested. `screen.ts` draws what `handView` decides.
 //
-// Everything here keys on hand play's `status`, never on `turn` or `endsAt` alone: a player whose
-// bot plays has a hand play whose status is `idle` with its turn filled in, and a game that ends on
-// its open generation keeps `endsAt` set.
+// Everything here keys on hand play's `status`, never on `turn` or `castles` alone: a player whose
+// bot plays has a hand play whose status is `idle` with its turn and castles filled in.
 
 import type { PlayState, PlayTurn } from "../../play";
 import {
