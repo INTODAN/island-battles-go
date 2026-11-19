@@ -312,6 +312,10 @@ func TestASilentPlayerLeavesAndADeadlineCallerStays(t *testing.T) {
 	if departures := state.Outcome.Departures; len(departures) != 1 || departures[0].Kind != models.DepartureLeft || !reflect.DeepEqual(departures[0].Players, []string{"Player 2"}) {
 		t.Fatalf("departures = %+v", departures)
 	}
+	// The lobby's round-ended hook answers that the round is over.
+	if ended, err := services.EndAbandonedRound(context.Background(), game.database, nil, game.lobbyID, 1, *game.clock); err != nil || !ended {
+		t.Fatalf("round ended = %v, %v", ended, err)
+	}
 }
 
 // A player who comes back after nearly the limit, and whose own request ends
