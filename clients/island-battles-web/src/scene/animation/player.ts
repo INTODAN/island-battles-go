@@ -36,6 +36,23 @@ export interface PlayerOptions {
    * same frame, with the frame's time that is left, so it follows without a pause.
    */
   onIdle?: () => void;
+  /** How a live turn is timed while following live; `WATCHING` when absent. */
+  liveTiming?: LiveTiming;
+}
+
+/**
+ * How the player times turns while following a live game. Use `WATCHING` or `PLAYING`.
+ */
+export interface LiveTiming {
+  /** Turns of animation still to play when the next turn should arrive. */
+  readonly bufferTurns: number;
+  /**
+   * What the catch-up aims at. `arrivals`: the backlog that playing every turn at the pace since
+   * it arrived would leave, so a burst of turns plays over the time it covers, and a lag, once
+   * taken, is kept. `newest`: the newest turn ends as the next one is due, one turn's length after
+   * it arrived; turns behind it are caught up, never kept as a lag.
+   */
+  readonly follows: "arrivals" | "newest";
 }
 
 export const DEFAULT_TURN_MS = 1500;
@@ -48,6 +65,20 @@ export const MIN_LIVE_TURN_MS = 250;
 export const MAX_LIVE_TURN_MS = 3000;
 /** How much of a turn is still to play, following live, when the next one should arrive. */
 export const LIVE_BUFFER_TURNS = 0.5;
+/**
+ * For watchers and players whose bot plays: half a turn in hand, so the next turn is usually
+ * known when one ends, and bursts of turns play at the pace.
+ */
+export const WATCHING: LiveTiming = {
+  bufferTurns: LIVE_BUFFER_TURNS,
+  follows: "arrivals",
+};
+/**
+ * For a player who plays by hand: nothing in hand, so the board reaches the open generation as
+ * its turn ends, the turn into generation N playing while turn N is open. A late turn stops the
+ * board on the open generation until it arrives.
+ */
+export const PLAYING: LiveTiming = { bufferTurns: 0, follows: "newest" };
 /** How quickly the catch-up speed moves to its target: the time constant, in milliseconds. */
 export const CATCH_UP_EASE_MS = 300;
 /** How quickly a live turn's length moves to the time between arrivals. */
@@ -96,8 +127,10 @@ function clamp(value: number, low: number, high: number): number {
 /**
  * Plays turns at one of two paces. Stepping through a saved or finished game, a turn takes
  * `turnMs` times the user's speed. Following a live game (`setLive(true)`), a turn takes about
- * the time between arriving turns, and the speed changes gradually to keep about half a turn in
- * hand, so boats sail on at a steady speed without waiting at the end of each turn.
+ * the time between arriving turns, and the speed changes gradually towards the target of its
+ * `LiveTiming`: for a watcher (`WATCHING`) about half a turn in hand, so boats sail on at a steady
+ * speed without waiting at the end of each turn; for a hand player (`PLAYING`) none, so the board
+ * keeps up with the open generation.
  */
 export class TurnPlayer {
   private readonly turnMs: number;
@@ -130,6 +163,7 @@ export class TurnPlayer {
    * since it arrived: one more at each arrival, one fewer per turn's length of time.
    */
   private paced = 0;
+  private timing: LiveTiming;
 
   constructor(
     private readonly stage: Stage,
@@ -144,6 +178,7 @@ export class TurnPlayer {
     this.onShown = options.onShown;
     this.onIdle = options.onIdle;
     this.liveTurnMs = clamp(this.turnMs, MIN_LIVE_TURN_MS, MAX_LIVE_TURN_MS);
+    this.timing = options.liveTiming ?? WATCHING;
   }
 
   /**
@@ -209,6 +244,23 @@ export class TurnPlayer {
     this.arrivalGap = null;
     this.paced = 0;
     this.liveTurnMs = clamp(this.turnMs, MIN_LIVE_TURN_MS, MAX_LIVE_TURN_MS);
+  }
+
+  /**
+   * Changes how live turns are timed, from the next frame on, without a jump: the catch-up
+   * eases to the new target.
+   */
+  setLiveTiming(timing: LiveTiming): void {
+    if (timing.follows === "arrivals" && this.timing.follows !== "arrivals") {
+      // `paced` went unread meanwhile and may hold every turn that arrived while no frame ran
+      // (a hidden tab): keep at most one, as after a skip.
+      this.paced = Math.min(this.paced, 1);
+    }
+    this.timing = timing;
+  }
+
+  get liveTiming(): LiveTiming {
+    return this.timing;
   }
 
   get following(): boolean {
@@ -324,9 +376,12 @@ export class TurnPlayer {
       return Math.min(this.maxCatchUpSpeed, 1 + behind);
     }
     // Following live, a turn should play over about the time until the next one arrives, with
-    // LIVE_BUFFER_TURNS in hand: a burst of turns plays at the pace over the time it covers, and
-    // only a backlog beyond that is caught up.
-    const expected = this.paced + LIVE_BUFFER_TURNS;
+    // `bufferTurns` in hand. Following arrivals, a burst of turns plays at the pace over the time
+    // it covers, and only a backlog beyond that is caught up; following the newest turn, every
+    // turn behind it is caught up.
+    const expected =
+      (this.timing.follows === "arrivals" ? this.paced : this.newestLeft()) +
+      this.timing.bufferTurns;
     const slowest = Math.max(
       MIN_CATCH_UP_SPEED,
       this.liveTurnMs / MAX_LIVE_TURN_MS,
@@ -336,6 +391,12 @@ export class TurnPlayer {
       slowest,
       this.maxCatchUpSpeed,
     );
+  }
+
+  /** How much of the newest turn would still be to play had it started when it arrived. */
+  private newestLeft(): number {
+    if (this.lastArrival === null) return 0;
+    return clamp(1 - (this.now() - this.lastArrival) / this.liveTurnMs, 0, 1);
   }
 
   /** Eases the turn length and the catch-up speed by `deltaMs`. */
