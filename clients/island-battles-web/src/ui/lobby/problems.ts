@@ -73,7 +73,7 @@ const reopenSentences: Record<string, string> = {
 };
 
 const botNotChosen =
-  "Choose your bot first: your localhost bot or a default level.";
+  "Choose your bot first: play by hand, your localhost bot or a default level.";
 
 /** Turns a failed call into what the screen shows next to the control that caused it. */
 export function describeProblem(
