@@ -398,6 +398,12 @@ describe("the burst row", () => {
 });
 
 describe("the menu's reasons", () => {
+  test("a burst before the upgrade table loaded waits", () => {
+    expect(menuReason({ kind: "upgrades-not-loaded", castleId: 1 })).toBe(
+      LOADING_REASON,
+    );
+  });
+
   test("other refusals get hand play's sentence", () => {
     expect(menuReason({ kind: "not-playing", status: "ended" })).toBe(
       "The game has ended.",

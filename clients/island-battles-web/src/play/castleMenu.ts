@@ -195,6 +195,8 @@ export function menuReason(refusal: Refusal): string {
       return `Repaying a burst: ${soldiers(refusal.debt)} left`;
     case "burst-ordered":
       return "Already ordered this turn";
+    case "upgrades-not-loaded":
+      return LOADING_REASON;
     default:
       return refusalSentence(refusal);
   }
