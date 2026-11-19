@@ -90,6 +90,8 @@ func DecodeCommand(command models.CommandFields) (Command, error) {
 		return decodeParameters[SendSoldierGroupParams](command.Parameters)
 	case models.RemoveArrivedSoldierGroups:
 		return decodeParameters[RemoveArrivedSoldierGroupsParams](command.Parameters)
+	case models.RemoveTeam:
+		return decodeParameters[RemoveTeamParams](command.Parameters)
 	}
 	return nil, fmt.Errorf("unknown command type %q", command.CommandType)
 }

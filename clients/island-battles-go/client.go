@@ -964,6 +964,13 @@ func (client *Client) turnWorker() error {
 			client.signalWakeup()
 			continue
 		}
+		if errors.Is(err, ErrTeamOut) {
+			// The team resigned or left a real-time game: it has no more
+			// turns, so the client stops without an error.
+			client.sdkLog.Info("the team is out of the game, so the bot stops: " + err.Error())
+			client.stop()
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -994,8 +1001,24 @@ func (client *Client) playTurn(state generationState, stored int) error {
 		Memory:         state.Memory,
 		TurnDeadlineAt: state.TurnDeadlineAt,
 	}
-	result, err := client.callBot(turnLog, turn)
+	// The bot's ctx ends before the turn's deadline by serve's margin
+	// (submitBudget), so that an answer given when it ends still arrives in
+	// time.
+	var botDeadline *time.Time
+	if turn.TurnDeadlineAt != nil {
+		deadline := time.Now().Add(submitBudget(time.Until(*turn.TurnDeadlineAt)))
+		botDeadline = &deadline
+	}
+	result, err := client.callBot(turnLog, turn, botDeadline)
 	turnLog.close()
+	// A bot that fails once its ctx ended in a real-time game was slower
+	// than the pace, and passes the turn.
+	tooSlow := err != nil && state.TurnPaceMilliseconds != nil && botDeadline != nil && !time.Now().Before(*botDeadline)
+	if tooSlow && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+		// The bot failed for its own reason, such as a panic: say what it
+		// was, although the turn passes.
+		client.sdkLog.Warn(failureMessage(state.GenerationID, err))
+	}
 	if err == nil {
 		turnLog.addResult(result)
 		if client.isClosed() {
@@ -1005,9 +1028,20 @@ func (client *Client) playTurn(state generationState, stored int) error {
 		if err == nil {
 			return nil
 		}
+		tooSlow = state.TurnPaceMilliseconds != nil && errors.Is(err, ErrStaleGeneration)
 	}
-	if client.isClosed() || errors.Is(err, ErrGameEnded) || errors.Is(err, ErrTransport) || errors.Is(err, ErrAuthentication) || errors.Is(err, ErrClientClosed) {
+	if client.isClosed() || errors.Is(err, ErrGameEnded) || errors.Is(err, ErrTeamOut) || errors.Is(err, ErrTransport) || errors.Is(err, ErrAuthentication) || errors.Is(err, ErrClientClosed) {
 		return err
+	}
+	if tooSlow {
+		// The bot passes the real-time turn. The server plays the turn
+		// without its answer when a request finds its time up: the deadline
+		// worker asks for that at the turn's deadline, and a read brings the
+		// next turn.
+		client.sdkLog.Warn(fmt.Sprintf("the bot was slower than the turn pace of %s on generation %d, so it passes this turn",
+			time.Duration(*state.TurnPaceMilliseconds)*time.Millisecond, state.GenerationID))
+		client.signalWakeup()
+		return nil
 	}
 	// The bot failed, returned an invalid result, or the server rejected
 	// the result. The turn stays open, and the client stops after the error
@@ -1019,15 +1053,15 @@ func (client *Client) playTurn(state generationState, stored int) error {
 	return err
 }
 
-// callBot plays one turn in its own goroutine, with ctx cancelled at the
-// turn's deadline and when the client closes. It stops waiting when the
-// client closes; a bot that ignores ctx keeps its goroutine until it
-// returns.
-func (client *Client) callBot(turnLog *turnLog, turn Turn) (Result, error) {
+// callBot plays one turn in its own goroutine, with ctx cancelled at
+// deadline, when it isn't nil, and when the client closes. It stops waiting
+// when the client closes; a bot that ignores ctx keeps its goroutine until
+// it returns.
+func (client *Client) callBot(turnLog *turnLog, turn Turn, deadline *time.Time) (Result, error) {
 	ctx := turnLog.context(client.ctx)
-	if turn.TurnDeadlineAt != nil {
+	if deadline != nil {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithDeadline(ctx, *turn.TurnDeadlineAt)
+		ctx, cancel = context.WithDeadline(ctx, *deadline)
 		defer cancel()
 	}
 	type outcome struct {
@@ -1128,18 +1162,22 @@ func (client *Client) register(ctx context.Context, commands []Command, complete
 }
 
 // deadlineWorker applies the turn's deadline while the player waits for the
-// others. The server runs no timers: a turn times out when a request applies
-// its deadline. Once this player has completed a turn that has a deadline,
-// the client posts to the deadline endpoint a second after it, unless a new
-// state arrives first. The server answers with this player's state, which
-// carries the outcome when someone didn't answer in time.
+// others. The server runs no timers: a turn times out, or a real-time turn
+// plays, when a request applies its deadline. Once this player has
+// completed a turn that has a deadline, and in a real-time game for every
+// turn, completed or not, the client posts to the deadline endpoint just
+// after it, unless a new state arrives first, and again while the turn stays
+// open. So a real-time turn that the bot passed still ends when nobody else
+// calls, even with this machine's clock ahead of the server's. The server
+// answers with this player's state, the next turn's or the one that carries
+// the outcome when someone didn't answer in time.
 func (client *Client) deadlineWorker() error {
 	attemptGeneration, attempts := uint(0), 0
 	for {
 		client.mutex.Lock()
 		state, changed := client.state, client.changed
 		client.mutex.Unlock()
-		if state == nil || state.Outcome != nil || state.TurnDeadlineAt == nil || !state.Submitted {
+		if state == nil || state.Outcome != nil || state.TurnDeadlineAt == nil || (!state.Submitted && state.TurnPaceMilliseconds == nil) {
 			select {
 			case <-changed:
 				continue

@@ -38,6 +38,16 @@ func TimeoutOutcome(state GameState, teams []models.GameTeam, timedOut []uint) *
 	return &models.GameOutcome{Reason: models.GameOutcomeTurnTimeout, WinnerTeamColor: mostCastles(state, standingTeams(state, teams, timedOut))}
 }
 
+// AbandonedOutcome ends a real-time game that nobody played for its turn
+// limit, on the board of its open generation, as the generation cap does:
+// among the teams still standing, leaving out those in resigned, whose
+// resignation was waiting for the turn, the team with the most castles wins,
+// and equal castle counts, or no such team, are a draw. The outcome's
+// Departures are left to the caller.
+func AbandonedOutcome(state GameState, teams []models.GameTeam, resigned []uint) *models.GameOutcome {
+	return &models.GameOutcome{Reason: models.GameOutcomeAbandoned, WinnerTeamColor: mostCastles(state, standingTeams(state, teams, resigned))}
+}
+
 // StandingTeams lists the colours of teams that are still in the game: those
 // with castles or soldier groups on state. The others are eliminated.
 func StandingTeams(state GameState, teams []models.GameTeam) []uint {

@@ -45,7 +45,11 @@ type FrozenGamePlayer struct {
 	BotPackageKey       *string `gorm:"column:bot_package_key"`
 	BotPackageLanguage  *string `gorm:"column:bot_package_language"`
 	BotPackageSizeBytes *int64  `gorm:"column:bot_package_size_bytes"`
-	CreatedAt           time.Time
+	// LastSeenAt is when the server last heard from the player in a real-time
+	// game: the game's start, then the latest game request made as them, with
+	// a player token or a submit token, written at most every SeenWriteInterval.
+	LastSeenAt time.Time `gorm:"not null;default:now()"`
+	CreatedAt  time.Time
 }
 
 type GenerationInput struct {
@@ -160,13 +164,28 @@ type GenerationState struct {
 	// TurnPaceMilliseconds is Game.TurnPaceMilliseconds: nil when the game
 	// waits for every player.
 	TurnPaceMilliseconds *uint `json:"turn_pace_milliseconds" nullable:"true" minimum:"500" maximum:"5000" doc:"The game's turn pace in milliseconds when the game is real-time, because a player on its roster plays by hand: each turn ends this long after its generation was created, at turn_deadline_at, and plays with the commands that arrived, without waiting for anyone. It still plays early once every player completed it. Null when the game waits for every player to complete each turn."`
+	// Departures are the game's applied departures; a resignation still
+	// waiting for its turn isn't listed.
+	Departures []DepartureView `json:"departures" nullable:"false" doc:"The teams that have resigned or left this real-time game so far, in the order they left, from the turn that took them out. Empty in every other game. A resignation shows here once the turn that applies it has played; before that, the answer of POST /game/from-lobby/{lobby_id}/resign is its only sign."`
 }
 
 // GameOutcomeView is how a finished game ended.
 type GameOutcomeView struct {
-	Reason          GameOutcomeReason `json:"reason" enum:"last_team_standing,all_eliminated,generation_cap,turn_timeout" doc:"last_team_standing: one team was left after every other team lost all its castles and soldier groups. all_eliminated: the last teams were eliminated in the same turn, a draw. generation_cap: the game reached its last generation; the team with the most castles won, and equal counts are a draw. turn_timeout: a turn passed its deadline; every team with a player who hadn't completed it lost, and among the other teams still standing the team with the most castles won, while equal counts, or no team left, are a draw."`
+	Reason          GameOutcomeReason `json:"reason" enum:"last_team_standing,all_eliminated,generation_cap,turn_timeout,abandoned" doc:"last_team_standing: one team was left after every other team lost all its castles and soldier groups, or resigned or left the game. all_eliminated: the last teams were eliminated, or left, in the same turn, a draw. generation_cap: the game reached its last generation; the team with the most castles won, and equal counts are a draw. turn_timeout: in a game that waits for every player, a turn passed its deadline; every team with a player who hadn't completed it lost, and among the other teams still standing the team with the most castles won, while equal counts, or no team left, are a draw. abandoned: nobody played a real-time game for its turn limit, so it ended on its open generation; among the teams still in it, except one whose resignation was waiting for the turn, the team with the most castles won, and equal counts, or no team left, are a draw."`
 	WinnerTeamColor *uint             `json:"winner_team_color" minimum:"1" nullable:"true" doc:"The winning team, or null for a draw."`
-	Summary         string            `json:"summary" doc:"The outcome in one sentence, naming the winning team, and for turn_timeout the teams that lost and their players who didn't answer."`
+	Summary         string            `json:"summary" doc:"The outcome in one sentence, naming the winning team, the teams that resigned or left a real-time game, and for turn_timeout the teams that lost and their players who didn't answer."`
+	// Departures is optional in the schema only so that demos saved before it
+	// existed still read; the server always writes it.
+	Departures []DepartureView `json:"departures" required:"false" nullable:"false" doc:"The teams that resigned or left a real-time game, in the order they left. Always present, and empty for most games; a demo saved before this field existed has none, which reads as empty."`
+}
+
+// DepartureView is a team that left a real-time game: it resigned, or the
+// server didn't hear from its player for the game's turn limit.
+type DepartureView struct {
+	TeamColor  uint          `json:"team_color" minimum:"1"`
+	Kind       DepartureKind `json:"kind" enum:"resigned,left" doc:"resigned: its player resigned. left: the server didn't hear from its player for the game's turn limit (or one turn plus 5 seconds, when that is longer) by the time a turn ended."`
+	Players    []string      `json:"players" nullable:"false" doc:"The display name the player who resigned or went silent had at the start."`
+	TurnNumber *int          `json:"turn_number" minimum:"1" nullable:"true" doc:"The turn number of the first generation in which the team is out: its castles turned neutral, keeping their soldiers, and its soldier groups were removed. Null only in an abandoned game's outcome, for a resignation that was still waiting for its turn to play."`
 }
 
 const (

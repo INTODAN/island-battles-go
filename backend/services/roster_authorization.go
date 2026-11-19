@@ -8,9 +8,10 @@ import (
 	"islandBattles/backend/models"
 )
 
-// authorize admits only the players frozen into the game's roster at start.
-// A started game never reads its lobby, so it stays playable after the lobby
-// is deleted. Checking before WithLockedGame keeps outsiders off the game lock.
+// authorize admits only the players frozen into the game's roster at start,
+// and records that the server heard from the player (markSeen). A started
+// game never reads its lobby, so it stays playable after the lobby is
+// deleted. Checking before WithLockedGame keeps outsiders off the game lock.
 func (service *GenerationService) authorize(ctx context.Context, principal domain.Principal, game *models.Game) error {
 	if game == nil || game.LobbyID == nil {
 		return reject(404, "game not found")
@@ -22,7 +23,7 @@ func (service *GenerationService) authorize(ctx context.Context, principal domai
 	if player == nil {
 		return reject(404, "game not found")
 	}
-	return nil
+	return service.markSeen(ctx, game, *player)
 }
 
 // Replay derives the replay of a lobby's game from its stored generations,
@@ -38,7 +39,7 @@ func (service *GenerationService) Replay(ctx context.Context, principal domain.P
 	if err := service.authorize(ctx, principal, game); err != nil {
 		return GameReplay{}, err
 	}
-	if game, err = service.applyOverdueDeadline(ctx, game); err != nil {
+	if game, err = service.applyOverdueDeadline(ctx, game, principal.PlayerID); err != nil {
 		return GameReplay{}, err
 	}
 	generations, err := dal.LoadGameGenerations(database, game.ID)

@@ -65,16 +65,20 @@ type turnEnd struct {
 // does nothing, and a request that raced the one that ended the turn finds
 // the new generation not yet due and does nothing either.
 //
-// In a real-time game it plays the turn as playTurn does after the last
-// completion: every player of a team still in the game who hasn't completed
-// it is treated as complete, so the commands of their batches with complete
-// false are played, a player who sent none passes, and the stored memories
-// stay as they are. It plays one turn, however late the request is: the next
-// turn starts when its generation is created, now, so a game that nobody
-// calls stays where it is.
+// In a real-time game it first ends a game that nobody played for its turn
+// limit (abandonGame), on its open generation. Otherwise it takes out the
+// teams whose player the server hasn't heard from (leaveSilentTeams), never
+// caller's, the roster player who made the request, or "" for a watcher's
+// read. Then it plays the turn as playTurn does after the last completion:
+// every player of a team still in the game who hasn't completed it is treated
+// as complete, so the commands of their batches with complete false are
+// played, a player who sent none passes, and the stored memories stay as they
+// are. It plays one turn, however late the request is: the next turn starts
+// when its generation is created, now, so a game that nobody calls stays where
+// it is.
 //
 // In a game that waits for every player, the turn times out (expireTurn).
-func endTurn(ctx context.Context, transaction *gorm.DB, game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer, now time.Time, sender *TurnSender) (turnEnd, error) {
+func endTurn(ctx context.Context, transaction *gorm.DB, game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer, caller string, now time.Time, sender *TurnSender) (turnEnd, error) {
 	deadline := turnDeadline(game, generation)
 	if deadline == nil || now.Before(*deadline) {
 		return turnEnd{generation: generation}, nil
@@ -83,12 +87,21 @@ func endTurn(ctx context.Context, transaction *gorm.DB, game *models.Game, gener
 		events, err := expireTurn(transaction, game, generation, players)
 		return turnEnd{generation: generation, events: events}, err
 	}
+	if abandoned(game, generation, now) {
+		events, err := abandonGame(transaction, game, generation, players)
+		return turnEnd{generation: generation, events: events}, err
+	}
+	if leaveSilentTeams(game, generation, players, caller, *deadline) {
+		// Every team still in the game went silent: nobody played it.
+		events, err := abandonGame(transaction, game, generation, players)
+		return turnEnd{generation: generation, events: events}, err
+	}
 	inputs, err := dal.LoadGenerationInputs(transaction, generation.ID)
 	if err != nil {
 		return turnEnd{}, err
 	}
 	end := turnEnd{played: true}
-	if end.generation, inputs, end.events, end.turns, err = playTurn(ctx, transaction, game, players, inputs, sender); err != nil {
+	if end.generation, inputs, end.events, end.turns, err = playTurn(ctx, transaction, game, players, inputs, now, sender); err != nil {
 		return turnEnd{}, err
 	}
 	end.goBotsOnly = game.Outcome == nil && slices.ContainsFunc(players, isGoBot) && turnComplete(game, end.generation, players, inputs)
@@ -96,14 +109,15 @@ func endTurn(ctx context.Context, transaction *gorm.DB, game *models.Game, gener
 }
 
 // afterTurnEnd does what a committed turnEnd leaves to do: push its events,
-// send its bots' turns, and have the Go bots play on when they are the only
+// send its bots' turns, and have the Go bots play on for at most goBotBudget,
+// the caller's (goBotWriteBudget or goBotReadBudget), when they are the only
 // ones left. The end has committed, so a failure of the Go bots only stops
 // them until the next game request.
-func (service *GenerationService) afterTurnEnd(ctx context.Context, gameID uint, end turnEnd) {
+func (service *GenerationService) afterTurnEnd(ctx context.Context, gameID uint, end turnEnd, goBotBudget time.Duration) {
 	service.publish(ctx, end.events)
 	service.Bots.send(ctx, service.Database.WithContext(ctx), end.turns)
 	if end.goBotsOnly {
-		if _, err := service.playGoBotTurns(ctx, gameID, goBotWriteBudget); err != nil {
+		if _, err := service.playGoBotTurns(ctx, gameID, goBotBudget); err != nil {
 			observability.RecordError(ctx, fmt.Errorf("play Go bot turns: %w", err))
 		}
 	}
@@ -190,10 +204,11 @@ func expireTurn(transaction *gorm.DB, game *models.Game, generation *models.Gene
 // applyOverdueDeadline has the Go bots play, as every game request does, and
 // then ends the game's open turn once its time is up (endTurn), for the reads
 // that take no game lock: the replay, the game log, the demo and the watch
-// reads. It checks the deadline without the lock first, so a running game's
-// reads lock it only once its deadline has passed. It returns the game as it
-// is afterwards.
-func (service *GenerationService) applyOverdueDeadline(ctx context.Context, game *models.Game) (*models.Game, error) {
+// reads. caller is the reader's player ID, whom endTurn never takes out. It
+// checks the deadline without the lock first, so a running game's reads lock
+// it only once its deadline has passed. It returns the game as it is
+// afterwards.
+func (service *GenerationService) applyOverdueDeadline(ctx context.Context, game *models.Game, caller string) (*models.Game, error) {
 	if game.Outcome != nil {
 		return game, nil
 	}
@@ -229,13 +244,13 @@ func (service *GenerationService) applyOverdueDeadline(ctx context.Context, game
 		if err != nil {
 			return err
 		}
-		end, err = endTurn(ctx, transaction, locked, generation, players, service.now(), service.Bots)
+		end, err = endTurn(ctx, transaction, locked, generation, players, caller, service.now(), service.Bots)
 		return err
 	})
 	if err != nil {
 		return nil, err
 	}
-	service.afterTurnEnd(ctx, game.ID, end)
+	service.afterTurnEnd(ctx, game.ID, end, goBotReadBudget)
 	if end.goBotsOnly {
 		// The Go bots played on after the end, so the game may have ended.
 		return dal.FindGame(database, game.ID)
@@ -258,6 +273,16 @@ func describeTimeout(seconds uint) string {
 		return fmt.Sprintf("%d min", seconds/60)
 	}
 	return fmt.Sprintf("%d s", seconds)
+}
+
+// describeDuration writes a time in whole or fractional seconds, or in whole
+// minutes, as the create forms offer them, such as "30 s", "5.5 s" or
+// "2 min".
+func describeDuration(duration time.Duration) string {
+	if duration%time.Second == 0 {
+		return describeTimeout(uint(duration / time.Second))
+	}
+	return describePace(uint(duration / time.Millisecond))
 }
 
 // describePace writes a turn pace in seconds, as the create forms offer it,
