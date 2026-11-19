@@ -12,6 +12,11 @@ const upgradeNames = new Map([
   ["generation_amount", "Growth"],
   ["burst_potential", "Burst"],
 ]);
+/** An upgrade type's short name, such as "Speed" or "Growth"; an unknown type keeps its own name. */
+export function upgradeName(type: string): string {
+  return upgradeNames.get(type) ?? type;
+}
+
 const upgradeRank = (type: string) =>
   [...upgradeNames.keys()].indexOf(type) >>> 0;
 
