@@ -23,6 +23,8 @@ export interface LiveTurn {
   relayed_bots?: RelayedBot[];
   /** The teams out of the game so far (resigned or left), as the state lists them. */
   departures?: Departure[];
+  /** The game's turn pace in a real-time game, null when it waits for every player. */
+  turn_pace_milliseconds?: number | null;
 }
 
 export interface LiveSource {

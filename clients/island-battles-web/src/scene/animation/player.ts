@@ -75,10 +75,11 @@ export const MAX_LIVE_TURN_MS = 3000;
 /** How much of a turn is still to play, following live, when the next one should arrive. */
 export const LIVE_BUFFER_TURNS = 0.5;
 /**
- * For watchers and players whose bot plays: half a turn in hand, so the next turn is usually
- * known when one ends, and bursts of turns play at the pace. Any other backlog (turns that
- * arrived while the tab was hidden, the first turns' longer length) is a lag, given back
- * gradually, never faster than twice the pace.
+ * For watchers and players whose bot plays: half a turn in hand, more when the gaps between
+ * turns vary, so the next turn is usually known when one ends, and bursts of turns play at the
+ * pace. Any other backlog (turns that arrived while the tab was hidden, the first turns' longer
+ * length) is a lag, given back gradually, never faster than twice the pace; turns that waited
+ * when Follow live was ticked replay at up to `maxCatchUpSpeed`.
  */
 export const WATCHING: LiveTiming = {
   bufferTurns: LIVE_BUFFER_TURNS,
@@ -110,6 +111,19 @@ export const MAX_BURST = 4;
  * of the pace and the running average.
  */
 const OUTLIER_SHARE = 1.5;
+/**
+ * Following arrivals, a gap shared by turns that arrived together counts as at least this share
+ * of the running average: turns that come late and together (a reconnect, a stalled server) don't
+ * collapse the turn length, which the catch-up would then double.
+ */
+const ARRIVALS_GAP_FLOOR = 0.5;
+/**
+ * Following arrivals, the buffer grows by this many times the running mean of how far a gap is
+ * from the average, as a share of the average, by at most ARRIVALS_MAX_SPREAD_TURNS: games
+ * whose gaps vary (bots that answer quickly or slowly) keep enough in hand for a long gap.
+ */
+const ARRIVALS_SPREAD_GAIN = 2;
+const ARRIVALS_MAX_SPREAD_TURNS = 1.5;
 /** Catch-up speed per turn of backlog beyond the buffer. */
 const CATCH_UP_GAIN = 0.5;
 /**
@@ -119,8 +133,10 @@ const CATCH_UP_GAIN = 0.5;
  */
 const ARRIVALS_GIVE_BACK_MS = 4 * CATCH_UP_EASE_MS;
 /**
- * Following arrivals, the fastest the catch-up plays: a long lag plays at twice the pace, so a lag
- * of N turns is given back in a little more than N turns, without a fast replay.
+ * Following arrivals, the fastest the catch-up plays a lag the board built itself: a long lag
+ * plays at twice the pace, so a lag of N turns is given back in a little more than N turns,
+ * without a fast replay. Turns that already waited when following started (Follow live ticked
+ * again) replay at up to `maxCatchUpSpeed`, until the replay has slowed to twice the pace.
  */
 const ARRIVALS_MAX_CATCH_UP_SPEED = 2;
 /** Following live, the slowest the catch-up plays to let a buffer build up. */
@@ -184,6 +200,10 @@ export class TurnPlayer {
   private lastArrival: number | null = null;
   /** The running average of the time between live turns. */
   private arrivalGap: number | null = null;
+  /** The running mean of how far a gap between live turns was from `arrivalGap`. */
+  private arrivalSpread = 0;
+  /** Following started with turns waiting: they replay at up to `maxCatchUpSpeed`. */
+  private replaying = false;
   /** How long a live turn takes now; it eases towards the time between arrivals. */
   private liveTurnMs: number;
   /**
@@ -276,7 +296,9 @@ export class TurnPlayer {
     this.burstStart = null;
     this.burst = 1;
     this.arrivalGap = null;
+    this.arrivalSpread = 0;
     this.paced = 0;
+    this.replaying = live && this.queue.length > 0;
     this.seededPace = this.knownPace();
     this.liveTurnMs =
       this.seededPace ?? clamp(this.turnMs, MIN_LIVE_TURN_MS, MAX_LIVE_TURN_MS);
@@ -297,12 +319,12 @@ export class TurnPlayer {
   }
 
   /**
-   * The game's turn pace, in milliseconds, when it has one (a real-time game), or null. Following
-   * the newest turn, a known pace is the turn's length from the first turn on (and after each
-   * `setLive(true)`) until the time between arrivals is known, and a single late turn counts as
-   * at most half a turn more than usual in that average; the turn's length still follows the
-   * arrivals, so a server slower or faster than its pace neither stops the board every turn nor
-   * leaves it behind.
+   * The game's turn pace, in milliseconds, when it has one (a real-time game), or null. With
+   * either timing, a single late turn counts as at most half a turn more than usual in the
+   * arrivals' average; the turn's length still follows the arrivals, so a server slower or faster
+   * than its pace neither stops the board every turn nor leaves it behind. Following the newest
+   * turn, a known pace is also the turn's length from the first turn on (and after each
+   * `setLive(true)`) until the time between arrivals is known.
    */
   setLivePace(paceMs: number | null): void {
     this.livePaceMs = paceMs !== null && paceMs > 0 ? paceMs : null;
@@ -416,7 +438,11 @@ export class TurnPlayer {
         (now - this.burstStart) / this.burst,
         2 * MAX_LIVE_TURN_MS,
       );
-      const known = this.knownPace();
+      const arrivals = this.timing.follows === "arrivals";
+      if (arrivals && this.arrivalGap !== null) {
+        gap = Math.max(gap, ARRIVALS_GAP_FLOOR * this.arrivalGap);
+      }
+      const known = this.gamePace();
       if (known !== null) {
         // With the game's pace known, one late turn counts as at most half a turn more than
         // usual, so it doesn't stretch the turns after it; gaps that stay long still raise the
@@ -427,6 +453,10 @@ export class TurnPlayer {
         );
       }
       const weight = 1 - (1 - ARRIVAL_WEIGHT) ** this.burst;
+      if (this.arrivalGap !== null) {
+        this.arrivalSpread +=
+          weight * (Math.abs(gap - this.arrivalGap) - this.arrivalSpread);
+      }
       this.arrivalGap =
         this.arrivalGap === null
           ? gap
@@ -461,13 +491,26 @@ export class TurnPlayer {
       this.liveTurnMs / MAX_LIVE_TURN_MS,
     );
     if (this.timing.follows === "arrivals") {
+      // Gaps that vary keep more in hand: an early turn plays while a late one is awaited.
+      const spread =
+        this.arrivalGap === null
+          ? 0
+          : Math.min(
+              ARRIVALS_MAX_SPREAD_TURNS,
+              (ARRIVALS_SPREAD_GAIN * this.arrivalSpread) /
+                Math.max(this.arrivalGap, MIN_LIVE_TURN_MS),
+            );
+      const beyond = backlog - expected - spread;
       // A lag beyond the target, in time, over the time it should take to give back.
-      const lag =
-        ((backlog - expected) * this.liveTurnMs) / ARRIVALS_GIVE_BACK_MS;
+      const lag = (beyond * this.liveTurnMs) / ARRIVALS_GIVE_BACK_MS;
+      // A replay ends once it is down to what a lag of the board's own may play.
+      if (1 + lag <= ARRIVALS_MAX_CATCH_UP_SPEED) this.replaying = false;
       return clamp(
         1 + lag,
         slowest,
-        Math.min(ARRIVALS_MAX_CATCH_UP_SPEED, this.maxCatchUpSpeed),
+        this.replaying
+          ? this.maxCatchUpSpeed
+          : Math.min(ARRIVALS_MAX_CATCH_UP_SPEED, this.maxCatchUpSpeed),
       );
     }
     return clamp(
@@ -482,6 +525,15 @@ export class TurnPlayer {
     if (this.timing.follows !== "newest" || this.livePaceMs === null) {
       return null;
     }
+    return clamp(this.livePaceMs, MIN_LIVE_TURN_MS, MAX_LIVE_TURN_MS);
+  }
+
+  /**
+   * The game's turn pace (`setLivePace`), for any timing: with it, a single late turn counts as at
+   * most half a turn more than usual in the arrivals' average.
+   */
+  private gamePace(): number | null {
+    if (this.livePaceMs === null) return null;
     return clamp(this.livePaceMs, MIN_LIVE_TURN_MS, MAX_LIVE_TURN_MS);
   }
 

@@ -450,6 +450,34 @@ describe("following live (#176)", () => {
     // The speed eases: no frame changes it by more than a few per cent.
     expect(largestChange(rates)).toBeLessThan(0.05);
   });
+
+  // Gaps ±40 % around 1 s and 0.5 s, as a game of bots that answer quickly or slowly (#361's
+  // review): the buffer grows with the spread of the gaps, so the boats almost never wait.
+  for (const [low, span] of [
+    [600, 800],
+    [300, 400],
+  ] as const) {
+    // 24 games of 50 turns each.
+    test(`turns ${low} to ${low + span} ms apart stop the boats rarely and briefly, over 24 games`, () => {
+      let stops = 0;
+      let longest = 0;
+      let turns = 0;
+      for (let game = 1; game <= 24; game++) {
+        let state = game;
+        const jitter = () => {
+          state = (state * 1664525 + 1013904223) % 2 ** 32;
+          return state / 2 ** 32;
+        };
+        const run = live(() => low + span * jitter(), 55 * (low + span / 2));
+        const after = stopsFrom(run, 5 * (low + span / 2));
+        stops += after.length;
+        longest = Math.max(longest, ...after);
+        turns += lagsFrom(run, 5 * (low + span / 2)).length;
+      }
+      expect((stops / turns) * 100).toBeLessThan(0.2);
+      expect(longest).toBeLessThanOrEqual(6);
+    }, 30_000);
+  }
 });
 
 describe("time steps (#176)", () => {
@@ -869,34 +897,54 @@ describe("a watcher's lag (#361)", () => {
     });
   }
 
-  test("a burst of five turns plays, and its lag is given back", () => {
-    // Turn 20 comes 5 s late, and the next four with it.
-    const run = live(
-      (index) => (index === 20 ? 5000 : index > 20 && index <= 24 ? 0 : 1000),
-      60_000,
-    );
-    // Nothing kept: from four turns after the burst never more than the buffer behind ...
-    for (const lag of lagsFromTurn(run, 29)) {
-      expect(lag).toBeLessThan(buffer + 0.1);
-    }
-    // ... and back to it within fifteen.
-    for (const lag of lagsFromTurn(run, 40)) {
-      expect(Math.abs(lag - buffer)).toBeLessThan(0.1);
-    }
-    // At most twice the turn's length. (The turns that arrived together shorten that length for
-    // a few turns, as the arrivals' average has always done.)
-    expect(Math.max(...run.speeds)).toBeLessThanOrEqual(2);
-  });
+  for (const turns of [5, 7, 9]) {
+    test(`${turns} turns that arrive together after a ${turns} s stall play at no more than 2x the pace, and don't run dry`, () => {
+      // A reconnect: turn 20 comes `turns` seconds late, and the next ones with it.
+      const run = live(
+        (index) =>
+          index === 20
+            ? turns * 1000
+            : index > 20 && index < 20 + turns
+              ? 0
+              : 1000,
+        80_000,
+      );
+      const from = 500 + (19 + turns) * 1000;
+      // The turns that arrived together don't collapse the turn length the catch-up doubles.
+      expect(fastest(run, from, 1000)).toBeLessThan(2.1);
+      expect(Math.max(...run.speeds)).toBeLessThanOrEqual(2);
+      // The board doesn't overshoot into its buffer, and gives the lag back.
+      for (const lag of lagsFrom(run, from + 100)) {
+        expect(lag).toBeGreaterThan(buffer - 0.1);
+      }
+      for (const lag of lagsFromTurn(run, 20 + turns + 22)) {
+        expect(lag).toBeLessThan(buffer + 0.15);
+      }
+    });
+  }
 
-  test("after a 3 s gap the lag is given back", () => {
-    // Turn 21 comes 3 s late; the gap stretches the turns after it for a while.
-    const run = live((index) => (index === 20 ? 4000 : 1000), 60_000);
-    const lags = lagsFromTurn(run, 21);
-    expect(Math.max(...lags)).toBeLessThan(buffer + 0.6);
-    for (const lag of lagsFromTurn(run, 36)) {
+  test("a turn 3 s late in a real-time game counts as half a turn more than usual", () => {
+    // Turn 21 comes 3 s late at a 1 s pace; the view gives a watcher the game's pace.
+    const paced = live((index) => (index === 20 ? 4000 : 1000), 60_000, {
+      paceMs: 1000,
+    });
+    expect(Math.max(...lagsFromTurn(paced, 21))).toBeLessThan(0.85);
+    for (const lag of lagsFromTurn(paced, 36)) {
       expect(Math.abs(lag - buffer)).toBeLessThan(0.1);
     }
-    expect(Math.max(...run.speeds)).toBeLessThanOrEqual(2);
+    expect(Math.max(...paced.speeds)).toBeLessThanOrEqual(2);
+    // Without a pace (a game that waits for its bots), the gap stretches the turns after it for
+    // a while, and the spread of the gaps keeps a little more in hand; that too is given back.
+    const unpaced = live((index) => (index === 20 ? 4000 : 1000), 70_000);
+    const lags = lagsFromTurn(unpaced, 21);
+    expect(Math.max(...lags)).toBeGreaterThan(
+      Math.max(...lagsFromTurn(paced, 21)),
+    );
+    expect(Math.max(...lags)).toBeLessThan(2);
+    for (const lag of lagsFromTurn(unpaced, 46)) {
+      expect(Math.abs(lag - buffer)).toBeLessThan(0.1);
+    }
+    expect(Math.max(...unpaced.speeds)).toBeLessThanOrEqual(2);
   });
 
   test("a hand player who is out while the tab is hidden gets back to the buffer", () => {
@@ -915,17 +963,37 @@ describe("a watcher's lag (#361)", () => {
     expect(fastest(run, 29_500, 1000)).toBeLessThan(2.05);
   });
 
-  test("Follow live again replays the missed turns at no more than 2x", () => {
-    // Scrubbed back for 8 s at a 1 s pace, then Follow live.
-    const run = live(() => 1000, 50_000, { replay: [20_000, 28_000] });
-    const after = run.lags.filter((entry) => entry.at >= 28_000);
-    expect(after[0]?.lag as number).toBeGreaterThan(7);
-    for (const lag of lagsFrom(run, 28_000 + 8000 + 2500)) {
-      expect(Math.abs(lag - buffer)).toBeLessThan(0.1);
-    }
-    expect(Math.max(...run.speeds)).toBeLessThanOrEqual(2);
-    expect(fastest(run, 28_000, 1000)).toBeLessThan(2.05);
-  });
+  for (const pace of [500, 1000]) {
+    test(`at a ${pace} ms pace, Follow live ticked again replays the missed turns at up to 4x, then 2x`, () => {
+      // Scrubbed back for 8 turns, then Follow live.
+      const back = 8 * pace;
+      const run = live(() => pace, 20_000 + back + 40 * pace, {
+        replay: [20_000, 20_000 + back],
+      });
+      const start = 20_000 + back;
+      const after = run.lags.filter((entry) => entry.at >= start);
+      expect(after[0]?.lag as number).toBeGreaterThan(7);
+      // Faster than a lag the board built itself, never in a jump: the replay doesn't fall further
+      // behind the game, nor reach the ten turns that skip to the newest.
+      expect(Math.max(...run.speeds)).toBeGreaterThan(2);
+      expect(Math.max(...run.speeds)).toBeLessThanOrEqual(4);
+      expect(fastest(run, start, pace)).toBeLessThan(6.1);
+      expect(after[1]?.lag as number).toBeLessThan(after[0]?.lag as number);
+      for (const lag of lagsFrom(run, start + 12 * pace)) {
+        expect(Math.abs(lag - buffer)).toBeLessThan(0.1);
+      }
+      // Once the board is back, a lag it builds (a hidden tab) is given back at 2x again.
+      const hidden = live(() => pace, start + 40 * pace, {
+        replay: [20_000, start],
+        hidden: [start + 20 * pace, start + 26 * pace],
+      });
+      expect(
+        Math.max(
+          ...hidden.speeds.slice(Math.ceil((start + 20 * pace) / FRAME_MS)),
+        ),
+      ).toBeLessThanOrEqual(2);
+    });
+  }
 });
 
 describe("a hand player's timing with the game's pace (#345)", () => {
@@ -1030,7 +1098,7 @@ describe("a hand player's timing with the game's pace (#345)", () => {
     }
   });
 
-  test("the pace changes nothing for a watcher", () => {
+  test("with steady turns, the pace changes nothing for a watcher", () => {
     seed = 1;
     const { trace } = live(() => 1000, 30_000, { paceMs: 1000 });
     for (const [index, position] of trace.entries()) {
