@@ -394,8 +394,14 @@ interface Arrival {
  * Plans the turn between two consecutive generations as tracks over t in [0, 1]. At t = 1 every
  * position, count and team equals `next` exactly.
  */
-export function planTurn(previous: Generation, next: Generation): TurnPlan {
-  const departed = departedTeams(previous, next);
+export function planTurn(
+  previous: Generation,
+  next: Generation,
+  left?: ReadonlySet<number>,
+): TurnPlan {
+  // The teams that left in this turn: as the state's `departures` say, or, with none to go by (a
+  // demo saved before they existed), as the castles show (`departedTeams`).
+  const departed = left ?? departedTeams(previous, next);
   const tracks: Track[] = [];
   const transients: SoldierGroup[] = [];
   const previousGroups = new Map(previous.soldier_groups.map((g) => [g.id, g]));
@@ -683,7 +689,10 @@ export function planTurn(previous: Generation, next: Generation): TurnPlan {
 }
 
 /**
- * The teams that left the game this turn: a castle of theirs is neutral in `next`. Fighting never
+ * The teams that left the game this turn, found from the castles: a castle of theirs is
+ * neutral in `next`. A fallback for a demo without `departures`: it misses a team with no castle
+ * and one whose castles were all captured in the same turn.
+ * Fighting never
  * makes a castle neutral (a capture gives it to the attacker, and a tie leaves it as it was), so
  * this is the server taking a team out of a real-time game (resigned or left): its castles turn
  * neutral, keeping their soldiers, and its soldier groups vanish with no clash and no landing.

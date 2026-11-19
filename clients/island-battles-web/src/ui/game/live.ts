@@ -165,12 +165,12 @@ export function mountLive(
   }
 
   function installTurn(turn: LiveTurn): void {
-    screen.setDepartures(turn.departures ?? []);
     if (gameId === undefined) {
       pending.push(turn);
       return;
     }
     if (turn.game_id !== gameId) return;
+    screen.setDepartures(turn.departures ?? []);
     controller?.merge([turn.generation], turn.outcome ?? null);
   }
 

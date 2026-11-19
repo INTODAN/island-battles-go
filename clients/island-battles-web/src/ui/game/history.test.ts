@@ -5,6 +5,7 @@ import {
   mergeGenerations,
   sortTeams,
   teamStats,
+  teamsDepartedAt,
   turnLabel,
 } from "./history";
 import { generation, sampleDemo } from "./testing";
@@ -97,6 +98,12 @@ describe("departures", () => {
   test("a card says Resigned or Left the game", () => {
     expect(departureText(resigned)).toBe("Resigned");
     expect(departureText(left)).toBe("Left the game");
+  });
+
+  test("the teams that left in a turn, or undefined with no departures to go by", () => {
+    expect(teamsDepartedAt([], 4)).toBeUndefined();
+    expect(teamsDepartedAt([resigned, left], 4)).toEqual(new Set([2]));
+    expect(teamsDepartedAt([resigned, left], 5)).toEqual(new Set());
   });
 
   test("lists merge by team, the first naming a team wins, and a missing list is empty", () => {

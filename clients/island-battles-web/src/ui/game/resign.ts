@@ -16,8 +16,10 @@ const problemPrefix = "urn:island-battles:problem:";
 
 export interface ResignControlInput {
   /**
-   * The hand play's status. `playing` is exactly "a `manual` player in a real-time game, whose
-   * team is in it, with no outcome"; a watcher, a demo and a player with a bot never have it.
+   * The hand play's status. `playing` is "a `manual` player in a game with a turn pace, whose
+   * team is in it, with no outcome". Only the server makes a game with a hand player real-time
+   * (`realTimePace`), so that is what makes it a game that can be resigned. A watcher, a demo and
+   * a player with a bot never have it.
    */
   status: PlayStatus;
   /** The resign request is running. */

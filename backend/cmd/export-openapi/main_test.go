@@ -4,8 +4,48 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"slices"
+	"strings"
 	"testing"
+
+	"github.com/INTODAN/mpl/httpapi"
+	"islandBattles/backend/handlers"
+	"islandBattles/backend/routes"
+
+	"github.com/danielgtaylor/huma/v2"
+	"github.com/danielgtaylor/huma/v2/adapters/humachi"
+	"github.com/go-chi/chi/v5"
 )
+
+// unpublishedOperations are registered routes that player clients are not generated from: the
+// replay pages are HTML. A new route belongs in PlayerOperations, or here with its reason.
+var unpublishedOperations = []string{"getIslandLobbyReplay", "watchIslandLobbyReplay"}
+
+func TestEveryRegisteredOperationIsPublishedOrExcluded(t *testing.T) {
+	config := routes.NewAPIConfig(apiTitle, apiVersion)
+	config.OpenAPIPath = ""
+	config.DocsPath = ""
+	config.SchemasPath = ""
+	api := humachi.New(chi.NewRouter(), config)
+	routes.SetupRoutes(api, &handlers.Env{}, "")
+	httpapi.Register(api, nil, nil, nil, nil, nil)
+	routes.SetupGameRoutes(api, &handlers.LobbyGame{})
+	routes.SetupBotPackageRoutes(api, &handlers.BotPackages{})
+	for path, item := range api.OpenAPI().Paths {
+		// The lobby's routes have their own document; the game's player routes are all here.
+		if !strings.HasPrefix(path, "/game/") {
+			continue
+		}
+		for _, operation := range []*huma.Operation{item.Get, item.Post, item.Put, item.Patch, item.Delete} {
+			if operation == nil {
+				continue
+			}
+			if !slices.Contains(PlayerOperations, operation.OperationID) && !slices.Contains(unpublishedOperations, operation.OperationID) {
+				t.Errorf("%s (%s) is registered but neither in PlayerOperations nor in unpublishedOperations", operation.OperationID, path)
+			}
+		}
+	}
+}
 
 const artifactPath = "../../api/openapi.json"
 

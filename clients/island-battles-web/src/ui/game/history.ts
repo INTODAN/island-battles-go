@@ -14,6 +14,22 @@ export function departureText(departure: Pick<Departure, "kind">): string {
 }
 
 /**
+ * The teams that left in turn `turn` (a turn is numbered by its index in the history, from 1), or
+ * undefined when there are no departures to go by.
+ */
+export function teamsDepartedAt(
+  departures: readonly Departure[],
+  turn: number,
+): ReadonlySet<number> | undefined {
+  if (departures.length === 0) return undefined;
+  return new Set(
+    departures
+      .filter((departure) => departure.turn_number === turn)
+      .map((departure) => departure.team_color),
+  );
+}
+
+/**
  * The departures from every source, one per team: the first list that names a team wins. The live
  * state lists the teams out so far; a game's outcome lists all of them (and an old demo's has
  * none).

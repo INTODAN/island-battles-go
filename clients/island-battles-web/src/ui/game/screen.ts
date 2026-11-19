@@ -34,6 +34,7 @@ import {
   mergeDepartures,
   sortTeams,
   teamStats,
+  teamsDepartedAt,
   turnLabel,
 } from "./history";
 import {
@@ -186,6 +187,8 @@ export class GameScreen {
     "gv-button gv-danger",
   );
   private readonly confirmKeep = button("Keep playing", "Keep playing");
+  /** The top bar's first button, where the focus goes when the Resign button can't have it. */
+  private backToLobby: HTMLButtonElement | undefined;
   private resignSending = false;
   private resignDone = false;
   /** What had the focus when the confirmation opened, to give it back when it closes. */
@@ -248,6 +251,7 @@ export class GameScreen {
     const top = element("header", "gv-top");
     const backLabel = this.options.backLabel ?? "Back to lobby";
     const back = button(backLabel, backLabel);
+    this.backToLobby = back;
     back.addEventListener("click", () => this.options.onBack());
     const open = button("Open demo file", "Open demo file");
     const file = element("input");
@@ -480,7 +484,7 @@ export class GameScreen {
     if (control.kind === "resigned") this.resigned.textContent = control.text;
     // The team is out or the game over while the question was open: nothing is left to ask.
     if (control.kind !== "button" && !this.confirmBackdrop.hidden) {
-      this.closeConfirmation(false);
+      this.closeConfirmation("top-bar");
     }
   }
 
@@ -501,21 +505,34 @@ export class GameScreen {
     document.addEventListener("keydown", this.confirmKeyListener);
   }
 
-  private closeConfirmation(restoreFocus = true): void {
+  /**
+   * Closes the question. The focus goes back to what opened it (`opener`), to the top bar's first
+   * button when that can't have it (`top-bar`: the button is disabled or gone), or stays.
+   */
+  private closeConfirmation(
+    focus: "opener" | "top-bar" | "none" = "opener",
+  ): void {
     if (this.confirmKeyListener) {
       document.removeEventListener("keydown", this.confirmKeyListener);
       this.confirmKeyListener = undefined;
     }
     this.confirmBackdrop.hidden = true;
-    const back = this.confirmReturnFocus;
+    const opener = this.confirmReturnFocus;
     this.confirmReturnFocus = null;
-    if (restoreFocus && back?.isConnected) back.focus();
+    if (focus === "none") return;
+    const usable =
+      focus === "opener" &&
+      opener?.isConnected === true &&
+      !(opener instanceof HTMLButtonElement && opener.disabled) &&
+      !opener.hidden;
+    (usable ? opener : this.backToLobby)?.focus();
   }
 
   private async resign(): Promise<void> {
     const onResign = this.options.onResign;
     if (!onResign || this.resignSending) return;
-    this.closeConfirmation();
+    // The button is disabled while it runs: the focus goes to the top bar's first button.
+    this.closeConfirmation("top-bar");
     this.resignSending = true;
     this.renderResign();
     let result: ResignResult;
@@ -533,8 +550,7 @@ export class GameScreen {
       this.resignDone = true;
     } else {
       // A refused resignation is feedback on an order of the player's (the notice contract).
-      if (this.hand) this.hand.showOrderFeedback(result.sentence);
-      else this.setNotice(result.sentence);
+      this.hand?.showOrderFeedback(result.sentence);
     }
     this.renderResign();
   }
@@ -650,8 +666,22 @@ export class GameScreen {
     );
     // A turn that ends asks for the next one at once, so playing on loses no time between turns.
     let onIdle = () => {};
+    let controllerOf: GameController | undefined;
     const { player } = createScenePlayer(scene, sorted, {
       onIdle: () => onIdle(),
+      // The turn that `next` is: its index in the history, from 1.
+      departed: (_previous, next) => {
+        const index = controllerOf?.state.frames.findIndex(
+          (frame) => frame.id === next.id,
+        );
+        const outcome = controllerOf?.state.outcome;
+        return index === undefined || index < 0
+          ? undefined
+          : teamsDepartedAt(
+              mergeDepartures(this.departures, outcome?.departures),
+              index + 1,
+            );
+      },
     });
     const controller = new GameController(
       {
@@ -664,6 +694,7 @@ export class GameScreen {
       },
       { live: this.options.live },
     );
+    controllerOf = controller;
     onIdle = () => controller.tick();
     scene.onBeforeRenderObservable.add(() => controller.tick());
     this.handSurface = handPlay && {
@@ -733,7 +764,7 @@ export class GameScreen {
       dispose: () => {
         unsubscribe();
         for (const stop of handStatusStops) stop();
-        this.closeConfirmation(false);
+        this.closeConfirmation("none");
         this.resignButton.hidden = true;
         this.resigned.hidden = true;
         this.handStatus.hidden = true;
