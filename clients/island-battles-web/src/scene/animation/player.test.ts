@@ -490,10 +490,7 @@ describe("time steps (#176)", () => {
 
 /** The positions `TurnPlayer` showed before its live timing became an option (#345). */
 const watchingTrace = JSON.parse(
-  readFileSync(
-    new URL("../../../test/fixtures/live-watching-trace.json", import.meta.url),
-    "utf8",
-  ),
+  readFileSync(new URL("./watching-trace.json", import.meta.url), "utf8"),
 ) as { steady: number[]; bursts: number[]; uneven: number[] };
 
 interface LiveRun {
