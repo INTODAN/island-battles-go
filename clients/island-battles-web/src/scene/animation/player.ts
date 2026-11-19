@@ -47,10 +47,11 @@ export interface LiveTiming {
   /** Turns of animation still to play when the next turn should arrive. */
   readonly bufferTurns: number;
   /**
-   * What the catch-up aims at. `arrivals`: the backlog that playing every turn at the pace since
-   * it arrived would leave, so a burst of turns plays over the time it covers, and a lag, once
-   * taken, is kept. `newest`: the newest turn ends as the next one is due, one turn's length after
-   * it arrived; turns behind it are caught up, never kept as a lag.
+   * What the catch-up aims at. `arrivals`: the backlog that playing the newest burst of turns at
+   * the pace since it arrived would leave, so a burst plays over the time it covers; a backlog
+   * beyond that is a lag, given back over a few turns at no more than twice the pace. `newest`:
+   * the newest turn ends as the next one is due, one turn's length after it arrived; turns behind
+   * it are caught up, never kept as a lag.
    */
   readonly follows: "arrivals" | "newest";
 }
@@ -67,7 +68,9 @@ export const MAX_LIVE_TURN_MS = 3000;
 export const LIVE_BUFFER_TURNS = 0.5;
 /**
  * For watchers and players whose bot plays: half a turn in hand, so the next turn is usually
- * known when one ends, and bursts of turns play at the pace.
+ * known when one ends, and bursts of turns play at the pace. Any other backlog (turns that
+ * arrived while the tab was hidden, the first turns' longer length) is a lag, given back
+ * gradually, never faster than twice the pace.
  */
 export const WATCHING: LiveTiming = {
   bufferTurns: LIVE_BUFFER_TURNS,
@@ -101,6 +104,17 @@ export const MAX_BURST = 4;
 const OUTLIER_SHARE = 1.5;
 /** Catch-up speed per turn of backlog beyond the buffer. */
 const CATCH_UP_GAIN = 0.5;
+/**
+ * Following arrivals (`WATCHING`), a lag beyond the target is given back over about this time:
+ * the catch-up speed is 1x plus the lag over this. It is four times the catch-up's ease, so the
+ * speed follows it without overshooting, at any pace.
+ */
+const ARRIVALS_GIVE_BACK_MS = 4 * CATCH_UP_EASE_MS;
+/**
+ * Following arrivals, the fastest the catch-up plays: a long lag plays at twice the pace, so a lag
+ * of N turns is given back in a little more than N turns, without a fast replay.
+ */
+const ARRIVALS_MAX_CATCH_UP_SPEED = 2;
 /** Following live, the slowest the catch-up plays to let a buffer build up. */
 const MIN_CATCH_UP_SPEED = 0.8;
 
@@ -164,8 +178,9 @@ export class TurnPlayer {
   /** How long a live turn takes now; it eases towards the time between arrivals. */
   private liveTurnMs: number;
   /**
-   * Following live, the turns that would still be waiting had every turn played at the pace
-   * since it arrived: one more at each arrival, one fewer per turn's length of time.
+   * Following live, the turns of the newest burst that would still be waiting had they played at
+   * the pace since the burst arrived: one more at each arrival, one fewer per turn's length of
+   * time, and one again at a turn that arrives on its own.
    */
   private paced = 0;
   private timing: LiveTiming;
@@ -369,16 +384,18 @@ export class TurnPlayer {
    */
   private arrived(): void {
     const now = this.now();
-    this.paced += 1;
     const close = Math.max(
       BURST_MS,
       BURST_SHARE * (this.arrivalGap ?? this.knownPace() ?? this.turnMs),
     );
-    if (
-      this.lastArrival !== null &&
-      now - this.lastArrival < close &&
-      this.burst < MAX_BURST
-    ) {
+    const together =
+      this.lastArrival !== null && now - this.lastArrival < close;
+    // A turn that arrives on its own starts the count again. What is left of the turns before it
+    // is a lag by now, not a burst still to play at the pace: turns that arrived while no frame
+    // ran (a hidden tab), or what the first turns' longer length left. The catch-up gives it back.
+    if (!together) this.paced = 0;
+    this.paced += 1;
+    if (together && this.burst < MAX_BURST) {
       this.lastArrival = now;
       this.burst += 1;
       return;
@@ -433,6 +450,16 @@ export class TurnPlayer {
       MIN_CATCH_UP_SPEED,
       this.liveTurnMs / MAX_LIVE_TURN_MS,
     );
+    if (this.timing.follows === "arrivals") {
+      // A lag beyond the target, in time, over the time it should take to give back.
+      const lag =
+        ((backlog - expected) * this.liveTurnMs) / ARRIVALS_GIVE_BACK_MS;
+      return clamp(
+        1 + lag,
+        slowest,
+        Math.min(ARRIVALS_MAX_CATCH_UP_SPEED, this.maxCatchUpSpeed),
+      );
+    }
     return clamp(
       1 + CATCH_UP_GAIN * (backlog - expected),
       slowest,

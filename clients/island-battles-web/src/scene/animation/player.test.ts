@@ -488,7 +488,10 @@ describe("time steps (#176)", () => {
   });
 });
 
-/** The positions `TurnPlayer` showed before its live timing became an option (#345). */
+/**
+ * The positions `WATCHING` showed when its timing last changed on purpose: recorded when it began
+ * to give back a lag instead of keeping it (#361).
+ */
 const watchingTrace = JSON.parse(
   readFileSync(new URL("./watching-trace.json", import.meta.url), "utf8"),
 ) as { steady: number[]; bursts: number[]; uneven: number[] };
@@ -510,13 +513,19 @@ interface LiveRun {
   paceOnce?: boolean;
   /** Jumps to the newest turn at this time, in ms, as Return to live does after a scrub back. */
   jumpAt?: number;
+  /**
+   * Stops following at `from` and follows again at `to`, in ms, playing the turns that arrived
+   * meanwhile, as a watcher's Follow live does after a scrub back.
+   */
+  replay?: readonly [number, number];
 }
 
 /**
  * Follows a live game for `ms` whose turns arrive `gap(n)` after the one before, the first at
  * 500 ms. Records the position every 10th frame; the lag as each turn arrives (the backlog: how
- * far the board is behind the generation that was open, at that turn's end); and, after the
- * first turn has played, each stop: the frames in a row in which the board did not move.
+ * far the board is behind the generation that was open, at that turn's end); after the first
+ * turn has played, each stop: the frames in a row in which the board did not move; and the
+ * board's speed in each frame, in turns a second.
  */
 function live(gap: (index: number) => number, ms: number, run: LiveRun = {}) {
   const frameMs = run.frameMs ?? FRAME_MS;
@@ -536,13 +545,35 @@ function live(gap: (index: number) => number, ms: number, run: LiveRun = {}) {
   const trace: number[] = [];
   const lags: { at: number; index: number; lag: number }[] = [];
   let jumped = false;
+  let held: number | null = null;
+  let replayed = false;
   const stops: { at: number; frames: number }[] = [];
   let still = 0;
   let last = stage.position;
   const speeds: number[] = [];
+  const rates: { at: number; rate: number }[] = [];
   while (now < ms) {
     now += frameMs;
+    if (run.replay && held === null && now >= run.replay[0]) {
+      // Scrubbed back: following stops, and the turns that arrive aren't played.
+      player.setLive(false);
+      player.seek(long[next] as Generation);
+      held = next;
+    }
+    if (run.replay && held !== null && !replayed && now >= run.replay[1]) {
+      // Follow live again: the turns in between are queued, then following starts.
+      for (let index = held; index < next; index++) {
+        player.play(long[index] as Generation, long[index + 1] as Generation);
+      }
+      player.setLive(true);
+      replayed = true;
+    }
     while (now >= arrival && next < long.length - 1) {
+      if (held !== null && !replayed) {
+        next++;
+        arrival += gap(next);
+        continue;
+      }
       lags.push({
         at: now,
         index: next + 1,
@@ -571,6 +602,7 @@ function live(gap: (index: number) => number, ms: number, run: LiveRun = {}) {
     frame++;
     if (frame % 10 === 0) trace.push(stage.position);
     speeds.push(player.catchUpSpeed);
+    rates.push({ at: now, rate: ((stage.position - last) * 1000) / frameMs });
     if (stage.position >= 1) {
       if (stage.position === last) still++;
       else if (still > 0) {
@@ -580,7 +612,7 @@ function live(gap: (index: number) => number, ms: number, run: LiveRun = {}) {
     }
     last = stage.position;
   }
-  return { trace, lags, stops, speeds, player };
+  return { trace, lags, stops, speeds, rates, player };
 }
 
 /** The lengths of the stops that ended from `from` ms on, in frames. */
@@ -602,7 +634,7 @@ const uneven = () => {
 };
 
 describe("live timing (#345)", () => {
-  test("by default and with WATCHING it plays exactly as before the option", () => {
+  test("by default and with WATCHING it plays exactly as the recorded trace", () => {
     const patterns: [keyof typeof watchingTrace, (index: number) => number][] =
       [
         ["steady", () => 1000],
@@ -622,14 +654,6 @@ describe("live timing (#345)", () => {
     }
   });
 
-  test("a watcher stays about a turn behind at a 1 s pace", () => {
-    const run = live(() => 1000, 60_000);
-    for (const lag of lagsFrom(run, 20_000)) {
-      expect(lag).toBeGreaterThan(1);
-      expect(lag).toBeLessThan(1.1);
-    }
-  });
-
   test("a hand player's board reaches the open generation as its turn ends", () => {
     for (const pace of [500, 1000, 2000]) {
       const run = live(() => pace, 60_000, { timing: PLAYING });
@@ -644,7 +668,7 @@ describe("live timing (#345)", () => {
     }
   });
 
-  test("at a 0.5 s pace a watcher falls further behind, and a hand player doesn't", () => {
+  test("at a 0.5 s pace a watcher keeps the buffer in hand, and a hand player none", () => {
     const watching = lagsFrom(
       live(() => 500, 60_000),
       20_000,
@@ -653,7 +677,9 @@ describe("live timing (#345)", () => {
       live(() => 500, 60_000, { timing: PLAYING }),
       20_000,
     );
-    expect(Math.min(...watching)).toBeGreaterThan(2);
+    for (const lag of watching) {
+      expect(Math.abs(lag - WATCHING.bufferTurns)).toBeLessThan(0.1);
+    }
     expect(Math.max(...playing)).toBeLessThan(0.05);
   });
 
@@ -711,12 +737,11 @@ describe("live timing (#345)", () => {
       expect(change).toBeLessThan(0.05);
     }
     for (const lag of lagsFrom(run, 50_000)) {
-      expect(lag).toBeGreaterThan(0.9);
-      expect(lag).toBeLessThan(1.1);
+      expect(Math.abs(lag - WATCHING.bufferTurns)).toBeLessThan(0.1);
     }
   });
 
-  test("after a hidden tab, switching to WATCHING keeps no more than a turn behind", () => {
+  test("after a hidden tab, switching to WATCHING keeps no more than the buffer behind", () => {
     // Hidden for 6 s while playing by hand; the team is out 20 s later.
     const run = live(() => 1000, 80_000, {
       timing: PLAYING,
@@ -724,7 +749,9 @@ describe("live timing (#345)", () => {
       switchTo: { at: 40_000, timing: WATCHING },
     });
     expect(run.player.liveTiming).toBe(WATCHING);
-    for (const lag of lagsFrom(run, 60_000)) expect(lag).toBeLessThan(1.1);
+    for (const lag of lagsFrom(run, 60_000)) {
+      expect(Math.abs(lag - WATCHING.bufferTurns)).toBeLessThan(0.1);
+    }
   });
 
   test("switching from WATCHING to PLAYING catches up without a step", () => {
@@ -738,6 +765,166 @@ describe("live timing (#345)", () => {
       expect(change).toBeLessThan(0.05);
     }
     for (const lag of lagsFrom(run, 40_000)) expect(lag).toBeLessThan(0.05);
+  });
+});
+
+describe("a watcher's lag (#361)", () => {
+  const buffer = WATCHING.bufferTurns;
+
+  /** The fastest the board moved from `from` ms on, as a multiple of the pace. */
+  const fastest = (run: ReturnType<typeof live>, from: number, pace: number) =>
+    Math.max(
+      ...run.rates
+        .filter((entry) => entry.at >= from)
+        .map((entry) => (entry.rate * pace) / 1000),
+    );
+
+  /** The largest change of the catch-up speed from one frame to the next. */
+  const largestStep = (run: ReturnType<typeof live>) => {
+    let largest = 0;
+    for (let index = 1; index < run.speeds.length; index++) {
+      largest = Math.max(
+        largest,
+        Math.abs(
+          (run.speeds[index] as number) - (run.speeds[index - 1] as number),
+        ),
+      );
+    }
+    return largest;
+  };
+
+  /** The mean of the lags between `from` and `to` ms: the steady lag before something happened. */
+  const steadyLag = (
+    run: ReturnType<typeof live>,
+    from: number,
+    to: number,
+  ) => {
+    const lags = run.lags
+      .filter((entry) => entry.at >= from && entry.at < to)
+      .map((entry) => entry.lag);
+    return lags.reduce((sum, lag) => sum + lag, 0) / lags.length;
+  };
+
+  for (const pace of [500, 1000, 2000]) {
+    test(`at a ${pace} ms pace the lag is the buffer`, () => {
+      const run = live(() => pace, 20_000 + 100 * pace);
+      for (const lag of lagsFrom(run, 20_000)) {
+        expect(Math.abs(lag - buffer)).toBeLessThan(0.1);
+      }
+    });
+
+    test(`at a ${pace} ms pace, with ±40 ms of jitter, the lag is about the buffer`, () => {
+      let state = 7;
+      const jitter = () => {
+        state = (state * 1664525 + 1013904223) % 2 ** 32;
+        return state / 2 ** 32;
+      };
+      const run = live(() => pace + 80 * (jitter() - 0.5), 20_000 + 200 * pace);
+      const lags = lagsFrom(run, 20_000);
+      const mean = lags.reduce((sum, lag) => sum + lag, 0) / lags.length;
+      expect(Math.abs(mean - buffer)).toBeLessThan(0.1);
+      // Each turn is as early or late as its arrival, by up to 40 ms: the lag doesn't drift.
+      const off = lags
+        .map((lag) => Math.abs(lag - buffer))
+        .sort((a, b) => a - b);
+      expect(off[Math.floor(off.length * 0.95)] as number).toBeLessThan(
+        0.1 + 40 / pace,
+      );
+    });
+  }
+
+  test("the first turns, which play longer, leave no lag", () => {
+    // The turn's length starts at 1.5 s and eases down to the time between arrivals.
+    const run = live(() => 500, 30_000);
+    for (const lag of lagsFromTurn(run, 12)) {
+      expect(Math.abs(lag - buffer)).toBeLessThan(0.1);
+    }
+  });
+
+  for (const [pace, hiddenMs] of [
+    [500, 4000],
+    [1000, 6000],
+    [2000, 10_000],
+  ] as const) {
+    // At twice the pace the board gains a second a second: the lag goes in about as long again
+    // as the tab was hidden, and then the last of it eases out.
+    test(`after a ${hiddenMs / 1000} s hidden tab at a ${pace} ms pace, the lag is given back within ${hiddenMs / 1000 + 2.5} s, never faster than 2x`, () => {
+      const start = 20_000 + 0.3 * pace;
+      const end = start + hiddenMs;
+      const run = live(() => pace, end + 30 * pace, {
+        hidden: [start, end],
+      });
+      const steady = steadyLag(run, 10_000, start);
+      expect(Math.abs(steady - buffer)).toBeLessThan(0.1);
+      // The tab comes back with every turn that arrived meanwhile waiting.
+      const after = run.lags.filter((entry) => entry.at >= end);
+      expect(after[0]?.lag as number).toBeGreaterThan(hiddenMs / pace - 1);
+      for (const lag of lagsFrom(run, end + hiddenMs + 2500)) {
+        expect(Math.abs(lag - steady)).toBeLessThan(0.1);
+      }
+      // No turn plays faster than twice the pace, and the speed changes gradually: no jump.
+      expect(Math.max(...run.speeds)).toBeLessThanOrEqual(2);
+      expect(fastest(run, end, pace)).toBeLessThan(2.05);
+      expect(largestStep(run)).toBeLessThan(0.06);
+    });
+  }
+
+  test("a burst of five turns plays, and its lag is given back", () => {
+    // Turn 20 comes 5 s late, and the next four with it.
+    const run = live(
+      (index) => (index === 20 ? 5000 : index > 20 && index <= 24 ? 0 : 1000),
+      60_000,
+    );
+    // Nothing kept: from four turns after the burst never more than the buffer behind ...
+    for (const lag of lagsFromTurn(run, 29)) {
+      expect(lag).toBeLessThan(buffer + 0.1);
+    }
+    // ... and back to it within fifteen.
+    for (const lag of lagsFromTurn(run, 40)) {
+      expect(Math.abs(lag - buffer)).toBeLessThan(0.1);
+    }
+    // At most twice the turn's length. (The turns that arrived together shorten that length for
+    // a few turns, as the arrivals' average has always done.)
+    expect(Math.max(...run.speeds)).toBeLessThanOrEqual(2);
+  });
+
+  test("after a 3 s gap the lag is given back", () => {
+    // Turn 21 comes 3 s late; the gap stretches the turns after it for a while.
+    const run = live((index) => (index === 20 ? 4000 : 1000), 60_000);
+    const lags = lagsFromTurn(run, 21);
+    expect(Math.max(...lags)).toBeLessThan(buffer + 0.6);
+    for (const lag of lagsFromTurn(run, 36)) {
+      expect(Math.abs(lag - buffer)).toBeLessThan(0.1);
+    }
+    expect(Math.max(...run.speeds)).toBeLessThanOrEqual(2);
+  });
+
+  test("a hand player who is out while the tab is hidden gets back to the buffer", () => {
+    // Hidden for 9.5 turns while playing by hand; the team is out half-way through.
+    const run = live(() => 1000, 60_000, {
+      timing: PLAYING,
+      paceMs: 1000,
+      hidden: [20_000, 29_500],
+      switchTo: { at: 24_000, timing: WATCHING },
+    });
+    const after = run.lags.filter((entry) => entry.at >= 29_500);
+    expect(after[0]?.lag as number).toBeGreaterThan(9);
+    for (const lag of lagsFrom(run, 29_500 + 9500 + 2500)) {
+      expect(Math.abs(lag - buffer)).toBeLessThan(0.1);
+    }
+    expect(fastest(run, 29_500, 1000)).toBeLessThan(2.05);
+  });
+
+  test("Follow live again replays the missed turns at no more than 2x", () => {
+    // Scrubbed back for 8 s at a 1 s pace, then Follow live.
+    const run = live(() => 1000, 50_000, { replay: [20_000, 28_000] });
+    const after = run.lags.filter((entry) => entry.at >= 28_000);
+    expect(after[0]?.lag as number).toBeGreaterThan(7);
+    for (const lag of lagsFrom(run, 28_000 + 8000 + 2500)) {
+      expect(Math.abs(lag - buffer)).toBeLessThan(0.1);
+    }
+    expect(Math.max(...run.speeds)).toBeLessThanOrEqual(2);
+    expect(fastest(run, 28_000, 1000)).toBeLessThan(2.05);
   });
 });
 
