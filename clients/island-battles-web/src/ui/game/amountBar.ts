@@ -12,12 +12,20 @@ import {
   sliderAmount,
 } from "../../play/drag";
 
+/** A `click` this soon after a second finger's tap on a button is the same tap. */
+const SECOND_FINGER_CLICK_MS = 500;
+
 const HALF_ICON =
   '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 4a8 8 0 0 0 0 16z" fill="currentColor"/></svg>';
 const ALL_ICON =
   '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8" fill="currentColor" stroke="currentColor" stroke-width="2"/></svg>';
 
-function iconButton(label: string, title: string, icon: string) {
+function iconButton(
+  label: string,
+  title: string,
+  icon: string,
+  onPress: () => void,
+) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "gv-amount-button";
@@ -28,6 +36,29 @@ function iconButton(label: string, title: string, icon: string) {
   // release for every pressed pointer, which would drop a drag a finger holds while another taps
   // here. It also keeps the drag's keys working.
   button.addEventListener("pointerdown", (event) => event.preventDefault());
+  // A browser fires `click` for a finger that is the only one down, not for a second one: a tap
+  // of a second finger, while the first holds a drag, is `pointerdown` and `pointerup` alone. So
+  // that tap presses the button on its `pointerup`, and the `click` some browser may still add
+  // after it is ignored.
+  const secondFingers = new Set<number>();
+  let lastTapAt = Number.NEGATIVE_INFINITY;
+  button.addEventListener("pointerdown", (event) => {
+    if (event.pointerType === "touch" && !event.isPrimary) {
+      secondFingers.add(event.pointerId);
+    }
+  });
+  button.addEventListener("pointerup", (event) => {
+    if (!secondFingers.delete(event.pointerId)) return;
+    lastTapAt = event.timeStamp;
+    onPress();
+  });
+  button.addEventListener("pointercancel", (event) => {
+    secondFingers.delete(event.pointerId);
+  });
+  button.addEventListener("click", (event) => {
+    if (event.timeStamp - lastTapAt < SECOND_FINGER_CLICK_MS) return;
+    onPress();
+  });
   return button;
 }
 
@@ -76,10 +107,10 @@ export class AmountBar implements AmountControl {
     text.setAttribute("aria-live", "off");
     status.className = "gv-visually-hidden";
     status.setAttribute("role", "status");
-    const half = iconButton("Half", "Half (A)", HALF_ICON);
-    const all = iconButton("All", "All (D)", ALL_ICON);
-    half.addEventListener("click", () => this.emit(HALF));
-    all.addEventListener("click", () => this.emit(ALL));
+    const half = iconButton("Half", "Half (A)", HALF_ICON, () =>
+      this.emit(HALF),
+    );
+    const all = iconButton("All", "All (D)", ALL_ICON, () => this.emit(ALL));
     // A finger on the slider keeps the focus on the board, for the reason the buttons do. Only a
     // touch: cancelling a mouse's or pen's pointerdown stops the browser dragging the slider, and
     // a mouse cannot hold a drag with one hand and move the slider with another anyway. A touch
