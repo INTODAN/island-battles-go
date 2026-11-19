@@ -259,6 +259,19 @@ A **Game rules** button on the start screen (beside **Change name**), in the lob
 
 The view gets its game from a `LiveSource` (`sources.ts`): `playerSource` (the player channel, `/demo` and `/logs`) for `mountGameView`, and `watchSource` (the watch channel, `/watch/demo` and `/watch/logs`) for `mountWatchView`, described next. The turn deadline call (`POST .../deadline`) is not made here: the relay of [#98](https://github.com/INTODAN/island-battles-go/issues/98) does that, and for a player who plays by hand, hand play (below). `mountGameView` also takes `handPlay`, the player's [hand play](#hand-play), which the shell starts; the view's controls give orders through it.
 
+## Playing by hand
+
+A player who chose **Play by hand** gives orders on the board of the game view while their status is `playing` and the view shows the newest turn. Scrubbed back in the timeline, the board's controls are a watcher's and a row above the timeline says "Return to live to give orders".
+
+- **Send soldiers:** press on one of your castles and drag to another castle, with a mouse or a finger. A line follows the drag from your castle's shore, in your team's colour, and snaps to the shore of the castle under the pointer, which gets a white ring; a chip over your castle shows what the drag sends, such as "12 of 23" (of its unreserved soldiers). Releasing over the castle sends the soldiers; the line stays, dimmed, until the turn with the new boat is on the board, and flashes red if the server refuses the order, whose sentence shows under the notice line. A drag that starts anywhere else turns the board as before; the board never turns for a drag that starts on your castle.
+- **Cancel:** release anywhere else, press `Esc`, press the right button, or put a second finger on the board (which then pans or pinches the board).
+- **The amount:** every drag sends all unless you change it, and the next drag sends all again. During a drag: `d` all, `a` half, `w` and `s` one soldier more or less (faster while held), digits type an exact number (`Backspace` edits it; it is capped at the castle's unreserved soldiers). Keys are ignored while a text field has the focus.
+- **The amount bar**, above the timeline: a slider between a **Half** and an **All** button. Before a drag it sets the share the next drag sends ("Send 50%"); during a drag it moves in whole soldiers of the dragged castle, so a touch player sets it with a second finger while the first holds the drag. Its buttons are 44 px on a touch screen.
+
+The rules live in `src/play/drag.ts` (pure, tested in `drag.test.ts`): a press on your castle holds its pointer (`holdCameraPointer` in `src/scene/camera.ts`, whose `BoardPointersInput` ignores that pointer's one-pointer moves) until it is released, whatever happens to the drag; more than 8 px makes it a drag. `src/scene/dragControls.ts` feeds it Babylon's pointer events, keys and the bar, draws the line (`dragLine.ts`, with the heading arrows' `ribbonGeometry`), and gives the order with `handPlay.send`, as a share of the unreserved soldiers resolved when it is sent, or an exact number. A release only counts from a real `PointerEvent` of the main button: Babylon makes up a release for a cancelled pointer and a blur, and those cancel.
+
+With `debug=1` in the page's URL, `window.gameViewDebug` (`src/ui/game/debug.ts`) gives browser tests the castles' screen positions, the camera and the board's labels.
+
 ## Hand play
 
 `src/play/` plays the seat of a player who plays by hand (bot kind `manual`, #342). It has no DOM and no Babylon imports. The app shell starts it in `enterGame` beside the relays (`startHandPlay({ realtime, lobbyId })`), hands it to the game view (`mountGameView`'s `handPlay`), and stops it with the game, so it keeps running behind the read-only room after **Back to lobby**. For any other player it stays `idle` and makes no request.

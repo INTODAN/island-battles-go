@@ -21,6 +21,8 @@ export interface GameViewDebug {
     radius: number;
     target: { x: number; y: number; z: number };
   } | null;
+  /** Drag to send's meshes (its line, casing and target ring): enabled ones and their opacity. */
+  dragMeshes(): { name: string; visibility: number }[];
   /** The board's labels (`LabelLayer.describe`), such as the drag's chip `drag:amount`. */
   labels(): ReturnType<
     NonNullable<ReturnType<typeof battlefieldOf>>["labels"]["describe"]
@@ -80,6 +82,11 @@ export function installGameViewDebug(scene: Scene): () => void {
         radius: camera.radius,
         target: { x, y, z },
       };
+    },
+    dragMeshes() {
+      return scene.meshes
+        .filter((mesh) => mesh.name.startsWith("drag-") && mesh.isEnabled())
+        .map((mesh) => ({ name: mesh.name, visibility: mesh.visibility }));
     },
     labels() {
       return battlefieldOf(scene)?.labels.describe() ?? [];
