@@ -136,7 +136,7 @@ export class CastleMenu {
     }
 
     const burst = element("div", "gv-cm-burst");
-    const burstName = element("span", "gv-cm-name", "Burst");
+    const burstName = element("span", "gv-cm-name", "Order a burst");
     this.burstSlider.type = "range";
     this.burstSlider.min = "1";
     this.burstSlider.step = "1";
