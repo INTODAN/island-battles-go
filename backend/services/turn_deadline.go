@@ -96,14 +96,15 @@ func endTurn(ctx context.Context, transaction *gorm.DB, game *models.Game, gener
 }
 
 // afterTurnEnd does what a committed turnEnd leaves to do: push its events,
-// send its bots' turns, and have the Go bots play on when they are the only
+// send its bots' turns, and have the Go bots play on for at most goBotBudget,
+// the caller's (goBotWriteBudget or goBotReadBudget), when they are the only
 // ones left. The end has committed, so a failure of the Go bots only stops
 // them until the next game request.
-func (service *GenerationService) afterTurnEnd(ctx context.Context, gameID uint, end turnEnd) {
+func (service *GenerationService) afterTurnEnd(ctx context.Context, gameID uint, end turnEnd, goBotBudget time.Duration) {
 	service.publish(ctx, end.events)
 	service.Bots.send(ctx, service.Database.WithContext(ctx), end.turns)
 	if end.goBotsOnly {
-		if _, err := service.playGoBotTurns(ctx, gameID, goBotWriteBudget); err != nil {
+		if _, err := service.playGoBotTurns(ctx, gameID, goBotBudget); err != nil {
 			observability.RecordError(ctx, fmt.Errorf("play Go bot turns: %w", err))
 		}
 	}
@@ -235,7 +236,7 @@ func (service *GenerationService) applyOverdueDeadline(ctx context.Context, game
 	if err != nil {
 		return nil, err
 	}
-	service.afterTurnEnd(ctx, game.ID, end)
+	service.afterTurnEnd(ctx, game.ID, end, goBotReadBudget)
 	if end.goBotsOnly {
 		// The Go bots played on after the end, so the game may have ended.
 		return dal.FindGame(database, game.ID)

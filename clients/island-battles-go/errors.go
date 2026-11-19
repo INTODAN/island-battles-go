@@ -55,13 +55,22 @@ var (
 	// ErrRejected: the server refused a request for another reason (any
 	// other 4xx status), or the seat can't be played.
 	ErrRejected = errors.New("rejected")
+	// ErrStaleGeneration: the server refused a batch because its
+	// generation's turn is over. It is also an ErrRejected. In a real-time
+	// game the turn ends one turn pace after its generation was created and
+	// plays with the commands that arrived by then, so a bot slower than the
+	// pace passes that turn: the Client handles it itself there, writes one
+	// line, reads the new state and plays on. In a game that waits for every
+	// player the Client stops on it, as on any other rejection.
+	ErrStaleGeneration = fmt.Errorf("stale generation: %w", ErrRejected)
 )
 
 // problemKinds are the server's problem types that the client tells apart:
-// the command rejections, shared by every command, the game's end, the game
-// log limit and the bot memory limit.
+// the command rejections, shared by every command, the game's end, a stale
+// generation, the game log limit and the bot memory limit.
 var problemKinds = map[string]error{
 	"urn:island-battles:problem:game-ended":            ErrGameEnded,
+	"urn:island-battles:problem:stale-generation":      ErrStaleGeneration,
 	"urn:island-battles:problem:castle-not-found":      ErrCastleNotFound,
 	"urn:island-battles:problem:castle-not-owned":      ErrCastleNotOwned,
 	"urn:island-battles:problem:upgrade-max-level":     ErrUpgradeMaxLevel,

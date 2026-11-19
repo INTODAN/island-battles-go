@@ -40,8 +40,15 @@ from .errors import (
     GameLogLimitError,
     GameProtocolError,
     GameTransportError,
+    StaleGenerationError,
 )
-from .game_log import SDK_LOGGER, ClientLogging, GameLog, report_server_limit
+from .game_log import (
+    SDK_LOGGER,
+    ClientLogging,
+    GameLog,
+    report_passed_turn,
+    report_server_limit,
+)
 from .models import Generation
 
 _sdk_logger = logging.getLogger(SDK_LOGGER)
@@ -660,6 +667,18 @@ class IslandBattlesClient:
                         GameClientClosedError,
                     ):
                         raise
+                    except StaleGenerationError as error:
+                        if state.turn_pace_milliseconds is None:
+                            await self._send_failure_logs(state.generation_id, error)
+                            raise
+                        # In a real-time game the turn ended while the bot
+                        # played, and the server played it without the
+                        # answer: the bot passed it. Reconciling reads the
+                        # next turn.
+                        report_passed_turn(
+                            state.generation_id, state.turn_pace_milliseconds
+                        )
+                        self._wakeup.set()
                     except Exception as error:
                         # The bot raised, returned an invalid result, or the
                         # server rejected the result's commands or memory. The

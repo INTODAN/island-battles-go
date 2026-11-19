@@ -29,8 +29,10 @@ import (
 // The next game request continues where it stopped, and a request plays at
 // least one turn, so the game always makes progress. The game start, every
 // batch and the deadline call get the write budget. The reads, the state, the
-// replay, the game log and the demo, get the read budget, so that reading a
-// game that only Go bots play stays quick. Tests change them.
+// turn delivery, the replay, the game log, the demo and the watch reads, get
+// the read budget, so that reading a game that only Go bots play stays quick,
+// also after a real-time turn that the read played left only Go bots
+// (afterTurnEnd). Tests change them.
 var (
 	goBotWriteBudget = 5 * time.Second
 	goBotReadBudget  = time.Second
