@@ -914,6 +914,8 @@ export interface components {
         GameOutcome: {
             /** @description The teams that resigned or left a real-time game, in the order they left. Always present, and empty for most games; a demo saved before this field existed has none, which reads as empty. */
             departures?: components["schemas"]["Departure"][];
+            /** @description How the game changed each team's competitor's Elo rating, one per team in colour order, for a rated game only: absent when the game isn't rated. The winner gains and every other team loses, each against the winner alone; in a draw every pair of teams counts as a draw. */
+            ratings?: components["schemas"]["RatingChange"][];
             /**
              * @description last_team_standing: one team was left after every other team lost all its castles and soldier groups, or resigned or left the game. all_eliminated: the last teams were eliminated, or left, in the same turn, a draw. generation_cap: the game reached its last generation; the team with the most castles won, and equal counts are a draw. turn_timeout: in a game that waits for every player, a turn passed its deadline; every team with a player who hadn't completed it lost, and among the other teams still standing the team with the most castles won, while equal counts, or no team left, are a draw. abandoned: nobody played a real-time game for its turn limit, so it ended on its open generation; among the teams still in it, except one whose resignation was waiting for the turn, the team with the most castles won, and equal counts, or no team left, are a draw.
              * @enum {string}
@@ -1238,6 +1240,31 @@ export interface components {
             type?: string;
         };
         PublicGenerationCommand: components["schemas"]["SendSoldierGroupCommand"] | components["schemas"]["UpgradeCastleCommand"] | components["schemas"]["BurstCastleCommand"];
+        RatingChange: {
+            /**
+             * Format: double
+             * @description The competitor's rating after the game, a decimal: show it rounded.
+             */
+            after: number;
+            /**
+             * Format: double
+             * @description The competitor's rating before the game, a decimal: show it rounded.
+             */
+            before: number;
+            /** Format: uuid */
+            competitor_id: string;
+            /**
+             * @description bot: a bot name that an account registered. manual: an account's hand play. house: a default bot level.
+             * @enum {string}
+             */
+            kind: "bot" | "manual" | "house";
+            /** @description The name the competitor is shown by: a bot's name, such as Kraken, the account's display name for its hand play, or Bot (level N) for a house bot. */
+            name: string;
+            /** @description The display name of the account that the bot name belongs to, for kind bot only. */
+            owner?: string;
+            /** Format: int64 */
+            team_color: number;
+        };
         RegisterBotNameRequest: {
             /** @description The bot's name: 3 to 24 characters after trimming, of letters, digits, spaces, - and _, not starting with Bot (level. It is unique across all accounts without regard to case. */
             name: string;

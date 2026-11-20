@@ -75,3 +75,6 @@ func SentTurnPlayers(sender *TurnSender, game *models.Game, generation *models.G
 	}
 	return playerIDs, err
 }
+
+// RateGame exposes rateGame to the external tests.
+var RateGame = rateGame

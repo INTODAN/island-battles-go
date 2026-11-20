@@ -43,7 +43,7 @@ func TestKeptMigrationsFreshInstall(t *testing.T) {
 			t.Fatalf("history[%d] = %+v, want version %d %s run, not adopted", index, row, index+1, names[index])
 		}
 	}
-	for _, record := range []any{&models.MapTemplate{}, &models.CastleTemplate{}, &models.IslandAccount{}, &models.Competitor{}} {
+	for _, record := range []any{&models.MapTemplate{}, &models.CastleTemplate{}, &models.IslandAccount{}, &models.Competitor{}, &models.RatingEvent{}} {
 		assertRecordMatchesColumns(t, db, record)
 	}
 }
