@@ -155,23 +155,23 @@ dev = [
     { name = "ty", specifier = ">=0.0.84" },
 ]
 integration = [
-    { name = "mpl-lobby-client", specifier = "==0.4.0" },
+    { name = "mpl-lobby-client", specifier = "==0.6.0" },
     { name = "pytest", specifier = ">=8.0,<9" },
     { name = "pytest-asyncio", specifier = ">=0.24,<1" },
 ]
 
 [[package]]
 name = "mpl-lobby-client"
-version = "0.4.0"
+version = "0.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
     { name = "centrifuge-python" },
     { name = "httpx" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/28/df/82ed1f8a36ee494a510994693ede5bde7f1fda498fe598025cf947660f3e/mpl_lobby_client-0.4.0.tar.gz", hash = "sha256:9c1a8f54d7df87b6b180cebbb0eae993040ae6c3c242621403160499136bf349", size = 38437, upload-time = "2026-11-18T07:01:30.245Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3e/33/a783c3880bb063060fab6a2c58dc9c18f6f9536440c1ace66090d4c4aa50/mpl_lobby_client-0.6.0.tar.gz", hash = "sha256:02797a97fc5b2a81c5765ed3305b32fc25da62df0b53d1b22775f851647744ee", size = 42703, upload-time = "2026-11-20T14:32:11.898Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b7/56/7dd1e2a51669c95adc07ff5a078aa4062f2c13ee6849d0894fda1e874c4c/mpl_lobby_client-0.4.0-py3-none-any.whl", hash = "sha256:16c6b429eb064c26c6313d7c61f075b6580ec93afe57c50dd6aca5c8d8b8352e", size = 86575, upload-time = "2026-11-18T07:01:28.776Z" },
+    { url = "https://files.pythonhosted.org/packages/56/54/39477b3fd0f54ca02fbee5f9cfa05b2c0ed9baa3155f03000caea2b7f5d5/mpl_lobby_client-0.6.0-py3-none-any.whl", hash = "sha256:f97bf3e3d59286a35b3f77b5f04da5d5a4c36fa762da79290022802c354fd5b9", size = 97880, upload-time = "2026-11-20T14:32:10.576Z" },
 ]
 
 [[package]]

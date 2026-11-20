@@ -27,14 +27,14 @@ type mapTemplateHistoryRow struct {
 	Adopted bool
 }
 
-func TestMapTemplateMigrationsFreshInstall(t *testing.T) {
+func TestKeptMigrationsFreshInstall(t *testing.T) {
 	// No AutoMigrate runs here, so model fields the migrations lack show up.
 	db := testutils.InitEmptyTestDB(t)
-	if err := schema.MapTemplateMigrations().Apply(context.Background(), db); err != nil {
+	if err := schema.KeptMigrations().Apply(context.Background(), db); err != nil {
 		t.Fatal(err)
 	}
 	history := mapTemplateHistory(t, db)
-	names := mapTemplateMigrationNames(t, schema.MapTemplateMigrations().Files)
+	names := mapTemplateMigrationNames(t, schema.KeptMigrations().Files)
 	if len(history) != len(names) {
 		t.Fatalf("history = %+v, want versions for %v", history, names)
 	}
@@ -43,17 +43,17 @@ func TestMapTemplateMigrationsFreshInstall(t *testing.T) {
 			t.Fatalf("history[%d] = %+v, want version %d %s run, not adopted", index, row, index+1, names[index])
 		}
 	}
-	for _, record := range []any{&models.MapTemplate{}, &models.CastleTemplate{}} {
+	for _, record := range []any{&models.MapTemplate{}, &models.CastleTemplate{}, &models.IslandAccount{}, &models.Competitor{}} {
 		assertRecordMatchesColumns(t, db, record)
 	}
 }
 
-func TestMapTemplateMigrationsAdoptSchemaCreatedBeforeVersioning(t *testing.T) {
+func TestKeptMigrationsAdoptSchemaCreatedBeforeVersioning(t *testing.T) {
 	legacy := legacyMapTemplates(t)
 	templateID := insertLegacyMapTemplate(t, legacy)
 
 	// Migration 1 has no IF NOT EXISTS clauses, so running it here would fail.
-	if err := schema.MapTemplateMigrations().Apply(context.Background(), legacy); err != nil {
+	if err := schema.KeptMigrations().Apply(context.Background(), legacy); err != nil {
 		t.Fatalf("migrate legacy map templates: %v", err)
 	}
 	history := mapTemplateHistory(t, legacy)
@@ -73,7 +73,7 @@ func TestMapTemplateMigrationsAdoptSchemaCreatedBeforeVersioning(t *testing.T) {
 	assertTemplateStartsWith(t, legacy, createExampleMapTemplate(t, legacy, 30), map[uint]uint{0: 30, 1: 15})
 
 	fresh := testutils.InitEmptyTestDB(t)
-	if err := schema.MapTemplateMigrations().Apply(context.Background(), fresh); err != nil {
+	if err := schema.KeptMigrations().Apply(context.Background(), fresh); err != nil {
 		t.Fatal(err)
 	}
 	got, want := mapTemplateSchema(t, legacy), mapTemplateSchema(t, fresh)
@@ -84,22 +84,22 @@ func TestMapTemplateMigrationsAdoptSchemaCreatedBeforeVersioning(t *testing.T) {
 
 // A database that GORM AutoMigrate gave starting_soldier_amount before
 // migration 2 existed keeps the column and its counts.
-func TestMapTemplateMigrationsAdoptSchemaWithStartingSoldiers(t *testing.T) {
+func TestKeptMigrationsAdoptSchemaWithStartingSoldiers(t *testing.T) {
 	legacy := legacyMapTemplates(t, `ALTER TABLE castle_templates ADD COLUMN starting_soldier_amount bigint`)
 	templateID := insertLegacyMapTemplate(t, legacy)
 	if err := legacy.Exec(`UPDATE castle_templates SET starting_soldier_amount = 40 WHERE persistent_castle_id = 0`).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := schema.MapTemplateMigrations().Apply(context.Background(), legacy); err != nil {
+	if err := schema.KeptMigrations().Apply(context.Background(), legacy); err != nil {
 		t.Fatalf("migrate legacy map templates: %v", err)
 	}
-	if history := mapTemplateHistory(t, legacy); len(history) != len(mapTemplateMigrationNames(t, schema.MapTemplateMigrations().Files)) || !history[0].Adopted || history[1].Adopted {
+	if history := mapTemplateHistory(t, legacy); len(history) != len(mapTemplateMigrationNames(t, schema.KeptMigrations().Files)) || !history[0].Adopted || history[1].Adopted {
 		t.Fatalf("history = %+v, want version 1 adopted and the rest run", history)
 	}
 	assertTemplateStartsWith(t, legacy, templateID, map[uint]uint{0: 40, 1: 15})
 
 	fresh := testutils.InitEmptyTestDB(t)
-	if err := schema.MapTemplateMigrations().Apply(context.Background(), fresh); err != nil {
+	if err := schema.KeptMigrations().Apply(context.Background(), fresh); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := mapTemplateSchema(t, legacy), mapTemplateSchema(t, fresh); !slices.Equal(got, want) {
@@ -107,38 +107,38 @@ func TestMapTemplateMigrationsAdoptSchemaWithStartingSoldiers(t *testing.T) {
 	}
 }
 
-func TestMapTemplateMigrationsRefuseToAdoptPartialSchema(t *testing.T) {
+func TestKeptMigrationsRefuseToAdoptPartialSchema(t *testing.T) {
 	// GORM's AutoMigrate wasn't atomic, so it could leave only map_templates.
 	legacy := legacyMapTemplates(t, `DROP TABLE castle_templates`)
 
-	err := schema.MapTemplateMigrations().Apply(context.Background(), legacy)
-	if err == nil || !strings.HasPrefix(err.Error(), schema.MapTemplateMigrations().HistoryTable+": ") ||
+	err := schema.KeptMigrations().Apply(context.Background(), legacy)
+	if err == nil || !strings.HasPrefix(err.Error(), schema.KeptMigrations().HistoryTable+": ") ||
 		!strings.Contains(err.Error(), "has map_templates but lacks castle_templates") {
 		t.Fatalf("migrate partial schema error = %v, want castle_templates named", err)
 	}
-	if legacy.Migrator().HasTable("castle_templates") || legacy.Migrator().HasTable(schema.MapTemplateMigrations().HistoryTable) {
+	if legacy.Migrator().HasTable("castle_templates") || legacy.Migrator().HasTable(schema.KeptMigrations().HistoryTable) {
 		t.Fatal("a refused adoption changed the database")
 	}
 }
 
-func TestMapTemplateMigrationsRefuseToAdoptOutdatedSchema(t *testing.T) {
+func TestKeptMigrationsRefuseToAdoptOutdatedSchema(t *testing.T) {
 	// Older AutoMigrate runs had neither column.
 	legacy := legacyMapTemplates(t, `ALTER TABLE castle_templates DROP COLUMN persistent_castle_id, DROP COLUMN upgrades`)
 
-	err := schema.MapTemplateMigrations().Apply(context.Background(), legacy)
+	err := schema.KeptMigrations().Apply(context.Background(), legacy)
 	if err == nil || !strings.Contains(err.Error(), "lacks castle_templates.persistent_castle_id, castle_templates.upgrades,") {
 		t.Fatalf("migrate outdated schema error = %v, want the missing columns named", err)
 	}
-	if legacy.Migrator().HasTable(schema.MapTemplateMigrations().HistoryTable) {
+	if legacy.Migrator().HasTable(schema.KeptMigrations().HistoryTable) {
 		t.Fatal("a refused adoption recorded history")
 	}
 }
 
-func TestMapTemplateMigrationsApplyNewMigrationToExistingDatabase(t *testing.T) {
+func TestKeptMigrationsApplyNewMigrationToExistingDatabase(t *testing.T) {
 	db := testutils.InitTestDB(t)
 	templateID := createExampleMapTemplate(t, db, 15)
 
-	set := schema.MapTemplateMigrations()
+	set := schema.KeptMigrations()
 	names := mapTemplateMigrationNames(t, set.Files)
 	next := fmt.Sprintf("%04d_require_players.sql", len(names)+1)
 	files := fstest.MapFS{next: &fstest.MapFile{Data: []byte(`ALTER TABLE map_templates ADD CONSTRAINT ck_map_templates_player_amount CHECK (player_amount > 0);`)}}
@@ -166,7 +166,7 @@ func TestMapTemplateMigrationsApplyNewMigrationToExistingDatabase(t *testing.T) 
 	}
 }
 
-func TestConcurrentMapTemplateMigrationsOfEmptyDatabaseAllSucceed(t *testing.T) {
+func TestConcurrentKeptMigrationsOfEmptyDatabaseAllSucceed(t *testing.T) {
 	db := testutils.InitEmptyTestDB(t)
 	const runs = 4
 	start := make(chan struct{})
@@ -175,7 +175,7 @@ func TestConcurrentMapTemplateMigrationsOfEmptyDatabaseAllSucceed(t *testing.T) 
 	for range runs {
 		group.Go(func() {
 			<-start
-			errs <- schema.MapTemplateMigrations().Apply(context.Background(), db)
+			errs <- schema.KeptMigrations().Apply(context.Background(), db)
 		})
 	}
 	close(start)
@@ -186,7 +186,7 @@ func TestConcurrentMapTemplateMigrationsOfEmptyDatabaseAllSucceed(t *testing.T) 
 			t.Errorf("concurrent migration: %v", err)
 		}
 	}
-	if history, names := mapTemplateHistory(t, db), mapTemplateMigrationNames(t, schema.MapTemplateMigrations().Files); len(history) != len(names) {
+	if history, names := mapTemplateHistory(t, db), mapTemplateMigrationNames(t, schema.KeptMigrations().Files); len(history) != len(names) {
 		t.Fatalf("history = %+v, want one row for each of %v", history, names)
 	}
 }
@@ -261,7 +261,7 @@ func assertTemplateStartsWith(t *testing.T, db *gorm.DB, templateID uint, want m
 func mapTemplateHistory(t *testing.T, db *gorm.DB) []mapTemplateHistoryRow {
 	t.Helper()
 	var rows []mapTemplateHistoryRow
-	if err := db.Table(schema.MapTemplateMigrations().HistoryTable).Order(clause.OrderByColumn{Column: clause.Column{Name: "version"}}).Find(&rows).Error; err != nil {
+	if err := db.Table(schema.KeptMigrations().HistoryTable).Order(clause.OrderByColumn{Column: clause.Column{Name: "version"}}).Find(&rows).Error; err != nil {
 		t.Fatal(err)
 	}
 	return rows

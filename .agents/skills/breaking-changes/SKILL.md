@@ -1,6 +1,6 @@
 ---
 name: breaking-changes
-description: Apply when changing the player or lobby API, Centrifugo event payloads, stored data or columns, or the client SDKs. Island Battles breaks compatibility rather than carrying code for old clients or old game data, but preserves lobby data and map templates.
+description: Apply when changing the player or lobby API, Centrifugo event payloads, stored data or columns, or the client SDKs. Island Battles breaks compatibility rather than carrying code for old clients or old game data, but preserves lobby data, map templates, and accounts and their competitors.
 ---
 
 # Break compatibility instead of carrying it
@@ -9,19 +9,20 @@ Clean, compact code matters more than compatibility. When the API, an event, or 
 
 ## Data that must survive
 
-Two kinds of stored data are never reset:
+Three kinds of stored data are never reset:
 
 - **Lobby data:** every `lobby_*` table. The lobby is shared by other games, so resetting or breaking its data would break them too.
 - **Map templates:** `map_templates` and `castle_templates`. Default maps are kept forever.
+- **Accounts and competitors:** `island_accounts` and `island_competitors`, and the rating history that later joins them. They hold what players earned: bot names and ratings. They have no foreign key to any game table, and game retention never deletes them.
 
-Change their schema only through a new versioned migration that keeps existing rows working, with a data migration or backfill where needed. Lobby tables change only in the lobby's repository, [`INTODAN/mpl`](https://github.com/INTODAN/mpl), under its own rules. For map templates, add the next numbered `NNNN_description.sql` file to `backend/dal/migrations/`, and update the GORM record or model in the same change. Never edit an applied migration. Everything below about resetting data applies only to game data.
+Change their schema only through a new versioned migration that keeps existing rows working, with a data migration or backfill where needed. Lobby tables change only in the lobby's repository, [`INTODAN/mpl`](https://github.com/INTODAN/mpl), under its own rules. For map templates, accounts and competitors, add the next numbered `NNNN_description.sql` file to `backend/dal/migrations/`, and update the GORM record or model in the same change. Never edit an applied migration. Everything below about resetting data applies only to game data.
 
 ## Do
 
 - Rename, retype or remove fields, endpoints and columns outright, in a single change.
 - Update the server and every in-repository client together: export `backend/api/openapi.json` (for a lobby change, merged in `INTODAN/mpl` first: move the pin and run `scripts/sync-lobby-api.sh`, as the root README's "The lobby's version" says), regenerate the Python models, update the web client (`clients/island-battles-web/`), update the conformance adapters and fixtures, the browser demo and the docs.
 - Say in the pull request description and the affected client README that the change is breaking and that clients must upgrade.
-- Reset game data when a schema change strands it: games, their maps, castles, generations, soldier groups, commands, player inputs, requests, notifications, team bindings, frozen rosters and replays. In development, `docker compose down -v` or removing the `island-battles-dev-postgres` Podman volume does this, but it also wipes lobby data and map templates, so only do it locally.
+- Reset game data when a schema change strands it: games, their maps, castles, generations, soldier groups, commands, player inputs, requests, notifications, team bindings, frozen rosters and replays. In development, `docker compose down -v` or removing the `island-battles-dev-postgres` Podman volume does this, but it also wipes lobby data, map templates, accounts and competitors, so only do it locally.
 
 ## Don't
 

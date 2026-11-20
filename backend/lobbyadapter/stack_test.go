@@ -8,9 +8,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/INTODAN/mpl/application"
 	"github.com/INTODAN/mpl/auth"
+	"github.com/INTODAN/mpl/auth/googletest"
 	"github.com/INTODAN/mpl/domain"
 	"github.com/INTODAN/mpl/gamehooks"
 	"github.com/INTODAN/mpl/httpapi"
@@ -55,7 +57,13 @@ type lobbyStack struct {
 	// hooksURL serves Island Battles' hooks, for a test that calls them as
 	// another lobby would.
 	hooksURL string
+	// google signs the ID tokens that the lobby takes for Sign in with
+	// Google, for googleClientID.
+	google *googletest.Issuer
 }
+
+// googleClientID is the Google OAuth client ID of the stack's lobby.
+const googleClientID = "island-battles-test.apps.googleusercontent.com"
 
 // hookCallCount is how many times the lobby called hook.
 func (stack *lobbyStack) hookCallCount(hook string) int {
@@ -157,10 +165,25 @@ func newLobbyStackWith(t *testing.T, serverBots services.ServerBots) *lobbyStack
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The lobby verifies Google ID tokens with the keys of a test issuer.
+	if stack.google, err = googletest.NewIssuer("test-key"); err != nil {
+		t.Fatal(err)
+	}
+	googleCerts := httptest.NewServer(stack.google.Handler(time.Hour))
+	t.Cleanup(googleCerts.Close)
+	googleVerifier, err := auth.NewGoogleVerifier([]string{googleClientID}, googleCerts.URL, nil, clock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accounts, err := auth.NewAccounts(authentication, identities, googleVerifier, googleClientID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	_, api := humatest.New(t, routes.NewAPIConfig("test", "1.0.0"))
-	httpapi.Register(api, lobbies, authentication, authentication, playerTokens, nil)
+	httpapi.Register(api, lobbies, authentication, authentication, playerTokens, accounts, nil)
 	routes.SetupGameRoutes(api, &handlers.LobbyGame{Database: database, Players: handlers.PlayerTokens{Verifier: verifier}, Publisher: stack.publisher, Watchers: lobbyClient})
 	routes.SetupRoutes(api, &handlers.Env{DB: database, ServerBots: serverBots.Enabled, BotCompute: serverBots.Compute}, "")
+	routes.SetupAccountRoutes(api, &handlers.Accounts{Players: handlers.PlayerTokens{Verifier: verifier}, Service: services.Accounts{Database: database}})
 	stack.api = api
 	return stack
 }

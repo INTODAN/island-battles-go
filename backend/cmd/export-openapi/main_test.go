@@ -32,7 +32,7 @@ func TestEveryRegisteredOperationIsPublishedOrExcluded(t *testing.T) {
 	lobbyConfig.DocsPath = ""
 	lobbyConfig.SchemasPath = ""
 	lobbyAPI := humachi.New(chi.NewRouter(), lobbyConfig)
-	httpapi.Register(lobbyAPI, nil, nil, nil, nil, nil)
+	httpapi.Register(lobbyAPI, nil, nil, nil, nil, nil, nil)
 	lobbyOperations := map[string]bool{}
 	for _, item := range lobbyAPI.OpenAPI().Paths {
 		for _, operation := range []*huma.Operation{item.Get, item.Post, item.Put, item.Patch, item.Delete} {
@@ -48,9 +48,10 @@ func TestEveryRegisteredOperationIsPublishedOrExcluded(t *testing.T) {
 	config.SchemasPath = ""
 	api := humachi.New(chi.NewRouter(), config)
 	routes.SetupRoutes(api, &handlers.Env{}, "")
-	httpapi.Register(api, nil, nil, nil, nil, nil)
+	httpapi.Register(api, nil, nil, nil, nil, nil, nil)
 	routes.SetupGameRoutes(api, &handlers.LobbyGame{})
 	routes.SetupBotPackageRoutes(api, &handlers.BotPackages{})
+	routes.SetupAccountRoutes(api, &handlers.Accounts{})
 	checked := 0
 	for path, item := range api.OpenAPI().Paths {
 		for _, operation := range []*huma.Operation{item.Get, item.Post, item.Put, item.Patch, item.Delete} {
