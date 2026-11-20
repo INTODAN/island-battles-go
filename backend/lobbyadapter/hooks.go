@@ -126,8 +126,8 @@ func recordingFailures(registration domain.GameRegistration) domain.GameRegistra
 		}
 	}
 	if validate := registration.ValidateMemberSettings; validate != nil {
-		registration.ValidateMemberSettings = func(ctx context.Context, lobbyID string, settings json.RawMessage) error {
-			return recordUnavailable(ctx, validate(ctx, lobbyID, settings))
+		registration.ValidateMemberSettings = func(ctx context.Context, lobbyID string, member domain.MemberIdentity, settings json.RawMessage) error {
+			return recordUnavailable(ctx, validate(ctx, lobbyID, member, settings))
 		}
 	}
 	if gate := registration.ReadyGate; gate != nil {

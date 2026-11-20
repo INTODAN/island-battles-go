@@ -10,7 +10,7 @@ dependencies = [
     "pytest-asyncio>=0.24,<1",
     # Live tests reuse the lobby acceptance fixtures to start games. The lobby's
     # client at the version go.mod pins (README.md, "The lobby's version").
-    "mpl-lobby-client==0.4.0",
+    "mpl-lobby-client==0.6.0",
 ]
 
 [dependency-groups]

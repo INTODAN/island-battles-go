@@ -25,8 +25,8 @@ type PlayerAuthenticator interface {
 // without the lobby's database.
 type PlayerTokens struct{ Verifier *playertoken.Verifier }
 
-// AuthenticatePlayer returns the token's player, and adds their ID to the
-// request's error line.
+// AuthenticatePlayer returns the token's player, with their account when they
+// signed in, and adds their ID to the request's error line.
 func (tokens PlayerTokens) AuthenticatePlayer(ctx context.Context, authorization string) (domain.Principal, error) {
 	token, found := playertoken.FromAuthorization(authorization)
 	if !found || tokens.Verifier == nil {
@@ -37,7 +37,7 @@ func (tokens PlayerTokens) AuthenticatePlayer(ctx context.Context, authorization
 		return domain.Principal{}, err
 	}
 	observability.Annotate(ctx, slog.String("player_id", player.ID))
-	return domain.Principal{PlayerID: player.ID, DisplayName: player.Name}, nil
+	return domain.Principal{PlayerID: player.ID, DisplayName: player.Name, AccountID: player.AccountID}, nil
 }
 
 // authenticate returns the player of a request, or the problem to answer:

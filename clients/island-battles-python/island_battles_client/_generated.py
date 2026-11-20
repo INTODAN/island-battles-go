@@ -367,6 +367,43 @@ class ClashParticipant(GameModel):
     y: StrictFloat
 
 
+class Competitor(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    field_schema: Annotated[
+        AnyUrl | None,
+        Field(alias="$schema", examples=["https://example.com/Competitor.json"]),
+    ] = None
+    """
+    A URL to the JSON Schema for this object.
+    """
+    draws: Annotated[StrictInt, Field(ge=0)]
+    games: Annotated[StrictInt, Field(ge=0)]
+    """
+    Rated games played.
+    """
+    id: UUID
+    kind: Literal["bot", "manual", "house"]
+    """
+    bot: a bot name that an account registered. manual: an account's hand play, one per account. house: a default bot level.
+    """
+    last_played_at: AwareDatetime | None
+    """
+    When its latest rated game ended, or null before the first.
+    """
+    losses: Annotated[StrictInt, Field(ge=0)]
+    name: StrictStr
+    """
+    The name it is shown by: a bot's registered name, the account's display name for its hand play, or Bot (level N) for a house bot.
+    """
+    rating: StrictFloat
+    """
+    The Elo rating, 1500 before the first rated game. Shown rounded.
+    """
+    wins: Annotated[StrictInt, Field(ge=0)]
+
+
 class ConnectionToken(GameModel):
     model_config = ConfigDict(
         extra="ignore",
@@ -721,6 +758,39 @@ class HiddenTeamColor(RootModel[StrictInt]):
     root: Annotated[StrictInt, Field(ge=0)]
 
 
+class IslandAccount(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    field_schema: Annotated[
+        AnyUrl | None,
+        Field(alias="$schema", examples=["https://example.com/IslandAccount.json"]),
+    ] = None
+    """
+    A URL to the JSON Schema for this object.
+    """
+    account_id: UUID
+    """
+    The lobby's account ID.
+    """
+    bot_names: Sequence[Competitor]
+    """
+    The account's bot names, oldest first.
+    """
+    display_name: StrictStr
+    """
+    The account's display name, from the player token. Renaming the account in the lobby reaches the game with the next player token.
+    """
+    hand: Competitor
+    """
+    The account's hand play, a manual competitor shown under the account's display name.
+    """
+    max_bot_names: StrictInt
+    """
+    How many bot names an account may register: 5.
+    """
+
+
 class ListDefaultBotsResponseBody(GameModel):
     model_config = ConfigDict(
         extra="ignore",
@@ -933,6 +1003,9 @@ class Problem(GameModel):
         "game_unavailable",
         "watcher_kicked",
         "watchers_full",
+        "sign_in_required",
+        "display_name_required",
+        "display_name_taken",
         "unavailable",
         "internal_error",
     ]
@@ -946,6 +1019,16 @@ class Problem(GameModel):
     type: StrictStr | None = None
     """
     For game_requirement, the game's own problem type, a URI that the game documents, such as one meaning a player has yet to choose something in the game's API. Absent for every other code.
+    """
+
+
+class RegisterBotNameRequest(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    name: Annotated[StrictStr, Field(max_length=200)]
+    """
+    The bot's name: 3 to 24 characters after trimming, of letters, digits, spaces, - and _, not starting with Bot (level. It is unique across all accounts without regard to case.
     """
 
 

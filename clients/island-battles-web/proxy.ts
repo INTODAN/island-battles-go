@@ -10,8 +10,14 @@ export const backendOrigin = "http://localhost:8888";
 export const lobbyOrigin = "http://localhost:8890";
 
 /** Paths the dev server forwards to the backend. */
-const backendPrefixes = ["/game/", "/generation/", "/map/", "/bots/"];
-const backendPaths = ["/healthz", "/openapi.json"];
+const backendPrefixes = [
+  "/game/",
+  "/generation/",
+  "/map/",
+  "/bots/",
+  "/account/",
+];
+const backendPaths = ["/healthz", "/openapi.json", "/account"];
 
 /**
  * The origin the dev server forwards a path to, so the client and the game are on one origin, as

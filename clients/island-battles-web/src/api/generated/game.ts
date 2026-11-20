@@ -1,6 +1,70 @@
 // Generated from backend/api/openapi.json by tools/codegen/generate.ts. Do not edit; run `bun run generate`.
 
 export interface paths {
+    "/account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read your account: your hand play and your bot names
+         * @description Requires the player token of a signed-in player, which names their account; a guest's token is 403 with problem type urn:island-battles:problem:sign-in-required. Every call stores the account the first time the game sees it, with its hand play, and the display name of the token whenever it changed, so a rename in the lobby reaches the game with the next player token. A competitor is what gets a rating: each bot name an account registers, and the account's hand play, shown under its display name. Each starts at a rating of 1500. Returns the account's ID and display name, max_bot_names (5), its hand play and its bot names, oldest first.
+         */
+        get: operations["getIslandAccount"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete your account's part of the game
+         * @description Requires the player token of a signed-in player; a guest's token is 403 with problem type urn:island-battles:problem:sign-in-required. Deletes every competitor of the account, its bot names and its hand play with their ratings, and the game's record of the account. Call it before the lobby's DELETE /lobby/v1/account, so the game's part is gone first. Deleting an account the game doesn't know is 204 too.
+         */
+        delete: operations["deleteIslandAccount"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/account/bot-names": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register a bot name in your account
+         * @description Requires the player token of a signed-in player, which names their account; a guest's token is 403 with problem type urn:island-battles:problem:sign-in-required. Every call stores the account the first time the game sees it, with its hand play, and the display name of the token whenever it changed, so a rename in the lobby reaches the game with the next player token. Registers a bot name, a competitor at a rating of 1500, and returns it. A name is 3 to 24 characters after trimming, of letters, digits, spaces, - and _, and can't start with Bot (level, otherwise 422. Names are unique across all accounts without regard to case: a taken name is 409 with problem type urn:island-battles:problem:bot-name-taken. An account has at most 5 bot names: a sixth is 409 with problem type urn:island-battles:problem:bot-name-limit. A name can't be renamed: delete it and register another.
+         */
+        post: operations["registerIslandBotName"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/account/bot-names/{competitor_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete one of your bot names
+         * @description Requires the player token of a signed-in player, which names their account; a guest's token is 403 with problem type urn:island-battles:problem:sign-in-required. Every call stores the account the first time the game sees it, with its hand play, and the display name of the token whenever it changed, so a rename in the lobby reaches the game with the next player token. Deletes the bot name with its rating. The name is free at once, and registering it again makes a new competitor at 1500. Another account's bot name, or an unknown one, is 404.
+         */
+        delete: operations["deleteIslandBotName"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/bots/defaults": {
         parameters: {
             query?: never;
@@ -673,6 +737,44 @@ export interface components {
             /** Format: double */
             y: number;
         };
+        Competitor: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/Competitor.json
+             */
+            readonly $schema?: string;
+            /** Format: int64 */
+            draws: number;
+            /**
+             * Format: int64
+             * @description Rated games played.
+             */
+            games: number;
+            /** Format: uuid */
+            id: string;
+            /**
+             * @description bot: a bot name that an account registered. manual: an account's hand play, one per account. house: a default bot level.
+             * @enum {string}
+             */
+            kind: "bot" | "manual" | "house";
+            /**
+             * Format: date-time
+             * @description When its latest rated game ended, or null before the first.
+             */
+            last_played_at: string | null;
+            /** Format: int64 */
+            losses: number;
+            /** @description The name it is shown by: a bot's registered name, the account's display name for its hand play, or Bot (level N) for a house bot. */
+            name: string;
+            /**
+             * Format: double
+             * @description The Elo rating, 1500 before the first rated game. Shown rounded.
+             */
+            rating: number;
+            /** Format: int64 */
+            wins: number;
+        };
         ConnectionToken: {
             /**
              * Format: uri
@@ -940,6 +1042,30 @@ export interface components {
              */
             turn_pace_milliseconds: number | null;
         };
+        IslandAccount: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/IslandAccount.json
+             */
+            readonly $schema?: string;
+            /**
+             * Format: uuid
+             * @description The lobby's account ID.
+             */
+            account_id: string;
+            /** @description The account's bot names, oldest first. */
+            bot_names: components["schemas"]["Competitor"][];
+            /** @description The account's display name, from the player token. Renaming the account in the lobby reaches the game with the next player token. */
+            display_name: string;
+            /** @description The account's hand play, a manual competitor shown under the account's display name. */
+            hand: components["schemas"]["Competitor"];
+            /**
+             * Format: int64
+             * @description How many bot names an account may register: 5.
+             */
+            max_bot_names: number;
+        };
         ListDefaultBotsResponseBody: {
             /**
              * Format: uri
@@ -1090,7 +1216,7 @@ export interface components {
         };
         Problem: {
             /** @enum {string} */
-            code: "unauthenticated" | "not_found" | "not_host" | "lobby_full" | "team_full" | "phase_conflict" | "not_ready" | "empty_teams" | "stale_membership" | "idempotency_conflict" | "invalid_input" | "invalid_game_settings" | "invalid_seat_settings" | "invalid_member_settings" | "game_requirement" | "game_running" | "game_unavailable" | "watcher_kicked" | "watchers_full" | "unavailable" | "internal_error";
+            code: "unauthenticated" | "not_found" | "not_host" | "lobby_full" | "team_full" | "phase_conflict" | "not_ready" | "empty_teams" | "stale_membership" | "idempotency_conflict" | "invalid_input" | "invalid_game_settings" | "invalid_seat_settings" | "invalid_member_settings" | "game_requirement" | "game_running" | "game_unavailable" | "watcher_kicked" | "watchers_full" | "sign_in_required" | "display_name_required" | "display_name_taken" | "unavailable" | "internal_error";
             detail: string;
             /** Format: int64 */
             status: number;
@@ -1101,6 +1227,10 @@ export interface components {
             type?: string;
         };
         PublicGenerationCommand: components["schemas"]["SendSoldierGroupCommand"] | components["schemas"]["UpgradeCastleCommand"] | components["schemas"]["BurstCastleCommand"];
+        RegisterBotNameRequest: {
+            /** @description The bot's name: 3 to 24 characters after trimming, of letters, digits, spaces, - and _, not starting with Bot (level. It is unique across all accounts without regard to case. */
+            name: string;
+        };
         RegisterGenerationCommands: {
             /**
              * Format: uri
@@ -1340,6 +1470,132 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    getIslandAccount: {
+        parameters: {
+            query?: never;
+            header?: {
+                Authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IslandAccount"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    deleteIslandAccount: {
+        parameters: {
+            query?: never;
+            header?: {
+                Authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    registerIslandBotName: {
+        parameters: {
+            query?: never;
+            header?: {
+                Authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterBotNameRequest"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Competitor"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    deleteIslandBotName: {
+        parameters: {
+            query?: never;
+            header?: {
+                Authorization?: string;
+            };
+            path: {
+                competitor_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     listDefaultBots: {
         parameters: {
             query?: never;

@@ -172,7 +172,8 @@ func (rows gameRows) total() int64 {
 
 // assertNoGameData checks that every game table is empty, including any that
 // countGameRows doesn't know about: every table but the lobby's, the map
-// templates, the migration histories and the bot runners' cached compute.
+// templates, the accounts and their competitors, which outlive every game,
+// the migration histories and the bot runners' cached compute.
 func assertNoGameData(t *testing.T, database *gorm.DB) {
 	t.Helper()
 	var tables []string
@@ -183,7 +184,8 @@ func assertNoGameData(t *testing.T, database *gorm.DB) {
 	for _, table := range tables {
 		// island_bot_compute_usage caches the bot runners' compute, which
 		// belongs to no game.
-		if strings.HasPrefix(table, "lobby_") || strings.HasSuffix(table, "_schema_migrations") || table == "map_templates" || table == "castle_templates" || table == "island_bot_compute_usage" {
+		if strings.HasPrefix(table, "lobby_") || strings.HasSuffix(table, "_schema_migrations") || table == "map_templates" || table == "castle_templates" ||
+			table == "island_accounts" || table == "island_competitors" || table == "island_bot_compute_usage" {
 			continue
 		}
 		checked++

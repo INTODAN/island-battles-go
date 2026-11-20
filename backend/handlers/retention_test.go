@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/humatest"
@@ -18,6 +20,7 @@ import (
 	"islandBattles/backend/handlers"
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/models"
+	"islandBattles/backend/retention"
 	"islandBattles/backend/services"
 )
 
@@ -115,4 +118,71 @@ func TestGameRequestsEndWithARetentionPass(t *testing.T) {
 		t.Fatalf("unknown demo=%d", response.Code)
 	}
 	expectPasses("unknown demo", 9)
+}
+
+// Accounts and competitors outlive every game: a retention pass that deletes
+// an expired game deletes none of them, deleted bot names included.
+func TestRetentionKeepsAccountsAndCompetitors(t *testing.T) {
+	database := testutils.InitTestDB(t)
+	ctx := context.Background()
+	accounts := services.Accounts{Database: database}
+	dana := domain.Principal{PlayerID: uuid.NewString(), DisplayName: "Dana", AccountID: uuid.NewString()}
+	kraken, err := accounts.RegisterBotName(ctx, dana, "Kraken")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := accounts.RegisterBotName(ctx, dana, "Leviathan"); err != nil {
+		t.Fatal(err)
+	}
+	if err := accounts.DeleteBotName(ctx, dana, kraken.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dal.FindOrCreateHouseCompetitor(database, 2); err != nil {
+		t.Fatal(err)
+	}
+	count := func() (accountRows, competitorRows int64) {
+		t.Helper()
+		if err := database.Model(&models.IslandAccount{}).Count(&accountRows).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := database.Unscoped().Model(&models.Competitor{}).Count(&competitorRows).Error; err != nil {
+			t.Fatal(err)
+		}
+		return accountRows, competitorRows
+	}
+	accountRows, competitorRows := count()
+	if accountRows != 1 || competitorRows != 4 {
+		t.Fatalf("%d accounts and %d competitors before retention, want 1 and 4", accountRows, competitorRows)
+	}
+
+	playerID, teamID := uuid.NewString(), uuid.NewString()
+	binding, err := services.RunLobbyGame(ctx, database, &testutils.RecordedPublisher{}, nil, domain.Snapshot{
+		Lobby: domain.Lobby{ID: uuid.NewString(), GameKey: "island-battles", Phase: domain.PhaseStarted, GameSettings: testutils.CircleMapSettings(2, `{"turn_timeout_seconds":null}`)},
+		Teams: []domain.Team{{ID: teamID, Order: 1}, {ID: uuid.NewString(), Order: 2}}, StartRoster: domain.StartRoster{{PlayerID: playerID, TeamID: teamID}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := retention.New(retention.DatabaseStore{Database: database}, retention.DefaultPolicy(), time.Now, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Long after the game's last generation, a few passes retire and purge
+	// it.
+	later := time.Now().Add(30 * 24 * time.Hour)
+	for range 3 {
+		if _, err := runner.Pass(ctx, later); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var games int64
+	if err := database.Unscoped().Model(&models.Game{}).Where(&models.Game{Model: gorm.Model{ID: binding.GameID}}).Count(&games).Error; err != nil {
+		t.Fatal(err)
+	}
+	if games != 0 {
+		t.Fatal("retention kept the expired game")
+	}
+	if got, gotCompetitors := count(); got != accountRows || gotCompetitors != competitorRows {
+		t.Fatalf("%d accounts and %d competitors after retention, want %d and %d", got, gotCompetitors, accountRows, competitorRows)
+	}
 }

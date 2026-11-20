@@ -190,9 +190,10 @@ func defaultLevelMessage(sentence string) string {
 // ValidateMemberSettings is Island Battles' member settings validator for the
 // lobby: the settings name the person's bot, as MemberBot reads it. A hosted
 // bot's URL must follow the rules of hostedbot.Check, and an uploaded bot
-// must be a ready package of the lobby. The validator doesn't learn who sets
-// the settings, so the ready check refuses a package of someone else.
-func (rules BotRules) ValidateMemberSettings(ctx context.Context, lobbyID string, settings json.RawMessage) error {
+// must be a ready package of the lobby. It learns who sets the settings,
+// member, but checks nothing of them yet: the ready check refuses a package
+// of someone else.
+func (rules BotRules) ValidateMemberSettings(ctx context.Context, lobbyID string, member domain.MemberIdentity, settings json.RawMessage) error {
 	bot, err := MemberBot(settings, rules.ServerBots.Enabled)
 	if err != nil {
 		return err
