@@ -91,6 +91,13 @@ func (handler *Accounts) Delete(ctx context.Context, input *struct {
 // accountsHTTPError answers with the service's rejection, and with 503 when
 // the database failed, whose cause goes on the request's error line.
 func accountsHTTPError(ctx context.Context, err error) error {
+	return rejectionOrUnavailable(ctx, err, "accounts are temporarily unavailable")
+}
+
+// rejectionOrUnavailable answers with the service's rejection, and with 503
+// and the message unavailable when the database failed, whose cause goes on
+// the request's error line.
+func rejectionOrUnavailable(ctx context.Context, err error, unavailable string) error {
 	var rejection *services.GenerationError
 	if errors.As(err, &rejection) {
 		return &huma.ErrorModel{Type: rejection.Type, Title: http.StatusText(rejection.Status), Status: rejection.Status, Detail: rejection.Detail}
@@ -99,5 +106,5 @@ func accountsHTTPError(ctx context.Context, err error) error {
 		err = errors.Join(domain.ErrUnavailable, err)
 	}
 	observability.RecordError(ctx, err)
-	return huma.Error503ServiceUnavailable("accounts are temporarily unavailable")
+	return huma.Error503ServiceUnavailable(unavailable)
 }

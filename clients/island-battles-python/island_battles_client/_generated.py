@@ -408,6 +408,51 @@ class Competitor(GameModel):
     wins: Annotated[StrictInt, Field(ge=0)]
 
 
+class CompetitorResult(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    ended_at: AwareDatetime
+    """
+    When the game ended.
+    """
+    opponents: Sequence[CompetitorResultOpponent]
+    """
+    The game's other teams' competitors, in colour order.
+    """
+    rating_after: StrictInt
+    """
+    The competitor's rating after the game, rounded.
+    """
+    rating_before: StrictInt
+    """
+    The competitor's rating before the game, rounded.
+    """
+    result: Literal["win", "draw", "loss"]
+
+
+class CompetitorResultOpponent(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    competitor_id: UUID | None
+    """
+    Null for a competitor that was deleted since, or whose account is hidden.
+    """
+    name: StrictStr
+    """
+    The name it is shown by now, as on the leaderboard; Deleted bot or Deleted player for a competitor that was deleted since, or whose account is hidden.
+    """
+    owner: StrictStr | None
+    """
+    The display name of the account that a bot name belongs to; null otherwise, and for a deleted or hidden competitor.
+    """
+    rating_before: StrictInt
+    """
+    Its rating before the game, rounded.
+    """
+
+
 class ConnectionToken(GameModel):
     model_config = ConfigDict(
         extra="ignore",
@@ -801,6 +846,116 @@ class IslandAccount(GameModel):
     """
     How many bot names an account may register: 5.
     """
+
+
+class Leaderboard(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    field_schema: Annotated[
+        AnyUrl | None,
+        Field(alias="$schema", examples=["https://example.com/Leaderboard.json"]),
+    ] = None
+    """
+    A URL to the JSON Schema for this object.
+    """
+    entries: Sequence[LeaderboardEntry]
+    """
+    The page's competitors, in the leaderboard's order: rating, highest first, then more rated games first, then the older competitor.
+    """
+    total: Annotated[StrictInt, Field(ge=0)]
+    """
+    How many competitors the leaderboard lists, of the kind asked for.
+    """
+
+
+class LeaderboardCompetitor(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    field_schema: Annotated[
+        AnyUrl | None,
+        Field(
+            alias="$schema", examples=["https://example.com/LeaderboardCompetitor.json"]
+        ),
+    ] = None
+    """
+    A URL to the JSON Schema for this object.
+    """
+    competitor_id: UUID
+    draws: Annotated[StrictInt, Field(ge=0)]
+    games: Annotated[StrictInt, Field(ge=1)]
+    """
+    Rated games played: a competitor is listed after its first.
+    """
+    history: Sequence[CompetitorResult]
+    """
+    The competitor's latest 50 rated results, newest first.
+    """
+    kind: Literal["bot", "manual", "house"]
+    """
+    bot: a bot name that an account registered. manual: an account's hand play. house: a default bot level, which the backend plays.
+    """
+    last_played_at: AwareDatetime
+    """
+    When its latest rated game ended.
+    """
+    losses: Annotated[StrictInt, Field(ge=0)]
+    name: StrictStr
+    """
+    The name it is shown by: a bot's name, such as Kraken, the account's display name for its hand play, or Bot (level N) for a house bot.
+    """
+    owner: StrictStr | None
+    """
+    The display name of the account that a bot name belongs to, as in "Kraken, by Dana"; null for hand play and house bots.
+    """
+    rank: Annotated[StrictInt, Field(ge=1)]
+    """
+    The place in the leaderboard's order, from 1: equal ratings, as shown, get the same rank, and the next rank skips as many places (1, 2, 2, 4). GET /leaderboard ranks within the kind it lists; a competitor's page among all kinds.
+    """
+    rating: StrictInt
+    """
+    The Elo rating, rounded to a whole number.
+    """
+    wins: Annotated[StrictInt, Field(ge=0)]
+
+
+class LeaderboardEntry(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    competitor_id: UUID
+    draws: Annotated[StrictInt, Field(ge=0)]
+    games: Annotated[StrictInt, Field(ge=1)]
+    """
+    Rated games played: a competitor is listed after its first.
+    """
+    kind: Literal["bot", "manual", "house"]
+    """
+    bot: a bot name that an account registered. manual: an account's hand play. house: a default bot level, which the backend plays.
+    """
+    last_played_at: AwareDatetime
+    """
+    When its latest rated game ended.
+    """
+    losses: Annotated[StrictInt, Field(ge=0)]
+    name: StrictStr
+    """
+    The name it is shown by: a bot's name, such as Kraken, the account's display name for its hand play, or Bot (level N) for a house bot.
+    """
+    owner: StrictStr | None
+    """
+    The display name of the account that a bot name belongs to, as in "Kraken, by Dana"; null for hand play and house bots.
+    """
+    rank: Annotated[StrictInt, Field(ge=1)]
+    """
+    The place in the leaderboard's order, from 1: equal ratings, as shown, get the same rank, and the next rank skips as many places (1, 2, 2, 4). GET /leaderboard ranks within the kind it lists; a competitor's page among all kinds.
+    """
+    rating: StrictInt
+    """
+    The Elo rating, rounded to a whole number.
+    """
+    wins: Annotated[StrictInt, Field(ge=0)]
 
 
 class ListDefaultBotsResponseBody(GameModel):

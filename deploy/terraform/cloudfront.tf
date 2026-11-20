@@ -65,6 +65,41 @@ resource "aws_cloudfront_cache_policy" "origin_cache_control" {
   }
 }
 
+# The public leaderboard (#367): its answers say Cache-Control: public,
+# max-age=60, which this policy follows, so a visitor costs the database at
+# most one read a minute per page. Unlike origin_cache_control, the key holds
+# the query string's parameters, which choose the page, and the Origin header,
+# since the backend's CORS answer varies by it (Vary: Origin). Neither is Host,
+# so the Function URL still gets its own.
+resource "aws_cloudfront_cache_policy" "leaderboard" {
+  name        = "${var.name}-leaderboard"
+  comment     = "Follows the origin's Cache-Control; the cache key is the path, kind, limit, offset and Origin."
+  min_ttl     = 0
+  default_ttl = 0
+  max_ttl     = 3600
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    enable_accept_encoding_gzip   = true
+    enable_accept_encoding_brotli = true
+
+    cookies_config {
+      cookie_behavior = "none"
+    }
+    headers_config {
+      header_behavior = "whitelist"
+      headers {
+        items = ["Origin"]
+      }
+    }
+    query_strings_config {
+      query_string_behavior = "whitelist"
+      query_strings {
+        items = ["kind", "limit", "offset"]
+      }
+    }
+  }
+}
+
 # Every header, cookie and query string except Host, which the Function URL
 # needs to be its own. CloudFront strips Authorization from GET and HEAD
 # requests unless the policy forwards all viewer headers, so the smoke test
@@ -73,8 +108,8 @@ data "aws_cloudfront_origin_request_policy" "all_viewer_except_host_header" {
   name = "Managed-AllViewerExceptHostHeader"
 }
 
-# Except for /play/ (the web client, from S3) and the static files of the
-# Lambda's pages (below), nothing is cached, and /lobby/ui/ redirects to the
+# Except for /play/ (the web client, from S3), the static files of the
+# Lambda's pages and the public leaderboard (below), nothing is cached, and /lobby/ui/ redirects to the
 # lobby: every request reaches the Lambda
 # as if it came straight to the Function URL. There's no origin access
 # control. For a Function URL it
@@ -174,6 +209,21 @@ resource "aws_cloudfront_distribution" "game" {
       origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host_header.id
       compress                 = true
     }
+  }
+
+  # The public leaderboard (#367), GET /leaderboard and a competitor's page,
+  # GET /leaderboard/{competitor_id}: the backend says Cache-Control: public,
+  # max-age=60, so each page reaches the Lambda at most once a minute per
+  # query and Origin. The admin's routes are under /admin/, uncached.
+  ordered_cache_behavior {
+    path_pattern             = "/leaderboard*"
+    target_origin_id         = "backend"
+    viewer_protocol_policy   = "redirect-to-https"
+    allowed_methods          = ["GET", "HEAD", "OPTIONS"]
+    cached_methods           = ["GET", "HEAD"]
+    cache_policy_id          = aws_cloudfront_cache_policy.leaderboard.id
+    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host_header.id
+    compress                 = true
   }
 
   default_cache_behavior {
