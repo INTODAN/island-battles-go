@@ -593,6 +593,10 @@ class GameOutcome(GameModel):
     """
     The teams that resigned or left a real-time game, in the order they left. Always present, and empty for most games; a demo saved before this field existed has none, which reads as empty.
     """
+    ratings: Sequence[RatingChange] | None = None
+    """
+    How the game changed each team's competitor's Elo rating, one per team in colour order, for a rated game only: absent when the game isn't rated. The winner gains and every other team loses, each against the winner alone; in a draw every pair of teams counts as a draw.
+    """
     reason: Literal[
         "last_team_standing",
         "all_eliminated",
@@ -872,7 +876,7 @@ class LobbySettings(GameModel):
     """
     rated: StrictBool | None = False
     """
-    Whether the game is rated, false when left out. A rated lobby starts only when every member is signed in and plays by hand or with one of their bot names, no two teams belong to one account, and every bot seat is a default bot level, each level once. The game then records the competitor of each team.
+    Whether the game is rated, false when left out. A rated lobby starts only when every member is signed in and plays by hand or with one of their bot names, no two teams belong to one account, and every bot seat is a default bot level, each level once. The game then records the competitor of each team, and its end changes their Elo ratings.
     """
     turn_pace_milliseconds: Annotated[StrictInt | None, Field(ge=500, le=5000)] = 1000
     """
@@ -1036,6 +1040,34 @@ class Problem(GameModel):
     """
     For game_requirement, the game's own problem type, a URI that the game documents, such as one meaning a player has yet to choose something in the game's API. Absent for every other code.
     """
+
+
+class RatingChange(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    after: StrictFloat
+    """
+    The competitor's rating after the game, a decimal: show it rounded.
+    """
+    before: StrictFloat
+    """
+    The competitor's rating before the game, a decimal: show it rounded.
+    """
+    competitor_id: UUID
+    kind: Literal["bot", "manual", "house"]
+    """
+    bot: a bot name that an account registered. manual: an account's hand play. house: a default bot level.
+    """
+    name: StrictStr
+    """
+    The name the competitor is shown by: a bot's name, such as Kraken, the account's display name for its hand play, or Bot (level N) for a house bot.
+    """
+    owner: StrictStr | None = None
+    """
+    The display name of the account that the bot name belongs to, for kind bot only.
+    """
+    team_color: Annotated[StrictInt, Field(ge=1)]
 
 
 class RegisterBotNameRequest(GameModel):

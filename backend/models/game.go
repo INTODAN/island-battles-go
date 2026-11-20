@@ -96,6 +96,10 @@ type GameOutcome struct {
 	// tells a draw of teams that left in the last turn from one of teams
 	// eliminated.
 	FinalTurn int `json:"final_turn,omitempty"`
+	// Ratings are the rating changes of a rated game's competitors, one per
+	// team in colour order, applied in the transaction that stored the
+	// outcome. Nil for a game that isn't rated.
+	Ratings []RatingChange `json:"ratings,omitempty"`
 }
 
 // DepartureKind says how a team left a real-time game.

@@ -63,7 +63,7 @@ func outcomeView(game *models.Game) *models.GameOutcomeView {
 		return nil
 	}
 	return &models.GameOutcomeView{Reason: game.Outcome.Reason, WinnerTeamColor: game.Outcome.WinnerTeamColor, Summary: describeOutcome(game),
-		Departures: departureViews(game.Outcome.Departures, false)}
+		Departures: departureViews(game.Outcome.Departures, false), Ratings: game.Outcome.Ratings}
 }
 
 // describeOutcome sums up the outcome of a game that has ended. The teams

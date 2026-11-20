@@ -47,6 +47,27 @@ type GameOutcome struct {
 	// the order they left. The server always sends it; a demo saved before
 	// it existed has none.
 	Departures []Departure `json:"departures,omitempty"`
+	// Ratings is how a rated game changed each team's competitor's Elo
+	// rating, one per team in colour order, and absent for a game that isn't
+	// rated.
+	Ratings []RatingChange `json:"ratings,omitempty"`
+}
+
+// RatingChange is one team's competitor's rating before and after a rated
+// game. Ratings are decimals; show them rounded.
+type RatingChange struct {
+	TeamColor    uint   `json:"team_color"`
+	CompetitorID string `json:"competitor_id"`
+	// Kind is bot (a bot name an account registered), manual (an account's
+	// hand play) or house (a default bot level).
+	Kind string `json:"kind"`
+	// Name is how the competitor is shown, such as Kraken, the account's
+	// display name, or Bot (level N).
+	Name string `json:"name"`
+	// Owner is the display name of a bot name's account, for kind bot only.
+	Owner  string  `json:"owner,omitempty"`
+	Before float64 `json:"before"`
+	After  float64 `json:"after"`
 }
 
 // DepartureKind says how a team left a real-time game.

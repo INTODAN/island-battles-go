@@ -988,6 +988,13 @@
             },
             "type": "array"
           },
+          "ratings": {
+            "description": "How the game changed each team's competitor's Elo rating, one per team in colour order, for a rated game only: absent when the game isn't rated. The winner gains and every other team loses, each against the winner alone; in a draw every pair of teams counts as a draw.",
+            "items": {
+              "$ref": "#/components/schemas/RatingChange"
+            },
+            "type": "array"
+          },
           "reason": {
             "description": "last_team_standing: one team was left after every other team lost all its castles and soldier groups, or resigned or left the game. all_eliminated: the last teams were eliminated, or left, in the same turn, a draw. generation_cap: the game reached its last generation; the team with the most castles won, and equal counts are a draw. turn_timeout: in a game that waits for every player, a turn passed its deadline; every team with a player who hadn't completed it lost, and among the other teams still standing the team with the most castles won, while equal counts, or no team left, are a draw. abandoned: nobody played a real-time game for its turn limit, so it ended on its open generation; among the teams still in it, except one whose resignation was waiting for the turn, the team with the most castles won, and equal counts, or no team left, are a draw.",
             "enum": [
@@ -1476,7 +1483,7 @@
           },
           "rated": {
             "default": false,
-            "description": "Whether the game is rated, false when left out. A rated lobby starts only when every member is signed in and plays by hand or with one of their bot names, no two teams belong to one account, and every bot seat is a default bot level, each level once. The game then records the competitor of each team.",
+            "description": "Whether the game is rated, false when left out. A rated lobby starts only when every member is signed in and plays by hand or with one of their bot names, no two teams belong to one account, and every bot seat is a default bot level, each level once. The game then records the competitor of each team, and its end changes their Elo ratings.",
             "type": "boolean"
           },
           "turn_pace_milliseconds": {
@@ -1789,6 +1796,56 @@
             "$ref": "#/components/schemas/BurstCastleCommand"
           }
         ]
+      },
+      "RatingChange": {
+        "additionalProperties": false,
+        "properties": {
+          "after": {
+            "description": "The competitor's rating after the game, a decimal: show it rounded.",
+            "format": "double",
+            "type": "number"
+          },
+          "before": {
+            "description": "The competitor's rating before the game, a decimal: show it rounded.",
+            "format": "double",
+            "type": "number"
+          },
+          "competitor_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "kind": {
+            "description": "bot: a bot name that an account registered. manual: an account's hand play. house: a default bot level.",
+            "enum": [
+              "bot",
+              "manual",
+              "house"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "The name the competitor is shown by: a bot's name, such as Kraken, the account's display name for its hand play, or Bot (level N) for a house bot.",
+            "type": "string"
+          },
+          "owner": {
+            "description": "The display name of the account that the bot name belongs to, for kind bot only.",
+            "type": "string"
+          },
+          "team_color": {
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "team_color",
+          "competitor_id",
+          "kind",
+          "name",
+          "before",
+          "after"
+        ],
+        "type": "object"
       },
       "RegisterBotNameRequest": {
         "additionalProperties": false,

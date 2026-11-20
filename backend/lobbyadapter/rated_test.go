@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -435,5 +436,57 @@ func TestARetriedRatedStartReturnsTheSameGame(t *testing.T) {
 		if player.CompetitorID == nil || (player.PlayerID == snapshot.StartRoster[1].PlayerID && (*player.CompetitorID != kraken.ID || player.BotName == nil || *player.BotName != "Kraken")) {
 			t.Fatalf("frozen player = %+v", player)
 		}
+	}
+}
+
+// One person against a level 2 bot seat in a rated lobby: the game changes
+// both the person's hand play's rating and the house bot's, and its outcome
+// says so.
+func TestARatedGameAgainstABotSeatRatesThePersonAndTheHouseBot(t *testing.T) {
+	stack := newLobbyStack(t)
+	dana := stack.player("google-dana", "Dana")
+	var account models.IslandAccountView
+	stack.expect(stack.api.Get("/account", stack.playerToken(dana, lobbyadapter.GameKey)), http.StatusOK, &account)
+	room := stack.lobbyOf(dana, 2, ratedSettings(2, true))
+	stack.expect(stack.addSeat(room, dana, 1, map[string]any{"bot_level": 2}), http.StatusOK, nil)
+	stack.expect(stack.choose(room, dana, `{"kind":"manual"}`), http.StatusOK, nil)
+	stack.expect(stack.ready(room, dana), http.StatusOK, nil)
+	stack.expect(stack.start(room, dana), http.StatusOK, nil)
+	house, err := dal.FindOrCreateHouseCompetitor(stack.database, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Dana resigns. The bot completed the turn at once, so it plays in the
+	// resign request, and the bot's team wins.
+	var ended models.GenerationState
+	stack.expect(stack.api.Post("/game/from-lobby/"+room.Lobby.ID+"/resign", stack.playerToken(dana, lobbyadapter.GameKey), map[string]any{}), http.StatusOK, &ended)
+	if ended.Outcome == nil || ended.Outcome.WinnerTeamColor == nil || *ended.Outcome.WinnerTeamColor == ended.TeamColor {
+		t.Fatalf("outcome = %+v, want the bot's team to win", ended.Outcome)
+	}
+	houseColor := *ended.Outcome.WinnerTeamColor
+	want := []models.RatingChange{
+		{TeamColor: ended.TeamColor, CompetitorID: account.Hand.ID, Kind: models.ManualCompetitor, Name: "Dana", Before: 1500, After: 1480},
+		{TeamColor: houseColor, CompetitorID: house.ID, Kind: models.HouseCompetitor, Name: "Bot (level 2)", Before: 1500, After: 1520},
+	}
+	if houseColor < ended.TeamColor {
+		want[0], want[1] = want[1], want[0]
+	}
+	if !reflect.DeepEqual(ended.Outcome.Ratings, want) {
+		t.Fatalf("ratings = %+v, want %+v", ended.Outcome.Ratings, want)
+	}
+	for id, rating := range map[string]float64{account.Hand.ID: 1480, house.ID: 1520} {
+		var competitor models.Competitor
+		if err := stack.database.Where(&models.Competitor{ID: id}).First(&competitor).Error; err != nil {
+			t.Fatal(err)
+		}
+		if competitor.Rating != rating || competitor.Games != 1 {
+			t.Fatalf("competitor after the game = %+v, want rating %g after one game", competitor, rating)
+		}
+	}
+	// The account page shows the hand play's new rating.
+	stack.expect(stack.api.Get("/account", stack.playerToken(dana, lobbyadapter.GameKey)), http.StatusOK, &account)
+	if account.Hand.Rating != 1480 || account.Hand.Losses != 1 {
+		t.Fatalf("hand play = %+v", account.Hand)
 	}
 }
