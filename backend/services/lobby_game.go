@@ -56,8 +56,14 @@ func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 		return models.BindingResult{}, fmt.Errorf("lobby settings: %w", err)
 	}
 	// A rated game finds each roster player's competitor first, checking the
-	// roster as the ready gate does, so it never starts half rated.
-	if gameSettings.Rated {
+	// roster as the ready gate does, so it never starts half rated. A retried
+	// start of a round whose game has started returns that game: its roster
+	// may have left the lobby, or deleted a bot name, since.
+	started, err := roundStarted(database, snapshot)
+	if err != nil {
+		return models.BindingResult{}, err
+	}
+	if gameSettings.Rated && !started {
 		competitors, err := ratedCompetitors(ctx, database, snapshot, chosen)
 		if err != nil {
 			return models.BindingResult{}, fmt.Errorf("rated start: %w", err)
@@ -162,6 +168,17 @@ func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 		}
 	}
 	return binding, nil
+}
+
+// roundStarted reports whether the game of the snapshot's lobby round has
+// started: it exists, with its teams, which are saved with its first
+// generation.
+func roundStarted(database *gorm.DB, snapshot domain.Snapshot) (bool, error) {
+	game, err := dal.FindLobbyRoundGame(database, snapshot.Lobby.ID, snapshot.Lobby.Round)
+	if err != nil {
+		return false, err
+	}
+	return game != nil && len(game.Teams) > 0, nil
 }
 
 // lobbyGameTeams copies the replay's teams out of the lobby, which the game

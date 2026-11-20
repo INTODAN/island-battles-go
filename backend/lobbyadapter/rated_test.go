@@ -17,6 +17,7 @@ import (
 	"islandBattles/backend/services"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // ratedSettings are the game settings of a lobby of teams on the circle map,
@@ -374,5 +375,65 @@ func TestARatedStartHookNeverStartsHalfRated(t *testing.T) {
 	players, err := dal.LoadFrozenPlayers(database.WithContext(context.Background()), gameID)
 	if err != nil || len(players) != 2 || players[0].CompetitorID == nil || players[1].CompetitorID == nil || *players[0].CompetitorID == *players[1].CompetitorID {
 		t.Fatalf("frozen players = %+v, %v", players, err)
+	}
+}
+
+// A retried start of a rated round whose game has started returns that game,
+// even when a roster member left the lobby, or deleted their bot name, since.
+// The start never changes the display name of an account the game knows.
+func TestARetriedRatedStartReturnsTheSameGame(t *testing.T) {
+	database := testutils.InitTestDB(t)
+	snapshot := startedSnapshot()
+	snapshot.Lobby.GameSettings = testutils.CircleMapSettings(2, `{"rated":true}`)
+	host, other := uuid.NewString(), uuid.NewString()
+	snapshot.Members[0].AccountID, snapshot.Members[1].AccountID = &host, &other
+	snapshot.Members[0].MemberSettings = []byte(`{"bot":{"kind":"manual"}}`)
+	snapshot.Members[1].MemberSettings = []byte(`{"bot":{"kind":"localhost","name":"Kraken"}}`)
+	var kraken models.Competitor
+	if err := database.Transaction(func(transaction *gorm.DB) error {
+		if err := dal.SeeAccount(transaction, host, "Host, renamed"); err != nil {
+			return err
+		}
+		if err := dal.SeeAccount(transaction, other, "Guest"); err != nil {
+			return err
+		}
+		var err error
+		kraken, err = dal.AddBotName(transaction, other, "Kraken")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	client := hooksClient(t, database, &testutils.RecordedPublisher{})
+	gameID, err := start(t, client, snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored models.IslandAccount
+	if err := database.Where(&models.IslandAccount{AccountID: host}).First(&stored).Error; err != nil || stored.DisplayName != "Host, renamed" {
+		t.Fatalf("the host's account after the start = %+v, %v", stored, err)
+	}
+
+	if deleted, err := dal.DeleteBotName(database, other, kraken.ID); err != nil || !deleted {
+		t.Fatalf("delete Kraken: %v, %v", deleted, err)
+	}
+	retried, err := start(t, client, snapshot)
+	if err != nil || retried != gameID {
+		t.Fatalf("a retry after Kraken was deleted = %d, %v; want game %d", retried, err, gameID)
+	}
+	// The lobby's snapshot no longer lists a member who left.
+	snapshot.Members = snapshot.Members[:1]
+	retried, err = start(t, client, snapshot)
+	if err != nil || retried != gameID {
+		t.Fatalf("a retry after a member left = %d, %v; want game %d", retried, err, gameID)
+	}
+	assertBindingCounts(t, database, snapshot.Lobby.ID, 1, 2)
+	players, err := dal.LoadFrozenPlayers(database, gameID)
+	if err != nil || len(players) != 2 {
+		t.Fatalf("frozen players = %+v, %v", players, err)
+	}
+	for _, player := range players {
+		if player.CompetitorID == nil || (player.PlayerID == snapshot.StartRoster[1].PlayerID && (*player.CompetitorID != kraken.ID || player.BotName == nil || *player.BotName != "Kraken")) {
+			t.Fatalf("frozen player = %+v", player)
+		}
 	}
 }

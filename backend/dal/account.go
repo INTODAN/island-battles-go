@@ -45,6 +45,22 @@ func SeeAccount(transaction *gorm.DB, accountID, displayName string) error {
 	return transaction.Clauses(clause.OnConflict{DoNothing: true}).Create(&hand).Error
 }
 
+// EnsureAccount stores an account that the game doesn't know, with its
+// manual competitor, as SeeAccount does, but never changes the display name
+// of an account it knows. Run it in a transaction.
+func EnsureAccount(transaction *gorm.DB, accountID, displayName string) error {
+	if accountID == "" {
+		return errors.New("ensure account: no account ID")
+	}
+	account := models.IslandAccount{AccountID: accountID, DisplayName: displayName}
+	if err := transaction.Clauses(clause.OnConflict{DoNothing: true}).Create(&account).Error; err != nil {
+		return err
+	}
+	// The unique index on a live manual competitor's account keeps one.
+	hand := models.Competitor{ID: uuid.NewString(), Kind: models.ManualCompetitor, AccountID: &accountID, Rating: models.InitialRating}
+	return transaction.Clauses(clause.OnConflict{DoNothing: true}).Create(&hand).Error
+}
+
 // AccountCompetitors returns an account's live competitors, its manual one
 // and its bot names, oldest first.
 func AccountCompetitors(database *gorm.DB, accountID string) ([]models.Competitor, error) {

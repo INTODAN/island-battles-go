@@ -256,10 +256,13 @@ func CheckRatedSeats(lobby domain.Snapshot) error {
 // ratedCompetitors resolves the competitor of each roster player of a rated
 // game's start, by player ID, after checking the roster as the ready gate
 // does at the start: a person's manual competitor when they play by hand,
-// which Accounts.Seen creates for an account new to the game, their bot
+// which Accounts.Ensure creates for an account new to the game, their bot
 // name's when their bot plays under one, and a default bot seat's house
-// competitor. It refuses a roster that the gate would, so a rated game never
-// starts with a player who has no competitor.
+// competitor. A roster it can't resolve fails the start hook, which runs
+// after the lobby committed the start: the host's start then answers 502
+// game_unavailable, and the lobby stays started, without a game, until the
+// host starts it again or reopens it. So a rated game never starts with a
+// player who has no competitor.
 func ratedCompetitors(ctx context.Context, database *gorm.DB, snapshot domain.Snapshot, chosen map[string]frozenBot) (map[string]models.Competitor, error) {
 	membersByPlayer := map[string]domain.Member{}
 	for _, member := range snapshot.Members {
@@ -295,7 +298,7 @@ func ratedCompetitors(ctx context.Context, database *gorm.DB, snapshot domain.Sn
 	for _, person := range people {
 		bot := chosen[person.PlayerID]
 		if bot.Kind == models.ManualBot {
-			if err := (Accounts{Database: database}).Seen(ctx, person.AccountID, person.DisplayName); err != nil {
+			if err := (Accounts{Database: database}).Ensure(ctx, person.AccountID, person.DisplayName); err != nil {
 				return nil, err
 			}
 			hand, err := dal.FindManualCompetitor(database, person.AccountID)
