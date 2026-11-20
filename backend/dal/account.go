@@ -89,6 +89,10 @@ func retired(now time.Time) map[string]any {
 // frees the name at once; a game in play still finds the row. It reports
 // false when the account has no such live bot name.
 func DeleteBotName(database *gorm.DB, accountID, competitorID string) (bool, error) {
+	// A struct filter drops empty fields, which would match every bot name.
+	if accountID == "" || competitorID == "" {
+		return false, errors.New("delete bot name: no account or competitor ID")
+	}
 	deleted := database.Model(&models.Competitor{}).
 		Where(&models.Competitor{ID: competitorID, AccountID: &accountID, Kind: models.BotCompetitor}).
 		Updates(retired(time.Now()))

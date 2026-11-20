@@ -55,7 +55,7 @@ The longest chains are four merges deep: #16 → #15 → #35 → #44 and #17 →
 
 ### Data and schema
 
-- **Game data can be reset; lobby data and map templates can't.** README code philosophy #6 and `.agents/skills/breaking-changes/SKILL.md` now say so.
+- **Game data can be reset; lobby data, map templates, accounts and competitors can't.** README code philosophy #6 and `.agents/skills/breaking-changes/SKILL.md` now say so.
   - Game data covers games, their maps, castles, generations, soldier groups, commands, player inputs, requests, team bindings, frozen rosters and replays. It may be reset on breaking changes, with no data migrations.
   - Lobby data is every `lobby_*` table. Map templates are `map_templates` and `castle_templates`. Neither is ever reset; change them only through a new versioned migration that keeps existing rows.
 - **The lobby API can still break.** The exception covers stored data only. Clients upgrade.
@@ -169,7 +169,7 @@ Tests that leave containers behind after an interrupted run can be found with `p
 
 ### Breaking changes
 
-- Follow the breaking-changes skill: break the API and game data freely, keep lobby data and map templates.
+- Follow the breaking-changes skill: break the API and game data freely, keep lobby data, map templates, accounts and competitors.
 - Say in the PR description which clients must upgrade.
 
 ### Infrastructure agents
