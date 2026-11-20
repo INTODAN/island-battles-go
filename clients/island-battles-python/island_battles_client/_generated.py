@@ -876,7 +876,7 @@ class LobbySettings(GameModel):
     """
     rated: StrictBool | None = False
     """
-    Whether the game is rated, false when left out. A rated lobby starts only when every member is signed in and plays by hand or with one of their bot names, no two teams belong to one account, and every bot seat is a default bot level, each level once. The game then records the competitor of each team.
+    Whether the game is rated, false when left out. A rated lobby starts only when every member is signed in and plays by hand or with one of their bot names, no two teams belong to one account, and every bot seat is a default bot level, each level once. The game then records the competitor of each team, and its end changes their Elo ratings.
     """
     turn_pace_milliseconds: Annotated[StrictInt | None, Field(ge=500, le=5000)] = 1000
     """

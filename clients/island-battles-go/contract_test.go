@@ -248,6 +248,7 @@ var clientSchemaTypes = map[string]reflect.Type{
 	"GenerationState":            reflect.TypeFor[generationState](),
 	"GameOutcome":                reflect.TypeFor[GameOutcome](),
 	"Departure":                  reflect.TypeFor[Departure](),
+	"RatingChange":               reflect.TypeFor[RatingChange](),
 	"BotChoice":                  reflect.TypeFor[botChoice](),
 	"RelayedBot":                 reflect.TypeFor[relayedBot](),
 	"GenerationEvent":            reflect.TypeFor[generationEvent](),

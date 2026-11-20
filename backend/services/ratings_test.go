@@ -3,9 +3,12 @@ package services_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -323,8 +326,9 @@ func TestARatedGameIsRatedOnce(t *testing.T) {
 	if want := fixture.ratingChanges(1520, 1480); !reflect.DeepEqual(first.Ratings, want) {
 		t.Fatalf("first rating = %+v, want %+v", first.Ratings, want)
 	}
-	if _, err := rate(); err == nil {
-		t.Fatal("the game was rated twice")
+	// The unique (game, competitor) history row refuses a second rating.
+	if _, err := rate(); !errors.Is(err, gorm.ErrDuplicatedKey) && !strings.Contains(fmt.Sprint(err), "23505") {
+		t.Fatalf("rating the game again = %v, want a unique violation", err)
 	}
 	fixture.assertRated(t, []float64{1520, 1480}, []models.RatingResult{models.RatingWin, models.RatingLoss}, []int{40, 40})
 }
