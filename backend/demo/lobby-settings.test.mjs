@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { builderHello, builderWindowAction, changeSettingsLabel, describeGameLength, describeSettings, describeTurnPace, describeTurnTimeout, loadDefaultMaps, mapFromBuilderMessage, readMapFile, settingsSelection, teamNames, turnPaces, turnTimeouts } from "./lobby-settings.mjs";
+import { builderHello, builderWindowAction, changeSettingsLabel, describeGameLength, describeRated, describeSettings, describeTurnPace, describeTurnTimeout, loadDefaultMaps, mapFromBuilderMessage, readMapFile, settingsSelection, teamNames, turnPaces, turnTimeouts } from "./lobby-settings.mjs";
 
 test("a map's teams are named after the board's team colours", () => {
   assert.deepEqual(teamNames(2), ["Blue", "Red"]);
@@ -105,11 +105,11 @@ test("the room reads the default maps from the game's site", async (context) => 
 });
 
 test("the room's form shows the lobby's current map and turn timeout", () => {
-  assert.deepEqual(settingsSelection({}), { map: "", file: null, timeout: "30", pace: "1000", length: "300" });
-  assert.deepEqual(settingsSelection(null), { map: "", file: null, timeout: "30", pace: "1000", length: "300" });
-  assert.deepEqual(settingsSelection({ map_template_id: 4, turn_timeout_seconds: null }), { map: "template:4", file: null, timeout: "none", pace: "1000", length: "300" });
+  assert.deepEqual(settingsSelection({}), { map: "", file: null, timeout: "30", pace: "1000", length: "300", rated: false });
+  assert.deepEqual(settingsSelection(null), { map: "", file: null, timeout: "30", pace: "1000", length: "300", rated: false });
+  assert.deepEqual(settingsSelection({ map_template_id: 4, turn_timeout_seconds: null }), { map: "template:4", file: null, timeout: "none", pace: "1000", length: "300", rated: false });
   const map = { map_name: "Loaded", player_amount: 3 };
-  assert.deepEqual(settingsSelection({ map, turn_timeout_seconds: 120 }), { map: "file", file: map, timeout: "120", pace: "1000", length: "300" });
+  assert.deepEqual(settingsSelection({ map, turn_timeout_seconds: 120 }), { map: "file", file: map, timeout: "120", pace: "1000", length: "300", rated: false });
   // A timeout the form doesn't offer, set through the API, is still shown.
   assert.equal(settingsSelection({ turn_timeout_seconds: 45 }).timeout, "45");
   assert.equal(changeSettingsLabel, "Change map");
@@ -132,4 +132,14 @@ test("a room names the turn pace of a real-time game", async () => {
   assert.equal(await describeSettings({ map: { map_name: "Loaded" }, turn_pace_milliseconds: 2000 }), "Map: Loaded · Turn limit: 30 s · Turn pace: 2 s");
   assert.equal(settingsSelection({ turn_pace_milliseconds: 500 }).pace, "500");
   assert.equal(settingsSelection({}).pace, "1000");
+});
+
+test("a room says that a rated lobby is played in the 3D client", async () => {
+  assert.equal(describeRated({ rated: true }), "Rated (3D client only)");
+  assert.equal(describeRated({ rated: false }), "");
+  assert.equal(describeRated({}), "");
+  assert.equal(describeRated(null), "");
+  assert.equal(await describeSettings({ map: { map_name: "Loaded" }, rated: true }), "Map: Loaded · Turn limit: 30 s · Turn pace: 1 s · Rated (3D client only)");
+  assert.equal(await describeSettings({ map: { map_name: "Loaded" }, rated: false }), "Map: Loaded · Turn limit: 30 s · Turn pace: 1 s");
+  assert.equal(settingsSelection({ rated: true }).rated, true);
 });

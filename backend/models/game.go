@@ -34,7 +34,10 @@ type Game struct {
 	// Departures lists the teams that left a real-time game, by resigning or
 	// by going silent, in the order they left. A resignation waits here, with
 	// a nil Turn, for the turn that takes the team out.
-	Departures  []Departure `gorm:"serializer:json;type:jsonb" json:"-"`
+	Departures []Departure `gorm:"serializer:json;type:jsonb" json:"-"`
+	// Rated is the lobby's rated setting, saved with the teams when the game
+	// is initialized. Each frozen player of a rated game has a competitor.
+	Rated       bool `gorm:"not null;default:false" json:"-"`
 	Generations []Generation
 }
 

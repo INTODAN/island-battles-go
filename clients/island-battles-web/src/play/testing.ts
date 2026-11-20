@@ -126,6 +126,7 @@ export function handState(
     log_lines_stored: 0,
     memory: null,
     player_id: "p1",
+    rated: false,
     relayed_bots: [],
     submitted: false,
     team_color: 1,

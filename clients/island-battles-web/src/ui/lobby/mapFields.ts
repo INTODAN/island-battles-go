@@ -364,6 +364,7 @@ export function mountMapFields(options: MapFieldsOptions): MapFields {
             currentTurnTimeoutSeconds: initial.turnTimeoutSeconds,
             currentTurnPaceMilliseconds: initial.turnPaceMilliseconds,
             currentMaxGenerations: initial.maxGenerations,
+            rated: initial.rated,
           }
         : {}),
     }),

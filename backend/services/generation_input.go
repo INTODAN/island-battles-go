@@ -449,7 +449,7 @@ func generationState(game *models.Game, generation *models.Generation, players [
 		return models.GenerationState{}, err
 	}
 	state := models.GenerationState{GameID: game.ID, LobbyID: *game.LobbyID, LobbyRound: game.LobbyRound, GenerationID: generation.ID, PlayerID: player.PlayerID, TeamColor: player.TeamColor, Channel: channel,
-		Generation: GenerationView(generation), TurnNumber: generation.Number, MaxGenerations: game.MaxGenerations, Outcome: outcomeView(game), Memory: memory, TurnDeadlineAt: turnDeadline(game, generation), TurnPaceMilliseconds: game.TurnPaceMilliseconds, Bot: models.FrozenBot(player),
+		Generation: GenerationView(generation), TurnNumber: generation.Number, MaxGenerations: game.MaxGenerations, Outcome: outcomeView(game), Memory: memory, TurnDeadlineAt: turnDeadline(game, generation), TurnPaceMilliseconds: game.TurnPaceMilliseconds, Rated: game.Rated, Bot: models.FrozenBot(player),
 		RelayedBots: models.RelayedBots(players, player.PlayerID), Departures: departureViews(game.Departures, true)}
 	for _, input := range inputs {
 		if input.PlayerID == player.PlayerID {

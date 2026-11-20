@@ -157,10 +157,17 @@ function describeMap(name, teamCount, width, height) {
   return `${name} · ${teamCount} teams · ${width}×${height}`;
 }
 
+// A short line naming a rated lobby, from its game_settings, and "" for any
+// other. Only the 3D client signs in, so only it plays a rated lobby.
+export function describeRated(settings) {
+  return settings?.rated === true ? "Rated (3D client only)" : "";
+}
+
 // A short line for the room, naming the map that a lobby's settings chose and
-// its turn timeout and turn pace, and its game length when that isn't 300 turns.
+// its turn timeout and turn pace, its game length when that isn't 300 turns,
+// and whether it is rated.
 export async function describeSettings(settings, { gameURL = "" } = {}) {
-  return [await describeMapChoice(settings, gameURL), describeTurnTimeout(settings), describeTurnPace(settings), describeGameLength(settings)].filter(Boolean).join(" · ");
+  return [await describeMapChoice(settings, gameURL), describeTurnTimeout(settings), describeTurnPace(settings), describeGameLength(settings), describeRated(settings)].filter(Boolean).join(" · ");
 }
 
 async function describeMapChoice(settings, gameURL) {
@@ -185,14 +192,16 @@ export const changeSettingsLabel = "Change map";
 // settingsSelection reads a lobby's game_settings as the form shows them: the
 // map select's value ("template:ID", "file", or "" for no map), the
 // map file the settings carry, and the turn timeout select's value ("none" for
-// no limit), the turn pace select's value and the game length select's value.
+// no limit), the turn pace select's value, the game length select's value and
+// whether the lobby is rated.
 export function settingsSelection(settings) {
   const seconds = settings && "turn_timeout_seconds" in settings ? settings.turn_timeout_seconds : defaultTurnTimeout;
   let map = "";
   if (settings?.map) map = "file";
   else if (settings?.map_template_id) map = `template:${settings.map_template_id}`;
   return { map, file: settings?.map || null, timeout: seconds === null ? "none" : String(seconds),
-    pace: String(settings?.turn_pace_milliseconds ?? defaultTurnPace), length: String(settings?.max_generations ?? defaultGameLength) };
+    pace: String(settings?.turn_pace_milliseconds ?? defaultTurnPace), length: String(settings?.max_generations ?? defaultGameLength),
+    rated: settings?.rated === true };
 }
 
 function node(tag, properties = {}, ...children) {
@@ -201,13 +210,16 @@ function node(tag, properties = {}, ...children) {
   return element;
 }
 
-// The create form's map, turn timeout, turn pace and game length controls. The lobby page constructs
+// The create form's map, turn timeout, turn pace and game length controls, and
+// a Rated checkbox that this page can't change: rated games are set up in the
+// 3D client, where players sign in. The lobby page constructs
 // it with a container for its controls and an onChange callback, and calls
 // choice() when the host creates a lobby. The room's form for changing a
 // waiting lobby's settings is the same, constructed with current, the lobby's
 // game_settings, which it shows as chosen. Without a map to show, the form
-// chooses the first default map once the default maps load. destroy() stops a
-// form that the page removes from listening to the map builder.
+// chooses the first default map once the default maps load, and keeps the
+// lobby's rated setting. destroy() stops a form that the page removes from
+// listening to the map builder.
 export class SettingsForm {
   constructor({ container, onChange = () => {}, current = null, gameURL = "" }) {
     this.onChange = onChange;
@@ -242,13 +254,16 @@ export class SettingsForm {
       ...turnPaces.map(({ milliseconds, label }) => new Option(label, String(milliseconds), false, milliseconds === defaultTurnPace)));
     this.length = node("select", {},
       ...gameLengths.map((turns) => new Option(`${turns} turns`, String(turns), false, turns === defaultGameLength)));
+    this.rated = node("input", { type: "checkbox", disabled: true, checked: false });
     container.append(node("label", {}, "Map", this.select), this.fileInput, this.builderButton, this.status,
       node("label", {}, "Turn timeout", this.timeout),
       node("p", { className: "hint" }, "In a game of bots, a team whose bot doesn’t answer in this time loses. In a real-time game, a player who doesn’t respond for this long has left."),
       node("label", {}, "Turn pace", this.pace),
       node("p", { className: "hint" }, "Used when someone plays by hand: the game is then real-time, with a turn this often."),
       node("label", {}, "Game length", this.length),
-      node("p", { className: "hint" }, "The game ends after this many turns; the team with the most castles wins."));
+      node("p", { className: "hint" }, "The game ends after this many turns; the team with the most castles wins."),
+      node("label", {}, this.rated, "Rated"),
+      node("p", { className: "hint" }, "Rated games are set up in the 3D client."));
     this.builderButton.addEventListener("click", () => this.openBuilder());
     window.addEventListener("message", (event) => this.receive(event), { signal: this.listening.signal });
     this.select.addEventListener("change", () => {
@@ -282,6 +297,7 @@ export class SettingsForm {
       this.length.append(new Option(`${selection.length} turns`, selection.length));
     }
     this.length.value = selection.length;
+    this.rated.checked = selection.rated;
     if (selection.file) {
       this.file = selection.file;
       this.fileSource = "lobby";
@@ -416,6 +432,8 @@ export class SettingsForm {
       throw new Error(this.mapsError ? "Could not load the default maps. Pick another map, or reload the page." : "The default maps are still loading. Try again in a moment.");
     }
     const limits = { turn_timeout_seconds: this.timeout.value === "none" ? null : Number(this.timeout.value), turn_pace_milliseconds: Number(this.pace.value), max_generations: Number(this.length.value) };
+    // The page can't change rated, so a rated lobby stays rated.
+    if (this.rated.checked) limits.rated = true;
     if (this.select.value === "file") {
       if (!this.file) throw new Error(this.fileError || "Choose a map file to load, or pick another map.");
       return { settings: { map: this.file, ...limits }, teams: teamNames(this.file.player_amount) };

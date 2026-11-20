@@ -45,6 +45,15 @@ type FrozenGamePlayer struct {
 	BotPackageKey       *string `gorm:"column:bot_package_key"`
 	BotPackageLanguage  *string `gorm:"column:bot_package_language"`
 	BotPackageSizeBytes *int64  `gorm:"column:bot_package_size_bytes"`
+	// CompetitorID is the competitor that plays this player in a rated game,
+	// island_competitors.id, with no foreign key, since competitors outlive
+	// games and games never hold them back: an account's manual competitor
+	// for a person who plays by hand, a bot name's for a named bot, and a
+	// house bot's for a default bot seat. Nil in a game that isn't rated.
+	CompetitorID *string `gorm:"column:competitor_id;type:uuid"`
+	// BotName is the bot name of CompetitorID when it is a bot name, as it
+	// was at the start, which GenerationState.bot shows. Nil otherwise.
+	BotName *string `gorm:"column:bot_name"`
 	// LastSeenAt is when the server last heard from the player in a real-time
 	// game: the game's start, then the latest game request made as them, with
 	// a player token or a submit token, written at most every SeenWriteInterval.
@@ -153,6 +162,8 @@ type GenerationState struct {
 	LogLinesStored uint `json:"log_lines_stored" doc:"How many game log lines you have stored for this generation, out of the 100 a player may store per generation. 0 when there are none. A client that restarts during a turn continues counting from it."`
 
 	Memory BotMemory `json:"memory" doc:"The memory sent with your latest completed turn of this game, for your bot's next BotTurn.memory. Null before your first completed turn, and after a completed turn without memory."`
+
+	Rated bool `json:"rated" doc:"Whether the game is rated: its lobby's rated setting at the start. Every team of a rated game is played by a competitor, a signed-in player's hand play or bot name or a house bot, and bot.name names a player's bot name."`
 
 	Bot BotChoiceView `json:"bot" doc:"Your bot in this game, the one you chose in the lobby, copied when the game started. For kind localhost your client delivers each turn to your bot, on bot.port, which submits its answer. For kind default the backend plays your turns itself as soon as each generation is created. For kinds hosted and uploaded the server plays your turns with your bot, without your client. For kind manual you play by hand in the 3D client, which sends your commands; nothing plays or relays you. Only for kind localhost, and for relayed_bots, does your client relay anything."`
 

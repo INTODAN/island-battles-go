@@ -86,6 +86,8 @@ type botChoice struct {
 	// Port is a localhost bot's port, where a game client in the browser
 	// delivers its turns. A Client plays the seat itself, on no port.
 	Port *uint `json:"port,omitempty"`
+	// Name is the bot name that the seat's bot plays as in a rated game.
+	Name string `json:"name,omitempty"`
 }
 
 // relayedBot is a localhost bot seat that the host's game client in the
@@ -126,20 +128,23 @@ func (bot botChoice) playedByServer() string {
 // GenerationEvent and GameEndedEvent pushed on the player's channel. It is
 // the contract's GenerationState.
 type generationState struct {
-	Schema         string       `json:"$schema,omitempty"`
-	GameID         uint         `json:"game_id"`
-	LobbyID        string       `json:"lobby_id"`
-	LobbyRound     int64        `json:"lobby_round"`
-	GenerationID   uint         `json:"generation_id"`
-	PlayerID       string       `json:"player_id"`
-	TeamColor      uint         `json:"team_color"`
-	Channel        string       `json:"channel"`
-	Submitted      bool         `json:"submitted"`
-	Generation     Generation   `json:"generation"`
-	TurnNumber     int          `json:"turn_number"`
-	MaxGenerations int          `json:"max_generations"`
-	LogLinesStored uint         `json:"log_lines_stored"`
-	Memory         Memory       `json:"memory"`
+	Schema         string     `json:"$schema,omitempty"`
+	GameID         uint       `json:"game_id"`
+	LobbyID        string     `json:"lobby_id"`
+	LobbyRound     int64      `json:"lobby_round"`
+	GenerationID   uint       `json:"generation_id"`
+	PlayerID       string     `json:"player_id"`
+	TeamColor      uint       `json:"team_color"`
+	Channel        string     `json:"channel"`
+	Submitted      bool       `json:"submitted"`
+	Generation     Generation `json:"generation"`
+	TurnNumber     int        `json:"turn_number"`
+	MaxGenerations int        `json:"max_generations"`
+	LogLinesStored uint       `json:"log_lines_stored"`
+	Memory         Memory     `json:"memory"`
+	// Rated says whether the game is rated. A Client joins with a guest
+	// credential, which a rated lobby refuses, so it never plays one.
+	Rated          bool         `json:"rated"`
 	Bot            botChoice    `json:"bot"`
 	RelayedBots    []relayedBot `json:"relayed_bots"`
 	TurnDeadlineAt *time.Time   `json:"turn_deadline_at"`

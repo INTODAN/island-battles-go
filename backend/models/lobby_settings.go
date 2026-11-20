@@ -14,8 +14,8 @@ import (
 // LobbySettings are the Island Battles settings a host chooses when creating a
 // lobby, its game_settings object. The lobby hands them back in the started
 // snapshot. They hold exactly one map choice: a default map by its template
-// ID, or a whole map file. They also set the turn timeout, the game's length
-// and the turn pace of a real-time game.
+// ID, or a whole map file. They also set the turn timeout, the game's length,
+// the turn pace of a real-time game and whether the game is rated.
 type LobbySettings struct {
 	MapTemplateID uint             `json:"map_template_id,omitempty" minimum:"1" doc:"Start on this default map, a map_template_id from GET /map/templates. Give this or map, not both."`
 	Map           *MapTemplateView `json:"map,omitempty" doc:"Start on this map file. Give this or map_template_id, not both."`
@@ -28,6 +28,8 @@ type LobbySettings struct {
 	// TurnPaceMilliseconds is always set by ParseLobbySettings, to
 	// DefaultTurnPaceMilliseconds when the settings leave it out.
 	TurnPaceMilliseconds uint `json:"turn_pace_milliseconds,omitempty" minimum:"500" maximum:"5000" default:"1000" doc:"How long each turn lasts in a real-time game, in whole milliseconds from 500 to 5000; 1000 when left out. A game is real-time when a player on its roster plays by hand: each turn then ends this long after its generation was created, and the server plays it with the commands that arrived, so a player who sent nothing passes. A game of bots only doesn't use it and waits for every player."`
+	// Rated is false when the settings leave it out.
+	Rated bool `json:"rated,omitempty" default:"false" doc:"Whether the game is rated, false when left out. A rated lobby starts only when every member is signed in and plays by hand or with one of their bot names, no two teams belong to one account, and every bot seat is a default bot level, each level once. The game then records the competitor of each team."`
 }
 
 // The turn paces a lobby may set for a real-time game, in milliseconds, and
@@ -93,9 +95,10 @@ func NewLobbySettingsError(field, message string) *LobbySettingsError {
 // seconds from MinTurnTimeoutSeconds to MaxTurnTimeoutSeconds, and a
 // max_generations that is not a whole number from MinMaxGenerations to
 // MaxMaxGenerations, and a turn_pace_milliseconds that is not a whole number
-// from MinTurnPaceMilliseconds to MaxTurnPaceMilliseconds. Settings without a
-// turn timeout get DefaultTurnTimeoutSeconds, without max_generations
-// DefaultMaxGenerations, and without a pace DefaultTurnPaceMilliseconds.
+// from MinTurnPaceMilliseconds to MaxTurnPaceMilliseconds, and a rated that
+// is not a JSON boolean. Settings without a turn timeout get
+// DefaultTurnTimeoutSeconds, without max_generations DefaultMaxGenerations,
+// without a pace DefaultTurnPaceMilliseconds, and without rated false.
 // Whether a template
 // exists, and whether a map fits the lobby's teams, are checked separately.
 // Every rejection is a *LobbySettingsError.
@@ -105,8 +108,8 @@ func ParseLobbySettings(raw json.RawMessage) (LobbySettings, error) {
 		return LobbySettings{}, &LobbySettingsError{Details: []*huma.ErrorDetail{{Location: LobbySettingsLocation, Message: "must be a JSON object"}}}
 	}
 	for _, field := range slices.Sorted(maps.Keys(fields)) {
-		if field != "map_template_id" && field != "map" && field != "turn_timeout_seconds" && field != "max_generations" && field != "turn_pace_milliseconds" {
-			return LobbySettings{}, NewLobbySettingsError(field, "is not an Island Battles setting; the settings are map_template_id, map, turn_timeout_seconds, max_generations and turn_pace_milliseconds")
+		if field != "map_template_id" && field != "map" && field != "turn_timeout_seconds" && field != "max_generations" && field != "turn_pace_milliseconds" && field != "rated" {
+			return LobbySettings{}, NewLobbySettingsError(field, "is not an Island Battles setting; the settings are map_template_id, map, turn_timeout_seconds, max_generations, turn_pace_milliseconds and rated")
 		}
 	}
 	rawTemplateID, hasTemplateID := fields["map_template_id"]
@@ -131,7 +134,11 @@ func ParseLobbySettings(raw json.RawMessage) (LobbySettings, error) {
 	if err != nil {
 		return LobbySettings{}, err
 	}
-	settings := LobbySettings{TurnTimeoutSeconds: timeout, MaxGenerations: maxGenerations, TurnPaceMilliseconds: pace}
+	rated, err := parseRated(fields)
+	if err != nil {
+		return LobbySettings{}, err
+	}
+	settings := LobbySettings{TurnTimeoutSeconds: timeout, MaxGenerations: maxGenerations, TurnPaceMilliseconds: pace, Rated: rated}
 	if hasTemplateID {
 		if err := json.Unmarshal(rawTemplateID, &settings.MapTemplateID); err != nil || settings.MapTemplateID == 0 {
 			return LobbySettings{}, NewLobbySettingsError("map_template_id", "must be the positive integer ID of a default map")
@@ -201,6 +208,22 @@ func parseTurnPace(fields map[string]json.RawMessage) (uint, error) {
 		return 0, NewLobbySettingsError("turn_pace_milliseconds", fmt.Sprintf("must be a whole number of milliseconds from %d to %d", MinTurnPaceMilliseconds, MaxTurnPaceMilliseconds))
 	}
 	return pace, nil
+}
+
+// parseRated reads rated from the settings' fields, and false when absent. It
+// must be a JSON boolean: null, 1 and "true" are rejected.
+func parseRated(fields map[string]json.RawMessage) (bool, error) {
+	raw, present := fields["rated"]
+	if !present {
+		return false, nil
+	}
+	switch strings.TrimSpace(string(raw)) {
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	}
+	return false, NewLobbySettingsError("rated", "must be true or false")
 }
 
 // MapTeamCount returns the number of teams a map is made for: its

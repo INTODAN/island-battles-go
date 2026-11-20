@@ -22,11 +22,14 @@ type GameSettings struct {
 	// TurnPaceMilliseconds is how long each turn of a real-time game lasts.
 	// The start uses it only when a player plays by hand.
 	TurnPaceMilliseconds uint
+	// Rated makes the game rated: each team is played by a competitor.
+	Rated bool
 }
 
 // LobbyGameSettings returns the game settings that a lobby's game settings
 // choose: the map, ready for models.BuildMap, the turn timeout in seconds, or
-// nil for no limit, the game's last generation and the turn pace.
+// nil for no limit, the game's last generation, the turn pace and whether the
+// game is rated.
 // The settings must choose a map: a default map that exists, or a map file.
 // The map must be made for exactly teamCount teams: team colours 1 to
 // teamCount, in the lobby's team order. Absent settings choose no map. A
@@ -40,7 +43,7 @@ func LobbyGameSettings(database *gorm.DB, rawSettings json.RawMessage, teamCount
 	if err != nil {
 		return GameSettings{}, err
 	}
-	chosen := GameSettings{TurnTimeoutSeconds: settings.TurnTimeoutSeconds, MaxGenerations: settings.MaxGenerations, TurnPaceMilliseconds: settings.TurnPaceMilliseconds}
+	chosen := GameSettings{TurnTimeoutSeconds: settings.TurnTimeoutSeconds, MaxGenerations: settings.MaxGenerations, TurnPaceMilliseconds: settings.TurnPaceMilliseconds, Rated: settings.Rated}
 	if settings.Map != nil {
 		if err := models.CheckMapTeams(*settings.Map, teamCount, "map"); err != nil {
 			return GameSettings{}, err

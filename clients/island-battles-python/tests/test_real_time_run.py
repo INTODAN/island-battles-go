@@ -51,6 +51,7 @@ def state(generation_id: int, pace: int | None, **fields: object) -> dict:
         "memory": None,
         "bot": {"kind": "localhost", "port": 41414},
         "relayed_bots": [],
+        "rated": False,
         "departures": [],
         "turn_deadline_at": None,
         "turn_pace_milliseconds": pace,

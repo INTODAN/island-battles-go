@@ -106,8 +106,9 @@ func memberSettingsShape(serverBots bool) string {
 // its shape only: {"bot": {"kind": "manual"}}, {"bot": {"kind": "localhost"}}, {"bot": {"kind":
 // "default", "level": N}} with a level that GET /bots/defaults lists, and,
 // with serverBots, {"bot": {"kind": "hosted", "url": "…"}} or {"bot":
-// {"kind": "uploaded", "package_id": "…"}}. It reads nothing, so it checks
-// neither the URL's host nor the package; ValidateMemberSettings does. Its
+// {"kind": "uploaded", "package_id": "…"}}. A localhost, hosted or uploaded
+// bot may also have a name. It reads nothing, so it checks neither the URL's
+// host, nor the package, nor the name; ValidateMemberSettings does. Its
 // errors are written for the person who sets the settings.
 func MemberBot(settings json.RawMessage, serverBots bool) (models.MemberBotView, error) {
 	var decoded MemberSettings
@@ -149,6 +150,8 @@ func checkMemberBotShape(bot models.MemberBotView, serverBots bool) error {
 		return reject(422, "url is only for kind hosted")
 	case bot.PackageID != "" && bot.Kind != models.UploadedBot:
 		return reject(422, "package_id is only for kind uploaded")
+	case bot.Name != "" && bot.Kind != models.LocalhostBot && bot.Kind != models.HostedBot && bot.Kind != models.UploadedBot:
+		return reject(422, "name is only for kinds localhost, hosted and uploaded: by hand you play as your account, and a default bot as a house bot")
 	}
 	switch bot.Kind {
 	case models.DefaultBot:
@@ -190,13 +193,20 @@ func defaultLevelMessage(sentence string) string {
 // ValidateMemberSettings is Island Battles' member settings validator for the
 // lobby: the settings name the person's bot, as MemberBot reads it. A hosted
 // bot's URL must follow the rules of hostedbot.Check, and an uploaded bot
-// must be a ready package of the lobby. It learns who sets the settings,
-// member, but checks nothing of them yet: the ready check refuses a package
-// of someone else.
+// must be a ready package of the lobby. A bot's name must be a live bot name
+// of member's account, compared without regard to case; a guest has none.
+// The name is checked in every lobby, rated or not, so a member keeps their
+// choice when the host turns rated on and off. The ready check refuses a
+// package of someone else, and a name deleted since.
 func (rules BotRules) ValidateMemberSettings(ctx context.Context, lobbyID string, member domain.MemberIdentity, settings json.RawMessage) error {
 	bot, err := MemberBot(settings, rules.ServerBots.Enabled)
 	if err != nil {
 		return err
+	}
+	if bot.Name != "" {
+		if err := rules.checkBotName(ctx, member.AccountID, bot.Name); err != nil {
+			return err
+		}
 	}
 	switch bot.Kind {
 	case models.HostedBot:
@@ -262,6 +272,14 @@ func isUUID(value string) bool {
 // uploaded bot, and the lobby's packages, and at the start the runners'
 // cached compute, only when a member or a seat has an uploaded bot. The
 // game API reads the snapshot without waiting for the lobby's lock.
+//
+// A rated lobby (LobbyRated) checks more (checkRated): every member is
+// signed in and plays by hand or with a bot under one of their live bot
+// names, and at the start no two members share an account and every seat is
+// a default bot level, each level once. To learn whether the lobby is
+// rated, the gate reads the lobby's snapshot for a member getting ready too,
+// unless they are signed in and play by hand, which every lobby allows; it
+// reads the members' bot names in one query.
 func (rules BotRules) ReadyGate(ctx context.Context, lobbyID string) (domain.ReadyCheck, error) {
 	return func(members []domain.ReadyMember, atStart bool) error {
 		return rules.checkReady(ctx, lobbyID, members, atStart)
@@ -280,17 +298,26 @@ func (rules BotRules) snapshot(ctx context.Context, lobbyID string) (*domain.Sna
 	case ctx.Err() != nil:
 		return nil, ctx.Err()
 	default:
-		return nil, fmt.Errorf("%w: read the lobby's seats: %w", domain.ErrUnavailable, err)
+		return nil, fmt.Errorf("%w: read the lobby: %w", domain.ErrUnavailable, err)
 	}
 }
 
 func (rules BotRules) checkReady(ctx context.Context, lobbyID string, members []domain.ReadyMember, atStart bool) error {
 	serverBots := rules.ServerBots.Enabled
+	// lobby is the snapshot that the start reads for its seats.
 	var lobby *domain.Snapshot
-	if atStart {
-		var err error
-		if lobby, err = rules.snapshot(ctx, lobbyID); err != nil {
+	if atStart || mayFailRated(members) {
+		read, err := rules.snapshot(ctx, lobbyID)
+		if err != nil {
 			return err
+		}
+		if read != nil && LobbyRated(read.Lobby.GameSettings) {
+			if err := rules.checkRated(ctx, *read, members, atStart); err != nil {
+				return err
+			}
+		}
+		if atStart {
+			lobby = read
 		}
 	}
 	if !serverBots {
@@ -528,6 +555,11 @@ type frozenBot struct {
 	Level     uint
 	URL       string
 	PackageID string
+	// Name is the bot name that a member's bot plays under, which only a
+	// rated game records.
+	Name string
+	// Competitor plays the player in a rated game, and is nil otherwise.
+	Competitor *models.Competitor
 	// Port is a localhost bot's port, 0 for the default one.
 	Port uint
 	// RelayPlayerID is the roster player who relays a localhost bot seat:
@@ -589,7 +621,7 @@ func lobbyBots(snapshot domain.Snapshot) (map[string]frozenBot, error) {
 		if err != nil {
 			continue
 		}
-		frozen := frozenBot{Kind: bot.Kind, URL: bot.URL, PackageID: bot.PackageID}
+		frozen := frozenBot{Kind: bot.Kind, URL: bot.URL, PackageID: bot.PackageID, Name: bot.Name}
 		if bot.Level != nil {
 			frozen.Level = *bot.Level
 		}
@@ -606,6 +638,14 @@ func lobbyBots(snapshot domain.Snapshot) (map[string]frozenBot, error) {
 // language; a package deleted since the ready check leaves them unset.
 func (bot frozenBot) freeze(transaction *gorm.DB, lobbyID string, player *models.FrozenGamePlayer) error {
 	player.BotKind = bot.Kind
+	if bot.Competitor != nil {
+		competitorID := bot.Competitor.ID
+		player.CompetitorID = &competitorID
+		if bot.Competitor.Kind == models.BotCompetitor && bot.Competitor.Name != nil {
+			name := *bot.Competitor.Name
+			player.BotName = &name
+		}
+	}
 	switch bot.Kind {
 	case models.LocalhostBot:
 		port := models.LocalhostPort(nil)
@@ -765,11 +805,22 @@ func UploadedBotSeatName(ownerName string) string {
 // every other localhost bot seat's that they added, unless the seat is
 // already there with these settings, when the host sends its request again.
 // The start checks the ports again, since the host can change their own port
-// later.
+// later. In a rated lobby, read from the snapshot's game_settings, a seat
+// must be a default bot level that no active seat has (checkRatedSeat); the
+// start checks the seats again.
 func (rules BotRules) ValidateBotSeat(ctx context.Context, lobbyID, playerID string, settings json.RawMessage) (string, error) {
 	decoded, err := seatSettings(settings, rules.ServerBots.Enabled)
 	if err != nil {
 		return "", err
+	}
+	lobby, err := rules.snapshot(ctx, lobbyID)
+	if err != nil {
+		return "", err
+	}
+	if lobby != nil && LobbyRated(lobby.Lobby.GameSettings) {
+		if err := checkRatedSeat(*lobby, decoded); err != nil {
+			return "", err
+		}
 	}
 	switch {
 	case decoded.BotLevel != nil:
@@ -778,10 +829,6 @@ func (rules BotRules) ValidateBotSeat(ctx context.Context, lobbyID, playerID str
 		const notTheAdder = "bot_relay_player_id must be your own player ID, as the lobby's host: only the tab of the host who adds a localhost bot seat relays it"
 		if playerID != "" && decoded.BotRelayPlayerID != playerID {
 			return "", reject(422, notTheAdder)
-		}
-		lobby, err := rules.snapshot(ctx, lobbyID)
-		if err != nil {
-			return "", err
 		}
 		port := *decoded.BotLocalhostPort
 		if lobby != nil {

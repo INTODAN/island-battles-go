@@ -152,3 +152,28 @@ test("the turn pace is sent, and the room's form shows the lobby's current one",
   await loaded();
   assert.equal(odd.choice().settings.turn_pace_milliseconds, 1500);
 });
+
+// The texts of an element's descendants, in order.
+function texts(element) {
+  return element.children.flatMap((child) => (child instanceof FakeElement ? texts(child) : [String(child)]));
+}
+
+test("the Rated checkbox shows the lobby's setting, can't be changed here, and keeps it", async () => {
+  games += 1;
+  const container = new FakeElement("div");
+  const created = new SettingsForm({ container, gameURL: `https://game${games}.example` });
+  await loaded();
+  assert.equal(created.rated.type, "checkbox");
+  assert.equal(created.rated.disabled, true);
+  assert.equal(created.rated.checked, false);
+  assert.ok(texts(container).includes("Rated"));
+  assert.ok(texts(container).includes("Rated games are set up in the 3D client."));
+  assert.equal("rated" in created.choice().settings, false);
+  // A rated lobby's form shows it checked, and a change of map keeps it.
+  const room = form({ current: { map_template_id: 7, rated: true } });
+  await loaded();
+  assert.equal(room.rated.checked, true);
+  room.select.value = "template:4";
+  assert.equal(room.choice().settings.rated, true);
+  assert.equal(room.choice().settings.map_template_id, 4);
+});

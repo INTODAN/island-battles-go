@@ -41,6 +41,16 @@ func (accounts Accounts) Seen(ctx context.Context, accountID, displayName string
 	})
 }
 
+// Ensure stores an account the game hasn't seen, with its manual competitor,
+// and changes nothing of an account it knows: displayName is only the
+// account's first one. A start uses it with the name that the lobby copied
+// when the member joined, which may be older than the account's.
+func (accounts Accounts) Ensure(ctx context.Context, accountID, displayName string) error {
+	return accounts.Database.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
+		return dal.EnsureAccount(transaction, accountID, displayName)
+	})
+}
+
 // Read returns the caller's account, with its hand play and its bot names.
 func (accounts Accounts) Read(ctx context.Context, principal domain.Principal) (models.IslandAccountView, error) {
 	if err := signedIn(principal); err != nil {

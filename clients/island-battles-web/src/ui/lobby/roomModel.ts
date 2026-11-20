@@ -440,9 +440,9 @@ export function describeRealTime(
 }
 
 /**
- * One line naming the map and the turn limit a lobby's settings chose, and its game length when
- * that isn't 300 turns. A game where someone plays by hand is real-time and has no turn limit, so
- * `realTime` swaps the limit's phrase for the turn pace's.
+ * One line naming the map and the turn limit a lobby's settings chose, its game length when
+ * that isn't 300 turns, and "Rated" for a rated lobby. A game where someone plays by hand is
+ * real-time and has no turn limit, so `realTime` swaps the limit's phrase for the turn pace's.
  */
 export function describeSettings(
   settings: Record<string, unknown> | undefined,
@@ -462,5 +462,12 @@ export function describeSettings(
     const found = templates.find((item) => item.map_template_id === id);
     map = found ? `Map: ${found.map_name}` : `Map: default map #${id}`;
   }
-  return [map, limit, describeGameLength(settings)].filter(Boolean).join(" · ");
+  return [
+    map,
+    limit,
+    describeGameLength(settings),
+    settings?.rated === true ? "Rated" : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
