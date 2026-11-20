@@ -279,6 +279,76 @@ run "serves_the_game_through_cloudfront" {
   }
 }
 
+# The public leaderboard (#367) ------------------------------------------------
+
+run "caches_the_leaderboard_for_as_long_as_the_backend_says" {
+  command = plan
+
+  # AWS assigns these on creation. Known during the plan, the behaviours'
+  # policies can be told apart.
+  override_resource {
+    target          = aws_lambda_function_url.backend
+    override_during = plan
+    values = {
+      function_url = "https://abcdefghijklmnopqrstuvwxyz012345.lambda-url.eu-central-1.on.aws/"
+    }
+  }
+
+  override_resource {
+    target          = aws_cloudfront_cache_policy.origin_cache_control
+    override_during = plan
+    values = {
+      id = "11111111-2222-3333-4444-555555555555"
+    }
+  }
+
+  override_resource {
+    target          = aws_cloudfront_cache_policy.leaderboard
+    override_during = plan
+    values = {
+      id = "66666666-7777-8888-9999-000000000000"
+    }
+  }
+
+  # GET /leaderboard and GET /leaderboard/{competitor_id}, which answer with
+  # Cache-Control: public, max-age=60. The admin's routes are under /admin/,
+  # which the uncached default serves.
+  assert {
+    condition = (
+      length([for behavior in aws_cloudfront_distribution.game.ordered_cache_behavior : behavior if behavior.path_pattern == "/leaderboard*"]) == 1 &&
+      alltrue([for behavior in aws_cloudfront_distribution.game.ordered_cache_behavior : (
+        behavior.target_origin_id == "backend" &&
+        behavior.viewer_protocol_policy == "redirect-to-https" &&
+        toset(behavior.allowed_methods) == toset(["GET", "HEAD", "OPTIONS"]) &&
+        toset(behavior.cached_methods) == toset(["GET", "HEAD"]) &&
+        behavior.compress &&
+        behavior.cache_policy_id == aws_cloudfront_cache_policy.leaderboard.id &&
+        behavior.origin_request_policy_id == data.aws_cloudfront_origin_request_policy.all_viewer_except_host_header.id
+      ) if behavior.path_pattern == "/leaderboard*"]) &&
+      !anytrue([for behavior in aws_cloudfront_distribution.game.ordered_cache_behavior : startswith(behavior.path_pattern, "/admin")])
+    )
+    error_message = "/leaderboard* must reach the Lambda with GET, HEAD and OPTIONS only, compressed, through the leaderboard's cache policy and the default behaviour's origin request policy, and /admin/ must stay uncached."
+  }
+
+  # The answer depends on the query (kind, limit, offset) and, through CORS,
+  # on Origin, so they are in the key. Host never is: CloudFront sends a
+  # cache-key header to the origin, and the Function URL refuses a Host that
+  # isn't its own. Cookies in the key would give every visitor their own copy.
+  assert {
+    condition = (
+      aws_cloudfront_cache_policy.leaderboard.min_ttl == 0 &&
+      aws_cloudfront_cache_policy.leaderboard.default_ttl == 0 &&
+      aws_cloudfront_cache_policy.leaderboard.max_ttl >= 60 &&
+      one(one(aws_cloudfront_cache_policy.leaderboard.parameters_in_cache_key_and_forwarded_to_origin).headers_config).header_behavior == "whitelist" &&
+      toset(one(one(one(aws_cloudfront_cache_policy.leaderboard.parameters_in_cache_key_and_forwarded_to_origin).headers_config).headers).items) == toset(["Origin"]) &&
+      one(one(aws_cloudfront_cache_policy.leaderboard.parameters_in_cache_key_and_forwarded_to_origin).cookies_config).cookie_behavior == "none" &&
+      one(one(aws_cloudfront_cache_policy.leaderboard.parameters_in_cache_key_and_forwarded_to_origin).query_strings_config).query_string_behavior == "whitelist" &&
+      toset(one(one(one(aws_cloudfront_cache_policy.leaderboard.parameters_in_cache_key_and_forwarded_to_origin).query_strings_config).query_strings).items) == toset(["kind", "limit", "offset"])
+    )
+    error_message = "The leaderboard's cache policy must cache only what the origin allows, keyed on the path, kind, limit, offset and Origin, and on no cookie."
+  }
+}
+
 # The web client at /play/ (#104) ----------------------------------------------
 
 run "serves_the_web_client_from_a_private_bucket" {
@@ -382,14 +452,14 @@ run "serves_the_web_client_from_a_private_bucket" {
   # kept. No API path may match these patterns.
   assert {
     condition = (
-      toset([for behavior in aws_cloudfront_distribution.game.ordered_cache_behavior : behavior.path_pattern if behavior.target_origin_id == "backend" && !startswith(behavior.path_pattern, "/lobby/")]) == toset(["/game/demo/*", "/game/demo-viewer/*", "/map/builder/*"]) &&
+      toset([for behavior in aws_cloudfront_distribution.game.ordered_cache_behavior : behavior.path_pattern if behavior.target_origin_id == "backend" && !startswith(behavior.path_pattern, "/lobby/") && behavior.path_pattern != "/leaderboard*"]) == toset(["/game/demo/*", "/game/demo-viewer/*", "/map/builder/*"]) &&
       alltrue([for behavior in aws_cloudfront_distribution.game.ordered_cache_behavior : (
         behavior.viewer_protocol_policy == "redirect-to-https" &&
         toset(behavior.allowed_methods) == toset(["GET", "HEAD", "OPTIONS"]) &&
         behavior.compress &&
         behavior.cache_policy_id == aws_cloudfront_cache_policy.origin_cache_control.id &&
         behavior.origin_request_policy_id == data.aws_cloudfront_origin_request_policy.all_viewer_except_host_header.id
-      ) if behavior.target_origin_id == "backend" && !startswith(behavior.path_pattern, "/lobby/")])
+      ) if behavior.target_origin_id == "backend" && !startswith(behavior.path_pattern, "/lobby/") && behavior.path_pattern != "/leaderboard*"])
     )
     error_message = "The Lambda's static pages must follow the origin's Cache-Control, compressed, with GET, HEAD and OPTIONS only, and the default behaviour's origin request policy."
   }

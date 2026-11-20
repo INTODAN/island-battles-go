@@ -156,7 +156,7 @@ The game verifies a token with the lobby's public keys, which it reads from the 
 
 ## Accounts and bot names
 
-A player who signs in to the lobby with Google (the lobby's [accounts](https://github.com/INTODAN/mpl#accounts)) has an **account**, and their player token names it (`account_id`); a guest's names none. The game learns the account and its display name from the token alone, never from the lobby's tables, and [`handlers.PlayerTokens`](handlers/player_token.go) puts it in the request's principal. A signed-in player registers **bot names** in their account, for the leaderboard (#358), and a [rated lobby](#rated-lobbies) records which competitor plays each team, whose [rating](#ratings) the game's end changes.
+A player who signs in to the lobby with Google (the lobby's [accounts](https://github.com/INTODAN/mpl#accounts)) has an **account**, and their player token names it (`account_id`); a guest's names none. The game learns the account and its display name from the token alone, never from the lobby's tables, and [`handlers.PlayerTokens`](handlers/player_token.go) puts it in the request's principal. A signed-in player registers **bot names** in their account, for the [leaderboard](#leaderboard) (#358), and a [rated lobby](#rated-lobbies) records which competitor plays each team, whose [rating](#ratings) the game's end changes.
 
 **Competitors.** A *competitor* is what gets a rating, at 1500 before its first rated game:
 
@@ -198,6 +198,34 @@ Two new competitors at 1500: the winner goes to 1520 and the loser to 1480, and 
 **The outcome says what changed.** A rated game's outcome has `ratings`, one per team in colour order, `{"team_color", "competitor_id", "kind", "name", "owner", "before", "after"}`, with `name` as the competitor is shown (`Kraken`, the account's display name for hand play, `Bot (level 2)`) and, for a bot name only, `owner`, its account's display name. It is stored in the game's outcome, so `GenerationState`, `WatchState`, the `game.ended` events and a saved demo all carry it, for the week the game exists. An unrated game's outcome has no `ratings`.
 
 **History.** `island_rating_events` holds one row for each competitor of each rated game: `id`, `game_id` (no foreign key: the row outlives the game), `competitor_id`, `result` (`win`, `draw` or `loss`), `rating_before`, `rating_after`, `k` (40 or 20), `opponents` (the game's other teams' competitors, `[{"competitor_id", "rating_before"}]`, without names, which are read from the competitors when shown) and `ended_at`. Its unique index on `(game_id, competitor_id)` is what stops a game from being rated twice: a second rating of the game fails, and its transaction changes nothing. An index on `(competitor_id, ended_at)` serves a competitor's recent results. Like the accounts and competitors, the history is **never reset**, changes only through the numbered migrations in [`dal/migrations/`](dal/migrations/), and [game retention](#game-retention) never deletes it.
+
+## Leaderboard
+
+The public leaderboard (#367, part of #358) ranks the [competitors](#accounts-and-bot-names) by their [rating](#ratings). It needs no sign-in and no credential, and the 3D client shows it ([`services.Leaderboard`](services/leaderboard.go)).
+
+**Who is listed.** A competitor is listed after its first rated game, while it isn't deleted and its account isn't [hidden](#removing-a-name-from-the-leaderboard): each bot name, shown with its owner's display name ("Kraken, by Dana"), each account's hand play, under the account's display name, and the house bots, `Bot (level N)`, marked as `house`. The display names are the ones players chose in the lobby; the game holds no Google name, picture or email to show.
+
+**The order** is the rating, highest first, then more rated games first, then the older competitor (and the ID, so paging is stable). Ratings are shown rounded to whole numbers, halves up ([`models.RoundRating`](models/leaderboard.go)), and `rank` is the place in that order from 1, where equal ratings as shown get the same rank and the next skips as many places: 1520, 1500 and 1500 are ranked 1, 2 and 2.
+
+| Route | Answers |
+| --- | --- |
+| `GET /leaderboard` (`listIslandLeaderboard`) | `{"total", "entries"}`, a page of the leaderboard. `kind` (`bot`, `manual` or `house`; absent, all) lists one kind, ranked among itself; `limit` (1 to 100, default 50) and `offset` (default 0) page through it, and `total` counts that kind. An entry is `{"rank", "competitor_id", "kind", "name", "owner", "rating", "games", "wins", "draws", "losses", "last_played_at"}`, with `owner` the account's display name for a bot and null otherwise. |
+| `GET /leaderboard/{competitor_id}` (`getIslandCompetitor`) | The competitor's entry, ranked among all kinds, and `history`, its latest 50 results from the [rating history](#ratings), newest first: `{"ended_at", "result", "rating_before", "rating_after", "opponents"}`, each opponent `{"competitor_id", "name", "owner", "rating_before"}` by the name it is shown by now. An opponent that was deleted since, or whose account is hidden, is `Deleted bot` or `Deleted player`, with a null `competitor_id` and `owner`. A competitor that isn't listed (unknown, deleted, hidden, or without a rated game) is 404. |
+
+The history outlives the games, which [game retention](#game-retention) deletes after a week, so a competitor's page keeps its results without a replay.
+
+**The cache.** Both answer with `Cache-Control: public, max-age=60`, and CloudFront keeps each answer for that minute, keyed on the path, `kind`, `limit`, `offset` and the `Origin` header, by which the CORS answer varies ([the deploy guide](../deploy/README.md#aws-resources)). So a visitor costs PostgreSQL at most one read a minute per page, and a game's end, a new name or a removal shows on the leaderboard within a minute. A page reads the database three times (the count, the page and the rank of its first entry), and a competitor's page five times (the competitor, its rank, its history, its opponents and their accounts).
+
+### Removing a name from the leaderboard
+
+The owner takes an offensive name off the leaderboard with two admin routes, behind the admin API key as `POST /map/create` is (`X-Admin-API-Key`, `ISLAND_BATTLES_ADMIN_API_KEY`: 401 without it or with a wrong one, 403 for every request while the deployment sets none). They aren't in the [player API document](#player-api-document). There's no blocklist, report button or rename.
+
+| Route | Does |
+| --- | --- |
+| `DELETE /admin/competitors/{competitor_id}` (`removeIslandBotName`) | Deletes a bot name as its owner could, 204: its rating goes with it, it leaves the leaderboard and its page is 404, other competitors' history shows it as `Deleted bot`, and the name is free at once, so the owner can register another. A `manual` or `house` competitor is 422, and an unknown or already deleted one 404. |
+| `PUT /admin/accounts/{account_id}/hidden` (`setIslandAccountHidden`) | `{"hidden": true}`, 204, for an offensive display name: hides the account's hand play and every bot name of it from the leaderboard and from other competitors' history (`Deleted player`, `Deleted bot`). `{"hidden": false}` shows them again. Nothing is deleted: the account keeps its names and ratings and can still play, rated too. An account the game doesn't know is 404. |
+
+Both show on the leaderboard within the minute that CloudFront keeps its answers. The [admin MCP server](#admin-mcp-server) finds the IDs to send.
 
 ## Interactive Island Battles generations
 
@@ -792,6 +820,16 @@ claude mcp add island-battles-admin \
 go build -o ~/.local/bin/island-battles-admin-mcp ./backend/cmd/admin-mcp
 claude mcp add island-battles-admin --env ISLAND_BATTLES_ADMIN_DATABASE_URL=... --env ISLAND_BATTLES_ADMIN_LOBBY_DATABASE_URL=... -- ~/.local/bin/island-battles-admin-mcp
 ```
+
+**Removing an offensive name.** The server stays read-only, so it only finds the name; the [admin routes](#removing-a-name-from-the-leaderboard) remove it. Ask `query` in the `game` database for the competitor or the account, for example `SELECT c.id, c.kind, c.name, c.account_id, a.display_name, a.hidden FROM island_competitors c LEFT JOIN island_accounts a USING (account_id) WHERE c.deleted_at IS NULL AND (c.name ILIKE '%kraken%' OR a.display_name ILIKE '%kraken%')`. Then delete an offensive bot name by its `id`, or hide the account of an offensive display name by its `account_id`, with the deployment's admin API key:
+
+```sh
+curl -X DELETE https://island-battles.elidan.org/admin/competitors/<id> -H "X-Admin-API-Key: $ISLAND_BATTLES_ADMIN_API_KEY"
+curl -X PUT https://island-battles.elidan.org/admin/accounts/<account_id>/hidden -H "X-Admin-API-Key: $ISLAND_BATTLES_ADMIN_API_KEY" \
+  -H 'Content-Type: application/json' -d '{"hidden": true}'
+```
+
+Each answers 204, and the leaderboard shows the change within a minute.
 
 Rebuild it after pulling changes to the tools. `claude mcp list` shows whether the server connects, and `/mcp` inside Claude Code shows its tools. Other MCP clients start the same command with the same environment variables. To use the local database and production side by side, register the server twice under different names.
 

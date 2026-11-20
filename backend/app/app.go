@@ -165,7 +165,7 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	environment := handlers.Env{DB: database, ServerBots: config.ServerBots, BotCompute: compute}
 	routes.SetupRoutes(api, &environment, config.AdminAPIKey)
 	if config.AdminAPIKey == "" {
-		logger.Warn("POST /map/create refuses every request because " + dependencies.AdminAPIKeyEnv + " is not set")
+		logger.Warn("The admin routes, POST /map/create and /admin/*, refuse every request because " + dependencies.AdminAPIKeyEnv + " is not set")
 	}
 	if selected.gameGraph {
 		routes.SetupGameGraphRoute(api, &environment)
@@ -184,6 +184,7 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	routes.SetupBotPackageRoutes(api, &handlers.BotPackages{Players: handlers.PlayerTokens{Verifier: playerVerifier}, Service: services.BotPackages{
 		Database: database, Lobbies: lobbyClient, Store: packages, Tokens: uploadTokens}})
 	routes.SetupAccountRoutes(api, &handlers.Accounts{Players: handlers.PlayerTokens{Verifier: playerVerifier}, Service: services.Accounts{Database: database}})
+	routes.SetupLeaderboardRoutes(api, &handlers.Leaderboard{Service: services.Leaderboard{Database: database}}, config.AdminAPIKey)
 	// The game's hooks, which the lobby signs its calls of.
 	router.Handle(lobbyadapter.HooksPath+"/*", hooks)
 	if config.BotPackagesBucket == "" && selected.localPackagesHandler != nil {

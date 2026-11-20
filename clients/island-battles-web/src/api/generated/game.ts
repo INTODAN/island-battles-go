@@ -409,6 +409,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/leaderboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the leaderboard: the competitors ranked by rating
+         * @description Public: it needs no credential. It lists the competitors that have played at least one rated game: each registered bot name, shown with its owner's display name ("Kraken, by Dana"), each account's hand play, shown under the account's display name, and the house bots, one per default bot level, shown as Bot (level N). A deleted bot name and an account that the admin hid aren't listed, and the game holds no Google name, picture or email to show. Ratings are rounded to whole numbers. The answer carries Cache-Control: public, max-age=60, and CloudFront keeps it for a minute, so a change, such as a game that ends, shows within a minute. The order is rating, highest first, then more rated games first, then the older competitor. rank is the place in that order within the kind asked for, from 1, and equal ratings, as shown, get the same rank. kind lists only one kind, ranked among itself; limit (1 to 100, default 50) and offset (default 0) page through it, and total counts the competitors of that kind.
+         */
+        get: operations["listIslandLeaderboard"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/leaderboard/{competitor_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a competitor's page: its place on the leaderboard and its latest results
+         * @description Public: it needs no credential. It lists the competitors that have played at least one rated game: each registered bot name, shown with its owner's display name ("Kraken, by Dana"), each account's hand play, shown under the account's display name, and the house bots, one per default bot level, shown as Bot (level N). A deleted bot name and an account that the admin hid aren't listed, and the game holds no Google name, picture or email to show. Ratings are rounded to whole numbers. The answer carries Cache-Control: public, max-age=60, and CloudFront keeps it for a minute, so a change, such as a game that ends, shows within a minute. Returns the competitor's leaderboard entry, ranked among every kind, and history, its latest 50 rated results, newest first, each with its result, its rating before and after, and the game's other competitors by the name they are shown by now. An opponent that was deleted since, or whose account is hidden, is shown as Deleted bot or Deleted player, without its ID or owner. A competitor that the leaderboard doesn't list is 404: unknown, deleted, hidden, or without a rated game yet.
+         */
+        get: operations["getIslandCompetitor"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/lobby/v1/connection-token": {
         parameters: {
             query?: never;
@@ -777,6 +817,43 @@ export interface components {
             /** Format: int64 */
             wins: number;
         };
+        CompetitorResult: {
+            /**
+             * Format: date-time
+             * @description When the game ended.
+             */
+            ended_at: string;
+            /** @description The game's other teams' competitors, in colour order. */
+            opponents: components["schemas"]["CompetitorResultOpponent"][];
+            /**
+             * Format: int64
+             * @description The competitor's rating after the game, rounded.
+             */
+            rating_after: number;
+            /**
+             * Format: int64
+             * @description The competitor's rating before the game, rounded.
+             */
+            rating_before: number;
+            /** @enum {string} */
+            result: "win" | "draw" | "loss";
+        };
+        CompetitorResultOpponent: {
+            /**
+             * Format: uuid
+             * @description Null for a competitor that was deleted since, or whose account is hidden.
+             */
+            competitor_id: string | null;
+            /** @description The name it is shown by now, as on the leaderboard; Deleted bot or Deleted player for a competitor that was deleted since, or whose account is hidden. */
+            name: string;
+            /** @description The display name of the account that a bot name belongs to; null otherwise, and for a deleted or hidden competitor. */
+            owner: string | null;
+            /**
+             * Format: int64
+             * @description Its rating before the game, rounded.
+             */
+            rating_before: number;
+        };
         ConnectionToken: {
             /**
              * Format: uri
@@ -1071,6 +1148,107 @@ export interface components {
              * @description How many bot names an account may register: 5.
              */
             max_bot_names: number;
+        };
+        Leaderboard: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/Leaderboard.json
+             */
+            readonly $schema?: string;
+            /** @description The page's competitors, in the leaderboard's order: rating, highest first, then more rated games first, then the older competitor. */
+            entries: components["schemas"]["LeaderboardEntry"][];
+            /**
+             * Format: int64
+             * @description How many competitors the leaderboard lists, of the kind asked for.
+             */
+            total: number;
+        };
+        LeaderboardCompetitor: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/LeaderboardCompetitor.json
+             */
+            readonly $schema?: string;
+            /** Format: uuid */
+            competitor_id: string;
+            /** Format: int64 */
+            draws: number;
+            /**
+             * Format: int64
+             * @description Rated games played: a competitor is listed after its first.
+             */
+            games: number;
+            /** @description The competitor's latest 50 rated results, newest first. */
+            history: components["schemas"]["CompetitorResult"][];
+            /**
+             * @description bot: a bot name that an account registered. manual: an account's hand play. house: a default bot level, which the backend plays.
+             * @enum {string}
+             */
+            kind: "bot" | "manual" | "house";
+            /**
+             * Format: date-time
+             * @description When its latest rated game ended.
+             */
+            last_played_at: string;
+            /** Format: int64 */
+            losses: number;
+            /** @description The name it is shown by: a bot's name, such as Kraken, the account's display name for its hand play, or Bot (level N) for a house bot. */
+            name: string;
+            /** @description The display name of the account that a bot name belongs to, as in "Kraken, by Dana"; null for hand play and house bots. */
+            owner: string | null;
+            /**
+             * Format: int64
+             * @description The place in the leaderboard's order, from 1: equal ratings, as shown, get the same rank, and the next rank skips as many places (1, 2, 2, 4). GET /leaderboard ranks within the kind it lists; a competitor's page among all kinds.
+             */
+            rank: number;
+            /**
+             * Format: int64
+             * @description The Elo rating, rounded to a whole number.
+             */
+            rating: number;
+            /** Format: int64 */
+            wins: number;
+        };
+        LeaderboardEntry: {
+            /** Format: uuid */
+            competitor_id: string;
+            /** Format: int64 */
+            draws: number;
+            /**
+             * Format: int64
+             * @description Rated games played: a competitor is listed after its first.
+             */
+            games: number;
+            /**
+             * @description bot: a bot name that an account registered. manual: an account's hand play. house: a default bot level, which the backend plays.
+             * @enum {string}
+             */
+            kind: "bot" | "manual" | "house";
+            /**
+             * Format: date-time
+             * @description When its latest rated game ended.
+             */
+            last_played_at: string;
+            /** Format: int64 */
+            losses: number;
+            /** @description The name it is shown by: a bot's name, such as Kraken, the account's display name for its hand play, or Bot (level N) for a house bot. */
+            name: string;
+            /** @description The display name of the account that a bot name belongs to, as in "Kraken, by Dana"; null for hand play and house bots. */
+            owner: string | null;
+            /**
+             * Format: int64
+             * @description The place in the leaderboard's order, from 1: equal ratings, as shown, get the same rank, and the next rank skips as many places (1, 2, 2, 4). GET /leaderboard ranks within the kind it lists; a competitor's page among all kinds.
+             */
+            rank: number;
+            /**
+             * Format: int64
+             * @description The Elo rating, rounded to a whole number.
+             */
+            rating: number;
+            /** Format: int64 */
+            wins: number;
         };
         ListDefaultBotsResponseBody: {
             /**
@@ -2239,6 +2417,93 @@ export interface operations {
             };
             /** @description Error */
             default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    listIslandLeaderboard: {
+        parameters: {
+            query?: {
+                /** @description Lists only competitors of this kind, ranked among themselves: bot, a registered bot name; manual, an account's hand play; house, a default bot level. Absent, every kind. */
+                kind?: "bot" | "manual" | "house";
+                /** @description How many competitors to return, 1 to 100. */
+                limit?: number;
+                /** @description How many competitors to skip, in the leaderboard's order. */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Leaderboard"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    getIslandCompetitor: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                competitor_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeaderboardCompetitor"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

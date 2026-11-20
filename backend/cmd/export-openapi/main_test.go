@@ -17,8 +17,9 @@ import (
 )
 
 // unpublishedOperations are registered routes that player clients are not generated from: the
-// replay pages are HTML. A new route belongs in PlayerOperations, or here with its reason.
-var unpublishedOperations = []string{"getIslandLobbyReplay", "watchIslandLobbyReplay"}
+// replay pages are HTML, and the admin's leaderboard routes take the admin API key, which player
+// clients never hold. A new route belongs in PlayerOperations, or here with its reason.
+var unpublishedOperations = []string{"getIslandLobbyReplay", "watchIslandLobbyReplay", "removeIslandBotName", "setIslandAccountHidden"}
 
 // unpublishedPaths are registered routes with no operation ID, which no client is generated from:
 // the map builder's admin routes. Their bodies are published as the MapTemplate schema only.
@@ -52,6 +53,7 @@ func TestEveryRegisteredOperationIsPublishedOrExcluded(t *testing.T) {
 	routes.SetupGameRoutes(api, &handlers.LobbyGame{})
 	routes.SetupBotPackageRoutes(api, &handlers.BotPackages{})
 	routes.SetupAccountRoutes(api, &handlers.Accounts{})
+	routes.SetupLeaderboardRoutes(api, &handlers.Leaderboard{}, "")
 	checked := 0
 	for path, item := range api.OpenAPI().Paths {
 		for _, operation := range []*huma.Operation{item.Get, item.Post, item.Put, item.Patch, item.Delete} {
