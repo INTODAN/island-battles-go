@@ -53,6 +53,40 @@ func AccountCompetitors(database *gorm.DB, accountID string) ([]models.Competito
 	return competitors, err
 }
 
+// FindManualCompetitor returns an account's live manual competitor, its hand
+// play, or nil when the game doesn't know the account (SeeAccount creates it).
+func FindManualCompetitor(database *gorm.DB, accountID string) (*models.Competitor, error) {
+	// A struct filter drops an empty field, which would match any account's.
+	if accountID == "" {
+		return nil, errors.New("find manual competitor: no account ID")
+	}
+	var found []models.Competitor
+	if err := database.Where(&models.Competitor{AccountID: &accountID, Kind: models.ManualCompetitor}).Limit(1).Find(&found).Error; err != nil {
+		return nil, err
+	}
+	if len(found) == 0 {
+		return nil, nil
+	}
+	return &found[0], nil
+}
+
+// LiveBotNames returns the live bot names of the accounts, in one query, in
+// no particular order. No accounts read nothing.
+func LiveBotNames(database *gorm.DB, accountIDs []string) ([]models.Competitor, error) {
+	if len(accountIDs) == 0 {
+		return nil, nil
+	}
+	accounts := make([]any, len(accountIDs))
+	for index, accountID := range accountIDs {
+		accounts[index] = accountID
+	}
+	var competitors []models.Competitor
+	err := database.Where(&models.Competitor{Kind: models.BotCompetitor}).
+		Where(clause.IN{Column: clause.Column{Name: "account_id"}, Values: accounts}).
+		Find(&competitors).Error
+	return competitors, err
+}
+
 // AddBotName registers a bot name for an account, whose row the transaction
 // holds locked (SeeAccount), at models.InitialRating. name is already
 // normalized (models.NormalizeBotName). An account with models.MaxBotNames

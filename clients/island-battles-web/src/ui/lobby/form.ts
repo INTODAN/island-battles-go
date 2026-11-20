@@ -113,6 +113,11 @@ export interface MapSettingsValues {
   maxGenerations: number;
   /** The lobby's current game length, accepted even when the list lacks it. */
   currentMaxGenerations?: number;
+  /**
+   * The lobby's `rated` setting, which the form doesn't change yet: kept as
+   * it is when the host changes the map.
+   */
+  rated?: boolean;
 }
 
 export interface CreateFormValues extends MapSettingsValues {
@@ -229,6 +234,7 @@ export function lobbyMapSettings(
     currentTurnPaceMilliseconds: turnPaceOf(settings),
     maxGenerations: gameLengthOf(settings),
     currentMaxGenerations: gameLengthOf(settings),
+    rated: settings?.rated === true,
   };
 }
 
@@ -284,6 +290,7 @@ export function validateMapSettings(
     turn_pace_milliseconds: values.turnPaceMilliseconds,
     max_generations: values.maxGenerations,
   };
+  if (values.rated) gameSettings.rated = true;
   if (choice.kind === "template") {
     gameSettings.map_template_id = choice.templateId;
   } else if (choice.kind === "file") {
@@ -298,7 +305,7 @@ export function validateMapSettings(
   };
 }
 
-/** The body of `PUT …/settings` for the fields' checked choice. */
+/** The body of `PUT …/settings` for the fields' checked choice, its `rated` setting included. */
 export function changeSettingsBody(
   result: Extract<FormResult, { ok: true }>,
 ): ChangeSettingsBody {

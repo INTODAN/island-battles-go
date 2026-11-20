@@ -4,6 +4,8 @@ A 3D browser client for Island Battles, written in TypeScript with [Babylon.js](
 
 The tooling is [Bun](https://bun.sh/) (runtime, package manager, bundler, dev server and test runner) and [Biome](https://biomejs.dev/) (lint, format and import sorting). Bun does not type-check, so `tsc` does.
 
+**Rated lobbies, a breaking change of the game API (#365).** A lobby's `game_settings` can have `rated`, `GenerationState` has a required `rated`, and `MemberBot` and `BotChoice` a `name`, the bot name a bot plays as in a rated game. Until the client sets rated lobbies up itself (#370), it only keeps them correct: the room's **Change map** form keeps a lobby's `rated` value when the host changes the map (`lobbyMapSettings`, `validateMapSettings` and `changeSettingsBody` in `ui/lobby/form.ts`), and the room's settings line ends with "Rated" for a rated lobby (`describeSettings` in `ui/lobby/roomModel.ts`). What to do: regenerate the types (`bun run generate`) and upgrade.
+
 **A new bot kind, `manual`, a breaking change of the game API (#338).** `BotChoice.kind` and `MemberBot.kind` can be `manual`, a person who plays by hand: nothing plays or relays that seat. The bot picker offers it as **Play by hand** (#341); a member who chose it shows as "Plays by hand" in the room, and the game view says "You play by hand" under your team. What to do: regenerate the types (`bun run generate`) and upgrade.
 
 ## Prerequisites

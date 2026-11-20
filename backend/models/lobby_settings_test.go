@@ -50,6 +50,25 @@ func TestParseLobbySettingsReadsTheTurnPace(t *testing.T) {
 	}
 }
 
+func TestParseLobbySettingsReadsRated(t *testing.T) {
+	for settings, want := range map[string]bool{`{"map_template_id":1}`: false, `{"map_template_id":1,"rated":true}`: true, `{"map_template_id":1, "rated": false }`: false} {
+		parsed, err := ParseLobbySettings(json.RawMessage(settings))
+		if err != nil || parsed.Rated != want {
+			t.Fatalf("%s: rated = %t, %v", settings, parsed.Rated, err)
+		}
+	}
+	for _, settings := range []string{`{"map_template_id":1,"rated":null}`, `{"map_template_id":1,"rated":1}`, `{"map_template_id":1,"rated":"true"}`} {
+		var invalid *LobbySettingsError
+		if _, err := ParseLobbySettings(json.RawMessage(settings)); !errors.As(err, &invalid) || invalid.Details[0].Location != "game_settings.rated" {
+			t.Fatalf("%s: %v", settings, err)
+		}
+	}
+	var unknown *LobbySettingsError
+	if _, err := ParseLobbySettings(json.RawMessage(`{"map_template_id":1,"rated":true,"ranked":true}`)); !errors.As(err, &unknown) || unknown.Details[0].Location != "game_settings.ranked" {
+		t.Fatalf("an unknown setting: %v", err)
+	}
+}
+
 func TestParseLobbySettingsLocatesEveryRejection(t *testing.T) {
 	outsidePlane := `{"map_name":"a","player_amount":2,"plane_size_x":4,"plane_size_y":4,"neutral_starting_soldier_amount":1,"castles":[{"team_color":1,"x":3,"y":0},{"team_color":2,"x":0,"y":9}]}`
 	tests := []struct {

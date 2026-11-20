@@ -53,6 +53,7 @@ type BotChoiceView struct {
 	Level *uint   `json:"level,omitempty" minimum:"1" doc:"For kind default, the level of the default bot, one that GET /bots/defaults lists. Absent for the other kinds."`
 	Host  string  `json:"host,omitempty" doc:"For kind hosted, the host name of the bot's URL, such as bot.example.com; the rest of the URL is not shown. Absent for the other kinds."`
 	Port  *uint   `json:"port,omitempty" minimum:"1024" maximum:"65535" doc:"For kind localhost, the port on 127.0.0.1 where the player's client delivers each turn: the one they chose in the lobby, 41414 by default. Absent for the other kinds."`
+	Name  string  `json:"name,omitempty" doc:"In a rated game, the bot name that a localhost, hosted or uploaded bot plays as, one that its player registered in their account, such as Kraken. Absent for the other kinds and in a game that isn't rated."`
 }
 
 // MemberBotView is the bot that a person chooses for themselves, in their
@@ -63,6 +64,7 @@ type MemberBotView struct {
 	URL       string  `json:"url,omitempty" maxLength:"2048" doc:"For kind hosted only: where the server POSTs each TurnDelivery. https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public."`
 	PackageID string  `json:"package_id,omitempty" format:"uuid" doc:"For kind uploaded only: a package of yours in this lobby, from GET /game/lobbies/{lobby_id}/bot-packages."`
 	Port      *uint   `json:"port,omitempty" minimum:"1024" maximum:"65535" doc:"For kind localhost only: the port on 127.0.0.1 where your bot serves (island-battles-bot serve --port N), where your game client delivers each turn. 41414 when absent."`
+	Name      string  `json:"name,omitempty" maxLength:"200" doc:"For kinds localhost, hosted and uploaded only: one of the bot names of your account (GET /account), compared without regard to case, that the bot plays as. Only a signed-in player has bot names. A rated lobby needs it for a bot, and records the game under it; elsewhere it changes nothing."`
 }
 
 // MemberSettingsView are Island Battles' member settings in a lobby: the bot
@@ -96,8 +98,17 @@ func URLHost(raw string) string {
 }
 
 // FrozenBot is the bot a frozen roster player plays with, as
-// GenerationState.bot reports it.
+// GenerationState.bot reports it, with the bot name it plays as in a rated
+// game.
 func FrozenBot(player FrozenGamePlayer) BotChoiceView {
+	view := frozenBotKind(player)
+	if player.BotName != nil && view.Kind != DefaultBot && view.Kind != ManualBot {
+		view.Name = *player.BotName
+	}
+	return view
+}
+
+func frozenBotKind(player FrozenGamePlayer) BotChoiceView {
 	switch player.BotKind {
 	case DefaultBot:
 		view := BotChoiceView{Kind: DefaultBot}

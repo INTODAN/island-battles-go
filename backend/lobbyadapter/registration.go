@@ -48,10 +48,13 @@ type Lobbies = services.LobbyReader
 //
 // The lobby runs the ready check inside the transaction of a ready or start
 // request, so it reads as little as it can: a member getting ready is
-// checked from the request alone unless their bot is an uploaded one, whose
-// package it reads; at the start it also reads the lobby's seats through
-// lobbies, which the game API reads without waiting
-// for the lobby's lock (services.BotRules.ReadyGate).
+// checked from the request, with the package of an uploaded bot and, unless
+// they are signed in and play by hand, the lobby's snapshot, to learn whether
+// it is rated; at the start it also reads the lobby's seats. It reads the
+// lobby through lobbies, which the game API reads without waiting for the
+// lobby's lock (services.BotRules.ReadyGate). In a rated lobby each member
+// must be signed in and play by hand or under one of their bot names, and
+// the seats must be default bot levels, each once.
 //
 // The key, start rules and retention that the lobby applies are those of
 // LobbyGame's configuration; the registration's own are not read.
@@ -62,8 +65,8 @@ func Registration(database *gorm.DB, publisher services.Publisher, sender *servi
 	}
 	return domain.GameRegistration{
 		Key: GameKey,
-		ValidateSettings: func(ctx context.Context, _ string, settings json.RawMessage, teams []domain.TeamDefinition) error {
-			return validateSettings(ctx, database, settings, teams)
+		ValidateSettings: func(ctx context.Context, lobbyID string, settings json.RawMessage, teams []domain.TeamDefinition) error {
+			return validateSettings(ctx, database, lobbies, lobbyID, settings, teams)
 		},
 		ReadyGate:              rules.ReadyGate,
 		ValidateSeat:           rules.ValidateBotSeat,
@@ -153,17 +156,31 @@ func gameOver(ctx context.Context, database *gorm.DB, publisher services.Publish
 }
 
 // validateSettings accepts settings that choose a map that exists and is made
-// for the lobby's teams. A failed database read is reported as unavailable
-// rather than as invalid settings.
-func validateSettings(ctx context.Context, database *gorm.DB, settings json.RawMessage, teams []domain.TeamDefinition) error {
-	_, err := services.LobbyGameSettings(database.WithContext(ctx), settings, len(teams))
+// for the lobby's teams. Settings that make an existing lobby, lobbyID, rated
+// are refused while one of its seats breaks a rated game's rule of seats,
+// which it reads through lobbies (services.CheckRatedSeats); a new lobby has
+// no seats. A failed read is reported as unavailable rather than as invalid
+// settings.
+func validateSettings(ctx context.Context, database *gorm.DB, lobbies Lobbies, lobbyID string, settings json.RawMessage, teams []domain.TeamDefinition) error {
+	chosen, err := services.LobbyGameSettings(database.WithContext(ctx), settings, len(teams))
 	var invalidSettings *models.LobbySettingsError
 	switch {
-	case err == nil, errors.As(err, &invalidSettings):
+	case errors.As(err, &invalidSettings):
 		return err
-	case ctx.Err() != nil:
+	case err != nil && ctx.Err() != nil:
 		return ctx.Err()
-	default:
+	case err != nil:
 		return fmt.Errorf("%w: read default maps: %w", domain.ErrUnavailable, err)
 	}
+	if !chosen.Rated || lobbyID == "" || lobbies == nil {
+		return nil
+	}
+	snapshot, err := lobbies.Snapshot(ctx, lobbyID)
+	switch {
+	case err != nil && ctx.Err() != nil:
+		return ctx.Err()
+	case err != nil:
+		return fmt.Errorf("%w: read the lobby's seats: %w", domain.ErrUnavailable, err)
+	}
+	return services.CheckRatedSeats(snapshot)
 }

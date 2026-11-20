@@ -43,6 +43,7 @@ def state() -> dict:
         "memory": None,
         "bot": {"kind": "localhost", "port": 41414},
         "relayed_bots": [],
+        "rated": False,
         "departures": [],
         "turn_deadline_at": None,
         "turn_pace_milliseconds": 1000,

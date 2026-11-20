@@ -41,6 +41,10 @@ class BotChoice(GameModel):
     """
     For kind default, the level of the default bot, one that GET /bots/defaults lists. Absent for the other kinds.
     """
+    name: StrictStr | None = None
+    """
+    In a rated game, the bot name that a localhost, hosted or uploaded bot plays as, one that its player registered in their account, such as Kraken. Absent for the other kinds and in a game that isn't rated.
+    """
     port: Annotated[StrictInt | None, Field(ge=1024, le=65535)] = None
     """
     For kind localhost, the port on 127.0.0.1 where the player's client delivers each turn: the one they chose in the lobby, 41414 by default. Absent for the other kinds.
@@ -731,6 +735,10 @@ class GenerationState(GameModel):
     How the game ended. Absent while the game runs. A finished game keeps its final generation and rejects every command.
     """
     player_id: UUID
+    rated: StrictBool
+    """
+    Whether the game is rated: its lobby's rated setting at the start. Every team of a rated game is played by a competitor, a signed-in player's hand play or bot name or a house bot, and bot.name names a player's bot name.
+    """
     relayed_bots: Sequence[RelayedBot]
     """
     The localhost bot seats that you added to the lobby as its host, which only you relay: your client reads each one's turn with GET /game/from-lobby/{lobby_id}/turn-delivery?player_id= and delivers it to 127.0.0.1 on the seat's port, as it does for your own localhost bot. Empty for everyone else.
@@ -862,6 +870,10 @@ class LobbySettings(GameModel):
     """
     The most turns the game may last, a whole number from 50 to 1200; 300 when left out. The turn that creates generation max_generations ends the game, if nothing has ended it before, and the team with the most castles wins.
     """
+    rated: StrictBool | None = False
+    """
+    Whether the game is rated, false when left out. A rated lobby starts only when every member is signed in and plays by hand or with one of their bot names, no two teams belong to one account, and every bot seat is a default bot level, each level once. The game then records the competitor of each team.
+    """
     turn_pace_milliseconds: Annotated[StrictInt | None, Field(ge=500, le=5000)] = 1000
     """
     How long each turn lasts in a real-time game, in whole milliseconds from 500 to 5000; 1000 when left out. A game is real-time when a player on its roster plays by hand: each turn then ends this long after its generation was created, and the server plays it with the commands that arrived, so a player who sent nothing passes. A game of bots only doesn't use it and waits for every player.
@@ -934,6 +946,10 @@ class MemberBot(GameModel):
     level: Annotated[StrictInt | None, Field(ge=1)] = None
     """
     For kind default only: a level that GET /bots/defaults lists.
+    """
+    name: Annotated[StrictStr | None, Field(max_length=200)] = None
+    """
+    For kinds localhost, hosted and uploaded only: one of the bot names of your account (GET /account), compared without regard to case, that the bot plays as. Only a signed-in player has bot names. A rated lobby needs it for a bot, and records the game under it; elsewhere it changes nothing.
     """
     package_id: UUID | None = None
     """

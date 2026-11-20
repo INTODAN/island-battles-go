@@ -226,6 +226,7 @@ describe("the room's Change map form", () => {
       currentTurnPaceMilliseconds: 1000,
       maxGenerations: 300,
       currentMaxGenerations: 300,
+      rated: false,
     });
     expect(
       lobbyMapSettings({ map_template_id: 4, turn_timeout_seconds: null }),
@@ -242,6 +243,7 @@ describe("the room's Change map form", () => {
       currentTurnPaceMilliseconds: 1000,
       maxGenerations: 300,
       currentMaxGenerations: 300,
+      rated: false,
     });
   });
 
@@ -267,6 +269,27 @@ describe("the room's Change map form", () => {
         },
       });
     }
+  });
+
+  test("keeps the lobby's rated setting when the host changes the map", () => {
+    const values = lobbyMapSettings({ map_template_id: 4, rated: true });
+    expect(values.rated).toBe(true);
+    const result = validateMapSettings(
+      { ...values, map: { kind: "template", templateId: 4 } },
+      templates,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(changeSettingsBody(result).game_settings).toMatchObject({
+        map_template_id: 4,
+        rated: true,
+      });
+    }
+    const unrated = validateMapSettings(
+      lobbyMapSettings({ map_template_id: 4 }),
+      templates,
+    );
+    expect(unrated.ok && "rated" in unrated.gameSettings).toBe(false);
   });
 
   test("keeps a turn limit the list lacks only when it is the lobby's own", () => {

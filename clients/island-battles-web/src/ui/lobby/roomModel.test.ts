@@ -323,6 +323,15 @@ describe("the settings line", () => {
       "Map: Mine · Turn limit: 30 s",
     );
   });
+
+  test("says when the lobby is rated", () => {
+    expect(describeSettings({ map_template_id: 5, rated: true }, [])).toBe(
+      "Map: default map #5 · Turn limit: 30 s · Rated",
+    );
+    expect(describeSettings({ map_template_id: 5, rated: false }, [])).toBe(
+      "Map: default map #5 · Turn limit: 30 s",
+    );
+  });
 });
 
 describe("what keeps the host from starting", () => {

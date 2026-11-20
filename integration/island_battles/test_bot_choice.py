@@ -88,3 +88,22 @@ async def test_a_localhost_bot_plays_a_default_level_to_the_end(guests):
     # unless the player chose another.
     assert [state["bot"] for state in states] == [{"kind": "localhost", "port": 41414}, {"kind": "default", "level": 2}]
     assert all(state["outcome"] is not None for state in states)
+
+
+async def test_a_rated_lobby_refuses_a_guest_at_the_ready_gate(guests):
+    """``island-battles-bot run`` and the Go SDK's ``run`` play as guests, so a
+    rated lobby (#365) refuses the guest who gets ready with the lobby client,
+    whose error carries the sentence to print."""
+    alice, bob = await guests("Alice"), await guests("Bob")
+    room = await create(alice, "island-battles", island_settings({"rated": True}))
+    scope = Scope.from_snapshot(room)
+    await bob.join_lobby(game_key=scope.game_key, join_code=room.lobby.join_code)
+    await alice.select_team(scope, room.teams[0].id)
+    await choose_bot(alice, scope.lobby_id, {"kind": "localhost"})
+    with pytest.raises(LobbyError) as refused:
+        await alice.set_ready(scope, True)
+    assert (refused.value.code, refused.value.status, refused.value.problem_type) == (
+        "game_requirement", 409, "urn:island-battles:problem:rated-sign-in-required")
+    sentence = "This lobby is rated. Sign in with Google in the 3D client to play in it."
+    assert refused.value.detail == sentence
+    assert str(refused.value) == f"game_requirement: {sentence}"
