@@ -214,7 +214,7 @@ The public leaderboard (#367, part of #358) ranks the [competitors](#accounts-an
 
 The history outlives the games, which [game retention](#game-retention) deletes after a week, so a competitor's page keeps its results without a replay.
 
-**The cache.** Both answer with `Cache-Control: public, max-age=60`, and CloudFront keeps each answer for that minute, keyed on the path, `kind`, `limit`, `offset` and the `Origin` header, by which the CORS answer varies ([the deploy guide](../deploy/README.md#aws-resources)). So a visitor costs PostgreSQL at most one read a minute per page, and a game's end, a new name or a removal shows on the leaderboard within a minute. A page reads the database three times (the count, the page and the rank of its first entry), and a competitor's page five times (the competitor, its rank, its history, its opponents and their accounts).
+**The cache.** Both answer with `Cache-Control: public, max-age=60`, and CloudFront keeps each answer for that minute, keyed on the path, `kind`, `limit`, `offset` and the `Origin` header, by which the CORS answer varies ([the deploy guide](../deploy/README.md#aws-resources)). So a visitor costs PostgreSQL at most one read a minute per page, and a game's end, a new name or a removal shows on the leaderboard within a minute. A page reads the database four times (the count, the page, the rank of its first entry and the accounts' display names), and a competitor's page five times (the competitor, its rank, its history, its opponents and the accounts).
 
 ### Removing a name from the leaderboard
 
