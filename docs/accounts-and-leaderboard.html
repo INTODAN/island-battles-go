@@ -1,0 +1,651 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Accounts and leaderboard mockups (#369, #371)</title>
+<!--
+  Mockups for #369 (Sign in with Google and the account page) and #371 (the leaderboard,
+  a competitor's page and "How ratings work"), part of epic #358.
+
+  Self-contained and static: synthetic data, no calls. The styles copy the 3D client's
+  lobby screens (clients/island-battles-web/src/ui/lobby/lobby.css) and its rules dialog
+  (src/ui/rules/rules.css); the 3D ocean behind them is stood in for by a flat sea.
+  Google's button is a stand-in drawn here: the real one is Google's own, rendered by
+  Google Identity Services.
+
+  Open with ?view=<name> for one screen (the screenshots in docs/accounts-and-leaderboard/
+  are those views at 1280 px and 450 px wide), or without it for the index of every view.
+-->
+<style>
+:root {
+  --ink: #12283a;
+  --ink-soft: #3d5568;
+  --glass: rgba(250, 253, 255, 0.9);
+  --glass-edge: rgba(255, 255, 255, 0.65);
+  --accent: #1d6fb8;
+  --accent-ink: #ffffff;
+  --good: #1f7a4d;
+  --bad: #b3261e;
+  --mine: #fff4cc;
+}
+html, body { margin: 0; min-height: 100%; }
+body {
+  background:
+    radial-gradient(ellipse 60% 45% at 22% 18%, #123a4c 0%, transparent 70%),
+    radial-gradient(ellipse 55% 50% at 82% 85%, #0f3445 0%, transparent 70%),
+    repeating-linear-gradient(160deg, transparent 0 46px, rgba(120, 190, 210, 0.05) 46px 48px, transparent 48px 90px),
+    #0a2330;
+  font: 15px / 1.45 system-ui, sans-serif;
+  color: var(--ink);
+}
+.isles { position: absolute; inset: 0; overflow: hidden; z-index: 0; pointer-events: none; }
+.isle { position: absolute; }
+.overlay {
+  position: relative; z-index: 1;
+  display: flex; flex-direction: column;
+  min-height: 100vh; padding: 16px; box-sizing: border-box;
+}
+.overlay > * { margin: auto; }
+.panel, .card {
+  box-sizing: border-box; border-radius: 14px;
+  background: var(--glass); border: 1px solid var(--glass-edge);
+  box-shadow: 0 10px 30px rgba(8, 30, 50, 0.28);
+  padding: 18px 20px;
+}
+.card { padding: 14px 16px; }
+.panel.narrow { width: min(420px, 100%); }
+h1, h2, h3 { margin: 0 0 6px; line-height: 1.2; }
+h1 { font-size: 28px; } h2 { font-size: 18px; } h3 { font-size: 16px; }
+.lead { margin: 0 0 12px; color: var(--ink-soft); }
+.hint { margin: 4px 0; font-size: 13px; color: var(--ink-soft); }
+label { display: block; margin: 10px 0 4px; font-weight: 600; font-size: 14px; }
+input[type="text"] {
+  box-sizing: border-box; width: 100%; padding: 8px 10px;
+  border: 1px solid #9db4c6; border-radius: 8px; background: #fff; color: var(--ink); font: inherit;
+}
+input:disabled { background: #e7eef3; color: #6b7f8f; }
+button { font: inherit; cursor: pointer; }
+button.primary, button.secondary, button.danger {
+  padding: 8px 14px; border-radius: 8px; border: 1px solid transparent; font-weight: 600;
+}
+button.primary { background: var(--accent); color: var(--accent-ink); }
+button.secondary { background: #fff; color: var(--ink); border-color: #9db4c6; }
+button.danger { background: #fff; color: #8a1c10; border-color: #c4554a; }
+button.danger.solid { background: var(--bad); color: #fff; border-color: var(--bad); }
+button.small { padding: 4px 10px; font-size: 13px; }
+button.link { border: 0; background: none; padding: 0; color: var(--accent); text-decoration: underline; }
+a.link { color: var(--accent); }
+button:disabled { opacity: 0.55; cursor: default; }
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.field-error { margin: 4px 0 0; font-size: 13px; color: var(--bad); }
+.menu { width: min(900px, 100%); }
+.greeting { margin-bottom: 12px; padding: 14px 18px; border-radius: 14px; background: rgba(10, 36, 56, 0.62); color: #fff; }
+.greeting .lead { margin: 0; color: #d4e6f3; }
+.greeting button.link, .greeting a.link { color: #bfe1ff; }
+.cards { display: grid; grid-template-columns: 3fr 2fr; gap: 14px; align-items: start; }
+.card-stack { display: grid; gap: 14px; }
+.tag { color: var(--ink); margin-left: 6px; padding: 0 6px; border-radius: 6px; background: #dbe6ee; font-size: 11px; font-weight: 600; text-transform: uppercase; white-space: nowrap; }
+.tag.house { background: #e6def5; color: #4b3380; }
+.tag.you { background: #fbe7a6; }
+.fake-select { box-sizing: border-box; width: 100%; padding: 8px 10px; border: 1px solid #9db4c6; border-radius: 8px; background: #fff; }
+
+/* Google's button: a stand-in for the one Google Identity Services renders. */
+.gsi {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  width: 100%; max-width: 400px; height: 40px; box-sizing: border-box;
+  border: 1px solid #dadce0; border-radius: 4px; background: #fff;
+  font: 500 14px / 1 Roboto, "Segoe UI", Arial, sans-serif; color: #3c4043; letter-spacing: 0.25px;
+}
+.gsi svg { width: 18px; height: 18px; }
+.or { display: flex; align-items: center; gap: 10px; margin: 14px 0 2px; font-size: 13px; color: var(--ink-soft); }
+.or::before, .or::after { content: ""; flex: 1; border-top: 1px solid #c3d3df; }
+.signin-why { margin: 8px 0 0; font-size: 13px; color: var(--ink-soft); }
+.choice { width: min(780px, 100%); }
+.choice .cards { grid-template-columns: 1fr 1fr; }
+
+/* Dialogs, as the rules page. */
+.stage { position: relative; display: grid; width: 100%; min-height: calc(100vh - 32px); }
+.stage > * { grid-area: 1 / 1; }
+.stage > .behind { margin: auto; pointer-events: none; }
+.dialog {
+  align-self: start; justify-self: center; position: relative; z-index: 2;
+  width: min(640px, calc(100vw - 32px)); margin-top: 0;
+  padding: 0; border-radius: 12px; background: #fafdff; color: #12283a;
+  box-shadow: 0 18px 48px rgba(10, 30, 50, 0.35);
+}
+.dialog.wide { width: min(880px, calc(100vw - 32px)); }
+.dialog-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 20px; border-bottom: 1px solid #d5e0ea; }
+.dialog-header h2 { margin: 0; font-size: 22px; }
+.dialog-body { padding: 4px 20px 20px; }
+.dialog-body > section { padding: 14px 0; border-bottom: 1px solid #e3ebf1; }
+.dialog-body > section:last-child { border-bottom: 0; }
+.dialog-body h3 { margin: 0 0 4px; font-size: 17px; }
+.inline { display: flex; gap: 8px; align-items: center; }
+.inline input { flex: 1; min-width: 0; }
+.confirm {
+  align-self: center; justify-self: center; position: relative; z-index: 4;
+  width: min(460px, calc(100vw - 32px)); box-sizing: border-box;
+  padding: 20px 24px; border-radius: 12px; background: #fff;
+  box-shadow: 0 18px 48px rgba(10, 30, 50, 0.45);
+}
+.confirm p.q { margin: 0 0 6px; font-size: 18px; font-weight: 600; }
+.confirm .actions { justify-content: flex-end; margin-top: 16px; }
+.scrim { position: absolute; inset: -16px; background: rgba(10, 25, 40, 0.55); z-index: 1; }
+.scrim.top { z-index: 3; }
+
+/* Account page: competitors */
+.comp-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.comp-list li {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: 4px 14px;
+  padding: 8px 10px; border-radius: 8px; background: rgba(29, 111, 184, 0.07);
+}
+.comp-list li.hand { grid-template-columns: minmax(0, 1fr) auto auto; }
+.comp-name { font-weight: 600; overflow-wrap: anywhere; }
+.rating { font-weight: 700; font-variant-numeric: tabular-nums; }
+.games { font-size: 13px; color: var(--ink-soft); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.count { font-size: 13px; color: var(--ink-soft); font-weight: 400; }
+.add-row { margin-top: 10px; }
+.danger-zone { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 8px; }
+.tile { position: relative; padding: 10px 12px; border-radius: 10px; background: #fff; border: 1px solid #c3d3df; }
+.tile .kind { font-size: 12px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+.tile .big { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; margin: 2px 0; }
+.tile .comp-name { font-size: 16px; }
+.tile.hand { background: #eef6fc; border-color: #9cc4e4; }
+.tile.add { border-style: dashed; background: rgba(255, 255, 255, 0.6); }
+.tile .tile-del { position: absolute; top: 8px; right: 8px; }
+.cols { display: grid; grid-template-columns: 1fr 1.4fr; gap: 0 24px; }
+.cols > div > section { padding: 14px 0; border-bottom: 1px solid #e3ebf1; }
+.cols > div > section:last-child { border-bottom: 0; }
+
+/* Leaderboard */
+.board { width: min(960px, 100%); }
+.board-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.board-head h1 { margin: 0; }
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; padding: 3px; border-radius: 10px; background: #e3ecf2; width: fit-content; margin-bottom: 10px; }
+.tabs button { border: 0; background: none; padding: 5px 12px; border-radius: 8px; font-size: 14px; font-weight: 600; color: var(--ink-soft); }
+.tabs button[aria-selected="true"] { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(10, 30, 50, 0.18); }
+table.lb { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.lb th, table.lb td { padding: 7px 8px; border-bottom: 1px solid #d5e0ea; text-align: left; vertical-align: middle; }
+table.lb thead th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-soft); font-weight: 600; white-space: nowrap; }
+table.lb td.wdl { white-space: nowrap; }
+table.lb td.num, table.lb th.num { text-align: right; font-variant-numeric: tabular-nums; }
+table.lb td.rank { width: 2.5em; font-weight: 700; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+table.lb td.rating { font-size: 16px; }
+table.lb tr.mine td { background: var(--mine); }
+table.lb tr.mine td:first-child { box-shadow: inset 4px 0 0 #e0a800; }
+table.lb .owner { display: block; font-size: 12px; color: var(--ink-soft); font-weight: 400; }
+table.lb a { color: var(--ink); text-decoration: none; font-weight: 600; }
+table.lb a:hover { text-decoration: underline; }
+.wdl { display: none; }
+.more { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.how h2 { margin-bottom: 4px; }
+.how h3 { margin: 12px 0 2px; font-size: 15px; }
+.how p { margin: 4px 0; }
+.how ul { margin: 6px 0; padding-left: 20px; }
+.how li { margin: 3px 0; }
+.board-body { display: grid; gap: 14px; }
+.board-body.side { grid-template-columns: minmax(0, 2.4fr) minmax(0, 1fr); align-items: start; }
+.podium { display: grid; grid-template-columns: 1fr 1.15fr 1fr; gap: 10px; align-items: end; margin-bottom: 12px; }
+.podium .step { text-align: center; padding: 12px 10px; border-radius: 12px; background: #fff; border: 1px solid #c3d3df; }
+.podium .step.first { padding-top: 20px; padding-bottom: 20px; border-color: #e0b400; background: #fffaf0; }
+.podium .medal { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; font-weight: 700; color: #fff; }
+.podium .first .medal { background: #c99a00; } .podium .second .medal { background: #8a99a8; } .podium .third .medal { background: #a7683a; }
+.podium .comp-name { display: block; margin-top: 6px; font-size: 16px; }
+.podium .big { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stats { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.stat { padding: 8px 10px; border-radius: 10px; background: #fff; border: 1px solid #d5e0ea; }
+.stat .k { font-size: 12px; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+.stat .v { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.results { list-style: none; margin: 8px 0 0; padding: 0; }
+.results li { display: grid; grid-template-columns: 9.5em minmax(0, 1fr) auto; gap: 2px 14px; align-items: baseline; padding: 9px 4px; border-bottom: 1px solid #d5e0ea; }
+.results li:last-child { border-bottom: 0; }
+.results time { font-size: 13px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.results .change { font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+.results .delta { display: inline-block; min-width: 3em; margin-left: 6px; padding: 0 6px; border-radius: 6px; font-size: 13px; font-weight: 700; text-align: center; }
+.delta.up { background: #d3efdf; color: var(--good); } .delta.down { background: #f6dedb; color: var(--bad); } .delta.flat { background: #e3ecf2; color: var(--ink-soft); }
+.res { font-weight: 700; }
+.res.won { color: var(--good); } .res.lost { color: var(--bad); } .res.drew { color: var(--ink-soft); }
+.results a { color: var(--accent); }
+.empty-state { padding: 28px 8px; text-align: center; color: var(--ink-soft); }
+.empty-state p { margin: 4px 0; }
+.empty-state strong { display: block; color: var(--ink); font-size: 17px; }
+.panel-footer { margin: 14px 0 0; padding-top: 10px; border-top: 1px solid #d5e0ea; font-size: 14px; color: var(--ink-soft); }
+details.how-details summary { cursor: pointer; font-weight: 600; font-size: 16px; }
+
+/* Index */
+.index { position: relative; z-index: 1; padding: 20px; color: #e8f1f7; }
+.index h1 { font-size: 24px; }
+.index h2 { margin-top: 28px; color: #fff; }
+.index .row { display: flex; gap: 16px; align-items: flex-start; margin: 8px 0 24px; }
+.index iframe { border: 1px solid #456; background: #0a2330; }
+.index a { color: #bfe1ff; }
+
+@media (max-width: 760px) {
+  .cards, .choice .cards, .board-body.side, .cols { grid-template-columns: 1fr; }
+  h1 { font-size: 24px; }
+  .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 520px) {
+  .dialog-body { padding: 4px 16px 16px; }
+  .dialog-header { padding: 12px 16px; }
+  .comp-list li { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .comp-list li .games { grid-column: 1; grid-row: 2; }
+  .comp-list li .rating { grid-row: 1 / span 2; }
+  .comp-list li button { grid-row: 1 / span 2; }
+  .comp-list li.hand { grid-template-columns: minmax(0, 1fr) auto; }
+  table.lb .wide { display: none; }
+  table.lb .wdl { display: table-cell; }
+  table.lb th, table.lb td { padding: 7px 5px; }
+  .results li { grid-template-columns: minmax(0, 1fr) auto; }
+  .results time { grid-column: 1 / -1; }
+  .podium { grid-template-columns: 1fr; }
+  .podium .step { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; text-align: left; padding: 10px 12px; }
+  .podium .step.first { padding: 12px; order: -1; }
+  .podium .comp-name { margin-top: 0; }
+  .podium .big { font-size: 22px; }
+  .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .stat .v { font-size: 19px; }
+}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+"use strict";
+
+const G = `<svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>`;
+const gsi = `<button type="button" class="gsi">${G}<span>Sign in with Google</span></button>`;
+const nameRule = "3 to 24 letters, digits, spaces, - and _.";
+
+// A few islands on the sea, as the lobby's ocean has.
+function isles() {
+  const one = (x, y, s, roof) => `<svg class="isle" style="left:${x}%;top:${y}%;width:${s}px" viewBox="0 0 120 90">
+    <path d="M10 50 C8 28 40 14 62 16 C92 18 116 32 110 54 C104 76 70 84 46 78 C24 74 12 66 10 50Z" fill="#bfeee4" opacity="0.55"/>
+    <path d="M18 50 C18 32 44 22 62 24 C86 26 104 36 100 54 C96 70 70 76 48 72 C30 68 18 62 18 50Z" fill="#e6d7a8"/>
+    <path d="M24 49 C25 36 46 29 62 30 C82 32 95 40 92 53 C89 64 68 68 50 65 C34 62 24 58 24 49Z" fill="#203d1c"/>
+    <rect x="50" y="34" width="20" height="16" rx="2" fill="#cfd6dc"/><path d="M47 36 L60 22 L73 36Z" fill="${roof}"/></svg>`;
+  return `<div class="isles">` + one(4, 8, 150, "#d94d5b") + one(78, 6, 120, "#3464e0") + one(84, 62, 160, "#288562") + one(2, 70, 130, "#b37914") + one(46, 86, 110, "#9560cb") + `</div>`;
+}
+
+// ---------- #369: name screen ----------
+
+function nameScreenA(extraFooter = "") {
+  return `<form class="panel narrow">
+    <h1>Island Battles</h1>
+    <p class="lead">Command your castles across the sea. Sign in, or choose a name to play as a guest.</p>
+    ${gsi}
+    <div class="or">or play as a guest</div>
+    <label for="n">Your name</label>
+    <input id="n" type="text" placeholder="Captain Nemo" />
+    <div class="actions"><button type="button" class="primary">Continue</button>${extraFooter}</div>
+  </form>`;
+}
+
+function nameScreenB() {
+  return `<form class="panel narrow">
+    <h1>Island Battles</h1>
+    <p class="lead">Command your castles across the sea.</p>
+    ${gsi}
+    <p class="signin-why">Signed in, you can play rated games, register your bots' names and climb the leaderboard. Nothing from your Google account is shown.</p>
+    <div class="or">or play as a guest</div>
+    <p class="hint">Guests play unrated, as today.</p>
+    <label for="n">Your name</label>
+    <input id="n" type="text" placeholder="Captain Nemo" />
+    <div class="actions"><button type="button" class="primary">Continue</button></div>
+  </form>`;
+}
+
+function nameScreenC() {
+  return `<div class="choice">
+    <div class="greeting"><h1>Island Battles</h1><p class="lead">Command your castles across the sea.</p></div>
+    <div class="cards">
+      <div class="card">
+        <h2>Sign in</h2>
+        <p class="hint" style="margin-bottom:12px">Play rated games, register your bots' names and climb the leaderboard. Nothing from your Google account is shown.</p>
+        ${gsi}
+      </div>
+      <form class="card">
+        <h2>Play as a guest</h2>
+        <p class="hint">Unrated, as today.</p>
+        <label for="n">Your name</label>
+        <input id="n" type="text" placeholder="Captain Nemo" />
+        <div class="actions"><button type="button" class="primary">Continue</button></div>
+      </form>
+    </div>
+  </div>`;
+}
+
+function nameStep() {
+  return `<form class="panel narrow">
+    <h1>Choose a display name</h1>
+    <p class="lead">This is the name others see. It isn't your Google name.</p>
+    <label for="d">Display name</label>
+    <input id="d" type="text" value="Dana" />
+    <p class="hint">${nameRule}</p>
+    <p class="field-error" role="alert">Another account has that display name. Choose another.</p>
+    <div class="actions"><button type="button" class="primary">Continue</button><button type="button" class="secondary">Cancel</button></div>
+  </form>`;
+}
+
+// ---------- the menu ----------
+
+function menu({ signedIn = true, leaderboard = false } = {}) {
+  const lb = leaderboard ? ` · <button type="button" class="link">Leaderboard</button>` : "";
+  const who = signedIn
+    ? `Signed in as Dana. <button type="button" class="link">Account</button>${lb} · <button type="button" class="link">Game rules</button>`
+    : `Playing as Robin. <button type="button" class="link">Change name</button>${lb} · <button type="button" class="link">Game rules</button>`;
+  return `<div class="menu">
+    <div class="greeting"><h1>Island Battles</h1><p class="lead">${who}</p></div>
+    <div class="cards">
+      <form class="card">
+        <h2>Create a lobby</h2>
+        <label>Lobby name</label><input type="text" value="${signedIn ? "Dana" : "Robin"}'s lobby" />
+        <div class="row" style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div><label>Teams</label><input type="text" value="2" /></div>
+          <div><label>Players per team</label><input type="text" value="1" /></div>
+        </div>
+        <label>Map</label><div class="fake-select">Generated map</div>
+        <p class="hint">Teams: Blue, Red.</p>
+        <div class="actions"><button type="button" class="primary">Create lobby</button></div>
+      </form>
+      <div class="card-stack">
+        <form class="card"><h2>Join with a code</h2><label>Join code</label><input type="text" placeholder="ABCD1234" />
+          <div class="actions"><button type="button" class="primary">Join lobby</button></div></form>
+        <form class="card"><h2>Watch a game</h2><p class="hint">Follow a game live without taking a seat. Ask a player for its code.</p>
+          <label>Join code</label><input type="text" placeholder="ABCD1234" />
+          <div class="actions"><button type="button" class="secondary">Watch game</button></div></form>
+      </div>
+    </div>
+  </div>`;
+}
+
+// ---------- #369: account page ----------
+
+const bots3 = [
+  { name: "Kraken", rating: 1609, games: 52 },
+  { name: "Squid", rating: 1488, games: 7 },
+  { name: "Narwhal", rating: 1500, games: 0 },
+];
+const bots5 = [...bots3, { name: "Sea Serpent", rating: 1534, games: 19 }, { name: "Barnacle_2", rating: 1471, games: 3 }];
+const gamesText = (n) => (n === 0 ? "no rated games yet" : n === 1 ? "1 rated game" : `${n} rated games`);
+
+function dialog(title, body, { wide = false } = {}) {
+  return `<div class="dialog${wide ? " wide" : ""}" role="dialog" aria-label="${title}">
+    <header class="dialog-header"><h2>${title}</h2><button type="button" class="secondary small">Close</button></header>
+    <div class="dialog-body">${body}</div>
+  </div>`;
+}
+
+const overMenu = (front, extra = "") =>
+  `<div class="stage"><div class="behind">${menu()}</div><div class="scrim"></div>${front}${extra}</div>`;
+
+function displayNameSection() {
+  return `<section>
+    <h3>Display name</h3>
+    <p class="hint">The name others see in lobbies, and beside your bots on the leaderboard.</p>
+    <div class="inline"><input type="text" value="Dana" aria-label="Display name" /><button type="button" class="secondary">Save</button></div>
+    <p class="hint">${nameRule}</p>
+  </section>`;
+}
+
+function addBotName(bots, { error = "" } = {}) {
+  const full = bots.length >= 5;
+  return `<div class="add-row">
+    <label for="nb">New bot name</label>
+    <div class="inline"><input id="nb" type="text" ${full ? "disabled" : 'placeholder="Leviathan"'} /><button type="button" class="primary" ${full ? "disabled" : ""}>Add</button></div>
+    ${full
+      ? `<p class="hint"><strong>You have 5 bot names, the most an account can have.</strong> Delete one to register another.</p>`
+      : `<p class="hint">${nameRule} You have ${bots.length} of 5.</p>`}
+    ${error ? `<p class="field-error" role="alert">${error}</p>` : ""}
+  </div>`;
+}
+
+function accountActions() {
+  return `<section class="danger-zone">
+    <button type="button" class="secondary">Sign out</button>
+    <button type="button" class="danger">Delete account…</button>
+  </section>`;
+}
+
+function accountA(bots = bots3, opts = {}) {
+  const rows = bots.map((b) => `<li><span class="comp-name">${b.name}</span><span class="rating">${b.rating}</span><span class="games">${gamesText(b.games)}</span><button type="button" class="danger small">Delete</button></li>`).join("");
+  return dialog("Account", `
+    ${displayNameSection()}
+    <section>
+      <h3>Playing by hand</h3>
+      <ul class="comp-list"><li class="hand"><span class="comp-name">Dana</span><span class="rating">1546</span><span class="games">${gamesText(18)}</span></li></ul>
+    </section>
+    <section>
+      <h3>Bot names <span class="count">${bots.length} of 5</span></h3>
+      <p class="hint">Choose one of these where you choose your bot in a rated lobby. Each name has its own rating; the code behind it can change.</p>
+      <ul class="comp-list">${rows}</ul>
+      ${addBotName(bots, opts)}
+    </section>
+    ${accountActions()}`);
+}
+
+function accountB() {
+  const tiles = bots3.map((b) => `<div class="tile"><button type="button" class="link tile-del" style="color:#8a1c10;font-size:13px">Delete</button>
+    <div class="kind">Bot</div><div class="comp-name">${b.name}</div><div class="big">${b.rating}</div><div class="games">${gamesText(b.games)}</div></div>`).join("");
+  return dialog("Account", `
+    ${displayNameSection()}
+    <section>
+      <h3>Your ratings</h3>
+      <p class="hint">Playing by hand has a rating, and so does each bot name (${bots3.length} of 5).</p>
+      <div class="tiles">
+        <div class="tile hand"><div class="kind">By hand</div><div class="comp-name">Dana</div><div class="big">1546</div><div class="games">${gamesText(18)}</div></div>
+        ${tiles}
+        <div class="tile add"><div class="kind">New bot name</div>
+          <input type="text" placeholder="Leviathan" aria-label="New bot name" style="margin:6px 0" />
+          <button type="button" class="primary small">Add</button>
+          <p class="hint" style="font-size:12px">${nameRule}</p></div>
+      </div>
+    </section>
+    ${accountActions()}`, { wide: true });
+}
+
+function accountC() {
+  const rows = bots3.map((b) => `<tr><td><strong>${b.name}</strong></td><td class="num rating">${b.rating}</td><td class="num">${b.games}</td><td class="num"><button type="button" class="danger small">Delete</button></td></tr>`).join("");
+  return dialog("Account", `<div class="cols">
+    <div>
+      ${displayNameSection()}
+      <section>
+        <h3>Sign out</h3>
+        <p class="hint">Ends this session. You'll see the name screen; Google won't sign you in again by itself.</p>
+        <div class="actions" style="margin-top:6px"><button type="button" class="secondary">Sign out</button></div>
+      </section>
+      <section>
+        <h3>Delete account</h3>
+        <p class="hint">Deletes your display name, your bot names and every rating. It can't be undone.</p>
+        <div class="actions" style="margin-top:6px"><button type="button" class="danger">Delete account…</button></div>
+      </section>
+    </div>
+    <div>
+      <section>
+        <h3>Ratings</h3>
+        <table class="lb">
+          <thead><tr><th>Name</th><th class="num">Rating</th><th class="num">Games</th><th></th></tr></thead>
+          <tbody>
+            <tr><td><strong>Dana</strong><span class="owner">by hand</span></td><td class="num rating">1546</td><td class="num">18</td><td></td></tr>
+            ${rows}
+          </tbody>
+        </table>
+        ${addBotName(bots3)}
+      </section>
+    </div>
+  </div>`, { wide: true });
+}
+
+function confirmBox(question, text, yes) {
+  return `<div class="scrim top"></div><div class="confirm" role="alertdialog">
+    <p class="q">${question}</p><p style="margin:0">${text}</p>
+    <div class="actions"><button type="button" class="danger solid">${yes}</button><button type="button" class="secondary">Keep it</button></div>
+  </div>`;
+}
+
+// ---------- #371: leaderboard ----------
+
+const entries = [
+  { rank: 1, id: "c1", kind: "bot", name: "Kraken", owner: "Dana", rating: 1609, games: 52, w: 34, d: 3, l: 15, mine: true },
+  { rank: 2, id: "h3", kind: "house", name: "Bot (level 3)", rating: 1590, games: 214, w: 131, d: 9, l: 74 },
+  { rank: 3, id: "c2", kind: "manual", name: "Mira", rating: 1571, games: 33, w: 19, d: 2, l: 12 },
+  { rank: 4, id: "c3", kind: "bot", name: "Leviathan", owner: "Ola_K", rating: 1559, games: 61, w: 35, d: 1, l: 25 },
+  { rank: 5, id: "c4", kind: "manual", name: "Dana", rating: 1546, games: 18, w: 10, d: 1, l: 7, mine: true },
+  { rank: 6, id: "c5", kind: "bot", name: "Sea Serpent", owner: "Mira", rating: 1534, games: 19, w: 10, d: 0, l: 9 },
+  { rank: 7, id: "c6", kind: "bot", name: "Coral", owner: "Ben 7", rating: 1522, games: 12, w: 7, d: 0, l: 5 },
+  { rank: 8, id: "h2", kind: "house", name: "Bot (level 2)", rating: 1503, games: 187, w: 90, d: 6, l: 91 },
+  { rank: 9, id: "c7", kind: "manual", name: "Ola_K", rating: 1500, games: 4, w: 2, d: 0, l: 2 },
+  { rank: 9, id: "c8", kind: "bot", name: "Tidebreaker", owner: "Sam", rating: 1500, games: 2, w: 1, d: 0, l: 1 },
+  { rank: 11, id: "c9", kind: "bot", name: "Squid", owner: "Dana", rating: 1488, games: 7, w: 3, d: 0, l: 4, mine: true },
+  { rank: 12, id: "h1", kind: "house", name: "Bot (level 1)", rating: 1402, games: 240, w: 71, d: 4, l: 165 },
+];
+
+function nameCell(e) {
+  const tag = "";
+  const owner = e.kind === "bot" ? `<span class="owner">by ${e.owner}</span>` : e.kind === "manual" ? `<span class="owner">by hand</span>` : `<span class="owner"><span class="tag house" style="margin-left:0">house bot</span></span>`;
+  const you = e.mine ? `<span class="tag you">you</span>` : "";
+  return `<a href="#">${e.name}</a>${tag}${you}${owner}`;
+}
+
+function table(list) {
+  const rows = list.map((e) => `<tr${e.mine ? ' class="mine"' : ""}>
+    <td class="rank">${e.rank}</td><td>${nameCell(e)}</td><td class="num rating">${e.rating}</td>
+    <td class="num">${e.games}</td><td class="num wide">${e.w}</td><td class="num wide">${e.d}</td><td class="num wide">${e.l}</td>
+    <td class="num wdl">${e.w}–${e.d}–${e.l}</td></tr>`).join("");
+  return `<table class="lb">
+    <thead><tr><th>#</th><th>Name</th><th class="num">Rating</th><th class="num">Games</th>
+      <th class="num wide">Won</th><th class="num wide">Drawn</th><th class="num wide">Lost</th><th class="num wdl">W–D–L</th></tr></thead>
+    <tbody>${rows}</tbody></table>`;
+}
+
+const tabs = (sel = "All") => `<div class="tabs" role="tablist">${["All", "Bots", "Hand players", "House bots"].map((t) => `<button type="button" role="tab" aria-selected="${t === sel}">${t}</button>`).join("")}</div>`;
+const more = `<div class="more"><span class="hint">Showing 1–50 of 132 (the mockup draws 12)</span><button type="button" class="secondary">Show more</button></div>`;
+
+function howRatings(tag = "h2") {
+  return `<${tag} id="how">How ratings work</${tag}>
+    <p>Everyone starts at <strong>1500</strong>. Winning a rated game raises your rating and losing lowers it: more when the result is a surprise, less when it was expected.</p>
+    <ul>
+      <li><strong>Which games count:</strong> the host turned Rated on, everyone is signed in, and each team is a different competitor.</li>
+      <li><strong>Bots and hands:</strong> each bot name has its own rating, and so does playing by hand.</li>
+      <li><strong>New competitors:</strong> your first <strong>30</strong> games move your rating twice as fast (40 points at stake instead of 20).</li>
+      <li><strong>More than two teams:</strong> only the winner gains, and each other team loses a little.</li>
+      <li><strong>Unfinished games:</strong> a game that never finishes changes nothing.</li>
+    </ul>`;
+}
+
+function boardHead(sub = `Updated every minute · <a class="link" href="#how">How ratings work</a>`) {
+  return `<div class="greeting board-head"><div><h1>Leaderboard</h1><p class="lead">${sub}</p></div><button type="button" class="secondary small">Back</button></div>`;
+}
+
+function leaderboardA({ empty = false } = {}) {
+  const body = empty
+    ? `<div class="empty-state"><strong>Nobody has played a rated game yet.</strong><p>Turn on Rated when you create a lobby, and the first result shows here.</p></div>`
+    : `${table(entries)}${more}`;
+  return `<div class="board">${boardHead()}
+    <div class="board-body"><div class="card">${tabs()}${body}</div><div class="card how">${howRatings()}</div></div></div>`;
+}
+
+function leaderboardB() {
+  const [a, b, c] = entries;
+  const step = (e, cls, n) => `<div class="step ${cls}"><span class="medal">${n}</span><div><a class="comp-name" href="#" style="color:inherit;font-weight:700;text-decoration:none">${e.name}</a>${e.mine ? `<span class="tag you">you</span>` : ""}${e.kind === "house" ? `<span class="tag house">house bot</span>` : ""}<div class="hint" style="margin:0">${e.kind === "bot" ? `by ${e.owner}` : e.kind === "manual" ? "by hand" : "&nbsp;"}</div></div><div class="big">${e.rating}</div></div>`;
+  return `<div class="board">${boardHead(`Updated every minute`)}
+    <div class="board-body side">
+      <div class="card">${tabs()}
+        <div class="podium">${step(b, "second", 2)}${step(a, "first", 1)}${step(c, "third", 3)}</div>
+        ${table(entries.slice(3))}${more}</div>
+      <div class="card how">${howRatings()}</div>
+    </div></div>`;
+}
+
+function leaderboardC() {
+  const body = `<p class="hint" style="margin:10px 0">Updated every minute.</p>${tabs()}${table(entries)}${more}
+    <details class="how-details" style="margin-top:16px" open><summary>How ratings work</summary><div class="how">${howRatings("h3").replace('<h3 id="how">How ratings work</h3>', "")}</div></details>`;
+  return `<div class="stage"><div class="behind">${nameScreenA()}</div><div class="scrim"></div>${dialog("Leaderboard", body, { wide: true })}</div>`;
+}
+
+const history = [
+  { at: "20 Nov 2026, 14:32", res: "won", text: `against <a href="#">Bot (level 3)</a> (1590)`, before: 1599, after: 1609 },
+  { at: "20 Nov 2026, 13:58", res: "lost", text: `to <a href="#">Mira</a> (1551)`, before: 1611, after: 1599 },
+  { at: "19 Nov 2026, 21:10", res: "won", text: `against <a href="#">Squid</a> (1490), <a href="#">Coral</a> (1520) and <a href="#">Bot (level 2)</a> (1500)`, before: 1603, after: 1611 },
+  { at: "19 Nov 2026, 20:41", res: "drew", text: `with <a href="#">Leviathan</a> (1560)`, before: 1605, after: 1603 },
+  { at: "18 Nov 2026, 18:05", res: "won", text: `against Deleted bot (1480)`, before: 1598, after: 1605 },
+  { at: "18 Nov 2026, 17:44", res: "lost", text: `to <a href="#">Tidebreaker</a> (1500)`, before: 1611, after: 1598 },
+];
+const resWord = { won: "Won", lost: "Lost", drew: "Drew" };
+
+function competitor() {
+  const rows = history.map((r) => {
+    const d = r.after - r.before;
+    const cls = d > 0 ? "up" : d < 0 ? "down" : "flat";
+    return `<li><time>${r.at}</time><span><span class="res ${r.res}">${resWord[r.res]}</span> ${r.text}</span>
+      <span class="change">${r.before} → ${r.after}<span class="delta ${cls}">${d > 0 ? "+" : d < 0 ? "−" : "±"}${Math.abs(d)}</span></span></li>`;
+  }).join("");
+  return `<div class="board">
+    <div class="greeting board-head"><div><h1>Kraken <span class="tag" style="font-size:12px;vertical-align:middle">bot</span></h1><p class="lead">by Dana · on the leaderboard since 3 Oct 2026</p></div><button type="button" class="secondary small">Back to the leaderboard</button></div>
+    <div class="board-body">
+      <div class="card"><div class="stats">
+        <div class="stat"><div class="k">Rank</div><div class="v">1</div></div>
+        <div class="stat"><div class="k">Rating</div><div class="v">1609</div></div>
+        <div class="stat"><div class="k">Games</div><div class="v">52</div></div>
+        <div class="stat"><div class="k">Won</div><div class="v">34</div></div>
+        <div class="stat"><div class="k">Drawn</div><div class="v">3</div></div>
+        <div class="stat"><div class="k">Lost</div><div class="v">15</div></div>
+      </div></div>
+      <div class="card"><h2>Latest results</h2><p class="hint">Newest first. Results stay here after a game's replay is deleted.</p><ul class="results">${rows}</ul></div>
+    </div></div>`;
+}
+
+function competitor404() {
+  return `<div class="panel narrow"><h1>Leaderboard</h1><p style="margin:8px 0 0">This competitor isn't on the leaderboard.</p>
+    <p class="hint">Its owner may have deleted it, or it hasn't played a rated game.</p>
+    <div class="actions"><button type="button" class="primary">See the leaderboard</button><button type="button" class="secondary">Back</button></div></div>`;
+}
+
+// Where the Leaderboard link goes on the name screen.
+const linkName1 = () => nameScreenA().replace("</form>", `<p class="panel-footer">Who's on top? <a class="link" href="#">See the leaderboard</a></p></form>`);
+const linkName2 = () => nameScreenA(`<button type="button" class="secondary" style="margin-left:auto">Leaderboard</button>`);
+
+// ---------- views ----------
+
+const views = {
+  "369-name-a": ["#369 Name screen, option A: Google's button above the field", () => nameScreenA()],
+  "369-name-b": ["#369 Name screen, option B: A, plus what signing in gives", () => nameScreenB()],
+  "369-name-c": ["#369 Name screen, option C: two cards, sign in or guest", () => nameScreenC()],
+  "369-name-step": ["#369 First sign-in: the display name step (with a taken name)", () => nameStep()],
+  "369-menu": ["#369 Menu heading, signed in", () => menu()],
+  "369-account-a": ["#369 Account page, option A: one column, a list", () => overMenu(accountA())],
+  "369-account-b": ["#369 Account page, option B: rating tiles", () => overMenu(accountB())],
+  "369-account-c": ["#369 Account page, option C: two columns, a table", () => overMenu(accountC())],
+  "369-account-a-full": ["#369 Account page A at the limit of 5 names", () => overMenu(accountA(bots5))],
+  "369-account-a-taken": ["#369 Account page A, a name another account has", () => overMenu(accountA(bots3, { error: "Another account has the bot name Leviathan. Choose another." }))],
+  "369-confirm-bot": ["#369 Deleting a bot name", () => overMenu(accountA(), confirmBox("Delete the bot name Kraken?", "Its rating (1609, after 52 rated games) is deleted with it and can't be restored. Anyone can then register the name.", "Delete Kraken"))],
+  "369-confirm-account": ["#369 Deleting the account", () => overMenu(accountA(), confirmBox("Delete your account?", "Your display name, your 3 bot names and every rating are deleted, and can't be restored. You can still play as a guest.", "Delete account"))],
+  "371-board-a": ["#371 Leaderboard, option A: a screen, ratings explained below", () => leaderboardA()],
+  "371-board-b": ["#371 Leaderboard, option B: a podium, ratings explained beside", () => leaderboardB()],
+  "371-board-c": ["#371 Leaderboard, option C: a dialog, like the rules page", () => leaderboardC()],
+  "371-board-empty": ["#371 Leaderboard, empty", () => leaderboardA({ empty: true })],
+  "371-competitor": ["#371 A competitor's page", () => competitor()],
+  "371-competitor-404": ["#371 A competitor that isn't listed", () => competitor404()],
+  "371-link-name-1": ["#371 Link on the name screen, option 1: a line at the foot", () => linkName1()],
+  "371-link-name-2": ["#371 Link on the name screen, option 2: a button beside Continue", () => linkName2()],
+  "371-link-menu": ["#371 Link in the menu's heading", () => menu({ leaderboard: true })],
+  "371-link-menu-guest": ["#371 Link in the menu's heading, a guest", () => menu({ signedIn: false, leaderboard: true })],
+};
+
+const root = document.getElementById("root");
+const view = new URLSearchParams(location.search).get("view");
+if (view && views[view]) {
+  document.title = views[view][0];
+  root.innerHTML = isles() + `<div class="overlay">${views[view][1]()}</div>`;
+} else {
+  root.innerHTML = `<div class="index"><h1>Accounts and leaderboard mockups</h1>
+    <p>Each view at 1280 px and at 450 px. Open one alone with <code>?view=&lt;name&gt;</code>.</p>
+    ${Object.entries(views).map(([k, [title]]) => `<h2>${title}</h2><p><a href="?view=${k}">${k}</a></p>
+      <div class="row"><div style="width:640px;height:400px;overflow:hidden;flex:none"><iframe src="?view=${k}" width="1280" height="800" style="transform:scale(0.5);transform-origin:0 0" loading="lazy"></iframe></div>
+      <iframe src="?view=${k}" width="450" height="800" loading="lazy"></iframe></div>`).join("")}</div>`;
+}
+</script>
+</body>
+</html>
