@@ -758,10 +758,21 @@ select:focus-visible {
   margin: 0 0 4px;
 }
 
-/* Bot tutorial: a collapsible card under the menu's cards */
+/* Bot tutorials: two collapsible cards side by side under the menu's cards,
+   by hand and with a coding agent */
 
-.tutorial {
+.tutorials {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
   margin-top: 14px;
+}
+
+@media (max-width: 760px) {
+  .tutorials {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .tutorial summary {
@@ -815,6 +826,12 @@ select:focus-visible {
   overflow-x: auto;
   white-space: pre;
   overflow-wrap: normal;
+}
+
+/* The prompt is prose: wrap it rather than scroll it sideways. */
+.command-block.tutorial-prompt {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .tutorial-copy {

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { serveCommand } from "../../bots/localhost";
 import {
+  agentPrompt,
   commandText,
   detectSystem,
   installCommand,
@@ -125,6 +126,39 @@ describe("bot tutorial", () => {
       detectSystem("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"),
     ).toBe("unix");
     expect(detectSystem("Mozilla/5.0 (X11; Linux x86_64)")).toBe("unix");
+  });
+});
+
+describe("AI tutorial", () => {
+  const prompt = agentPrompt();
+
+  test("does the manual tutorial's setup: the same download, install and serve", () => {
+    const [get, serve] = tutorialSteps("unix");
+    const [clone, sparse] = get?.commands ?? [];
+    for (const command of [clone, sparse, installCommand, serveCommand]) {
+      expect(prompt).toContain(`\`${command}\``);
+    }
+    expect(serve?.commands).toEqual([serveCommand]);
+    expect(prompt).toContain("templates/python-bot folder to my-bot");
+  });
+
+  test("names each script on both systems, and every one exists", () => {
+    const named = [...prompt.matchAll(/scripts[/\\][\w.]+/g)].map(
+      (match) => match[0],
+    );
+    expect(named).toEqual(
+      ["check", "package"].flatMap((name) =>
+        tutorialSystems.map((system) => scriptCommand(system, name)),
+      ),
+    );
+    for (const script of named) read(script.replace("\\", "/"));
+  });
+
+  test("points the agent at the template's guide and skills", () => {
+    expect(prompt).toContain("AGENTS.md");
+    expect(read("AGENTS.md")).toContain(".agents/skills");
+    expect(readdirSync(new URL(".agents/skills/", template)).length).toBe(4);
+    expect(prompt).toContain("dist/island-battles-bot.zip");
   });
 });
 

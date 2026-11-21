@@ -12,7 +12,7 @@ import {
 import { mountMapFields } from "./mapFields";
 import type { Screen } from "./nameScreen";
 import { describeProblem } from "./problems";
-import { mountTutorial } from "./tutorial";
+import { mountTutorials } from "./tutorial";
 
 export interface MenuScreenOptions {
   playerName: string;
@@ -251,7 +251,7 @@ export function mountMenuScreen(options: MenuScreenOptions): Screen {
       createForm,
       h("div", { class: "card-stack" }, joinForm, watchForm),
     ),
-    mountTutorial(),
+    mountTutorials(),
   );
   if (options.joinCode) queueMicrotask(() => void join(options.joinCode ?? ""));
   else if (options.watchCode) {
