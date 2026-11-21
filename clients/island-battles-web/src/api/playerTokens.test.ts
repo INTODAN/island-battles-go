@@ -113,12 +113,22 @@ describe("player tokens", () => {
     expect(server.gameAuthorizations()).toEqual(["Bearer token-1"]);
   });
 
+  test("the account's routes take a player token too", async () => {
+    const server = serverFor();
+    await server.gameApi.GET("/account");
+    expect(server.gameAuthorizations()).toEqual(["Bearer token-1"]);
+  });
+
   test("the game's public routes need no token", async () => {
     const server = serverFor();
     await server.gameApi.GET("/game/upgrades");
     await server.gameApi.GET("/map/templates");
+    await server.gameApi.GET("/leaderboard");
+    await server.gameApi.GET("/leaderboard/{competitor_id}", {
+      params: { path: { competitor_id: LOBBY_ID } },
+    });
     expect(server.issued()).toBe(0);
-    expect(server.gameAuthorizations()).toEqual([null, null]);
+    expect(server.gameAuthorizations()).toEqual([null, null, null, null]);
   });
 
   test("a token is renewed once 80 % of its life has passed", async () => {

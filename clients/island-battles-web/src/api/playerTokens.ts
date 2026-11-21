@@ -12,13 +12,15 @@ export interface IssuedPlayerToken {
 
 /**
  * The game's routes that take a player token instead of the guest credential:
- * a player's game, its watcher reads, the command batches and a lobby's bot
- * packages.
+ * a player's game, its watcher reads, the command batches, a lobby's bot
+ * packages and the signed-in player's account.
  */
 export const needsPlayerToken = (pathname: string): boolean =>
   pathname.includes("/game/from-lobby/") ||
   pathname.includes("/game/lobbies/") ||
-  pathname.endsWith("/generation/commands");
+  pathname.endsWith("/generation/commands") ||
+  pathname.endsWith("/account") ||
+  pathname.includes("/account/");
 
 /**
  * The player token the game's routes take, for the current guest session. The
