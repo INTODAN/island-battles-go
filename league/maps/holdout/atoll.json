@@ -1,0 +1,81 @@
+{
+  "map_name": "atoll",
+  "player_amount": 2,
+  "plane_size_x": 16,
+  "plane_size_y": 10,
+  "neutral_starting_soldier_amount": 15,
+  "castles": [
+    {
+      "team_color": 1,
+      "x": -6.5,
+      "y": 1.5,
+      "starting_soldier_amount": 30
+    },
+    {
+      "team_color": 2,
+      "x": 6.5,
+      "y": -1.5,
+      "starting_soldier_amount": 30
+    },
+    {
+      "team_color": 0,
+      "x": -4.5,
+      "y": -4.0,
+      "starting_soldier_amount": 15
+    },
+    {
+      "team_color": 0,
+      "x": 4.5,
+      "y": 4.0,
+      "starting_soldier_amount": 15
+    },
+    {
+      "team_color": 0,
+      "x": -6.0,
+      "y": -4.5,
+      "starting_soldier_amount": 5
+    },
+    {
+      "team_color": 0,
+      "x": 6.0,
+      "y": 4.5,
+      "starting_soldier_amount": 5
+    },
+    {
+      "team_color": 0,
+      "x": -3.5,
+      "y": 4.5,
+      "starting_soldier_amount": 25
+    },
+    {
+      "team_color": 0,
+      "x": 3.5,
+      "y": -4.5,
+      "starting_soldier_amount": 25
+    },
+    {
+      "team_color": 0,
+      "x": -2.0,
+      "y": 2.5,
+      "starting_soldier_amount": 18
+    },
+    {
+      "team_color": 0,
+      "x": 2.0,
+      "y": -2.5,
+      "starting_soldier_amount": 18
+    },
+    {
+      "team_color": 0,
+      "x": -2.5,
+      "y": 0.5,
+      "starting_soldier_amount": 5
+    },
+    {
+      "team_color": 0,
+      "x": 2.5,
+      "y": -0.5,
+      "starting_soldier_amount": 5
+    }
+  ]
+}

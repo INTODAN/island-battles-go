@@ -1,0 +1,63 @@
+{
+  "map_name": "ridge",
+  "player_amount": 2,
+  "plane_size_x": 12,
+  "plane_size_y": 8,
+  "neutral_starting_soldier_amount": 15,
+  "castles": [
+    {
+      "team_color": 1,
+      "x": -5,
+      "y": 0,
+      "starting_soldier_amount": 30
+    },
+    {
+      "team_color": 2,
+      "x": 5,
+      "y": 0,
+      "starting_soldier_amount": 30
+    },
+    {
+      "team_color": 0,
+      "x": -4,
+      "y": 2.5,
+      "starting_soldier_amount": 7
+    },
+    {
+      "team_color": 0,
+      "x": 4,
+      "y": -2.5,
+      "starting_soldier_amount": 7
+    },
+    {
+      "team_color": 0,
+      "x": -2,
+      "y": -2,
+      "starting_soldier_amount": 16
+    },
+    {
+      "team_color": 0,
+      "x": 2,
+      "y": 2,
+      "starting_soldier_amount": 16
+    },
+    {
+      "team_color": 0,
+      "x": 0,
+      "y": 3,
+      "starting_soldier_amount": 22
+    },
+    {
+      "team_color": 0,
+      "x": 0,
+      "y": -3,
+      "starting_soldier_amount": 22
+    },
+    {
+      "team_color": 0,
+      "x": 0,
+      "y": 0,
+      "starting_soldier_amount": 35
+    }
+  ]
+}

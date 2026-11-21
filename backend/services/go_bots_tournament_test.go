@@ -12,9 +12,6 @@ import (
 	"islandBattles/backend/bots"
 	"islandBattles/backend/models"
 	"islandBattles/backend/simulation"
-
-	"github.com/jackc/pgx/v5/pgtype"
-	"gorm.io/gorm"
 )
 
 // tournamentMap is a map the default bots play on, for two teams.
@@ -55,35 +52,6 @@ func tournamentMaps() []tournamentMap {
 	}
 }
 
-// generationFromState is the stored generation of a board, as the bots and
-// the command checks see it.
-func generationFromState(id uint, state simulation.GameState) *models.Generation {
-	generation := &models.Generation{Model: gorm.Model{ID: id}}
-	castles := map[uint]models.Castle{}
-	for _, castle := range state.SortedCastles() {
-		stored := models.Castle{CastleFields: models.CastleFields{TeamColor: castle.TeamColor, Position: castle.Position, PersistentCastleID: castle.ID, Upgrades: castle.Upgrades.Clone()}, SoldierAmount: castle.Soldiers}
-		castles[castle.ID] = stored
-		generation.Map.Castles = append(generation.Map.Castles, stored)
-	}
-	for _, group := range state.SortedSoldierGroups() {
-		generation.SoldierGroups = append(generation.SoldierGroups, models.SoldierGroup{
-			SoldierGroupFields: models.SoldierGroupFields{SoldierAmount: group.Soldiers}, PersistentSoldierGroupID: group.ID, TeamColor: group.TeamColor,
-			OriginCastle: castles[group.OriginCastleID], DestinationCastle: castles[group.DestinationCastleID],
-			MovementPauseGenerations: group.MovementPauseGenerations, ClashRadius: group.ClashRadius, Position: group.Position, Upgrades: group.Upgrades.Clone(),
-		})
-	}
-	return generation
-}
-
-func stateFromMap(gameMap models.Map) simulation.GameState {
-	state := simulation.GameState{Map: gameMap.MapFields, Castles: map[uint]*simulation.Castle{}, SoldierGroups: map[uint]*simulation.SoldierGroup{}}
-	for _, castle := range gameMap.Castles {
-		state.Castles[castle.PersistentCastleID] = &simulation.Castle{ID: castle.PersistentCastleID, TeamColor: castle.TeamColor, Soldiers: castle.SoldierAmount,
-			Position: pgtype.Point{P: castle.Position.P, Valid: true}, Upgrades: castle.Upgrades.Clone()}
-	}
-	return state
-}
-
 // playTournamentGame plays a game between Go bots, levels[i] for team colour
 // i+1, as the service plays their turns, to its outcome. Every turn of every
 // bot must pass the command checks.
@@ -96,7 +64,7 @@ func playTournamentGame(t *testing.T, gameID uint, gameMap models.Map, levels []
 	state := stateFromMap(gameMap)
 	memories := make([]models.BotMemory, len(levels))
 	for generations := 1; ; generations++ {
-		generation := generationFromState(uint(generations), state)
+		generation := generationFromState(uint(generations), generations, state)
 		inputs := []models.GenerationInput{}
 		commands := []models.CommandFields{}
 		for index, level := range levels {

@@ -1,0 +1,21 @@
+{
+  "map_name": "circle",
+  "player_amount": 2,
+  "plane_size_x": 8,
+  "plane_size_y": 6,
+  "neutral_starting_soldier_amount": 15,
+  "castles": [
+    {
+      "team_color": 1,
+      "x": -2,
+      "y": 0,
+      "starting_soldier_amount": 30
+    },
+    {
+      "team_color": 2,
+      "x": 2,
+      "y": 0,
+      "starting_soldier_amount": 30
+    }
+  ]
+}
