@@ -16,9 +16,12 @@ import {
   type WatchState,
 } from "./install";
 import { Reconciler } from "./reconciler";
+import { createSessionLock, type SessionLock } from "./session-lock";
 import {
+  defaultRememberStorage,
   defaultStorage,
   loadSession,
+  rememberedSessionKey,
   type Session,
   type StorageLike,
   saveSession,
@@ -44,6 +47,13 @@ export interface RealtimeOptions {
   fetch?: typeof fetch;
   /** Where the guest session is kept. Defaults to `sessionStorage`; null keeps the session in memory only. */
   storage?: StorageLike | null;
+  /**
+   * Where a session signed in with Google is remembered for the browser's other tabs (#409).
+   * Defaults to `localStorage` (none in the desktop app); null remembers nothing.
+   */
+  rememberStorage?: StorageLike | null;
+  /** The tab's hold on its player, so two tabs don't share a remembered session. */
+  sessionLock?: SessionLock;
   /** Builds the Centrifugo client; tests pass a fake. */
   createClient?: CreateCentrifuge;
   /** Epoch milliseconds. */
@@ -117,6 +127,13 @@ export interface Realtime {
    */
   followWatch(target: { lobbyId: string; channel: string }): void;
   leaveWatch(): void;
+  /**
+   * Takes the browser's remembered Google session (#409) when this tab has none and no other open
+   * tab uses it. Resolves true when the tab has a session afterwards.
+   */
+  resumeRemembered(): Promise<boolean>;
+  /** Forgets the remembered Google session, for a sign-out for good. */
+  forgetRemembered(): void;
   /** Ends the session and closes the connection. */
   signOut(): void;
   /**
@@ -184,12 +201,23 @@ export function createRealtime(options: RealtimeOptions = {}): Realtime {
     options.storage === undefined
       ? defaultStorage()
       : (options.storage ?? undefined);
+  const remembered =
+    options.rememberStorage === undefined
+      ? defaultRememberStorage()
+      : (options.rememberStorage ?? undefined);
+  const lock = options.sessionLock ?? createSessionLock();
   const createClient = options.createClient ?? createCentrifuge;
   const settleMs = options.settleMs ?? 50;
   const retryBaseMs = options.retryBaseMs ?? 500;
   const retryMaxMs = options.retryMaxMs ?? 10_000;
 
   const session = createStore<Session | null>(loadSession(storage, now()));
+  {
+    // A tab that reloaded with its Google session holds its player, and the browser remembers
+    // the session if it remembers none newer (also for a tab signed in before #409).
+    const initial = session.get();
+    if (initial?.account) remember(initial, false);
+  }
   const lobby = createStore<Snapshot | null>(null);
   const game = createStore<GenerationState | null>(null);
   const watch = createStore<WatchState | null>(null);
@@ -245,6 +273,15 @@ export function createRealtime(options: RealtimeOptions = {}): Realtime {
     const closing = client;
     client = undefined;
     closing?.disconnect();
+    const ended = session.get();
+    if (
+      ended &&
+      loadSession(remembered, now(), rememberedSessionKey)?.playerId ===
+        ended.playerId
+    ) {
+      saveSession(remembered, null, rememberedSessionKey);
+    }
+    lock.release();
     saveSession(storage, null);
     session.set(null);
     lobby.set(null);
@@ -618,8 +655,22 @@ export function createRealtime(options: RealtimeOptions = {}): Realtime {
     problem.set(null);
   }
 
+  /**
+   * Remembers a session signed in with Google for the browser, and holds its player. `latest` is
+   * true for a session that just started; otherwise another tab's remembered session stays.
+   */
+  function remember(next: Session, latest: boolean): void {
+    if (!next.account) return;
+    const held = loadSession(remembered, now(), rememberedSessionKey);
+    if (latest || !held || held.playerId === next.playerId) {
+      saveSession(remembered, next, rememberedSessionKey);
+    }
+    void lock.claim(next.playerId);
+  }
+
   function startSession(next: Session): Session {
     saveSession(storage, next);
+    remember(next, true);
     problem.set(null);
     session.set(next);
     watchExpiry(next);
@@ -697,6 +748,7 @@ export function createRealtime(options: RealtimeOptions = {}): Realtime {
         account: { id: account.id, displayName: account.display_name },
       };
       saveSession(storage, next);
+      remember(next, false);
       session.set(next);
       return next;
     },
@@ -794,6 +846,34 @@ export function createRealtime(options: RealtimeOptions = {}): Realtime {
     },
 
     leaveWatch,
+
+    async resumeRemembered() {
+      // Another tab may remember a newer session while the lock is asked for: then try that one.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (session.get()) return true;
+        const saved = loadSession(remembered, now(), rememberedSessionKey);
+        if (!saved?.account) return false;
+        const claimed = await lock.claim(saved.playerId);
+        // A sign-in that finished meanwhile wins. An account's took its own lock; a guest's holds none.
+        const signedIn = session.get();
+        if (signedIn) {
+          if (!signedIn.account) lock.release();
+          return true;
+        }
+        const still = loadSession(remembered, now(), rememberedSessionKey);
+        if (still?.playerId === saved.playerId) {
+          if (!claimed) return false;
+          startSession(still);
+          return true;
+        }
+        lock.release();
+      }
+      return false;
+    },
+
+    forgetRemembered() {
+      saveSession(remembered, null, rememberedSessionKey);
+    },
 
     signOut() {
       endSession();

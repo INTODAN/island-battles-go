@@ -1,4 +1,4 @@
-import { tabStorage } from "../platform";
+import { isDesktop, tabStorage } from "../platform";
 
 /** The part of `Storage` the module uses; `sessionStorage` fits. */
 export interface StorageLike {
@@ -32,13 +32,20 @@ const isAccount = (value: unknown): value is SessionAccount =>
 
 export const sessionStorageKey = "island-battles-web.session";
 
+/**
+ * The browser's latest session signed in with Google (#409), in `localStorage`: a tab without a
+ * session of its own takes it, so a new tab or a restarted browser stays signed in.
+ */
+export const rememberedSessionKey = "island-battles-web.google-session";
+
 /** Reads the saved session; null when missing, malformed or expired. */
 export function loadSession(
   storage: StorageLike | undefined,
   now: number,
+  key = sessionStorageKey,
 ): Session | null {
   try {
-    const raw = storage?.getItem(sessionStorageKey);
+    const raw = storage?.getItem(key);
     if (!raw) return null;
     const value = JSON.parse(raw) as Partial<Session> | null;
     if (
@@ -52,7 +59,7 @@ export function loadSession(
     ) {
       return value as Session;
     }
-    storage?.removeItem(sessionStorageKey);
+    storage?.removeItem(key);
   } catch {
     // Storage may be blocked; the page then works without it.
   }
@@ -62,10 +69,11 @@ export function loadSession(
 export function saveSession(
   storage: StorageLike | undefined,
   session: Session | null,
+  key = sessionStorageKey,
 ): void {
   try {
-    if (session) storage?.setItem(sessionStorageKey, JSON.stringify(session));
-    else storage?.removeItem(sessionStorageKey);
+    if (session) storage?.setItem(key, JSON.stringify(session));
+    else storage?.removeItem(key);
   } catch {
     // Storage may be blocked or full; the session then lives for this page only.
   }
@@ -75,6 +83,20 @@ export function saveSession(
 export function defaultStorage(): StorageLike | undefined {
   try {
     return tabStorage();
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Where a session signed in with Google is remembered across tabs: `localStorage`, or undefined
+ * where the browser blocks it, and in the desktop app, whose own session already outlives the
+ * window and which doesn't offer Google.
+ */
+export function defaultRememberStorage(): StorageLike | undefined {
+  if (isDesktop) return undefined;
+  try {
+    return globalThis.localStorage ?? undefined;
   } catch {
     return undefined;
   }

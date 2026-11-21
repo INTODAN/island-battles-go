@@ -43,7 +43,7 @@ import {
   type RoundRoute,
   routeRound,
 } from "./rounds";
-import { googleSignInKey } from "./signIn";
+import { googleSignInKey, refusedGoogleSignIn } from "./signIn";
 import { watchForGame } from "./startRetry";
 import { mountWatchersPanel } from "./watchersPanel";
 
@@ -62,6 +62,9 @@ interface SavedRoom {
   lobbyId: string;
   joinCode: string;
 }
+
+/** Storage that outlives the tab: the remembered Google sign-in (#409). */
+const browserStorage = (): Storage => globalThis.localStorage;
 
 function read(storage: () => Storage, key: string): string | null {
   try {
@@ -166,28 +169,42 @@ export function mountLobbyApp(options: {
     return googleStarted;
   };
   /**
-   * The tab's person signed in with Google and didn't sign out: when their session ends, Google is
-   * asked for a credential without a click before the name screen shows.
+   * The browser's person signed in with Google and didn't sign out (#409): a tab without a session,
+   * a new tab or the page after a browser restart, or one whose session ended, takes the
+   * browser's remembered session, or else asks Google for a credential without a click, before
+   * the name screen shows. Kept in `localStorage`, so it outlives the tab.
    */
   const signedInWithGoogle = (): boolean =>
-    read(tabStorage, googleSignInKey) === "1";
+    read(browserStorage, googleSignInKey) === "1";
   const setSignedInWithGoogle = (on: boolean) =>
-    write(tabStorage, googleSignInKey, on ? "1" : null);
+    write(browserStorage, googleSignInKey, on ? "1" : null);
+  // A tab signed in before #409 kept the mark in its own storage: the browser keeps it now. The
+  // desktop app's tab storage is the browser's already.
+  if (!isDesktop && read(tabStorage, googleSignInKey) === "1") {
+    setSignedInWithGoogle(true);
+    write(tabStorage, googleSignInKey, null);
+  }
   /** The silent sign-in of the session that ended last: running, or tried. */
   let silent: "running" | "tried" | undefined;
 
   async function signInSilently(): Promise<void> {
+    // Another tab's session, once that tab is closed: no call to Google.
+    if (await realtime.resumeRemembered()) return;
+    if (disposed) return;
     const signIn = await google();
     const credential = signIn ? await signIn.silent() : undefined;
     if (credential !== undefined && !disposed) {
       try {
         await realtime.signInWithGoogle(credential);
         return;
-      } catch {
-        // The name screen shows, with the button.
+      } catch (cause) {
+        // The lobby refused Google's credential (the account is gone, or sign-in is off): the
+        // browser stops trying. The name screen shows, with the button.
+        if (refusedGoogleSignIn(cause)) setSignedInWithGoogle(false);
       }
     }
-    setSignedInWithGoogle(false);
+    // Without a credential from Google (it allows one silent sign-in per 10 minutes, and some
+    // browsers none), the mark stays for the next tab; this one shows the name screen.
     silent = "tried";
     route();
   }
@@ -198,6 +215,7 @@ export function mountLobbyApp(options: {
    */
   function forgetGoogle(): void {
     setSignedInWithGoogle(false);
+    realtime.forgetRemembered();
     void google().then((signIn) => signIn?.disableAutoSelect());
   }
 
