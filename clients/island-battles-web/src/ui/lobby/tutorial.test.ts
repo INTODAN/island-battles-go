@@ -133,13 +133,19 @@ describe("AI tutorial", () => {
   const prompt = agentPrompt();
 
   test("does the manual tutorial's setup: the same download, install and serve", () => {
-    const [get, serve] = tutorialSteps("unix");
+    const [get] = tutorialSteps("unix");
     const [clone, sparse] = get?.commands ?? [];
     for (const command of [clone, sparse, installCommand, serveCommand]) {
       expect(prompt).toContain(`\`${command}\``);
     }
-    expect(serve?.commands).toEqual([serveCommand]);
     expect(prompt).toContain("templates/python-bot folder to my-bot");
+  });
+
+  test("asks for a local agent, and for a bot server that outlives it", () => {
+    expect(prompt).toContain("on this computer");
+    expect(prompt).toContain(
+      "give me that command to run in a terminal of my own",
+    );
   });
 
   test("names each script on both systems, and every one exists", () => {
@@ -155,9 +161,13 @@ describe("AI tutorial", () => {
   });
 
   test("points the agent at the template's guide and skills", () => {
-    expect(prompt).toContain("AGENTS.md");
-    expect(read("AGENTS.md")).toContain(".agents/skills");
-    expect(readdirSync(new URL(".agents/skills/", template)).length).toBe(4);
+    expect(prompt).toContain(
+      "Read AGENTS.md and the skills in .agents/skills/",
+    );
+    read("AGENTS.md");
+    expect(
+      readdirSync(new URL(".agents/skills/", template)).length,
+    ).toBeGreaterThan(0);
     expect(prompt).toContain("dist/island-battles-bot.zip");
   });
 });

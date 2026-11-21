@@ -91,23 +91,24 @@ export function tutorialSteps(system: TutorialSystem): TutorialStep[] {
  * Codex, Cursor and the like) that does the manual tutorial's setup itself. It
  * is built from the manual steps' commands, so the two tutorials stay the same
  * setup, and it names both systems' scripts, because the agent can tell which
- * system it runs on.
+ * shell it runs in. The agent must run on the player's computer, because the
+ * game tab hands turns to the bot on 127.0.0.1.
  */
 export function agentPrompt(): string {
   const [get] = tutorialSteps("unix");
   const [clone, sparse] = get?.commands ?? [];
-  const both = (name: string) =>
-    `\`${scriptCommand("unix", name)}\` (\`${scriptCommand("windows", name)}\` on Windows)`;
+  const both = (name: string, note = "") =>
+    `\`${scriptCommand("unix", name)}\` (\`${scriptCommand("windows", name)}\` on Windows${note})`;
   return [
-    "Set up a bot for the game Island Battles for me, from its Python bot template, in a new folder called my-bot here.",
+    "Set up a bot for the game Island Battles for me, from its Python bot template, in a new folder called my-bot here, on this computer.",
     "",
     "1. Check that git and uv (https://docs.astral.sh/uv/) are installed. If one is missing, tell me how to install it, or install it if I agree.",
     `2. Download only the template: run \`${clone}\`, then \`${sparse}\`, and copy the island-battles-go/templates/python-bot folder to my-bot. Work in my-bot from now on.`,
     `3. Run \`${installCommand}\`. The template has no uv.lock on purpose: this takes the newest island-battles-python SDK, the only one the live game speaks.`,
     "4. Read AGENTS.md and the skills in .agents/skills/ before changing anything. They explain the game and how a bot is written. The bot is bot.py, and its strategy is play().",
-    `5. Run ${both("check")} and fix anything that fails.`,
-    `6. Serve the bot with \`${serveCommand}\` in my-bot, in the background, and leave it running. It listens on http://127.0.0.1:41414. Saving bot.py reloads it.`,
-    "7. Tell me when it is running, and how to stop it.",
+    `5. Run ${both("check", " in PowerShell or cmd; the .sh scripts work in Git Bash and WSL")} and fix anything that fails.`,
+    `6. Serve the bot with \`${serveCommand}\` in my-bot. It listens on http://127.0.0.1:41414, and saving bot.py reloads it. It must keep running while I play: start it only if it will outlive this conversation, and either way give me that command to run in a terminal of my own, in my-bot.`,
+    "7. Tell me when it is running, or what I need to run, and how to stop it.",
     "",
     `Later, when I ask for a zip to upload, run ${both("package")}: it builds dist/island-battles-bot.zip.`,
   ].join("\n");
@@ -122,9 +123,9 @@ export function mountAgentTutorial(): HTMLElement {
     h(
       "p",
       { class: "hint" },
-      "The same setup in one step: copy this prompt into a coding agent, such as Claude Code, Codex or Cursor, opened in the folder where you want your bot.",
+      "The same setup in one step: copy this prompt into a coding agent that runs on this computer, such as Claude Code, Codex or Cursor, opened in the folder where you want your bot. A cloud agent won't do: this tab hands turns to your bot on this computer.",
     ),
-    copyBlock("The setup prompt", agentPrompt(), "tutorial-prompt"),
+    copyBlock("The setup prompt", agentPrompt(), true),
     h(
       "p",
       {},
@@ -154,18 +155,28 @@ export function detectSystem(
 export const commandText = (step: TutorialStep): string =>
   step.commands.join("\n");
 
-/** A block of text to copy, such as commands or a prompt, with a Copy button. */
-function copyBlock(label: string, text: string, className = ""): HTMLElement {
-  const pre = h(
-    "pre",
-    {
-      class: `command command-block ${className}`.trim(),
-      // A scrollable region needs to be reachable by keyboard.
-      tabIndex: 0,
-      attrs: { "aria-label": label },
-    },
-    h("code", {}, text),
-  );
+/**
+ * A block of text to copy, such as commands or a prompt, with a Copy button.
+ * Commands scroll sideways; `wraps` is for prose, such as the prompt, which
+ * wraps instead and so needs no tab stop.
+ */
+function copyBlock(label: string, text: string, wraps = false): HTMLElement {
+  const pre = wraps
+    ? h(
+        "pre",
+        { class: "command command-block tutorial-prompt" },
+        h("code", {}, text),
+      )
+    : h(
+        "pre",
+        {
+          class: "command command-block",
+          // A scrollable region needs to be reachable by keyboard.
+          tabIndex: 0,
+          attrs: { "aria-label": label },
+        },
+        h("code", {}, text),
+      );
   const copy = h(
     "button",
     {
