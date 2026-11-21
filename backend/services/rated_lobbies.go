@@ -150,11 +150,11 @@ func checkNameURLs(members []domain.ReadyMember, names botNames, rated, atStart 
 	}
 	switch {
 	case len(gone) > 0 && atStart:
-		return domain.GameRequirement(RatedBotNameGoneProblemType, strings.Join(gone, ", ")+" no longer exists: they must choose another.")
+		return domain.GameRequirement(RatedBotNameGoneProblemType, strings.Join(gone, ", ")+pluralVerb(len(gone), " no longer exists", " no longer exist")+": they must choose another.")
 	case len(gone) > 0:
 		return domain.GameRequirement(RatedBotNameGoneProblemType, "Your bot name "+goneNames[0]+" no longer exists. Choose another.")
 	case len(missing) > 0 && atStart:
-		return domain.GameRequirement(BotNameURLRequiredProblemType, strings.Join(missing, ", ")+" has no URL yet: they must add its hosted bot's URL on the account page.")
+		return domain.GameRequirement(BotNameURLRequiredProblemType, strings.Join(missing, ", ")+pluralVerb(len(missing), " has no URL yet: they must add its hosted bot's URL", " have no URL yet: they must add their hosted bots' URLs")+" on the account page.")
 	case len(missing) > 0:
 		return domain.GameRequirement(BotNameURLRequiredProblemType, "Your bot name "+missingNames[0]+" has no URL yet. Add its hosted bot's URL on the account page, then get ready again.")
 	}
@@ -385,7 +385,7 @@ func ratedCompetitors(ctx context.Context, database *gorm.DB, snapshot domain.Sn
 		}
 		named, found := names.find(person.AccountID, bot.Name)
 		if !found {
-			return nil, domain.GameRequirement(RatedBotNameRequiredProblemType, "This lobby is rated: waiting for "+person.DisplayName+" to play by hand, or to choose one of their bot names for their bot.")
+			return nil, domain.GameRequirement(RatedBotNameRequiredProblemType, "This lobby is rated: waiting for "+person.DisplayName+" to play by hand, or to choose one of their hosted bot names.")
 		}
 		competitors[person.PlayerID] = named
 	}
@@ -437,4 +437,12 @@ func playNameURLs(database *gorm.DB, snapshot domain.Snapshot, chosen map[string
 		chosen[person.PlayerID] = bot
 	}
 	return nil
+}
+
+// pluralVerb is singular for one named bot and plural for several.
+func pluralVerb(count int, singular, plural string) string {
+	if count == 1 {
+		return singular
+	}
+	return plural
 }
