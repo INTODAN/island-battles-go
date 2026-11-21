@@ -6,12 +6,18 @@
 // is (K_A / (N - 1)) * (S - E), with S 1 if A won, 0 if B won and 0.5 in a
 // draw. With a winner, only the pairs that include the winner count: the
 // winner gets the sum over every other team, and each other team its one
-// pair against the winner. In a draw every pair counts, each as a draw. Every
+// pair against the winner. Without a winner, the teams that survived, still
+// in the game when it ended, draw each other, and each team that dropped out
+// loses to each survivor; two teams that dropped out aren't scored against
+// each other. When no team survived, every pair counts, each as a draw. Every
 // change uses the ratings from before the game, and each competitor its own
 // K, so a game's changes need not add up to zero.
 package rating
 
-import "math"
+import (
+	"math"
+	"slices"
+)
 
 const (
 	// ProvisionalK is a competitor's K while it has played fewer than
@@ -25,11 +31,15 @@ const (
 	ProvisionalGames = 30
 )
 
-// Team is one team of a rated game: its competitor's rating and how many
-// rated games the competitor played before this one.
+// Team is one team of a rated game: its competitor's rating, how many rated
+// games the competitor played before this one, and whether the team survived.
 type Team struct {
 	Rating float64
 	Games  int
+	// Survived reports whether the team was still in the game when it ended,
+	// as opposed to eliminated, out of time, resigned or left. It counts only
+	// in a game without a winner.
+	Survived bool
 }
 
 // K is the K of a competitor that played games rated games before this one:
@@ -47,9 +57,16 @@ func Expected(rating, opponent float64) float64 {
 	return 1 / (1 + math.Pow(10, (opponent-rating)/400))
 }
 
+// AnySurvived reports whether a team of teams survived. In a game without a
+// winner where none did, every pair of teams draws.
+func AnySurvived(teams []Team) bool {
+	return slices.ContainsFunc(teams, func(team Team) bool { return team.Survived })
+}
+
 // Changes returns each team's rating change, in the order of teams. winner
 // is the index in teams of the team that won, which must be one of them, or
-// nil for a draw. A game of fewer than two teams changes nothing.
+// nil for a game without a winner, which the teams' Survived decides. A game
+// of fewer than two teams changes nothing.
 func Changes(teams []Team, winner *int) []float64 {
 	changes := make([]float64, len(teams))
 	if len(teams) < 2 {
@@ -61,10 +78,18 @@ func Changes(teams []Team, winner *int) []float64 {
 		return float64(K(teams[a].Games)) / pairs * (score - Expected(teams[a].Rating, teams[b].Rating))
 	}
 	if winner == nil {
+		anySurvived := AnySurvived(teams)
 		for a := range teams {
+			// Two teams that dropped out aren't scored against each other.
 			for b := range teams {
-				if a != b {
+				switch {
+				case a == b:
+				case !anySurvived || teams[a].Survived && teams[b].Survived:
 					changes[a] += change(a, b, 0.5)
+				case teams[a].Survived:
+					changes[a] += change(a, b, 1)
+				case teams[b].Survived:
+					changes[a] += change(a, b, 0)
 				}
 			}
 		}

@@ -189,7 +189,7 @@ type GameOutcomeView struct {
 	// existed still read; the server always writes it.
 	Departures []DepartureView `json:"departures" required:"false" nullable:"false" doc:"The teams that resigned or left a real-time game, in the order they left. Always present, and empty for most games; a demo saved before this field existed has none, which reads as empty."`
 	// Ratings is nil, and left out, for a game that isn't rated.
-	Ratings []RatingChange `json:"ratings,omitempty" nullable:"false" doc:"How the game changed each team's competitor's Elo rating, one per team in colour order, for a rated game only: absent when the game isn't rated. The winner gains and every other team loses, each against the winner alone; in a draw every pair of teams counts as a draw."`
+	Ratings []RatingChange `json:"ratings,omitempty" nullable:"false" doc:"How the game changed each team's competitor's Elo rating, one per team in colour order, for a rated game only: absent when the game isn't rated. The winner gains and every other team loses, each against the winner alone. Without a winner, the teams still in the game when it ended draw each other, and each team that was eliminated, timed out, resigned or left loses to each of them; when no team was left, every pair of teams counts as a draw."`
 }
 
 // DepartureView is a team that left a real-time game: it resigned, or the
