@@ -28,8 +28,8 @@
 // `python -m island_battles_client.worker module:function` or a Go bot's
 // `worker` command. Bots are stateless, so one worker process plays any
 // number of games: a match borrows a process for each worker seat, and gives
-// it back for the next match, so at most two processes per match played at
-// once ever run. A map is a map file.
+// it back for the next match, so no more processes run than worker seats
+// play at once. A map is a map file.
 // seats[index] plays team colour index+1. The README's "Headless matches"
 // has the rest.
 package main
@@ -50,6 +50,7 @@ import (
 	"runtime"
 	"slices"
 	"sync"
+	"syscall"
 	"time"
 
 	"islandBattles/backend/bots"
@@ -108,7 +109,7 @@ type matchLine struct {
 }
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
 		fmt.Fprintln(os.Stderr, "headless-match:", err)
@@ -198,11 +199,18 @@ func run(ctx context.Context, arguments []string, input io.Reader, output, worke
 	var writeError error
 	var waiting sync.WaitGroup
 	running := make(chan struct{}, plan.Parallel)
+matches:
 	for index, match := range plan.Matches {
+		// No match starts once the command is told to stop.
+		select {
+		case <-ctx.Done():
+			break matches
+		case running <- struct{}{}:
+		}
 		if ctx.Err() != nil {
+			<-running
 			break
 		}
-		running <- struct{}{}
 		waiting.Add(1)
 		go func() {
 			defer func() { <-running; waiting.Done() }()
@@ -228,7 +236,7 @@ func playMatch(ctx context.Context, plan schedule, gameID uint, match matchSpeci
 	for index, name := range match.Seats {
 		// Getting a player ready, such as starting a worker's process, is not
 		// part of the match: the game's first turn doesn't pay for it.
-		player, release, err := players[name].seat()
+		player, release, err := players[name].seat(ctx)
 		if err != nil {
 			line.Error = err.Error()
 			return line
@@ -290,15 +298,16 @@ func writeDemo(plan schedule, matchID string, demo models.Demo) (path string, er
 const workerStartTimeout = 60 * time.Second
 
 // playerSource gives each match a player for one of its seats, and takes it
-// back when the match ends.
+// back when the match ends. ctx is the command's: a player isn't made ready
+// once the command is told to stop.
 type playerSource interface {
-	seat() (player services.HeadlessPlayer, release func(), err error)
+	seat(ctx context.Context) (player services.HeadlessPlayer, release func(), err error)
 }
 
 // defaultBot is a default bot, which plays any number of games at once.
 type defaultBot struct{ bot bots.Bot }
 
-func (source defaultBot) seat() (services.HeadlessPlayer, func(), error) {
+func (source defaultBot) seat(context.Context) (services.HeadlessPlayer, func(), error) {
 	return source.bot, func() {}, nil
 }
 
@@ -315,7 +324,7 @@ type workerPool struct {
 }
 
 // seat borrows an idle process, or starts one.
-func (pool *workerPool) seat() (services.HeadlessPlayer, func(), error) {
+func (pool *workerPool) seat(ctx context.Context) (services.HeadlessPlayer, func(), error) {
 	pool.lock.Lock()
 	var process *workerProcess
 	if last := len(pool.idle) - 1; last >= 0 {
@@ -324,34 +333,39 @@ func (pool *workerPool) seat() (services.HeadlessPlayer, func(), error) {
 	pool.lock.Unlock()
 	if process == nil {
 		var err error
-		if process, err = pool.start(); err != nil {
+		if process, err = pool.start(ctx); err != nil {
 			return nil, nil, err
 		}
 	}
-	seat := &workerSeat{pool: pool, process: process}
-	return seat, func() {
-		if seat.process == nil {
-			return
-		}
-		pool.lock.Lock()
-		defer pool.lock.Unlock()
-		pool.idle = append(pool.idle, seat.process)
-	}, nil
+	seat := &workerSeat{pool: pool, process: process, commandContext: ctx}
+	return seat, seat.release, nil
 }
 
-// workerSeat plays one seat of one match on a process of its pool. A match
-// plays a seat's turns one at a time, so it needs no lock.
+// workerSeat plays one seat of one match on a process of its pool. Its lock
+// keeps a turn, and the recovery after a failed one, apart from the next turn
+// and from the release: a match that stops early may still have a turn
+// running when it gives the seat back.
 type workerSeat struct {
-	pool    *workerPool
+	pool *workerPool
+	// commandContext is the command's context, which outlives a turn's: a
+	// process that replaces a stopped one is started under it.
+	commandContext context.Context
+	lock           sync.Mutex
+	// process is nil after a process was stopped and its replacement didn't
+	// start.
 	process *workerProcess
 }
 
-// Play has the seat's process play the turn. A process that fails, or whose
-// turn runs out of time, is stopped, since its next line would answer the
-// wrong turn; the seat's next turn starts a new one.
+// Play has the seat's process play the turn. A process that stops, or whose
+// turn runs out of time, can't play on, since its next line would answer the
+// wrong turn: Play stops it and starts its replacement before it returns, so
+// the failed turn pays for the start, not the seat's next one.
 func (seat *workerSeat) Play(ctx context.Context, turn models.BotTurn) (models.BotTurnResult, error) {
+	seat.lock.Lock()
+	defer seat.lock.Unlock()
 	if seat.process == nil {
-		process, err := seat.pool.start()
+		// The replacement didn't start after an earlier turn; try once more.
+		process, err := seat.pool.start(seat.commandContext)
 		if err != nil {
 			return models.BotTurnResult{}, err
 		}
@@ -364,7 +378,8 @@ func (seat *workerSeat) Play(ctx context.Context, turn models.BotTurn) (models.B
 	answer, err := seat.process.exchange(ctx, request)
 	if err != nil {
 		seat.process.stop()
-		seat.process = nil
+		// A start that fails is reported by the seat's next turn.
+		seat.process, _ = seat.pool.start(seat.commandContext)
 		return models.BotTurnResult{}, err
 	}
 	if answer.Error != "" {
@@ -376,8 +391,26 @@ func (seat *workerSeat) Play(ctx context.Context, turn models.BotTurn) (models.B
 	return *answer.Result, nil
 }
 
-// start starts a process of the pool's command and waits for its ready line.
-func (pool *workerPool) start() (*workerProcess, error) {
+// release gives the seat's process back to its pool, once no turn runs.
+func (seat *workerSeat) release() {
+	seat.lock.Lock()
+	process := seat.process
+	seat.process = nil
+	seat.lock.Unlock()
+	if process == nil {
+		return
+	}
+	seat.pool.lock.Lock()
+	defer seat.pool.lock.Unlock()
+	seat.pool.idle = append(seat.pool.idle, process)
+}
+
+// start starts a process of the pool's command and waits for its ready line,
+// for at most workerStartTimeout and not once ctx is done.
+func (pool *workerPool) start(ctx context.Context) (*workerProcess, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	command := exec.Command(pool.specification.Worker[0], pool.specification.Worker[1:]...)
 	command.Dir = pool.specification.Directory
 	command.Env = os.Environ()
@@ -385,6 +418,7 @@ func (pool *workerPool) start() (*workerProcess, error) {
 		command.Env = append(command.Env, key+"="+pool.specification.Environment[key])
 	}
 	command.Stderr = pool.workerErrors
+	ownProcessGroup(command)
 	requests, err := command.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -397,7 +431,7 @@ func (pool *workerPool) start() (*workerProcess, error) {
 		return nil, fmt.Errorf("start the worker of %s: %w", pool.name, err)
 	}
 	process := &workerProcess{command: command, requests: requests, answers: bufio.NewReader(answers)}
-	ready, cancel := context.WithTimeout(context.Background(), workerStartTimeout)
+	ready, cancel := context.WithTimeout(ctx, workerStartTimeout)
 	defer cancel()
 	answer, err := process.read(ready)
 	if err == nil && !answer.Ready {
@@ -473,9 +507,10 @@ func (process *workerProcess) read(ctx context.Context) (workerAnswer, error) {
 	}
 }
 
-// stop ends the process.
+// stop ends the process, and the processes it started: a worker command may
+// be a wrapper, such as a shell or `uv run`, around the bot's own process.
 func (process *workerProcess) stop() {
 	_ = process.requests.Close()
-	_ = process.command.Process.Kill()
+	killWithChildren(process.command)
 	_ = process.command.Wait()
 }

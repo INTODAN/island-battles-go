@@ -1,8 +1,10 @@
-"""Economist: raise production first, expand with the surplus, attack when far ahead.
+"""Economist: raise production first, expand with the surplus, attack enemies with a margin.
 
 A founder of the league (iteration 0). Every castle buys generation_amount
-levels while it can keep a guard home, then spends like the expander. The bot
-keeps nothing between turns except its memory.
+levels while it can keep a guard home. With what is left it takes the cheapest
+castle it can afford alone, preferring ones that already produce more, and an
+enemy castle only with ATTACK_MARGIN times its defenders. The bot keeps
+nothing between turns except its memory.
 """
 
 from math import ceil

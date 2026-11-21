@@ -27,6 +27,8 @@ class Tournament:
     maps: list[Path]
     # With a focus, only the pairs with a focused player are played.
     focus: list[str] = field(default_factory=list)
+    # The players whose lost games and longest wins the tables list.
+    listed: list[str] = field(default_factory=list)
     max_generations: int = 300
     turn_timeout_milliseconds: int = 2000
     parallel: int = 0
@@ -37,19 +39,29 @@ def map_files(selection: str) -> list[Path]:
     """The map files a selection names: ``train``, ``holdout``, ``all`` or names.
 
     Raises:
-        ValueError: A name is not a map of the league.
+        ValueError: A name is not a map of the league, or two maps share a name.
     """
     if selection in ("train", "holdout"):
-        return sorted((MAPS / selection).glob("*.json"))
-    if selection == "all":
-        return sorted(MAPS.glob("*/*.json"))
-    files = []
-    for name in selection.split(","):
-        found = sorted(MAPS.glob(f"*/{name.strip()}.json"))
-        if not found:
-            raise ValueError(f"there is no map {name.strip()!r} under {MAPS}")
-        files.extend(found)
+        files = sorted((MAPS / selection).glob("*.json"))
+    elif selection == "all":
+        files = sorted(MAPS.glob("*/*.json"))
+    else:
+        files = []
+        for name in selection.split(","):
+            found = sorted(MAPS.glob(f"*/{name.strip()}.json"))
+            if not found:
+                raise ValueError(f"there is no map {name.strip()!r} under {MAPS}")
+            files.extend(found)
+    names = [file.stem for file in files]
+    repeated = sorted({name for name in names if names.count(name) > 1})
+    if repeated:
+        raise ValueError(f"more than one map is named {', '.join(repeated)}; a map's name is its file's")
     return files
+
+
+def has_holdout(maps: list[Path]) -> bool:
+    """Whether any of the maps is a holdout map, whose games nobody reads."""
+    return any(file.parent.name == "holdout" for file in maps)
 
 
 def player_specification(name: str) -> dict[str, Any]:
@@ -58,13 +70,11 @@ def player_specification(name: str) -> dict[str, Any]:
     if anchor:
         return {"default_level": int(anchor.group(1))}
     return {
-        "worker": [
-            sys.executable,
-            "-m",
-            "island_battles_client.worker",
-            load_bot(name).entry,
-        ],
+        "worker": [sys.executable, "-m", "island_battles_client.worker", load_bot(name).entry],
         "directory": str(LEAGUE),
+        # The same hash seed in every process, so that a bot which walks a
+        # set plays the same game whichever process plays it.
+        "environment": {"PYTHONHASHSEED": "0"},
     }
 
 
@@ -75,49 +85,57 @@ def player_fingerprint(name: str, sdk: str) -> str:
     return fingerprint(BOTS / name) + sdk
 
 
+def match_key(build: str, map_hash: str, seats: list[str], fingerprints: list[str], settings: list[int]) -> str:
+    """The name of a match's result in the cache.
+
+    It covers everything that decides the game, and the seats' names, which
+    the result carries: two bots with the same code have results of their own.
+    """
+    return hashlib.sha256(json.dumps([build, map_hash, seats, fingerprints, settings]).encode()).hexdigest()[:32]
+
+
+def cached_result(key: str) -> dict[str, Any] | None:
+    """A match's cached result, when its demo is still there."""
+    result_file, demo_file = CACHE / f"{key}.json", CACHE / f"{key}.json.gz"
+    if not result_file.is_file() or not demo_file.is_file():
+        return None
+    return json.loads(result_file.read_text(encoding="utf-8")) | {"demo": str(demo_file)}
+
+
 def play(tournament: Tournament, run_directory: Path) -> list[dict[str, Any]]:
     """Play the tournament's matches, reusing cached results, and return them all.
 
     Bots are deterministic, so a match is decided by the runner's build, the
     map, the two bots' code and the settings. A match with the same key as an
-    earlier one is not played again.
+    earlier one is not played again. A result with a failed turn is not kept:
+    a turn can run out of time because the machine was busy, and the next
+    tournament plays that match again.
     """
     build = engine.build()
     sdk = fingerprint(SDK)
     focus = set(tournament.focus)
     pairs = [
         pair
-        for pair in combinations(tournament.players, 2)
+        for pair in combinations(dict.fromkeys(tournament.players), 2)
         if not all(ANCHOR.fullmatch(name) for name in pair) and (not focus or focus & set(pair))
     ]
+    settings = [tournament.max_generations, tournament.turn_timeout_milliseconds]
     planned: dict[str, dict[str, Any]] = {}
     for map_file in tournament.maps:
         map_hash = hashlib.sha256(map_file.read_bytes()).hexdigest()
         for pair in pairs:
-            for seats in (pair, pair[::-1]):
-                key = hashlib.sha256(
-                    json.dumps(
-                        [
-                            build,
-                            map_hash,
-                            [player_fingerprint(name, sdk) for name in seats],
-                            tournament.max_generations,
-                            tournament.turn_timeout_milliseconds,
-                        ]
-                    ).encode()
-                ).hexdigest()[:32]
-                planned[key] = {"id": key, "map": map_file.stem, "seats": list(seats)}
+            for seats in (list(pair), list(pair[::-1])):
+                fingerprints = [player_fingerprint(name, sdk) for name in seats]
+                key = match_key(build, map_hash, seats, fingerprints, settings)
+                planned[key] = {"id": key, "map": map_file.stem, "seats": seats}
     results: dict[str, dict[str, Any]] = {}
     if tournament.use_cache:
         for key in planned:
-            cached = CACHE / f"{key}.json"
-            if cached.is_file():
-                results[key] = json.loads(cached.read_text(encoding="utf-8"))
+            cached = cached_result(key)
+            if cached is not None:
+                results[key] = cached
     to_play = [match for key, match in planned.items() if key not in results]
-    print(
-        f"{len(planned)} matches: {len(results)} cached, {len(to_play)} to play",
-        file=sys.stderr,
-    )
+    print(f"{len(planned)} matches: {len(results)} cached, {len(to_play)} to play", file=sys.stderr)
     if to_play:
         CACHE.mkdir(parents=True, exist_ok=True)
         names = sorted({name for match in to_play for name in match["seats"]})
@@ -133,7 +151,7 @@ def play(tournament: Tournament, run_directory: Path) -> list[dict[str, Any]]:
         }
         for line in engine.play(schedule, run_directory / "workers.log"):
             results[line["id"]] = line
-            if "error" not in line:
+            if "error" not in line and not any(seat["failed_turns"] for seat in line["seats"]):
                 (CACHE / f"{line['id']}.json").write_text(json.dumps(line), encoding="utf-8")
     return [results[key] for key in planned if key in results]
 
@@ -209,8 +227,30 @@ def losses(results: list[dict[str, Any]], player: str) -> list[dict[str, Any]]:
     return sorted(lost, key=lambda result: (result["winner"] is None, result["generations"]))
 
 
-def markdown(summary: dict[str, Any], results: list[dict[str, Any]], focus: list[str]) -> str:
-    """The summary as Markdown tables, with the focused players' lost games."""
+def longest_wins(results: list[dict[str, Any]], player: str) -> list[dict[str, Any]]:
+    """The games a player won, longest first: a slow win hides a weakness."""
+    won = [result for result in results if "error" not in result and result["winner"] == player]
+    return sorted(won, key=lambda result: -result["generations"])
+
+
+def game_line(result: dict[str, Any]) -> str:
+    """One game of a list: its map, seats, outcome, length and demo."""
+    return (
+        f"- {result['map']}: {' vs '.join(result['players'])}: {result['outcome']['summary']} "
+        f"in {result['generations']} generations: `{result['demo']}`"
+    )
+
+
+def markdown(summary: dict[str, Any], results: list[dict[str, Any]], listed: list[str], list_games: bool) -> str:
+    """The summary as Markdown tables.
+
+    Args:
+        summary: What ``summarize`` returned.
+        results: The matches.
+        listed: The players whose lost games and longest wins are listed.
+        list_games: False leaves those lists out, as for holdout maps, whose
+            games nobody reads.
+    """
     lines = [
         "| Player | Rating | Score | W | D | L | Failed turns | Slowest turn (ms) |",
         "|---|---|---|---|---|---|---|---|",
@@ -232,23 +272,19 @@ def markdown(summary: dict[str, Any], results: list[dict[str, Any]], focus: list
         lines.append(f"| {name} | " + " | ".join(cells) + " |")
     map_names = sorted({result["map"] for result in results})
     lines += ["", "Points per map:", ""]
-    lines += [
-        "| | " + " | ".join(map_names) + " |",
-        "|---" * (len(map_names) + 1) + "|",
-    ]
+    lines += ["| | " + " | ".join(map_names) + " |", "|---" * (len(map_names) + 1) + "|"]
     for name in order:
         cells = [cell(summary["maps"][name].get(map_name)) for map_name in map_names]
         lines.append(f"| {name} | " + " | ".join(cells) + " |")
     for error in summary["errors"]:
         lines.append(f"\nNOT PLAYED {error['map']} {' vs '.join(error['players'])}: {error['error']}")
-    for name in focus:
+    if listed and not list_games:
+        lines += ["", "Holdout maps were played: their games are not listed, and nobody digests them."]
+    for name in listed if list_games else []:
         lines += ["", f"Games {name} didn't win (demo to digest):", ""]
-        for result in losses(results, name)[:20]:
-            seats = " vs ".join(result["players"])
-            lines.append(
-                f"- {result['map']}: {seats}: {result['outcome']['summary']} "
-                f"after {result['generations']} turns: `{result['demo']}`"
-            )
+        lines += [game_line(result) for result in losses(results, name)[:20]]
+        lines += ["", f"Longest wins of {name}:", ""]
+        lines += [game_line(result) for result in longest_wins(results, name)[:5]]
     failures = [
         f"- {result['map']} {' vs '.join(result['players'])}: {seat['name']} turn {failure['turn']}: "
         f"{failure['message'].strip().splitlines()[-1][:300]}"
@@ -267,8 +303,8 @@ def run(tournament: Tournament, run_id: str) -> tuple[dict[str, Any], str]:
     run_directory = RUNS / run_id
     run_directory.mkdir(parents=True, exist_ok=True)
     results = play(tournament, run_directory)
-    summary = summarize(results)
-    table = markdown(summary, results, tournament.focus)
+    summary = summarize(results) | {"matches": len(results)}
+    table = markdown(summary, results, tournament.listed, not has_holdout(tournament.maps))
     with (run_directory / "results.jsonl").open("w", encoding="utf-8") as file:
         for result in results:
             file.write(json.dumps(result) + "\n")

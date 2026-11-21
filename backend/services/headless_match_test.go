@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -135,6 +136,50 @@ func TestHeadlessPlayerThatFailsPassesItsTurn(t *testing.T) {
 				t.Fatalf("lines = %+v, want one error line that says the seat passes", lines)
 			}
 		})
+	}
+}
+
+// A player that doesn't return when its turn's time is up is waited for, so
+// that its next turn never runs beside the one that failed; the turn's time
+// is the timeout, not the wait.
+func TestHeadlessMatchWaitsForALatePlayerBeforeItsNextTurn(t *testing.T) {
+	var playing, overlapped atomic.Int32
+	deaf := headlessPlayerFunc(func(context.Context, models.BotTurn) (models.BotTurnResult, error) {
+		if playing.Add(1) > 1 {
+			overlapped.Add(1)
+		}
+		defer playing.Add(-1)
+		time.Sleep(200 * time.Millisecond)
+		return models.BotTurnResult{Commands: []models.PublicGenerationCommand{}}, nil
+	})
+	result, err := PlayHeadlessMatch(context.Background(), HeadlessMatch{Map: straitMap(t), MaxGenerations: 4, TurnTimeout: 20 * time.Millisecond,
+		Seats: []HeadlessSeat{{Name: "deaf", Player: deaf}, {Name: "passing", Player: passes}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if overlapped.Load() != 0 {
+		t.Fatalf("%d turns of one seat ran beside another", overlapped.Load())
+	}
+	seat := result.Seats[0]
+	if seat.FailedTurns != 3 || seat.Failures[0].Message != "the bot didn't answer within 20ms" || seat.SlowestTurnMilliseconds < 20 || seat.SlowestTurnMilliseconds > 150 {
+		t.Fatalf("seat = %+v, want 3 failed turns of about the 20 ms timeout each", seat)
+	}
+}
+
+// An eliminated team's seat stays in the game log of every later generation,
+// with no lines, as every roster player does in a lobby's demo.
+func TestHeadlessDemoListsEverySeatInEveryGeneration(t *testing.T) {
+	result, err := PlayHeadlessMatch(context.Background(), HeadlessMatch{Map: straitMap(t), Seats: []HeadlessSeat{defaultHeadlessSeat(t, 3), defaultHeadlessSeat(t, 1)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, logs := range result.Demo.Logs {
+		if len(logs.Players) != 2 || logs.Players[0].TeamColor != 1 || logs.Players[1].TeamColor != 2 || logs.Players[0].Lines == nil {
+			t.Fatalf("generation %d: players = %+v, want both seats", index+1, logs.Players)
+		}
+	}
+	if last := result.Demo.Logs[len(result.Demo.Logs)-1]; len(last.Players[0].Lines)+len(last.Players[1].Lines) != 0 {
+		t.Fatalf("the final generation has lines: %+v", last)
 	}
 }
 

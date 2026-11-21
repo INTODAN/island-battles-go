@@ -1,9 +1,10 @@
 """Sentinel: hold every castle against what is coming, and strike castles that emptied.
 
 A founder of the league (iteration 0). It bursts a castle that is about to
-fall, reinforces it from its other castles, and attacks an enemy castle right
-after that castle sent its soldiers away. The bot keeps nothing between turns
-except its memory.
+fall, buying the first burst level for it when it has none, and reinforces it
+from its other castles. It attacks the castle that costs least per turn of
+walking, which favours an enemy castle that just sent its soldiers away. The
+bot keeps nothing between turns except its memory.
 """
 
 from math import ceil

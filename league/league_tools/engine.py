@@ -18,13 +18,20 @@ def build() -> str:
     Go rebuilds only what changed, so this takes a moment when nothing did.
     The hash changes whenever the rules or the runner do, which is what makes
     a cached result stale.
+
+    Raises:
+        RuntimeError: The runner didn't build.
     """
     ENGINE.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        ["go", "build", "-o", str(ENGINE), "./backend/cmd/headless-match"],
+    # Without the commit's stamp and the build's paths, the same sources give
+    # the same binary in every commit and checkout, so the cache survives them.
+    built = subprocess.run(
+        ["go", "build", "-buildvcs=false", "-trimpath", "-o", str(ENGINE), "./backend/cmd/headless-match"],
         cwd=REPOSITORY,
-        check=True,
+        check=False,
     )
+    if built.returncode != 0:
+        raise RuntimeError("the headless runner didn't build; see the compiler's messages above")
     return hashlib.sha256(ENGINE.read_bytes()).hexdigest()
 
 

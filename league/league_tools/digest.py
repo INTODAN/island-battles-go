@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Any
 
 MAX_EVENTS = 250
+# The events that change who holds what; a long game's list keeps these and
+# leaves out sends and clashes first.
+KEY_EVENTS = ("capture", "eliminated", "upgrade", "burst")
 
 
 def load_demo(path: Path) -> dict[str, Any]:
@@ -38,7 +41,14 @@ def _totals(frame: dict[str, Any], color: int) -> tuple[int, int, int, int]:
 
 
 def events(demo: dict[str, Any]) -> list[tuple[int, str]]:
-    """What happened in each turn, read from the difference between its board and the next."""
+    """What happened in each turn, read from the difference between its board and the next.
+
+    A turn's events are what its commands and its end did: the board of turn
+    N + 1 compared with the board of turn N. A send's "left with" and a
+    capture's new count are from the next board, after the turn's growth. A
+    group that leaves and lands in the same turn is on neither board, so its
+    send is missing; its capture or the castle's changed count still shows.
+    """
     names = _team_names(demo)
     found: list[tuple[int, str]] = []
     frames = demo["frames"]
@@ -81,6 +91,22 @@ def events(demo: dict[str, Any]) -> list[tuple[int, str]]:
                     f"distance {_distance(origin, target):.1f}, speed level {group['upgrades'].get('speed', 1)}",
                 )
             )
+        # A group that left and was destroyed in the same turn is on neither
+        # board: only its clash shows that it was sent.
+        groups_after = {group["id"] for group in after["soldier_groups"]}
+        unseen: set[int] = set()
+        for clash in after["clashes"]:
+            for participant in clash["participants"]:
+                group_id = participant["group_id"]
+                if group_id not in known_groups and group_id not in groups_after and group_id not in unseen:
+                    unseen.add(group_id)
+                    found.append(
+                        (
+                            turn,
+                            f"send: {names[participant['team_color']]} {participant['soldiers_before']} soldiers "
+                            f"as group {group_id}, which a clash destroyed in the same turn",
+                        )
+                    )
         for clash in after["clashes"]:
             sides = ", ".join(
                 f"{names[participant['team_color']]} group {participant['group_id']} "
@@ -104,6 +130,51 @@ def events(demo: dict[str, Any]) -> list[tuple[int, str]]:
                 standing.discard(color)
                 found.append((turn, f"eliminated: {names[color]}"))
     return found
+
+
+def logistics(demo: dict[str, Any]) -> list[str]:
+    """How each team used its soldiers over the whole game, one line per team.
+
+    Soldiers sent, how far on average, how many to its own castles and how
+    many at others, the share of its soldiers that were walking rather than
+    standing in a castle, and what it lost in clashes.
+    """
+    names = _team_names(demo)
+    frames = demo["frames"]
+    lines = []
+    for team in demo["teams"]:
+        color = team["color"]
+        sent = to_own = lost = 0
+        distance = 0.0
+        seen: set[int] = set()
+        walking = total = 0
+        for index, frame in enumerate(frames):
+            castles = {castle["id"]: castle for castle in frames[max(index - 1, 0)]["castles"]}
+            for group in frame["soldier_groups"]:
+                if group["team_color"] != color:
+                    continue
+                walking += group["soldiers"]
+                if group["id"] in seen:
+                    continue
+                seen.add(group["id"])
+                origin, target = castles[group["origin_castle_id"]], castles[group["destination_castle_id"]]
+                sent += group["soldiers"]
+                distance += group["soldiers"] * _distance(origin, target)
+                to_own += group["soldiers"] if target["team_color"] == color else 0
+            total += sum(castle["soldiers"] for castle in frame["castles"] if castle["team_color"] == color)
+            for clash in frame["clashes"]:
+                for participant in clash["participants"]:
+                    if participant["team_color"] == color:
+                        lost += participant["soldiers_before"] - participant["soldiers_after"]
+        if not sent:
+            lines.append(f"  {names[color]}: sent nothing")
+            continue
+        lines.append(
+            f"  {names[color]}: sent {sent} soldiers, {distance / sent:.1f} away on average, {to_own} to its own "
+            f"castles and {sent - to_own} at others; {walking / (walking + total):.0%} of its soldiers were walking; "
+            f"lost {lost} in clashes"
+        )
+    return lines
 
 
 def _distance(first: dict[str, Any], second: dict[str, Any]) -> float:
@@ -133,6 +204,7 @@ def digest(
     every: int = 10,
     turns: tuple[int, int] | None = None,
     logs: str = "all",
+    key_only: bool = False,
 ) -> str:
     """The game as text.
 
@@ -143,6 +215,7 @@ def digest(
             log lines. Without it, only the timeline and the events are shown.
         logs: In the window, whose log lines to show: a team's name, ``all``
             or ``none``.
+        key_only: List only the captures, eliminations, upgrades and bursts.
     """
     names = _team_names(demo)
     frames = demo["frames"]
@@ -150,7 +223,8 @@ def digest(
     outcome = demo["outcome"]
     lines = [
         "Teams: " + ", ".join(f"{color} = {names[color]}" for color in colors),
-        f"Outcome: {outcome['summary'] if outcome else 'still running'} ({len(frames)} generations)",
+        f"Outcome: {outcome['summary'] if outcome else 'still running'} "
+        f"({len(frames)} generations, so {len(frames) - 1} turns were played)",
         "",
         "Timeline: castles / soldiers in castles / soldiers in groups / production per turn",
         "| Turn | " + " | ".join(names[color] for color in colors) + " | Neutral castles |",
@@ -174,6 +248,8 @@ def digest(
         "Most soldiers, from turn: "
         + ", ".join(f"{turn} {names[leader] if leader else 'tied'}" for turn, leader in leaders[-12:]),
     ]
+    lines += ["", "Logistics (sends seen on a board; a group destroyed the turn it left isn't counted):"]
+    lines += logistics(demo)
     all_events = events(demo)
     failures = [
         (index + 1, player["display_name"], line["message"])
@@ -186,10 +262,16 @@ def digest(
         lines += ["", f"Error lines: {len(failures)}. The first:"]
         lines += [f"  turn {turn} {name}: {message}" for turn, name, message in failures[:5]]
     if turns is None:
-        lines += ["", f"Events ({len(all_events)}):"]
-        lines += [f"  turn {turn}: {event}" for turn, event in all_events[:MAX_EVENTS]]
-        if len(all_events) > MAX_EVENTS:
-            lines.append(f"  ... {len(all_events) - MAX_EVENTS} more; narrow them with --turns")
+        shown_events = all_events
+        if key_only or len(all_events) > MAX_EVENTS:
+            shown_events = [(turn, event) for turn, event in all_events if event.startswith(KEY_EVENTS)]
+        lines += ["", f"Events ({len(shown_events)} of {len(all_events)}):"]
+        lines += [f"  turn {turn}: {event}" for turn, event in shown_events]
+        if len(shown_events) < len(all_events):
+            lines.append(
+                f"  ... the {len(all_events) - len(shown_events)} sends and clashes are left out; "
+                "see them with --turns A-B"
+            )
         return "\n".join(lines) + "\n"
     first, last = max(turns[0], 1), min(turns[1], len(frames))
     for turn in range(first, last + 1):

@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import gzip
 import json
+import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -21,25 +23,27 @@ def _tournament(arguments: argparse.Namespace) -> int:
     else:
         names = [bot.name for bot in bots if bot.status != "candidate"]
     focus = [name.strip() for name in arguments.focus.split(",")] if arguments.focus else []
-    names += [name for name in focus if name not in names]
+    added = [name.strip() for name in arguments.add.split(",")] if arguments.add else []
+    names += [name for name in focus + added if name not in names]
     names += [f"level{level}" for level in arguments.anchors.split(",") if level]
     plan = tournament.Tournament(
         players=names,
         maps=tournament.map_files(arguments.maps),
         focus=focus,
+        listed=focus + added,
         max_generations=arguments.max_generations,
         turn_timeout_milliseconds=arguments.turn_timeout_milliseconds,
         parallel=arguments.parallel,
         use_cache=not arguments.no_cache,
     )
-    run_id = arguments.run_id or time.strftime("%Y%m%d-%H%M%S")
+    run_id = arguments.run_id or f"{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
     summary, table = tournament.run(plan, run_id)
     print(table)
     print(f"Written to {RUNS / run_id}", file=sys.stderr)
     failed = [row["player"] for row in summary["standings"] if row["failed_turns"]]
-    if arguments.strict and (failed or summary["errors"]):
+    if arguments.strict and (failed or summary["errors"] or not summary["matches"]):
         print(
-            f"league: --strict: {len(summary['errors'])} matches were not played, "
+            f"league: --strict: {summary['matches']} matches, {len(summary['errors'])} of them not played, "
             f"and these players failed turns: {', '.join(failed) or 'none'}",
             file=sys.stderr,
         )
@@ -53,7 +57,7 @@ def _digest(arguments: argparse.Namespace) -> int:
         first, _, last = arguments.turns.partition("-")
         window = (int(first), int(last or first))
     demo = digest_module.load_demo(Path(arguments.demo))
-    print(digest_module.digest(demo, arguments.every, window, arguments.logs), end="")
+    print(digest_module.digest(demo, arguments.every, window, arguments.logs, arguments.key_events), end="")
     return 0
 
 
@@ -84,7 +88,7 @@ def _new(arguments: argparse.Namespace) -> int:
 
 
 def _new_map(arguments: argparse.Namespace) -> int:
-    if not roster.NAME.fullmatch(arguments.name.replace("-", "_")) or list(MAPS.glob(f"*/{arguments.name}.json")):
+    if not re.fullmatch(r"[a-z][a-z0-9-]*", arguments.name) or list(MAPS.glob(f"*/{arguments.name}.json")):
         raise ValueError(f"{arguments.name!r} is taken or not a map name: lower-case letters, digits and -")
     target = MAPS / arguments.set / f"{arguments.name}.json"
     target.write_text(json.dumps(maps.generate(arguments.name, arguments.seed), indent=2) + "\n", encoding="utf-8")
@@ -110,7 +114,12 @@ def main(argv: list[str] | None = None) -> int:
     play.add_argument("--bots", help="the bots, by name; default: every bot that is not a candidate")
     play.add_argument(
         "--focus",
-        help="play only the pairs with one of these bots (added to the bots), and list the games they didn't win",
+        help="play only the pairs with one of these bots (added to the bots), and list their lost games and longest "
+        "wins; quick, but its ratings come from those pairs alone",
+    )
+    play.add_argument(
+        "--add",
+        help="add these bots, candidates too, to the whole round robin, and list their lost games and longest wins",
     )
     play.add_argument("--anchors", default="1,2,3", help="default bot levels to add; '' for none")
     play.add_argument("--maps", default="train", help="train, holdout, all, or map names")
@@ -122,7 +131,7 @@ def main(argv: list[str] | None = None) -> int:
     play.add_argument(
         "--strict",
         action="store_true",
-        help="exit with status 1 when a match was not played or a player failed a turn",
+        help="exit with status 1 when a match was not played, a player failed a turn or there was no match",
     )
     play.set_defaults(handler=_tournament)
 
@@ -131,6 +140,11 @@ def main(argv: list[str] | None = None) -> int:
     study.add_argument("--every", type=int, default=10, help="turns per timeline row")
     study.add_argument("--turns", help="show these turns whole, such as 40-55")
     study.add_argument("--logs", default="all", help="with --turns: a team's name, all or none")
+    study.add_argument(
+        "--key-events",
+        action="store_true",
+        help="list only captures, eliminations, upgrades and bursts; a game with over 250 events is listed so anyway",
+    )
     study.set_defaults(handler=_digest)
 
     unpack = commands.add_parser("unpack", help="unpack a demo for the demo viewer, and print its path")
@@ -163,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
     arguments = parser.parse_args(argv)
     try:
         return arguments.handler(arguments)
-    except (ValueError, RuntimeError) as error:
+    except (ValueError, RuntimeError, OSError) as error:
         print(f"league: {error}", file=sys.stderr)
         return 1
 

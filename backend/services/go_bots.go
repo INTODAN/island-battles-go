@@ -94,6 +94,15 @@ func runGoBot(ctx context.Context, level uint, turn models.BotTurn, generation *
 	if err != nil {
 		return goBotTurn{}, err
 	}
+	return checkBotResult(generation, turn.TeamColor, inputs, result)
+}
+
+// checkBotResult checks a bot's answer to a turn of generation with the rules
+// of a completing POST /generation/commands batch, against the commands
+// already accepted this turn, inputs: the number of commands, the log lines,
+// the memory and the commands themselves. The backend checks the answers of
+// the bots it plays itself with it, in a lobby's game and in a headless match.
+func checkBotResult(generation *models.Generation, teamColor uint, inputs []models.GenerationInput, result models.BotTurnResult) (played goBotTurn, err error) {
 	if result.Commands == nil || len(result.Commands) > 1000 {
 		return goBotTurn{}, fmt.Errorf("commands must be an array of at most 1000 commands")
 	}
@@ -103,7 +112,7 @@ func runGoBot(ctx context.Context, level uint, turn models.BotTurn, generation *
 	if played.memory, err = validateBotMemory(result.Memory); err != nil {
 		return goBotTurn{}, err
 	}
-	if played.commands, err = validateCommands(generation, turn.TeamColor, inputs, result.Commands); err != nil {
+	if played.commands, err = validateCommands(generation, teamColor, inputs, result.Commands); err != nil {
 		return goBotTurn{}, err
 	}
 	played.logs = result.Logs

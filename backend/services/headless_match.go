@@ -32,8 +32,10 @@ import (
 
 // HeadlessPlayer plays one team's turns of a headless match. A player that
 // returns an error, or a result that the rules reject, passes the turn. When
-// ctx is done the turn's time is up: Play should return, and its answer is
-// not used.
+// ctx is done the turn's time is up: Play must return, and its answer is not
+// used. The match waits for it to return, so that a seat's turns never
+// overlap and whatever the player does to recover, such as starting a new
+// process, is done before its next turn.
 type HeadlessPlayer interface {
 	Play(ctx context.Context, turn models.BotTurn) (models.BotTurnResult, error)
 }
@@ -78,7 +80,7 @@ type HeadlessSeatResult struct {
 	FailedTurns int                   `json:"failed_turns"`
 	Failures    []HeadlessTurnFailure `json:"failures"`
 	// TotalTurnMilliseconds and SlowestTurnMilliseconds measure the player's
-	// Play calls.
+	// Play calls, up to the answer or to the turn's timeout.
 	TotalTurnMilliseconds   float64 `json:"total_turn_milliseconds"`
 	SlowestTurnMilliseconds float64 `json:"slowest_turn_milliseconds"`
 	SlowestTurn             int     `json:"slowest_turn"`
@@ -173,7 +175,12 @@ func PlayHeadlessMatch(ctx context.Context, match HeadlessMatch) (HeadlessResult
 		generation := generationFromState(uint(headlessFirstGenerationID+number-1), number, state)
 		generation.Clashes = clashes
 		demo.Frames = append(demo.Frames, GenerationView(generation))
-		logs := models.GenerationLogs{GenerationID: generation.ID, Players: []models.PlayerGenerationLogs{}, HiddenTeamColors: []uint{}}
+		// Every seat has an entry in every generation, as every roster player
+		// has in a lobby's demo; a seat that didn't play has no lines.
+		logs := models.GenerationLogs{GenerationID: generation.ID, Players: make([]models.PlayerGenerationLogs, len(match.Seats)), HiddenTeamColors: []uint{}}
+		for index, seat := range match.Seats {
+			logs.Players[index] = models.PlayerGenerationLogs{DisplayName: seat.Name, TeamColor: uint(index + 1), Lines: []models.GenerationLogLine{}}
+		}
 		standing := standingTeams(generation, game.Teams)
 		for index := range seats {
 			if seats[index].EliminatedAtTurn == 0 && !slices.Contains(standing, seats[index].TeamColor) {
@@ -195,9 +202,8 @@ func PlayHeadlessMatch(ctx context.Context, match HeadlessMatch) (HeadlessResult
 				return HeadlessResult{}, err
 			}
 			turn := models.BotTurn{GameID: gameID, TurnNumber: number, MaxGenerations: maxGenerations, TeamColor: color, Upgrades: models.UpgradeTable(), Memory: memories[index]}
-			started := time.Now()
-			played, err := playHeadlessTurn(ctx, seat.Player, match.TurnTimeout, turn, generation, inputs)
-			milliseconds := float64(time.Since(started).Microseconds()) / 1000
+			played, elapsed, err := playHeadlessTurn(ctx, seat.Player, match.TurnTimeout, turn, generation, inputs)
+			milliseconds := float64(elapsed.Microseconds()) / 1000
 			result := &seats[index]
 			result.TurnsPlayed++
 			result.TotalTurnMilliseconds += milliseconds
@@ -223,7 +229,7 @@ func PlayHeadlessMatch(ctx context.Context, match HeadlessMatch) (HeadlessResult
 			}
 			inputs = append(inputs, models.GenerationInput{GenerationID: generation.ID, PlayerID: fmt.Sprint(index), Commands: rawCommands, Completed: true})
 			batches = append(batches, simulation.TeamBatch{Color: color, Commands: played.commands})
-			logs.Players = append(logs.Players, models.PlayerGenerationLogs{DisplayName: seat.Name, TeamColor: color, Lines: append([]models.GenerationLogLine{}, played.logs...)})
+			logs.Players[index].Lines = append(logs.Players[index].Lines, played.logs...)
 		}
 		demo.Logs = append(demo.Logs, logs)
 		turnCommands, err := simulation.TurnCommands(nil, batches)
@@ -265,15 +271,20 @@ func PlayHeadlessMatch(ctx context.Context, match HeadlessMatch) (HeadlessResult
 }
 
 // playHeadlessTurn has player play turn on generation, within timeout when it
-// isn't 0, and checks the answer as runGoBot checks a default bot's: against
-// the commands that the teams before it stored this turn, inputs.
-func playHeadlessTurn(ctx context.Context, player HeadlessPlayer, timeout time.Duration, turn models.BotTurn, generation *models.Generation, inputs []models.GenerationInput) (played goBotTurn, err error) {
+// isn't 0, and checks the answer as the service checks a default bot's
+// (checkBotResult): against the commands that the teams before it stored this
+// turn, inputs. elapsed is how long the player took to answer, or the timeout
+// for a player that ran out of time. After a timeout it returns only once
+// Play has returned, so that the seat's next turn can't overlap this one; that
+// wait is not part of elapsed.
+func playHeadlessTurn(ctx context.Context, player HeadlessPlayer, timeout time.Duration, turn models.BotTurn, generation *models.Generation, inputs []models.GenerationInput) (played goBotTurn, elapsed time.Duration, err error) {
 	if turn.Generation, err = goBotGeneration(generation, turn.TeamColor, inputs); err != nil {
-		return goBotTurn{}, err
+		return goBotTurn{}, 0, err
 	}
+	turnContext := ctx
 	if timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeout)
+		turnContext, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
 	type answer struct {
@@ -281,40 +292,36 @@ func playHeadlessTurn(ctx context.Context, player HeadlessPlayer, timeout time.D
 		err    error
 	}
 	answers := make(chan answer, 1)
+	started := time.Now()
 	go func() {
 		defer func() {
 			if recovered := recover(); recovered != nil {
 				answers <- answer{err: fmt.Errorf("the bot panicked: %v", recovered)}
 			}
 		}()
-		result, err := player.Play(ctx, turn)
+		result, err := player.Play(turnContext, turn)
 		answers <- answer{result: result, err: err}
 	}()
-	var result models.BotTurnResult
 	select {
-	case <-ctx.Done():
-		if timeout > 0 && errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return goBotTurn{}, fmt.Errorf("the bot didn't answer within %s", timeout)
+	case <-turnContext.Done():
+		elapsed = time.Since(started)
+		// The match is over when its own context is done; nothing plays the
+		// seat again, so nothing waits for the player.
+		if ctx.Err() != nil {
+			return goBotTurn{}, elapsed, ctx.Err()
 		}
-		return goBotTurn{}, ctx.Err()
+		select {
+		case <-answers:
+		case <-ctx.Done():
+			return goBotTurn{}, elapsed, ctx.Err()
+		}
+		return goBotTurn{}, elapsed, fmt.Errorf("the bot didn't answer within %s", timeout)
 	case answered := <-answers:
+		elapsed = time.Since(started)
 		if answered.err != nil {
-			return goBotTurn{}, answered.err
+			return goBotTurn{}, elapsed, answered.err
 		}
-		result = answered.result
+		played, err = checkBotResult(generation, turn.TeamColor, inputs, answered.result)
+		return played, elapsed, err
 	}
-	if result.Commands == nil || len(result.Commands) > 1000 {
-		return goBotTurn{}, errors.New("commands must be an array of at most 1000 commands")
-	}
-	if err := validateLogLines(result.Logs); err != nil {
-		return goBotTurn{}, err
-	}
-	if played.memory, err = validateBotMemory(result.Memory); err != nil {
-		return goBotTurn{}, err
-	}
-	if played.commands, err = validateCommands(generation, turn.TeamColor, inputs, result.Commands); err != nil {
-		return goBotTurn{}, err
-	}
-	played.logs = result.Logs
-	return played, nil
 }

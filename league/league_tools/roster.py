@@ -44,6 +44,8 @@ def load_bot(name: str) -> Bot:
     Raises:
         ValueError: The bot is missing, or its file is not a valid ``bot.toml``.
     """
+    if not NAME.fullmatch(name):
+        raise ValueError(f"{name!r} is not a bot name: lower-case letters, digits and _, starting with a letter")
     path = BOTS / name / "bot.toml"
     if not path.is_file() or not (BOTS / name / "bot.py").is_file():
         raise ValueError(f"there is no bot {name!r}: {path.parent} needs bot.py and bot.toml")
@@ -66,18 +68,23 @@ def load_roster() -> list[Bot]:
     return [load_bot(name) for name in names]
 
 
+def _toml_string(value: str) -> str:
+    """A TOML basic string: JSON's escapes, with other characters as they are."""
+    return json.dumps(value, ensure_ascii=False).replace("\x7f", "\\u007f")
+
+
 def write_bot(bot: Bot) -> None:
     """Write a bot's ``bot.toml``."""
     lines = [
         "# candidate: new and unproven. active: in the population. retired: no longer",
         "# developed, kept as an opponent.",
-        f"status = {json.dumps(bot.status)}",
+        f"status = {_toml_string(bot.status)}",
         "# The bot this one was copied from, or empty for a founder.",
-        f"parent = {json.dumps(bot.parent)}",
+        f"parent = {_toml_string(bot.parent)}",
         "# The league iteration that created it (ledger/iterations.md).",
         f"iteration = {bot.iteration}",
         "# What this bot tries that its parent doesn't, in a sentence.",
-        f"idea = {json.dumps(bot.idea)}",
+        f"idea = {_toml_string(bot.idea)}",
     ]
     (bot.directory / "bot.toml").write_text("\n".join(lines) + "\n", encoding="utf-8")
 

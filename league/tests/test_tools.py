@@ -43,8 +43,73 @@ def test_summary_counts_points_from_both_seats() -> None:
     assert summary["pairs"]["b"]["a"] == [0, 2]
     assert summary["maps"]["a"]["strait"] == [2.5, 3]
     assert summary["errors"] == [{"map": "strait", "players": ["a", "b"], "error": "no map"}]
-    table = tournament.markdown(summary, results, ["b"])
-    assert "Games b didn't win" in table and "NOT PLAYED" in table
+    table = tournament.markdown(summary, results, ["b"], list_games=True)
+    assert "Games b didn't win" in table and "Longest wins of b" in table and "NOT PLAYED" in table
+    # A holdout map's games are never listed: nobody reads them.
+    hidden = tournament.markdown(summary, results, ["b"], list_games=False)
+    assert "demo.json.gz" not in hidden and "Holdout maps were played" in hidden
+    holdout, train = Path("maps/holdout/ridge.json"), Path("maps/train/strait.json")
+    assert tournament.has_holdout([train, holdout]) and not tournament.has_holdout([train])
+
+
+def test_ratings_settle_for_a_player_that_wins_everything() -> None:
+    games = [("best", "level3", 1.0)] * 40 + [("level3", "worst", 1.0)] * 40 + [("best", "worst", 1.0)] * 40
+    fitted = ratings.fit(games)
+    # Fitted to the end, the result no longer moves when the fit is run from its own answer's games again.
+    assert fitted == pytest.approx(ratings.fit(games[::-1]), abs=1e-6)
+    assert fitted["best"] - fitted["level3"] == pytest.approx(fitted["level3"] - fitted["worst"], abs=1e-4)
+
+
+def test_a_match_is_cached_under_its_players_names(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Two bots with the same code have results of their own, and a failed turn is played again."""
+    bots, cache = tmp_path / "bots", tmp_path / "cache"
+    for name in ("first", "copy"):
+        (bots / name).mkdir(parents=True)
+        (bots / name / "bot.py").write_text("def play(turn): ...\n")
+    map_file = tmp_path / "duel.json"
+    map_file.write_text("{}")
+    monkeypatch.setattr(tournament, "BOTS", bots)
+    monkeypatch.setattr(tournament, "CACHE", cache)
+    monkeypatch.setattr(tournament, "player_specification", lambda name: {})
+    monkeypatch.setattr(tournament.engine, "build", lambda: "build")
+    played: list[list[str]] = []
+    failing = {"copy"}
+
+    def play(schedule: dict, worker_log: Path) -> list[dict]:
+        lines = []
+        for match in schedule["matches"]:
+            played.append(match["seats"])
+            (cache / f"{match['id']}.json.gz").write_bytes(b"demo")
+            failed = [int(name in failing) for name in match["seats"]]
+            seats = [
+                {"name": name, "failed_turns": count, "failures": []}
+                for name, count in zip(match["seats"], failed, strict=True)
+            ]
+            lines.append(
+                {"id": match["id"], "map": match["map"], "players": match["seats"], "winner": None, "seats": seats}
+            )
+        return lines
+
+    monkeypatch.setattr(tournament.engine, "play", play)
+    plan = tournament.Tournament(players=["first", "copy", "level3"], maps=[map_file])
+    results = tournament.play(plan, tmp_path / "run")
+    assert sorted(result["players"] for result in results) == sorted(played) and len(played) == 6
+    # Every match with "copy" had a failed turn, so only the two without it were kept.
+    failing.clear()
+    played.clear()
+    again = tournament.play(plan, tmp_path / "run")
+    assert len(played) == 4 and all("copy" in seats for seats in played)
+    assert sorted(result["players"] for result in again) == sorted(result["players"] for result in results)
+    played.clear()
+    tournament.play(plan, tmp_path / "run")
+    assert played == []
+    # A cached result whose demo is gone is played again.
+    next(cache.glob("*.json.gz")).unlink()
+    tournament.play(plan, tmp_path / "run")
+    assert len(played) == 1
+    assert tournament.match_key("b", "m", ["first", "copy"], ["x", "x"], [300, 2000]) != tournament.match_key(
+        "b", "m", ["copy", "first"], ["x", "x"], [300, 2000]
+    )
 
 
 def castle(castle_id: int, team_color: int, soldiers: int, x: float, levels: dict | None = None) -> dict:
@@ -103,6 +168,11 @@ def test_digest_reads_the_events_between_boards() -> None:
     assert any(turn == 1 and event.startswith("send: blue 20 soldiers from castle 0") for turn, event in events)
     assert (2, "capture: castle 1 red (6 soldiers) -> blue (13 soldiers)") in events
     assert (2, "eliminated: red") in events
+    assert digest.logistics(demo)[0] == (
+        "  blue: sent 20 soldiers, 2.0 away on average, 0 to its own castles and 20 at others; "
+        "30% of its soldiers were walking; lost 0 in clashes"
+    )
+    assert "send:" not in digest.digest(demo, key_only=True) and "capture:" in digest.digest(demo, key_only=True)
     text = digest.digest(demo, turns=(1, 1))
     assert "log blue [info]: all in" in text and "| 3 | 2 / 15 / 0 / 2 | 0 / 0 / 0 / 0 | 0 |" in text
 
@@ -123,6 +193,52 @@ def test_new_bot_copies_its_parent_as_a_candidate(tmp_path: Path, monkeypatch: p
     with pytest.raises(ValueError):
         roster.new_bot("founder_fast", "founder", 3, "taken")
     assert json.loads(json.dumps(child.__dict__))["name"] == "founder_fast"
+    # Whatever an idea says, its bot.toml reads back.
+    odd = roster.new_bot("founder_odd", "founder", 4, 'faster \U0001f680 "rush"\\ \x7f\ttab')
+    assert roster.load_bot("founder_odd") == odd
+    with pytest.raises(ValueError):
+        roster.load_bot("../founder")
+
+
+def test_digest_shows_a_group_destroyed_the_turn_it_left() -> None:
+    walker = {
+        "id": 3,
+        "team_color": 1,
+        "soldiers": 4,
+        "x": 0,
+        "y": 0,
+        "origin_castle_id": 0,
+        "destination_castle_id": 1,
+        "clash_radius": 0.25,
+        "upgrades": {"speed": 1},
+    }
+    clash = {
+        "id": 1,
+        "time": 0.5,
+        "participants": [
+            {"group_id": 3, "team_color": 1, "soldiers_before": 10, "soldiers_after": 4},
+            {"group_id": 7, "team_color": 2, "soldiers_before": 6, "soldiers_after": 0},
+        ],
+    }
+    frames = [
+        {
+            "id": 1,
+            "castles": [castle(0, 1, 5, -1), castle(1, 2, 9, 1)],
+            "soldier_groups": [walker | {"soldiers": 10}],
+            "clashes": [],
+        },
+        {"id": 2, "castles": [castle(0, 1, 6, -1), castle(1, 2, 4, 1)], "soldier_groups": [walker], "clashes": [clash]},
+    ]
+    demo = {
+        "teams": [{"color": 1, "name": "blue"}, {"color": 2, "name": "red"}],
+        "outcome": None,
+        "frames": frames,
+        "logs": [{"players": []}] * 2,
+    }
+    assert digest.events(demo) == [
+        (1, "send: red 6 soldiers as group 7, which a clash destroyed in the same turn"),
+        (1, "clash: blue group 3 10->4, red group 7 6->0"),
+    ]
 
 
 @pytest.mark.parametrize("seed", range(20))

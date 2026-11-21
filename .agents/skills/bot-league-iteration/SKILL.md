@@ -46,7 +46,9 @@ It plays the active and retired bots and default levels 1 to 3 on the training m
 uv run --project league league tournament --focus CHAMPION --run-id iteration-N-champion
 ```
 
-lists the games the champion didn't win. Study at least the three shortest losses, one draw if there is one, and the opponent or map where its row is worst; then `digest` each, and the deciding turns with `--turns` and both bots' logs, as `bot-league` describes. Look at a long win too: a game the champion won in 200 turns that should have taken 60 hides a weakness that a better opponent will use.
+lists the games the champion didn't win, and its longest wins. (Its ratings table is from the champion's pairs alone; ignore it.) Study at least the three shortest losses, one draw if there is one, and the opponent or map where its row is worst; then `digest` each, and the deciding turns with `--turns` and both bots' logs, as `bot-league` describes. Read a long win too: a game the champion won in 200 turns that should have taken 60 hides a weakness that a better opponent will use.
+
+Check each game against the ledger's lessons from real games as well: a habit that a real opponent punished there (long walks, trickled attacks, a border castle left thin) is a finding even in a game the champion won.
 
 Write each finding down before writing any code:
 
@@ -78,7 +80,7 @@ Rules:
 - **Three candidates** unless the request names another number. More than six is usually the same idea with different numbers.
 - **A number is not an idea.** Don't make candidates that only differ in a constant. If an idea needs a constant tuned, tune it inside the candidate on the training maps, and count that as the one idea.
 
-Write the candidates yourself, one after the other, measuring each as it is done. When the request asks for subagents, or for more than three candidates, they can be written in parallel, since candidates don't share files: one subagent per candidate, each given the finding with its evidence (the digest lines and log lines), the parent's name, the candidate's name, and the instruction to read the `bot-league` skill and the template's rules skills and to touch nothing outside `league/bots/<candidate>/`. Each subagent finishes by running `league/scripts/check.sh` and `league tournament --focus <candidate> --strict`, and reports the standings. Do the selection yourself.
+Write the candidates yourself, one after the other, measuring each as it is done. When the request asks for subagents, or for more than three candidates, they can be written in parallel, since candidates don't share files: one subagent per candidate, each given the finding with its evidence (the digest lines and log lines), the parent's name, the candidate's name, and the instruction to read the `bot-league` skill and the template's rules skills and to touch nothing outside `league/bots/<candidate>/`. Each subagent finishes by running `uv run --project league league tournament --focus <candidate> --strict --run-id iteration-N-<candidate>`, and reports its lost games. It doesn't run `league/scripts/check.sh`, which checks every bot and so fails on another subagent's half-written candidate: run it yourself once all of them are done. Do the selection yourself.
 
 ## 4. Gate
 
@@ -88,22 +90,28 @@ A candidate plays only when all of this holds:
 - `uv run --project league league tournament --focus CANDIDATES --strict --run-id iteration-N-candidates` exits 0: no match unplayed, no failed turn.
 - Its slowest turn is under 200 ms.
 
-Fix a candidate that fails the gate, or drop it. A failed turn is never "close enough".
+Fix a candidate that fails the gate, or drop it. A failed turn is never "close enough". A turn that ran out of time while the machine was busy with something else is the one exception: run the same command again, which plays that match again, and believe the second run.
 
 ## 5. Select
 
-On the **training maps**, from the candidates' tournament, a candidate **passes** when both hold:
+Select from a round robin of **the whole population with the candidates in it**, never from a `--focus` run, whose ratings come from the candidates' pairs alone:
 
-1. Head to head against its parent it has more than half the points.
-2. Its rating is above its parent's.
+```sh
+uv run --project league league tournament --add CANDIDATES --run-id iteration-N-select
+```
+
+The cache already holds every pair without a candidate, so it plays little more than the gate did. On the **training maps**, a candidate **passes** when both hold:
+
+1. Head to head against its parent it has more than half the points (the pair table).
+2. Its rating is above its parent's (the standings).
 
 Then, for the candidates that passed only, play the **holdout maps**:
 
 ```sh
-uv run --project league league tournament --maps holdout --focus CANDIDATES --run-id iteration-N-holdout
+uv run --project league league tournament --maps holdout --add CANDIDATES --run-id iteration-N-holdout
 ```
 
-A candidate is **promoted** when its holdout rating is not below its parent's. Read only the standings and the tables of that run. **Never digest a holdout game, and never change a candidate after seeing its holdout numbers:** a candidate that fails the holdout is rejected, and its idea may come back next iteration in another form, measured again from the start.
+A candidate is **promoted** when its holdout rating is not below its parent's. Read only the standings and the tables of that run; it lists no games. **Never digest a holdout game, and never change a candidate after seeing its holdout numbers:** a candidate that fails the holdout is rejected, and its idea may come back next iteration in another form, measured again from the start.
 
 **Promoting nothing is a result.** Most ideas don't work, and an iteration that rejects all three and says why has done its job. Never promote a candidate that missed a rule by a little, and never loosen a rule to get a promotion.
 
@@ -114,10 +122,11 @@ Then:
 - **Rejected:** delete the directory. The ledger keeps the idea and the numbers.
 - **More than six active bots:** retire the lowest-rated one whose row of the pair table another active bot matches or beats everywhere. **More than six retired:** delete the lowest-rated.
 
-Finish with the whole population on all maps, which becomes the ledger's standings:
+Finish with the population as it now is, once on each set of maps. These two tables are the ledger's standings:
 
 ```sh
-uv run --project league league tournament --maps all --strict --run-id iteration-N
+uv run --project league league tournament --maps train --strict --run-id iteration-N-train
+uv run --project league league tournament --maps holdout --strict --run-id iteration-N-holdout
 ```
 
 ## 6. Record
@@ -152,6 +161,7 @@ Say what the numbers say. "No candidate was promoted; the champion is unchanged 
 - **Nothing promoted twice in a row:** make one of the next iteration's candidates a founder, and start that iteration by adding maps: `league new-map NAME --seed N --set train` and one for `holdout`. New maps change every rating, so add them before step 1, never in the middle of an iteration, and say in the ledger that the map set grew.
 - **The champion wins everything:** the opponents are too weak. Add founders built to beat it: read its logs for what it never does (never defends, never upgrades speed, never attacks before turn 40) and write the bot that punishes that.
 - **Training rating up, holdout rating down, more than once:** the bots are learning the maps. Start the next iteration by adding training maps, and prefer ideas stated without map geometry.
+- **A real game arrives** (someone gives you a demo saved from a lobby's game): digest it before the next iteration and add what it shows to **Lessons so far**. A new default map in it goes into `league/maps/train/` as a map file built from its first board, before step 1.
 - **Two bots that trade the top place every iteration** are a cycle, not progress: the measure of progress is the rating against the default bots and the retired bots, which don't move.
 
 ## What an iteration never does

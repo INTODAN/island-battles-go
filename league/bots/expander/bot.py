@@ -1,7 +1,10 @@
 """Expander: take the cheapest castle each of its castles can afford, neutral or enemy.
 
-A founder of the league (iteration 0). It never upgrades and never combines
-castles for one attack. The bot keeps nothing between turns except its memory.
+A founder of the league (iteration 0). It never upgrades. A castle sends only
+what takes its target, counting this bot's groups already on their way there,
+so several castles may finish one capture, but none plans with another. A
+castle that holds more than OVERFLOW throws its spare soldiers at the nearest
+enemy castle. The bot keeps nothing between turns except its memory.
 """
 
 from math import ceil
