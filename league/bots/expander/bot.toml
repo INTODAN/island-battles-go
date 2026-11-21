@@ -1,9 +1,0 @@
-# candidate: new and unproven. active: in the population. retired: no longer
-# developed, kept as an opponent.
-status = "active"
-# The bot this one was copied from, or empty for a founder.
-parent = ""
-# The league iteration that created it (ledger/iterations.md).
-iteration = 0
-# What this bot tries that its parent doesn't, in a sentence.
-idea = "Each castle takes the cheapest castle it can afford alone, neutral or enemy; no upgrades."

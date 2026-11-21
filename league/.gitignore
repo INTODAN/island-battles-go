@@ -1,4 +1,0 @@
-# Match results, demos, the result cache and the built runner: everything a
-# tournament writes. The ledger keeps what matters from them.
-runs/
-.bin/
