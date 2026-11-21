@@ -25,6 +25,20 @@ from pydantic import (
 )
 
 
+class AwayPause(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    at: AwareDatetime
+    """
+    When it missed the turn.
+    """
+    reason: StrictStr
+    """
+    Which turn it missed, such as "Missed turn 12 of a rated game on 21 November".
+    """
+
+
 class BotChoice(GameModel):
     model_config = ConfigDict(
         extra="ignore",
@@ -43,7 +57,7 @@ class BotChoice(GameModel):
     """
     name: StrictStr | None = None
     """
-    In a rated game, the bot name that a hosted bot plays as, one that its player registered in their account, such as Kraken. Absent for the other kinds and in a game that isn't rated.
+    In a rated game, the bot name that a hosted bot plays as, such as Kraken: one that its player registered in their account, or a bot from the leaderboard that plays away, for a member of another account or in a seat. Absent for the other kinds and in a game that isn't rated.
     """
     port: Annotated[StrictInt | None, Field(ge=1024, le=65535)] = None
     """
@@ -177,6 +191,10 @@ class BotSeatSettings(GameModel):
     model_config = ConfigDict(
         extra="ignore",
     )
+    bot_competitor_id: UUID | None = None
+    """
+    A bot name that the leaderboard lists, by its competitor_id (GET /leaderboard), whoever owns it, which plays at the name's URL as it is at the start. The seat is named after the bot and its owner, such as "Kraken (Dana)". It plays away: in a rated lobby the bot is the seat's competitor, and the daily caps and the pause apply to it; in a lobby that isn't rated it rates nothing. Only when GET /bots/defaults says server_bots.
+    """
     bot_level: Annotated[StrictInt | None, Field(ge=1)] = None
     """
     A default bot of this level, one that GET /bots/defaults lists, which the backend plays. The seat is named "Bot (level N)".
@@ -382,6 +400,10 @@ class Competitor(GameModel):
     """
     A URL to the JSON Schema for this object.
     """
+    away_paused: AwayPause | None = None
+    """
+    For a bot name that missed a turn while it played away, in a rated game of someone else's lobby: it plays away in no rated game until its owner resumes it with DELETE /account/bot-names/{competitor_id}/away-pause. Its owner's own games with it are unaffected. Absent otherwise.
+    """
     draws: Annotated[StrictInt, Field(ge=0)]
     games: Annotated[StrictInt, Field(ge=0)]
     """
@@ -416,6 +438,10 @@ class CompetitorResult(GameModel):
     model_config = ConfigDict(
         extra="ignore",
     )
+    away: StrictBool
+    """
+    Whether the competitor played away: a bot name in a seat of someone else's lobby, or chosen by a member of another account. Its owner wasn't there.
+    """
     ended_at: AwareDatetime
     """
     When the game ended.
@@ -1110,6 +1136,10 @@ class MemberBot(GameModel):
     model_config = ConfigDict(
         extra="ignore",
     )
+    competitor_id: UUID | None = None
+    """
+    For kind hosted only, instead of url and name: a bot name by its competitor_id, one that the leaderboard lists (GET /leaderboard, with a url), or one of your own bot names. It plays at the name's URL as it is at the start. Another account's bot plays away: in a rated lobby it is that bot that plays for your team, your own hand play isn't in the game, and the daily caps and the pause apply to it. One of your own plays as if you named it. In a lobby that isn't rated it rates nothing.
+    """
     kind: Literal["localhost", "default", "hosted", "uploaded", "manual"]
     """
     localhost: your own bot, which island-battles-bot serve runs on your machine and your game client relays each turn to. default: a default bot of GET /bots/defaults, which the backend plays. hosted: your own bot server at url, which the server sends each turn to. uploaded: your own bot package in this lobby, package_id, which the server runs. manual: you play by hand in the 3D client; no bot plays for you. hosted and uploaded are offered only when GET /bots/defaults says server_bots.
@@ -1120,7 +1150,7 @@ class MemberBot(GameModel):
     """
     name: Annotated[StrictStr | None, Field(max_length=200)] = None
     """
-    For kinds localhost, hosted and uploaded only: one of the bot names of your account (GET /account), compared without regard to case, that the bot plays as. Only a signed-in player has bot names. A rated lobby takes a bot only as a hosted bot under one of your bot names, which plays at the name's URL, and records the game under the name. Elsewhere the name changes nothing, except that a hosted bot without a url plays at its name's URL.
+    For kinds localhost, hosted and uploaded only: one of the bot names of your account (GET /account), compared without regard to case, that the bot plays as. Only a signed-in player has bot names. A rated lobby takes a bot only as a hosted bot under a bot name, which plays at the name's URL, and records the game under the name. Elsewhere the name changes nothing, except that a hosted bot without a url plays at its name's URL.
     """
     package_id: UUID | None = None
     """
@@ -1132,7 +1162,7 @@ class MemberBot(GameModel):
     """
     url: Annotated[StrictStr | None, Field(max_length=2048)] = None
     """
-    For kind hosted only: where the server POSTs each TurnDelivery. https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public. Required unless the bot has a name, which then plays at its own URL (GET /account). In a rated lobby a named hosted bot always plays at its name's URL, and url is ignored.
+    For kind hosted only: where the server POSTs each TurnDelivery. https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public. Required unless the bot has a name or a competitor_id, which then plays at its own URL (GET /account). In a rated lobby a named hosted bot always plays at its name's URL, and url is ignored.
     """
 
 

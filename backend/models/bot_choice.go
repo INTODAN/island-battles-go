@@ -53,7 +53,7 @@ type BotChoiceView struct {
 	Level *uint   `json:"level,omitempty" minimum:"1" doc:"For kind default, the level of the default bot, one that GET /bots/defaults lists. Absent for the other kinds."`
 	Host  string  `json:"host,omitempty" doc:"For kind hosted, the host name of the bot's URL, such as bot.example.com; the rest of the URL is not shown. Absent for the other kinds."`
 	Port  *uint   `json:"port,omitempty" minimum:"1024" maximum:"65535" doc:"For kind localhost, the port on 127.0.0.1 where the player's client delivers each turn: the one they chose in the lobby, 41414 by default. Absent for the other kinds."`
-	Name  string  `json:"name,omitempty" doc:"In a rated game, the bot name that a hosted bot plays as, one that its player registered in their account, such as Kraken. Absent for the other kinds and in a game that isn't rated."`
+	Name  string  `json:"name,omitempty" doc:"In a rated game, the bot name that a hosted bot plays as, such as Kraken: one that its player registered in their account, or a bot from the leaderboard that plays away, for a member of another account or in a seat. Absent for the other kinds and in a game that isn't rated."`
 }
 
 // MemberBotView is the bot that a person chooses for themselves, in their

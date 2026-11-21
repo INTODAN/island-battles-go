@@ -107,21 +107,21 @@ type Competitor struct {
 	// had URLs, until its owner adds one.
 	URL *string `gorm:"column:url"`
 	// HouseLevel is a house bot's default bot level.
-	HouseLevel   *uint          `gorm:"column:house_level"`
-	Rating       float64        `gorm:"column:rating;not null;default:1500"`
-	Games        int            `gorm:"column:games;not null;default:0"`
-	Wins         int            `gorm:"column:wins;not null;default:0"`
-	Draws        int            `gorm:"column:draws;not null;default:0"`
-	Losses       int            `gorm:"column:losses;not null;default:0"`
-	LastPlayedAt *time.Time     `gorm:"column:last_played_at"`
+	HouseLevel   *uint      `gorm:"column:house_level"`
+	Rating       float64    `gorm:"column:rating;not null;default:1500"`
+	Games        int        `gorm:"column:games;not null;default:0"`
+	Wins         int        `gorm:"column:wins;not null;default:0"`
+	Draws        int        `gorm:"column:draws;not null;default:0"`
+	Losses       int        `gorm:"column:losses;not null;default:0"`
+	LastPlayedAt *time.Time `gorm:"column:last_played_at"`
 	// AwayPausedAt is when a bot name that played away, in a rated game of
 	// someone else's lobby, missed a turn: it plays away in no rated game
 	// until its owner resumes it. AwayPausedReason says which turn. Both nil
 	// while it isn't paused.
-	AwayPausedAt     *time.Time `gorm:"column:away_paused_at"`
-	AwayPausedReason *string    `gorm:"column:away_paused_reason"`
-	CreatedAt        time.Time  `gorm:"column:created_at;not null"`
-	DeletedAt    gorm.DeletedAt `gorm:"column:deleted_at"`
+	AwayPausedAt     *time.Time     `gorm:"column:away_paused_at"`
+	AwayPausedReason *string        `gorm:"column:away_paused_reason"`
+	CreatedAt        time.Time      `gorm:"column:created_at;not null"`
+	DeletedAt        gorm.DeletedAt `gorm:"column:deleted_at"`
 }
 
 func (Competitor) TableName() string { return "island_competitors" }

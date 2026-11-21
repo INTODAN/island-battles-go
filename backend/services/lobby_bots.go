@@ -632,7 +632,7 @@ type frozenBot struct {
 	// CompetitorID is a hosted bot chosen by its competitor ID, a member's
 	// or a seat's, which plays at the bot name's URL.
 	CompetitorID string
-	PackageID string
+	PackageID    string
 	// Name is the bot name that a member's bot plays under, which only a
 	// rated game records.
 	Name string
