@@ -1,0 +1,109 @@
+{
+  "package": {
+    "id": "6f1c2b9e-4d0a-4c55-9a7e-2f8b1d3c4e5a",
+    "url": "https://island-battles-bot-packages.s3.eu-central-1.amazonaws.com/lobbies/0b8f6a1e-3c2d-4e5f-8a9b-1c2d3e4f5a6b/6f1c2b9e-4d0a-4c55-9a7e-2f8b1d3c4e5a.zip?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Expires=3600&X-Amz-Signature=0000",
+    "size_bytes": 123
+  },
+  "game_ended": {
+    "game_id": 1,
+    "team_color": 1,
+    "turn_number": 3,
+    "outcome": {
+      "reason": "last_team_standing",
+      "winner_team_color": 1,
+      "summary": "Red won: the last team standing",
+      "departures": []
+    },
+    "generation": {
+      "id": 12,
+      "castles": [
+        {
+          "id": 0,
+          "team_color": 1,
+          "soldiers": 30,
+          "x": -3.0,
+          "y": 0.0,
+          "upgrades": {
+            "burst_potential": 1,
+            "clash_stop_generations": 1,
+            "generation_amount": 1,
+            "speed": 1
+          },
+          "burst_debt": 0
+        },
+        {
+          "id": 1,
+          "team_color": 2,
+          "soldiers": 30,
+          "x": 3.0,
+          "y": 0.0,
+          "upgrades": {
+            "burst_potential": 1,
+            "clash_stop_generations": 1,
+            "generation_amount": 1,
+            "speed": 1
+          },
+          "burst_debt": 0
+        },
+        {
+          "id": 2,
+          "team_color": 0,
+          "soldiers": 10,
+          "x": 0.0,
+          "y": 2.0,
+          "upgrades": {
+            "burst_potential": 1,
+            "clash_stop_generations": 1,
+            "generation_amount": 1,
+            "speed": 1
+          },
+          "burst_debt": 0
+        },
+        {
+          "id": 3,
+          "team_color": 1,
+          "soldiers": 12,
+          "x": -2.0,
+          "y": -2.0,
+          "upgrades": {
+            "burst_potential": 1,
+            "clash_stop_generations": 1,
+            "generation_amount": 1,
+            "speed": 1
+          },
+          "burst_debt": 0
+        }
+      ],
+      "soldier_groups": [
+        {
+          "id": 0,
+          "team_color": 2,
+          "soldiers": 4,
+          "origin_castle_id": 1,
+          "destination_castle_id": 0,
+          "x": 1.0,
+          "y": 0.0,
+          "clash_radius": 0.5,
+          "upgrades": {
+            "burst_potential": 1,
+            "clash_stop_generations": 1,
+            "generation_amount": 1,
+            "speed": 1
+          }
+        }
+      ],
+      "clashes": []
+    },
+    "memory": {
+      "sent_total": 4
+    },
+    "demo": {
+      "url": "https://island-battles.example.org/game/1/demo?token=ibdt1.eyJnYW1lX2lkIjoxfQ.Zm9v",
+      "expires_at": "2026-11-14T12:00:00Z"
+    }
+  },
+  "limits": {
+    "load_seconds": 10,
+    "play_seconds": 5
+  }
+}

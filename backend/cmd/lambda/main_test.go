@@ -283,7 +283,14 @@ func TestTheLambdaHostServesOnlyListedRoutesWithoutAuthentication(t *testing.T) 
 		if _, signed := signedMounts[route]; signed {
 			return nil
 		}
-		path := parameter.ReplaceAllString(route, "00000000-0000-4000-8000-000000000001")
+		// {id} is a game's number, such as GET /game/{id}/demo's; the
+		// other parameters are UUIDs.
+		path := parameter.ReplaceAllStringFunc(route, func(name string) string {
+			if name == "{id}" {
+				return "1"
+			}
+			return "00000000-0000-4000-8000-000000000001"
+		})
 		response, content := call(t, invoke, method, path, `{}`, "")
 		if response.StatusCode != http.StatusUnauthorized && response.StatusCode != http.StatusForbidden {
 			return fmt.Errorf("%s %s answered %d without credentials; protect it, or list it in publicRoutes if it is meant to be public: %.300s", method, route, response.StatusCode, content)

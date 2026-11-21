@@ -27,7 +27,7 @@ import urllib.request
 from pathlib import Path
 
 import runner
-from test_runner import Game, Packages, example_event
+from test_runner import Game, Packages, example_event, game_ended_event
 
 REPOSITORY = Path(__file__).resolve().parents[3]
 SDK = REPOSITORY / "clients" / "island-battles-python"
@@ -113,6 +113,7 @@ class EndToEndTest(unittest.TestCase):
             packages.add("template", packaged.read_bytes()), game.submit_url, load_seconds=10, play_seconds=2
         )
 
+        package = event["package"]
         outcome = bot_runner.handle(event, deadline=time.monotonic() + 20)
 
         self.assertEqual(outcome, {"outcome": "submitted", "status": 200}, json.dumps(game.submissions)[:2000])
@@ -131,6 +132,11 @@ class EndToEndTest(unittest.TestCase):
         self.assertTrue(
             any("4 commands, 15 soldiers sent so far" in line["message"] for line in batch["logs"]), batch["logs"]
         )
+        # The template has no game_ended function, so its worker takes the
+        # end of the game at once (#413), and nothing is submitted.
+        ended = bot_runner.handle(game_ended_event(package, game.server.host), deadline=time.monotonic() + 20)
+        self.assertEqual(ended, {"outcome": "ended"})
+        self.assertEqual(len(game.submissions), 1)
 
 
 if __name__ == "__main__":

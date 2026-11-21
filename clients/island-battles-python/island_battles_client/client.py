@@ -21,6 +21,7 @@ from ._generated import (
     BotChoice,
     BotTurn,
     ConnectionToken,
+    GameEndedDelivery,
     GameEndedEvent,
     GameOutcome,
     GenerationEvent,
@@ -43,6 +44,7 @@ from .errors import (
     StaleGenerationError,
     TeamOutError,
 )
+from .game_end import GameEnded, call_game_ended
 from .game_log import (
     SDK_LOGGER,
     ClientLogging,
@@ -163,9 +165,12 @@ class IslandBattlesClient:
     client calls it once per generation, serially, and sends its result as the
     turn's one completing batch: the commands, the game log lines and the
     memory, which the server stores for the next ``BotTurn.memory``. When the
-    game ends, the optional ``on_game_ended(outcome, generation)`` runs once and
-    ``wait()`` and ``run()`` return. While the player waits for others to complete a turn
-    that has a deadline, the client asks the server to apply the deadline a
+    game ends, the optional ``on_game_ended(outcome, generation)`` runs once,
+    then the bot's optional ``game_ended`` function (sync or async) gets the
+    player's ``GameEndedDelivery``, read from the game, and ``wait()`` and
+    ``run()`` return. A failure to read the delivery, or in ``game_ended``, is
+    logged and never fails the client. While the player waits for others to
+    complete a turn that has a deadline, the client asks the server to apply the deadline a
     second after it, which ends the game when someone didn't answer.
 
     From ``start()`` to ``close()`` the client attaches its log handlers to the
@@ -182,6 +187,7 @@ class IslandBattlesClient:
         lobby_id: str,
         *,
         play: Play,
+        game_ended: GameEnded | None = None,
         game_url: str | None = None,
         lobby_url: str | None = None,
         base_url: str | None = None,
@@ -209,6 +215,7 @@ class IslandBattlesClient:
         self.credential = credential
         self.lobby_id = str(UUID(str(lobby_id)))
         self._play = play
+        self._game_ended = game_ended
         self._on_game_ended = on_game_ended
         if (
             (refresh_interval is not None and refresh_interval <= 0)
@@ -621,6 +628,8 @@ class IslandBattlesClient:
                             ended = self._on_game_ended(state.outcome, state.generation)
                             if inspect.isawaitable(ended):
                                 await ended
+                    if self._game_ended is not None:
+                        await self._end_game(self._game_ended)
                 finally:
                     self._callbacks.task_done()
                 self._stopped.set()
@@ -702,6 +711,36 @@ class IslandBattlesClient:
             finally:
                 self._game_log = None
                 self._callbacks.task_done()
+
+    async def _end_game(self, game_ended: GameEnded) -> None:
+        """Read the player's ``GameEndedDelivery`` and give it to the bot's
+        ``game_ended``. A failure is logged: the game is over either way."""
+        with self._logging.scope():
+            try:
+                delivery = await self._fetch_game_ended_delivery()
+            except Exception as error:  # noqa: BLE001 - logged, never fails run
+                _sdk_logger.warning("could not read the end of the game: %s", error)
+                return
+            try:
+                await call_game_ended(game_ended, delivery)
+            except Exception as error:
+                _sdk_logger.warning("the bot's game_ended failed", exc_info=error)
+
+    async def _fetch_game_ended_delivery(self) -> GameEndedDelivery:
+        """``GET /game/from-lobby/{lobby_id}/game-ended-delivery`` with the
+        player token, once more with a new token after a 401.
+
+        Unlike ``_request``, a 401 here doesn't fail the client: the game is
+        over, and only the bot's ``game_ended`` misses it.
+        """
+        path = f"/game/from-lobby/{self.lobby_id}/game-ended-delivery"
+        token = await self._game_token()
+        try:
+            data = await self._send("GET", path, token, None, True)
+        except GameAuthenticationError:
+            token = await self._game_token(stale=token)
+            data = await self._send("GET", path, token, None, True)
+        return GameEndedDelivery.model_validate(data)
 
     async def _deadline_worker(self) -> None:
         """Apply the turn's deadline while this player waits for the others.

@@ -118,6 +118,35 @@ func CheckSyntax(raw string) (string, error) {
 	return "", refuse("the bot's URL must name its host, not an IP address")
 }
 
+// GameEndedPath is the last path segment of the URL a hosted bot gets the
+// end of its game on (#413).
+const GameEndedPath = "game-ended"
+
+// GameEndedURL is where a hosted bot whose turns go to raw gets the end of
+// its game: raw with the last segment of its path replaced by game-ended,
+// keeping its query. https://bot.example.com/turn gives
+// https://bot.example.com/game-ended, and a path that ends in a slash, or none,
+// gets game-ended added: https://bot.example.com/bots/ gives
+// https://bot.example.com/bots/game-ended.
+func GameEndedURL(raw string) (string, error) {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Opaque != "" {
+		return "", refuse("the bot's URL is not a URL, such as https://bot.example.com/turn")
+	}
+	path := parsed.EscapedPath()
+	directory := path[:strings.LastIndex(path, "/")+1]
+	if directory == "" {
+		directory = "/"
+	}
+	parsed.RawPath = ""
+	if parsed.Path, err = url.PathUnescape(directory + GameEndedPath); err != nil {
+		return "", refuse("the bot's URL has a malformed path")
+	}
+	parsed.RawPath = directory + GameEndedPath
+	parsed.Fragment, parsed.RawFragment = "", ""
+	return parsed.String(), nil
+}
+
 // Public reports whether address is one the server may send a hosted bot's
 // turns to: not loopback, private (which covers IPv6 unique-local),
 // link-local, unspecified or multicast.

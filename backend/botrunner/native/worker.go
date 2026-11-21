@@ -31,7 +31,8 @@ const (
 var errLineTooLong = errors.New("wrote a line longer than 4 MiB")
 
 // worker is a bot's worker process (#216): the runner writes {"turn": ...}
-// lines to its stdin and reads one answer line from its stdout for each.
+// lines, and {"game_ended": ...} at the end of a game (#413), to its stdin
+// and reads one answer line from its stdout for each.
 type worker struct {
 	packageID string
 	command   *exec.Cmd
@@ -198,8 +199,51 @@ func (worker *worker) waitReady(ctx context.Context) error {
 // the result, a *botAnswerError when the bot answered with an error, or an
 // error that says how the worker failed; the caller kills it then.
 func (worker *worker) play(ctx context.Context, turn json.RawMessage, limit time.Duration) (json.RawMessage, error) {
-	request := make([]byte, 0, len(turn)+11)
-	request = append(append(append(request, `{"turn":`...), turn...), "}\n"...)
+	line, err := worker.exchange(ctx, "turn", turn, limit)
+	if err != nil {
+		return nil, err
+	}
+	var answer struct {
+		Result json.RawMessage `json:"result"`
+		Error  *string         `json:"error"`
+	}
+	if err := json.Unmarshal(line, &answer); err != nil || (answer.Error == nil && len(answer.Result) == 0) {
+		return nil, fmt.Errorf("broke the worker protocol: it wrote %q", firstCharacters(line))
+	}
+	if answer.Error != nil {
+		return nil, &botAnswerError{message: *answer.Error}
+	}
+	return answer.Result, nil
+}
+
+// endGame offers the worker the end of its game, {"game_ended": ...}, and
+// waits at most limit for its {"ended": true}. It returns a *botAnswerError
+// when the bot answered with an error, such as a worker of an SDK that
+// doesn't know the line, or an error that says how the worker failed; the
+// caller kills it then.
+func (worker *worker) endGame(ctx context.Context, ended json.RawMessage, limit time.Duration) error {
+	line, err := worker.exchange(ctx, "game_ended", ended, limit)
+	if err != nil {
+		return err
+	}
+	var answer struct {
+		Ended bool    `json:"ended"`
+		Error *string `json:"error"`
+	}
+	if err := json.Unmarshal(line, &answer); err != nil || (answer.Error == nil && !answer.Ended) {
+		return fmt.Errorf("broke the worker protocol: it wrote %q", firstCharacters(line))
+	}
+	if answer.Error != nil {
+		return &botAnswerError{message: *answer.Error}
+	}
+	return nil
+}
+
+// exchange writes the request line {key: payload} and waits at most limit
+// for the worker's answer line.
+func (worker *worker) exchange(ctx context.Context, key string, payload json.RawMessage, limit time.Duration) ([]byte, error) {
+	request := make([]byte, 0, len(payload)+len(key)+6)
+	request = append(append(append(request, `{"`+key+`":`...), payload...), "}\n"...)
 	// The write blocks while the worker doesn't read, so it runs on its own;
 	// killing the worker ends it.
 	go func() { _, _ = worker.stdin.Write(request) }()
@@ -213,17 +257,7 @@ func (worker *worker) play(ctx context.Context, turn json.RawMessage, limit time
 		if line.err != nil {
 			return nil, fmt.Errorf("broke the worker protocol: it %v", line.err)
 		}
-		var answer struct {
-			Result json.RawMessage `json:"result"`
-			Error  *string         `json:"error"`
-		}
-		if err := json.Unmarshal(line.data, &answer); err != nil || (answer.Error == nil && len(answer.Result) == 0) {
-			return nil, fmt.Errorf("broke the worker protocol: it wrote %q", firstCharacters(line.data))
-		}
-		if answer.Error != nil {
-			return nil, &botAnswerError{message: *answer.Error}
-		}
-		return answer.Result, nil
+		return line.data, nil
 	case <-timer.C:
 		return nil, fmt.Errorf("did not answer within %v", limit)
 	case <-ctx.Done():

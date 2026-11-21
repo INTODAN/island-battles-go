@@ -393,7 +393,7 @@ func (service *GenerationService) playGoBotTurns(ctx context.Context, gameID uin
 			// A game that nobody played for its turn limit ends before the
 			// Go bots replace its open generation.
 			if abandoned(game, generation, service.now()) {
-				events, err = abandonGame(transaction, game, generation, players)
+				events, turns, err = abandonGame(transaction, game, generation, players, service.Bots)
 				return err
 			}
 			inputs, err := dal.LoadGenerationInputs(transaction, generation.ID)

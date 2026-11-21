@@ -799,3 +799,117 @@ func TestRefusesMalformedEvents(t *testing.T) {
 		t.Error("a malformed event submits nothing")
 	}
 }
+
+// gameEndedEvent is backend/botrunner/testdata/game_ended_event.json, the
+// end of a game both runners' tests use, with the package and the demo link's
+// host given.
+func gameEndedEvent(t *testing.T, botPackage models.BotRunnerPackage, gameURL string, limits models.BotRunnerLimits) models.BotRunnerEvent {
+	t.Helper()
+	data, err := os.ReadFile("../testdata/game_ended_event.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var event models.BotRunnerEvent
+	if err := json.Unmarshal(data, &event); err != nil {
+		t.Fatal(err)
+	}
+	event.Package, event.Limits = &botPackage, &limits
+	link, err := url.Parse(event.GameEnded.Demo.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	game, _ := url.Parse(gameURL)
+	link.Scheme, link.Host = game.Scheme, game.Host
+	event.GameEnded.Demo.URL = link.String()
+	return event
+}
+
+// endingBot answers each line, a turn or the end of a game, as an SDK's
+// worker does, and logs the end of its game on stderr.
+const endingBot = "#!/bin/sh\necho '{\"ready\": true}'\nwhile IFS= read -r line; do\n  case \"$line\" in\n    *'\"game_ended\"'*) echo 'the game ended' >&2; echo '{\"ended\": true}' ;;\n    *) echo '{\"result\": {\"commands\": [], \"logs\": [], \"memory\": null}}' ;;\n  esac\ndone\n"
+
+func TestOffersTheEndOfTheGameToAnUploadedBot(t *testing.T) {
+	fake, served := serveGame(t), servePackages(t)
+	runner := newRunner(t, fake)
+	botPackage := served.add("ending", botPackage(t, endingBot))
+	ended := gameEndedEvent(t, botPackage, fake.server.URL, models.GameEndedBotRunnerLimits)
+
+	if outcome := mustHandle(t, runner, ended); outcome != (Outcome{Outcome: "ended"}) {
+		t.Fatalf("outcome = %+v", outcome)
+	}
+	// The worker stays loaded for the next game's turns.
+	turn := exampleEvent(t, botPackage, fake.server.URL+"/generation/commands", fastLimits)
+	if outcome := mustHandle(t, runner, turn); outcome.Outcome != "submitted" {
+		t.Fatalf("the next turn: %+v", outcome)
+	}
+	if submissions := len(fake.taken()); submissions != 1 || served.downloadsOf("ending") != 1 {
+		t.Errorf("the end of a game submits nothing and keeps the worker: %d submissions, %d downloads", submissions, served.downloadsOf("ending"))
+	}
+}
+
+// A worker of an SDK that doesn't know the end of a game answers with an
+// error, which changes nothing.
+func TestAnUploadedBotThatFailsAtTheEndChangesNothing(t *testing.T) {
+	fake, served := serveGame(t), servePackages(t)
+	runner := newRunner(t, fake)
+	older := "#!/bin/sh\necho '{\"ready\": true}'\nwhile IFS= read -r line; do echo '{\"error\": \"the line must be an object like {\\\"turn\\\": ...}\"}'; done\n"
+	ended := gameEndedEvent(t, served.add("older", botPackage(t, older)), fake.server.URL, models.GameEndedBotRunnerLimits)
+
+	outcome := mustHandle(t, runner, ended)
+
+	if outcome.Outcome != "unended" || !strings.Contains(outcome.Reason, "failed at the end of its game: the line must be") {
+		t.Fatalf("outcome = %+v", outcome)
+	}
+	if len(fake.taken()) != 0 {
+		t.Error("the end of a game submits nothing")
+	}
+}
+
+func TestHostedModePostsTheEndOfTheGameToGameEnded(t *testing.T) {
+	fake := serveGame(t)
+	var path string
+	var body []byte
+	hosted := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		path, body = request.URL.Path, nil
+		body, _ = io.ReadAll(request.Body)
+		response.WriteHeader(http.StatusAccepted)
+	}))
+	t.Cleanup(hosted.Close)
+	runner := newRunner(t, fake)
+	runner.AllowLoopbackHosted = true
+	ended := gameEndedEvent(t, models.BotRunnerPackage{}, fake.server.URL, models.GameEndedBotRunnerLimits)
+	ended.Package, ended.Limits = nil, nil
+	ended.Hosted = &models.BotRunnerHosted{URL: hosted.URL + "/bots/turn"}
+
+	outcome := mustHandle(t, runner, ended)
+
+	if outcome != (Outcome{Outcome: "delivered", Status: http.StatusAccepted}) || path != "/bots/game-ended" {
+		t.Fatalf("outcome = %+v, path %q", outcome, path)
+	}
+	var delivered models.GameEndedDelivery
+	if err := json.Unmarshal(body, &delivered); err != nil || delivered.GameID != ended.GameEnded.GameID || delivered.Demo.URL != ended.GameEnded.Demo.URL {
+		t.Fatalf("the hosted bot must get the end of its game: %s, %v", body, err)
+	}
+}
+
+func TestRefusesMalformedEndsOfGames(t *testing.T) {
+	fake := serveGame(t)
+	runner := newRunner(t, fake)
+	botPackage := models.BotRunnerPackage{ID: "one", URL: "https://example.org/one.zip"}
+	both := gameEndedEvent(t, botPackage, fake.server.URL, models.GameEndedBotRunnerLimits)
+	turn := exampleEvent(t, botPackage, fake.server.URL+"/generation/commands", fastLimits)
+	both.Delivery = turn.Delivery
+	elsewhere := gameEndedEvent(t, botPackage, "https://elsewhere.example.org", models.GameEndedBotRunnerLimits)
+	hostedAndPackage := gameEndedEvent(t, botPackage, fake.server.URL, models.GameEndedBotRunnerLimits)
+	hostedAndPackage.Hosted = &models.BotRunnerHosted{URL: "https://bot.example.org/turn"}
+	noLimits := gameEndedEvent(t, botPackage, fake.server.URL, models.GameEndedBotRunnerLimits)
+	noLimits.Limits = nil
+	for name, event := range map[string]models.BotRunnerEvent{"a turn too": both, "a demo link elsewhere": elsewhere, "hosted and a package": hostedAndPackage, "no limits": noLimits} {
+		if _, err := handle(t, runner, event); err == nil {
+			t.Errorf("%s: Handle must refuse", name)
+		}
+	}
+	if len(fake.taken()) != 0 {
+		t.Error("a malformed event submits nothing")
+	}
+}

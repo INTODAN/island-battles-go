@@ -93,7 +93,7 @@ func (origins *originsFlag) Set(origin string) error {
 }
 
 func serve(ctx context.Context, program invocation, arguments []string) int {
-	flags := newFlags(program, "serve", fmt.Sprintf("Serves the bot on http://%s:<port> for a game client in the browser: POST /turn\ntakes a TurnDelivery, answers 202 at once, plays the turn and submits the answer\nitself with the delivery's submit token. GET /health says the bot is there.\nGo doesn't reload code: after changing the bot, stop the server and start it again.", serveHost))
+	flags := newFlags(program, "serve", fmt.Sprintf("Serves the bot on http://%s:<port> for a game client in the browser: POST /turn\ntakes a TurnDelivery, answers 202 at once, plays the turn and submits the answer\nitself with the delivery's submit token. POST /game-ended takes a GameEndedDelivery,\nanswers 202 at once and calls the bot's game-end callback, if it has one.\nGET /health says the bot is there.\nGo doesn't reload code: after changing the bot, stop the server and start it again.", serveHost))
 	port := flags.Int("port", DefaultPort, "the `port` to serve on")
 	turnTimeout := flags.Duration("turn-timeout", DefaultTurnTimeout, "pass the turn when the bot takes longer than this `duration`, or than the time left before the turn's deadline less 1s, or less a quarter of it when it is under 4s. A lobby's turn timeout is 30s by default, and its host can set it from 5s to 600s or to none")
 	var allowedOrigins, submitHosts originsFlag
@@ -108,6 +108,7 @@ func serve(ctx context.Context, program invocation, arguments []string) int {
 	}
 	handler := newBotServer(program.name, program.play, append(slices.Clone(DefaultOrigins), allowedOrigins...), *turnTimeout, program.stdout)
 	handler.addSubmitHosts(submitHosts...)
+	handler.gameEnd = program.gameEnd
 	listener, err := net.Listen("tcp", net.JoinHostPort(serveHost, strconv.Itoa(*port)))
 	if err != nil {
 		_, _ = fmt.Fprintf(program.stderr, "could not serve: %v\n", err)
@@ -137,14 +138,20 @@ func serve(ctx context.Context, program invocation, arguments []string) int {
 	return 0
 }
 
-// botServer is the bot's HTTP server: POST /turn, GET /health and the CORS
-// preflights for them, as a game client in the browser expects them. It plays
-// each delivered turn in the background and submits the answer itself.
+// botServer is the bot's HTTP server: POST /turn, POST /game-ended,
+// GET /health and the CORS preflights for them, as a game client in the
+// browser expects them. It plays each delivered turn in the background and
+// submits the answer itself, and calls the bot's game-end callback in the
+// background.
 type botServer struct {
-	name        string
-	play        Play
-	origins     map[string]bool
-	turnTimeout time.Duration
+	name string
+	play Play
+	// gameEnd is the bot's game-end callback, or nil, and gameEndTimeout
+	// how long it may take.
+	gameEnd        GameEnd
+	gameEndTimeout time.Duration
+	origins        map[string]bool
+	turnTimeout    time.Duration
 	// submitHosts are the https hosts it submits to, as name or name:port.
 	submitHosts map[string]bool
 	// httpClient submits the answers.
@@ -160,6 +167,24 @@ type botServer struct {
 	playingMutex sync.Mutex
 	// turns counts the turns in the background, for tests to wait on.
 	turns sync.WaitGroup
+	// ended are the games whose end was delivered, so that one delivered
+	// again calls the bot once. endings counts the game-end callbacks in the
+	// background, for tests to wait on.
+	ended      map[endedGame]bool
+	endedOrder []endedGame
+	endedMutex sync.Mutex
+	endings    sync.WaitGroup
+}
+
+// maxEndedGames is how many delivered game ends serve remembers.
+const maxEndedGames = 1000
+
+// endedGame names a game whose end was delivered for a team: the game's
+// site, from the demo link, and the game and team.
+type endedGame struct {
+	host      string
+	gameID    uint
+	teamColor uint
 }
 
 // playingTurn names a turn being played.
@@ -176,7 +201,8 @@ func newBotServer(name string, play Play, origins []string, turnTimeout time.Dur
 		allowed[strings.TrimRight(origin, "/")] = true
 	}
 	return &botServer{name: name, play: play, origins: allowed, turnTimeout: turnTimeout, log: log, botLog: &logOutputs{level: slog.LevelInfo, writers: []io.Writer{log}},
-		submitHosts: map[string]bool{OfficialSubmitHost: true}, httpClient: &http.Client{Timeout: submitTimeout}, playing: map[playingTurn]bool{}}
+		submitHosts: map[string]bool{OfficialSubmitHost: true}, httpClient: &http.Client{Timeout: submitTimeout}, playing: map[playingTurn]bool{},
+		gameEndTimeout: GameEndTimeout, ended: map[endedGame]bool{}}
 }
 
 // addSubmitHosts allows submitting to more https hosts.
@@ -186,18 +212,28 @@ func (server *botServer) addSubmitHosts(hosts ...string) {
 	}
 }
 
+// gameURLAllowed reports whether link is on a game the bot talks to: https
+// on an allowed host, or http on localhost or 127.0.0.1.
+func (server *botServer) gameURLAllowed(link string) bool {
+	parsed, err := url.Parse(link)
+	if err != nil || parsed.User != nil || parsed.Host == "" {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	switch {
+	case parsed.Scheme == "http" && (host == "localhost" || host == "127.0.0.1"):
+		return true
+	case parsed.Scheme == "https" && (server.submitHosts[host] || (parsed.Port() != "" && server.submitHosts[host+":"+parsed.Port()])):
+		return true
+	}
+	return false
+}
+
 // submitRefusal says why the bot may not submit to submitURL, or is empty
-// when it may: https on an allowed host, or http on localhost or 127.0.0.1.
+// when it may: see gameURLAllowed.
 func (server *botServer) submitRefusal(submitURL string) string {
-	parsed, err := url.Parse(submitURL)
-	if err == nil && parsed.User == nil && parsed.Host != "" {
-		host := strings.ToLower(parsed.Hostname())
-		switch {
-		case parsed.Scheme == "http" && (host == "localhost" || host == "127.0.0.1"):
-			return ""
-		case parsed.Scheme == "https" && (server.submitHosts[host] || (parsed.Port() != "" && server.submitHosts[host+":"+parsed.Port()])):
-			return ""
-		}
+	if server.gameURLAllowed(submitURL) {
+		return ""
 	}
 	return fmt.Sprintf("submit.url %s is not an allowed host, so the bot doesn't play this turn: it submits only to https://%s and to http://localhost or http://127.0.0.1 on any port. Start the server with --allow-submit-host <host> to add an https host.\n", submitURL, OfficialSubmitHost)
 }
@@ -250,11 +286,14 @@ func (server *botServer) ServeHTTP(response http.ResponseWriter, request *http.R
 		if server.refuse(writer, request) {
 			return
 		}
-		if request.URL.Path != "/turn" {
+		switch request.URL.Path {
+		case "/turn":
+			server.turn(writer, request)
+		case "/game-ended":
+			server.gameEnded(writer, request)
+		default:
 			server.text(writer, request, http.StatusNotFound, "not found\n")
-			return
 		}
-		server.turn(writer, request)
 	default:
 		server.text(writer, request, http.StatusMethodNotAllowed, "method not allowed\n")
 	}
@@ -325,25 +364,35 @@ func (server *botServer) preflight(writer http.ResponseWriter, request *http.Req
 	writer.WriteHeader(http.StatusNoContent)
 }
 
-// turn accepts the TurnDelivery in the body with 202, and plays and submits
-// it in the background.
-func (server *botServer) turn(writer http.ResponseWriter, request *http.Request) {
+// readJSON reads a POST's JSON body, of at most maxTurnBytes, and answers
+// the refusal and returns false when it can't.
+func (server *botServer) readJSON(writer http.ResponseWriter, request *http.Request) ([]byte, bool) {
 	mediaType, _, _ := mime.ParseMediaType(request.Header.Get("Content-Type"))
 	if mediaType != "application/json" {
 		server.text(writer, request, http.StatusUnsupportedMediaType, "Content-Type must be application/json\n")
-		return
+		return nil, false
 	}
 	if request.ContentLength < 0 || request.Header.Get("Content-Length") == "" {
 		server.text(writer, request, http.StatusLengthRequired, "Content-Length is required\n")
-		return
+		return nil, false
 	}
 	if request.ContentLength > maxTurnBytes {
 		server.text(writer, request, http.StatusRequestEntityTooLarge, "request body is too large\n")
-		return
+		return nil, false
 	}
 	body, err := io.ReadAll(io.LimitReader(request.Body, maxTurnBytes+1))
 	if err != nil {
 		server.text(writer, request, http.StatusBadRequest, fmt.Sprintf("could not read the body: %v\n", err))
+		return nil, false
+	}
+	return body, true
+}
+
+// turn accepts the TurnDelivery in the body with 202, and plays and submits
+// it in the background.
+func (server *botServer) turn(writer http.ResponseWriter, request *http.Request) {
+	body, ok := server.readJSON(writer, request)
+	if !ok {
 		return
 	}
 	delivery, err := DecodeTurnDelivery(body)
@@ -370,6 +419,54 @@ func (server *botServer) turn(writer http.ResponseWriter, request *http.Request)
 		server.playingMutex.Lock()
 		delete(server.playing, key)
 		server.playingMutex.Unlock()
+	}()
+}
+
+// gameEnded accepts the GameEndedDelivery in the body with 202, and calls the
+// bot's game-end callback with it in the background, once per game and team.
+func (server *botServer) gameEnded(writer http.ResponseWriter, request *http.Request) {
+	body, ok := server.readJSON(writer, request)
+	if !ok {
+		return
+	}
+	ended, err := DecodeGameEndedDelivery(body)
+	if err != nil {
+		server.text(writer, request, http.StatusUnprocessableEntity, fmt.Sprintf("the body is not a GameEndedDelivery:\n%v\n", err))
+		return
+	}
+	// A page can't make the bot download from elsewhere.
+	if !server.gameURLAllowed(ended.Demo.URL) {
+		server.text(writer, request, http.StatusBadRequest, fmt.Sprintf("demo.url %s is not an allowed host, so the bot doesn't take this game's end: it takes only demo links of https://%s and of http://localhost or http://127.0.0.1 on any port. Start the server with --allow-submit-host <host> to add an https host.\n", ended.Demo.URL, OfficialSubmitHost))
+		return
+	}
+	server.send(writer, request, http.StatusAccepted, []byte(`{"accepted":true}`), "application/json")
+	key := endedGame{gameID: ended.GameID, teamColor: ended.TeamColor}
+	if link, err := url.Parse(ended.Demo.URL); err == nil {
+		key.host = strings.ToLower(link.Host)
+	}
+	server.endedMutex.Lock()
+	defer server.endedMutex.Unlock()
+	if server.ended[key] {
+		return
+	}
+	// Only the latest games are kept: a game's end arrives once, or again
+	// within moments.
+	if len(server.endedOrder) >= maxEndedGames {
+		delete(server.ended, server.endedOrder[0])
+		server.endedOrder = server.endedOrder[1:]
+	}
+	server.ended[key] = true
+	server.endedOrder = append(server.endedOrder, key)
+	server.logf("game %d ended at turn %d: %s", ended.GameID, ended.TurnNumber, ended.Outcome.Summary)
+	if server.gameEnd == nil {
+		return
+	}
+	server.endings.Add(1)
+	go func() {
+		defer server.endings.Done()
+		if err := runGameEnd(context.Background(), server.gameEnd, ended, server.botLog, server.gameEndTimeout); err != nil {
+			server.logf("game %d: the bot's game-end callback failed: %v", ended.GameID, err)
+		}
 	}()
 }
 

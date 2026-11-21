@@ -125,6 +125,64 @@ func TestWorkerReportsFailuresAsErrorLinesAndGoesOn(t *testing.T) {
 	}
 }
 
+// gameEndedLine is a request line with the end of game gameID.
+func gameEndedLine(t *testing.T, gameID int) string {
+	t.Helper()
+	var ended map[string]any
+	if err := json.Unmarshal(gameEndedJSON(t, "https://game.test/game/7/demo?token=ibdt1.x"), &ended); err != nil {
+		t.Fatal(err)
+	}
+	ended["game_id"] = gameID
+	line, err := json.Marshal(map[string]any{"game_ended": ended})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(line)
+}
+
+func TestWorkerReportsTheGameEndToTheBot(t *testing.T) {
+	var heard []uint
+	gameEnd := func(ctx context.Context, ended GameEndedDelivery) error {
+		Logger(ctx).Info("game over")
+		heard = append(heard, ended.GameID)
+		if ended.GameID == 8 {
+			return errors.New("could not save the demo")
+		}
+		return nil
+	}
+	input := strings.Join([]string{gameEndedLine(t, 7), gameEndedLine(t, 8), `{"game_ended": {"game_id": 9}}`, turnLine(t, 0)}, "\n") + "\n"
+	var stdout, stderr bytes.Buffer
+	status := runMain(context.Background(), invocation{name: "mybot", play: workerBot, gameEnd: gameEnd, stdin: strings.NewReader(input), stdout: &stdout, stderr: &stderr}, []string{"worker"})
+	if status != 0 {
+		t.Fatalf("got status %d, stderr %q", status, stderr.String())
+	}
+	got := answers(t, stdout.String())
+	if len(got) != 5 || string(got[1]["ended"]) != "true" || got[1]["error"] != nil || got[4]["result"] == nil {
+		t.Fatalf("got %q", stdout.String())
+	}
+	for index, wanted := range map[int]string{2: "the bot's game-end callback failed on game 8: could not save the demo", 3: "game_ended is not a GameEndedDelivery"} {
+		var message string
+		if err := json.Unmarshal(got[index]["error"], &message); err != nil || !strings.Contains(message, wanted) || got[index]["ended"] != nil {
+			t.Fatalf("line %d: got %v, want an error with %q", index, got[index], wanted)
+		}
+	}
+	if len(heard) != 2 || heard[0] != 7 || heard[1] != 8 || !strings.Contains(stderr.String(), "INFO island_battles.player: game over") {
+		t.Fatalf("the bot heard of %v; stderr %q", heard, stderr.String())
+	}
+}
+
+// A bot without a game-end callback answers the end at once, and a line
+// with both a turn and an end is refused.
+func TestWorkerAnswersTheGameEndWithoutACallback(t *testing.T) {
+	both := strings.TrimSuffix(turnLine(t, 0), "}") + "," + strings.TrimPrefix(gameEndedLine(t, 7), "{")
+	_, stdout, _ := runWorker(t, gameEndedLine(t, 7)+"\n"+both+"\n")
+	got := answers(t, stdout)
+	var message string
+	if len(got) != 3 || string(got[1]["ended"]) != "true" || json.Unmarshal(got[2]["error"], &message) != nil || !strings.Contains(message, `{"game_ended": ...}`) {
+		t.Fatalf("got %q", stdout)
+	}
+}
+
 func TestWorkerRefusesMemoryOverTheLimit(t *testing.T) {
 	_, stdout, _ := runWorker(t, turnLine(t, 101)+"\n")
 	var message string
@@ -139,25 +197,28 @@ func TestWorkerHelper(t *testing.T) {
 		t.Skip("only the helper process runs this")
 	}
 	os.Args = []string{"mybot", "worker"}
-	Main(workerBot)
+	Main(workerBot, OnGameEnd(func(context.Context, GameEndedDelivery) error {
+		fmt.Println("printing at the end must not reach the protocol")
+		return nil
+	}))
 }
 
-// A real process, so that the real stdout is the protocol's: the bot's print
-// goes to stderr.
+// A real process, so that the real stdout is the protocol's: the bot's
+// prints, in a turn and at the game's end, go to stderr.
 func TestWorkerKeepsTheProtocolClean(t *testing.T) {
 	command := exec.Command(os.Args[0], "-test.run=^TestWorkerHelper$")
 	command.Env = append(os.Environ(), "ISLAND_BATTLES_WORKER_HELPER=1")
-	command.Stdin = strings.NewReader(turnLine(t, 0) + "\n")
+	command.Stdin = strings.NewReader(turnLine(t, 0) + "\n" + gameEndedLine(t, 7) + "\n")
 	var stdout, stderr bytes.Buffer
 	command.Stdout, command.Stderr = &stdout, &stderr
 	if err := command.Run(); err != nil {
 		t.Fatalf("%v, stderr %q", err, stderr.String())
 	}
 	got := answers(t, stdout.String())
-	if len(got) != 2 || string(got[0]["ready"]) != "true" || got[1]["result"] == nil {
+	if len(got) != 3 || string(got[0]["ready"]) != "true" || got[1]["result"] == nil || string(got[2]["ended"]) != "true" {
 		t.Fatalf("stdout is not clean: %q", stdout.String())
 	}
-	if !strings.Contains(stderr.String(), "printing to stdout") {
+	if !strings.Contains(stderr.String(), "printing to stdout") || !strings.Contains(stderr.String(), "printing at the end") {
 		t.Fatalf("the print goes to stderr: got %q", stderr.String())
 	}
 }

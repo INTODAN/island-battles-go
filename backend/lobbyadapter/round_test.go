@@ -150,7 +150,7 @@ func TestEndAbandonedRound(t *testing.T) {
 		}
 	}
 	for round, want := range map[int64]bool{1: true, 2: false, 3: true} {
-		if ended, err := services.EndAbandonedRound(context.Background(), stack.database, nil, lobbyID, round, time.Now()); err != nil || ended != want {
+		if ended, err := services.EndAbandonedRound(context.Background(), stack.database, nil, nil, lobbyID, round, time.Now()); err != nil || ended != want {
 			t.Fatalf("round %d ended = %v, %v; want %v", round, ended, err, want)
 		}
 	}

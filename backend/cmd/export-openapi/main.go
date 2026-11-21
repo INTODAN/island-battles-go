@@ -43,6 +43,7 @@ const (
 		"`BotTurn` and `BotTurnResult` are the stateless bot contract: a bot gets a `BotTurn` each turn and answers with a " +
 		"`BotTurnResult`, which is sent as one completing batch. A localhost bot gets its turns as a `TurnDelivery` from " +
 		"`GET /game/from-lobby/{lobby_id}/turn-delivery`, which its player's client posts to it, and submits its answer itself with the delivery's one-turn submit token. " +
+		"When the game ends, every bot that runs outside the backend gets a `GameEndedDelivery`, with the outcome and a self-contained link to the game's demo, `GET /game/{id}/demo?token=ibdt1.…`: the server sends it to hosted and uploaded bots, and a localhost bot's client relays it from `GET /game/from-lobby/{lobby_id}/game-ended-delivery`. " +
 		"Any member of a lobby can upload a bot package, the zip that the SDKs' `package` command builds, to the lobby: `POST /game/lobbies/{lobby_id}/bot-packages` presigns the upload, the zip goes straight to storage, " +
 		"and `POST /game/lobbies/{lobby_id}/bot-packages/{package_id}/complete` checks it. The command line uploads with an upload token from `POST /game/lobbies/{lobby_id}/bot-packages/upload-token` instead of a session."
 )
@@ -52,7 +53,7 @@ const (
 // download, the default map list for choosing a lobby's map, whether uploaded bots may start this month, the lobby's bot packages, which the
 // bot pickers and the SDKs' upload commands use, a signed-in player's account with their bot names, and the public leaderboard. Lobby setup, including each member's
 // bot in their member settings, has its own generated SDK from api/lobby/openapi.json.
-var PlayerOperations = []string{"createLobbyConnectionToken", "getIslandLobbyGeneration", "getIslandLobbyTurnDelivery", "applyIslandLobbyTurnDeadline", "resignIslandLobbyGame", "registerGenerationCommand", "getIslandLobbyGenerationLogs", "getIslandLobbyDemo", "watchIslandLobbyGeneration", "watchIslandLobbyDemo", "watchIslandLobbyGenerationLogs", "listUpgrades", "listMapTemplates", "listDefaultBots", "getBotCompute",
+var PlayerOperations = []string{"createLobbyConnectionToken", "getIslandLobbyGeneration", "getIslandLobbyTurnDelivery", "getIslandLobbyGameEndedDelivery", "getIslandGameDemo", "applyIslandLobbyTurnDeadline", "resignIslandLobbyGame", "registerGenerationCommand", "getIslandLobbyGenerationLogs", "getIslandLobbyDemo", "watchIslandLobbyGeneration", "watchIslandLobbyDemo", "watchIslandLobbyGenerationLogs", "listUpgrades", "listMapTemplates", "listDefaultBots", "getBotCompute",
 	"startIslandBotPackageUpload", "completeIslandBotPackageUpload", "listIslandBotPackages", "deleteIslandBotPackage", "createIslandBotUploadToken",
 	"getIslandAccount", "registerIslandBotName", "setIslandBotNameURL", "resumeIslandBotNameAway", "deleteIslandBotName", "deleteIslandAccount",
 	"listIslandLeaderboard", "getIslandCompetitor"}

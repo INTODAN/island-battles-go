@@ -169,6 +169,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/game/from-lobby/{lobby_id}/game-ended-delivery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the end of your game, or a localhost bot seat's that you relay, as a delivery for the bot, with a demo link
+         * @description Requires a place on the game's frozen roster; the lobby is not consulted. Once the game has an outcome, returns it as a GameEndedDelivery for the caller's bot: the outcome, the final generation as the bot's team sees it, the memory the bot sent last, and demo.url, a self-contained link to GET /game/{id}/demo with a read-only demo token. The server sends the same delivery to every hosted and uploaded bot on the roster when the game ends; a game client reads this to relay it to a localhost bot, island-battles-bot serve, at POST /game-ended, which answers 2xx. With player_id, the player who added a localhost bot seat reads the seat's, as for GET /game/from-lobby/{lobby_id}/turn-delivery; any other player_id is 403. Like every game request, it first ends the turn once its deadline has passed. While the game runs it returns 409 with problem type urn:island-battles:problem:game-not-ended. Each call issues a new link that expires at the same time. A lobby can play several games, one per round (lobby.round, raised by POST /lobby/v1/games/island-battles/lobbies/{lobby_id}/reopen once a game has ended); this route serves the lobby's newest game and its frozen roster, and an older game can't be reached once the next one starts.
+         */
+        get: operations["getIslandLobbyGameEndedDelivery"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/game/from-lobby/{lobby_id}/generation": {
         parameters: {
             query?: never;
@@ -405,6 +425,26 @@ export interface paths {
          * @description Lists every upgrade type, sorted by type, with what its levels measure and, for each level from 1 to max_level, its effect and the soldiers a castle pays to reach it from the level below. Every castle starts at level 1. The table is static and needs no authentication. Castles and soldier groups carry their current levels, and upgrade_castle in POST /generation/commands buys the next one. generation_amount is what a castle produces each generation, and burst_potential the most a burst_castle command may order.
          */
         get: operations["listUpgrades"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/game/{id}/demo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Save a game, by its ID, as a demo file, with a demo link or for a roster player
+         * @description The demo of GET /game/from-lobby/{lobby_id}/demo, the same file, for a game named by its ID. A bot that runs outside the backend has no player token and doesn't know the lobby, so the end of its game, GameEndedDelivery, carries demo.url: this path with a read-only demo token in its token query parameter, which downloads the game's demo as the bot's player sees it, once the game has ended with every team's game log lines and the outcome, and nothing else. The demo token can also go in Authorization: Bearer ibdt1.…, and a roster player's player token works too. A demo token of another game, an expired or altered one, or one of a player no longer on the roster is 401. Packed with gzip when Accept-Encoding allows it. The game is deleted 7 days after its last generation by default, when the link expires; then this returns 404.
+         */
+        get: operations["getIslandGameDemo"];
         put?: never;
         post?: never;
         delete?: never;
@@ -958,6 +998,18 @@ export interface components {
             /** @description The teams that played, with their lobby names and the display names their players had at the start. */
             teams: components["schemas"]["GameTeam"][];
         };
+        DemoLink: {
+            /**
+             * Format: date-time
+             * @description When the link stops working: when game retention deletes the game, 7 days after its final generation by default. Download the demo before then.
+             */
+            expires_at: string;
+            /**
+             * Format: uri
+             * @description GET /game/{id}/demo on the game's public URL, with a read-only demo token in its token query parameter, so a plain GET downloads the Demo file. The token lets its bearer download this game's demo as this player sees it, and nothing else; keep the link private.
+             */
+            url: string;
+        };
         Departure: {
             /**
              * @description resigned: its player resigned. left: the server didn't hear from its player for the game's turn limit (or one turn plus 5 seconds, when that is longer) by the time a turn ended.
@@ -1020,6 +1072,37 @@ export interface components {
              * @example https://example.com/errors/example
              */
             type: string;
+        };
+        /** @description The end of a game, delivered to a bot that runs outside the backend, once the game has an outcome, however it ended and whatever became of the bot's team: the outcome, the final generation as the bot's team sees it, its last memory, and demo.url, a self-contained link that downloads the game's demo. It carries no submit token. The server POSTs it to a hosted bot's URL with the last path segment replaced by game-ended (https://bot.example.com/turn gives https://bot.example.com/game-ended), and offers it to an uploaded bot's worker; a game client relays it to its localhost bot at POST /game-ended, from GET /game/from-lobby/{lobby_id}/game-ended-delivery. The server doesn't wait for the answer or retry it: a 2xx is expected, and anything else changes nothing. */
+        GameEndedDelivery: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/GameEndedDelivery.json
+             */
+            readonly $schema?: string;
+            /** @description Where to download the game's demo. */
+            demo: components["schemas"]["DemoLink"];
+            /** Format: int64 */
+            game_id: number;
+            /** @description The final generation, the board the outcome was decided on, as a BotTurn's generation shows it to the bot's team. */
+            generation: components["schemas"]["Generation"];
+            /** @description The memory the bot sent with its latest completed turn, as the next BotTurn.memory would have been, or null. */
+            memory: {
+                [key: string]: unknown;
+            } | null;
+            /** @description How the game ended, as GenerationState.outcome says it. */
+            outcome: components["schemas"]["GameOutcome"];
+            /**
+             * Format: int64
+             * @description The bot's team, also when it was eliminated or left before the end.
+             */
+            team_color: number;
+            /**
+             * Format: int64
+             * @description The final generation's turn number, as BotTurn.turn_number counts it.
+             */
+            turn_number: number;
         };
         GameEndedEvent: {
             /**
@@ -2078,6 +2161,42 @@ export interface operations {
             };
         };
     };
+    getIslandLobbyGameEndedDelivery: {
+        parameters: {
+            query?: {
+                /** @description A localhost bot seat that you relay, one of GenerationState.relayed_bots, to read its delivery instead of yours. Absent for your own. */
+                player_id?: string;
+            };
+            header?: {
+                Authorization?: string;
+            };
+            path: {
+                lobby_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GameEndedDelivery"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     getIslandLobbyGeneration: {
         parameters: {
             query?: never;
@@ -2507,6 +2626,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ListUpgradesResponseBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    getIslandGameDemo: {
+        parameters: {
+            query?: {
+                /** @description A demo token, ibdt1.…, as GameEndedDelivery.demo.url carries it. Absent when the Authorization header carries the demo token or a player token instead. */
+                token?: string;
+            };
+            header?: {
+                Authorization?: string;
+            };
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The demo file. */
+            200: {
+                headers: {
+                    /** @description attachment, with the demo's file name. */
+                    "Content-Disposition"?: string;
+                    /** @description gzip when the request's Accept-Encoding allows it; absent otherwise. */
+                    "Content-Encoding"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Demo"];
                 };
             };
             /** @description Error */

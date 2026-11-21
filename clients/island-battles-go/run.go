@@ -75,6 +75,9 @@ func runSeat(ctx context.Context, program invocation, arguments []string) int {
 	if *logFile != "" {
 		options = append(options, WithLogFile(*logFile))
 	}
+	if program.gameEnd != nil {
+		options = append(options, WithGameEndedDelivery(program.gameEnd))
+	}
 	options = append(options, program.clientOptions...)
 	client, err := NewClient(urls, *token, *lobbyID, program.play, options...)
 	if err != nil {

@@ -29,6 +29,9 @@ func TestBotRunnerEventExampleDecodesExactly(t *testing.T) {
 	if event.Limits == nil || *event.Limits != DefaultBotRunnerLimits {
 		t.Fatalf("the example's limits = %+v, want the defaults %+v", event.Limits, DefaultBotRunnerLimits)
 	}
+	if event.Delivery == nil || event.GameEnded != nil {
+		t.Fatal("the example is a turn's event, with a delivery and without game_ended")
+	}
 	if event.Delivery.Turn.GameID == 0 || event.Delivery.Turn.Generation.ID == 0 || len(event.Delivery.Turn.Generation.Castles) == 0 {
 		t.Fatalf("the example's turn = %+v", event.Delivery.Turn)
 	}
@@ -57,5 +60,29 @@ func TestBotRunnerEventOfAHostedBot(t *testing.T) {
 	}
 	if string(fields["hosted"]) != `{"url":"https://bot.example.org/turn"}` {
 		t.Errorf("hosted = %s", fields["hosted"])
+	}
+}
+
+// The runners' tests share this example of the end of a game too (#413).
+func TestGameEndedEventExampleDecodesExactly(t *testing.T) {
+	data, err := os.ReadFile("../botrunner/testdata/game_ended_event.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	var event BotRunnerEvent
+	if err := decoder.Decode(&event); err != nil {
+		t.Fatalf("the example isn't a BotRunnerEvent: %v", err)
+	}
+	if event.Package == nil || event.Hosted != nil || event.Delivery != nil {
+		t.Fatalf("the example is a package's end of a game, without hosted or delivery: %+v", event)
+	}
+	if event.Limits == nil || *event.Limits != GameEndedBotRunnerLimits {
+		t.Fatalf("the example's limits = %+v, want %+v", event.Limits, GameEndedBotRunnerLimits)
+	}
+	ended := event.GameEnded
+	if ended == nil || ended.GameID == 0 || ended.TurnNumber == 0 || len(ended.Generation.Castles) == 0 || ended.Outcome.Reason == "" || ended.Demo.URL == "" || ended.Demo.ExpiresAt.IsZero() {
+		t.Fatalf("the example's game_ended = %+v", ended)
 	}
 }

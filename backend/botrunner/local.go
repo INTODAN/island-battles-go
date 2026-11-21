@@ -95,7 +95,16 @@ func (local *Local) Invoke(_ context.Context, runner models.BotRunnerName, event
 func (local *Local) play(runner models.BotRunnerName, event models.BotRunnerEvent, payload []byte) {
 	ctx, cancel := context.WithTimeout(context.Background(), localTurnTimeout)
 	defer cancel()
-	attributes := []any{"runner", runner, "game_id", event.Delivery.Turn.GameID, "generation_id", event.Delivery.Turn.Generation.ID}
+	var attributes []any
+	switch {
+	case event.Delivery != nil:
+		attributes = []any{"runner", runner, "game_id", event.Delivery.Turn.GameID, "generation_id", event.Delivery.Turn.Generation.ID}
+	case event.GameEnded != nil:
+		// The end of a game (#413) has no turn.
+		attributes = []any{"runner", runner, "game_id", event.GameEnded.GameID, "game_ended", true}
+	default:
+		attributes = []any{"runner", runner}
+	}
 	var outcome any
 	var err error
 	if event.Hosted != nil {

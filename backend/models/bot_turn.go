@@ -95,6 +95,30 @@ type TurnSubmit struct {
 	DeadlineAt *time.Time `json:"deadline_at" nullable:"true" doc:"When the turn ends, the BotTurn's turn_deadline_at, or null when turns have no time limit. An answer must be submitted before it: in a real-time game a later one is refused as a stale generation, and the bot passes the turn."`
 }
 
+// GameEndedDelivery tells a bot that runs outside the backend that its game
+// has ended: how it ended, the final generation as its team sees it, and a
+// link that downloads the game's demo (#413). The server sends one to each
+// hosted and uploaded bot on the roster once the outcome is stored, however
+// the game ended, and a localhost bot's client reads it from
+// GET /game/from-lobby/{lobby_id}/game-ended-delivery. It carries no submit
+// token: a finished game takes no commands.
+type GameEndedDelivery struct {
+	GameID     uint            `json:"game_id" minimum:"1"`
+	TeamColor  uint            `json:"team_color" minimum:"1" doc:"The bot's team, also when it was eliminated or left before the end."`
+	TurnNumber int             `json:"turn_number" minimum:"1" doc:"The final generation's turn number, as BotTurn.turn_number counts it."`
+	Outcome    GameOutcomeView `json:"outcome" doc:"How the game ended, as GenerationState.outcome says it."`
+	Generation GenerationView  `json:"generation" doc:"The final generation, the board the outcome was decided on, as a BotTurn's generation shows it to the bot's team."`
+	Memory     BotMemory       `json:"memory" doc:"The memory the bot sent with its latest completed turn, as the next BotTurn.memory would have been, or null."`
+	Demo       DemoLink        `json:"demo" doc:"Where to download the game's demo."`
+}
+
+// DemoLink is a self-contained link to one game's demo, as one roster player
+// sees it: once the game has ended, every team's game logs and the outcome.
+type DemoLink struct {
+	URL       string    `json:"url" format:"uri" doc:"GET /game/{id}/demo on the game's public URL, with a read-only demo token in its token query parameter, so a plain GET downloads the Demo file. The token lets its bearer download this game's demo as this player sees it, and nothing else; keep the link private."`
+	ExpiresAt time.Time `json:"expires_at" doc:"When the link stops working: when game retention deletes the game, 7 days after its final generation by default. Download the demo before then."`
+}
+
 // GamePlayerBotMemory is the memory a player sent with their latest completed
 // turn of a game. It is game data, and is deleted with the game.
 type GamePlayerBotMemory struct {

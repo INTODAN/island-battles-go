@@ -30,6 +30,7 @@ from unittest import mock
 import runner
 
 EXAMPLE_EVENT = Path(__file__).resolve().parent.parent / "testdata" / "event.json"
+GAME_ENDED_EVENT = EXAMPLE_EVENT.with_name("game_ended_event.json")
 
 FAKE_WORKER = r"""
 import json, os, sys, time
@@ -42,6 +43,7 @@ if mode == "noimport":
     print(json.dumps({"error": "could not load noimport:play:\nModuleNotFoundError: No module named 'noimport'"}), flush=True)
     sys.exit(1)
 print('{"ready": true}', flush=True)
+ended = []
 for line in sys.stdin:
     request = json.loads(line)
     if mode == "slowplay":
@@ -56,7 +58,12 @@ for line in sys.stdin:
     if mode == "failing":
         print(json.dumps({"error": "ValueError: no castles"}), flush=True)
         continue
+    if "game_ended" in request:
+        ended.append(request["game_ended"]["game_id"])
+        print(json.dumps({"ended": mode != "notended"}), flush=True)
+        continue
     memory = {
+        "ended": ended,
         "pid": os.getpid(),
         "pythonpath": os.environ.get("PYTHONPATH"),
         "secret": os.environ.get("AWS_SECRET_ACCESS_KEY"),
@@ -188,6 +195,19 @@ def example_event(
     event = json.loads(EXAMPLE_EVENT.read_text())
     event["package"] = package
     event["delivery"]["submit"]["url"] = submit_url
+    event["limits"] = {"load_seconds": load_seconds, "play_seconds": play_seconds}
+    return event
+
+
+def game_ended_event(
+    package: dict[str, Any], game_host: str, load_seconds: float = 5, play_seconds: float = 5
+) -> dict[str, Any]:
+    """backend/botrunner/testdata/game_ended_event.json, which the Go runner's
+    tests use too, with its demo link on game_host."""
+    event = json.loads(GAME_ENDED_EVENT.read_text())
+    event["package"] = package
+    demo = event["game_ended"]["demo"]
+    demo["url"] = demo["url"].replace("https://island-battles.example.org", f"http://{game_host}", 1)
     event["limits"] = {"load_seconds": load_seconds, "play_seconds": play_seconds}
     return event
 
@@ -513,6 +533,88 @@ class RunnerTest(unittest.TestCase):
                 self.handle(event)
         self.assertEqual(self.game.submissions, [])
 
+    def test_offers_the_end_of_the_game_and_submits_nothing(self) -> None:
+        package = self.packages.add("one", fake_package("answering"))
+
+        outcome = self.handle(game_ended_event(package, self.game.server.host))
+
+        self.assertEqual(outcome, {"outcome": "ended"})
+        self.assertEqual(self.game.submissions, [])
+        self.handle(example_event(package, self.game.submit_url))
+        self.assertEqual(self.game.submissions[0]["batch"]["memory"]["ended"], [1], "the worker got the game's end")
+        self.assertEqual(self.packages.downloads_of("one"), 1, "the loaded package plays on")
+
+    def test_a_bot_that_fails_at_the_end_is_unended_and_keeps_its_worker(self) -> None:
+        # Also what a worker of an older SDK, which doesn't know the line, answers.
+        package = self.packages.add("failing", fake_package("failing"))
+
+        outcome = self.handle(game_ended_event(package, self.game.server.host))
+
+        self.assertEqual(
+            outcome,
+            {"outcome": "unended", "reason": "The uploaded bot failed at the end of its game: ValueError: no castles"},
+        )
+        self.assertIsNotNone(self.runner.loaded)
+        self.assertEqual(self.game.submissions, [])
+
+    def test_a_bot_slow_at_the_end_is_unended_and_killed(self) -> None:
+        package = self.packages.add("slow", fake_package("slowplay"))
+
+        outcome = self.handle(game_ended_event(package, self.game.server.host, play_seconds=0.3))
+
+        self.assertEqual(outcome["outcome"], "unended")
+        self.assertIn("did not answer within 0.3 seconds at the end of its game", outcome["reason"])
+        self.assertIsNone(self.runner.loaded)
+        self.assertEqual(self.game.submissions, [])
+
+    def test_a_worker_that_breaks_the_protocol_at_the_end_is_unended(self) -> None:
+        package = self.packages.add("notended", fake_package("notended"))
+
+        outcome = self.handle(game_ended_event(package, self.game.server.host))
+
+        self.assertEqual(outcome["outcome"], "unended")
+        self.assertIn("broke the worker protocol", outcome["reason"])
+        self.assertIsNone(self.runner.loaded)
+
+    def test_a_package_that_does_not_load_at_the_end_is_unended(self) -> None:
+        package = self.packages.add("broken", fake_package("noimport"))
+
+        outcome = self.handle(game_ended_event(package, self.game.server.host))
+
+        self.assertEqual(outcome["outcome"], "unended")
+        self.assertIn("could not be loaded", outcome["reason"])
+        self.assertIn("ModuleNotFoundError: No module named 'noimport'", outcome["reason"])
+        self.assertEqual(self.game.submissions, [])
+
+    def test_refuses_malformed_game_ends(self) -> None:
+        package = self.packages.add("one", fake_package("answering"))
+        host = self.game.server.host
+        elsewhere = game_ended_event(package, host)
+        elsewhere["game_ended"]["demo"]["url"] = "https://elsewhere.example/game/1/demo?token=x"
+        no_demo = game_ended_event(package, host)
+        del no_demo["game_ended"]["demo"]
+        no_game = game_ended_event(package, host)
+        del no_game["game_ended"]["game_id"]
+        both = game_ended_event(package, host)
+        both["delivery"] = example_event(package, self.game.submit_url)["delivery"]
+        hosted = game_ended_event(package, host)
+        del hosted["package"]
+        hosted["hosted"] = {"url": "https://bot.example.org/turn"}
+        no_limits = game_ended_event(package, host)
+        del no_limits["limits"]
+        for name, (event, message) in {
+            "demo elsewhere": (elsewhere, "the demo link: .* not on the game's host"),
+            "no demo": (no_demo, "the demo link"),
+            "no game": (no_game, "no game"),
+            "both": (both, "both a turn and the end of a game"),
+            "hosted": (hosted, "native runner"),
+            "no limits": (no_limits, "limits"),
+            "not an object": ({"game_ended": []}, "not an object"),
+        }.items():
+            with self.subTest(name), self.assertRaisesRegex(runner.EventError, message):
+                self.handle(event)
+        self.assertEqual(self.packages.downloads_of("one"), 0)
+
     def test_the_lambda_handler_keeps_one_runner(self) -> None:
         class Context:
             def get_remaining_time_in_millis(self) -> int:
@@ -544,7 +646,15 @@ class EventsTest(unittest.TestCase):
         self.addCleanup(packages.server.close)
         self.addCleanup(game.server.close)
         event = example_event(packages.add("one", fake_package("answering")), game.submit_url)
-        lines = [json.dumps(event), "", json.dumps(event), "not json", json.dumps(example_event({}, "https://x/y"))]
+        ended = game_ended_event(event["package"], game.server.host)
+        lines = [
+            json.dumps(event),
+            "",
+            json.dumps(event),
+            "not json",
+            json.dumps(example_event({}, "https://x/y")),
+            json.dumps(ended),
+        ]
         output = io.StringIO()
 
         with mock.patch.object(runner.log, "disabled", True):
@@ -554,7 +664,8 @@ class EventsTest(unittest.TestCase):
         self.assertEqual(answers[:2], [{"outcome": "submitted", "status": 200}] * 2)
         self.assertIn("error", answers[2])
         self.assertIn("not on the game's host", answers[3]["error"])
-        self.assertEqual(len(answers), 4)
+        self.assertEqual(answers[4], {"outcome": "ended"})
+        self.assertEqual(len(answers), 5)
         first, second = (submission["batch"]["memory"]["pid"] for submission in game.submissions)
         self.assertEqual(first, second, "the same worker plays both turns")
 

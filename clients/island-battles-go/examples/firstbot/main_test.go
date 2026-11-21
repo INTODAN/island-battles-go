@@ -25,3 +25,11 @@ func TestFirstBotPlaysTheFixtureTurn(t *testing.T) {
 		t.Fatalf("got memory %s and error %v", result.Memory, err)
 	}
 }
+
+// The game-end callback reads the last turn's memory.
+func TestFirstBotHearsTheEnd(t *testing.T) {
+	ended := islandbattles.GameEndedDelivery{Memory: islandbattles.Memory(`{"turns":90}`), Outcome: islandbattles.GameOutcome{Summary: "Team 1 won"}}
+	if err := gameEnded(context.Background(), ended); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -29,20 +29,45 @@ import (
 //
 // Run the program with -h, or a subcommand with -h, for their flags. Go
 // doesn't reload code: after changing the bot, stop serve and start it again.
-func Main(play Play) {
+//
+// Options add to the bot, such as OnGameEnd, its game-end callback, which
+// serve, worker and run call when a game ends:
+//
+//	islandbattles.Main(play, islandbattles.OnGameEnd(gameEnded))
+func Main(play Play, options ...MainOption) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	status := runMain(ctx, invocation{name: filepath.Base(os.Args[0]), play: play, stdout: os.Stdout, stderr: os.Stderr, stdin: os.Stdin}, os.Args[1:])
+	program := invocation{name: filepath.Base(os.Args[0]), play: play, stdout: os.Stdout, stderr: os.Stderr, stdin: os.Stdin}
+	for _, option := range options {
+		option.apply(&program)
+	}
+	status := runMain(ctx, program, os.Args[1:])
 	stop()
 	os.Exit(status)
+}
+
+// MainOption configures the bot program that Main runs. OnGameEnd makes one.
+type MainOption struct {
+	apply func(program *invocation)
+}
+
+// OnGameEnd gives the bot a game-end callback, which gets the end of each
+// game the bot played, a GameEndedDelivery, however the game ended: serve
+// takes it at POST /game-ended and calls gameEnd in the background, worker
+// calls it for a {"game_ended": ...} line, and run calls it once the game
+// has ended. A bot without one ignores the end.
+func OnGameEnd(gameEnd GameEnd) MainOption {
+	return MainOption{apply: func(program *invocation) { program.gameEnd = gameEnd }}
 }
 
 // invocation is one run of a bot program's command line.
 type invocation struct {
 	// name is the program's name, which serve reports on /health.
-	name   string
-	play   Play
-	stdout io.Writer
-	stderr io.Writer
+	name string
+	play Play
+	// gameEnd is the bot's game-end callback, or nil.
+	gameEnd GameEnd
+	stdout  io.Writer
+	stderr  io.Writer
 	// stdin is what worker reads its requests from; nil means os.Stdin.
 	stdin io.Reader
 	// clientOptions are added to run's Client options; tests set them.

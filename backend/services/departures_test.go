@@ -187,7 +187,7 @@ func TestAResignationAgainstBotsPlaysTheTurnAtOnce(t *testing.T) {
 		t.Fatalf("the resignation's answer = %+v, outcome %+v", state, state.Outcome)
 	}
 	// The lobby can be reopened at once.
-	ended, err := services.EndAbandonedRound(context.Background(), game.database, nil, game.lobbyID, 1, *game.clock)
+	ended, err := services.EndAbandonedRound(context.Background(), game.database, nil, nil, game.lobbyID, 1, *game.clock)
 	if err != nil || !ended {
 		t.Fatalf("round ended = %v, %v", ended, err)
 	}
@@ -349,7 +349,7 @@ func TestASilentPlayerLeavesAndADeadlineCallerStays(t *testing.T) {
 		t.Fatalf("departures = %+v", departures)
 	}
 	// The lobby's round-ended hook answers that the round is over.
-	if ended, err := services.EndAbandonedRound(context.Background(), game.database, nil, game.lobbyID, 1, *game.clock); err != nil || !ended {
+	if ended, err := services.EndAbandonedRound(context.Background(), game.database, nil, nil, game.lobbyID, 1, *game.clock); err != nil || !ended {
 		t.Fatalf("round ended = %v, %v", ended, err)
 	}
 }
@@ -482,10 +482,10 @@ func TestEveryoneSilentIsAbandonedAndAPendingResignationIsNamed(t *testing.T) {
 	game := startClockGame(t, withMoreCastles(`{"turn_timeout_seconds":5}`), services.ServerBot{Manual: true}, services.ServerBot{Manual: true})
 	game.resign(t, game.players[0])
 	// The hook answers that the round is running until the game is abandoned.
-	if ended, err := services.EndAbandonedRound(context.Background(), game.database, game.publisher, game.lobbyID, 1, game.turnEnd(t).Add(5*time.Second)); err != nil || ended {
+	if ended, err := services.EndAbandonedRound(context.Background(), game.database, game.publisher, nil, game.lobbyID, 1, game.turnEnd(t).Add(5*time.Second)); err != nil || ended {
 		t.Fatalf("round ended = %v, %v", ended, err)
 	}
-	ended, err := services.EndAbandonedRound(context.Background(), game.database, game.publisher, game.lobbyID, 1, game.turnEnd(t).Add(5*time.Second+time.Millisecond))
+	ended, err := services.EndAbandonedRound(context.Background(), game.database, game.publisher, nil, game.lobbyID, 1, game.turnEnd(t).Add(5*time.Second+time.Millisecond))
 	if err != nil || !ended {
 		t.Fatalf("round ended = %v, %v", ended, err)
 	}
@@ -530,18 +530,18 @@ func TestTheRoundEndedHookEndsOnlyAnAbandonedGame(t *testing.T) {
 	ctx := context.Background()
 	generations := game.generationCount(t)
 	end := game.turnEnd(t)
-	if ended, err := services.EndAbandonedRound(ctx, game.database, game.publisher, game.lobbyID, 1, end.Add(time.Hour)); err != nil || !ended {
+	if ended, err := services.EndAbandonedRound(ctx, game.database, game.publisher, nil, game.lobbyID, 1, end.Add(time.Hour)); err != nil || !ended {
 		t.Fatalf("round ended = %v, %v", ended, err)
 	}
 	if game.generationCount(t) != generations || game.stored(t).Outcome.Reason != models.GameOutcomeAbandoned {
 		t.Fatal("the hook played a turn or didn't end the game")
 	}
-	if ended, err := services.EndAbandonedRound(ctx, game.database, game.publisher, game.lobbyID, 1, end.Add(2*time.Hour)); err != nil || !ended || len(game.publisher.GameEndedEvents(t)) != 2 {
+	if ended, err := services.EndAbandonedRound(ctx, game.database, game.publisher, nil, game.lobbyID, 1, end.Add(2*time.Hour)); err != nil || !ended || len(game.publisher.GameEndedEvents(t)) != 2 {
 		t.Fatalf("again: %v, %v, %d pushes", ended, err, len(game.publisher.GameEndedEvents(t)))
 	}
 	// A game of bots isn't ended by the hook.
 	bots := startClockGame(t, `{"turn_timeout_seconds":5}`, services.ServerBot{}, services.ServerBot{Level: 1})
-	if ended, err := services.EndAbandonedRound(ctx, bots.database, bots.publisher, bots.lobbyID, 1, time.Now().Add(time.Hour)); err != nil || ended {
+	if ended, err := services.EndAbandonedRound(ctx, bots.database, bots.publisher, nil, bots.lobbyID, 1, time.Now().Add(time.Hour)); err != nil || ended {
 		t.Fatalf("a game of bots: %v, %v", ended, err)
 	}
 }
@@ -562,7 +562,7 @@ func TestNoLimitNeverLeavesOrAbandons(t *testing.T) {
 			t.Fatalf("after %d minutes: outcome %+v, %d turns played", minute, state.Outcome, game.generationCount(t)-before)
 		}
 	}
-	if ended, err := services.EndAbandonedRound(context.Background(), game.database, nil, game.lobbyID, 1, game.clock.Add(time.Hour)); err != nil || ended {
+	if ended, err := services.EndAbandonedRound(context.Background(), game.database, nil, nil, game.lobbyID, 1, game.clock.Add(time.Hour)); err != nil || ended {
 		t.Fatalf("round ended = %v, %v", ended, err)
 	}
 	if writes.Load() != 0 {

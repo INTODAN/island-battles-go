@@ -4,12 +4,15 @@ Try it from ``clients/island-battles-python``:
 
     uv run island-battles-bot check examples.bot:play
     uv run island-battles-bot serve examples.bot:play
+
+When a game ends, ``game_ended`` says how and where to download its demo.
 """
 
 from island_battles_client import (
     NEUTRAL_TEAM_COLOR,
     BotTurn,
     BotTurnResult,
+    GameEndedDelivery,
     UpgradeType,
     log_line,
     logger,
@@ -70,4 +73,20 @@ def play(turn: BotTurn) -> BotTurnResult:
             )
         ],
         memory={"sent": sent},
+    )
+
+
+def game_ended(delivery: GameEndedDelivery) -> None:
+    """Say how the game ended; optional, called once when it has its outcome.
+
+    ``download_demo(delivery, "demo.json")`` would save the game's demo, which
+    the link in ``delivery.demo`` serves until ``delivery.demo.expires_at``.
+    """
+    won = delivery.outcome.winner_team_color == delivery.team_color
+    logger.info(
+        "game %d %s at turn %d: %s",
+        delivery.game_id,
+        "won" if won else "over",
+        delivery.turn_number,
+        delivery.outcome.summary,
     )

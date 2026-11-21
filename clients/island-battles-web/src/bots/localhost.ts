@@ -2,6 +2,7 @@ import type { components } from "../api/generated/game";
 import { platformFetch } from "../platform";
 
 export type TurnDelivery = components["schemas"]["TurnDelivery"];
+export type GameEndedDelivery = components["schemas"]["GameEndedDelivery"];
 export type GenerationState = components["schemas"]["GenerationState"];
 export type RelayedBot = components["schemas"]["RelayedBot"];
 
@@ -87,7 +88,7 @@ export interface BotCallOptions {
   fetch?: typeof fetch;
   /** The bot's port on 127.0.0.1. Default 41414. */
   port?: number;
-  /** Gives up on the bot after this long. Default 2 s for health, 5 s for a delivery. */
+  /** Gives up on the bot after this long. Default 2 s for health, 5 s for a delivery or the game's end. */
   timeoutMs?: number;
 }
 
@@ -161,5 +162,45 @@ export async function deliverTurn(
   throw new BotError(
     "refused",
     `Your bot refused the turn (HTTP ${response.status}).${said}`,
+  );
+}
+
+/**
+ * Posts a `GameEndedDelivery`, as `GET /game/from-lobby/{lobby_id}/game-ended-delivery` returned
+ * it, to the localhost bot on the port, at `POST /game-ended`, and resolves once the bot has
+ * answered with a `2xx` (`island-battles-bot serve` answers `202` and runs the bot's game-end
+ * callback by itself). The bot answers nothing that the game needs: a caller ignores a failure.
+ * An SDK older than the game-ended delivery answers `404`. Rejects with `BotError`.
+ */
+export async function deliverGameEnded(
+  delivery: GameEndedDelivery,
+  options: BotCallOptions = {},
+): Promise<void> {
+  const doFetch = options.fetch ?? defaultFetch;
+  const port = options.port ?? defaultBotPort;
+  let response: Response;
+  try {
+    response = await doFetch(`${localhostBotOrigin(port)}/game-ended`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(delivery),
+      signal: AbortSignal.timeout(options.timeoutMs ?? 5000),
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      throw new BotError(
+        "too-slow",
+        `The bot on port ${port} did not accept the end of the game in time.`,
+      );
+    }
+    throw new BotError(
+      "unreachable",
+      `Your bot is not reachable on 127.0.0.1:${port}.`,
+    );
+  }
+  if (response.ok) return;
+  throw new BotError(
+    "refused",
+    `Your bot refused the end of the game (HTTP ${response.status}).`,
   );
 }

@@ -290,3 +290,50 @@ func (result Result) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(plain(result))
 }
+
+// GameEndedDelivery is the end of a game, as it is delivered to a bot that
+// runs outside the backend once the game has an outcome, however it ended
+// and also when the bot's own team was out before the end: how it ended,
+// the final generation as the bot's team sees it, the bot's last memory and
+// a link that downloads the game's demo. It takes no answer and carries no
+// submit token. It is the contract's GameEndedDelivery.
+//
+// The bot's game-end callback, OnGameEnd for Main and
+// WithGameEndedDelivery for a Client, gets it: serve takes it at
+// POST /game-ended, worker as a {"game_ended": ...} line, and run reads it
+// from the game once the game has ended.
+type GameEndedDelivery struct {
+	// GameID is the game that ended.
+	GameID uint `json:"game_id"`
+	// TeamColor is the bot's team, also when it was eliminated or left
+	// before the end.
+	TeamColor uint `json:"team_color"`
+	// TurnNumber is the final generation's turn number, as Turn.TurnNumber
+	// counts it.
+	TurnNumber int `json:"turn_number"`
+	// Outcome is how the game ended.
+	Outcome GameOutcome `json:"outcome"`
+	// Generation is the final board, the one the outcome was decided on, as
+	// a Turn's generation shows it to the bot's team.
+	Generation Generation `json:"generation"`
+	// Memory is the memory the bot returned with its latest completed turn,
+	// as the next Turn.Memory would have been, or empty.
+	Memory Memory `json:"memory"`
+	// Demo is where to download the game's demo, with DownloadDemo.
+	Demo DemoLink `json:"demo"`
+}
+
+// DemoLink is a self-contained link to one game's demo, the Demo file that
+// the 3D client's demo viewer opens, as the bot's player sees it: once the
+// game has ended, with every team's game log lines and the outcome. It is
+// the contract's DemoLink.
+type DemoLink struct {
+	// URL is GET /game/{id}/demo on the game's site, with a read-only demo
+	// token in its token query parameter, so a plain GET downloads the
+	// demo. The token downloads this one demo and nothing else, but keep
+	// the link private.
+	URL string `json:"url"`
+	// ExpiresAt is when the link stops working: when the game is deleted,
+	// 7 days after its final generation by default.
+	ExpiresAt time.Time `json:"expires_at"`
+}

@@ -91,11 +91,12 @@ func abandoned(game *models.Game, generation *models.Generation, now time.Time) 
 // among the teams still standing, except a team whose resignation was waiting
 // for the turn, the team with the most castles wins, and equal counts, or no
 // such team, are a draw (simulation.AbandonedOutcome). No turn is played. It
-// returns the game.ended events to push once the transaction commits.
-func abandonGame(transaction *gorm.DB, game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer) ([]Publication, error) {
+// returns the game.ended events to push, and the game-ended deliveries to
+// send with sender, once the transaction commits.
+func abandonGame(transaction *gorm.DB, game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer, sender *TurnSender) ([]Publication, []turnToSend, error) {
 	board, err := dal.LoadGameState(transaction, game.ID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	resigned := pendingDepartures(game)
 	outcome := simulation.AbandonedOutcome(board, game.Teams, resigned)
@@ -106,20 +107,32 @@ func abandonGame(transaction *gorm.DB, game *models.Game, generation *models.Gen
 	}
 	outcome.Departures = slices.Clone(game.Departures)
 	if err := rateGame(transaction, game, players, outcome, 0); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := dal.SaveGameOutcome(transaction, game, *outcome); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	return gameEndedWork(transaction, game, generation, players, sender)
+}
+
+// gameEndedWork is what a game that has just ended on its open generation,
+// generation, leaves to do once its transaction commits: the game.ended
+// events to push, and the game-ended deliveries to send with sender.
+func gameEndedWork(transaction *gorm.DB, game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer, sender *TurnSender) ([]Publication, []turnToSend, error) {
 	inputs, err := dal.LoadGenerationInputs(transaction, generation.ID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	memories, err := dal.LoadBotMemories(transaction, game.ID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return generationEvents(game, generation, players, inputs, memories)
+	events, err := generationEvents(game, generation, players, inputs, memories)
+	if err != nil {
+		return nil, nil, err
+	}
+	turns, err := sender.sentTurns(game, generation, players, inputs, memories)
+	return events, turns, err
 }
 
 // leaveSilentTeams takes out the teams of a real-time game whose player the
@@ -347,12 +360,13 @@ func (service *GenerationService) Resign(ctx context.Context, principal domain.P
 // EndAbandonedRound answers the lobby's round-ended hook: whether the game of
 // a lobby round has ended, so that the lobby can be reopened. A game whose
 // players all closed their tabs gets no game request, so the hook first ends
-// it when nobody has played it for its turn limit at now (abandonGame), and
-// pushes game.ended with publisher. It has the lobby's short hook timeout, so
+// it when nobody has played it for its turn limit at now (abandonGame),
+// pushes game.ended with publisher, and sends the game-ended deliveries of
+// the hosted and uploaded bots with sender. It has the lobby's short hook timeout, so
 // it plays no turn, has no Go bots play, and takes nobody out for silence. A
 // round whose start bound no game counts as ended, so the lobby can't be
 // stuck.
-func EndAbandonedRound(ctx context.Context, database *gorm.DB, publisher Publisher, lobbyID string, round int64, now time.Time) (bool, error) {
+func EndAbandonedRound(ctx context.Context, database *gorm.DB, publisher Publisher, sender *TurnSender, lobbyID string, round int64, now time.Time) (bool, error) {
 	database = database.WithContext(ctx)
 	game, err := dal.FindLobbyRoundGame(database, lobbyID, round)
 	if err != nil || game == nil || game.Outcome != nil {
@@ -365,6 +379,7 @@ func EndAbandonedRound(ctx context.Context, database *gorm.DB, publisher Publish
 		return false, err
 	}
 	var events []Publication
+	var turns []turnToSend
 	err = dal.WithLockedGame(database, game.ID, func(transaction *gorm.DB, locked *models.Game) error {
 		game = locked
 		generation, err := dal.GetLatestGenerationForGame(transaction, locked.ID)
@@ -375,13 +390,14 @@ func EndAbandonedRound(ctx context.Context, database *gorm.DB, publisher Publish
 		if err != nil {
 			return err
 		}
-		events, err = abandonGame(transaction, locked, generation, players)
+		events, turns, err = abandonGame(transaction, locked, generation, players, sender)
 		return err
 	})
 	if err != nil {
 		return false, err
 	}
-	service := GenerationService{Database: database, Publisher: publisher}
+	service := GenerationService{Database: database, Publisher: publisher, Bots: sender}
 	service.publish(ctx, events)
+	sender.send(ctx, database, turns)
 	return game.Outcome != nil, nil
 }

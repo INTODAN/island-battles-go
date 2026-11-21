@@ -220,3 +220,20 @@ func TestLoopbackNamesOnlyThisMachine(t *testing.T) {
 		}
 	}
 }
+
+func TestGameEndedURL(t *testing.T) {
+	for raw, want := range map[string]string{
+		"https://bot.example.com/turn":                   "https://bot.example.com/game-ended",
+		"https://bot.example.com":                        "https://bot.example.com/game-ended",
+		"https://bot.example.com/":                       "https://bot.example.com/game-ended",
+		"https://bot.example.com/bots/kraken/turn?key=1": "https://bot.example.com/bots/kraken/game-ended?key=1",
+		"https://bot.example.com/bots/":                  "https://bot.example.com/bots/game-ended",
+		"https://bot.example.com/a%2Fb/turn#frag":        "https://bot.example.com/a%2Fb/game-ended",
+		"http://127.0.0.1:41414/turn":                    "http://127.0.0.1:41414/game-ended",
+	} {
+		got, err := GameEndedURL(raw)
+		if err != nil || got != want {
+			t.Errorf("GameEndedURL(%q) = %q, %v; want %q", raw, got, err, want)
+		}
+	}
+}
