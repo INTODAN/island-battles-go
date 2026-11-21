@@ -7,6 +7,7 @@ import (
 
 	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/dal"
+	"islandBattles/backend/hostedbot"
 	"islandBattles/backend/models"
 
 	"gorm.io/gorm"
@@ -30,6 +31,11 @@ const BotNameLimitProblemType = "urn:island-battles:problem:bot-name-limit"
 // has no account here.
 type Accounts struct {
 	Database *gorm.DB
+	// ServerBots checks a bot name's URL as a hosted bot's
+	// (ServerBots.CheckURL), with its resolver, and on the local server host
+	// accepts a URL on this machine. Whether server bots are on doesn't
+	// matter: a name keeps its URL while they are off.
+	ServerBots ServerBots
 }
 
 // Seen stores an account the first time the game sees it, with its manual
@@ -76,14 +82,18 @@ func (accounts Accounts) Read(ctx context.Context, principal domain.Principal) (
 }
 
 // RegisterBotName registers a bot name for the caller's account, at
-// models.InitialRating.
-func (accounts Accounts) RegisterBotName(ctx context.Context, principal domain.Principal, name string) (models.CompetitorView, error) {
+// models.InitialRating, with its hosted bot's URL, which must pass a hosted
+// bot's check (checkBotNameURL).
+func (accounts Accounts) RegisterBotName(ctx context.Context, principal domain.Principal, name, url string) (models.CompetitorView, error) {
 	if err := signedIn(principal); err != nil {
 		return models.CompetitorView{}, err
 	}
 	name, err := models.NormalizeBotName(name)
 	if err != nil {
 		return models.CompetitorView{}, reject(422, err.Error())
+	}
+	if err := accounts.checkBotNameURL(ctx, url); err != nil {
+		return models.CompetitorView{}, err
 	}
 	var competitor models.Competitor
 	err = accounts.Database.WithContext(ctx).Transaction(func(transaction *gorm.DB) error {
@@ -93,7 +103,7 @@ func (accounts Accounts) RegisterBotName(ctx context.Context, principal domain.P
 			return err
 		}
 		var err error
-		competitor, err = dal.AddBotName(transaction, principal.AccountID, name)
+		competitor, err = dal.AddBotName(transaction, principal.AccountID, name, url)
 		return err
 	})
 	switch {
@@ -107,6 +117,49 @@ func (accounts Accounts) RegisterBotName(ctx context.Context, principal domain.P
 		return models.CompetitorView{}, accountsUnavailable(ctx, "register the bot name", err)
 	}
 	return CompetitorView(competitor, principal.DisplayName), nil
+}
+
+// SetBotNameURL changes the hosted bot URL of one of the caller's bot
+// names, which must pass a hosted bot's check (checkBotNameURL). The name
+// keeps its rating. A game that started before plays the URL it started
+// with. Another account's bot name, or an unknown one, is 404.
+func (accounts Accounts) SetBotNameURL(ctx context.Context, principal domain.Principal, competitorID, url string) (models.CompetitorView, error) {
+	if err := signedIn(principal); err != nil {
+		return models.CompetitorView{}, err
+	}
+	if err := accounts.checkBotNameURL(ctx, url); err != nil {
+		return models.CompetitorView{}, err
+	}
+	if err := accounts.Seen(ctx, principal.AccountID, principal.DisplayName); err != nil {
+		return models.CompetitorView{}, accountsUnavailable(ctx, "store the account", err)
+	}
+	competitor, err := dal.SetBotNameURL(accounts.Database.WithContext(ctx), principal.AccountID, competitorID, url)
+	if err != nil {
+		return models.CompetitorView{}, accountsUnavailable(ctx, "change the bot name's URL", err)
+	}
+	if competitor == nil {
+		return models.CompetitorView{}, reject(404, "your account has no bot name with this ID")
+	}
+	return CompetitorView(*competitor, principal.DisplayName), nil
+}
+
+// checkBotNameURL refuses a bot name's URL that a hosted bot couldn't have,
+// with 422 and the rule it breaks. A failed lookup of its host is a refusal
+// too, as for a hosted bot; a cancelled request is reported as such.
+func (accounts Accounts) checkBotNameURL(ctx context.Context, url string) error {
+	if url == "" {
+		return reject(422, "a bot name needs its hosted bot's url: where the bot takes turns, such as https://bot.example.com/turn")
+	}
+	err := accounts.ServerBots.CheckURL(ctx, url)
+	var invalid *hostedbot.Invalid
+	switch {
+	case err == nil:
+		return nil
+	case errors.As(err, &invalid):
+		return reject(422, invalid.Reason)
+	default:
+		return accountsUnavailable(ctx, "check the bot's URL", err)
+	}
 }
 
 // DeleteBotName deletes one of the caller's bot names, with its rating. The
@@ -149,7 +202,8 @@ func (accounts Accounts) Delete(ctx context.Context, principal domain.Principal)
 // BotSeatName for a house bot.
 func CompetitorView(competitor models.Competitor, ownerName string) models.CompetitorView {
 	view := models.CompetitorView{ID: competitor.ID, Kind: competitor.Kind, Rating: competitor.Rating,
-		Games: competitor.Games, Wins: competitor.Wins, Draws: competitor.Draws, Losses: competitor.Losses, LastPlayedAt: competitor.LastPlayedAt}
+		Games: competitor.Games, Wins: competitor.Wins, Draws: competitor.Draws, Losses: competitor.Losses, LastPlayedAt: competitor.LastPlayedAt,
+		URL: botNameURL(competitor)}
 	switch {
 	case competitor.Kind == models.ManualCompetitor:
 		view.Name = ownerName
@@ -159,6 +213,16 @@ func CompetitorView(competitor models.Competitor, ownerName string) models.Compe
 		view.Name = *competitor.Name
 	}
 	return view
+}
+
+// botNameURL is a bot name's hosted bot URL, nil for the other kinds and
+// for a name without one.
+func botNameURL(competitor models.Competitor) *string {
+	if competitor.Kind != models.BotCompetitor || competitor.URL == nil {
+		return nil
+	}
+	url := *competitor.URL
+	return &url
 }
 
 // signedIn refuses a guest, whose player token names no account.

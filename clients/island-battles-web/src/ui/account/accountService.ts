@@ -9,8 +9,8 @@ import type { Competitor, IslandAccount } from "./accountModel";
 export interface AccountService {
   /** The game's `GET /account`: the hand play and the bot names. */
   read(): Promise<IslandAccount>;
-  /** `POST /account/bot-names`. */
-  addBotName(name: string): Promise<Competitor>;
+  /** `POST /account/bot-names`, with the URL of the hosted bot that plays the name. */
+  addBotName(name: string, url: string): Promise<Competitor>;
   /** `DELETE /account/bot-names/{competitor_id}`, with its rating. */
   deleteBotName(competitorId: string): Promise<void>;
   /**
@@ -71,10 +71,10 @@ export function createAccountService(
     call(async () => required((await gameApi.GET("/account")).data));
   return {
     read,
-    addBotName: (name) =>
+    addBotName: (name, url) =>
       call(async () => {
         const { data } = await gameApi.POST("/account/bot-names", {
-          body: { name },
+          body: { name, url },
         });
         return required(data);
       }),

@@ -34,6 +34,7 @@ const competitor = (
   draws: 0,
   losses: 0,
   last_played_at: null,
+  url: kind === "bot" ? `https://bot.example.com/${name}` : null,
 });
 
 const account = (bots: Competitor[]): IslandAccount => ({

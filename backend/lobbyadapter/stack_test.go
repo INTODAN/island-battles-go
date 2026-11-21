@@ -183,7 +183,8 @@ func newLobbyStackWith(t *testing.T, serverBots services.ServerBots) *lobbyStack
 	httpapi.Register(api, lobbies, authentication, authentication, playerTokens, accounts, nil)
 	routes.SetupGameRoutes(api, &handlers.LobbyGame{Database: database, Players: handlers.PlayerTokens{Verifier: verifier}, Publisher: stack.publisher, Watchers: lobbyClient})
 	routes.SetupRoutes(api, &handlers.Env{DB: database, ServerBots: serverBots.Enabled, BotCompute: serverBots.Compute}, "")
-	routes.SetupAccountRoutes(api, &handlers.Accounts{Players: handlers.PlayerTokens{Verifier: verifier}, Service: services.Accounts{Database: database}})
+	routes.SetupAccountRoutes(api, &handlers.Accounts{Players: handlers.PlayerTokens{Verifier: verifier}, Service: services.Accounts{Database: database, ServerBots: services.ServerBots{Resolver: testutils.BotHosts}}})
+	routes.SetupLeaderboardRoutes(api, &handlers.Leaderboard{Service: services.Leaderboard{Database: database}}, "")
 	stack.api = api
 	return stack
 }

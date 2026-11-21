@@ -18,8 +18,9 @@ class FakeStorage implements StorageLike {
 }
 
 const ACCOUNT_ID = "33333333-3333-4333-8333-333333333333";
+const BOT_URL = "https://bot.example.com/turn";
 
-const competitor = (name: string, id = `id-${name}`) => ({
+const competitor = (name: string, id = `id-${name}`, url = BOT_URL) => ({
   id,
   kind: "bot",
   name,
@@ -29,6 +30,7 @@ const competitor = (name: string, id = `id-${name}`) => ({
   draws: 0,
   losses: 0,
   last_played_at: null,
+  url,
 });
 
 /**
@@ -112,7 +114,7 @@ async function signedIn() {
       });
     }
     if (route === "POST /account/bot-names") {
-      const body = (await request.json()) as { name: string };
+      const body = (await request.json()) as { name: string; url: string };
       if (bots.length >= 5) {
         return Response.json(
           {
@@ -136,7 +138,7 @@ async function signedIn() {
           { status: 409 },
         );
       }
-      const added = competitor(body.name);
+      const added = competitor(body.name, `id-${body.name}`, body.url);
       bots = [...bots, added];
       return Response.json(added, { status: 201 });
     }
@@ -185,14 +187,18 @@ describe("the account service", () => {
   test("adds bot names up to 5, refuses a sixth and a taken one, and deletes one", async () => {
     const { service } = await signedIn();
     for (const name of ["Kraken", "Squid", "Narwhal", "Orca", "Eel"]) {
-      expect((await service.addBotName(name)).name).toBe(name);
+      expect((await service.addBotName(name, BOT_URL)).name).toBe(name);
     }
-    expect(await rejection(service.addBotName("Sixth"))).toMatchObject({
-      status: 409,
-      problemType: "urn:island-battles:problem:bot-name-limit",
-    });
+    expect(await rejection(service.addBotName("Sixth", BOT_URL))).toMatchObject(
+      {
+        status: 409,
+        problemType: "urn:island-battles:problem:bot-name-limit",
+      },
+    );
     await service.deleteBotName("id-Squid");
-    expect(await rejection(service.addBotName("kraken"))).toMatchObject({
+    expect(
+      await rejection(service.addBotName("kraken", BOT_URL)),
+    ).toMatchObject({
       status: 409,
       problemType: "urn:island-battles:problem:bot-name-taken",
     });
@@ -251,7 +257,7 @@ describe("the account service", () => {
 
   test("when the lobby's part fails after the game's, it says so, and deleting again finishes it", async () => {
     const { realtime, service, calls, fail } = await signedIn();
-    await service.addBotName("Kraken");
+    await service.addBotName("Kraken", BOT_URL);
     fail.lobbyDelete = true;
     const steps: string[] = [];
     const deleteSteps = {
@@ -303,7 +309,7 @@ describe("the account service", () => {
   test("a refused bot name or delete ends a refused session too", async () => {
     const { realtime, service, fail } = await signedIn();
     fail.playerTokens = true;
-    await rejection(service.addBotName("Kraken"));
+    await rejection(service.addBotName("Kraken", BOT_URL));
     expect(realtime.session.get()).toBeNull();
   });
 });

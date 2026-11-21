@@ -54,11 +54,27 @@ func (handler *Accounts) RegisterBotName(ctx context.Context, input *struct {
 	if err != nil {
 		return nil, err
 	}
-	view, err := handler.Service.RegisterBotName(ctx, principal, input.Body.Name)
+	view, err := handler.Service.RegisterBotName(ctx, principal, input.Body.Name, input.Body.URL)
 	if err != nil {
 		return nil, accountsHTTPError(ctx, err)
 	}
 	return &CompetitorResponse{Status: http.StatusCreated, Body: view}, nil
+}
+
+func (handler *Accounts) SetBotNameURL(ctx context.Context, input *struct {
+	CompetitorID  string `path:"competitor_id" format:"uuid"`
+	Authorization string `header:"Authorization"`
+	Body          models.SetBotNameURLRequest
+}) (*CompetitorResponse, error) {
+	principal, err := authenticatePlayer(ctx, handler.Players, input.Authorization)
+	if err != nil {
+		return nil, err
+	}
+	view, err := handler.Service.SetBotNameURL(ctx, principal, input.CompetitorID, input.Body.URL)
+	if err != nil {
+		return nil, accountsHTTPError(ctx, err)
+	}
+	return &CompetitorResponse{Status: http.StatusOK, Body: view}, nil
 }
 
 func (handler *Accounts) DeleteBotName(ctx context.Context, input *struct {

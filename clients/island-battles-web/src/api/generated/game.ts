@@ -10,7 +10,7 @@ export interface paths {
         };
         /**
          * Read your account: your hand play and your bot names
-         * @description Requires the player token of a signed-in player, which names their account; a guest's token is 403 with problem type urn:island-battles:problem:sign-in-required. Every call stores the account the first time the game sees it, with its hand play, and the display name of the token whenever it changed, so a rename in the lobby reaches the game with the next player token. A competitor is what gets a rating: each bot name an account registers, and the account's hand play, shown under its display name. Each starts at a rating of 1500. Returns the account's ID and display name, max_bot_names (5), its hand play and its bot names, oldest first.
+         * @description Requires the player token of a signed-in player, which names their account; a guest's token is 403 with problem type urn:island-battles:problem:sign-in-required. Every call stores the account the first time the game sees it, with its hand play, and the display name of the token whenever it changed, so a rename in the lobby reaches the game with the next player token. A competitor is what gets a rating: each bot name an account registers, and the account's hand play, shown under its display name. Each starts at a rating of 1500. Returns the account's ID and display name, max_bot_names (5), its hand play and its bot names, oldest first, each bot name with its hosted bot's url, which is null for a name registered before names had URLs.
          */
         get: operations["getIslandAccount"];
         put?: never;
@@ -35,8 +35,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Register a bot name in your account
-         * @description Requires the player token of a signed-in player, which names their account; a guest's token is 403 with problem type urn:island-battles:problem:sign-in-required. Every call stores the account the first time the game sees it, with its hand play, and the display name of the token whenever it changed, so a rename in the lobby reaches the game with the next player token. Registers a bot name, a competitor at a rating of 1500, and returns it. A name is 3 to 24 characters after trimming, of letters, digits, spaces, - and _, and can't start with Bot (level, otherwise 422. Names are unique across all accounts without regard to case: a taken name is 409 with problem type urn:island-battles:problem:bot-name-taken. An account has at most 5 bot names: a sixth is 409 with problem type urn:island-battles:problem:bot-name-limit. A name can't be renamed: delete it and register another.
+         * Register a bot name in your account, with its hosted bot's URL
+         * @description Requires the player token of a signed-in player, which names their account; a guest's token is 403 with problem type urn:island-battles:problem:sign-in-required. Every call stores the account the first time the game sees it, with its hand play, and the display name of the token whenever it changed, so a rename in the lobby reaches the game with the next player token. Registers a bot name, a competitor at a rating of 1500, with the URL of the hosted bot that plays it, and returns it. A name is 3 to 24 characters after trimming, of letters, digits, spaces, - and _, and can't start with Bot (level, otherwise 422. The url is required and must pass a hosted bot's check (https:// on port 443, without credentials, on a host name whose addresses are all public), otherwise 422. In a rated lobby the name plays as a hosted bot at this URL. Once the name has played a rated game, the leaderboard lists it with its URL, so that others can play against it. Names are unique across all accounts without regard to case: a taken name is 409 with problem type urn:island-battles:problem:bot-name-taken. An account has at most 5 bot names: a sixth is 409 with problem type urn:island-battles:problem:bot-name-limit. A name can't be renamed: delete it and register another.
          */
         post: operations["registerIslandBotName"];
         delete?: never;
@@ -53,7 +53,11 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        put?: never;
+        /**
+         * Change the hosted bot URL of one of your bot names
+         * @description Requires the player token of a signed-in player, which names their account; a guest's token is 403 with problem type urn:island-battles:problem:sign-in-required. Every call stores the account the first time the game sees it, with its hand play, and the display name of the token whenever it changed, so a rename in the lobby reaches the game with the next player token. Sets the bot name's url, which must pass a hosted bot's check, otherwise 422, and returns the bot name. It keeps its rating. A rated game plays the URL that the name had when the game started. A listed name's new URL shows on the leaderboard within a minute. A name registered before names had URLs needs one before it can play in a rated lobby. Another account's bot name, or an unknown one, is 404.
+         */
+        put: operations["setIslandBotNameURL"];
         post?: never;
         /**
          * Delete one of your bot names
@@ -506,7 +510,7 @@ export interface components {
              * @description For kind default, the level of the default bot, one that GET /bots/defaults lists. Absent for the other kinds.
              */
             level?: number;
-            /** @description In a rated game, the bot name that a localhost, hosted or uploaded bot plays as, one that its player registered in their account, such as Kraken. Absent for the other kinds and in a game that isn't rated. */
+            /** @description In a rated game, the bot name that a hosted bot plays as, one that its player registered in their account, such as Kraken. Absent for the other kinds and in a game that isn't rated. */
             name?: string;
             /**
              * Format: int64
@@ -814,6 +818,8 @@ export interface components {
              * @description The Elo rating, 1500 before the first rated game. Shown rounded.
              */
             rating: number;
+            /** @description For a bot name, its hosted bot's URL, where it plays in a rated lobby. It becomes public on the leaderboard once the name has played a rated game. Null for hand play, and for a bot name registered before names had URLs, which plays in no rated lobby until its owner sets one with PUT /account/bot-names/{competitor_id}. */
+            url: string | null;
             /** Format: int64 */
             wins: number;
         };
@@ -1208,6 +1214,8 @@ export interface components {
              * @description The Elo rating, rounded to a whole number.
              */
             rating: number;
+            /** @description For a bot name, its hosted bot's URL, which its owner published by playing it in a rated game: anyone may play against it in an unrated lobby of their own, as a hosted bot seat at this URL, which changes no rating. Null for hand play and house bots, and for a bot name without a URL, which was registered before names had URLs. */
+            url: string | null;
             /** Format: int64 */
             wins: number;
         };
@@ -1247,6 +1255,8 @@ export interface components {
              * @description The Elo rating, rounded to a whole number.
              */
             rating: number;
+            /** @description For a bot name, its hosted bot's URL, which its owner published by playing it in a rated game: anyone may play against it in an unrated lobby of their own, as a hosted bot seat at this URL, which changes no rating. Null for hand play and house bots, and for a bot name without a URL, which was registered before names had URLs. */
+            url: string | null;
             /** Format: int64 */
             wins: number;
         };
@@ -1372,7 +1382,7 @@ export interface components {
              * @description For kind default only: a level that GET /bots/defaults lists.
              */
             level?: number;
-            /** @description For kinds localhost, hosted and uploaded only: one of the bot names of your account (GET /account), compared without regard to case, that the bot plays as. Only a signed-in player has bot names. A rated lobby needs it for a bot, and records the game under it; elsewhere it changes nothing. */
+            /** @description For kinds localhost, hosted and uploaded only: one of the bot names of your account (GET /account), compared without regard to case, that the bot plays as. Only a signed-in player has bot names. A rated lobby takes a bot only as a hosted bot under one of your bot names, which plays at the name's URL, and records the game under the name. Elsewhere the name changes nothing, except that a hosted bot without a url plays at its name's URL. */
             name?: string;
             /**
              * Format: uuid
@@ -1384,7 +1394,7 @@ export interface components {
              * @description For kind localhost only: the port on 127.0.0.1 where your bot serves (island-battles-bot serve --port N), where your game client delivers each turn. 41414 when absent.
              */
             port?: number;
-            /** @description For kind hosted only: where the server POSTs each TurnDelivery. https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public. */
+            /** @description For kind hosted only: where the server POSTs each TurnDelivery. https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public. Required unless the bot has a name, which then plays at its own URL (GET /account). In a rated lobby a named hosted bot always plays at its name's URL, and url is ignored. */
             url?: string;
         };
         /** @description Island Battles member_settings for setLobbyMemberSettings: the bot that plays for you. {"bot": {"kind": "manual"}} is you, playing by hand in the 3D client: no bot plays or relays for you, and your client sends your commands with POST /generation/commands. {"bot": {"kind": "localhost"}} is your own bot, which island-battles-bot serve runs on your machine and your game client relays each turn to, on port 41414 or on the port you add, {"bot": {"kind": "localhost", "port": 41415}}, and {"bot": {"kind": "default", "level": N}} a default bot of a level that GET /bots/defaults lists, which the backend plays itself. When GET /bots/defaults says server_bots, also {"bot": {"kind": "hosted", "url": "https://…"}}, your own bot server at a public URL, or {"bot": {"kind": "uploaded", "package_id": "…"}}, one of your bot packages in the lobby; the server plays both, without your game client. A localhost, hosted or uploaded bot may add "name", one of the bot names of your account (GET /account), compared without regard to case: {"bot": {"kind": "localhost", "name": "Kraken"}}. A name that isn't one of yours, or any name from a guest, is invalid_member_settings; it is accepted in every lobby, but only a rated lobby, where a bot needs one, records the game under it. Anything else is invalid_member_settings. You choose a bot before getting ready, and can change it while the lobby waits: getting ready without one is refused with game_requirement of type urn:island-battles:problem:bot-not-chosen, and an uploaded bot that is no longer a ready package of yours in the lobby, replaced, deleted or someone else's, with type urn:island-battles:problem:bot-package-gone. The start checks every roster player and bot seat the same way. It then initializes one playable generation, which waits for every frozen roster player to complete their turn, and copies each roster player's bot, and each bot seat's, which GenerationState.bot reports from then on. */
@@ -1446,6 +1456,8 @@ export interface components {
         RegisterBotNameRequest: {
             /** @description The bot's name: 3 to 24 characters after trimming, of letters, digits, spaces, - and _, not starting with Bot (level. It is unique across all accounts without regard to case. */
             name: string;
+            /** @description The bot's hosted bot URL, where the server sends it each turn in a rated lobby: https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public, as a hosted bot's. It becomes public on the leaderboard once the name has played a rated game, so that others can play against it. */
+            url: string;
         };
         RegisterGenerationCommands: {
             /**
@@ -1513,6 +1525,10 @@ export interface components {
              * @description Soldiers to send; counts against soldiers already reserved by your team this turn.
              */
             soldier_amount: number;
+        };
+        SetBotNameURLRequest: {
+            /** @description The bot's hosted bot URL, where the server sends it each turn in a rated lobby: https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public, as a hosted bot's. It becomes public on the leaderboard once the name has played a rated game, so that others can play against it. */
+            url: string;
         };
         SoldierGroup: {
             /**
@@ -1763,6 +1779,43 @@ export interface operations {
         responses: {
             /** @description Created */
             201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Competitor"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    setIslandBotNameURL: {
+        parameters: {
+            query?: never;
+            header?: {
+                Authorization?: string;
+            };
+            path: {
+                competitor_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetBotNameURLRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };

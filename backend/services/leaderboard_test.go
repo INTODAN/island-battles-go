@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/INTODAN/mpl/domain"
+	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
 
@@ -60,7 +61,7 @@ func TestAHiddenAccountStaysHiddenAfterItDeletesItself(t *testing.T) {
 			return
 		}
 		alex = person
-		accounts, leaderboard := services.Accounts{Database: database}, services.Leaderboard{Database: database}
+		accounts, leaderboard := services.Accounts{Database: database, ServerBots: services.ServerBots{Resolver: testutils.BotHosts}}, services.Leaderboard{Database: database}
 		first, err := accounts.Read(ctx, alex)
 		if err != nil {
 			t.Fatal(err)

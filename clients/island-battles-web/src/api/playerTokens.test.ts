@@ -118,7 +118,7 @@ describe("player tokens", () => {
     const server = serverFor();
     await server.gameApi.GET("/account");
     await server.gameApi.POST("/account/bot-names", {
-      body: { name: "Kraken" },
+      body: { name: "Kraken", url: "https://bot.example.com/turn" },
     });
     await server.gameApi.DELETE("/account/bot-names/{competitor_id}", {
       params: { path: { competitor_id: LOBBY_ID } },

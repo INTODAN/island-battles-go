@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"time"
 
@@ -23,7 +24,9 @@ import (
 // clients relay their localhost bots, and sender sends the turns of hosted
 // and uploaded bots, once the start has committed. In a rated game, which the
 // lobby's settings make rated, each frozen player also records their
-// competitor: a person's hand play or bot name, or a seat's house bot.
+// competitor: a person's hand play or bot name, or a seat's house bot. A
+// hosted bot under a bot name plays at the name's URL as it is at the start,
+// in a rated game always, and elsewhere when it has no url of its own.
 // Repeated and concurrent starts reuse the committed state.
 func RunLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, sender *TurnSender, snapshot domain.Snapshot) (models.BindingResult, error) {
 	chosen, err := lobbyBots(snapshot)
@@ -72,10 +75,23 @@ func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 		for playerID, bot := range chosen {
 			if competitor, found := competitors[playerID]; found {
 				bot.Competitor = &competitor
+				// A named hosted bot plays at its name's URL, as it is now,
+				// whatever url the member chose; the check above refused a
+				// name without one.
+				if bot.Kind == models.HostedBot && competitor.Kind == models.BotCompetitor && competitor.URL != nil {
+					bot.URL = *competitor.URL
+				}
 			}
 			rated[playerID] = bot
 		}
 		chosen = rated
+	} else if !started {
+		// A hosted bot without a url plays at its name's URL.
+		named := maps.Clone(chosen)
+		if err := playNameURLs(database, snapshot, named); err != nil {
+			return models.BindingResult{}, fmt.Errorf("start: %w", err)
+		}
+		chosen = named
 	}
 	binding, err := dal.BindLobbyGame(database, snapshot)
 	if err != nil {

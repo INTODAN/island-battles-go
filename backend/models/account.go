@@ -88,7 +88,8 @@ const (
 // Competitor is what has a rating: a registered bot name, an account's hand
 // play or a house bot. Competitors are never reset and outlive every game, so
 // nothing ties them to a game. Deleting one is soft, so a game in play can
-// still find it, and clears Name and NameKey, which frees the name at once.
+// still find it, and clears Name, NameKey and URL, which frees the name at
+// once.
 type Competitor struct {
 	ID   string         `gorm:"column:id;type:uuid;primaryKey"`
 	Kind CompetitorKind `gorm:"column:kind;not null"`
@@ -100,6 +101,11 @@ type Competitor struct {
 	// NameKey is Name in lower case, BotNameKey, unique among live
 	// competitors.
 	NameKey *string `gorm:"column:name_key"`
+	// URL is a bot name's hosted bot URL (#400): where the name plays in a
+	// rated lobby, and what the leaderboard shows once the name is listed.
+	// Nil for the other kinds, and for a bot name registered before names
+	// had URLs, until its owner adds one.
+	URL *string `gorm:"column:url"`
 	// HouseLevel is a house bot's default bot level.
 	HouseLevel   *uint          `gorm:"column:house_level"`
 	Rating       float64        `gorm:"column:rating;not null;default:1500"`
@@ -125,6 +131,7 @@ type CompetitorView struct {
 	Draws        int            `json:"draws" minimum:"0"`
 	Losses       int            `json:"losses" minimum:"0"`
 	LastPlayedAt *time.Time     `json:"last_played_at" nullable:"true" doc:"When its latest rated game ended, or null before the first."`
+	URL          *string        `json:"url" nullable:"true" doc:"For a bot name, its hosted bot's URL, where it plays in a rated lobby. It becomes public on the leaderboard once the name has played a rated game. Null for hand play, and for a bot name registered before names had URLs, which plays in no rated lobby until its owner sets one with PUT /account/bot-names/{competitor_id}."`
 }
 
 // IslandAccountView is a signed-in player's account, as GET /account returns
@@ -137,7 +144,13 @@ type IslandAccountView struct {
 	BotNames    []CompetitorView `json:"bot_names" nullable:"false" doc:"The account's bot names, oldest first."`
 }
 
-// RegisterBotNameRequest registers a bot name.
+// RegisterBotNameRequest registers a bot name with its hosted bot's URL.
 type RegisterBotNameRequest struct {
 	Name string `json:"name" maxLength:"200" doc:"The bot's name: 3 to 24 characters after trimming, of letters, digits, spaces, - and _, not starting with Bot (level. It is unique across all accounts without regard to case."`
+	URL  string `json:"url" maxLength:"2048" doc:"The bot's hosted bot URL, where the server sends it each turn in a rated lobby: https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public, as a hosted bot's. It becomes public on the leaderboard once the name has played a rated game, so that others can play against it."`
+}
+
+// SetBotNameURLRequest changes a bot name's hosted bot URL.
+type SetBotNameURLRequest struct {
+	URL string `json:"url" maxLength:"2048" doc:"The bot's hosted bot URL, where the server sends it each turn in a rated lobby: https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public, as a hosted bot's. It becomes public on the leaderboard once the name has played a rated game, so that others can play against it."`
 }

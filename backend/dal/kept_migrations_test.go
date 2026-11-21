@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"islandBattles/backend/dal"
 	"islandBattles/backend/internal/testutils"
@@ -163,6 +164,50 @@ func TestKeptMigrationsApplyNewMigrationToExistingDatabase(t *testing.T) {
 	var preserved models.MapTemplate
 	if err := db.First(&preserved, templateID).Error; err != nil {
 		t.Fatalf("existing map template after upgrade: %v", err)
+	}
+}
+
+// The bot names' URLs (0005_bot_name_urls.sql) keep every competitor that
+// came before them: a bot name registered before has no URL, and keeps its
+// name and rating.
+func TestBotNameURLsKeepEarlierCompetitors(t *testing.T) {
+	db := testutils.InitEmptyTestDB(t)
+	earlier := schema.KeptMigrations()
+	files := fstest.MapFS{}
+	for _, name := range mapTemplateMigrationNames(t, earlier.Files) {
+		if name >= "0005" {
+			continue
+		}
+		data, err := fs.ReadFile(earlier.Files, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files[name] = &fstest.MapFile{Data: data}
+	}
+	earlier.Files = files
+	if err := earlier.Apply(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	accountID, competitorID := "6f1c2a52-6f3e-4a8e-9a43-3d0c9a1f0b11", "0b7f3d1e-2c4a-4f5b-8e6d-7a9c1b2d3e4f"
+	if err := db.Table(models.Competitor{}.TableName()).Create(map[string]any{
+		"id": competitorID, "kind": "bot", "account_id": accountID, "name": "Kraken", "name_key": "kraken", "rating": 1520, "games": 1, "created_at": time.Now(),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := schema.KeptMigrations().Apply(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	var kraken models.Competitor
+	if err := db.Where(&models.Competitor{ID: competitorID}).First(&kraken).Error; err != nil {
+		t.Fatal(err)
+	}
+	if kraken.URL != nil || kraken.Name == nil || *kraken.Name != "Kraken" || kraken.Rating != 1520 || kraken.Games != 1 {
+		t.Fatalf("Kraken after the migration = %+v", kraken)
+	}
+	url := "https://bot.example.com/kraken"
+	if changed, err := dal.SetBotNameURL(db, accountID, competitorID, url); err != nil || changed == nil || changed.URL == nil || *changed.URL != url || changed.Rating != 1520 {
+		t.Fatalf("Kraken with a URL = %+v, %v", changed, err)
 	}
 }
 
