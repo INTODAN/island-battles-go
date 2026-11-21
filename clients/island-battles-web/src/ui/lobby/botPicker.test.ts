@@ -68,6 +68,16 @@ describe("a rated lobby's choices", () => {
       "",
     );
     expect(ratedChoiceValue({ kind: "hosted", name: "Kraken" }, null)).toBe("");
+    // One of your names chosen by its ID checks that name.
+    expect(
+      ratedChoiceValue({ kind: "hosted", competitor_id: "c-kraken" }, [
+        {
+          name: "Kraken",
+          url: "https://kraken.example.org/bot",
+          id: "c-kraken",
+        },
+      ]),
+    ).toBe("botname:Kraken");
   });
 
   test("a name without a URL can't be chosen, nor any name while the server plays no hosted bots", () => {
@@ -145,6 +155,20 @@ describe("a bot from the leaderboard", () => {
       ]),
     ).toEqual([{ competitorId: "c-eel", name: "Eel", owner: "Sam" }]);
     expect(pickableListedBots(listed, null)).toEqual(listed);
+    // Your own bot, chosen by its ID, stays listed.
+    expect(
+      pickableListedBots(
+        listed,
+        [
+          {
+            name: "Kraken",
+            url: "https://kraken.example.org/bot",
+            id: "c-kraken",
+          },
+        ],
+        "c-kraken",
+      ),
+    ).toEqual(listed);
   });
 
   test("its select names each bot with its owner, and keeps a chosen one it doesn't list", () => {

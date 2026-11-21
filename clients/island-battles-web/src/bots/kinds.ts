@@ -60,7 +60,7 @@ export function describeGameBot(bot: BotChoice): string {
     case "hosted":
       return bot.name
         ? `Played by the server: ${bot.name}, hosted${bot.host ? ` at ${bot.host}` : ""}`
-        : `Played by the server: your hosted bot${bot.host ? ` at ${bot.host}` : ""}`;
+        : `Played by the server: a hosted bot${bot.host ? ` at ${bot.host}` : ""}`;
     case "uploaded":
       return `Played by the server: ${your} uploaded bot`;
     case "manual":

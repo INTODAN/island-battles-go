@@ -93,16 +93,19 @@ export function botNameOfValue(value: string): string | undefined {
 
 /**
  * The radio a saved choice checks in a rated lobby, "" for none: hand play, a bot from the
- * leaderboard, or a hosted bot under one of your names (found without regard to case). Any other
- * choice checks none, and the room says what to do (`ratedBlockers`).
+ * leaderboard, or a hosted bot under one of your names (found without regard to case, or by its
+ * competitor ID, which plays as if you named it). Any other choice checks none, and the room says
+ * what to do (`ratedBlockers`).
  */
 export function ratedChoiceValue(
   chosen: MemberBot | undefined,
   names: readonly BotName[] | null,
 ): string {
   if (chosen?.kind === "manual") return "manual";
-  if (chosen?.kind === "hosted" && chosen.competitor_id)
-    return leaderboardValue;
+  if (chosen?.kind === "hosted" && chosen.competitor_id) {
+    const own = (names ?? []).find((name) => name.id === chosen.competitor_id);
+    return own ? botNameValue(own.name) : leaderboardValue;
+  }
   if (chosen?.kind !== "hosted" || !chosen.name) return "";
   const found = findBotName(names ?? [], chosen.name);
   return found ? botNameValue(found.name) : "";
@@ -122,14 +125,17 @@ export const leaderboardChoice = (competitorId: string): MemberBot => ({
 
 /**
  * The bots from the leaderboard that the picker lists: all but your own bot names, which it
- * offers by name already.
+ * offers by name already, unless one is the bot you chose by its ID, which then stays listed.
  */
 export function pickableListedBots(
   listed: readonly ListedBot[],
   names: readonly BotName[] | null,
+  chosenId?: string,
 ): ListedBot[] {
   const own = new Set((names ?? []).flatMap((name) => name.id ?? []));
-  return listed.filter((bot) => !own.has(bot.competitorId));
+  return listed.filter(
+    (bot) => !own.has(bot.competitorId) || bot.competitorId === chosenId,
+  );
 }
 
 /**
@@ -366,10 +372,10 @@ export function mountBotPicker(options: {
   /** The options drawn last, so a redraw only replaces them when they change. */
   let listedKey = "";
   /** The listed bots you may choose: all but your own names. */
-  const offeredBots = () =>
-    pickableListedBots(listed ?? [], account?.botNames ?? null);
   const chosenListed = () =>
     chosen?.kind === "hosted" ? chosen.competitor_id : undefined;
+  const offeredBots = () =>
+    pickableListedBots(listed ?? [], account?.botNames ?? null, chosenListed());
 
   /** Draws the leaderboard's bots as the select's options, with the saved one selected. */
   function showListed(): void {

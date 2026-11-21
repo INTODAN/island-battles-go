@@ -272,6 +272,9 @@ func (rules BotRules) checkRated(ctx context.Context, lobby domain.Snapshot, mem
 		return err
 	}
 	roster, err := resolveRoster(ctx, database, lobby, members, seats, names, chosen, false)
+	if domain.ErrorCodeOf(err) == domain.CodeGameRequirement {
+		return err
+	}
 	if err != nil {
 		return unavailable(ctx, "read the competitors", err)
 	}

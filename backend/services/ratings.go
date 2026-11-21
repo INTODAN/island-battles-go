@@ -25,9 +25,10 @@ import (
 // competitor's new rating, its rated games and its win, draw or loss; and
 // adds a history row for each, whose unique pair of game and competitor
 // refuses to rate a game twice, and which says whether the competitor
-// played away. A bot that played away and is in the outcome's timed_out,
-// which missed turn missedTurn, is paused too (dal.PauseAway), until its
-// owner resumes it. Any error fails the transaction, so the outcome and the
+// played away. A bot that played away and missed a turn is paused too
+// (dal.PauseAway), until its owner resumes it: one in the outcome's
+// timed_out, which missed turn missedTurn, and one that a real-time game's
+// silence rule took out (a departure of kind left). Any error fails the transaction, so the outcome and the
 // ratings are stored together or not at all.
 func rateGame(transaction *gorm.DB, game *models.Game, players []models.FrozenGamePlayer, outcome *models.GameOutcome, missedTurn int) error {
 	if !game.Rated {
@@ -116,13 +117,25 @@ func rateGame(transaction *gorm.DB, game *models.Game, players []models.FrozenGa
 		}
 	}
 	// One missed turn pauses a bot that played away: its owner, whose
-	// server may be down, loses one away game, not ten.
+	// server may be down, loses one away game, not ten. A game that waits
+	// for every player times it out; a real-time game, which plays on
+	// without it, takes it out by its silence rule.
+	missed := map[uint]int{}
 	for _, timedOut := range outcome.TimedOut {
-		for _, player := range teams {
-			if player.TeamColor == timedOut.Color && player.Away {
-				if err := dal.PauseAway(transaction, *player.CompetitorID, endedAt, awayPauseReason(missedTurn, endedAt)); err != nil {
-					return fmt.Errorf("rate game %d: pause competitor %s: %w", game.ID, *player.CompetitorID, err)
-				}
+		missed[timedOut.Color] = missedTurn
+	}
+	for _, departure := range outcome.Departures {
+		if departure.Kind == models.DepartureLeft {
+			missed[departure.Color] = 0
+			if departure.Turn != nil {
+				missed[departure.Color] = *departure.Turn
+			}
+		}
+	}
+	for _, player := range teams {
+		if turn, found := missed[player.TeamColor]; found && player.Away {
+			if err := dal.PauseAway(transaction, *player.CompetitorID, endedAt, awayPauseReason(turn, endedAt)); err != nil {
+				return fmt.Errorf("rate game %d: pause competitor %s: %w", game.ID, *player.CompetitorID, err)
 			}
 		}
 	}

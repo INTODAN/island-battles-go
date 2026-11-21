@@ -407,3 +407,38 @@ func TestARatedStartRefusesTwoCompetitorsOfOneAccountAndUnlistedBots(t *testing.
 	// Its owner may choose it by its ID, unlisted, as if they named it.
 	fixture.mustStart(t, settings, choosing(dana, unlisted.ID), awayTeam{settings: `{"bot_level":2}`})
 }
+
+// In a real-time game, which plays on without a bot that doesn't answer, an
+// away bot that the silence rule takes out has missed its turns too: it
+// loses, and is paused.
+func TestAnAwayBotThatLeavesARealTimeGameIsPaused(t *testing.T) {
+	fixture := newAwayAccounts(t)
+	dana, fay := fixture.person("Dana"), fixture.person("Fay")
+	kraken := fixture.listedBot(t, dana, "Kraken")
+	game := fixture.mustStart(t, mapSettings("10", 1, 2), byHand(fay), seated(kraken.ID))
+	state := game.current(t, fay)
+	for turns := 0; state.Outcome == nil; turns++ {
+		if turns > 1000 || state.TurnDeadlineAt == nil {
+			t.Fatalf("the game didn't end: %+v", state)
+		}
+		*game.clock = state.TurnDeadlineAt.Add(time.Millisecond)
+		state = game.applyDeadline(t, fay)
+	}
+	if len(state.Outcome.Departures) != 1 || state.Outcome.Departures[0].Kind != models.DepartureLeft || state.Outcome.WinnerTeamColor == nil || *state.Outcome.WinnerTeamColor != 1 {
+		t.Fatalf("outcome = %+v, want Kraken to leave", state.Outcome)
+	}
+	account, err := fixture.accounts.Read(context.Background(), dana)
+	if err != nil || len(account.BotNames) != 1 || account.BotNames[0].AwayPaused == nil || !strings.HasPrefix(account.BotNames[0].AwayPaused.Reason, "Missed turn ") {
+		t.Fatalf("Dana's account = %+v, %v; want Kraken paused", account, err)
+	}
+}
+
+// A rated start whose roster has a member without a bot is refused with
+// bot-not-chosen, never half rated.
+func TestARatedStartRefusesAMemberWithoutABot(t *testing.T) {
+	fixture := newAwayAccounts(t)
+	dana, fay := fixture.person("Dana"), fixture.person("Fay")
+	kraken := fixture.listedBot(t, dana, "Kraken")
+	_, err := fixture.start(t, mapSettings("30", 1, 2), awayTeam{person: &fay, settings: `{}`}, seated(kraken.ID))
+	expectRefusal(t, err, services.BotNotChosenProblemType, "")
+}

@@ -249,8 +249,9 @@ type rosterCompetitor struct {
 // resolveRoster finds the competitor of each member and seat of a rated
 // roster that checkRatedRoster passed, by player ID. With create, as the
 // start does, it creates the account and hand play of an account new to the
-// game, and a house bot's competitor; without, as the ready gate does, it
-// creates nothing and leaves those nil.
+// game, and a house bot's competitor, and refuses a member without a bot;
+// without, as the ready gate does, it creates nothing and leaves those nil,
+// and skips a member without a bot, for checkMembersReady to refuse.
 func resolveRoster(ctx context.Context, database *gorm.DB, lobby domain.Snapshot, members []domain.ReadyMember, seats []domain.Member, names botNames, chosen chosenBots, create bool) (map[string]rosterCompetitor, error) {
 	teams := map[string]domain.Team{}
 	for _, team := range lobby.Teams {
@@ -268,8 +269,11 @@ func resolveRoster(ctx context.Context, database *gorm.DB, lobby domain.Snapshot
 	roster := make(map[string]rosterCompetitor, len(members)+len(seats))
 	for _, person := range members {
 		bot, err := MemberBot(person.Settings, true)
-		if err != nil {
-			return nil, err
+		switch {
+		case err != nil && create:
+			return nil, domain.GameRequirement(BotNotChosenProblemType, botNotChosenAtStartMessage([]string{person.DisplayName}))
+		case err != nil:
+			continue
 		}
 		entry := rosterCompetitor{Label: person.DisplayName}
 		switch {
@@ -303,6 +307,7 @@ func resolveRoster(ctx context.Context, database *gorm.DB, lobby domain.Snapshot
 	for _, seat := range seats {
 		settings, err := seatSettings(seat.SeatSettings, true)
 		if err != nil {
+			// checkRatedRoster refused a seat that is no rated seat.
 			return nil, err
 		}
 		entry := rosterCompetitor{}
@@ -339,8 +344,8 @@ func utcDay(at time.Time) time.Time {
 // stores its frozen players: it locks the away bots' rows, in the order of
 // their IDs as rateGame does, until the transaction ends, so that two starts
 // at once can't both pass a cap: the second waits, and then counts the
-// first's game. It refuses an away bot paused since the roster's check, and
-// then checks the caps (checkAwayCaps).
+// first's game. It refuses an away bot deleted, left without a URL or paused
+// since the roster's check, and then checks the caps (checkAwayCaps).
 func lockAwayCaps(transaction *gorm.DB, roster map[string]rosterCompetitor, now time.Time) error {
 	var awayIDs []string
 	for _, entry := range roster {
@@ -356,11 +361,11 @@ func lockAwayCaps(transaction *gorm.DB, roster map[string]rosterCompetitor, now 
 		return err
 	}
 	for _, competitor := range locked {
-		if competitor.AwayPausedAt != nil {
-			name := "The bot"
-			if competitor.Name != nil {
-				name = *competitor.Name
-			}
+		name := chosenBot{competitor: competitor}.name()
+		switch {
+		case competitor.DeletedAt.Valid || competitor.URL == nil:
+			return domain.GameRequirement(RatedBotNotListedProblemType, notListedMessage(name)+" Choose another bot, and start again.")
+		case competitor.AwayPausedAt != nil:
 			return domain.GameRequirement(RatedBotPausedProblemType, pausedMessage(name)+" Choose another bot, and start again.")
 		}
 	}
@@ -443,7 +448,8 @@ func capRefusal(players []rosterCompetitor, past []models.FrozenGamePlayer) erro
 }
 
 // awayPauseReason tells a bot's owner which turn it missed, such as "Missed
-// turn 12 of a rated game on 21 November", the day in UTC.
+// turn 12 of a rated game on 21 November", the day in UTC: the turn it timed
+// out in, or the turn in which a real-time game's silence rule took it out.
 func awayPauseReason(turn int, at time.Time) string {
 	day := at.UTC().Format("2 January")
 	if turn < 1 {

@@ -390,31 +390,41 @@ export function mountLeaderboard(
     const play = options.playAgainst;
     if (play) {
       const error = h("p", { class: "field-error", attrs: { role: "alert" } });
-      const buttons: HTMLButtonElement[] = (
-        [
-          [true, playRatedLabel, "primary"],
-          [false, playUnratedLabel, "secondary"],
-        ] as const
-      ).map(([rated, label, className]) => {
-        const button = h("button", { type: "button", class: className }, label);
-        button.addEventListener("click", async () => {
-          for (const each of buttons) each.disabled = true;
-          button.textContent = "Starting…";
-          error.textContent = "";
-          try {
-            await play({ ...target, rated });
-          } catch (cause) {
-            error.textContent =
-              cause instanceof Error && cause.message
-                ? cause.message
-                : "Something went wrong. Please try again.";
-          } finally {
-            for (const each of buttons) each.disabled = false;
-            button.textContent = label;
-          }
-        });
-        return button;
-      });
+      // Your own bot can't be rated against your own hand play: one account, one competitor.
+      const kinds: (readonly [boolean, string, string])[] = own.has(
+        competitor.competitor_id,
+      )
+        ? [[false, playUnratedLabel, "primary"]]
+        : [
+            [true, playRatedLabel, "primary"],
+            [false, playUnratedLabel, "secondary"],
+          ];
+      const buttons: HTMLButtonElement[] = kinds.map(
+        ([rated, label, className]) => {
+          const button = h(
+            "button",
+            { type: "button", class: className },
+            label,
+          );
+          button.addEventListener("click", async () => {
+            for (const each of buttons) each.disabled = true;
+            button.textContent = "Starting…";
+            error.textContent = "";
+            try {
+              await play({ ...target, rated });
+            } catch (cause) {
+              error.textContent =
+                cause instanceof Error && cause.message
+                  ? cause.message
+                  : "Something went wrong. Please try again.";
+            } finally {
+              for (const each of buttons) each.disabled = false;
+              button.textContent = label;
+            }
+          });
+          return button;
+        },
+      );
       section.append(
         h(
           "div",

@@ -37,7 +37,7 @@ describe("the bot that plays your seat", () => {
       "Default bot, level 2, played by the server",
     );
     expect(describeGameBot({ kind: "hosted", host: "bot.example.com" })).toBe(
-      "Played by the server: your hosted bot at bot.example.com",
+      "Played by the server: a hosted bot at bot.example.com",
     );
     expect(describeGameBot({ kind: "uploaded" })).toBe(
       "Played by the server: your uploaded bot",

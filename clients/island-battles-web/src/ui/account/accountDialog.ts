@@ -395,16 +395,14 @@ export function openAccount(options: AccountDialogOptions): HTMLDialogElement {
     row: CompetitorRow,
     competitor: Competitor | undefined,
   ): HTMLElement | null {
-    if (!row.paused) return null;
+    if (!row.paused || !competitor) return null;
     const resume = h(
       "button",
       { type: "button", class: "secondary small", disabled: busy },
       "Resume",
     );
     resume.setAttribute("aria-label", `Resume ${row.name}`);
-    if (competitor) {
-      resume.addEventListener("click", () => void resumeBot(competitor));
-    }
+    resume.addEventListener("click", () => void resumeBot(competitor));
     return h(
       "div",
       { class: "account-paused" },
