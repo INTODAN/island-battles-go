@@ -1,7 +1,7 @@
 // How a rated game changed each team's rating (#370), as the outcome banner lists it under the
 // summary: the winner first, then the other teams in colour order. Pure, so `bun test` covers it.
 
-import { ratingChange } from "../leaderboard/model";
+import { ownerLine, ratingChange } from "../leaderboard/model";
 import type { GameOutcome } from "./history";
 
 export type RatingChange = NonNullable<GameOutcome["ratings"]>[number];
@@ -11,14 +11,16 @@ export interface RatingLine {
   teamColor: number;
   /** The competitor's name: a bot name, a hand player's display name, or "Bot (level 2)". */
   name: string;
+  /** "by Dana": a bot name's owner, as the leaderboard says it; none for hand play and a house bot. */
+  owner?: string;
   /** "1500 → 1520 (+20)", with the ratings rounded. */
   change: string;
   direction: "up" | "down" | "flat";
 }
 
-/** "Kraken 1500 → 1520 (+20)": a line as one sentence, for a screen reader and the tests. */
+/** "Kraken, by Dana 1500 → 1520 (+20)": a line as one sentence, for a screen reader and the tests. */
 export const ratingLineText = (line: RatingLine): string =>
-  `${line.name} ${line.change}`;
+  `${line.name}${line.owner ? `, ${line.owner}` : ""} ${line.change}`;
 
 /**
  * The rating changes of a rated game's outcome, the winner first and then by team colour; none
@@ -41,9 +43,15 @@ export function ratingLines(
         Math.round(rating.before),
         Math.round(rating.after),
       );
+      const owner = ownerLine({
+        kind: rating.kind,
+        owner: rating.owner ?? null,
+      });
       return {
         teamColor: rating.team_color,
         name: rating.name,
+        // Two bots are told apart by their owners too, not only by colour.
+        ...(rating.kind === "bot" && owner ? { owner } : {}),
         change: `${change.text} (${change.delta})`,
         direction: change.direction,
       };

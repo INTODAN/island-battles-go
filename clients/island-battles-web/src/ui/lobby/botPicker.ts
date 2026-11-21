@@ -77,6 +77,36 @@ export function playsAsOptions(
 export const takesBotName = (value: string): boolean =>
   value === "localhost" || value === "hosted" || value.startsWith("package-");
 
+/**
+ * The bot name a choice plays as. In a rated lobby, for a signed-in member: its **Plays as**
+ * while changed and not saved yet (`pending`), else the name the saved bot plays as, which a
+ * switch between your localhost, hosted and uploaded bots carries over. Unrated, only the saved
+ * choice keeps its name. A guest's, and a choice that takes no name (by hand, a default bot), has
+ * none.
+ */
+export function playsAsName(
+  value: string,
+  chosen: MemberBot | undefined,
+  pending: string | undefined,
+  lobby: { rated: boolean; signedIn: boolean },
+): string {
+  if (!takesBotName(value)) return "";
+  const saved = chosen?.name ?? "";
+  if (!lobby.rated) return choiceValue(chosen) === value ? saved : "";
+  if (!lobby.signedIn) return "";
+  return pending ?? saved;
+}
+
+/** Whether a choice's **Plays as** is disabled: while the lobby locks or a save runs, and for a package greyed out this month. */
+export function playsAsLocked(
+  value: string,
+  state: { locked: boolean; saving: boolean; computeSpent: string | null },
+): boolean {
+  return (
+    state.locked || state.saving || uploadedGreyedOut(value, state.computeSpent)
+  );
+}
+
 /** The note for browsers that block a page from reaching localhost (the lobby page's `safariNote`). */
 export const safariNote =
   "Safari does not let an https page reach a bot on localhost. Use Chrome, Edge or Firefox to play with your own bot, or open this page over http on localhost.";
@@ -145,14 +175,13 @@ export function mountBotPicker(options: {
   );
 
   /**
-   * The bot name a choice plays as: its **Plays as** while it is changed and not saved yet, else
-   * the saved choice's name when it is this choice. A guest's choice has none.
+   * The bot name a choice plays as (`playsAsName`).
    */
   function nameFor(value: string): string {
-    const saved = choiceValue(chosen) === value ? (chosen?.name ?? "") : "";
-    if (!rated) return saved;
-    if (!account) return "";
-    return pendingNames.get(value) ?? saved;
+    return playsAsName(value, chosen, pendingNames.get(value), {
+      rated,
+      signedIn: account !== null,
+    });
   }
 
   /** The **Plays as** row of a choice: made once, and drawn by `showNames`. */
@@ -216,7 +245,11 @@ export function mountBotPicker(options: {
             (option) => option.value.toLowerCase() === current.toLowerCase(),
           )?.value ?? "";
       }
-      entry.select.disabled = locked || saving;
+      entry.select.disabled = playsAsLocked(value, {
+        locked,
+        saving,
+        computeSpent,
+      });
     }
   }
 
@@ -486,6 +519,11 @@ export function mountBotPicker(options: {
   }
 
   async function choose(value: string): Promise<void> {
+    // A package greyed out this month can't be chosen, not even through its Plays as.
+    if (uploadedGreyedOut(value, computeSpent)) {
+      sync();
+      return;
+    }
     // Your localhost bot keeps the port in its field, which the seats you relay mustn't use;
     // a first choice of it takes the first port they leave free.
     const taken = options.takenPorts?.() ?? [];

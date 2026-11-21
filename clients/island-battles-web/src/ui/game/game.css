@@ -626,6 +626,11 @@
   margin: 2px 0;
 }
 
+.gv-rating-owner {
+  color: #4a5568;
+  font-size: 13px;
+}
+
 .gv-rating-change {
   font-variant-numeric: tabular-nums;
   font-weight: 500;

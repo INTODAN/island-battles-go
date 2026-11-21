@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   noBotNamesHint,
+  playsAsLocked,
+  playsAsName,
   playsAsOptions,
   ratedDefaultsHint,
   takesBotName,
@@ -40,4 +42,46 @@ describe("Plays as", () => {
       "Default bots play only in bot seats in a rated lobby.",
     );
   });
+});
+
+describe("the name a choice plays as", () => {
+  const kraken = { kind: "localhost" as const, name: "Kraken" };
+  const rated = { rated: true, signedIn: true };
+
+  test("carries over to another of your bots in a rated lobby", () => {
+    expect(playsAsName("localhost", kraken, undefined, rated)).toBe("Kraken");
+    expect(playsAsName("hosted", kraken, undefined, rated)).toBe("Kraken");
+    expect(playsAsName("package-pk", kraken, undefined, rated)).toBe("Kraken");
+    // Plays as, changed and not saved yet, wins; "" is No name.
+    expect(playsAsName("hosted", kraken, "Squid", rated)).toBe("Squid");
+    expect(playsAsName("hosted", kraken, "", rated)).toBe("");
+  });
+
+  test("is none for hand play, a default bot and a guest", () => {
+    expect(playsAsName("manual", kraken, undefined, rated)).toBe("");
+    expect(playsAsName("level-2", kraken, undefined, rated)).toBe("");
+    expect(
+      playsAsName("hosted", kraken, "Squid", { rated: true, signedIn: false }),
+    ).toBe("");
+  });
+
+  test("stays with its own choice in an unrated lobby", () => {
+    const unrated = { rated: false, signedIn: true };
+    expect(playsAsName("localhost", kraken, undefined, unrated)).toBe("Kraken");
+    expect(playsAsName("hosted", kraken, undefined, unrated)).toBe("");
+  });
+});
+
+test("a package greyed out this month can't be chosen through its Plays as", () => {
+  const free = { locked: false, saving: false, computeSpent: null };
+  const spent = {
+    ...free,
+    computeSpent: "Uploaded bots have used this month's free compute.",
+  };
+  expect(playsAsLocked("package-pk", free)).toBe(false);
+  expect(playsAsLocked("package-pk", spent)).toBe(true);
+  // Only uploaded bots use the server's compute.
+  expect(playsAsLocked("localhost", spent)).toBe(false);
+  expect(playsAsLocked("hosted", { ...free, saving: true })).toBe(true);
+  expect(playsAsLocked("hosted", { ...free, locked: true })).toBe(true);
 });

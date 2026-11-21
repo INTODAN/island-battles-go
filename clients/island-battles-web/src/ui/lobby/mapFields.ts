@@ -12,8 +12,7 @@ import {
   mapTeamCount,
   maxTeams,
   minTeams,
-  ratedGuestHint,
-  ratedHint,
+  ratedField,
   readMapFile,
   teamName,
   turnPaces,
@@ -150,12 +149,14 @@ export function mountMapFields(options: MapFieldsOptions): MapFields {
         new Option(`${turns} turns`, String(turns), false, turns === length),
     ),
   );
-  // Rated: off by default, and only a signed-in host can turn it on.
+  // Rated: off by default, and only a signed-in host can turn it on; a guest who became the
+  // host of a rated lobby can still turn it off.
+  const rated = ratedField(options.signedIn === true, initial?.rated === true);
   const ratedBox = h("input", {
     type: "checkbox",
     id: id("rated"),
     checked: initial?.rated === true,
-    disabled: options.signedIn !== true,
+    disabled: rated.disabled,
   });
   const ratedLabel = h(
     "label",
@@ -373,11 +374,7 @@ export function mountMapFields(options: MapFieldsOptions): MapFields {
       ),
       errors.gameLength,
       ratedLabel,
-      h(
-        "p",
-        { class: "hint" },
-        options.signedIn === true ? ratedHint : ratedGuestHint,
-      ),
+      h("p", { class: "hint" }, rated.hint),
     ],
     values: () => ({
       map: mapChoice(),

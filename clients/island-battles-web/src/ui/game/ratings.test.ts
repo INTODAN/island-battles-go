@@ -53,6 +53,31 @@ describe("the rating changes at the end", () => {
     expect(lines[1]?.direction).toBe("flat");
   });
 
+  test("a bot name is told apart by its owner too, as the leaderboard says it", () => {
+    const lines = ratingLines({
+      winner_team_color: 1,
+      ratings: [
+        { ...change(1, "Kraken", 1500, 1520), owner: "Dana" },
+        { ...change(2, "Kraken2", 1500, 1480), owner: "Sam" },
+        { ...change(3, "Dana", 1500, 1490, "manual"), owner: "Dana" },
+      ],
+    });
+    expect(lines.map(ratingLineText)).toEqual([
+      "Kraken, by Dana 1500 → 1520 (+20)",
+      "Kraken2, by Sam 1500 → 1480 (−20)",
+      "Dana 1500 → 1490 (−10)",
+    ]);
+    expect(lines[0]).toMatchObject({ name: "Kraken", owner: "by Dana" });
+    // Hand play and a house bot have no owner line; nor does a bot without one.
+    expect(lines[2]?.owner).toBeUndefined();
+    expect(
+      ratingLines({
+        winner_team_color: 1,
+        ratings: [change(1, "Squid", 1500, 1500)],
+      })[0]?.owner,
+    ).toBeUndefined();
+  });
+
   test("a game that isn't rated has none", () => {
     expect(ratingLines({ winner_team_color: 1 })).toEqual([]);
     expect(ratingLines(null)).toEqual([]);

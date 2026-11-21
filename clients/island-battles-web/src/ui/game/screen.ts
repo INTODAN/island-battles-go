@@ -1192,6 +1192,9 @@ export class GameScreen {
         item.append(
           swatch(line.teamColor),
           name,
+          ...(line.owner
+            ? [element("span", "gv-rating-owner", line.owner)]
+            : []),
           element("span", "gv-rating-change", line.change),
         );
         return item;

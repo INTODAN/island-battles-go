@@ -491,10 +491,16 @@ const noRatedBlockers = (): RatedBlockers => ({
   guests: [],
 });
 
-/** The default bot levels that the lobby's seats have, each once, in seat order. */
+/**
+ * The default bot levels that the lobby's seats have, each once, in seat order: on a team or
+ * not, as the server counts them.
+ */
 export function seatLevels(room: RoomModel): number[] {
   const levels: number[] = [];
-  for (const member of room.teams.flatMap((team) => team.members)) {
+  for (const member of [
+    ...room.teams.flatMap((team) => team.members),
+    ...room.unassigned,
+  ]) {
     if (
       member.kind === "seat" &&
       member.bot?.kind === "default" &&

@@ -451,7 +451,7 @@ describe("a rated lobby", () => {
   const named = (kind: string, name?: string, more = {}) => ({
     member_settings: { bot: { kind, ...more, ...(name ? { name } : {}) } },
   });
-  const seatOf = (id: string, teamId: string, settings: object) =>
+  const seatOf = (id: string, teamId: string | null, settings: object) =>
     member(id, teamId, { kind: "seat", ready: true, seat_settings: settings });
   /** A room for these members, seen by p1, who is the host; rated unless said otherwise. */
   const roomOf = (members: unknown[], rated = true, you = "p1") =>
@@ -592,6 +592,15 @@ describe("a rated lobby", () => {
         ]),
       ),
     ).toEqual([3, 1]);
+    // A seat on no team counts too, as the server counts it.
+    expect(
+      seatLevels(
+        roomOf([
+          seatOf("p2", "t-red", { bot_level: 3 }),
+          seatOf("p3", null, { bot_level: 2 }),
+        ]),
+      ),
+    ).toEqual([3, 2]);
   });
 });
 

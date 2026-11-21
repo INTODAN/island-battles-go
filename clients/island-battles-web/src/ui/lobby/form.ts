@@ -75,6 +75,25 @@ export const ratedHint =
 /** The Rated checkbox's line for a guest, who can't turn it on. */
 export const ratedGuestHint = "Sign in to host a rated lobby.";
 
+/**
+ * The Rated checkbox's state for a host: a signed-in host turns it on and off; a guest can't
+ * turn it on, but one who became the host of a rated lobby (the host role passes on when the
+ * host leaves) can turn it off.
+ */
+export function ratedField(
+  signedIn: boolean,
+  currentlyRated: boolean,
+): { disabled: boolean; hint: string } {
+  if (signedIn) return { disabled: false, hint: ratedHint };
+  return {
+    disabled: !currentlyRated,
+    hint: currentlyRated ? ratedGuestOffHint : ratedGuestHint,
+  };
+}
+/** The Rated checkbox's line for a guest who hosts a rated lobby: they may only turn it off. */
+export const ratedGuestOffHint =
+  "Only a signed-in host can turn Rated on. You can turn it off.";
+
 /** The game lengths the form offers, as `max_generations`: the most turns of a game. */
 export const gameLengths = [150, 300, 600, 1200];
 export const defaultGameLength = 300;
