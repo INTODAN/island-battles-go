@@ -24,7 +24,13 @@ standard library only. Each invocation gets a ``BotRunnerEvent``
 4. A worker that timed out or crashed is killed, and the next turn loads the
    package again.
 
-The submit URL must be on ``GAME_SUBMIT_HOST``. The worker gets no AWS
+At the end of a game (#413) the event has ``game_ended``, the bot's
+``GameEndedDelivery``, instead of ``delivery``. The runner loads the package
+if needed, writes ``{"game_ended": …}`` and waits at most ``play_seconds`` for
+``{"ended": true}``. It submits nothing: the outcome is ``ended``, or
+``unended`` with the reason, which is only logged.
+
+The submit URL, and a game end's demo link, must be on ``GAME_SUBMIT_HOST``. The worker gets no AWS
 credentials or other settings of the runner's: only a few plain variables.
 
 ``python runner.py --local …`` plays one turn of a local game instead
@@ -365,7 +371,28 @@ class Worker:
         ``BotAnswerError`` is a turn the bot failed, with the worker still
         running. ``BotFailure`` is a worker that failed; the caller kills it.
         """
-        request = (json.dumps({"turn": turn}, ensure_ascii=False, separators=(",", ":")) + "\n").encode()
+        answer, line = self._exchange("turn", turn, limit)
+        if not isinstance(answer.get("result"), dict):
+            raise BotFailure(f"broke the worker protocol: it wrote {first_characters(line)!r}")
+        return answer["result"]
+
+    def end_game(self, ended: Any, limit: float) -> None:
+        """Offer the end of the game and wait for ``{"ended": true}``; raise as ``play`` does.
+
+        A worker of an SDK that doesn't know the line answers an error, a
+        ``BotAnswerError``, which leaves it running.
+        """
+        answer, line = self._exchange("game_ended", ended, limit)
+        if answer.get("ended") is not True:
+            raise BotFailure(f"broke the worker protocol: it wrote {first_characters(line)!r}")
+
+    def _exchange(self, key: str, value: Any, limit: float) -> tuple[dict[str, Any], bytes]:
+        """Write ``{key: value}`` and read the one answer line, within ``limit`` seconds.
+
+        Returns the answer object and its line; raises ``BotAnswerError`` for
+        ``{"error": …}`` and ``BotFailure`` for a worker that failed.
+        """
+        request = (json.dumps({key: value}, ensure_ascii=False, separators=(",", ":")) + "\n").encode()
         # The write blocks while the worker doesn't read; killing it ends it.
         threading.Thread(target=self._write, args=(request,), daemon=True).start()
         try:
@@ -382,9 +409,9 @@ class Worker:
             answer = None
         if isinstance(answer, dict) and isinstance(answer.get("error"), str):
             raise BotAnswerError(answer["error"])
-        if not isinstance(answer, dict) or not isinstance(answer.get("result"), dict):
+        if not isinstance(answer, dict):
             raise BotFailure(f"broke the worker protocol: it wrote {first_characters(line)!r}")
-        return answer["result"]
+        return answer, line
 
     def _write(self, request: bytes) -> None:
         try:
@@ -444,9 +471,14 @@ class Runner:
         self._opener = urllib.request.build_opener(NoRedirects)
 
     def handle(self, event: Any, deadline: float) -> dict[str, Any]:
-        """Play the event's turn and submit it, or a pass; ``deadline`` is time.monotonic()."""
+        """Play the event's turn and submit it, or a pass, or offer the bot the
+        end of its game; ``deadline`` is time.monotonic()."""
+        if isinstance(event, dict) and event.get("game_ended") is not None:
+            if event.get("delivery") is not None:
+                raise EventError("the event has both a turn and the end of a game")
+            return self.end_game(event)
         if not isinstance(event, dict) or not isinstance(event.get("delivery"), dict):
-            raise EventError("the event has no delivery")
+            raise EventError("the event has neither a turn nor the end of a game")
         delivery = event["delivery"]
         submit = delivery.get("submit")
         if not isinstance(submit, dict):
@@ -457,15 +489,7 @@ class Runner:
             raise EventError("the delivery has no turn")
         if "hosted" in event:
             raise EventError("hosted bots are delivered by the native runner")
-        package, limits = event.get("package"), event.get("limits")
-        if not isinstance(package, dict):
-            raise EventError("the event has no package")
-        if (
-            not isinstance(limits, dict)
-            or not _positive(limits.get("load_seconds"))
-            or not _positive(limits.get("play_seconds"))
-        ):
-            raise EventError("a package's event needs positive limits.load_seconds and limits.play_seconds")
+        package, limits = package_and_limits(event)
         try:
             result = self.play(package, limits, turn)
         except BotFailure as failure:
@@ -480,22 +504,72 @@ class Runner:
             )
         return outcome("submitted", status, problem)
 
-    def play(self, package: dict[str, Any], limits: dict[str, Any], turn: Any) -> Any:
-        """The worker's result for the turn, loading the package first if needed."""
+    def end_game(self, event: dict[str, Any]) -> dict[str, Any]:
+        """Offer an uploaded bot the end of its game (#413), loading the package
+        first if needed. It submits nothing, and a bot that fails changes
+        nothing: the outcome only says what happened."""
+        ended = event["game_ended"]
+        if not isinstance(ended, dict):
+            raise EventError("the event's game_ended is not an object")
+        demo = ended.get("demo")
+        try:
+            check_submit_url(demo.get("url") if isinstance(demo, dict) else None, self.submit_host)
+        except EventError as error:
+            raise EventError(f"the demo link: {error}") from None
+        if not ended.get("game_id"):
+            raise EventError("the event's game_ended has no game")
+        if "hosted" in event:
+            raise EventError("hosted bots are delivered by the native runner")
+        package, limits = package_and_limits(event)
+        try:
+            worker = self.ensure_loaded(package, limits)
+        except LoadFailure as failure:
+            return self.end_failed(
+                ended, with_output(f"The uploaded bot could not be loaded: {failure.reason}", failure.stderr)
+            )
+        try:
+            worker.end_game(ended, float(limits["play_seconds"]))
+        except BotAnswerError as error:
+            return self.end_failed(ended, f"The uploaded bot failed at the end of its game: {error}")
+        except BotFailure as failure:
+            stderr = worker.stderr()
+            self.unload()
+            return self.end_failed(ended, with_output(f"The uploaded bot {failure} at the end of its game.", stderr))
+        return {"outcome": "ended"}
+
+    def end_failed(self, ended: dict[str, Any], reason: str) -> dict[str, Any]:
+        """The outcome of a bot that failed at the end of its game. It is only
+        logged: the game has ended, so there is no game log line to add it to."""
+        reason = truncate(reason)
+        log.warning("An uploaded bot failed at the end of its game: game %s: %s", ended.get("game_id"), reason)
+        return {"outcome": "unended", "reason": reason}
+
+    def ensure_loaded(self, package: dict[str, Any], limits: dict[str, Any]) -> Worker:
+        """The package's running worker, loading it within ``limits.load_seconds``
+        unless it is loaded already; raises ``LoadFailure``."""
         if self.loaded is not None and (self.loaded.package_id != package.get("id") or not self.loaded.running()):
             self.unload()
         if self.loaded is None:
             load_deadline = time.monotonic() + float(limits["load_seconds"])
             try:
                 self.loaded = self.load(package, load_deadline)
-            except LoadFailure as failure:
+            except LoadFailure:
                 self.unload()
-                raise BotFailure(
-                    with_output(
-                        f"The uploaded bot could not be loaded, so it passes this turn: {failure.reason}",
-                        failure.stderr,
-                    )
-                ) from None
+                raise
+        return self.loaded
+
+    def play(self, package: dict[str, Any], limits: dict[str, Any], turn: Any) -> Any:
+        """The worker's result for the turn, loading the package first if needed."""
+        try:
+            self.ensure_loaded(package, limits)
+        except LoadFailure as failure:
+            raise BotFailure(
+                with_output(
+                    f"The uploaded bot could not be loaded, so it passes this turn: {failure.reason}",
+                    failure.stderr,
+                )
+            ) from None
+        assert self.loaded is not None
         try:
             return self.loaded.play(turn, float(limits["play_seconds"]))
         except BotAnswerError as error:
@@ -679,6 +753,20 @@ class NoRedirects(urllib.request.HTTPRedirectHandler):
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001, ANN201, D102
         return None
+
+
+def package_and_limits(event: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The event's package and limits; refuse an event without them."""
+    package, limits = event.get("package"), event.get("limits")
+    if not isinstance(package, dict):
+        raise EventError("the event has no package")
+    if (
+        not isinstance(limits, dict)
+        or not _positive(limits.get("load_seconds"))
+        or not _positive(limits.get("play_seconds"))
+    ):
+        raise EventError("a package's event needs positive limits.load_seconds and limits.play_seconds")
+    return package, limits
 
 
 def _positive(value: object) -> bool:

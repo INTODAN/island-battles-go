@@ -9,9 +9,14 @@ talks JSON Lines over stdin and stdout (UTF-8):
    ``{"error": "<message>"}``.
 3. The result is checked as ``check`` and ``serve`` check it (memory size,
    commands, log lines), and the lines the bot logged become its ``logs``.
-4. The bot's own stdout goes to stderr, so prints never corrupt the protocol.
+4. When the game ends the runner writes one line
+   ``{"game_ended": <GameEndedDelivery>}`` (#413). The worker calls the bot's
+   ``game_ended`` function, if its module has one, and answers one line,
+   ``{"ended": true}`` or ``{"error": "<message>"}``. A bot without the
+   function answers ``{"ended": true}`` at once.
+5. The bot's own stdout goes to stderr, so prints never corrupt the protocol.
    Stderr is free text.
-5. The worker exits when stdin closes.
+6. The worker exits when stdin closes.
 
 The module is imported from ``sys.path`` as it is; a package's runner sets
 ``PYTHONPATH=<unpacked>/site``. A bot that fails to load makes the worker
@@ -33,8 +38,9 @@ from typing import IO
 
 from pydantic import ValidationError
 
-from ._generated import BotTurn
+from ._generated import BotTurn, GameEndedDelivery
 from .bot import Play, run_turn
+from .game_end import GameEnded, call_game_ended, module_game_ended
 from .game_log import ClientLogging
 
 
@@ -50,6 +56,11 @@ def import_play(spec: str) -> Play:
     return play
 
 
+def import_game_ended(spec: str) -> GameEnded | None:
+    """The ``game_ended`` function in the module of ``module:function``, or None."""
+    return module_game_ended(importlib.import_module(spec.partition(":")[0]))
+
+
 def send(protocol: IO[str], line: str) -> None:
     """Write one protocol line."""
     protocol.write(line + "\n")
@@ -61,14 +72,25 @@ def error_line(message: str) -> str:
     return json.dumps({"error": message}, ensure_ascii=False)
 
 
-async def answer(play: Play, line: str, client_logging: ClientLogging) -> str:
+async def answer(
+    play: Play,
+    line: str,
+    client_logging: ClientLogging,
+    game_ended: GameEnded | None = None,
+) -> str:
     """The protocol line that answers one request line."""
     try:
         request = json.loads(line)
     except ValueError as error:
         return error_line(f"the line is not JSON: {error}")
+    if isinstance(request, dict) and "game_ended" in request and "turn" not in request:
+        return await answer_game_ended(
+            game_ended, request["game_ended"], client_logging
+        )
     if not isinstance(request, dict) or "turn" not in request:
-        return error_line('the line must be an object like {"turn": ...}')
+        return error_line(
+            'the line must be an object like {"turn": ...} or {"game_ended": ...}'
+        )
     try:
         turn = BotTurn.model_validate(request["turn"])
     except ValidationError as error:
@@ -80,7 +102,30 @@ async def answer(play: Play, line: str, client_logging: ClientLogging) -> str:
     return '{"result": ' + result.model_dump_json(by_alias=True) + "}"
 
 
-def serve_lines(play: Play, requests: Iterable[str], protocol: IO[str]) -> None:
+async def answer_game_ended(
+    game_ended: GameEnded | None, data: object, client_logging: ClientLogging
+) -> str:
+    """The protocol line that answers ``{"game_ended": ...}``."""
+    try:
+        delivery = GameEndedDelivery.model_validate(data)
+    except ValidationError as error:
+        return error_line(f"the game_ended is not a GameEndedDelivery:\n{error}")
+    if game_ended is not None:
+        try:
+            # The game is over, so there is no game log to file lines in.
+            with client_logging.scope():
+                await call_game_ended(game_ended, delivery)
+        except Exception:  # noqa: BLE001 - reported to the runner
+            return error_line(traceback.format_exc())
+    return '{"ended": true}'
+
+
+def serve_lines(
+    play: Play,
+    requests: Iterable[str],
+    protocol: IO[str],
+    game_ended: GameEnded | None = None,
+) -> None:
     """Answer each request line until ``requests`` ends."""
     # The same log scope that serve gives a turn, with nothing printed.
     client_logging = ClientLogging(object(), logging.INFO, False, None)
@@ -90,7 +135,10 @@ def serve_lines(play: Play, requests: Iterable[str], protocol: IO[str]) -> None:
             for raw in requests:
                 line = raw.strip()
                 if line:
-                    send(protocol, runner.run(answer(play, line, client_logging)))
+                    send(
+                        protocol,
+                        runner.run(answer(play, line, client_logging, game_ended)),
+                    )
     finally:
         client_logging.detach()
 
@@ -113,6 +161,7 @@ def main(argv: list[str] | None = None) -> int:
     requests = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8")
     try:
         play = import_play(arguments[0])
+        game_ended = import_game_ended(arguments[0])
     except Exception:  # noqa: BLE001
         send(
             protocol,
@@ -120,7 +169,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
     send(protocol, '{"ready": true}')
-    serve_lines(play, requests, protocol)
+    serve_lines(play, requests, protocol, game_ended)
     return 0
 
 

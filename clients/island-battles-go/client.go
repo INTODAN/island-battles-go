@@ -25,7 +25,7 @@ import (
 // serially. The bot's result is the turn's one completing batch: its
 // commands, its game log lines and its memory, which the server stores for
 // the next Turn.Memory. When the game ends, the WithGameEnded callback runs
-// once and Wait and Run return. While the player waits for others to
+// once, then the WithGameEndedDelivery callback, and Wait and Run return. While the player waits for others to
 // complete a turn that has a deadline, the client asks the server to apply
 // the deadline a second after it, which ends the game when someone didn't
 // answer.
@@ -45,12 +45,14 @@ type Client struct {
 	lobbyID    string
 	play       Play
 	gameEnded  func(ctx context.Context, outcome GameOutcome, generation Generation)
-	http       *http.Client
-	dial       realtimeDialer
-	outputs    *logOutputs
-	logFile    string
-	sdkLog     *slog.Logger
-	timing     clientTiming
+	// gameEnd is the bot's game-end callback, or nil.
+	gameEnd GameEnd
+	http    *http.Client
+	dial    realtimeDialer
+	outputs *logOutputs
+	logFile string
+	sdkLog  *slog.Logger
+	timing  clientTiming
 
 	// ctx is cancelled by Close; the background work runs under it.
 	ctx    context.Context
@@ -132,7 +134,9 @@ type clientTiming struct {
 	deadlineRetryMax time.Duration
 	// closeTimeout is how long Close waits for the background work.
 	closeTimeout time.Duration
-	now          func() time.Time
+	// gameEndTimeout is how long the game-end callback may take.
+	gameEndTimeout time.Duration
+	now            func() time.Time
 }
 
 func defaultTiming() clientTiming {
@@ -146,6 +150,7 @@ func defaultTiming() clientTiming {
 		deadlineRetry:       2 * time.Second,
 		deadlineRetryMax:    30 * time.Second,
 		closeTimeout:        2 * time.Second,
+		gameEndTimeout:      GameEndTimeout,
 		now:                 time.Now,
 	}
 }
@@ -186,6 +191,18 @@ func WithLogOutput(writer io.Writer) ClientOption {
 // the final generation, which has no turn. Wait and Run return after it.
 func WithGameEnded(ended func(ctx context.Context, outcome GameOutcome, generation Generation)) ClientOption {
 	return func(client *Client) { client.gameEnded = ended }
+}
+
+// WithGameEndedDelivery gives the client the bot's game-end callback. When
+// the game ends, after the WithGameEnded callback, the client reads the end
+// as a GameEndedDelivery (GET /game/from-lobby/{lobby_id}/game-ended-delivery,
+// with its demo link) and calls gameEnd with it, for at most GameEndTimeout;
+// Wait and Run return after it. A failure to read the end, or an error of
+// gameEnd, is logged as a warning and never fails the client. A client whose
+// team resigned or left a real-time game stops before the game ends, without
+// calling gameEnd.
+func WithGameEndedDelivery(gameEnd GameEnd) ClientOption {
+	return func(client *Client) { client.gameEnd = gameEnd }
 }
 
 // URLs are where a client reaches Island Battles: Game, the game's site,
@@ -459,7 +476,8 @@ func (client *Client) Wait(ctx context.Context) error {
 // Close stops the client without completing an open turn: it cancels the
 // bot's ctx and the requests in flight, disconnects and closes the log file.
 // It waits up to 2 s, or until ctx is done, for the background work to end.
-// Don't call it from the WithGameEnded callback, which Close would wait for.
+// Don't call it from the WithGameEnded or WithGameEndedDelivery callback,
+// which Close would wait for.
 func (client *Client) Close(ctx context.Context) error {
 	client.closeOnce.Do(func() {
 		client.mutex.Lock()
@@ -946,6 +964,9 @@ func (client *Client) turnWorker() error {
 			if client.gameEnded != nil {
 				client.gameEnded(client.ctx, *state.Outcome, state.Generation)
 			}
+			if client.gameEnd != nil {
+				client.deliverGameEnd()
+			}
 			client.stop()
 			return nil
 		}
@@ -974,6 +995,30 @@ func (client *Client) turnWorker() error {
 		if err != nil {
 			return err
 		}
+	}
+}
+
+// deliverGameEnd reads the game's end as a GameEndedDelivery and calls the
+// bot's game-end callback with it. A failure is logged, and never fails the
+// client.
+func (client *Client) deliverGameEnd() {
+	// authorized, not request: a refused player token here must not fail
+	// the client.
+	data, err := client.authorized(client.ctx, http.MethodGet, "/game/from-lobby/"+client.lobbyID+"/game-ended-delivery", nil, true)
+	var ended GameEndedDelivery
+	if err == nil {
+		if ended, err = DecodeGameEndedDelivery(data); err != nil {
+			err = protocolError("invalid game-ended delivery", err)
+		}
+	}
+	if err != nil {
+		if !client.isClosed() {
+			client.sdkLog.Warn("could not read the game's end for the bot's game-end callback: " + err.Error())
+		}
+		return
+	}
+	if err := runGameEnd(client.ctx, client.gameEnd, ended, client.outputs, client.timing.gameEndTimeout); err != nil && !client.isClosed() {
+		client.sdkLog.Warn("the bot's game-end callback failed: " + err.Error())
 	}
 }
 

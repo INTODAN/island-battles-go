@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 import {
   BotError,
   checkBotHealth,
+  deliverGameEnded,
   deliverTurn,
+  type GameEndedDelivery,
   type TurnDelivery,
 } from "./localhost";
 
@@ -100,5 +102,66 @@ describe("the localhost bot", () => {
         }) as unknown as typeof fetch,
       }),
     ).toBe(false);
+  });
+});
+
+const ended = {
+  game_id: 5,
+  team_color: 1,
+  turn_number: 91,
+  outcome: {
+    reason: "last_team_standing",
+    winner_team_color: 1,
+    summary: "Red wins",
+  },
+  generation: { id: 92, castles: [], soldier_groups: [], clashes: [] },
+  memory: null,
+  demo: {
+    url: "https://island-battles.example.org/game/5/demo?token=ibdt1.x",
+    expires_at: "2026-11-28T12:00:00Z",
+  },
+} as unknown as GameEndedDelivery;
+
+describe("the end of the game, to the localhost bot", () => {
+  test("posts the delivery as JSON to 127.0.0.1:<port>/game-ended and takes any 2xx", async () => {
+    const seen: { url: string; init: RequestInit | undefined }[] = [];
+    const answering = (status: number) =>
+      (async (url: string, init?: RequestInit) => {
+        seen.push({ url, init });
+        return new Response('{"accepted": true}', { status });
+      }) as unknown as typeof fetch;
+    await deliverGameEnded(ended, { fetch: answering(202) });
+    await deliverGameEnded(ended, { port: 41415, fetch: answering(200) });
+    expect(seen.map((call) => call.url)).toEqual([
+      "http://127.0.0.1:41414/game-ended",
+      "http://127.0.0.1:41415/game-ended",
+    ]);
+    expect(seen[0]?.init?.method).toBe("POST");
+    expect(seen[0]?.init?.headers).toEqual({
+      "Content-Type": "application/json",
+    });
+    expect(JSON.parse(String(seen[0]?.init?.body))).toEqual(ended);
+  });
+
+  test("rejects with a BotError when the bot is not running, too slow, or an older SDK's 404", async () => {
+    const failed = (doFetch: typeof fetch) =>
+      deliverGameEnded(ended, { fetch: doFetch }).then(
+        () => undefined,
+        (error: unknown) => error as BotError,
+      );
+    const down = await failed((async () => {
+      throw new TypeError("Failed to fetch");
+    }) as unknown as typeof fetch);
+    expect(down).toBeInstanceOf(BotError);
+    expect(down?.kind).toBe("unreachable");
+    const slow = await failed((async () => {
+      throw new DOMException("timed out", "TimeoutError");
+    }) as unknown as typeof fetch);
+    expect(slow?.kind).toBe("too-slow");
+    const old = await failed(reply("404 page not found", 404));
+    expect(old?.kind).toBe("refused");
+    expect(old?.message).toBe(
+      "Your bot refused the end of the game (HTTP 404).",
+    );
   });
 });

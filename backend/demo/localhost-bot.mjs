@@ -4,7 +4,9 @@
 // running. This is the same protocol as the 3D web client's relay: the page
 // reads the player's TurnDelivery from the server and POSTs it to the bot,
 // which answers 202 and submits its commands itself with the delivery's
-// one-turn submit token. The page never submits the bot's commands.
+// one-turn submit token. The page never submits the bot's commands. Once the
+// game has an outcome, the page also reads the bot's GameEndedDelivery and
+// POSTs it to the bot's /game-ended, once per game; nothing waits for it.
 //
 // A localhost bot listens on a port of 127.0.0.1: the Island Battles bot
 // port, 41414, unless the player chose another. The host can also seat
@@ -111,4 +113,28 @@ export async function deliverTurn(delivery, { port = defaultBotPort, fetch = glo
     throw new BotError("refused", `Your bot did not understand the turn: its SDK is older than the game. Upgrade it and restart the bot: uv sync --upgrade-package island-battles-python in the bot's folder (or go get github.com/INTODAN/island-battles-go/clients/island-battles-go@latest for the Go SDK).${said}`);
   }
   throw new BotError("refused", `Your bot refused the turn (HTTP ${response.status}).${said}`);
+}
+
+// deliverGameEnded posts a GameEndedDelivery, as
+// GET /game/from-lobby/{lobby_id}/game-ended-delivery returned it, to the
+// localhost bot on port, at POST /game-ended, and resolves once the bot has
+// answered with a 2xx (`island-battles-bot serve` answers 202 and runs the
+// bot's game-end callback by itself). The game needs nothing from the answer,
+// so a caller ignores a failure; an SDK older than game-ended deliveries
+// answers 404. It rejects with a BotError.
+export async function deliverGameEnded(delivery, { port = defaultBotPort, fetch = globalThis.fetch, timeoutMs = 5000 } = {}) {
+  let response;
+  try {
+    response = await fetch(`${localhostBotOrigin(port)}/game-ended`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(delivery),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (error) {
+    if (error?.name === "TimeoutError") throw new BotError("too-slow", `The bot on port ${port} did not accept the end of the game in time.`);
+    throw new BotError("unreachable", `Your bot is not reachable on 127.0.0.1:${port}.`);
+  }
+  if (response.ok) return;
+  throw new BotError("refused", `Your bot refused the end of the game (HTTP ${response.status}).`);
 }

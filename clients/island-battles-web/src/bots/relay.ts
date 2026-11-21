@@ -1,6 +1,11 @@
 import { ApiError } from "../api/errors";
 import { createStore, type ReadableStore } from "../realtime/store";
-import { BotError, type GenerationState, type TurnDelivery } from "./localhost";
+import {
+  BotError,
+  type GameEndedDelivery,
+  type GenerationState,
+  type TurnDelivery,
+} from "./localhost";
 
 /** What the relay is doing, for the game view to show. */
 export type RelayStatus =
@@ -31,6 +36,15 @@ export interface RelayDeps {
   loadDelivery(): Promise<TurnDelivery>;
   /** Posts a delivery to the localhost bot, which answers `202`. Rejects with `BotError`. */
   deliver(delivery: TurnDelivery): Promise<void>;
+  /**
+   * Reads the end of the game for the bot, `GET /game/from-lobby/{lobby_id}/game-ended-delivery`:
+   * the outcome, the final generation, the bot's last memory and a link to the demo. Rejects with
+   * `ApiError` (409 while the game runs). Without it, and `deliverGameEnded`, the relay doesn't
+   * tell the bot that the game ended.
+   */
+  loadGameEnded?(): Promise<GameEndedDelivery>;
+  /** Posts the end of the game to the localhost bot, at `POST /game-ended`. Rejects with `BotError`. */
+  deliverGameEnded?(delivery: GameEndedDelivery): Promise<void>;
   /** `POST /game/from-lobby/{lobby_id}/deadline`. */
   applyDeadline(): Promise<void>;
   /** Epoch milliseconds. */
@@ -91,8 +105,11 @@ const turnKey = (state: GenerationState) =>
  * the delivery's submit token. The relay never submits commands. A player
  * with a default bot gets nothing, since the backend plays it. The relay also
  * asks the server to apply a turn's deadline once it passes while other
- * players have yet to answer. It has no DOM imports, so another client can
- * reuse it.
+ * players have yet to answer. Once the game has an outcome, it reads the
+ * bot's game-ended delivery and posts it to the bot, once per game; nothing
+ * waits for that, and a failure (the bot is not running, or its SDK is older
+ * and answers 404) is only logged. It has no DOM imports, so another client
+ * can reuse it.
  */
 export function createBotRelay(deps: RelayDeps): BotRelay {
   const status = createStore<RelayStatus>({ kind: "idle" });
@@ -103,6 +120,8 @@ export function createBotRelay(deps: RelayDeps): BotRelay {
   let held: string | undefined;
   let run = 0;
   let cancels = new Set<() => void>();
+  /** The games whose end was sent to the bot, or is being sent. */
+  const endsSent = new Set<number>();
 
   function reset(): void {
     run++;
@@ -208,12 +227,35 @@ export function createBotRelay(deps: RelayDeps): BotRelay {
     waitForOthers(state);
   }
 
+  /**
+   * Tells the bot that the game ended, once per game: reads its game-ended delivery and posts it.
+   * Any failure is only logged; nothing is shown, retried or waited for.
+   */
+  async function sendGameEnded(state: GenerationState): Promise<void> {
+    const { loadGameEnded, deliverGameEnded } = deps;
+    if (!loadGameEnded || !deliverGameEnded) return;
+    if (!seat && state.bot.kind !== "localhost") return;
+    if (endsSent.has(state.game_id)) return;
+    endsSent.add(state.game_id);
+    try {
+      const delivery = await loadGameEnded();
+      if (disposed || delivery.game_id !== state.game_id) return;
+      await deliverGameEnded(delivery);
+    } catch (error) {
+      console.debug(
+        "The end of the game was not sent to the localhost bot:",
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+
   function handle(state: GenerationState | null): void {
     if (disposed) return;
     if (state === null || state.outcome) {
       held = undefined;
       reset();
       status.set({ kind: "idle" });
+      if (state?.outcome) void sendGameEnded(state);
       return;
     }
     const key = turnKey(state);

@@ -152,8 +152,8 @@ func (handler *LobbyGame) GameDemo(ctx context.Context, input *GameDemoRequest) 
 	defer handler.runRetention(ctx)
 	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher, Bots: handler.Bots}
 	token := input.Token
-	if token == "" {
-		token, _ = demotoken.FromAuthorization(input.Authorization)
+	if bearer, found := demotoken.FromAuthorization(input.Authorization); token == "" && found {
+		token = bearer
 	}
 	var principal domain.Principal
 	var err error

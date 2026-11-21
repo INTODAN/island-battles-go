@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BotError, checkBotHealth, deliverTurn, localhostBotOrigin, nextFreePort, parseBotPort, portProblem, serveCommandFor } from "./localhost-bot.mjs";
+import { BotError, checkBotHealth, deliverGameEnded, deliverTurn, localhostBotOrigin, nextFreePort, parseBotPort, portProblem, serveCommandFor } from "./localhost-bot.mjs";
 
 const delivery = { turn: { game_id: 1 }, submit: { url: "http://localhost:8888/generation/commands", token: "ibst1.x", deadline_at: null } };
 
@@ -71,4 +71,33 @@ test("the serve command names the port unless it is the default one", () => {
   assert.equal(serveCommandFor(), "uv run island-battles-bot serve bot:play");
   assert.equal(serveCommandFor(41414), "uv run island-battles-bot serve bot:play");
   assert.equal(serveCommandFor(41415), "uv run island-battles-bot serve bot:play --port 41415");
+});
+
+const ended = {
+  game_id: 7, team_color: 1, turn_number: 91,
+  outcome: { reason: "last_team_standing", winner_team_color: 1, summary: "Red wins", departures: [] },
+  generation: { id: 92, castles: [], soldier_groups: [] }, memory: null,
+  demo: { url: "https://island-battles.example.org/game/7/demo?token=ibdt1.x", expires_at: "2026-11-28T12:00:00Z" },
+};
+
+test("the end of the game is posted as JSON to the bot's /game-ended, on its port, and any 2xx accepts it", async () => {
+  const calls = [];
+  const answering = (status) => async (url, init) => { calls.push({ url, init }); return new Response('{"accepted": true}', { status }); };
+  assert.equal(await deliverGameEnded(ended, { fetch: answering(202) }), undefined);
+  await deliverGameEnded(ended, { port: 41415, fetch: answering(200) });
+  assert.deepEqual(calls.map((call) => call.url), ["http://127.0.0.1:41414/game-ended", "http://127.0.0.1:41415/game-ended"]);
+  assert.equal(calls[0].init.method, "POST");
+  assert.equal(calls[0].init.headers["Content-Type"], "application/json");
+  assert.deepEqual(JSON.parse(calls[0].init.body), ended);
+});
+
+test("a bot that isn't running, is too slow, or is older and answers 404 rejects the end of the game with a BotError", async () => {
+  const failure = async (fetch) => deliverGameEnded(ended, { fetch }).then(() => null, (error) => error);
+  const down = await failure(async () => { throw new TypeError("Failed to fetch"); });
+  assert.ok(down instanceof BotError);
+  assert.equal(down.kind, "unreachable");
+  assert.equal((await failure(async () => { throw new DOMException("timed out", "TimeoutError"); })).kind, "too-slow");
+  const old = await failure(async () => new Response("404 page not found", { status: 404 }));
+  assert.equal(old.kind, "refused");
+  assert.equal(old.message, "Your bot refused the end of the game (HTTP 404).");
 });

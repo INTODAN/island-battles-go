@@ -1,4 +1,4 @@
-import { BotError, defaultBotPort, deliverTurn } from "./localhost-bot.mjs";
+import { BotError, defaultBotPort, deliverGameEnded, deliverTurn } from "./localhost-bot.mjs";
 
 // Castles and soldiers with this color belong to no player team.
 export const NEUTRAL_TEAM_COLOR = 0;
@@ -38,7 +38,10 @@ const BOT_RETRY_MS = 2000;
 // for them. A player also relays the localhost bot seats that they added as
 // the host, GenerationState.relayed_bots, each to its own port (seat
 // relays, below). In both, a player that isn't playing a turn, or whose bot
-// has the turn, asks the server to apply its deadline.
+// has the turn, asks the server to apply its deadline. Once the game has an
+// outcome, it tells each of those localhost bots, its own and the seats', that
+// the game ended: it reads the bot's game-ended delivery and posts it to the
+// bot's /game-ended, once per bot per game, and ignores any failure.
 //
 // A lobby plays one game per round, and the lobby page makes a player for each
 // round, with lobbyRound. The player takes only the states of that round's
@@ -61,9 +64,9 @@ export function serverBotStatus(bot) {
 export class ExamplePlayer {
   constructor({ lobbyID, lobbyRound = null, playerID, subscription, enabled = true, demo = true, pending = null, savePending = () => {},
     onState = () => {}, onStatus = () => {}, retryDelay = 500, botRetryDelay = BOT_RETRY_MS, deliver = (delivery, port) => deliverTurn(delivery, { port }),
-    fetcher = (...args) => globalThis.fetch(...args), now = () => Date.now() }) {
+    deliverEnd = (delivery, port) => deliverGameEnded(delivery, { port }), fetcher = (...args) => globalThis.fetch(...args), now = () => Date.now() }) {
     Object.assign(this, { lobbyID, lobbyRound, playerID, subscription, enabled, demo, pending, savePending, onState, onStatus, retryDelay,
-      botRetryDelay, deliver, fetcher, now });
+      botRetryDelay, deliver, deliverEnd, fetcher, now });
     // The generation whose turn the localhost bot failed to accept.
     this.failed = null;
     // The generation whose turn the localhost bot has, or that has nothing
@@ -81,6 +84,9 @@ export class ExamplePlayer {
     // localhost bot seats that the player relays, by the seat's player ID.
     this.own = null;
     this.seats = new Map();
+    // The localhost bots told that their game ended, or being told, by
+    // "game:player" ("game:" for the player's own bot).
+    this.endsSent = new Set();
     this.commandRetry = null;
     this.commandFailures = 0;
     this.state = null;
@@ -148,6 +154,7 @@ export class ExamplePlayer {
     this.scheduleDeadline();
     this.scheduleTurn();
     this.relaySeats();
+    this.relayGameEnded();
   }
 
   // Reports the player's own status, with a line for each localhost bot
@@ -256,6 +263,36 @@ export class ExamplePlayer {
       // relaySeats skipped this seat while its delivery was in flight, so a
       // turn that arrived meanwhile is sent now.
       if (!this.stopped) this.relaySeats();
+    }
+  }
+
+  // Once the game has an outcome, tells the player's own localhost bot and
+  // each localhost bot seat that they relay that the game ended, whatever
+  // became of their teams: reads each one's game-ended delivery (a seat's
+  // with player_id) and posts it to the bot's port. Each bot is told once per
+  // game, and nothing waits for it: a bot that isn't running, an older SDK
+  // that answers 404, or a failed read is only logged.
+  relayGameEnded() {
+    const state = this.state;
+    if (this.demo || this.stopped || !state?.outcome) return;
+    const bots = (state.relayed_bots ?? []).map((bot) => ({ playerID: bot.player_id, port: bot.port }));
+    if (state.bot?.kind === "localhost") bots.unshift({ playerID: null, port: state.bot.port ?? defaultBotPort });
+    for (const { playerID, port } of bots) {
+      const key = `${state.game_id}:${playerID ?? ""}`;
+      if (this.endsSent.has(key)) continue;
+      this.endsSent.add(key);
+      void this.sendGameEnded(state.game_id, playerID, port);
+    }
+  }
+
+  async sendGameEnded(gameID, playerID, port) {
+    const query = playerID === null ? "" : `?player_id=${encodeURIComponent(playerID)}`;
+    try {
+      const delivery = await this.request(`/game/from-lobby/${encodeURIComponent(this.lobbyID)}/game-ended-delivery${query}`);
+      if (this.stopped || delivery.game_id !== gameID) return;
+      await this.deliverEnd(delivery, port);
+    } catch (error) {
+      if (!this.stopped) console.debug(`The end of the game was not sent to the localhost bot on port ${port}:`, error?.message ?? error);
     }
   }
 

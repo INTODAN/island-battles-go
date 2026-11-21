@@ -34,15 +34,23 @@ async function until(predicate) {
 
 // A player whose deliveries are answered by bot(delivery, port), and whose
 // turn deliveries name the player that the request asked for.
-function host(context, { bot = async () => {}, read = null } = {}) {
+function host(context, { bot = async () => {}, read = null, endBot = async () => {} } = {}) {
   const reads = [];
   const deliveries = [];
+  const endReads = [];
+  const ends = [];
   const statuses = [];
   const player = new ExamplePlayer({
     lobbyID: "room", playerID: "host", subscription: new Subscription(), demo: false, botRetryDelay: 20, retryDelay: 20,
     onStatus: (title, detail) => statuses.push({ title, detail }),
     deliver: async (delivery, port) => { deliveries.push({ player: delivery.player, port }); return bot(delivery, port); },
+    deliverEnd: async (delivery, port) => { ends.push({ player: delivery.player, port }); return endBot(delivery, port); },
     fetcher: async (url) => {
+      if (url.includes("/game-ended-delivery")) {
+        const seat = new URL(url, "http://game.test").searchParams.get("player_id");
+        endReads.push(seat);
+        return { ok: true, status: 200, json: async () => ({ player: seat ?? "host", game_id: player.state.game_id, outcome: player.state.outcome }) };
+      }
       if (url.includes("/turn-delivery")) {
         const seat = new URL(url, "http://game.test").searchParams.get("player_id");
         reads.push(seat);
@@ -54,7 +62,7 @@ function host(context, { bot = async () => {}, read = null } = {}) {
     },
   });
   context.after(() => player.stop());
-  return { player, reads, deliveries, statuses };
+  return { player, reads, deliveries, endReads, ends, statuses };
 }
 
 const byPlayer = (deliveries) => Object.fromEntries(deliveries.map((delivery) => [delivery.player, delivery.port]));
@@ -148,4 +156,35 @@ test("a player without seats relays none", async (context) => {
   await delay(30);
   assert.deepEqual(reads, []);
   assert.deepEqual(statuses, []);
+});
+
+const OUTCOME = { reason: "generation_cap", winner_team_color: null, summary: "A draw" };
+
+test("at the end, the host tells their own bot and each relayed seat's bot, each on its own port, once", async (context) => {
+  const { player, endReads, ends, statuses } = host(context);
+  player.receive(stateOf());
+  await until(() => player.seats.size === 2 && [...player.seats.values()].every((seat) => seat.done === "1:1"));
+  player.receive(stateOf({ generation_id: 2, outcome: OUTCOME }));
+  await until(() => ends.length === 3);
+  assert.deepEqual(endReads.sort(), ["seat-a", "seat-b", null].sort());
+  assert.deepEqual(byPlayer(ends), { host: 41414, "seat-a": 41415, "seat-b": 41416 });
+  assert.match(statuses.at(-1).detail, /Localhost bot \(port 41415\): game over\./);
+  player.receive(stateOf({ generation_id: 2, outcome: OUTCOME }));
+  await delay(30);
+  assert.equal(ends.length, 3);
+});
+
+test("a host whose own bot the backend plays tells only the seats' bots; a seat whose bot is down changes nothing for the others", async (context) => {
+  const debug = context.mock.method(console, "debug", () => {});
+  const { player, ends, statuses } = host(context, {
+    endBot: async (delivery, port) => {
+      if (port === 41415) throw new BotError("unreachable", "Your bot is not reachable on 127.0.0.1:41415.");
+    },
+  });
+  player.receive(stateOf({ bot: { kind: "default", level: 2 }, outcome: OUTCOME }));
+  await until(() => ends.length === 2 && debug.mock.callCount() === 1);
+  assert.deepEqual(byPlayer(ends), { "seat-a": 41415, "seat-b": 41416 });
+  await delay(40);
+  assert.equal(ends.length, 2, "a failed one is not asked again");
+  assert.match(statuses.at(-1).detail, /Localhost bot \(port 41415\): game over\./);
 });
