@@ -280,6 +280,71 @@ func TestARatedGameThatEndsByTheTurnLimitIsRated(t *testing.T) {
 	fixture.assertRated(t, []float64{1520, 1480}, []models.RatingResult{models.RatingWin, models.RatingLoss}, []int{40, 40})
 }
 
+// A three-team game ends at the turn limit: Red missed it, and Blue and
+// Green tie on castles. Red loses to each survivor, and they draw each
+// other. Each pair weighs 40 / 2 = 20: Red loses 20 × 0.5 to Blue and to
+// Green, 1480, and Blue and Green each gain 20 × 0.5 from Red and nothing
+// from each other, 1510.
+func TestARatedDrawLosesATeamThatTimedOutToEachSurvivor(t *testing.T) {
+	fixture := newRatedFixture(t, mapSettings("30", 1, 2, 3), true, 3)
+	alex, kim := fixture.players[0][0], fixture.players[2][0]
+	fixture.complete(t, alex)
+	fixture.complete(t, kim)
+	*fixture.clock = fixture.deadline(t).Add(time.Second)
+	state := fixture.applyDeadline(t, alex)
+	want := fixture.ratingChanges(1510, 1480, 1510)
+	if state.Outcome == nil || state.Outcome.Reason != models.GameOutcomeTurnTimeout || state.Outcome.WinnerTeamColor != nil || !reflect.DeepEqual(state.Outcome.Ratings, want) {
+		t.Fatalf("outcome = %+v, want Red to lose by the turn limit and Blue and Green to draw, with ratings %+v", state.Outcome, want)
+	}
+	if saved := fixture.savedOutcome(t); !reflect.DeepEqual(saved.Survivors, []uint{1, 3}) {
+		t.Fatalf("survivors = %v, want Blue and Green", saved.Survivors)
+	}
+	fixture.assertRated(t, []float64{1510, 1480, 1510}, []models.RatingResult{models.RatingDraw, models.RatingLoss, models.RatingDraw}, []int{40, 40, 40})
+}
+
+// A three-team game where every team missed the turn limit has no survivor:
+// every pair draws, so new competitors keep 1500 and each counts a draw.
+func TestARatedGameWithoutASurvivorIsADrawForEveryTeam(t *testing.T) {
+	fixture := newRatedFixture(t, mapSettings("30", 1, 2, 3), true, 3)
+	*fixture.clock = fixture.deadline(t).Add(time.Second)
+	state := fixture.applyDeadline(t, fixture.players[0][0])
+	want := fixture.ratingChanges(1500, 1500, 1500)
+	if state.Outcome == nil || state.Outcome.Reason != models.GameOutcomeTurnTimeout || state.Outcome.WinnerTeamColor != nil || !reflect.DeepEqual(state.Outcome.Ratings, want) {
+		t.Fatalf("outcome = %+v, want a draw with ratings %+v", state.Outcome, want)
+	}
+	if saved := fixture.savedOutcome(t); len(saved.TimedOut) != 3 || len(saved.Survivors) != 0 {
+		t.Fatalf("outcome = %+v, want every team to time out", saved)
+	}
+	fixture.assertRated(t, []float64{1500, 1500, 1500}, []models.RatingResult{models.RatingDraw, models.RatingDraw, models.RatingDraw}, []int{40, 40, 40})
+}
+
+// A team eliminated before a draw at the generation cap loses to each
+// survivor too: Red's castle is neutral when the last turn plays, and Blue
+// and Green tie on one castle each, 1510, 1480 and 1510 as above.
+func TestARatedDrawAtTheCapLosesAnEliminatedTeamToEachSurvivor(t *testing.T) {
+	fixture := newRatedFixture(t, capSettings(1, 2, 3), true, 3)
+	generation, err := dal.GetLatestGenerationForGame(fixture.database, fixture.states[fixture.players[0][0].PlayerID].GameID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, castle := range generation.Map.Castles {
+		if castle.TeamColor == red {
+			if err := fixture.database.Model(&models.Castle{Model: gorm.Model{ID: castle.ID}}).Select("TeamColor").Updates(&models.Castle{CastleFields: models.CastleFields{TeamColor: models.NeutralTeamColor}}).Error; err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	state := fixture.playFirstTurn(t)
+	want := fixture.ratingChanges(1510, 1480, 1510)
+	if state.Outcome.Reason != models.GameOutcomeGenerationCap || state.Outcome.WinnerTeamColor != nil || !reflect.DeepEqual(state.Outcome.Ratings, want) {
+		t.Fatalf("outcome = %+v, want Blue and Green to draw, with ratings %+v", state.Outcome, want)
+	}
+	if saved := fixture.savedOutcome(t); !reflect.DeepEqual(saved.Survivors, []uint{1, 3}) {
+		t.Fatalf("survivors = %v, want Blue and Green", saved.Survivors)
+	}
+	fixture.assertRated(t, []float64{1510, 1480, 1510}, []models.RatingResult{models.RatingDraw, models.RatingLoss, models.RatingDraw}, []int{40, 40, 40})
+}
+
 // An unrated game writes no history row, changes no rating, and its
 // outcome has no ratings.
 func TestAnUnratedGameChangesNoRating(t *testing.T) {

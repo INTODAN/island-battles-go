@@ -19,7 +19,9 @@ import (
 // A game that isn't rated changes nothing. Otherwise it locks the players'
 // competitors in the order of their IDs, soft-deleted ones too, so two games
 // that end at once can't deadlock; works out each team's change with the Elo
-// rule (backend/rating) from the ratings before the game; stores each
+// rule (backend/rating) from the ratings before the game, in which a game
+// without a winner is a draw between the outcome's survivors and a loss to
+// each of them for every other team; stores each
 // competitor's new rating, its rated games and its win, draw or loss; and
 // adds a history row for each, whose unique pair of game and competitor
 // refuses to rate a game twice. Any error fails the transaction, so the
@@ -67,7 +69,8 @@ func rateGame(transaction *gorm.DB, game *models.Game, players []models.FrozenGa
 
 	before := make([]rating.Team, len(teams))
 	for index, competitorID := range competitorIDs {
-		before[index] = rating.Team{Rating: competitors[competitorID].Rating, Games: competitors[competitorID].Games}
+		before[index] = rating.Team{Rating: competitors[competitorID].Rating, Games: competitors[competitorID].Games,
+			Survived: slices.Contains(outcome.Survivors, teams[index].TeamColor)}
 	}
 	changes := rating.Changes(before, winner)
 	endedAt := time.Now()
@@ -76,7 +79,7 @@ func rateGame(transaction *gorm.DB, game *models.Game, players []models.FrozenGa
 	ratings := make([]models.RatingChange, 0, len(teams))
 	for index, player := range teams {
 		competitor := competitors[competitorIDs[index]]
-		result := ratingResult(index, winner)
+		result := ratingResult(before, index, winner)
 		event := models.RatingEvent{GameID: game.ID, CompetitorID: competitor.ID, Result: result, RatingBefore: competitor.Rating,
 			RatingAfter: competitor.Rating + changes[index], K: rating.K(competitor.Games), Opponents: []models.RatingOpponent{}, EndedAt: endedAt}
 		for other, opponentID := range competitorIDs {
@@ -113,13 +116,15 @@ func rateGame(transaction *gorm.DB, game *models.Game, players []models.FrozenGa
 	return nil
 }
 
-// ratingResult is the result of the team at index, with the index of the
-// winning team, or nil for a draw.
-func ratingResult(index int, winner *int) models.RatingResult {
+// ratingResult is the result of the team at index of teams, with the index
+// of the winning team, or nil for a game without a winner: then a survivor
+// drew and a team that dropped out lost, unless no team survived, which is a
+// draw for every team.
+func ratingResult(teams []rating.Team, index int, winner *int) models.RatingResult {
 	switch {
-	case winner == nil:
+	case winner == nil && (teams[index].Survived || !rating.AnySurvived(teams)):
 		return models.RatingDraw
-	case *winner == index:
+	case winner != nil && *winner == index:
 		return models.RatingWin
 	}
 	return models.RatingLoss
