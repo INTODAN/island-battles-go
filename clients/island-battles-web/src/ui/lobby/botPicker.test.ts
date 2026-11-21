@@ -137,7 +137,11 @@ describe("a bot from the leaderboard", () => {
   test("lists every listed bot but your own names, which it offers by name", () => {
     expect(
       pickableListedBots(listed, [
-        { name: "Kraken", url: "https://kraken.example.org/bot", id: "c-kraken" },
+        {
+          name: "Kraken",
+          url: "https://kraken.example.org/bot",
+          id: "c-kraken",
+        },
       ]),
     ).toEqual([{ competitorId: "c-eel", name: "Eel", owner: "Sam" }]);
     expect(pickableListedBots(listed, null)).toEqual(listed);

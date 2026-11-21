@@ -1145,7 +1145,7 @@ export interface components {
             outcome?: components["schemas"]["GameOutcome"];
             /** Format: uuid */
             player_id: string;
-            /** @description Whether the game is rated: its lobby's rated setting at the start. Every team of a rated game is played by a competitor, a signed-in player's hand play or bot name or a house bot, and bot.name names a player's bot name. */
+            /** @description Whether the game is rated: its lobby's rated setting at the start. Every team of a rated game is played by a competitor, a signed-in player's hand play or bot name, a bot from the leaderboard or a house bot, and bot.name names the bot name that plays. */
             rated: boolean;
             /** @description The localhost bot seats that you added to the lobby as its host, which only you relay: your client reads each one's turn with GET /game/from-lobby/{lobby_id}/turn-delivery?player_id= and delivers it to 127.0.0.1 on the seat's port, as it does for your own localhost bot. Empty for everyone else. */
             relayed_bots: components["schemas"]["RelayedBot"][];
@@ -1343,7 +1343,7 @@ export interface components {
              */
             max_generations: number;
             /**
-             * @description Whether the game is rated, false when left out. A rated lobby starts only when every member is signed in and plays by hand or with one of their bot names, no two teams belong to one account, and every bot seat is a default bot level, each level once. The game then records the competitor of each team, and its end changes their Elo ratings.
+             * @description Whether the game is rated, false when left out. A rated lobby starts only when every member is signed in and plays by hand, with one of their bot names or with a bot from the leaderboard, no two teams belong to one account, every bot seat is a default bot level, each level once, or a bot from the leaderboard, each once, and the bots that play away have rated games left today. The game then records the competitor of each team, and its end changes their Elo ratings.
              * @default false
              */
             rated: boolean;

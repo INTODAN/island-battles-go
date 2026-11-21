@@ -101,7 +101,8 @@ export function ratedChoiceValue(
   names: readonly BotName[] | null,
 ): string {
   if (chosen?.kind === "manual") return "manual";
-  if (chosen?.kind === "hosted" && chosen.competitor_id) return leaderboardValue;
+  if (chosen?.kind === "hosted" && chosen.competitor_id)
+    return leaderboardValue;
   if (chosen?.kind !== "hosted" || !chosen.name) return "";
   const found = findBotName(names ?? [], chosen.name);
   return found ? botNameValue(found.name) : "";

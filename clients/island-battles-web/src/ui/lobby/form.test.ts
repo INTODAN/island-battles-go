@@ -94,7 +94,7 @@ describe("the Rated setting", () => {
 
   test("says what rated means, and why a guest can't turn it on", () => {
     expect(ratedHint).toBe(
-      "Rated games count for the leaderboard. Everyone signs in, and plays by hand or with one of their bot names.",
+      "Rated games count for the leaderboard. Everyone signs in, and plays by hand, with one of their bot names or with a bot from the leaderboard.",
     );
     expect(ratedGuestHint).toBe("Sign in to host a rated lobby.");
   });

@@ -291,9 +291,9 @@ describe("the account service", () => {
     expect(resumed).toMatchObject({ id: "id-Kraken", name: "Kraken" });
     expect(resumed.away_paused).toBeUndefined();
     expect((await service.read()).bot_names[0]?.away_paused).toBeUndefined();
-    expect(
-      await rejection(service.resumeBotName("id-Unknown")),
-    ).toMatchObject({ status: 404 });
+    expect(await rejection(service.resumeBotName("id-Unknown"))).toMatchObject({
+      status: 404,
+    });
   });
 
   test("a rename goes to the lobby, then the game learns it with a new player token", async () => {

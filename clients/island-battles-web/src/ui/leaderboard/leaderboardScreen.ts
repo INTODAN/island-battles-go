@@ -396,11 +396,7 @@ export function mountLeaderboard(
           [false, playUnratedLabel, "secondary"],
         ] as const
       ).map(([rated, label, className]) => {
-        const button = h(
-          "button",
-          { type: "button", class: className },
-          label,
-        );
+        const button = h("button", { type: "button", class: className }, label);
         button.addEventListener("click", async () => {
           for (const each of buttons) each.disabled = true;
           button.textContent = "Starting…";
@@ -469,7 +465,11 @@ export function mountLeaderboard(
           ` ${line.joiner} `,
           ...opponents,
           line.away
-            ? h("span", { class: "tag away", attrs: { title: awayTitle } }, awayTag)
+            ? h(
+                "span",
+                { class: "tag away", attrs: { title: awayTitle } },
+                awayTag,
+              )
             : null,
         ),
         h(

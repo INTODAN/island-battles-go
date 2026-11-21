@@ -823,9 +823,7 @@ describe("a bot from the leaderboard", () => {
       bot_competitor_id: "c-eel",
     });
     expect(seatSettingsFromValue("competitor-", "")).toBeNull();
-    expect(
-      seatBody("t-red", { bot_competitor_id: "c-eel" }, "r-1"),
-    ).toEqual({
+    expect(seatBody("t-red", { bot_competitor_id: "c-eel" }, "r-1")).toEqual({
       request_id: "r-1",
       team_id: "t-red",
       seat_settings: { bot_competitor_id: "c-eel" },

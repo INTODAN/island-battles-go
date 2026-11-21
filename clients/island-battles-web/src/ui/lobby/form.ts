@@ -71,7 +71,7 @@ export function describePace(milliseconds: number): string {
 
 /** The Rated checkbox's line for a signed-in host. */
 export const ratedHint =
-  "Rated games count for the leaderboard. Everyone signs in, and plays by hand or with one of their bot names.";
+  "Rated games count for the leaderboard. Everyone signs in, and plays by hand, with one of their bot names or with a bot from the leaderboard.";
 /** The Rated checkbox's line for a guest, who can't turn it on. */
 export const ratedGuestHint = "Sign in to host a rated lobby.";
 
