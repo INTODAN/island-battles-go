@@ -47,7 +47,7 @@ func SetupAccountRoutes(api huma.API, handler *handlers.Accounts) {
 		OperationID: "deleteIslandAccount", Path: "/account", Method: http.MethodDelete, DefaultStatus: http.StatusNoContent,
 		Summary: "Delete your account's part of the game",
 		Description: "Requires the player token of a signed-in player; a guest's token is 403 with problem type " + services.SignInRequiredProblemType + ". " +
-			"Deletes every competitor of the account, its bot names and its hand play with their ratings, and the game's record of the account. Call it before the lobby's DELETE /lobby/v1/account, so the game's part is gone first. Deleting an account the game doesn't know is 204 too.",
+			"Deletes every competitor of the account, its bot names and its hand play with their ratings, and the game's record of the account, unless the account is hidden from the leaderboard: then the game keeps its record, with its display name, so that it stays hidden, with its new hand play and bot names, when it plays again. Call it before the lobby's DELETE /lobby/v1/account, so the game's part is gone first. Deleting an account the game doesn't know is 204 too.",
 		Tags: []string{"Island Battles"}, Security: playerTokenSecurity,
 	}, handler.Delete)
 }
