@@ -15,6 +15,7 @@ import {
   endsSession,
   type IslandAccount,
   nameRule,
+  partlyDeletedProblem,
   validateAccountName,
   validateBotName,
   withBotName,
@@ -31,6 +32,11 @@ export interface AccountDialogOptions {
    * Called by Sign out, and after the account is deleted.
    */
   onSignOut(): void;
+  /**
+   * Turns Google's silent sign-in off, without signing out. Called once the game's part of the
+   * account is deleted, before the lobby's, so a refusal there can't sign the person in again.
+   */
+  onForgetGoogle(): void;
   /** Replaces the requests; tests and the browser check use it. */
   service?: AccountService;
 }
@@ -100,6 +106,8 @@ export function openAccount(options: AccountDialogOptions): HTMLDialogElement {
   const { realtime } = options;
   const service = options.service ?? createAccountService(realtime);
   let account: IslandAccount | null = null;
+  /** The game's part of the account is deleted; the lobby's call failed. */
+  let gameDeleted = false;
   let adding = false;
   let busy = false;
 
@@ -242,6 +250,16 @@ export function openAccount(options: AccountDialogOptions): HTMLDialogElement {
   }
 
   function draw(): void {
+    if (gameDeleted) {
+      count.textContent = "";
+      const deleted = (text: string) =>
+        h("li", { class: "account-empty" }, text);
+      handList.replaceChildren(deleted("Deleted, with its rating."));
+      botList.replaceChildren(deleted("Deleted, with their ratings."));
+      addInputs(true);
+      addHint.textContent = nameRule;
+      return;
+    }
     if (!account) {
       count.textContent = "";
       addInputs(true);
@@ -285,13 +303,17 @@ export function openAccount(options: AccountDialogOptions): HTMLDialogElement {
 
   function setBusy(next: boolean): void {
     busy = next;
-    saveButton.disabled = next;
+    // After the game's part is deleted, a rename would read the game's account, which makes it again.
+    saveButton.disabled = next || gameDeleted;
     signOutButton.disabled = next;
     deleteButton.disabled = next;
     draw();
   }
 
-  /** A failure that ended the session closes the page: the name screen shows. */
+  /**
+   * A failure that ended the session closes the page; the service has ended the realtime
+   * session, so the silent sign-in or the name screen follows.
+   */
   function failed(error: unknown, shown: HTMLElement, sentence: string): void {
     if (endsSession(error)) {
       dialog.close();
@@ -385,9 +407,20 @@ export function openAccount(options: AccountDialogOptions): HTMLDialogElement {
     accountError.textContent = "";
     setBusy(true);
     try {
-      await service.deleteAccount(() => options.onSignOut());
+      await service.deleteAccount({
+        gameDeleted() {
+          options.onForgetGoogle();
+          gameDeleted = true;
+          account = null;
+        },
+        signOut: () => options.onSignOut(),
+      });
     } catch (error) {
-      failed(error, accountError, accountProblem(error));
+      failed(
+        error,
+        accountError,
+        gameDeleted ? partlyDeletedProblem(error) : accountProblem(error),
+      );
       setBusy(false);
     }
   });

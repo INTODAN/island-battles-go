@@ -119,6 +119,11 @@ export interface Realtime {
   leaveWatch(): void;
   /** Ends the session and closes the connection. */
   signOut(): void;
+  /**
+   * Ends the session because the lobby refused it (401) to a call made by another client, such
+   * as the account page's: `problem` gets scope `session`, as for a refusal of the session's own.
+   */
+  sessionRefused(error: ApiError): void;
 }
 
 const lobbyPath = (gameKey: string, lobbyId: string) => ({
@@ -792,6 +797,10 @@ export function createRealtime(options: RealtimeOptions = {}): Realtime {
 
     signOut() {
       endSession();
+    },
+
+    sessionRefused(error) {
+      if (session.get()) endSession(error);
     },
   };
 }

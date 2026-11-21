@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ApiError } from "../api/errors";
 import type {
   CentrifugeLike,
   CentrifugeOptions,
@@ -513,6 +514,24 @@ describe("signInWithGoogle", () => {
     expect(h.realtime.session.get()).toBeNull();
     expect(h.realtime.problem.get()).toBeNull();
     expect(h.storage.getItem(sessionStorageKey)).toBeNull();
+  });
+
+  test("sessionRefused ends the session with its problem, once", async () => {
+    const h = harness();
+    googleRoutes(h, "Dana");
+    await h.realtime.signInWithGoogle("id-token");
+    const refused = new ApiError({ kind: "problem", status: 401 });
+    h.realtime.sessionRefused(refused);
+    expect(h.realtime.session.get()).toBeNull();
+    expect(h.realtime.problem.get()).toEqual({
+      scope: "session",
+      error: refused,
+    });
+    expect(h.storage.getItem(sessionStorageKey)).toBeNull();
+    h.realtime.problem.subscribe(() => {
+      throw new Error("no second ending");
+    });
+    h.realtime.sessionRefused(refused);
   });
 
   test("a 401 on an account call ends the session", async () => {

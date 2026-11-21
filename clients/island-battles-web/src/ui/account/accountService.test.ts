@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createRealtime } from "../../realtime";
 import type { StorageLike } from "../../realtime/session-storage";
+import { partlyDeletedProblem } from "./accountModel";
 import { createAccountService } from "./accountService";
 
 class FakeStorage implements StorageLike {
@@ -37,6 +38,8 @@ const competitor = (name: string, id = `id-${name}`) => ({
 async function signedIn() {
   const calls: string[] = [];
   let displayName = "Dana";
+  /** What the fake refuses: the session's player tokens, or the lobby's account deletion. */
+  const fail = { playerTokens: false, lobbyDelete: false };
   let tokens = 0;
   const tokenNames = new Map<string, string>();
   let bots: ReturnType<typeof competitor>[] = [];
@@ -61,6 +64,12 @@ async function signedIn() {
           { status: 201 },
         );
       case "POST /lobby/v1/player-tokens": {
+        if (fail.playerTokens) {
+          return Response.json(
+            { status: 401, code: "unauthenticated" },
+            { status: 401 },
+          );
+        }
         const token = `token-${++tokens}`;
         tokenNames.set(token, displayName);
         return Response.json({
@@ -80,6 +89,12 @@ async function signedIn() {
         return Response.json({ id: ACCOUNT_ID, display_name: displayName });
       }
       case "DELETE /lobby/v1/account":
+        if (fail.lobbyDelete) {
+          return Response.json(
+            { status: 503, code: "unavailable", detail: "try again later" },
+            { status: 503 },
+          );
+        }
         return new Response(null, { status: 204 });
     }
     // The game's routes: the display name is the token's.
@@ -147,7 +162,7 @@ async function signedIn() {
     fetch: fetchStub,
   });
   calls.length = 0;
-  return { realtime, service, calls };
+  return { realtime, service, calls, fail };
 }
 
 const rejection = async (promise: Promise<unknown>) => {
@@ -217,26 +232,78 @@ describe("the account service", () => {
   test("deleting the account deletes the game's part, then the lobby's, then signs out", async () => {
     const { realtime, service, calls } = await signedIn();
     const order: string[] = [];
-    await service.deleteAccount(() => {
-      order.push(...calls, "sign out");
-      realtime.signOut();
+    await service.deleteAccount({
+      gameDeleted: () => order.push(...calls, "game deleted"),
+      signOut: () => {
+        order.push(calls.at(-1) ?? "", "sign out");
+        realtime.signOut();
+      },
     });
     expect(order).toEqual([
       "POST /lobby/v1/player-tokens",
       "DELETE /account",
+      "game deleted",
       "DELETE /lobby/v1/account",
       "sign out",
     ]);
     expect(realtime.session.get()).toBeNull();
   });
 
+  test("when the lobby's part fails after the game's, it says so, and deleting again finishes it", async () => {
+    const { realtime, service, calls, fail } = await signedIn();
+    await service.addBotName("Kraken");
+    fail.lobbyDelete = true;
+    const steps: string[] = [];
+    const deleteSteps = {
+      gameDeleted: () => steps.push("game deleted"),
+      signOut: () => {
+        steps.push("sign out");
+        realtime.signOut();
+      },
+    };
+    const error = await rejection(service.deleteAccount(deleteSteps));
+    expect(error.status).toBe(503);
+    // The game's part is gone already, so the page shows no bot names and says what is left.
+    expect(steps).toEqual(["game deleted"]);
+    expect(realtime.session.get()).not.toBeNull();
+    expect(partlyDeletedProblem(error)).toBe(
+      "Your bot names and every rating are deleted, but your account isn't yet. Try again later. Press Delete account again to finish.",
+    );
+    fail.lobbyDelete = false;
+    calls.length = 0;
+    await service.deleteAccount(deleteSteps);
+    expect(calls).toEqual(["DELETE /account", "DELETE /lobby/v1/account"]);
+    expect(steps).toEqual(["game deleted", "game deleted", "sign out"]);
+  });
+
   test("when the game's part can't be deleted, the lobby's isn't either", async () => {
     const { realtime, service, calls } = await signedIn();
     // Without a session the game refuses the call, so nothing else is sent.
     realtime.signOut();
-    const signOuts: string[] = [];
-    await rejection(service.deleteAccount(() => signOuts.push("sign out")));
+    const steps: string[] = [];
+    await rejection(
+      service.deleteAccount({
+        gameDeleted: () => steps.push("game deleted"),
+        signOut: () => steps.push("sign out"),
+      }),
+    );
     expect(calls).not.toContain("DELETE /lobby/v1/account");
-    expect(signOuts).toEqual([]);
+    expect(steps).toEqual([]);
+  });
+
+  test("a session the lobby refuses ends, with its problem, so the silent sign-in can follow", async () => {
+    const { realtime, service, fail } = await signedIn();
+    fail.playerTokens = true;
+    const error = await rejection(service.read());
+    expect(error.status).toBe(401);
+    expect(realtime.session.get()).toBeNull();
+    expect(realtime.problem.get()?.scope).toBe("session");
+  });
+
+  test("a refused bot name or delete ends a refused session too", async () => {
+    const { realtime, service, fail } = await signedIn();
+    fail.playerTokens = true;
+    await rejection(service.addBotName("Kraken"));
+    expect(realtime.session.get()).toBeNull();
   });
 });

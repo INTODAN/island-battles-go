@@ -133,7 +133,16 @@ export function mountLobbyApp(options: {
   const clientInstanceId = crypto.randomUUID();
   const actions = createLobbyActions({ realtime, clientInstanceId });
 
-  const google = startGoogleSignIn();
+  /**
+   * Google's sign-in, started the first time something needs it: the name screen, the silent
+   * sign-in, or turning auto-select off. A page that never shows the name screen (a saved session,
+   * or the public leaderboard) makes no call to the lobby's sign-in settings or to Google.
+   */
+  let googleStarted: Promise<GoogleSignIn | undefined> | undefined;
+  const google = () => {
+    googleStarted ??= startGoogleSignIn();
+    return googleStarted;
+  };
   /**
    * The tab's person signed in with Google and didn't sign out: when their session ends, Google is
    * asked for a credential without a click before the name screen shows.
@@ -146,7 +155,7 @@ export function mountLobbyApp(options: {
   let silent: "running" | "tried" | undefined;
 
   async function signInSilently(): Promise<void> {
-    const signIn = await google;
+    const signIn = await google();
     const credential = signIn ? await signIn.silent() : undefined;
     if (credential !== undefined && !disposed) {
       try {
@@ -162,12 +171,17 @@ export function mountLobbyApp(options: {
   }
 
   /**
-   * Sign out from the account page, and after the account is deleted: Google's silent sign-in is
-   * turned off, so neither an ended session nor a reload signs the person in again by itself.
+   * Turns Google's silent sign-in off: neither an ended session nor a reload signs the person in
+   * again by itself. Before the account's deletion reaches the lobby, and at every sign-out.
    */
-  function signOutForGood(): void {
+  function forgetGoogle(): void {
     setSignedInWithGoogle(false);
-    void google.then((signIn) => signIn?.disableAutoSelect());
+    void google().then((signIn) => signIn?.disableAutoSelect());
+  }
+
+  /** Sign out from the account page, and after the account is deleted. */
+  function signOutForGood(): void {
+    forgetGoogle();
     realtime.signOut();
   }
 
@@ -669,7 +683,7 @@ export function mountLobbyApp(options: {
             write(() => localStorage, nameKey, name);
           },
           google: {
-            ready: google,
+            ready: google(),
             async submit(credential, displayName) {
               await realtime.signInWithGoogle(credential, displayName);
               setSignedInWithGoogle(true);
@@ -783,7 +797,11 @@ export function mountLobbyApp(options: {
         onSignedOut: () => realtime.signOut(),
         onChangeName: () => realtime.signOut(),
         onAccount: () =>
-          void openAccount({ realtime, onSignOut: signOutForGood }),
+          void openAccount({
+            realtime,
+            onSignOut: signOutForGood,
+            onForgetGoogle: forgetGoogle,
+          }),
         newId: () => crypto.randomUUID(),
       });
     });

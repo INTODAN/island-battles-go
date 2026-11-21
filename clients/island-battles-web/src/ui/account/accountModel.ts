@@ -242,6 +242,14 @@ export function accountProblem(error: unknown): string {
   return common(error) ?? fallback(error);
 }
 
+/**
+ * What the page says when the game's part of the account is deleted but the lobby's call failed:
+ * the bot names and ratings are gone, and deleting again finishes it.
+ */
+export function partlyDeletedProblem(error: unknown): string {
+  return `Your bot names and every rating are deleted, but your account isn't yet. ${accountProblem(error)} Press Delete account again to finish.`;
+}
+
 /** True when a failed request means the session ended, so the page closes. */
 export const endsSession = (error: unknown): boolean =>
   error instanceof ApiError && error.status === 401;
