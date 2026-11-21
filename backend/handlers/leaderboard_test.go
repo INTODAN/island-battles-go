@@ -374,6 +374,44 @@ func TestTheAdminHidesAnAccount(t *testing.T) {
 	expectStatus(t, fixture.api.Put("/admin/accounts/"+fixture.eli+"/hidden", adminHeader, map[string]any{}), http.StatusUnprocessableEntity, nil)
 }
 
+// A hidden account that deletes itself keeps its row, hidden, and no live
+// competitor. When it comes back, GET /account gives it a new hand play, and
+// what it plays then stays off the leaderboard; showing the account again
+// lists it.
+func TestAHiddenAccountThatDeletesItselfStaysHidden(t *testing.T) {
+	fixture := newHistoryFixture(t)
+	hydra := registerBotName(t, fixture.api, "eli", "Hydra")
+	expectStatus(t, fixture.api.Put("/admin/accounts/"+fixture.eli+"/hidden", adminHeader, map[string]bool{"hidden": true}), http.StatusNoContent, nil)
+	expectStatus(t, fixture.api.Delete("/account", "Authorization: Bearer eli"), http.StatusNoContent, nil)
+
+	var stored []models.IslandAccount
+	var live int64
+	fixture.database.Where(&models.IslandAccount{AccountID: fixture.eli}).Find(&stored)
+	fixture.database.Model(&models.Competitor{}).Where(&models.Competitor{AccountID: &fixture.eli}).Count(&live)
+	if len(stored) != 1 || !stored[0].Hidden || live != 0 {
+		t.Fatalf("Eli's account rows %+v and %d live competitors, want one hidden row and none", stored, live)
+	}
+	// Hydra's name is free at once.
+	registerBotName(t, fixture.api, "dana", "Hydra")
+
+	var account models.IslandAccountView
+	expectStatus(t, fixture.api.Get("/account", "Authorization: Bearer eli"), http.StatusOK, &account)
+	if account.Hand.ID == fixture.eliHand.ID || account.Hand.ID == hydra.ID || account.Hand.Rating != models.InitialRating || account.Hand.Games != 0 || len(account.BotNames) != 0 {
+		t.Fatalf("Eli's account after the deletion = %+v, want a new hand play", account)
+	}
+	played(t, fixture.database, account.Hand.ID, 1600, 1)
+	const others = "[1 Kraken, by Dana 2 Nessie, by Fay 2 Bot (level 2)]"
+	if got := entryNames(readLeaderboard(t, fixture.api, "").Entries); got != others {
+		t.Fatalf("leaderboard after Eli came back = %s, want %s", got, others)
+	}
+	expectStatus(t, fixture.api.Get("/leaderboard/"+account.Hand.ID), http.StatusNotFound, nil)
+
+	expectStatus(t, fixture.api.Put("/admin/accounts/"+fixture.eli+"/hidden", adminHeader, map[string]bool{"hidden": false}), http.StatusNoContent, nil)
+	if got := entryNames(readLeaderboard(t, fixture.api, "").Entries); got != "[1 Eli 2 Kraken, by Dana 3 Nessie, by Fay 3 Bot (level 2)]" {
+		t.Fatalf("leaderboard with Eli shown again = %s", got)
+	}
+}
+
 func TestTheAdminRoutesNeedTheAdminAPIKey(t *testing.T) {
 	database := testutils.InitTestDB(t)
 	dana := signedInPlayer("Dana")

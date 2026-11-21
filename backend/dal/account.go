@@ -149,18 +149,29 @@ func DeleteBotName(database *gorm.DB, accountID, competitorID string) (bool, err
 	return deleted.RowsAffected > 0, deleted.Error
 }
 
-// DeleteAccount deletes an account's row and soft-deletes every competitor
-// of it, which frees its bot names. Deleting an account the game doesn't know
-// changes nothing.
+// DeleteAccount soft-deletes every competitor of an account, which frees its
+// bot names, and deletes the account's row, unless the account is hidden: a
+// hidden account keeps its row, with hidden set, so that it stays hidden when
+// it comes back (SeeAccount and EnsureAccount keep hidden, and give it a new
+// manual competitor). Deleting an account the game doesn't know changes
+// nothing.
 func DeleteAccount(database *gorm.DB, accountID string) error {
+	// A struct filter drops an empty ID, which would match every account.
 	if accountID == "" {
 		return errors.New("delete account: no account ID")
 	}
 	return database.Transaction(func(transaction *gorm.DB) error {
-		// The account's row goes first, so a concurrent change to its
-		// competitors, which locks it, waits.
-		if err := transaction.Where(&models.IslandAccount{AccountID: accountID}).Delete(&models.IslandAccount{}).Error; err != nil {
+		// The account's row is locked first, so a concurrent change to its
+		// competitors or to hidden, which locks it too, waits.
+		var accounts []models.IslandAccount
+		if err := transaction.Clauses(clause.Locking{Strength: clause.LockingStrengthUpdate}).
+			Where(&models.IslandAccount{AccountID: accountID}).Limit(1).Find(&accounts).Error; err != nil {
 			return err
+		}
+		if len(accounts) == 1 && !accounts[0].Hidden {
+			if err := transaction.Where(&models.IslandAccount{AccountID: accountID}).Delete(&models.IslandAccount{}).Error; err != nil {
+				return err
+			}
 		}
 		return transaction.Model(&models.Competitor{}).Where(&models.Competitor{AccountID: &accountID}).Updates(retired(time.Now())).Error
 	})
