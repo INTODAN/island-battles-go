@@ -60,7 +60,8 @@ The [Python bot template's skills](../templates/python-bot/.agents/skills/) desc
 - **Self-contained**: it imports only the SDK, a short list of pure standard modules (`math`, `dataclasses`, `collections`, `itertools`, `functools`, `heapq`, `bisect`, `enum`, `operator`, `typing`) and its own package.
 - **Pure**: no globals, no value at module or class level that a turn could change, no clock, randomness, file or network. The same turn gives the same result.
 - **It logs every turn** what it decided and why, in a line or two. A game whose bots say nothing can't be studied.
-- **Every result is one the server accepts**, on six boards: the SDK's fixture, under attack, with burst debt and top levels, with empty castles, without enemy castles and without castles.
+- **Every result is one the server accepts**, on six boards (the SDK's fixture, under attack, with burst debt and top levels, with empty castles, without enemy castles and without castles) and on 300 boards made from seeds.
+- **Its memory stays small** over a run of turns.
 
 The tests don't measure speed. The tournament does: its **Slowest turn** column should stay well under 200 ms; a real-time game gives a bot one second.
 

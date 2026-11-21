@@ -49,13 +49,13 @@ Different:
 
 ## Speed
 
-A worker process is started once and plays any number of games, since a bot keeps nothing between turns: a match borrows a process per worker seat and gives it back. Starting a worker is never part of a turn's time: a worker that stops, or whose turn times out, is stopped and replaced before the seat's next turn, so one failure costs one turn. `parallel` is how many matches play at once, the number of CPUs by default. A Python bot's turn costs about 1 ms, mostly the SDK reading the turn; a default bot's 0.3 ms.
+A worker process is started once and plays any number of games, since a bot keeps nothing between turns: a match borrows a process per worker seat and gives it back. Starting a worker is never part of a turn's time: a worker that stops, or whose turn times out, is stopped and replaced between that turn and the seat's next one (`HeadlessRecoverer`), so one failure costs one turn. A replacement that doesn't start is not tried again in that match. `parallel` is how many matches play at once, the number of CPUs by default. A Python bot's turn costs about 1 ms, mostly the SDK reading the turn; a default bot's 0.3 ms.
 
 Bots are deterministic, so a match with the same runner, map, seats, bots and settings always plays the same game, unless a turn timed out, which depends on the machine's load. Playing it twice measures nothing; add maps instead.
 
 ## Changing the runner
 
 - The engine is `services.PlayHeadlessMatch` in `backend/services/headless_match.go`; it must keep using the service's own functions (`checkBotResult`, `goBotGeneration`, the simulation) rather than copies of them, so a rule changes in both places at once. The loop around them is its own: when `playTurn` or `playGoBots` in `go_bots.go` changes what a turn does, change it here too. Its tests are `backend/services/headless_match_test.go`, which need no database.
-- The command, the schedule and the worker processes are `backend/cmd/headless-match`; its tests use the test binary itself as a worker, and cover a worker that is late and one that exits. Run them with `-race`: a seat's turns must never overlap.
+- The command, the schedule and the worker processes are `backend/cmd/headless-match`; its tests use the test binary itself as a worker, and cover a worker that is late, one that exits, one that stops reading its requests and one that can't start again. Run them with `-race`: a seat's turns must never overlap.
 - `go test ./backend/services -run Headless` and `go test ./backend/cmd/headless-match` run both in a second. `TestGoBotTournament` plays the default bots on the same in-memory board.
 - A rule change (see the `game-rules` skill) needs nothing here, but it changes every bot's results: say so in the pull request, and play the league again.

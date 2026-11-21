@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import sys
 from collections import defaultdict
 from collections.abc import Iterable
 
@@ -21,9 +22,6 @@ def fit(games: Iterable[tuple[str, str, float]]) -> dict[str, float]:
     updates, the fit doesn't depend on the order of the games. Every player
     also gets one drawn game against an average player, which keeps the
     rating of a player who won or lost everything finite.
-
-    Raises:
-        RuntimeError: The fit didn't settle, which no real set of games does.
 
     Returns:
         Each player's rating. ``level3`` is 1000 when it played; otherwise the
@@ -54,7 +52,9 @@ def fit(games: Iterable[tuple[str, str, float]]) -> dict[str, float]:
         if change < 1e-10:
             break
     else:
-        raise RuntimeError(f"the ratings didn't settle in {MAX_ROUNDS} rounds")
+        # Only a player that beat another hundreds of times in a row gets
+        # here; its rating is still as good as the rounds made it.
+        print(f"league: the ratings hadn't settled after {MAX_ROUNDS} rounds; they are approximate", file=sys.stderr)
     ratings = {player: 400 * math.log10(strength[player]) for player in players}
     reference = ratings.get(RATING_ANCHOR, sum(ratings.values()) / len(ratings))
     return {player: 1000 + rating - reference for player, rating in ratings.items()}

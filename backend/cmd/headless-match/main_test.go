@@ -22,8 +22,14 @@ import (
 // tests, so the tests have a worker command on every system: it answers each
 // turn with one send from the team's first castle to the first castle that
 // isn't the team's. As "broken" it answers an error instead; as "slow" it
-// takes a second for turn 3, and as "dying" it exits on turn 3.
+// takes a second for turn 3; as "dying" it exits on turn 3; as "deaf" it
+// stops reading its requests at turn 3, and as "stillborn" it exits on turn 3
+// and its replacements never get ready.
 const workerEnvironment = "HEADLESS_MATCH_TEST_WORKER"
+
+// workerMarkerEnvironment names a file that the "stillborn" worker creates
+// when it exits, and that keeps its later processes from getting ready.
+const workerMarkerEnvironment = "HEADLESS_MATCH_TEST_WORKER_MARKER"
 
 func TestMain(tests *testing.M) {
 	if behaviour := os.Getenv(workerEnvironment); behaviour != "" {
@@ -33,6 +39,12 @@ func TestMain(tests *testing.M) {
 }
 
 func testWorker(behaviour string) int {
+	if marker := os.Getenv(workerMarkerEnvironment); behaviour == "stillborn" && marker != "" {
+		if _, err := os.Stat(marker); err == nil {
+			time.Sleep(time.Minute)
+			return 1
+		}
+	}
 	fmt.Println(`{"ready": true}`)
 	lines := bufio.NewReader(os.Stdin)
 	for {
@@ -54,6 +66,15 @@ func testWorker(behaviour string) int {
 			time.Sleep(time.Second)
 		case behaviour == "dying" && request.Turn.TurnNumber == 3:
 			return 3
+		case behaviour == "stillborn" && request.Turn.TurnNumber == 3:
+			_ = os.WriteFile(os.Getenv(workerMarkerEnvironment), nil, 0o644)
+			return 3
+		case behaviour == "deaf" && request.Turn.TurnNumber == 2:
+			// A memory near the limit makes the next request larger than a
+			// pipe holds, so the runner's write of it blocks.
+			fmt.Printf(`{"result": {"commands": [], "logs": [], "memory": {"padding": "%s"}}}`+"\n", strings.Repeat("x", 65000))
+			time.Sleep(time.Minute)
+			return 1
 		}
 		commands := []map[string]any{}
 		var origin, destination *models.CastleView
@@ -196,6 +217,71 @@ func TestRunLosesOnlyTheTurnOfAWorkerThatIsLateOrStops(t *testing.T) {
 				t.Fatalf("a player that never failed: %+v", other)
 			}
 		})
+	}
+}
+
+// A worker that stops reading its requests, so that the write of a large one
+// blocks, loses the turn at its timeout like one that doesn't answer.
+func TestRunTimesOutAWorkerThatDoesNotReadItsRequests(t *testing.T) {
+	level := uint(1)
+	players := map[string]any{"level1": map[string]any{"default_level": level}, "deaf": testWorkerPlayer("deaf")}
+	started := time.Now()
+	lines, _ := playSchedule(t, players, []map[string]any{{"id": "a", "map": "duel", "seats": []string{"deaf", "level1"}}},
+		map[string]any{"max_generations": 5, "turn_timeout_milliseconds": 300})
+	seat := lines["a"].Seats[0]
+	if seat.FailedTurns == 0 || seat.Failures[0].Turn != 3 || seat.Failures[0].Message != "the bot didn't answer within 300ms" {
+		t.Fatalf("seat = %+v, want turn 3 to fail at the timeout", seat)
+	}
+	if elapsed := time.Since(started); elapsed > 20*time.Second {
+		t.Fatalf("the match took %s: the blocked write held it", elapsed)
+	}
+}
+
+// A worker whose replacement never gets ready costs the wait for it once,
+// not once for every turn that is left.
+func TestRunDoesNotRetryAWorkerThatCannotStartAgain(t *testing.T) {
+	previous := workerStartTimeout
+	workerStartTimeout = 300 * time.Millisecond
+	t.Cleanup(func() { workerStartTimeout = previous })
+	level := uint(1)
+	stillborn := testWorkerPlayer("stillborn")
+	stillborn["environment"].(map[string]string)[workerMarkerEnvironment] = filepath.Join(t.TempDir(), "exited")
+	players := map[string]any{"level1": map[string]any{"default_level": level}, "stillborn": stillborn}
+	started := time.Now()
+	lines, _ := playSchedule(t, players, []map[string]any{{"id": "a", "map": "duel", "seats": []string{"stillborn", "level1"}}}, map[string]any{"max_generations": 30})
+	seat := lines["a"].Seats[0]
+	if seat.FailedTurns != 27 || !strings.HasPrefix(seat.Failures[0].Message, "the worker stopped") || !strings.Contains(seat.Failures[1].Message, "is not running") {
+		t.Fatalf("seat = %+v, want turn 3 to fail as the worker stops and every later turn at once", seat)
+	}
+	if elapsed := time.Since(started); elapsed > 10*time.Second {
+		t.Fatalf("the match took %s: every turn waited for the worker to get ready", elapsed)
+	}
+}
+
+// A stop while every slot is taken starts none of the matches that wait.
+func TestRunStartsNoWaitingMatchWhenStoppedWhileItPlays(t *testing.T) {
+	level := uint(1)
+	directory := t.TempDir()
+	mapPath := writeFile(t, directory, "duel.json", testMapFile)
+	matches := []map[string]any{}
+	for _, id := range []string{"a", "b", "c"} {
+		matches = append(matches, map[string]any{"id": id, "map": "duel", "seats": []string{"slow", "level1"}})
+	}
+	plan, err := json.Marshal(map[string]any{"players": map[string]any{"level1": map[string]any{"default_level": level}, "slow": testWorkerPlayer("slow")},
+		"maps": map[string]string{"duel": mapPath}, "matches": matches, "parallel": 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopped, cancel := context.WithCancel(context.Background())
+	// The first match is in its slow third turn by now.
+	time.AfterFunc(400*time.Millisecond, cancel)
+	var output bytes.Buffer
+	if err := run(stopped, nil, bytes.NewReader(plan), &output, io.Discard); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+	written := strings.Split(strings.TrimSpace(output.String()), "\n")
+	if len(written) != 1 || !strings.Contains(written[0], `"id":"a"`) || !strings.Contains(written[0], `"error":"context canceled"`) {
+		t.Fatalf("output = %q, want only the playing match's line, with its error", output.String())
 	}
 }
 

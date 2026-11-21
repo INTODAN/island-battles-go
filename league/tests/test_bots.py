@@ -2,12 +2,16 @@
 
 import ast
 import importlib
+import json
+import logging
+import random
 import sys
 from collections.abc import Callable, Mapping
 from typing import Any
 
 import pytest
 from island_battles_client import (
+    MEMORY_LIMIT_BYTES,
     BotTurn,
     BotTurnResult,
     UpgradeType,
@@ -96,11 +100,13 @@ def _debt_and_top_levels(generation: dict, team_color: int) -> None:
     _under_attack(generation, team_color)
     own = [castle for castle in generation["castles"] if castle["team_color"] == team_color]
     for index, castle in enumerate(own):
-        castle["soldiers"] = 200
         castle["upgrades"]["burst_potential"] = 2
         if index == 0:
+            # Short of what is about to land on it, and not allowed to burst.
+            castle["soldiers"] = 6
             castle["burst_debt"] = 3
         else:
+            castle["soldiers"] = 200
             castle["upgrades"] = {"burst_potential": 4, "clash_stop_generations": 3, "generation_amount": 4, "speed": 4}
 
 
@@ -236,8 +242,109 @@ def test_the_check_rejects_what_the_server_rejects() -> None:
     assert rejection(fixture, turn_result([burst_castle(0, 4)])) is not None
 
 
-MUTABLE_NODES = (ast.Dict, ast.List, ast.Set, ast.DictComp, ast.ListComp, ast.SetComp)
-MUTABLE_CALLS = {"dict", "list", "set", "defaultdict", "Counter", "deque", "OrderedDict", "bytearray"}
+def random_turn(seed: int) -> BotTurn:
+    """A board made from a seed: owners, soldiers, levels, debts and groups all vary."""
+    rng = random.Random(seed)
+    data = fixture_turn_data()
+    generation = data["generation"]
+    tops = {upgrade["type"]: upgrade["max_level"] for upgrade in data["upgrades"]}
+    spots = [(x, y) for x in (-4, -2, 0, 2, 4) for y in (-2, 0, 2)]
+    rng.shuffle(spots)
+    generation["castles"] = [
+        {
+            "id": castle_id,
+            "team_color": rng.choice((0, 1, 1, 2, 2)),
+            "soldiers": rng.choice((0, 1, 3, 8, 15, 30, 60, 120)),
+            "x": float(x),
+            "y": float(y),
+            "upgrades": {upgrade_type: rng.randint(1, top) for upgrade_type, top in tops.items()},
+            "burst_debt": rng.choice((0, 0, 0, 2, 7)),
+        }
+        for castle_id, (x, y) in enumerate(spots[: rng.randint(2, 9)])
+    ]
+    castles = generation["castles"]
+    generation["soldier_groups"] = []
+    for group_id in range(rng.randint(0, 6)):
+        origin, target = rng.sample(castles, 2)
+        generation["soldier_groups"].append(
+            _group(group_id, rng.choice((1, 2)), rng.choice((1, 5, 20, 70)), origin, target, rng.random())
+        )
+    data["team_color"] = rng.choice((1, 2))
+    data["turn_number"] = rng.choice((1, 2, 40, 150, 299))
+    generation["id"] = FIRST_GENERATION_ID + data["turn_number"] - 1
+    return BotTurn.model_validate(data)
+
+
+@pytest.mark.parametrize("name", NAMES)
+def test_result_is_one_the_server_accepts_on_random_boards(name: str) -> None:
+    play = play_of(name)
+    for seed in range(300):
+        turn = random_turn(seed)
+        assert rejection(turn, play(turn)) is None, f"seed {seed}"
+
+
+@pytest.mark.parametrize("name", NAMES)
+def test_same_turn_gives_the_same_result(name: str) -> None:
+    play = play_of(name)
+    for board in BOARDS:
+        for turn_number in (1, 2, 150, 299):
+            memory = play(game_turn(1, board=board)).memory if turn_number > 1 else None
+            first = play(game_turn(turn_number, memory, board=board))
+            # Other turns in between, as a process that plays many games has.
+            play(random_turn(turn_number))
+            second = play(game_turn(turn_number, memory, board=board))
+            assert first.model_dump(mode="json") == second.model_dump(mode="json")
+
+
+@pytest.mark.parametrize("name", NAMES)
+def test_memory_stays_a_small_json_object(name: str) -> None:
+    play = play_of(name)
+    memory = None
+    for turn_number in range(1, 40):
+        memory = play(game_turn(turn_number, memory)).memory
+        if memory is not None:
+            assert len(json.dumps(memory, separators=(",", ":")).encode()) < MEMORY_LIMIT_BYTES // 8
+
+
+@pytest.mark.parametrize("name", NAMES)
+def test_bot_logs_its_turn(name: str) -> None:
+    """A game can only be studied if its bots say what they decided."""
+    records: list[logging.LogRecord] = []
+
+    class Collector(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = Collector()
+    logger = logging.getLogger("island_battles.player")
+    logger.addHandler(handler)
+    previous = logger.level
+    logger.setLevel(logging.DEBUG)
+    try:
+        result = play_of(name)(game_turn())
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(previous)
+    assert records or result.logs
+
+
+# What may be built once and kept between turns: values nothing can change.
+CONSTANT_CALLS = {"frozenset", "tuple", "range", "float", "int", "str", "bool"}
+
+
+def _is_constant(node: ast.expr) -> bool:
+    """Whether a module- or class-level value is one that no turn can change."""
+    if isinstance(node, ast.Constant):
+        return True
+    if isinstance(node, ast.Tuple):
+        return all(_is_constant(element) for element in node.elts)
+    if isinstance(node, ast.UnaryOp):
+        return _is_constant(node.operand)
+    if isinstance(node, ast.BinOp):
+        return _is_constant(node.left) and _is_constant(node.right)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in CONSTANT_CALLS:
+        return all(_is_constant(argument) for argument in node.args) and not node.keywords
+    return False
 
 
 def impurities(source: str) -> list[str]:
@@ -267,12 +374,20 @@ def impurities(source: str) -> list[str]:
     scopes = [tree, *(node for node in ast.walk(tree) if isinstance(node, ast.ClassDef))]
     for scope in scopes:
         for statement in scope.body:
-            if not isinstance(statement, ast.Assign | ast.AnnAssign) or statement.value is None:
-                continue
-            value = statement.value
-            called = value.func.id if isinstance(value, ast.Call) and isinstance(value.func, ast.Name) else ""
-            if isinstance(value, MUTABLE_NODES) or called in MUTABLE_CALLS:
-                found.append(f"keeps a value that a turn can change at line {statement.lineno}")
+            if isinstance(statement, ast.Assign | ast.AnnAssign | ast.AugAssign) and statement.value is not None:
+                if not _is_constant(statement.value):
+                    found.append(f"keeps a value that a turn can change at line {statement.lineno}")
+    for node in ast.walk(tree):
+        # play.calls = 0, or anything else stored on a function, class or module.
+        if isinstance(node, ast.Assign | ast.AugAssign | ast.AnnAssign):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                if (
+                    isinstance(target, ast.Attribute)
+                    and isinstance(target.value, ast.Name)
+                    and target.value.id != "self"
+                ):
+                    found.append(f"stores {target.value.id}.{target.attr} at line {node.lineno}")
     return found
 
 
@@ -292,8 +407,13 @@ def test_the_purity_check_finds_what_it_is_for() -> None:
         "SEEN = {}": "keeps a value that a turn can change at line 1",
         "class Board:\n    cache: list[int] = []": "keeps a value that a turn can change at line 2",
         "PLANS = defaultdict(int)": "keeps a value that a turn can change at line 1",
+        "CALLS = count()": "keeps a value that a turn can change at line 1",
+        "def play(turn):\n    play.calls = 1": "stores play.calls at line 2",
         "def play(turn):\n    global COUNT": "keeps state in a global",
-        "data = open('plan.txt')": "calls open",
+        "def play(turn):\n    data = open('plan.txt')": "calls open",
     }.items():
         assert impurities(source) == [problem], source
-    assert impurities("from .plan import choose\nfrom math import ceil\nWAVE = 8\nSHARES = (0.5, 1)") == []
+    pure = (
+        "from .plan import choose\nfrom math import ceil\nWAVE = 8\nSHARES = (0.5, -1)\nKINDS = frozenset(('a', 'b'))"
+    )
+    assert impurities(pure + "\nclass Board:\n    def __init__(self):\n        self.spent = {}") == []

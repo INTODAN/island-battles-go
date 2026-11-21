@@ -294,8 +294,8 @@ func writeDemo(plan schedule, matchID string, demo models.Demo) (path string, er
 }
 
 // workerStartTimeout is how long a worker has to load its bot and write its
-// ready line.
-const workerStartTimeout = 60 * time.Second
+// ready line. Tests shorten it.
+var workerStartTimeout = 60 * time.Second
 
 // playerSource gives each match a player for one of its seats, and takes it
 // back when the match ends. ctx is the command's: a player isn't made ready
@@ -337,39 +337,35 @@ func (pool *workerPool) seat(ctx context.Context) (services.HeadlessPlayer, func
 			return nil, nil, err
 		}
 	}
-	seat := &workerSeat{pool: pool, process: process, commandContext: ctx}
+	seat := &workerSeat{pool: pool, process: process}
 	return seat, seat.release, nil
 }
 
 // workerSeat plays one seat of one match on a process of its pool. Its lock
-// keeps a turn, and the recovery after a failed one, apart from the next turn
+// keeps a turn apart from the recovery after a failed one, from the next turn
 // and from the release: a match that stops early may still have a turn
 // running when it gives the seat back.
 type workerSeat struct {
 	pool *workerPool
-	// commandContext is the command's context, which outlives a turn's: a
-	// process that replaces a stopped one is started under it.
-	commandContext context.Context
-	lock           sync.Mutex
-	// process is nil after a process was stopped and its replacement didn't
-	// start.
+	lock sync.Mutex
+	// process is nil after a process was stopped, until Recover has started
+	// its replacement, and for the rest of the match when that didn't start.
 	process *workerProcess
+	// startError is why the replacement didn't start.
+	startError error
 }
 
 // Play has the seat's process play the turn. A process that stops, or whose
 // turn runs out of time, can't play on, since its next line would answer the
-// wrong turn: Play stops it and starts its replacement before it returns, so
-// the failed turn pays for the start, not the seat's next one.
+// wrong turn: Play stops it, and Recover starts its replacement.
 func (seat *workerSeat) Play(ctx context.Context, turn models.BotTurn) (models.BotTurnResult, error) {
 	seat.lock.Lock()
 	defer seat.lock.Unlock()
 	if seat.process == nil {
-		// The replacement didn't start after an earlier turn; try once more.
-		process, err := seat.pool.start(seat.commandContext)
-		if err != nil {
-			return models.BotTurnResult{}, err
-		}
-		seat.process = process
+		// One replacement is tried for each failed turn, never one for each
+		// turn after it: a worker that can't start would cost every turn the
+		// time it has to get ready.
+		return models.BotTurnResult{}, fmt.Errorf("the worker of %s is not running: %w", seat.pool.name, seat.startError)
 	}
 	request, err := json.Marshal(map[string]models.BotTurn{"turn": turn})
 	if err != nil {
@@ -378,8 +374,7 @@ func (seat *workerSeat) Play(ctx context.Context, turn models.BotTurn) (models.B
 	answer, err := seat.process.exchange(ctx, request)
 	if err != nil {
 		seat.process.stop()
-		// A start that fails is reported by the seat's next turn.
-		seat.process, _ = seat.pool.start(seat.commandContext)
+		seat.process, seat.startError = nil, errors.New("it was stopped after a failed turn")
 		return models.BotTurnResult{}, err
 	}
 	if answer.Error != "" {
@@ -389,6 +384,17 @@ func (seat *workerSeat) Play(ctx context.Context, turn models.BotTurn) (models.B
 		return models.BotTurnResult{}, errors.New("the worker answered neither a result nor an error")
 	}
 	return *answer.Result, nil
+}
+
+// Recover starts the replacement of a process that Play stopped, after the
+// failed turn and outside its time, under the match's context. A worker that
+// answered an error still runs, and needs none.
+func (seat *workerSeat) Recover(ctx context.Context) {
+	seat.lock.Lock()
+	defer seat.lock.Unlock()
+	if seat.process == nil {
+		seat.process, seat.startError = seat.pool.start(ctx)
+	}
 }
 
 // release gives the seat's process back to its pool, once no turn runs.
@@ -462,6 +468,10 @@ type workerProcess struct {
 	command  *exec.Cmd
 	requests io.WriteCloser
 	answers  *bufio.Reader
+	lock     sync.Mutex
+	// ended is set once the process was waited for: its ID may then belong
+	// to another process, which must not be killed.
+	ended bool
 }
 
 // workerAnswer is one line a worker writes.
@@ -471,9 +481,17 @@ type workerAnswer struct {
 	Error  string                `json:"error"`
 }
 
-// exchange writes a request line and reads its answer.
+// exchange writes a request line and reads its answer. When ctx is done
+// first it kills the process, so that neither a worker that doesn't read its
+// requests nor one that doesn't answer can hold the turn: the write and the
+// read both end. A caller that gets an error must stop the process.
 func (process *workerProcess) exchange(ctx context.Context, request []byte) (workerAnswer, error) {
+	cancelKill := context.AfterFunc(ctx, process.kill)
+	defer cancelKill()
 	if _, err := process.requests.Write(append(request, '\n')); err != nil {
+		if ctx.Err() != nil {
+			return workerAnswer{}, ctx.Err()
+		}
 		return workerAnswer{}, fmt.Errorf("the worker stopped: %w", err)
 	}
 	return process.read(ctx)
@@ -507,10 +525,22 @@ func (process *workerProcess) read(ctx context.Context) (workerAnswer, error) {
 	}
 }
 
-// stop ends the process, and the processes it started: a worker command may
+// kill kills the process, and the processes it started: a worker command may
 // be a wrapper, such as a shell or `uv run`, around the bot's own process.
+func (process *workerProcess) kill() {
+	process.lock.Lock()
+	defer process.lock.Unlock()
+	if !process.ended {
+		killWithChildren(process.command)
+	}
+}
+
+// stop ends the process and waits for it.
 func (process *workerProcess) stop() {
+	process.kill()
 	_ = process.requests.Close()
-	killWithChildren(process.command)
 	_ = process.command.Wait()
+	process.lock.Lock()
+	process.ended = true
+	process.lock.Unlock()
 }

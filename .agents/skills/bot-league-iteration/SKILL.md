@@ -108,7 +108,7 @@ The cache already holds every pair without a candidate, so it plays little more 
 Then, for the candidates that passed only, play the **holdout maps**:
 
 ```sh
-uv run --project league league tournament --maps holdout --add CANDIDATES --run-id iteration-N-holdout
+uv run --project league league tournament --maps holdout --add CANDIDATES --run-id iteration-N-select-holdout
 ```
 
 A candidate is **promoted** when its holdout rating is not below its parent's. Read only the standings and the tables of that run; it lists no games. **Never digest a holdout game, and never change a candidate after seeing its holdout numbers:** a candidate that fails the holdout is rejected, and its idea may come back next iteration in another form, measured again from the start.

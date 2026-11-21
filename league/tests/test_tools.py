@@ -103,6 +103,16 @@ def test_a_match_is_cached_under_its_players_names(tmp_path: Path, monkeypatch: 
     played.clear()
     tournament.play(plan, tmp_path / "run")
     assert played == []
+    # A match played again with a failed turn loses its earlier result: its demo was replaced.
+    failing.add("first")
+    tournament.play(
+        tournament.Tournament(players=["first", "level3"], maps=[map_file], use_cache=False), tmp_path / "run"
+    )
+    failing.clear()
+    played.clear()
+    tournament.play(plan, tmp_path / "run")
+    assert len(played) == 2 and all(set(seats) == {"first", "level3"} for seats in played)
+    played.clear()
     # A cached result whose demo is gone is played again.
     next(cache.glob("*.json.gz")).unlink()
     tournament.play(plan, tmp_path / "run")

@@ -34,10 +34,17 @@ import (
 // returns an error, or a result that the rules reject, passes the turn. When
 // ctx is done the turn's time is up: Play must return, and its answer is not
 // used. The match waits for it to return, so that a seat's turns never
-// overlap and whatever the player does to recover, such as starting a new
-// process, is done before its next turn.
+// overlap.
 type HeadlessPlayer interface {
 	Play(ctx context.Context, turn models.BotTurn) (models.BotTurnResult, error)
+}
+
+// HeadlessRecoverer is a HeadlessPlayer with something to do after a turn it
+// failed before it can play again, such as starting a new process. The match
+// calls Recover after each failed turn, with its own context rather than the
+// turn's, and outside any turn's time.
+type HeadlessRecoverer interface {
+	Recover(ctx context.Context)
 }
 
 // HeadlessSeat is one team of a headless match: the name the demo and the
@@ -220,6 +227,9 @@ func PlayHeadlessMatch(ctx context.Context, match HeadlessMatch) (HeadlessResult
 				}
 				played = goBotTurn{memory: memories[index], logs: []models.GenerationLogLine{{Level: models.GenerationLogError, Logger: GoBotLogger,
 					Message: truncateLogMessage(fmt.Sprintf("%s failed this turn, so it passes: %v", seat.Name, err))}}}
+				if recoverer, recovers := seat.Player.(HeadlessRecoverer); recovers {
+					recoverer.Recover(ctx)
+				}
 			}
 			memories[index] = played.memory
 			result.Commands += len(played.commands)

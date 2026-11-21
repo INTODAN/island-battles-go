@@ -151,8 +151,13 @@ def play(tournament: Tournament, run_directory: Path) -> list[dict[str, Any]]:
         }
         for line in engine.play(schedule, run_directory / "workers.log"):
             results[line["id"]] = line
+            cached = CACHE / f"{line['id']}.json"
             if "error" not in line and not any(seat["failed_turns"] for seat in line["seats"]):
-                (CACHE / f"{line['id']}.json").write_text(json.dumps(line), encoding="utf-8")
+                cached.write_text(json.dumps(line), encoding="utf-8")
+            else:
+                # The runner has replaced the demo, so an earlier result of
+                # this match no longer belongs to it.
+                cached.unlink(missing_ok=True)
     return [results[key] for key in planned if key in results]
 
 
