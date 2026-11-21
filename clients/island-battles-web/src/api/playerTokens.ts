@@ -13,7 +13,7 @@ export interface IssuedPlayerToken {
 /**
  * The game's routes that take a player token instead of the guest credential:
  * a player's game, its watcher reads, the command batches, a lobby's bot
- * packages and the signed-in player's account.
+ * packages and the signed-in player's account (`/account` and its bot names).
  */
 export const needsPlayerToken = (pathname: string): boolean =>
   pathname.includes("/game/from-lobby/") ||
@@ -34,6 +34,8 @@ export class PlayerTokens {
     | { token: string; credential: string; renewAt: number }
     | undefined;
   private pending: { credential: string; token: Promise<string> } | undefined;
+  /** Counts `forget()` calls, so a token issued before one isn't kept. */
+  private forgotten = 0;
 
   constructor(
     private readonly issue: () => Promise<IssuedPlayerToken>,
@@ -64,9 +66,21 @@ export class PlayerTokens {
     return pending.token;
   }
 
+  /**
+   * Drops the held token, so the next request gets a new one. After a rename the
+   * new token carries the new display name to the game.
+   */
+  forget(): void {
+    this.forgotten++;
+    this.current = undefined;
+    this.pending = undefined;
+  }
+
   private async issueFor(credential: string): Promise<string> {
     const issuedAt = this.now();
+    const forgotten = this.forgotten;
     const { token, expires_at } = await this.issue();
+    if (forgotten !== this.forgotten) return token;
     const life = Date.parse(expires_at) - issuedAt;
     this.current = {
       token,

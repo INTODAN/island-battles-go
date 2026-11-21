@@ -1,4 +1,5 @@
 import { ApiError } from "../../api/errors";
+import type { ReadableStore, Session } from "../../realtime";
 import { h } from "../dom";
 import { leaderboardLink } from "../leaderboard/links";
 import { rulesButton } from "../rules/rulesDialog";
@@ -16,7 +17,8 @@ import { describeProblem } from "./problems";
 import { mountTutorials } from "./tutorial";
 
 export interface MenuScreenOptions {
-  playerName: string;
+  /** The session: its display name, and whether it is signed in with Google (`account`). */
+  session: ReadableStore<Session | null>;
   actions: LobbyActions;
   /** A join code to prefill and try at once (the page's `?join=` link). */
   joinCode: string | undefined;
@@ -28,7 +30,10 @@ export interface MenuScreenOptions {
   notice: string;
   /** The session ended while a call ran. */
   onSignedOut(): void;
+  /** A guest's "Change name". */
   onChangeName(): void;
+  /** A signed-in person's "Account": opens the account page. */
+  onAccount(): void;
   /** Opens the leaderboard, from a link in the heading. */
   onLeaderboard?: () => void;
   newId(): string;
@@ -37,6 +42,8 @@ export interface MenuScreenOptions {
 /** Screen 2: create a lobby or join one by its code. */
 export function mountMenuScreen(options: MenuScreenOptions): Screen {
   const { actions } = options;
+  const playerName = options.session.get()?.displayName ?? "";
+  const signedIn = options.session.get()?.account !== undefined;
   let disposed = false;
   const requests = new CreateRequests(options.newId);
 
@@ -152,7 +159,7 @@ export function mountMenuScreen(options: MenuScreenOptions): Screen {
     id: "lobby-name",
     type: "text",
     maxLength: maxNameLength,
-    value: `${options.playerName}'s lobby`,
+    value: `${playerName}'s lobby`,
   });
   const mapFields = mountMapFields({ actions });
   const lobbyNameError = h("p", {
@@ -223,6 +230,11 @@ export function mountMenuScreen(options: MenuScreenOptions): Screen {
     }
   });
 
+  // A signed-in person's name can change on the account page; the heading follows it.
+  const shownName = h("span", {}, playerName);
+  const stopName = options.session.subscribe((session) => {
+    if (session) shownName.textContent = session.displayName;
+  });
   const heading = h(
     "div",
     { class: "greeting" },
@@ -230,16 +242,28 @@ export function mountMenuScreen(options: MenuScreenOptions): Screen {
     h(
       "p",
       { class: "lead" },
-      `Playing as ${options.playerName}. `,
-      h(
-        "button",
-        {
-          type: "button",
-          class: "link",
-          onclick: () => options.onChangeName(),
-        },
-        "Change name",
-      ),
+      signedIn ? "Signed in as " : "Playing as ",
+      shownName,
+      ". ",
+      signedIn
+        ? h(
+            "button",
+            {
+              type: "button",
+              class: "link",
+              onclick: () => options.onAccount(),
+            },
+            "Account",
+          )
+        : h(
+            "button",
+            {
+              type: "button",
+              class: "link",
+              onclick: () => options.onChangeName(),
+            },
+            "Change name",
+          ),
       " · ",
       ...(options.onLeaderboard
         ? [leaderboardLink("Leaderboard", options.onLeaderboard), " · "]
@@ -267,6 +291,7 @@ export function mountMenuScreen(options: MenuScreenOptions): Screen {
     el,
     dispose() {
       disposed = true;
+      stopName();
       mapFields.dispose();
     },
   };

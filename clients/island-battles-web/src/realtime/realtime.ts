@@ -70,6 +70,26 @@ export interface Realtime {
   readonly problem: ReadableStore<RealtimeProblem | null>;
   /** Reuses the saved session while it lasts, else creates a guest session. */
   signIn(displayName: string): Promise<Session>;
+  /**
+   * Signs in with the ID token Google's button or its silent sign-in gave the page
+   * (`POST /lobby/v1/sessions/google`), and saves the session with its account as
+   * `signIn` does. An account's first sign-in needs `displayName`: without one it
+   * rejects with the lobby's 422 `display_name_required`, and the caller asks for a
+   * name and calls again with the same credential. A taken name is 409
+   * `display_name_taken`.
+   */
+  signInWithGoogle(credential: string, displayName?: string): Promise<Session>;
+  /**
+   * Renames the signed-in account (`PUT /lobby/v1/account`) and keeps the session's
+   * display name in step. A taken name is 409 `display_name_taken`.
+   */
+  renameAccount(displayName: string): Promise<Session>;
+  /**
+   * Deletes the signed-in account in the lobby (`DELETE /lobby/v1/account`), which
+   * ends every session of it on the server. Delete the game's part first, and sign
+   * out after: the caller does, so it can turn Google's silent sign-in off first.
+   */
+  deleteAccount(): Promise<void>;
   /** Follows a lobby: reads its snapshot, then keeps it current. */
   followLobby(target: { gameKey: string; lobbyId: string }): void;
   /** Installs a snapshot an HTTP call returned (create, join, start...) and follows its lobby. */
@@ -99,6 +119,11 @@ export interface Realtime {
   leaveWatch(): void;
   /** Ends the session and closes the connection. */
   signOut(): void;
+  /**
+   * Ends the session because the lobby refused it (401) to a call made by another client, such
+   * as the account page's: `problem` gets scope `session`, as for a refusal of the session's own.
+   */
+  sessionRefused(error: ApiError): void;
 }
 
 const lobbyPath = (gameKey: string, lobbyId: string) => ({
@@ -593,6 +618,27 @@ export function createRealtime(options: RealtimeOptions = {}): Realtime {
     problem.set(null);
   }
 
+  function startSession(next: Session): Session {
+    saveSession(storage, next);
+    problem.set(null);
+    session.set(next);
+    watchExpiry(next);
+    return next;
+  }
+
+  /** Runs a call of the signed-in session; a 401 ends the session. */
+  async function signedInCall<T>(call: () => Promise<T>): Promise<T> {
+    const epoch = sessionEpoch;
+    try {
+      return await call();
+    } catch (error) {
+      if (isUnauthorized(error) && epoch === sessionEpoch) {
+        endSession(error as ApiError);
+      }
+      throw error;
+    }
+  }
+
   return {
     session,
     lobby,
@@ -608,17 +654,55 @@ export function createRealtime(options: RealtimeOptions = {}): Realtime {
         body: { display_name: displayName },
       });
       const created = required(data);
-      const next: Session = {
+      return startSession({
         playerId: created.player_id,
         accessToken: created.access_token,
         expiresAt: Date.parse(created.expires_at),
         displayName,
+      });
+    },
+
+    async signInWithGoogle(credential, displayName) {
+      const { data } = await lobbyApi.POST("/lobby/v1/sessions/google", {
+        body: {
+          credential,
+          ...(displayName === undefined ? {} : { display_name: displayName }),
+        },
+      });
+      const created = required(data);
+      return startSession({
+        playerId: created.player_id,
+        accessToken: created.access_token,
+        expiresAt: Date.parse(created.expires_at),
+        displayName: created.account.display_name,
+        account: {
+          id: created.account.id,
+          displayName: created.account.display_name,
+        },
+      });
+    },
+
+    async renameAccount(displayName) {
+      const { data } = await signedInCall(() =>
+        lobbyApi.PUT("/lobby/v1/account", {
+          body: { display_name: displayName },
+        }),
+      );
+      const account = required(data);
+      const held = session.get();
+      if (!held) throw new Error("the session ended during the rename");
+      const next: Session = {
+        ...held,
+        displayName: account.display_name,
+        account: { id: account.id, displayName: account.display_name },
       };
       saveSession(storage, next);
-      problem.set(null);
       session.set(next);
-      watchExpiry(next);
       return next;
+    },
+
+    async deleteAccount() {
+      await signedInCall(() => lobbyApi.DELETE("/lobby/v1/account"));
     },
 
     followLobby({ gameKey, lobbyId }) {
@@ -713,6 +797,10 @@ export function createRealtime(options: RealtimeOptions = {}): Realtime {
 
     signOut() {
       endSession();
+    },
+
+    sessionRefused(error) {
+      if (session.get()) endSession(error);
     },
   };
 }

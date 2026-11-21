@@ -114,15 +114,33 @@ describe("player tokens", () => {
     expect(server.gameAuthorizations()).toEqual(["Bearer token-1"]);
   });
 
-  test("the account's routes take a player token too", async () => {
+  test("the account and its bot names take a player token too", async () => {
     const server = serverFor();
     await server.gameApi.GET("/account");
+    await server.gameApi.POST("/account/bot-names", {
+      body: { name: "Kraken" },
+    });
     await server.gameApi.DELETE("/account/bot-names/{competitor_id}", {
       params: { path: { competitor_id: LOBBY_ID } },
     });
+    await server.gameApi.DELETE("/account");
+    expect(server.issued()).toBe(1);
     expect(server.gameAuthorizations()).toEqual([
       "Bearer token-1",
       "Bearer token-1",
+      "Bearer token-1",
+      "Bearer token-1",
+    ]);
+  });
+
+  test("forget makes the next request get a new token", async () => {
+    const server = serverFor();
+    await server.gameApi.GET("/account");
+    server.playerTokens.forget();
+    await server.gameApi.GET("/account");
+    expect(server.gameAuthorizations()).toEqual([
+      "Bearer token-1",
+      "Bearer token-2",
     ]);
   });
 

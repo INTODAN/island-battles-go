@@ -41,9 +41,11 @@ export function setAccessToken(token: string | undefined): void {
   accessToken = token;
 }
 
-/** Creating a guest session is the only call made without credentials. */
+/** Creating a session, as a guest or with Google, is the only call made without credentials. */
 const isSessionCreate = (method: string, schemaPath: string) =>
-  method === "POST" && schemaPath === "/lobby/v1/sessions";
+  method === "POST" &&
+  (schemaPath === "/lobby/v1/sessions" ||
+    schemaPath === "/lobby/v1/sessions/google");
 
 function authMiddleware(getAccessToken: () => string | undefined): Middleware {
   return {
@@ -129,5 +131,5 @@ export function createApiClients(options: ApiOptions = {}) {
     fetch: playerTokenFetch(send(), playerTokens, getAccessToken),
   });
   gameApi.use(errorMiddleware);
-  return { lobbyApi, gameApi };
+  return { lobbyApi, gameApi, playerTokens };
 }

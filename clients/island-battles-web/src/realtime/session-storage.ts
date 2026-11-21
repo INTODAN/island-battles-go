@@ -7,13 +7,28 @@ export interface StorageLike {
   removeItem(key: string): void;
 }
 
+/** The lobby account of a session signed in with Google. A guest's session has none. */
+export interface SessionAccount {
+  id: string;
+  /** The name the person chose; never anything of Google's. */
+  displayName: string;
+}
+
 export interface Session {
   playerId: string;
   accessToken: string;
   /** When the server ends the session, as epoch milliseconds. */
   expiresAt: number;
   displayName: string;
+  /** Set for a session signed in with Google; absent for a guest. */
+  account?: SessionAccount;
 }
+
+const isAccount = (value: unknown): value is SessionAccount =>
+  typeof value === "object" &&
+  value !== null &&
+  typeof (value as Partial<SessionAccount>).id === "string" &&
+  typeof (value as Partial<SessionAccount>).displayName === "string";
 
 export const sessionStorageKey = "island-battles-web.session";
 
@@ -32,7 +47,8 @@ export function loadSession(
       typeof value.accessToken === "string" &&
       typeof value.displayName === "string" &&
       typeof value.expiresAt === "number" &&
-      value.expiresAt > now
+      value.expiresAt > now &&
+      (value.account === undefined || isAccount(value.account))
     ) {
       return value as Session;
     }

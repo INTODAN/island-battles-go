@@ -129,6 +129,15 @@ describe("requests", () => {
     expect(requests[1]?.headers.get("Authorization")).toBe("Bearer tok");
   });
 
+  test("send no bearer token when signing in with Google", async () => {
+    const { lobbyApi, requests } = clientsFor(() => Response.json({}));
+    await lobbyApi.POST("/lobby/v1/sessions/google", {
+      body: { credential: "id-token" },
+    });
+    expect(requests[0]?.url).toBe("http://api.test/lobby/v1/sessions/google");
+    expect(requests[0]?.headers.get("Authorization")).toBeNull();
+  });
+
   test("tolerate unknown fields in successful responses", async () => {
     const { gameApi } = clientsFor(() =>
       Response.json({ $schema: "x", surprise: [1, 2, 3] }),

@@ -840,3 +840,37 @@ select:focus-visible {
   gap: 10px;
   margin: 6px 0;
 }
+
+/* Sign in with Google on the name screen (#369): Google's own button, then the guest's name. */
+
+.google-button {
+  display: flex;
+  justify-content: center;
+  min-height: 40px;
+}
+
+.signin-why {
+  margin: 8px 0 0;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.or-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0 2px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.or-divider::before,
+.or-divider::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid #c3d3df;
+}
+
+.signing-in {
+  text-align: center;
+}
