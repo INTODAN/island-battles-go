@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/INTODAN/mpl/domain"
 	lobbypostgres "github.com/INTODAN/mpl/postgres"
@@ -54,12 +55,25 @@ func (stack *lobbyStack) lobbyOf(host guest, teams int, settings map[string]any)
 	return snapshot
 }
 
-// registerBotName registers a bot name for a signed-in player.
+// registerBotName registers a bot name for a signed-in player, with the
+// hosted bot URL botURL(name).
 func (stack *lobbyStack) registerBotName(member guest, name string) models.CompetitorView {
 	stack.t.Helper()
 	var competitor models.CompetitorView
-	stack.expect(stack.api.Post("/account/bot-names", stack.playerToken(member, lobbyadapter.GameKey), map[string]string{"name": name}), http.StatusCreated, &competitor)
+	stack.expect(stack.api.Post("/account/bot-names", stack.playerToken(member, lobbyadapter.GameKey), map[string]string{"name": name, "url": botURL(name)}), http.StatusCreated, &competitor)
 	return competitor
+}
+
+// botURL is the hosted bot URL that registerBotName gives a bot name.
+func botURL(name string) string { return "https://bot.example.com/" + strings.ToLower(name) }
+
+// withoutURL takes a bot name's URL away, as a name registered before names
+// had URLs has none.
+func (stack *lobbyStack) withoutURL(competitorID string) {
+	stack.t.Helper()
+	if err := stack.database.Model(&models.Competitor{}).Where(&models.Competitor{ID: competitorID}).Update("url", nil).Error; err != nil {
+		stack.t.Fatal(err)
+	}
 }
 
 // expectRequirement checks that response is the lobby's game_requirement of
@@ -128,9 +142,10 @@ func TestALobbyIsRatedOnlyWhenItsSettingsSaySo(t *testing.T) {
 }
 
 // In a rated lobby a member gets ready only signed in, and playing by hand
-// or with a bot under one of their bot names.
+// or with a hosted bot under one of their bot names, which has a URL: a
+// named localhost or uploaded bot is refused.
 func TestARatedLobbysReadyGate(t *testing.T) {
-	stack := newLobbyStack(t)
+	stack := newServerBotStack(t)
 	dana, guestPlayer := stack.player("google-dana", "Dana"), stack.guest("Gus")
 	kraken := stack.registerBotName(dana, "Kraken")
 	room := stack.lobbyOf(dana, 2, ratedSettings(2, true))
@@ -146,25 +161,49 @@ func TestARatedLobbysReadyGate(t *testing.T) {
 
 	// A signed-in member needs a bot name for a bot, and can't choose a
 	// default bot.
-	for _, bot := range []string{`{"kind":"default","level":2}`, `{"kind":"localhost"}`, `{"kind":"localhost","port":41415}`} {
+	for _, bot := range []string{`{"kind":"default","level":2}`, `{"kind":"localhost"}`, `{"kind":"localhost","port":41415}`, `{"kind":"hosted","url":"https://bot.example.com/turn"}`} {
 		stack.expect(stack.choose(room, dana, bot), http.StatusOK, nil)
-		if detail := stack.expectRequirement(stack.ready(room, dana), services.RatedBotNameRequiredProblemType); detail != "This lobby is rated. Play by hand, or choose one of your bot names for your bot." {
+		if detail := stack.expectRequirement(stack.ready(room, dana), services.RatedBotNameRequiredProblemType); detail != "This lobby is rated. Play by hand, or choose one of your hosted bot names." {
 			t.Fatalf("%s = %q", bot, detail)
 		}
 	}
-	// A bot name of theirs is compared without regard to case and stored as
-	// given; playing by hand needs none.
-	var chosen domain.Snapshot
-	stack.expect(stack.choose(room, dana, `{"kind":"localhost","name":"kraken"}`), http.StatusOK, &chosen)
-	if settings := string(memberOf(t, chosen, dana.playerID).MemberSettings); settings != `{"bot":{"kind":"localhost","name":"kraken"}}` {
-		t.Fatalf("Dana's settings = %s", settings)
+	// A named bot must be hosted: a localhost or an uploaded one is refused.
+	danasPackage := stack.uploadPackage(room, dana, "Dana", "python")
+	for _, bot := range []string{`{"kind":"localhost","name":"Kraken"}`, `{"kind":"uploaded","package_id":"` + danasPackage + `","name":"Kraken"}`} {
+		stack.expect(stack.choose(room, dana, bot), http.StatusOK, nil)
+		if detail := stack.expectRequirement(stack.ready(room, dana), services.RatedHostedBotRequiredProblemType); detail != "This lobby is rated. Rated bots run at their own URL: choose one of your hosted bot names, or play by hand." {
+			t.Fatalf("%s = %q", bot, detail)
+		}
 	}
-	stack.expect(stack.ready(room, dana), http.StatusOK, nil)
-	stack.expect(stack.choose(room, dana, `{"kind":"manual"}`), http.StatusOK, nil)
+	// A hosted bot name of theirs, with no url, is compared without regard
+	// to case and stored as given; a url beside the name is taken, and
+	// ignored in a rated lobby. Playing by hand needs no name.
+	for _, bot := range []string{`{"kind":"hosted","name":"kraken"}`, `{"kind":"hosted","name":"Kraken","url":"https://bot.example.com/elsewhere"}`, `{"kind":"manual"}`} {
+		var chosen domain.Snapshot
+		stack.expect(stack.choose(room, dana, bot), http.StatusOK, &chosen)
+		if settings := string(memberOf(t, chosen, dana.playerID).MemberSettings); settings != `{"bot":`+bot+`}` {
+			t.Fatalf("Dana's settings = %s", settings)
+		}
+		stack.expect(stack.ready(room, dana), http.StatusOK, nil)
+	}
+
+	// A name without a URL, registered before names had URLs, can't be
+	// chosen without a url, and gets nobody ready in a rated lobby until its
+	// owner adds one.
+	leviathan := stack.registerBotName(dana, "Leviathan")
+	stack.withoutURL(leviathan.ID)
+	if detail := stack.expectInvalid(stack.choose(room, dana, `{"kind":"hosted","name":"leviathan"}`), "invalid_member_settings"); detail != "Leviathan has no URL yet: add its hosted bot's URL on the account page, or give your hosted bot a url." {
+		t.Fatalf("a name without a URL = %q", detail)
+	}
+	stack.expect(stack.choose(room, dana, `{"kind":"hosted","url":"https://bot.example.com/turn","name":"Leviathan"}`), http.StatusOK, nil)
+	if detail := stack.expectRequirement(stack.ready(room, dana), services.BotNameURLRequiredProblemType); detail != "Your bot name Leviathan has no URL yet. Add its hosted bot's URL on the account page, then get ready again." {
+		t.Fatalf("a name without a URL = %q", detail)
+	}
+	stack.expect(stack.api.Put("/account/bot-names/"+leviathan.ID, stack.playerToken(dana, lobbyadapter.GameKey), map[string]string{"url": botURL("Leviathan")}), http.StatusOK, nil)
 	stack.expect(stack.ready(room, dana), http.StatusOK, nil)
 
 	// A name deleted after it was chosen no longer gets them ready.
-	stack.expect(stack.choose(room, dana, `{"kind":"localhost","name":"Kraken"}`), http.StatusOK, nil)
+	stack.expect(stack.choose(room, dana, `{"kind":"hosted","name":"Kraken"}`), http.StatusOK, nil)
 	stack.expect(stack.api.Delete("/account/bot-names/"+kraken.ID, stack.playerToken(dana, lobbyadapter.GameKey)), http.StatusNoContent, nil)
 	if detail := stack.expectRequirement(stack.ready(room, dana), services.RatedBotNameGoneProblemType); detail != "Your bot name Kraken no longer exists. Choose another." {
 		t.Fatalf("a deleted name's refusal = %q", detail)
@@ -174,7 +213,7 @@ func TestARatedLobbysReadyGate(t *testing.T) {
 // A bot's name must be one of the member's own, in every lobby; a guest has
 // none, and only a bot that a client or the server runs takes one.
 func TestABotNameMustBeOneOfYours(t *testing.T) {
-	stack := newLobbyStack(t)
+	stack := newServerBotStack(t)
 	dana, erin, guestPlayer := stack.player("google-dana", "Dana"), stack.player("google-erin", "Erin"), stack.guest("Gus")
 	stack.registerBotName(dana, "Kraken")
 	for _, rated := range []bool{true, false} {
@@ -182,15 +221,41 @@ func TestABotNameMustBeOneOfYours(t *testing.T) {
 		stack.join(room, erin, 1)
 		stack.join(room, guestPlayer, 2)
 		for _, member := range []guest{erin, guestPlayer} {
-			if detail := stack.expectInvalid(stack.choose(room, member, `{"kind":"localhost","name":"Kraken"}`), "invalid_member_settings"); detail != "Kraken isn't one of your bot names." {
-				t.Fatalf("rated %t: another's name = %q", rated, detail)
+			for _, bot := range []string{`{"kind":"localhost","name":"Kraken"}`, `{"kind":"hosted","name":"Kraken"}`} {
+				if detail := stack.expectInvalid(stack.choose(room, member, bot), "invalid_member_settings"); detail != "Kraken isn't one of your bot names." {
+					t.Fatalf("rated %t: another's name = %q", rated, detail)
+				}
 			}
 		}
-		for _, bot := range []string{`{"kind":"manual","name":"Kraken"}`, `{"kind":"default","level":2,"name":"Kraken"}`} {
+		for _, bot := range []string{`{"kind":"manual","name":"Kraken"}`, `{"kind":"default","level":2,"name":"Kraken"}`, `{"kind":"hosted"}`} {
 			stack.expectInvalid(stack.choose(room, dana, bot), "invalid_member_settings")
 		}
-		stack.expect(stack.choose(room, dana, `{"kind":"localhost","name":"KRAKEN"}`), http.StatusOK, nil)
+		stack.expect(stack.choose(room, dana, `{"kind":"hosted","name":"KRAKEN"}`), http.StatusOK, nil)
 		stack.expect(stack.ready(room, dana), http.StatusOK, nil)
+	}
+}
+
+// A lobby that isn't rated takes every kind of bot, named or not, as before
+// rated bots were hosted only. A named hosted bot without a url plays at its
+// name's URL, so it needs the name to exist still.
+func TestAnUnratedLobbyTakesEveryNamedBot(t *testing.T) {
+	stack := newServerBotStack(t)
+	dana := stack.player("google-dana", "Dana")
+	kraken := stack.registerBotName(dana, "Kraken")
+	room := stack.lobbyOf(dana, 2, ratedSettings(2, false))
+	danasPackage := stack.uploadPackage(room, dana, "Dana", "python")
+	for _, bot := range []string{
+		`{"kind":"manual"}`, `{"kind":"default","level":2}`, `{"kind":"localhost"}`, `{"kind":"localhost","name":"Kraken"}`,
+		`{"kind":"uploaded","package_id":"` + danasPackage + `"}`, `{"kind":"uploaded","name":"Kraken","package_id":"` + danasPackage + `"}`,
+		`{"kind":"hosted","url":"https://bot.example.com/turn"}`, `{"kind":"hosted","name":"Kraken","url":"https://bot.example.com/turn"}`, `{"kind":"hosted","name":"Kraken"}`,
+	} {
+		stack.expect(stack.choose(room, dana, bot), http.StatusOK, nil)
+		stack.expect(stack.ready(room, dana), http.StatusOK, nil)
+	}
+	stack.expect(stack.choose(room, dana, `{"kind":"hosted","name":"KRAKEN"}`), http.StatusOK, nil)
+	stack.expect(stack.api.Delete("/account/bot-names/"+kraken.ID, stack.playerToken(dana, lobbyadapter.GameKey)), http.StatusNoContent, nil)
+	if detail := stack.expectRequirement(stack.ready(room, dana), services.RatedBotNameGoneProblemType); detail != "Your bot name KRAKEN no longer exists. Choose another." {
+		t.Fatalf("a deleted name's refusal = %q", detail)
 	}
 }
 
@@ -246,9 +311,9 @@ func TestARatedStartNeedsADifferentAccountOnEachTeam(t *testing.T) {
 
 // The start checks the whole roster again, and names whom the host waits
 // for: members who got ready before the lobby was rated, a name deleted
-// since, and a seat added before.
+// since, or without a URL, and a seat added before.
 func TestARatedStartChecksTheRosterAgain(t *testing.T) {
-	stack := newLobbyStack(t)
+	stack := newServerBotStack(t)
 	dana, erin, guestPlayer := stack.player("google-dana", "Dana"), stack.player("google-erin", "Erin"), stack.guest("Gus")
 	kraken := stack.registerBotName(erin, "Kraken")
 	readyRoom := func(rated bool, bots map[guest]string) domain.Snapshot {
@@ -273,11 +338,25 @@ func TestARatedStartChecksTheRosterAgain(t *testing.T) {
 
 	room = readyRoom(false, map[guest]string{dana: `{"kind":"manual"}`, erin: `{"kind":"default","level":2}`})
 	stack.setRated(room, true)
-	if detail := stack.expectRequirement(stack.start(room, dana), services.RatedBotNameRequiredProblemType); detail != "This lobby is rated: waiting for Erin to play by hand, or to choose one of their bot names for their bot." {
+	if detail := stack.expectRequirement(stack.start(room, dana), services.RatedBotNameRequiredProblemType); detail != "This lobby is rated: waiting for Erin to play by hand, or to choose one of their hosted bot names." {
 		t.Fatalf("a default bot at the start = %q", detail)
 	}
 
-	room = readyRoom(true, map[guest]string{dana: `{"kind":"manual"}`, erin: `{"kind":"localhost","name":"Kraken"}`})
+	room = readyRoom(false, map[guest]string{dana: `{"kind":"manual"}`, erin: `{"kind":"localhost","name":"Kraken"}`})
+	stack.setRated(room, true)
+	if detail := stack.expectRequirement(stack.start(room, dana), services.RatedHostedBotRequiredProblemType); detail != "This lobby is rated, and rated bots run at their own URL: waiting for Erin to choose one of their hosted bot names, or to play by hand." {
+		t.Fatalf("a named localhost bot at the start = %q", detail)
+	}
+
+	room = readyRoom(false, map[guest]string{dana: `{"kind":"manual"}`, erin: `{"kind":"hosted","url":"https://bot.example.com/turn","name":"Kraken"}`})
+	stack.withoutURL(kraken.ID)
+	stack.setRated(room, true)
+	if detail := stack.expectRequirement(stack.start(room, dana), services.BotNameURLRequiredProblemType); detail != "Erin's bot name Kraken has no URL yet: they must add its hosted bot's URL on the account page." {
+		t.Fatalf("a name without a URL at the start = %q", detail)
+	}
+	stack.expect(stack.api.Put("/account/bot-names/"+kraken.ID, stack.playerToken(erin, lobbyadapter.GameKey), map[string]string{"url": botURL("Kraken")}), http.StatusOK, nil)
+
+	room = readyRoom(true, map[guest]string{dana: `{"kind":"manual"}`, erin: `{"kind":"hosted","name":"Kraken"}`})
 	stack.expect(stack.api.Delete("/account/bot-names/"+kraken.ID, stack.playerToken(erin, lobbyadapter.GameKey)), http.StatusNoContent, nil)
 	if detail := stack.expectRequirement(stack.start(room, dana), services.RatedBotNameGoneProblemType); detail != "Erin's bot name Kraken no longer exists: they must choose another." {
 		t.Fatalf("a deleted name at the start = %q", detail)
@@ -297,9 +376,11 @@ func TestARatedStartChecksTheRosterAgain(t *testing.T) {
 }
 
 // A rated game records each team's competitor: a person's hand play or bot
-// name, and a seat's house bot. The same lobby unrated records none.
+// name, and a seat's house bot, and plays a named hosted bot at the name's
+// URL as it was at the start. The same lobby unrated records none, and plays
+// a hosted bot at its own url, or at its name's when it has none.
 func TestARatedGameRecordsItsCompetitors(t *testing.T) {
-	stack := newLobbyStack(t)
+	stack := newServerBotStack(t)
 	dana := stack.player("google-dana", "Dana")
 	kraken := stack.registerBotName(dana, "Kraken")
 	var account models.IslandAccountView
@@ -308,22 +389,29 @@ func TestARatedGameRecordsItsCompetitors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	const ownURL = "https://bot.example.com/own"
 	for _, play := range []struct {
 		bot        string
 		rated      bool
 		competitor string
 		name       string
+		url        string
 	}{
 		{bot: `{"kind":"manual"}`, rated: true, competitor: account.Hand.ID},
-		{bot: `{"kind":"localhost","name":"kraken"}`, rated: true, competitor: kraken.ID, name: "Kraken"},
+		{bot: `{"kind":"hosted","name":"kraken"}`, rated: true, competitor: kraken.ID, name: "Kraken", url: botURL("Kraken")},
+		{bot: `{"kind":"hosted","url":"` + ownURL + `","name":"Kraken"}`, rated: true, competitor: kraken.ID, name: "Kraken", url: botURL("Kraken")},
 		{bot: `{"kind":"manual"}`, rated: false},
 		{bot: `{"kind":"localhost","name":"Kraken"}`, rated: false},
+		{bot: `{"kind":"hosted","name":"Kraken"}`, rated: false, url: botURL("Kraken")},
+		{bot: `{"kind":"hosted","url":"` + ownURL + `","name":"Kraken"}`, rated: false, url: ownURL},
 	} {
 		room := stack.lobbyOf(dana, 2, ratedSettings(2, play.rated))
 		stack.expect(stack.addSeat(room, dana, 1, map[string]any{"bot_level": 2}), http.StatusOK, nil)
 		stack.expect(stack.choose(room, dana, play.bot), http.StatusOK, nil)
 		stack.expect(stack.ready(room, dana), http.StatusOK, nil)
 		stack.expect(stack.start(room, dana), http.StatusOK, nil)
+		// A URL changed during the game doesn't change the game's.
+		stack.expect(stack.api.Put("/account/bot-names/"+kraken.ID, stack.playerToken(dana, lobbyadapter.GameKey), map[string]string{"url": "https://bot.example.com/changed"}), http.StatusOK, nil)
 
 		state := stack.state(room, dana)
 		if state.Rated != play.rated || state.Bot.Name != play.name {
@@ -347,6 +435,60 @@ func TestARatedGameRecordsItsCompetitors(t *testing.T) {
 			if got := player.CompetitorID; (got == nil) != (want == "") || (got != nil && *got != want) {
 				t.Fatalf("%s, rated %t: %s's competitor = %v, want %q", play.bot, play.rated, player.DisplayName, got, want)
 			}
+			if player.PlayerID == dana.playerID {
+				if got := player.BotURL; (got == nil) != (play.url == "") || (got != nil && *got != play.url) {
+					t.Fatalf("%s, rated %t: Dana's bot URL = %v, want %q", play.bot, play.rated, got, play.url)
+				}
+			}
+		}
+		stack.expect(stack.api.Put("/account/bot-names/"+kraken.ID, stack.playerToken(dana, lobbyadapter.GameKey), map[string]string{"url": botURL("Kraken")}), http.StatusOK, nil)
+	}
+}
+
+// "Play against it": anyone may add a listed bot's URL, from the
+// leaderboard, as a hosted bot seat of a lobby of their own. A rated lobby
+// refuses such a seat, so the game is unrated: the seat is no competitor,
+// and the bot name's rating can't change.
+func TestPlayingAgainstAListedBotIsUnrated(t *testing.T) {
+	stack := newServerBotStack(t)
+	dana, erin := stack.player("google-dana", "Dana"), stack.player("google-erin", "Erin")
+	kraken := stack.registerBotName(dana, "Kraken")
+	// Kraken is listed, with its URL, once it has played a rated game.
+	if err := stack.database.Model(&models.Competitor{}).Where(&models.Competitor{ID: kraken.ID}).
+		Updates(map[string]any{"games": 1, "wins": 1, "rating": 1520, "last_played_at": time.Now()}).Error; err != nil {
+		t.Fatal(err)
+	}
+	var listed models.LeaderboardCompetitorView
+	stack.expect(stack.api.Get("/leaderboard/"+kraken.ID), http.StatusOK, &listed)
+	if listed.URL == nil || *listed.URL != botURL("Kraken") {
+		t.Fatalf("Kraken's page = %+v", listed)
+	}
+
+	rated := stack.lobbyOf(erin, 2, ratedSettings(2, true))
+	if detail := stack.expectInvalid(stack.addSeat(rated, erin, 1, map[string]any{"bot_url": *listed.URL}), "invalid_seat_settings"); detail != services.RatedSeatRule {
+		t.Fatalf("Kraken's seat in a rated lobby = %q", detail)
+	}
+	room := stack.lobbyOf(erin, 2, ratedSettings(2, false))
+	stack.expect(stack.addSeat(room, erin, 1, map[string]any{"bot_url": *listed.URL}), http.StatusOK, nil)
+	stack.expect(stack.choose(room, erin, `{"kind":"manual"}`), http.StatusOK, nil)
+	stack.expect(stack.ready(room, erin), http.StatusOK, nil)
+	stack.expect(stack.start(room, erin), http.StatusOK, nil)
+
+	state := stack.state(room, erin)
+	game, err := dal.GetGameByID(stack.database, state.GameID)
+	if err != nil || state.Rated || game.Rated {
+		t.Fatalf("game = %+v, %v; state rated %t", game, err, state.Rated)
+	}
+	players, err := dal.LoadFrozenPlayers(stack.database, state.GameID)
+	if err != nil || len(players) != 2 {
+		t.Fatalf("frozen players = %+v, %v", players, err)
+	}
+	for _, player := range players {
+		if player.CompetitorID != nil || player.BotName != nil {
+			t.Fatalf("frozen player = %+v, want no competitor", player)
+		}
+		if player.PlayerID != erin.playerID && (player.BotKind != models.HostedBot || player.BotURL == nil || *player.BotURL != botURL("Kraken")) {
+			t.Fatalf("Kraken's seat = %+v", player)
 		}
 	}
 }
@@ -389,7 +531,7 @@ func TestARetriedRatedStartReturnsTheSameGame(t *testing.T) {
 	host, other := uuid.NewString(), uuid.NewString()
 	snapshot.Members[0].AccountID, snapshot.Members[1].AccountID = &host, &other
 	snapshot.Members[0].MemberSettings = []byte(`{"bot":{"kind":"manual"}}`)
-	snapshot.Members[1].MemberSettings = []byte(`{"bot":{"kind":"localhost","name":"Kraken"}}`)
+	snapshot.Members[1].MemberSettings = []byte(`{"bot":{"kind":"hosted","name":"Kraken"}}`)
 	var kraken models.Competitor
 	if err := database.Transaction(func(transaction *gorm.DB) error {
 		if err := dal.SeeAccount(transaction, host, "Host, renamed"); err != nil {
@@ -399,7 +541,7 @@ func TestARetriedRatedStartReturnsTheSameGame(t *testing.T) {
 			return err
 		}
 		var err error
-		kraken, err = dal.AddBotName(transaction, other, "Kraken")
+		kraken, err = dal.AddBotName(transaction, other, "Kraken", botURL("Kraken"))
 		return err
 	}); err != nil {
 		t.Fatal(err)

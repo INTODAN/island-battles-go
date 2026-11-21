@@ -44,6 +44,7 @@ function entry(change: Partial<LeaderboardEntry> = {}): LeaderboardEntry {
     draws: 1,
     losses: 3,
     last_played_at: "2026-11-20T14:32:00Z",
+    url: null,
     ...change,
   };
 }
@@ -238,6 +239,7 @@ describe("the leaderboard", () => {
       draws: 0,
       losses: 0,
       last_played_at: null,
+      url: null,
     });
     expect(
       ownCompetitorIds({
@@ -453,6 +455,7 @@ const kraken: LeaderboardCompetitor = {
   draws: 3,
   losses: 15,
   last_played_at: "2026-11-20T14:32:00Z",
+  url: "https://kraken.example.org/bot",
   history: [],
 };
 

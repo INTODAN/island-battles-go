@@ -32,7 +32,7 @@ type accountProblem struct {
 func accountAPI(t *testing.T, database *gorm.DB, players bearerPlayers) humatest.TestAPI {
 	t.Helper()
 	_, api := humatest.New(t, routes.NewAPIConfig("test", "1.0.0"))
-	routes.SetupAccountRoutes(api, &handlers.Accounts{Players: players, Service: services.Accounts{Database: database}})
+	routes.SetupAccountRoutes(api, &handlers.Accounts{Players: players, Service: services.Accounts{Database: database, ServerBots: services.ServerBots{Resolver: testutils.BotHosts}}})
 	return api
 }
 
@@ -88,8 +88,9 @@ func TestASignedInPlayerHasAnAccountAndAGuestHasNone(t *testing.T) {
 
 	for name, response := range map[string]*httptest.ResponseRecorder{
 		"read":           api.Get("/account", "Authorization: Bearer guest"),
-		"register":       api.Post("/account/bot-names", "Authorization: Bearer guest", map[string]string{"name": "Kraken"}),
+		"register":       api.Post("/account/bot-names", "Authorization: Bearer guest", map[string]string{"name": "Kraken", "url": "https://bot.example.com/turn"}),
 		"delete a name":  api.Delete("/account/bot-names/"+uuid.NewString(), "Authorization: Bearer guest"),
+		"set a URL":      api.Put("/account/bot-names/"+uuid.NewString(), "Authorization: Bearer guest", map[string]string{"url": "https://bot.example.com/turn"}),
 		"delete account": api.Delete("/account", "Authorization: Bearer guest"),
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -110,7 +111,7 @@ func TestBotNamesAreUniqueAndAtMostFive(t *testing.T) {
 	dana, eli := signedInPlayer("Dana"), signedInPlayer("Eli")
 	api := accountAPI(t, database, bearerPlayers{"Bearer dana": dana, "Bearer eli": eli})
 	register := func(token, name string) *httptest.ResponseRecorder {
-		return api.Post("/account/bot-names", "Authorization: Bearer "+token, map[string]string{"name": name})
+		return api.Post("/account/bot-names", "Authorization: Bearer "+token, map[string]string{"name": name, "url": "https://bot.example.com/turn"})
 	}
 
 	var kraken models.CompetitorView
@@ -153,7 +154,7 @@ func TestBotNamesRegisteredAtOnceKeepTheLimit(t *testing.T) {
 	var group sync.WaitGroup
 	for index := range attempts {
 		group.Go(func() {
-			codes <- api.Post("/account/bot-names", "Authorization: Bearer dana", map[string]string{"name": fmt.Sprintf("Racer %d", index)}).Code
+			codes <- api.Post("/account/bot-names", "Authorization: Bearer dana", map[string]string{"name": fmt.Sprintf("Racer %d", index), "url": "https://bot.example.com/turn"}).Code
 		})
 	}
 	group.Wait()
@@ -178,7 +179,7 @@ func TestDeletingABotNameFreesIt(t *testing.T) {
 	dana, eli := signedInPlayer("Dana"), signedInPlayer("Eli")
 	api := accountAPI(t, database, bearerPlayers{"Bearer dana": dana, "Bearer eli": eli})
 	var kraken models.CompetitorView
-	expectStatus(t, api.Post("/account/bot-names", "Authorization: Bearer dana", map[string]string{"name": "Kraken"}), http.StatusCreated, &kraken)
+	expectStatus(t, api.Post("/account/bot-names", "Authorization: Bearer dana", map[string]string{"name": "Kraken", "url": "https://bot.example.com/turn"}), http.StatusCreated, &kraken)
 	// A rated game moved it from 1500.
 	if err := database.Model(&models.Competitor{}).Where(&models.Competitor{ID: kraken.ID}).Updates(map[string]any{"rating": 1520, "games": 1, "wins": 1}).Error; err != nil {
 		t.Fatal(err)
@@ -193,7 +194,7 @@ func TestDeletingABotNameFreesIt(t *testing.T) {
 	expectStatus(t, api.Delete("/account/bot-names/"+kraken.ID, "Authorization: Bearer dana"), http.StatusNoContent, nil)
 	expectStatus(t, api.Delete("/account/bot-names/"+kraken.ID, "Authorization: Bearer dana"), http.StatusNotFound, nil)
 	var again models.CompetitorView
-	expectStatus(t, api.Post("/account/bot-names", "Authorization: Bearer eli", map[string]string{"name": "KRAKEN"}), http.StatusCreated, &again)
+	expectStatus(t, api.Post("/account/bot-names", "Authorization: Bearer eli", map[string]string{"name": "KRAKEN", "url": "https://bot.example.com/turn"}), http.StatusCreated, &again)
 	if again.ID == kraken.ID || again.Rating != 1500 || again.Games != 0 || again.Name != "KRAKEN" {
 		t.Fatalf("Kraken again = %+v, want a new competitor at 1500", again)
 	}
@@ -206,8 +207,79 @@ func TestDeletingABotNameFreesIt(t *testing.T) {
 	if err := database.Unscoped().Where(&models.Competitor{ID: kraken.ID}).First(&deleted).Error; err != nil {
 		t.Fatal(err)
 	}
-	if !deleted.DeletedAt.Valid || deleted.Name != nil || deleted.NameKey != nil || deleted.Rating != 1520 {
+	if !deleted.DeletedAt.Valid || deleted.Name != nil || deleted.NameKey != nil || deleted.URL != nil || deleted.Rating != 1520 {
 		t.Fatalf("deleted Kraken = %+v", deleted)
+	}
+}
+
+// A bot name owns its hosted bot's URL: registering a name takes one, which
+// must pass a hosted bot's check, and its owner alone can change it, keeping
+// the name's rating. GET /account shows it.
+func TestABotNameOwnsItsHostedURL(t *testing.T) {
+	database := testutils.InitTestDB(t)
+	dana, eli := signedInPlayer("Dana"), signedInPlayer("Eli")
+	api := accountAPI(t, database, bearerPlayers{"Bearer dana": dana, "Bearer eli": eli})
+
+	for url, detail := range map[string]string{
+		"":                                  "a bot name needs its hosted bot's url: where the bot takes turns, such as https://bot.example.com/turn",
+		"http://bot.example.com/turn":       "the bot's URL must start with https://",
+		"https://203.0.113.7/turn":          "the bot's URL must name its host, not an IP address",
+		"https://private.example.com/turn":  "the bot's host private.example.com resolves to 10.0.0.1, an address on a private network: a hosted bot needs a public address",
+		"https://bot.example.com:8443/turn": "the bot's URL must use port 443, or name no port",
+	} {
+		var problem accountProblem
+		expectStatus(t, api.Post("/account/bot-names", "Authorization: Bearer dana", map[string]string{"name": "Kraken", "url": url}), http.StatusUnprocessableEntity, &problem)
+		if problem.Detail != detail {
+			t.Fatalf("url %q: %q, want %q", url, problem.Detail, detail)
+		}
+	}
+	// A body without a url is refused alike.
+	expectStatus(t, api.Post("/account/bot-names", "Authorization: Bearer dana", map[string]string{"name": "Kraken"}), http.StatusUnprocessableEntity, nil)
+
+	var kraken models.CompetitorView
+	expectStatus(t, api.Post("/account/bot-names", "Authorization: Bearer dana", map[string]string{"name": "Kraken", "url": "https://bot.example.com/kraken"}), http.StatusCreated, &kraken)
+	if kraken.URL == nil || *kraken.URL != "https://bot.example.com/kraken" {
+		t.Fatalf("Kraken = %+v", kraken)
+	}
+	// A rated game moved it from 1500; a new URL keeps that.
+	if err := database.Model(&models.Competitor{}).Where(&models.Competitor{ID: kraken.ID}).Updates(map[string]any{"rating": 1520, "games": 1, "wins": 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	var changed models.CompetitorView
+	expectStatus(t, api.Put("/account/bot-names/"+kraken.ID, "Authorization: Bearer dana", map[string]string{"url": "https://seat.example.com/kraken-2"}), http.StatusOK, &changed)
+	if changed.ID != kraken.ID || changed.URL == nil || *changed.URL != "https://seat.example.com/kraken-2" || changed.Rating != 1520 || changed.Games != 1 || changed.Name != "Kraken" {
+		t.Fatalf("Kraken after its new URL = %+v", changed)
+	}
+	var problem accountProblem
+	expectStatus(t, api.Put("/account/bot-names/"+kraken.ID, "Authorization: Bearer dana", map[string]string{"url": "https://loop.example.com/turn"}), http.StatusUnprocessableEntity, &problem)
+	if problem.Detail != "the bot's host loop.example.com resolves to ::1, an address on a private network: a hosted bot needs a public address" {
+		t.Fatalf("a private URL = %+v", problem)
+	}
+
+	var account models.IslandAccountView
+	expectStatus(t, api.Get("/account", "Authorization: Bearer dana"), http.StatusOK, &account)
+	if len(account.BotNames) != 1 || account.BotNames[0].URL == nil || *account.BotNames[0].URL != "https://seat.example.com/kraken-2" || account.Hand.URL != nil {
+		t.Fatalf("account = %+v", account)
+	}
+	// Another account's name, the hand play and an unknown one are 404.
+	expectStatus(t, api.Put("/account/bot-names/"+kraken.ID, "Authorization: Bearer eli", map[string]string{"url": "https://bot.example.com/eli"}), http.StatusNotFound, nil)
+	expectStatus(t, api.Put("/account/bot-names/"+account.Hand.ID, "Authorization: Bearer dana", map[string]string{"url": "https://bot.example.com/hand"}), http.StatusNotFound, nil)
+	expectStatus(t, api.Put("/account/bot-names/"+uuid.NewString(), "Authorization: Bearer dana", map[string]string{"url": "https://bot.example.com/turn"}), http.StatusNotFound, nil)
+	var stored models.Competitor
+	if err := database.Where(&models.Competitor{ID: kraken.ID}).First(&stored).Error; err != nil || stored.URL == nil || *stored.URL != "https://seat.example.com/kraken-2" {
+		t.Fatalf("stored Kraken = %+v, %v", stored, err)
+	}
+	// A name without a URL, registered before names had URLs, gets one.
+	if err := database.Model(&models.Competitor{}).Where(&models.Competitor{ID: kraken.ID}).Update("url", nil).Error; err != nil {
+		t.Fatal(err)
+	}
+	expectStatus(t, api.Get("/account", "Authorization: Bearer dana"), http.StatusOK, &account)
+	if account.BotNames[0].URL != nil {
+		t.Fatalf("a name without a URL = %+v", account.BotNames[0])
+	}
+	expectStatus(t, api.Put("/account/bot-names/"+kraken.ID, "Authorization: Bearer dana", map[string]string{"url": "https://bot.example.com/kraken"}), http.StatusOK, &changed)
+	if changed.URL == nil || *changed.URL != "https://bot.example.com/kraken" {
+		t.Fatalf("Kraken with its URL again = %+v", changed)
 	}
 }
 
@@ -237,9 +309,9 @@ func TestDeletingAnAccountLeavesNoLiveCompetitorAndNoAccountRow(t *testing.T) {
 	dana, eli := signedInPlayer("Dana"), signedInPlayer("Eli")
 	api := accountAPI(t, database, bearerPlayers{"Bearer dana": dana, "Bearer eli": eli})
 	for _, name := range []string{"Kraken", "Leviathan"} {
-		expectStatus(t, api.Post("/account/bot-names", "Authorization: Bearer dana", map[string]string{"name": name}), http.StatusCreated, nil)
+		expectStatus(t, api.Post("/account/bot-names", "Authorization: Bearer dana", map[string]string{"name": name, "url": "https://bot.example.com/turn"}), http.StatusCreated, nil)
 	}
-	expectStatus(t, api.Post("/account/bot-names", "Authorization: Bearer eli", map[string]string{"name": "Nessie"}), http.StatusCreated, nil)
+	expectStatus(t, api.Post("/account/bot-names", "Authorization: Bearer eli", map[string]string{"name": "Nessie", "url": "https://bot.example.com/turn"}), http.StatusCreated, nil)
 
 	expectStatus(t, api.Delete("/account", "Authorization: Bearer dana"), http.StatusNoContent, nil)
 	var accounts, live, kept int64
@@ -255,7 +327,7 @@ func TestDeletingAnAccountLeavesNoLiveCompetitorAndNoAccountRow(t *testing.T) {
 	if len(account.BotNames) != 1 {
 		t.Fatalf("Eli's account = %+v", account)
 	}
-	expectStatus(t, api.Post("/account/bot-names", "Authorization: Bearer eli", map[string]string{"name": "kraken"}), http.StatusCreated, nil)
+	expectStatus(t, api.Post("/account/bot-names", "Authorization: Bearer eli", map[string]string{"name": "kraken", "url": "https://bot.example.com/turn"}), http.StatusCreated, nil)
 	// Deleting it again is 204 too.
 	expectStatus(t, api.Delete("/account", "Authorization: Bearer dana"), http.StatusNoContent, nil)
 }

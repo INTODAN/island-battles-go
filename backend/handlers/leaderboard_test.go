@@ -25,7 +25,7 @@ import (
 func leaderboardAPI(t *testing.T, database *gorm.DB, players bearerPlayers, adminAPIKey string) humatest.TestAPI {
 	t.Helper()
 	_, api := humatest.New(t, routes.NewAPIConfig("test", "1.0.0"))
-	routes.SetupAccountRoutes(api, &handlers.Accounts{Players: players, Service: services.Accounts{Database: database}})
+	routes.SetupAccountRoutes(api, &handlers.Accounts{Players: players, Service: services.Accounts{Database: database, ServerBots: services.ServerBots{Resolver: testutils.BotHosts}}})
 	routes.SetupLeaderboardRoutes(api, &handlers.Leaderboard{Service: services.Leaderboard{Database: database}}, adminAPIKey)
 	return api
 }
@@ -62,7 +62,7 @@ func handOf(t *testing.T, api humatest.TestAPI, token string) models.CompetitorV
 func registerBotName(t *testing.T, api humatest.TestAPI, token, name string) models.CompetitorView {
 	t.Helper()
 	var competitor models.CompetitorView
-	expectStatus(t, api.Post("/account/bot-names", "Authorization: Bearer "+token, map[string]string{"name": name}), http.StatusCreated, &competitor)
+	expectStatus(t, api.Post("/account/bot-names", "Authorization: Bearer "+token, map[string]string{"name": name, "url": "https://bot.example.com/turn"}), http.StatusCreated, &competitor)
 	return competitor
 }
 
@@ -105,6 +105,84 @@ func TestTheLeaderboardListsACompetitorAfterItsFirstRatedGame(t *testing.T) {
 	if entry.CompetitorID != kraken.ID || entry.Rank != 1 || entry.Kind != models.BotCompetitor || entry.Name != "Kraken" || entry.Owner == nil || *entry.Owner != "Dana" ||
 		entry.Rating != 1520 || entry.Games != 1 || entry.Wins != 1 || entry.LastPlayedAt.IsZero() {
 		t.Fatalf("Kraken's entry = %+v", entry)
+	}
+}
+
+// A listed bot name's hosted bot URL is public, on the leaderboard and its
+// page, so others can play against it; hand play and house bots have none,
+// and a name that isn't listed, before its first rated game, removed or of
+// a hidden account, publishes nothing.
+func TestAListedBotsURLIsPublic(t *testing.T) {
+	database := testutils.InitTestDB(t)
+	dana := signedInPlayer("Dana")
+	api := leaderboardAPI(t, database, bearerPlayers{"Bearer dana": dana}, testAdminAPIKey)
+	hand := handOf(t, api, "dana")
+	var kraken, leviathan, nessie models.CompetitorView
+	for name, competitor := range map[string]*models.CompetitorView{"Kraken": &kraken, "Leviathan": &leviathan, "Nessie": &nessie} {
+		expectStatus(t, api.Post("/account/bot-names", "Authorization: Bearer dana", map[string]string{"name": name, "url": "https://bot.example.com/" + name}), http.StatusCreated, competitor)
+	}
+	house := houseBot(t, database, 2)
+	for _, competitor := range []string{hand.ID, kraken.ID, nessie.ID, house.ID} {
+		played(t, database, competitor, 1500, 1)
+	}
+	// Nessie was registered before names had URLs.
+	if err := database.Model(&models.Competitor{}).Where(&models.Competitor{ID: nessie.ID}).Update("url", nil).Error; err != nil {
+		t.Fatal(err)
+	}
+	urls := func() map[string]string {
+		t.Helper()
+		shown := map[string]string{}
+		for _, entry := range readLeaderboard(t, api, "").Entries {
+			shown[entry.Name] = "null"
+			if entry.URL != nil {
+				shown[entry.Name] = *entry.URL
+			}
+		}
+		return shown
+	}
+	if got := fmt.Sprint(urls()); got != "map[Bot (level 2):null Dana:null Kraken:https://bot.example.com/Kraken Nessie:null]" {
+		t.Fatalf("leaderboard's URLs = %s", got)
+	}
+	var page models.LeaderboardCompetitorView
+	expectStatus(t, api.Get("/leaderboard/"+kraken.ID), http.StatusOK, &page)
+	if page.URL == nil || *page.URL != "https://bot.example.com/Kraken" {
+		t.Fatalf("Kraken's page = %+v", page.LeaderboardEntryView)
+	}
+	expectStatus(t, api.Get("/leaderboard/"+hand.ID), http.StatusOK, &page)
+	if page.URL != nil {
+		t.Fatalf("Dana's hand play's page = %+v", page.LeaderboardEntryView)
+	}
+	// Leviathan, before its first rated game, publishes nothing.
+	expectStatus(t, api.Get("/leaderboard/"+leviathan.ID), http.StatusNotFound, nil)
+	if got := readLeaderboard(t, api, "?kind=bot"); got.Total != 2 {
+		t.Fatalf("bots = %+v", got)
+	}
+
+	// A new URL shows at once.
+	expectStatus(t, api.Put("/account/bot-names/"+kraken.ID, "Authorization: Bearer dana", map[string]string{"url": "https://seat.example.com/kraken"}), http.StatusOK, nil)
+	expectStatus(t, api.Get("/leaderboard/"+kraken.ID), http.StatusOK, &page)
+	if page.URL == nil || *page.URL != "https://seat.example.com/kraken" {
+		t.Fatalf("Kraken's page = %+v", page.LeaderboardEntryView)
+	}
+
+	// Hiding the account unpublishes it, and showing it publishes it again.
+	expectStatus(t, api.Put("/admin/accounts/"+dana.AccountID+"/hidden", adminHeader, map[string]bool{"hidden": true}), http.StatusNoContent, nil)
+	expectStatus(t, api.Get("/leaderboard/"+kraken.ID), http.StatusNotFound, nil)
+	if got := fmt.Sprint(urls()); got != "map[Bot (level 2):null]" {
+		t.Fatalf("leaderboard's URLs with Dana hidden = %s", got)
+	}
+	expectStatus(t, api.Put("/admin/accounts/"+dana.AccountID+"/hidden", adminHeader, map[string]bool{"hidden": false}), http.StatusNoContent, nil)
+	expectStatus(t, api.Get("/leaderboard/"+kraken.ID), http.StatusOK, nil)
+
+	// Removing the name unpublishes it, and clears it.
+	expectStatus(t, api.Delete("/admin/competitors/"+kraken.ID, adminHeader), http.StatusNoContent, nil)
+	expectStatus(t, api.Get("/leaderboard/"+kraken.ID), http.StatusNotFound, nil)
+	if got := fmt.Sprint(urls()); got != "map[Bot (level 2):null Dana:null Nessie:null]" {
+		t.Fatalf("leaderboard's URLs after Kraken's removal = %s", got)
+	}
+	var removed models.Competitor
+	if err := database.Unscoped().Where(&models.Competitor{ID: kraken.ID}).First(&removed).Error; err != nil || removed.URL != nil {
+		t.Fatalf("removed Kraken = %+v, %v", removed, err)
 	}
 }
 

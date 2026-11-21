@@ -1,11 +1,8 @@
 package lobbyadapter_test
 
 import (
-	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
-	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -20,23 +17,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// fakeResolver answers from a table, so no test looks up a real name.
-type fakeResolver map[string]string
-
-func (resolver fakeResolver) LookupNetIP(_ context.Context, _ string, host string) ([]netip.Addr, error) {
-	address, found := resolver[host]
-	if !found {
-		return nil, errors.New("no such host")
-	}
-	return []netip.Addr{netip.MustParseAddr(address)}, nil
-}
-
-var botHosts = fakeResolver{
-	"bot.example.com":     "203.0.113.7",
-	"seat.example.com":    "2001:db8::7",
-	"private.example.com": "10.0.0.1",
-	"loop.example.com":    "::1",
-}
+// botHosts resolve the tests' hosted bots' hosts, without a network.
+var botHosts = testutils.BotHosts
 
 // newServerBotStack is a stack with ISLAND_BATTLES_SERVER_BOTS=on, whose
 // hosted bots' hosts resolve through botHosts.
@@ -191,7 +173,7 @@ func TestAHostedBotURLFollowsEveryRule(t *testing.T) {
 		}
 	}
 	for settings, detail := range map[string]string{
-		`{"bot":{"kind":"hosted"}}`: "kind hosted needs a url: where your bot server takes turns, such as https://bot.example.com/turn",
+		`{"bot":{"kind":"hosted"}}`: "kind hosted needs a url: where your bot server takes turns, such as https://bot.example.com/turn, or the name of one of your bot names, which plays at its own URL",
 		`{"bot":{"kind":"hosted","url":"https://bot.example.com","level":1}}`: "level is only for kind default",
 		`{"bot":{"kind":"localhost","url":"https://bot.example.com"}}`:        "url is only for kind hosted",
 		`{"bot":{"kind":"uploaded"}}`:                                         "kind uploaded needs a package_id: one of your packages in this lobby",

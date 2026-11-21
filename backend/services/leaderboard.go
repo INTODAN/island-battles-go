@@ -157,11 +157,15 @@ func competitorAccounts(competitors []models.Competitor) []string {
 }
 
 // leaderboardEntry shows a listed competitor at a rank, with its owner's
-// display name for a bot name.
+// display name and its hosted bot's URL for a bot name.
 func leaderboardEntry(competitor models.Competitor, accounts map[string]models.IslandAccount, rank int) models.LeaderboardEntryView {
 	name, owner := shownName(competitor, accounts)
 	entry := models.LeaderboardEntryView{Rank: rank, CompetitorID: competitor.ID, Kind: competitor.Kind, Name: name, Owner: owner,
-		Rating: models.RoundRating(competitor.Rating), Games: competitor.Games, Wins: competitor.Wins, Draws: competitor.Draws, Losses: competitor.Losses}
+		Rating: models.RoundRating(competitor.Rating), Games: competitor.Games, Wins: competitor.Wins, Draws: competitor.Draws, Losses: competitor.Losses,
+		// Only listed competitors have entries, so a URL is public only
+		// while its name is listed: removing the name, or hiding its
+		// account, unpublishes it.
+		URL: botNameURL(competitor)}
 	if competitor.LastPlayedAt != nil {
 		entry.LastPlayedAt = *competitor.LastPlayedAt
 	}

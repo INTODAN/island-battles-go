@@ -16,22 +16,29 @@ import (
 
 // The lobby's game_requirement problem types of a rated lobby's ready gate,
 // in the order the gate checks them: a member without an account, a member
-// whose bot plays under no bot name of theirs, a member whose bot name was
-// deleted since they chose it, and at the start two members of one account
-// and a bot seat that isn't a default bot level, or a level seated twice.
+// whose bot plays under no bot name of theirs, a member whose named bot isn't
+// a hosted bot, a member whose bot name was deleted since they chose it, a
+// member whose bot name has no URL, and at the start two members of one
+// account and a bot seat that isn't a default bot level, or a level seated
+// twice. Any lobby refuses a hosted bot that plays at its name's URL, one
+// without a url of its own, with RatedBotNameGoneProblemType when the name
+// was deleted and BotNameURLRequiredProblemType when it has no URL.
 const (
-	RatedSignInRequiredProblemType  = "urn:island-battles:problem:rated-sign-in-required"
-	RatedBotNameRequiredProblemType = "urn:island-battles:problem:rated-bot-name-required"
-	RatedBotNameGoneProblemType     = "urn:island-battles:problem:rated-bot-name-gone"
-	RatedSameAccountProblemType     = "urn:island-battles:problem:rated-same-account"
-	RatedSeatProblemType            = "urn:island-battles:problem:rated-seat"
+	RatedSignInRequiredProblemType    = "urn:island-battles:problem:rated-sign-in-required"
+	RatedBotNameRequiredProblemType   = "urn:island-battles:problem:rated-bot-name-required"
+	RatedHostedBotRequiredProblemType = "urn:island-battles:problem:rated-hosted-bot-required"
+	RatedBotNameGoneProblemType       = "urn:island-battles:problem:rated-bot-name-gone"
+	BotNameURLRequiredProblemType     = "urn:island-battles:problem:bot-name-url-required"
+	RatedSameAccountProblemType       = "urn:island-battles:problem:rated-same-account"
+	RatedSeatProblemType              = "urn:island-battles:problem:rated-seat"
 )
 
 // The sentences that a rated lobby's ready gate tells a member getting ready,
 // which the clients show as they are.
 const (
 	ratedSignInMessage      = "This lobby is rated. Sign in with Google in the 3D client to play in it."
-	ratedBotNameMessage     = "This lobby is rated. Play by hand, or choose one of your bot names for your bot."
+	ratedBotNameMessage     = "This lobby is rated. Play by hand, or choose one of your hosted bot names."
+	ratedHostedBotMessage   = "This lobby is rated. Rated bots run at their own URL: choose one of your hosted bot names, or play by hand."
 	ratedSameAccountMessage = "A rated game needs a different account on each team."
 	// RatedSeatRule is the rule of a rated lobby's bot seats, which every
 	// refusal of a seat starts with.
@@ -92,24 +99,90 @@ func readBotNames(database *gorm.DB, accounts []string) (botNames, error) {
 	return names, nil
 }
 
-// checkBotName refuses a bot name that isn't a live bot name of the
-// member's account, compared without regard to case. A guest has none.
-func (rules BotRules) checkBotName(ctx context.Context, accountID, name string) error {
+// checkBotName returns the live bot name name of the member's account,
+// compared without regard to case, and refuses a name that isn't one. A
+// guest has none.
+func (rules BotRules) checkBotName(ctx context.Context, accountID, name string) (models.Competitor, error) {
 	notYours := reject(422, name+" isn't one of your bot names.")
 	if accountID == "" {
-		return notYours
+		return models.Competitor{}, notYours
 	}
 	names, err := readBotNames(rules.Database.WithContext(ctx), []string{accountID})
 	if err != nil {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return models.Competitor{}, ctx.Err()
 		}
-		return fmt.Errorf("%w: read the account's bot names: %w", domain.ErrUnavailable, err)
+		return models.Competitor{}, fmt.Errorf("%w: read the account's bot names: %w", domain.ErrUnavailable, err)
 	}
-	if _, found := names.find(accountID, name); !found {
-		return notYours
+	named, found := names.find(accountID, name)
+	if !found {
+		return models.Competitor{}, notYours
+	}
+	return named, nil
+}
+
+// playsAtNameURL reports whether a member's bot plays at its bot name's URL:
+// a named hosted bot in a rated lobby, whatever its own url, and elsewhere a
+// named hosted bot without a url of its own.
+func playsAtNameURL(bot models.MemberBotView, rated bool) bool {
+	return bot.Kind == models.HostedBot && bot.Name != "" && (rated || bot.URL == "")
+}
+
+// checkNameURLs refuses members whose hosted bot plays at its bot name's URL
+// (playsAtNameURL) when the name was deleted since they chose it, or has no
+// URL, with the members' live bot names. At the start it names the members.
+func checkNameURLs(members []domain.ReadyMember, names botNames, rated, atStart bool) error {
+	var gone, goneNames, missing, missingNames []string
+	for _, member := range members {
+		bot, err := MemberBot(member.Settings, true)
+		if err != nil || !playsAtNameURL(bot, rated) {
+			continue
+		}
+		named, found := names.find(member.AccountID, bot.Name)
+		switch {
+		case !found:
+			gone = append(gone, fmt.Sprintf("%s's bot name %s", member.DisplayName, bot.Name))
+			goneNames = append(goneNames, bot.Name)
+		case named.URL == nil:
+			missing = append(missing, fmt.Sprintf("%s's bot name %s", member.DisplayName, *named.Name))
+			missingNames = append(missingNames, *named.Name)
+		}
+	}
+	switch {
+	case len(gone) > 0 && atStart:
+		return domain.GameRequirement(RatedBotNameGoneProblemType, strings.Join(gone, ", ")+" no longer exists: they must choose another.")
+	case len(gone) > 0:
+		return domain.GameRequirement(RatedBotNameGoneProblemType, "Your bot name "+goneNames[0]+" no longer exists. Choose another.")
+	case len(missing) > 0 && atStart:
+		return domain.GameRequirement(BotNameURLRequiredProblemType, strings.Join(missing, ", ")+" has no URL yet: they must add its hosted bot's URL on the account page.")
+	case len(missing) > 0:
+		return domain.GameRequirement(BotNameURLRequiredProblemType, "Your bot name "+missingNames[0]+" has no URL yet. Add its hosted bot's URL on the account page, then get ready again.")
 	}
 	return nil
+}
+
+// checkUnratedNameURLs is the part of the ready gate of a lobby that isn't
+// rated that reads bot names: a hosted bot without a url of its own plays at
+// its name's URL, so the name must still exist and have one. It reads the
+// members' bot names, in one query, only when such a bot is chosen.
+func (rules BotRules) checkUnratedNameURLs(ctx context.Context, members []domain.ReadyMember, atStart bool) error {
+	needed := false
+	for _, member := range members {
+		if bot, err := MemberBot(member.Settings, true); err == nil && playsAtNameURL(bot, false) {
+			needed = true
+		}
+	}
+	if !needed {
+		return nil
+	}
+	names, err := readBotNames(rules.Database.WithContext(ctx), namedAccounts(members))
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("%w: read the members' bot names: %w", domain.ErrUnavailable, err)
+	}
+	return checkNameURLs(members, names, false, atStart)
 }
 
 // mayFailRated reports whether a member getting ready could break a rated
@@ -125,7 +198,8 @@ func mayFailRated(members []domain.ReadyMember) bool {
 }
 
 // checkRated is the ready gate of a rated lobby: each member is signed in
-// and plays by hand or with a bot under one of their live bot names, and, at
+// and plays by hand or with a hosted bot under one of their live bot names,
+// which has a URL, and, at
 // the start, no two members share an account and the lobby's active seats
 // are default bot levels, each level once. A member without a valid bot is
 // left to checkMembersReady. It reads the members' bot names in one query.
@@ -153,7 +227,7 @@ func (rules BotRules) checkRated(ctx context.Context, lobby domain.Snapshot, mem
 // members, or the seats, that break them, since the host who sees them can't
 // act for them.
 func checkRatedRoster(members []domain.ReadyMember, seats []domain.Member, atStart bool, names botNames) error {
-	var guests, nameless, gone, goneNames []string
+	var guests, nameless, notHosted []string
 	for _, member := range members {
 		if member.AccountID == "" {
 			guests = append(guests, member.DisplayName)
@@ -164,11 +238,10 @@ func checkRatedRoster(members []domain.ReadyMember, seats []domain.Member, atSta
 		case err != nil, bot.Kind == models.ManualBot:
 		case bot.Kind == models.DefaultBot, bot.Name == "":
 			nameless = append(nameless, member.DisplayName)
-		default:
-			if _, found := names.find(member.AccountID, bot.Name); !found {
-				gone = append(gone, fmt.Sprintf("%s's bot name %s", member.DisplayName, bot.Name))
-				goneNames = append(goneNames, bot.Name)
-			}
+		case bot.Kind != models.HostedBot:
+			// A named localhost or uploaded bot: a rated bot runs at its
+			// name's URL.
+			notHosted = append(notHosted, member.DisplayName)
 		}
 	}
 	switch {
@@ -177,13 +250,16 @@ func checkRatedRoster(members []domain.ReadyMember, seats []domain.Member, atSta
 	case len(guests) > 0:
 		return domain.GameRequirement(RatedSignInRequiredProblemType, ratedSignInMessage)
 	case len(nameless) > 0 && atStart:
-		return domain.GameRequirement(RatedBotNameRequiredProblemType, "This lobby is rated: waiting for "+strings.Join(nameless, ", ")+" to play by hand, or to choose one of their bot names for their bot.")
+		return domain.GameRequirement(RatedBotNameRequiredProblemType, "This lobby is rated: waiting for "+strings.Join(nameless, ", ")+" to play by hand, or to choose one of their hosted bot names.")
 	case len(nameless) > 0:
 		return domain.GameRequirement(RatedBotNameRequiredProblemType, ratedBotNameMessage)
-	case len(gone) > 0 && atStart:
-		return domain.GameRequirement(RatedBotNameGoneProblemType, strings.Join(gone, ", ")+" no longer exists: they must choose another.")
-	case len(gone) > 0:
-		return domain.GameRequirement(RatedBotNameGoneProblemType, "Your bot name "+goneNames[0]+" no longer exists. Choose another.")
+	case len(notHosted) > 0 && atStart:
+		return domain.GameRequirement(RatedHostedBotRequiredProblemType, "This lobby is rated, and rated bots run at their own URL: waiting for "+strings.Join(notHosted, ", ")+" to choose one of their hosted bot names, or to play by hand.")
+	case len(notHosted) > 0:
+		return domain.GameRequirement(RatedHostedBotRequiredProblemType, ratedHostedBotMessage)
+	}
+	if err := checkNameURLs(members, names, true, atStart); err != nil {
+		return err
 	}
 	if !atStart {
 		return nil
@@ -257,8 +333,8 @@ func CheckRatedSeats(lobby domain.Snapshot) error {
 // game's start, by player ID, after checking the roster as the ready gate
 // does at the start: a person's manual competitor when they play by hand,
 // which Accounts.Ensure creates for an account new to the game, their bot
-// name's when their bot plays under one, and a default bot seat's house
-// competitor. A roster it can't resolve fails the start hook, which runs
+// name's when their hosted bot plays under one, whose URL the start then
+// plays, and a default bot seat's house competitor. A roster it can't resolve fails the start hook, which runs
 // after the lobby committed the start: the host's start then answers 502
 // game_unavailable, and the lobby stays started, without a game, until the
 // host starts it again or reopens it. So a rated game never starts with a
@@ -280,11 +356,7 @@ func ratedCompetitors(ctx context.Context, database *gorm.DB, snapshot domain.Sn
 		case member.IsSeat():
 			seats = append(seats, member)
 		default:
-			accountID := ""
-			if member.AccountID != nil {
-				accountID = *member.AccountID
-			}
-			people = append(people, domain.ReadyMember{PlayerID: member.PlayerID, DisplayName: member.DisplayName, AccountID: accountID, Settings: member.MemberSettings})
+			people = append(people, readyMember(member))
 		}
 	}
 	names, err := readBotNames(database, namedAccounts(people))
@@ -325,4 +397,44 @@ func ratedCompetitors(ctx context.Context, database *gorm.DB, snapshot domain.Sn
 		competitors[seat.PlayerID] = house
 	}
 	return competitors, nil
+}
+
+// readyMember is a person of the lobby as the ready gate sees them.
+func readyMember(member domain.Member) domain.ReadyMember {
+	accountID := ""
+	if member.AccountID != nil {
+		accountID = *member.AccountID
+	}
+	return domain.ReadyMember{PlayerID: member.PlayerID, DisplayName: member.DisplayName, AccountID: accountID, Settings: member.MemberSettings}
+}
+
+// playNameURLs gives each roster person of an unrated game's start whose
+// hosted bot plays at its bot name's URL, one without a url of its own, the
+// name's URL, read in one query. The ready gate checked the names; one
+// deleted since fails the start, as a rated start's does, before the game is
+// bound.
+func playNameURLs(database *gorm.DB, snapshot domain.Snapshot, chosen map[string]frozenBot) error {
+	var people []domain.ReadyMember
+	for _, member := range snapshot.Members {
+		if bot, found := chosen[member.PlayerID]; found && !member.IsSeat() && bot.Kind == models.HostedBot && bot.Name != "" && bot.URL == "" {
+			people = append(people, readyMember(member))
+		}
+	}
+	if len(people) == 0 {
+		return nil
+	}
+	names, err := readBotNames(database, namedAccounts(people))
+	if err != nil {
+		return err
+	}
+	if err := checkNameURLs(people, names, false, true); err != nil {
+		return err
+	}
+	for _, person := range people {
+		named, _ := names.find(person.AccountID, chosen[person.PlayerID].Name)
+		bot := chosen[person.PlayerID]
+		bot.URL = *named.URL
+		chosen[person.PlayerID] = bot
+	}
+	return nil
 }

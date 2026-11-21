@@ -125,13 +125,13 @@ func TestGameRequestsEndWithARetentionPass(t *testing.T) {
 func TestRetentionKeepsAccountsAndCompetitors(t *testing.T) {
 	database := testutils.InitTestDB(t)
 	ctx := context.Background()
-	accounts := services.Accounts{Database: database}
+	accounts := services.Accounts{Database: database, ServerBots: services.ServerBots{Resolver: testutils.BotHosts}}
 	dana := domain.Principal{PlayerID: uuid.NewString(), DisplayName: "Dana", AccountID: uuid.NewString()}
-	kraken, err := accounts.RegisterBotName(ctx, dana, "Kraken")
+	kraken, err := accounts.RegisterBotName(ctx, dana, "Kraken", "https://bot.example.com/turn")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := accounts.RegisterBotName(ctx, dana, "Leviathan"); err != nil {
+	if _, err := accounts.RegisterBotName(ctx, dana, "Leviathan", "https://bot.example.com/turn"); err != nil {
 		t.Fatal(err)
 	}
 	if err := accounts.DeleteBotName(ctx, dana, kraken.ID); err != nil {

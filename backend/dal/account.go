@@ -104,11 +104,12 @@ func LiveBotNames(database *gorm.DB, accountIDs []string) ([]models.Competitor, 
 }
 
 // AddBotName registers a bot name for an account, whose row the transaction
-// holds locked (SeeAccount), at models.InitialRating. name is already
-// normalized (models.NormalizeBotName). An account with models.MaxBotNames
-// live bot names gets ErrBotNameLimit, and a name that a live competitor of
-// any account has, without regard to case, ErrBotNameTaken.
-func AddBotName(transaction *gorm.DB, accountID, name string) (models.Competitor, error) {
+// holds locked (SeeAccount), at models.InitialRating, with its hosted bot's
+// URL. name is already normalized (models.NormalizeBotName), and url
+// checked. An account with models.MaxBotNames live bot names gets
+// ErrBotNameLimit, and a name that a live competitor of any account has,
+// without regard to case, ErrBotNameTaken.
+func AddBotName(transaction *gorm.DB, accountID, name, url string) (models.Competitor, error) {
 	var live int64
 	if err := transaction.Model(&models.Competitor{}).Where(&models.Competitor{AccountID: &accountID, Kind: models.BotCompetitor}).Count(&live).Error; err != nil {
 		return models.Competitor{}, err
@@ -117,7 +118,7 @@ func AddBotName(transaction *gorm.DB, accountID, name string) (models.Competitor
 		return models.Competitor{}, ErrBotNameLimit
 	}
 	key := models.BotNameKey(name)
-	competitor := models.Competitor{ID: uuid.NewString(), Kind: models.BotCompetitor, AccountID: &accountID, Name: &name, NameKey: &key, Rating: models.InitialRating}
+	competitor := models.Competitor{ID: uuid.NewString(), Kind: models.BotCompetitor, AccountID: &accountID, Name: &name, NameKey: &key, URL: &url, Rating: models.InitialRating}
 	// The unique index on a live competitor's name_key is the only one a new
 	// bot name can conflict with.
 	created := transaction.Clauses(clause.OnConflict{DoNothing: true}).Create(&competitor)
@@ -130,9 +131,29 @@ func AddBotName(transaction *gorm.DB, accountID, name string) (models.Competitor
 	return competitor, nil
 }
 
-// retired soft-deletes competitors and frees their names at once.
+// retired soft-deletes competitors and frees their names at once. It
+// clears a bot name's URL too, which a game in play no longer needs: the
+// start copied it.
 func retired(now time.Time) map[string]any {
-	return map[string]any{"deleted_at": now, "name": nil, "name_key": nil}
+	return map[string]any{"deleted_at": now, "name": nil, "name_key": nil, "url": nil}
+}
+
+// SetBotNameURL changes the hosted bot URL of one of an account's live bot
+// names, which keeps its rating, and returns the bot name. url is already
+// checked. It returns nil when the account has no such live bot name.
+func SetBotNameURL(database *gorm.DB, accountID, competitorID, url string) (*models.Competitor, error) {
+	// A struct filter drops empty fields, which would match every bot name.
+	if accountID == "" || competitorID == "" {
+		return nil, errors.New("set bot name URL: no account or competitor ID")
+	}
+	var changed []models.Competitor
+	err := database.Model(&changed).Clauses(clause.Returning{}).
+		Where(&models.Competitor{ID: competitorID, AccountID: &accountID, Kind: models.BotCompetitor}).
+		Update("url", url).Error
+	if err != nil || len(changed) == 0 {
+		return nil, err
+	}
+	return &changed[0], nil
 }
 
 // DeleteBotName soft-deletes one of an account's live bot names, which

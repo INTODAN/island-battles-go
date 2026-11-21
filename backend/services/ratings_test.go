@@ -63,14 +63,14 @@ func newRatedFixtureWith(t *testing.T, settings string, rated bool, teams int, b
 	}
 	fixture := ratedFixture{deadlineFixture: deadlineFixture{database: database, publisher: &testutils.RecordedPublisher{}, lobbyID: uuid.NewString(), states: map[string]models.GenerationState{}}}
 	snapshot := domain.Snapshot{Lobby: domain.Lobby{ID: fixture.lobbyID, Round: 1, GameKey: "island-battles", Phase: domain.PhaseStarted, GameSettings: combined}}
-	accounts := services.Accounts{Database: database}
+	accounts := services.Accounts{Database: database, ServerBots: services.ServerBots{Resolver: testutils.BotHosts}}
 	for index := range teams {
 		accountID := uuid.NewString()
 		person := domain.Principal{PlayerID: uuid.NewString(), DisplayName: ratedPeople[index], AccountID: accountID}
 		if before != nil {
 			before(database, person)
 		}
-		competitor, err := accounts.RegisterBotName(context.Background(), person, ratedBots[index])
+		competitor, err := accounts.RegisterBotName(context.Background(), person, ratedBots[index], "https://bot.example.com/turn")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -79,7 +79,7 @@ func newRatedFixtureWith(t *testing.T, settings string, rated bool, teams int, b
 		snapshot.Teams = append(snapshot.Teams, team)
 		snapshot.StartRoster = append(snapshot.StartRoster, domain.StartRosterEntry{PlayerID: person.PlayerID, TeamID: team.ID})
 		snapshot.Members = append(snapshot.Members, domain.Member{PlayerID: person.PlayerID, DisplayName: person.DisplayName, AccountID: &accountID, TeamID: &team.ID, Active: true,
-			MemberSettings: json.RawMessage(`{"bot":{"kind":"localhost","name":"` + ratedBots[index] + `"}}`)})
+			MemberSettings: json.RawMessage(`{"bot":{"kind":"hosted","name":"` + ratedBots[index] + `"}}`)})
 		fixture.players = append(fixture.players, []domain.Principal{person})
 	}
 	if _, err := services.RunLobbyGame(context.Background(), database, fixture.publisher, nil, snapshot); err != nil {

@@ -183,7 +183,7 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 		SubmitTokens: submitTokens, PublicURL: config.PublicURL, Bots: bots})
 	routes.SetupBotPackageRoutes(api, &handlers.BotPackages{Players: handlers.PlayerTokens{Verifier: playerVerifier}, Service: services.BotPackages{
 		Database: database, Lobbies: lobbyClient, Store: packages, Tokens: uploadTokens}})
-	routes.SetupAccountRoutes(api, &handlers.Accounts{Players: handlers.PlayerTokens{Verifier: playerVerifier}, Service: services.Accounts{Database: database}})
+	routes.SetupAccountRoutes(api, &handlers.Accounts{Players: handlers.PlayerTokens{Verifier: playerVerifier}, Service: services.Accounts{Database: database, ServerBots: serverBots}})
 	routes.SetupLeaderboardRoutes(api, &handlers.Leaderboard{Service: services.Leaderboard{Database: database}}, config.AdminAPIKey)
 	// The game's hooks, which the lobby signs its calls of.
 	router.Handle(lobbyadapter.HooksPath+"/*", hooks)

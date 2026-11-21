@@ -97,7 +97,7 @@ type MemberSettings struct {
 func memberSettingsShape(serverBots bool) string {
 	shape := `member_settings must be {"bot": {"kind": "manual"}}, {"bot": {"kind": "localhost"}}, with an optional "port" from 1024 to 65535, or {"bot": {"kind": "default", "level": N}} with a level that GET /bots/defaults lists`
 	if serverBots {
-		shape += `, {"bot": {"kind": "hosted", "url": "https://…"}} or {"bot": {"kind": "uploaded", "package_id": "<your package in this lobby>"}}`
+		shape += `, {"bot": {"kind": "hosted", "url": "https://…"}}, {"bot": {"kind": "hosted", "name": "<one of your bot names>"}} or {"bot": {"kind": "uploaded", "package_id": "<your package in this lobby>"}}`
 	}
 	return shape
 }
@@ -162,8 +162,8 @@ func checkMemberBotShape(bot models.MemberBotView, serverBots bool) error {
 			return reject(422, defaultLevelMessage("kind default needs a level"))
 		}
 	case models.HostedBot:
-		if bot.URL == "" {
-			return reject(422, "kind hosted needs a url: where your bot server takes turns, such as https://bot.example.com/turn")
+		if bot.URL == "" && bot.Name == "" {
+			return reject(422, "kind hosted needs a url: where your bot server takes turns, such as https://bot.example.com/turn, or the name of one of your bot names, which plays at its own URL")
 		}
 	case models.UploadedBot:
 		if bot.PackageID == "" {
@@ -194,22 +194,32 @@ func defaultLevelMessage(sentence string) string {
 // lobby: the settings name the person's bot, as MemberBot reads it. A hosted
 // bot's URL must follow the rules of hostedbot.Check, and an uploaded bot
 // must be a ready package of the lobby. A bot's name must be a live bot name
-// of member's account, compared without regard to case; a guest has none.
-// The name is checked in every lobby, rated or not, so a member keeps their
-// choice when the host turns rated on and off. The ready check refuses a
-// package of someone else, and a name deleted since.
+// of member's account, compared without regard to case; a guest has none. A
+// hosted bot without a url plays at its name's URL, which the name must
+// have. The settings are checked alike in every lobby, rated or not, so a
+// member keeps their choice when the host turns rated on and off; the ready
+// gate refuses what a rated lobby doesn't take. The ready check also refuses
+// a package of someone else, and a name deleted since.
 func (rules BotRules) ValidateMemberSettings(ctx context.Context, lobbyID string, member domain.MemberIdentity, settings json.RawMessage) error {
 	bot, err := MemberBot(settings, rules.ServerBots.Enabled)
 	if err != nil {
 		return err
 	}
 	if bot.Name != "" {
-		if err := rules.checkBotName(ctx, member.AccountID, bot.Name); err != nil {
+		named, err := rules.checkBotName(ctx, member.AccountID, bot.Name)
+		if err != nil {
 			return err
+		}
+		if bot.Kind == models.HostedBot && bot.URL == "" && named.URL == nil {
+			return reject(422, *named.Name+" has no URL yet: add its hosted bot's URL on the account page, or give your hosted bot a url.")
 		}
 	}
 	switch bot.Kind {
 	case models.HostedBot:
+		if bot.URL == "" {
+			// The name's URL, which was checked when it was set.
+			return nil
+		}
 		return rules.checkURL(ctx, bot.URL)
 	case models.UploadedBot:
 		_, err := rules.readyPackage(ctx, lobbyID, bot.PackageID)
@@ -221,10 +231,19 @@ func (rules BotRules) ValidateMemberSettings(ctx context.Context, lobbyID string
 // checkURL checks a hosted bot's URL, resolving its host. A cancelled
 // request is reported as such, not as invalid settings.
 func (rules BotRules) checkURL(ctx context.Context, url string) error {
-	if rules.ServerBots.LoopbackHosts && hostedbot.Loopback(url) {
+	return rules.ServerBots.CheckURL(ctx, url)
+}
+
+// CheckURL checks a hosted bot's URL, a member's, a seat's or a bot name's,
+// under the rules of hostedbot.Check, resolving its host with Resolver; on
+// the local server host (LoopbackHosts) a URL on this machine passes too.
+// A URL that breaks a rule is a *hostedbot.Invalid; a cancelled request is
+// reported as such.
+func (serverBots ServerBots) CheckURL(ctx context.Context, url string) error {
+	if serverBots.LoopbackHosts && hostedbot.Loopback(url) {
 		return nil
 	}
-	_, err := hostedbot.Check(ctx, rules.ServerBots.Resolver, url)
+	_, err := hostedbot.Check(ctx, serverBots.Resolver, url)
 	return err
 }
 
@@ -274,12 +293,14 @@ func isUUID(value string) bool {
 // game API reads the snapshot without waiting for the lobby's lock.
 //
 // A rated lobby (LobbyRated) checks more (checkRated): every member is
-// signed in and plays by hand or with a bot under one of their live bot
-// names, and at the start no two members share an account and every seat is
-// a default bot level, each level once. To learn whether the lobby is
-// rated, the gate reads the lobby's snapshot for a member getting ready too,
-// unless they are signed in and play by hand, which every lobby allows; it
-// reads the members' bot names in one query.
+// signed in and plays by hand or with a hosted bot under one of their live
+// bot names, which has a URL, and at the start no two members share an
+// account and every seat is a default bot level, each level once. To learn
+// whether the lobby is rated, the gate reads the lobby's snapshot for a
+// member getting ready too, unless they are signed in and play by hand,
+// which every lobby allows; it reads the members' bot names in one query.
+// Any other lobby reads them only for a hosted bot without a url, which
+// plays at its name's URL (checkUnratedNameURLs).
 func (rules BotRules) ReadyGate(ctx context.Context, lobbyID string) (domain.ReadyCheck, error) {
 	return func(members []domain.ReadyMember, atStart bool) error {
 		return rules.checkReady(ctx, lobbyID, members, atStart)
@@ -306,12 +327,14 @@ func (rules BotRules) checkReady(ctx context.Context, lobbyID string, members []
 	serverBots := rules.ServerBots.Enabled
 	// lobby is the snapshot that the start reads for its seats.
 	var lobby *domain.Snapshot
+	rated := false
 	if atStart || mayFailRated(members) {
 		read, err := rules.snapshot(ctx, lobbyID)
 		if err != nil {
 			return err
 		}
 		if read != nil && LobbyRated(read.Lobby.GameSettings) {
+			rated = true
 			if err := rules.checkRated(ctx, *read, members, atStart); err != nil {
 				return err
 			}
@@ -353,6 +376,11 @@ func (rules BotRules) checkReady(ctx context.Context, lobbyID string, members []
 	}
 	if err := checkMembersReady(members, atStart, true, owners); err != nil {
 		return err
+	}
+	if !rated {
+		if err := rules.checkUnratedNameURLs(ctx, members, atStart); err != nil {
+			return err
+		}
 	}
 	var goneSeats []string
 	for _, member := range packageSeats {
@@ -551,8 +579,10 @@ func botNotChosenAtStartMessage(names []string) string {
 // frozenBot is the bot that a roster player plays with, as the start copies
 // it from the lobby: their member settings' bot, or a bot seat's.
 type frozenBot struct {
-	Kind      models.BotKind
-	Level     uint
+	Kind  models.BotKind
+	Level uint
+	// URL is a hosted bot's: the member's own url, or, for a hosted bot
+	// that plays at its bot name's URL, the name's, which the start reads.
 	URL       string
 	PackageID string
 	// Name is the bot name that a member's bot plays under, which only a

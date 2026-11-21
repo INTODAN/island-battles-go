@@ -374,7 +374,9 @@ export function openAccount(options: AccountDialogOptions): HTMLDialogElement {
     adding = true;
     draw();
     try {
-      const competitor = await service.addBotName(botInput.value.trim());
+      // The page has no URL field yet (#404), so the game refuses the name
+      // with its 422, which addError shows.
+      const competitor = await service.addBotName(botInput.value.trim(), "");
       if (account) account = withBotName(account, competitor);
       botInput.value = "";
     } catch (error) {

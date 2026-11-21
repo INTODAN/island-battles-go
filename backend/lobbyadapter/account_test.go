@@ -38,7 +38,7 @@ func TestTheGameLearnsTheAccountFromThePlayerToken(t *testing.T) {
 		view.Hand.Rating != 1500 || len(view.BotNames) != 0 {
 		t.Fatalf("account = %+v, want Dana's with her hand play at 1500 and no bot names", view)
 	}
-	stack.expect(stack.api.Post("/account/bot-names", token, map[string]string{"name": "Kraken"}), http.StatusCreated, nil)
+	stack.expect(stack.api.Post("/account/bot-names", token, map[string]string{"name": "Kraken", "url": "https://bot.example.com/turn"}), http.StatusCreated, nil)
 
 	var problem struct {
 		Type string `json:"type"`

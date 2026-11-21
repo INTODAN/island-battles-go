@@ -43,7 +43,7 @@ class BotChoice(GameModel):
     """
     name: StrictStr | None = None
     """
-    In a rated game, the bot name that a localhost, hosted or uploaded bot plays as, one that its player registered in their account, such as Kraken. Absent for the other kinds and in a game that isn't rated.
+    In a rated game, the bot name that a hosted bot plays as, one that its player registered in their account, such as Kraken. Absent for the other kinds and in a game that isn't rated.
     """
     port: Annotated[StrictInt | None, Field(ge=1024, le=65535)] = None
     """
@@ -404,6 +404,10 @@ class Competitor(GameModel):
     rating: StrictFloat
     """
     The Elo rating, 1500 before the first rated game. Shown rounded.
+    """
+    url: StrictStr | None
+    """
+    For a bot name, its hosted bot's URL, where it plays in a rated lobby. It becomes public on the leaderboard once the name has played a rated game. Null for hand play, and for a bot name registered before names had URLs, which plays in no rated lobby until its owner sets one with PUT /account/bot-names/{competitor_id}.
     """
     wins: Annotated[StrictInt, Field(ge=0)]
 
@@ -917,6 +921,10 @@ class LeaderboardCompetitor(GameModel):
     """
     The Elo rating, rounded to a whole number.
     """
+    url: StrictStr | None
+    """
+    For a bot name, its hosted bot's URL, which its owner published by playing it in a rated game: anyone may play against it in an unrated lobby of their own, as a hosted bot seat at this URL, which changes no rating. Null for hand play and house bots, and for a bot name without a URL, which was registered before names had URLs.
+    """
     wins: Annotated[StrictInt, Field(ge=0)]
 
 
@@ -954,6 +962,10 @@ class LeaderboardEntry(GameModel):
     rating: StrictInt
     """
     The Elo rating, rounded to a whole number.
+    """
+    url: StrictStr | None
+    """
+    For a bot name, its hosted bot's URL, which its owner published by playing it in a rated game: anyone may play against it in an unrated lobby of their own, as a hosted bot seat at this URL, which changes no rating. Null for hand play and house bots, and for a bot name without a URL, which was registered before names had URLs.
     """
     wins: Annotated[StrictInt, Field(ge=0)]
 
@@ -1108,7 +1120,7 @@ class MemberBot(GameModel):
     """
     name: Annotated[StrictStr | None, Field(max_length=200)] = None
     """
-    For kinds localhost, hosted and uploaded only: one of the bot names of your account (GET /account), compared without regard to case, that the bot plays as. Only a signed-in player has bot names. A rated lobby needs it for a bot, and records the game under it; elsewhere it changes nothing.
+    For kinds localhost, hosted and uploaded only: one of the bot names of your account (GET /account), compared without regard to case, that the bot plays as. Only a signed-in player has bot names. A rated lobby takes a bot only as a hosted bot under one of your bot names, which plays at the name's URL, and records the game under the name. Elsewhere the name changes nothing, except that a hosted bot without a url plays at its name's URL.
     """
     package_id: UUID | None = None
     """
@@ -1120,7 +1132,7 @@ class MemberBot(GameModel):
     """
     url: Annotated[StrictStr | None, Field(max_length=2048)] = None
     """
-    For kind hosted only: where the server POSTs each TurnDelivery. https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public.
+    For kind hosted only: where the server POSTs each TurnDelivery. https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public. Required unless the bot has a name, which then plays at its own URL (GET /account). In a rated lobby a named hosted bot always plays at its name's URL, and url is ignored.
     """
 
 
@@ -1233,6 +1245,10 @@ class RegisterBotNameRequest(GameModel):
     """
     The bot's name: 3 to 24 characters after trimming, of letters, digits, spaces, - and _, not starting with Bot (level. It is unique across all accounts without regard to case.
     """
+    url: Annotated[StrictStr, Field(max_length=2048)]
+    """
+    The bot's hosted bot URL, where the server sends it each turn in a rated lobby: https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public, as a hosted bot's. It becomes public on the leaderboard once the name has played a rated game, so that others can play against it.
+    """
 
 
 class RegisterGenerationCommands(GameModel):
@@ -1312,6 +1328,16 @@ class SendSoldierGroupParameters(GameModel):
     soldier_amount: Annotated[StrictInt, Field(ge=1)]
     """
     Soldiers to send; counts against soldiers already reserved by your team this turn.
+    """
+
+
+class SetBotNameURLRequest(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    url: Annotated[StrictStr, Field(max_length=2048)]
+    """
+    The bot's hosted bot URL, where the server sends it each turn in a rated lobby: https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public, as a hosted bot's. It becomes public on the leaderboard once the name has played a rated game, so that others can play against it.
     """
 
 

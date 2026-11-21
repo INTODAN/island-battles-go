@@ -46,6 +46,7 @@ type LeaderboardEntryView struct {
 	Draws        int            `json:"draws" minimum:"0"`
 	Losses       int            `json:"losses" minimum:"0"`
 	LastPlayedAt time.Time      `json:"last_played_at" doc:"When its latest rated game ended."`
+	URL          *string        `json:"url" nullable:"true" doc:"For a bot name, its hosted bot's URL, which its owner published by playing it in a rated game: anyone may play against it in an unrated lobby of their own, as a hosted bot seat at this URL, which changes no rating. Null for hand play and house bots, and for a bot name without a URL, which was registered before names had URLs."`
 }
 
 // LeaderboardView is a page of the public leaderboard.
