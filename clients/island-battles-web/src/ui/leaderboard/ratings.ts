@@ -35,7 +35,7 @@ export const ratingsSections: readonly RulesSection[] = [
     id: "rated-games",
     title: "Which games count",
     paragraphs: [
-      "the host turned Rated on, everyone is signed in, and each team is a different competitor.",
+      "the host turned Rated on, everyone is signed in and plays by hand or with one of their hosted bot names, and each team is a different competitor.",
     ],
   },
   {
@@ -43,6 +43,13 @@ export const ratingsSections: readonly RulesSection[] = [
     title: "Bots and hands",
     paragraphs: [
       "each bot name has its own rating, and so does playing by hand. The game's own bots are rated too, as house bots.",
+    ],
+  },
+  {
+    id: "bot-urls",
+    title: "Rated bots",
+    paragraphs: [
+      "a rated bot runs at its bot name's URL, which the leaderboard shows once the bot is listed. Anyone can play against it from its page, and those games are unrated.",
     ],
   },
   {

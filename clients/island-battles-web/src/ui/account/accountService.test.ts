@@ -142,6 +142,24 @@ async function signedIn() {
       bots = [...bots, added];
       return Response.json(added, { status: 201 });
     }
+    if (request.method === "PUT" && path.startsWith("/account/bot-names/")) {
+      const id = path.split("/").at(-1);
+      const body = (await request.json()) as { url: string };
+      const found = bots.find((bot) => bot.id === id);
+      if (!found) return Response.json({ status: 404 }, { status: 404 });
+      if (!body.url.startsWith("https://")) {
+        return Response.json(
+          {
+            status: 422,
+            detail: "a hosted bot's URL must start with https://",
+          },
+          { status: 422 },
+        );
+      }
+      const changed = { ...found, url: body.url };
+      bots = bots.map((bot) => (bot.id === id ? changed : bot));
+      return Response.json(changed);
+    }
     if (request.method === "DELETE" && path.startsWith("/account/bot-names/")) {
       const id = path.split("/").at(-1);
       bots = bots.filter((bot) => bot.id !== id);
@@ -208,6 +226,32 @@ describe("the account service", () => {
       "Orca",
       "Eel",
     ]);
+  });
+
+  test("registers a name with its URL, and changes the URL, keeping the name", async () => {
+    const { service, calls } = await signedIn();
+    const added = await service.addBotName("Kraken", BOT_URL);
+    expect(added.url).toBe(BOT_URL);
+    calls.length = 0;
+    const changed = await service.setBotNameUrl(
+      added.id,
+      "https://kraken.example.org/bot",
+    );
+    expect(calls).toEqual(["PUT /account/bot-names/id-Kraken"]);
+    expect(changed).toMatchObject({
+      id: "id-Kraken",
+      name: "Kraken",
+      url: "https://kraken.example.org/bot",
+    });
+    expect((await service.read()).bot_names[0]?.url).toBe(
+      "https://kraken.example.org/bot",
+    );
+    expect(
+      await rejection(service.setBotNameUrl(added.id, "http://kraken.test")),
+    ).toMatchObject({ status: 422 });
+    expect(
+      await rejection(service.setBotNameUrl("id-Unknown", BOT_URL)),
+    ).toMatchObject({ status: 404 });
   });
 
   test("a rename goes to the lobby, then the game learns it with a new player token", async () => {

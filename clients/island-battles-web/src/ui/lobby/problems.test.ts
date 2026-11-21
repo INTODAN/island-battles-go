@@ -135,7 +135,15 @@ describe("a rated lobby's refusals", () => {
       ],
       [
         "rated-bot-name-required",
-        "This lobby is rated. Play by hand, or choose one of your bot names for your bot.",
+        "This lobby is rated. Play by hand, or choose one of your hosted bot names.",
+      ],
+      [
+        "rated-hosted-bot-required",
+        "This lobby is rated. Rated bots run at their own URL: choose one of your hosted bot names, or play by hand.",
+      ],
+      [
+        "bot-name-url-required",
+        "Your bot name Kraken has no URL yet. Add its hosted bot's URL on the account page, then get ready again.",
       ],
       [
         "rated-bot-name-gone",
@@ -175,6 +183,12 @@ describe("a rated lobby's refusals", () => {
     expect(describeProblem(name, "bot").message).toBe(
       "Octopus isn't one of your bot names.",
     );
+    const noUrl = lobby("invalid_member_settings", {
+      status: 422,
+      detail:
+        "Kraken has no URL yet: add its hosted bot's URL on the account page, or give your hosted bot a url.",
+    });
+    expect(describeProblem(noUrl, "bot").message).toBe(noUrl.detail ?? "");
   });
 
   test("turning Rated on with a seat it doesn't allow says which", () => {

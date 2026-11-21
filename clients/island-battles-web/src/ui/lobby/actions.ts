@@ -105,9 +105,10 @@ export function createLobbyActions(options: {
   };
 
   return {
+    /** Creates a lobby with you as its host, and answers its first snapshot, which the session shows. */
     async create(
       body: Omit<CreateLobbyBody, "client_instance_id" | "game_key">,
-    ) {
+    ): Promise<Snapshot> {
       const { data } = await retryTransport(() =>
         lobbyApi.POST("/lobby/v1/lobbies", {
           body: {
@@ -118,6 +119,7 @@ export function createLobbyActions(options: {
         }),
       );
       adopt(data);
+      return required(data);
     },
 
     async join(joinCode: string) {

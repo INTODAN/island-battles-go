@@ -11,6 +11,11 @@ export interface AccountService {
   read(): Promise<IslandAccount>;
   /** `POST /account/bot-names`, with the URL of the hosted bot that plays the name. */
   addBotName(name: string, url: string): Promise<Competitor>;
+  /**
+   * `PUT /account/bot-names/{competitor_id}`: the name's new hosted bot URL. It keeps its rating;
+   * a game that started before plays the URL it started with.
+   */
+  setBotNameUrl(competitorId: string, url: string): Promise<Competitor>;
   /** `DELETE /account/bot-names/{competitor_id}`, with its rating. */
   deleteBotName(competitorId: string): Promise<void>;
   /**
@@ -76,6 +81,17 @@ export function createAccountService(
         const { data } = await gameApi.POST("/account/bot-names", {
           body: { name, url },
         });
+        return required(data);
+      }),
+    setBotNameUrl: (competitorId, url) =>
+      call(async () => {
+        const { data } = await gameApi.PUT(
+          "/account/bot-names/{competitor_id}",
+          {
+            params: { path: { competitor_id: competitorId } },
+            body: { url },
+          },
+        );
         return required(data);
       }),
     deleteBotName: (competitorId) =>

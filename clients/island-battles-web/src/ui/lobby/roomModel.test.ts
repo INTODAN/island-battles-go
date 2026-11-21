@@ -3,6 +3,7 @@ import type { Snapshot } from "../../realtime";
 
 import {
   anyPlaysByHand,
+  botNameUrlBlocker,
   buildRoom,
   canChangeSettings,
   choiceFromValue,
@@ -14,6 +15,7 @@ import {
   memberSettingsBot,
   ratedBlockers,
   ratedBotNameBlocker,
+  ratedHostedBlocker,
   ratedSignInBlocker,
   seatLevels,
   startBlocker,
@@ -463,7 +465,13 @@ describe("a rated lobby", () => {
       } as unknown as Snapshot,
       you,
     );
-  const kraken = { botNames: ["Kraken", "Squid"] };
+  const kraken = {
+    botNames: [
+      { name: "Kraken", url: "https://kraken.example.org/bot" },
+      { name: "Squid", url: "https://squid.example.org/" },
+      { name: "Old", url: null },
+    ],
+  };
 
   test("reads rated from the settings, and who signed in from the snapshot", () => {
     const room = roomOf([
@@ -517,7 +525,7 @@ describe("a rated lobby", () => {
     expect(guestTag).toBe("guest");
   });
 
-  test("a bot needs one of your bot names, and a default bot never plays for you", () => {
+  test("a bot needs one of your hosted bot names, and a default bot never plays for you", () => {
     const you = (settings: Record<string, unknown>) =>
       ratedBlockers(
         roomOf([member("p1", "t-blue", signedIn(settings))]),
@@ -526,7 +534,9 @@ describe("a rated lobby", () => {
     expect(you(named("default", undefined, { level: 2 }))).toBe(
       ratedBotNameBlocker,
     );
-    expect(ratedBotNameBlocker).toBe("Choose a bot name, or play by hand.");
+    expect(ratedBotNameBlocker).toBe(
+      "Choose one of your hosted bot names, or play by hand.",
+    );
     expect(you(named("localhost"))).toBe(ratedBotNameBlocker);
     expect(you(named("hosted", undefined, { url: "https://b.example" }))).toBe(
       ratedBotNameBlocker,
@@ -534,23 +544,84 @@ describe("a rated lobby", () => {
     expect(you(named("uploaded", undefined, { package_id: "pk" }))).toBe(
       ratedBotNameBlocker,
     );
-    expect(you(named("localhost", "Kraken"))).toBeNull();
+    expect(you(named("hosted", "Kraken"))).toBeNull();
     // Names compare without regard to case, as the server compares them.
-    expect(you(named("uploaded", "squid", { package_id: "pk" }))).toBeNull();
+    expect(you(named("hosted", "squid"))).toBeNull();
+    // A url beside the name is ignored in a rated lobby, as the server ignores it.
+    expect(
+      you(named("hosted", "Kraken", { url: "https://other.example" })),
+    ).toBeNull();
     expect(you(named("manual"))).toBeNull();
     // Without a bot, the server's "choose your bot first" applies, as in any lobby.
     expect(you({})).toBeNull();
   });
 
+  test("a named localhost or uploaded bot is refused: rated bots run at their own URL", () => {
+    const you = (settings: Record<string, unknown>) =>
+      ratedBlockers(
+        roomOf([member("p1", "t-blue", signedIn(settings))]),
+        kraken,
+      ).you;
+    expect(you(named("localhost", "Kraken"))).toBe(ratedHostedBlocker);
+    expect(you(named("uploaded", "Kraken", { package_id: "pk" }))).toBe(
+      ratedHostedBlocker,
+    );
+    expect(ratedHostedBlocker).toBe(
+      "Rated bots run at their own URL: choose one of your hosted bot names, or play by hand.",
+    );
+  });
+
+  test("a name without a URL needs one, on the account page", () => {
+    const room = roomOf([
+      member("p1", "t-blue", signedIn(named("hosted", "old"))),
+    ]);
+    expect(ratedBlockers(room, kraken).you).toBe(botNameUrlBlocker("Old"));
+    expect(botNameUrlBlocker("Old")).toBe(
+      "Your bot name Old has no URL yet. Add its hosted bot's URL on the account page.",
+    );
+    expect(ratedBlockers(room, null).you).toBeNull();
+  });
+
   test("a deleted bot name is named, once your names are known", () => {
     const room = roomOf([
-      member("p1", "t-blue", signedIn(named("localhost", "Octopus"))),
+      member("p1", "t-blue", signedIn(named("hosted", "Octopus"))),
     ]);
     expect(ratedBlockers(room, kraken).you).toBe(
       "Your bot name Octopus no longer exists. Choose another.",
     );
     // Until the names are read, the server decides.
     expect(ratedBlockers(room, null).you).toBeNull();
+  });
+
+  test("a named hosted bot without a URL is read from the settings, and shown by its name", () => {
+    const rated = roomOf([
+      member(
+        "p1",
+        "t-blue",
+        signedIn(named("hosted", "Kraken", { url: "https://typed.example" })),
+      ),
+    ]);
+    // In a rated lobby the name's URL plays, so the typed one is dropped.
+    expect(rated.you?.bot).toEqual({ kind: "hosted", name: "Kraken" });
+    expect(describeBot(rated.you?.bot)).toBe("Kraken (hosted bot)");
+    const unrated = roomOf(
+      [member("p1", "t-blue", signedIn(named("hosted", "Kraken")))],
+      false,
+    );
+    expect(unrated.you?.bot).toEqual({ kind: "hosted", name: "Kraken" });
+    const typed = roomOf(
+      [
+        member(
+          "p1",
+          "t-blue",
+          signedIn(named("hosted", "Kraken", { url: "https://typed.example" })),
+        ),
+      ],
+      false,
+    );
+    expect(describeBot(typed.you?.bot)).toBe(
+      "Kraken (hosted bot, typed.example)",
+    );
   });
 
   test("the host is told which seats to remove, in the server's terms", () => {
