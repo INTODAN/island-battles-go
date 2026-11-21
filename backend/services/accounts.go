@@ -130,8 +130,10 @@ func (accounts Accounts) DeleteBotName(ctx context.Context, principal domain.Pri
 }
 
 // Delete deletes the caller's account: every competitor of it, with its
-// rating, and the account's row. The client calls it before it deletes the
-// account in the lobby, so the game's part is gone first.
+// rating, and the account's row, which a hidden account keeps, with hidden
+// set, so that it stays hidden when it comes back. The client calls it
+// before it deletes the account in the lobby, so the game's part is gone
+// first.
 func (accounts Accounts) Delete(ctx context.Context, principal domain.Principal) error {
 	if err := signedIn(principal); err != nil {
 		return err

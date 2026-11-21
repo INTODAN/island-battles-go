@@ -43,6 +43,14 @@ type ratedFixture struct {
 // number of teams (mapSettings).
 func newRatedFixture(t *testing.T, settings string, rated bool, teams int) ratedFixture {
 	t.Helper()
+	return newRatedFixtureWith(t, settings, rated, teams, nil)
+}
+
+// newRatedFixtureWith starts the game as newRatedFixture does, and calls
+// before, when set, with each team's person before it registers its bot
+// name.
+func newRatedFixtureWith(t *testing.T, settings string, rated bool, teams int, before func(database *gorm.DB, person domain.Principal)) ratedFixture {
+	t.Helper()
 	database := testutils.InitTestDB(t)
 	fields := map[string]any{}
 	if err := json.Unmarshal([]byte(settings), &fields); err != nil {
@@ -59,6 +67,9 @@ func newRatedFixture(t *testing.T, settings string, rated bool, teams int) rated
 	for index := range teams {
 		accountID := uuid.NewString()
 		person := domain.Principal{PlayerID: uuid.NewString(), DisplayName: ratedPeople[index], AccountID: accountID}
+		if before != nil {
+			before(database, person)
+		}
 		competitor, err := accounts.RegisterBotName(context.Background(), person, ratedBots[index])
 		if err != nil {
 			t.Fatal(err)
