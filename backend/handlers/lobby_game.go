@@ -2,14 +2,18 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/INTODAN/mpl/domain"
+	"islandBattles/backend/demotoken"
 	"islandBattles/backend/models"
 	"islandBattles/backend/observability"
 	"islandBattles/backend/services"
 	"islandBattles/backend/submittoken"
+	"log/slog"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"gorm.io/gorm"
@@ -42,6 +46,10 @@ type LobbyGame struct {
 	// Bots sends the turns of hosted and uploaded bots that requests create.
 	// Nil sends none.
 	Bots *services.TurnSender
+	// Demos issues the demo links of game-ended deliveries, and its Tokens
+	// verify them on GET /game/{id}/demo. A nil Tokens refuses every
+	// game-ended delivery and every demo token.
+	Demos services.DemoLinks
 }
 
 // runRetention runs after the handler has its response, and after a turn has
@@ -128,6 +136,63 @@ func (handler *LobbyGame) Demo(ctx context.Context, input *struct {
 		return nil, generationHTTPError(ctx, err)
 	}
 	return streamDemo(ctx, demo)
+}
+
+// GameDemoRequest finds the game by its ID, for a bot that has a demo link
+// but no lobby.
+type GameDemoRequest struct {
+	GameID        uint   `path:"id" minimum:"1"`
+	Token         string `query:"token" doc:"A demo token, ibdt1.…, as GameEndedDelivery.demo.url carries it. Absent when the Authorization header carries the demo token or a player token instead."`
+	Authorization string `header:"Authorization"`
+}
+
+// GameDemo serves a game's demo, found by its ID, to the bearer of a demo
+// token of that game, or to a roster player with their player token.
+func (handler *LobbyGame) GameDemo(ctx context.Context, input *GameDemoRequest) (*huma.StreamResponse, error) {
+	defer handler.runRetention(ctx)
+	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher, Bots: handler.Bots}
+	token := input.Token
+	if token == "" {
+		token, _ = demotoken.FromAuthorization(input.Authorization)
+	}
+	var principal domain.Principal
+	var err error
+	if token != "" {
+		principal, err = handler.verifyDemoToken(ctx, &service, token, input.GameID)
+	} else {
+		principal, err = handler.authenticate(ctx, input.Authorization)
+	}
+	if err != nil {
+		return nil, err
+	}
+	demo, err := service.GameDemo(ctx, principal, input.GameID)
+	if err != nil {
+		return nil, generationHTTPError(ctx, err)
+	}
+	return streamDemo(ctx, demo)
+}
+
+// verifyDemoToken returns the player a demo token stands for, when the token
+// verifies and names gameID and a player on that game's roster. Anything
+// else is 401.
+func (handler *LobbyGame) verifyDemoToken(ctx context.Context, service *services.GenerationService, token string, gameID uint) (domain.Principal, error) {
+	refused := huma.Error401Unauthorized(demotoken.ErrInvalid.Error())
+	if handler.Demos.Tokens == nil {
+		return domain.Principal{}, refused
+	}
+	claims, err := handler.Demos.Tokens.Verify(token, time.Now())
+	if err != nil || claims.GameID != gameID {
+		return domain.Principal{}, refused
+	}
+	principal, err := service.AuthorizeDemoToken(ctx, claims)
+	if errors.Is(err, demotoken.ErrInvalid) {
+		return domain.Principal{}, refused
+	}
+	if err != nil {
+		return domain.Principal{}, generationHTTPError(ctx, err)
+	}
+	observability.Annotate(ctx, slog.String("player_id", principal.PlayerID))
+	return principal, nil
 }
 
 // WatchDemo serves the game's history to its watchers, in the demo format,

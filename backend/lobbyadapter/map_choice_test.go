@@ -143,7 +143,7 @@ func TestStartWithoutAMapChoiceIsRefused(t *testing.T) {
 		if gameID, err := start(t, client, snapshot); err == nil {
 			t.Fatalf("settings %q started game %d", settings, gameID)
 		}
-		ended, err := services.EndAbandonedRound(context.Background(), database, nil, snapshot.Lobby.ID, snapshot.Lobby.Round, time.Now())
+		ended, err := services.EndAbandonedRound(context.Background(), database, nil, nil, snapshot.Lobby.ID, snapshot.Lobby.Round, time.Now())
 		if err != nil || !ended {
 			t.Fatalf("settings %q: round ended = %v, %v; want a round without a game", settings, ended, err)
 		}

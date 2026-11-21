@@ -9,7 +9,11 @@ import (
 	"sync"
 	"time"
 
+	"net/url"
+	"strings"
+
 	"islandBattles/backend/dal"
+	"islandBattles/backend/demotoken"
 	"islandBattles/backend/models"
 	"islandBattles/backend/submittoken"
 
@@ -26,6 +30,11 @@ import (
 // the server never waits for a bot, which submits its own answer with the
 // turn's submit token, as a hosted bot does. A bot that never answers loses
 // at the turn's deadline, like any other.
+//
+// The code that stores a game's outcome collects, the same way, one
+// GameEndedDelivery for every hosted and uploaded bot on the roster, whatever
+// became of its team (#413), and sends them once the outcome has committed.
+// The server doesn't wait for them, or retry them, either.
 
 // BotRunners starts the bot runners. Invoke queues one event for runner, and
 // returns once it is queued, never waiting for the bot: botrunner.Lambda
@@ -64,6 +73,43 @@ type TurnSender struct {
 	// SubmitURL is where the bots submit: the game's public URL plus
 	// /generation/commands. Empty fails every turn.
 	SubmitURL string
+	// Origin is the game's public URL, which the demo links of game-ended
+	// deliveries start with. Empty fails every game-ended delivery.
+	Origin string
+	// Demos issues the demo links of game-ended deliveries.
+	Demos DemoLinks
+}
+
+// DemoLinks issues the self-contained demo links of GameEndedDeliveries.
+type DemoLinks struct {
+	// Tokens signs the links' demo tokens. Nil issues none, and fails every
+	// game-ended delivery.
+	Tokens *demotoken.Signer
+	// Lifetime is how long a link works after the game's final generation:
+	// the game retention period, after which the game is gone. Zero is
+	// DefaultDemoLinkLifetime.
+	Lifetime time.Duration
+}
+
+// DefaultDemoLinkLifetime is the default game retention period, 7 days.
+const DefaultDemoLinkLifetime = 7 * 24 * time.Hour
+
+// link is the link to game's demo as player sees it, under origin, valid
+// until the game's retention ends, Lifetime after its final generation.
+func (links DemoLinks) link(origin string, game *models.Game, final *models.Generation, playerID string) (models.DemoLink, error) {
+	if links.Tokens == nil || origin == "" {
+		return models.DemoLink{}, errors.New("no demo token secret or public URL is configured")
+	}
+	lifetime := links.Lifetime
+	if lifetime <= 0 {
+		lifetime = DefaultDemoLinkLifetime
+	}
+	expires := final.CreatedAt.Add(lifetime).UTC().Truncate(time.Second)
+	token, err := links.Tokens.Issue(demotoken.Claims{GameID: game.ID, PlayerID: playerID, Expires: expires})
+	if err != nil {
+		return models.DemoLink{}, err
+	}
+	return models.DemoLink{URL: fmt.Sprintf("%s/game/%d/demo?token=%s", strings.TrimRight(origin, "/"), game.ID, url.QueryEscape(token)), ExpiresAt: expires}, nil
 }
 
 // turnToSend is one bot's turn of a new generation, collected inside the
@@ -73,16 +119,24 @@ type turnToSend struct {
 	player               models.FrozenGamePlayer
 	// delivery is empty when the server has no submit tokens to issue.
 	delivery models.TurnDelivery
+	// ended, when set, is the end of the bot's game, sent instead of a turn.
+	ended *models.GameEndedDelivery
 }
 
 // sentTurns collects the turns that the server sends for the open turn,
 // generation: one for each hosted or uploaded bot of a team still in the
-// game that hasn't completed it. A finished game sends none. inputs are the
-// turn's inputs so far, and memories every player's stored memory. Each
-// delivery is the one GET …/turn-delivery would answer the player.
+// game that hasn't completed it. inputs are the turn's inputs so far, and
+// memories every player's stored memory. Each delivery is the one
+// GET …/turn-delivery would answer the player. A game that has ended, on
+// generation, sends each hosted and uploaded bot on its roster its
+// GameEndedDelivery instead, whatever became of its team; only the request
+// that stores the outcome calls it then, so each bot gets one.
 func (sender *TurnSender) sentTurns(game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer, inputs []models.GenerationInput, memories map[string]models.BotMemory) ([]turnToSend, error) {
-	if sender == nil || game.Outcome != nil {
+	if sender == nil {
 		return nil, nil
+	}
+	if game.Outcome != nil {
+		return sender.endedGames(game, generation, players, memories)
 	}
 	completed := map[string]bool{}
 	for _, input := range inputs {
@@ -106,6 +160,46 @@ func (sender *TurnSender) sentTurns(game *models.Game, generation *models.Genera
 	return turns, nil
 }
 
+// endedGames collects a GameEndedDelivery for each hosted and uploaded bot on
+// the roster of game, which ended on generation. A server without demo
+// tokens collects them without a link, and fails to send them.
+func (sender *TurnSender) endedGames(game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer, memories map[string]models.BotMemory) ([]turnToSend, error) {
+	var turns []turnToSend
+	for _, player := range players {
+		if !sentByServer(player) {
+			continue
+		}
+		ended, err := newGameEndedDelivery(game, generation, player, memories[player.PlayerID])
+		if err != nil {
+			return nil, err
+		}
+		if sender.Demos.Tokens != nil && sender.Origin != "" {
+			if ended.Demo, err = sender.Demos.link(sender.Origin, game, generation, player.PlayerID); err != nil {
+				return nil, err
+			}
+		}
+		turns = append(turns, turnToSend{gameID: game.ID, generationID: generation.ID, player: player, ended: &ended})
+	}
+	return turns, nil
+}
+
+// newGameEndedDelivery is the end of game, which ended on generation, as
+// player's bot is told it, without its demo link.
+func newGameEndedDelivery(game *models.Game, generation *models.Generation, player models.FrozenGamePlayer, memory models.BotMemory) (models.GameEndedDelivery, error) {
+	outcome := outcomeView(game)
+	if outcome == nil {
+		return models.GameEndedDelivery{}, fmt.Errorf("game %d has not ended", game.ID)
+	}
+	if generation.Number < 1 {
+		return models.GameEndedDelivery{}, fmt.Errorf("generation %d of game %d has no turn number", generation.ID, game.ID)
+	}
+	view, err := goBotGeneration(generation, player.TeamColor, nil)
+	if err != nil {
+		return models.GameEndedDelivery{}, err
+	}
+	return models.GameEndedDelivery{GameID: game.ID, TeamColor: player.TeamColor, TurnNumber: generation.Number, Outcome: *outcome, Generation: view, Memory: memory}, nil
+}
+
 // sentByServer reports whether the server sends the player's turns to a
 // runner: a hosted bot, or an uploaded bot whose package was frozen.
 func sentByServer(player models.FrozenGamePlayer) bool {
@@ -116,8 +210,9 @@ func sentByServer(player models.FrozenGamePlayer) bool {
 // that created their generation has committed. A turn whose runner can't be
 // started, because Lambda throttled it or answered with an error, is logged,
 // and the player gets the error line ServerCouldNotStartBotMessage in that
-// turn's game log; the turn then waits for its deadline. Nothing here fails
-// the request that created the generation.
+// turn's game log; the turn then waits for its deadline. A game-ended
+// delivery that can't be started is only logged. Nothing here fails the
+// request that created the generation.
 func (sender *TurnSender) send(ctx context.Context, database *gorm.DB, turns []turnToSend) {
 	if sender == nil || len(turns) == 0 {
 		return
@@ -136,6 +231,11 @@ func (sender *TurnSender) send(ctx context.Context, database *gorm.DB, turns []t
 			if err == nil {
 				return
 			}
+			if turn.ended != nil {
+				slog.ErrorContext(ctx, "The server couldn't tell a bot that its game ended", "game_id", turn.gameID,
+					"bot_kind", turn.player.BotKind, "error", err)
+				return
+			}
 			slog.ErrorContext(ctx, "The server couldn't start a bot's turn", "game_id", turn.gameID,
 				"generation_id", turn.generationID, "bot_kind", turn.player.BotKind, "error", err)
 			if err := recordUnstartedTurn(ctx, database, turn); err != nil {
@@ -149,15 +249,26 @@ func (sender *TurnSender) send(ctx context.Context, database *gorm.DB, turns []t
 // event is the runner and event of one turn: the native runner delivers a
 // hosted bot's turn to its URL, and the runner of an uploaded package's
 // language plays it from a presigned GET of its zip, within the owner's
-// limits.
+// limits. The end of a game goes the same way, within
+// models.GameEndedBotRunnerLimits for a package.
 func (sender *TurnSender) event(ctx context.Context, turn turnToSend) (models.BotRunnerName, models.BotRunnerEvent, error) {
 	if sender.Runners == nil {
 		return "", models.BotRunnerEvent{}, errors.New("no bot runners are configured")
 	}
-	if turn.delivery.Submit.Token == "" || turn.delivery.Submit.URL == "" {
+	var event models.BotRunnerEvent
+	limits := models.DefaultBotRunnerLimits
+	switch {
+	case turn.ended != nil:
+		if turn.ended.Demo.URL == "" {
+			return "", models.BotRunnerEvent{}, errors.New("no demo token secret or public URL is configured")
+		}
+		event.GameEnded, limits = turn.ended, models.GameEndedBotRunnerLimits
+	case turn.delivery.Submit.Token == "" || turn.delivery.Submit.URL == "":
 		return "", models.BotRunnerEvent{}, errors.New("no submit token secret or submit URL is configured")
+	default:
+		delivery := turn.delivery
+		event.Delivery = &delivery
 	}
-	event := models.BotRunnerEvent{Delivery: turn.delivery}
 	player := turn.player
 	if player.BotKind == models.HostedBot {
 		if player.BotURL == nil {
@@ -183,7 +294,6 @@ func (sender *TurnSender) event(ctx context.Context, turn turnToSend) (models.Bo
 		return "", models.BotRunnerEvent{}, err
 	}
 	event.Package = &models.BotRunnerPackage{ID: deref(player.BotPackageID), URL: link, SizeBytes: deref(player.BotPackageSizeBytes)}
-	limits := models.DefaultBotRunnerLimits
 	event.Limits = &limits
 	return runner, event, nil
 }

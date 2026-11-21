@@ -51,7 +51,8 @@ type turnEnd struct {
 	// generation's, or the game.ended of a turn that timed out.
 	events []Publication
 	// turns are the hosted and uploaded bots' turns of the new generation,
-	// to send once the transaction commits.
+	// or their game-ended deliveries when the game ended, to send once the
+	// transaction commits.
 	turns []turnToSend
 	// goBotsOnly is set when the new turn is already complete and only Go
 	// bots are left to play it, so they play on after the commit
@@ -84,17 +85,17 @@ func endTurn(ctx context.Context, transaction *gorm.DB, game *models.Game, gener
 		return turnEnd{generation: generation}, nil
 	}
 	if game.TurnPaceMilliseconds == nil {
-		events, err := expireTurn(transaction, game, generation, players)
-		return turnEnd{generation: generation, events: events}, err
+		events, turns, err := expireTurn(transaction, game, generation, players, sender)
+		return turnEnd{generation: generation, events: events, turns: turns}, err
 	}
 	if abandoned(game, generation, now) {
-		events, err := abandonGame(transaction, game, generation, players)
-		return turnEnd{generation: generation, events: events}, err
+		events, turns, err := abandonGame(transaction, game, generation, players, sender)
+		return turnEnd{generation: generation, events: events, turns: turns}, err
 	}
 	if leaveSilentTeams(game, generation, players, caller, *deadline) {
 		// Every team still in the game went silent: nobody played it.
-		events, err := abandonGame(transaction, game, generation, players)
-		return turnEnd{generation: generation, events: events}, err
+		events, turns, err := abandonGame(transaction, game, generation, players, sender)
+		return turnEnd{generation: generation, events: events, turns: turns}, err
 	}
 	inputs, err := dal.LoadGenerationInputs(transaction, generation.ID)
 	if err != nil {
@@ -137,12 +138,12 @@ func (service *GenerationService) now() time.Time {
 // loses; eliminated teams never do, and when only their players are late
 // nothing happens. The game ends with simulation.TimeoutOutcome on
 // generation's board, which stays the final generation. It returns the
-// game.ended events to push once the transaction commits, or none when the
-// game goes on.
-func expireTurn(transaction *gorm.DB, game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer) ([]Publication, error) {
+// game.ended events to push, and the game-ended deliveries to send with
+// sender, once the transaction commits, or none when the game goes on.
+func expireTurn(transaction *gorm.DB, game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer, sender *TurnSender) ([]Publication, []turnToSend, error) {
 	inputs, err := dal.LoadGenerationInputs(transaction, generation.ID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	completed := map[string]bool{}
 	for _, input := range inputs {
@@ -150,7 +151,7 @@ func expireTurn(transaction *gorm.DB, game *models.Game, generation *models.Gene
 	}
 	board, err := dal.LoadGameState(transaction, game.ID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// Only teams still in the game can time out. The players of an
 	// eliminated team have nothing to play, and the turn doesn't wait for
@@ -172,10 +173,10 @@ func expireTurn(transaction *gorm.DB, game *models.Game, generation *models.Gene
 	// it later, so with them the turn is open and complete between requests,
 	// and doesn't time out.
 	if waiting == 0 && !slices.ContainsFunc(players, isGoBot) {
-		return nil, fmt.Errorf("generation %d of game %d is open, but every roster player completed it", generation.ID, game.ID)
+		return nil, nil, fmt.Errorf("generation %d of game %d is open, but every roster player completed it", generation.ID, game.ID)
 	}
 	if len(late) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 	colors := slices.Sorted(maps.Keys(late))
 	timedOut := make([]models.TimedOutTeam, 0, len(colors))
@@ -192,16 +193,12 @@ func expireTurn(transaction *gorm.DB, game *models.Game, generation *models.Gene
 	}
 	slices.Sort(outcome.Survivors)
 	if err := rateGame(transaction, game, players, outcome); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := dal.SaveGameOutcome(transaction, game, *outcome); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	memories, err := dal.LoadBotMemories(transaction, game.ID)
-	if err != nil {
-		return nil, err
-	}
-	return generationEvents(game, generation, players, inputs, memories)
+	return gameEndedWork(transaction, game, generation, players, sender)
 }
 
 // applyOverdueDeadline has the Go bots play, as every game request does, and

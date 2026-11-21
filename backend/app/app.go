@@ -17,6 +17,7 @@ import (
 	"islandBattles/backend/botcompute"
 	"islandBattles/backend/botrunner"
 	"islandBattles/backend/demo"
+	"islandBattles/backend/demotoken"
 	"islandBattles/backend/demoviewer"
 	"islandBattles/backend/dependencies"
 	"islandBattles/backend/handlers"
@@ -122,6 +123,13 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	if err != nil {
 		return nil, err
 	}
+	// Demo tokens share it too, under a key derived for them alone.
+	demoTokens, err := demotoken.New([]byte(config.SubmitTokenSecret))
+	if err != nil {
+		return nil, err
+	}
+	// A demo link works until retention deletes its game.
+	demos := services.DemoLinks{Tokens: demoTokens, Lifetime: config.GameRetentionPeriod}
 	var packages packagestore.Store
 	switch {
 	case config.BotPackagesBucket != "":
@@ -135,7 +143,7 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	default:
 		logger.Warn("Bot package uploads answer 503 because " + dependencies.BotPackagesBucketEnv + " is not set")
 	}
-	bots, err := turnSender(config, selected, packages, submitTokens, logger)
+	bots, err := turnSender(config, selected, packages, submitTokens, demos, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +188,7 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 	router.Handle("/lobby", lobbyGone(config.LobbyURL))
 	router.Handle("/lobby/*", lobbyGone(config.LobbyURL))
 	routes.SetupGameRoutes(api, &handlers.LobbyGame{Database: database, Players: handlers.PlayerTokens{Verifier: playerVerifier}, Publisher: gamePublisher, Retention: gameRetention, Watchers: lobbyClient,
-		SubmitTokens: submitTokens, PublicURL: config.PublicURL, Bots: bots})
+		SubmitTokens: submitTokens, PublicURL: config.PublicURL, Bots: bots, Demos: demos})
 	routes.SetupBotPackageRoutes(api, &handlers.BotPackages{Players: handlers.PlayerTokens{Verifier: playerVerifier}, Service: services.BotPackages{
 		Database: database, Lobbies: lobbyClient, Store: packages, Tokens: uploadTokens}})
 	routes.SetupAccountRoutes(api, &handlers.Accounts{Players: handlers.PlayerTokens{Verifier: playerVerifier}, Service: services.Accounts{Database: database, ServerBots: serverBots}})
@@ -202,7 +210,7 @@ func New(config dependencies.Config, database *gorm.DB, logger *slog.Logger, opt
 // the local server host's own runners. A host with neither, such as the
 // Lambda host without the functions' names, sends nothing, and those bots
 // lose at their first deadline.
-func turnSender(config dependencies.Config, selected options, packages packagestore.Store, tokens *submittoken.Signer, logger *slog.Logger) (*services.TurnSender, error) {
+func turnSender(config dependencies.Config, selected options, packages packagestore.Store, tokens *submittoken.Signer, demos services.DemoLinks, logger *slog.Logger) (*services.TurnSender, error) {
 	if !config.ServerBots {
 		return nil, nil
 	}
@@ -210,7 +218,7 @@ func turnSender(config dependencies.Config, selected options, packages packagest
 	if origin == "" {
 		origin = strings.TrimRight(selected.localOrigin, "/")
 	}
-	sender := &services.TurnSender{Tokens: tokens}
+	sender := &services.TurnSender{Tokens: tokens, Demos: demos, Origin: origin}
 	if packages != nil {
 		sender.Packages = packages
 	}

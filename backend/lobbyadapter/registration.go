@@ -72,7 +72,7 @@ func Registration(database *gorm.DB, publisher services.Publisher, sender *servi
 		ValidateSeat:           rules.ValidateBotSeat,
 		ValidateMemberSettings: rules.ValidateMemberSettings,
 		GameOver: func(ctx context.Context, lobbyID string, round int64) (bool, error) {
-			return gameOver(ctx, database, publisher, lobbyID, round)
+			return gameOver(ctx, database, publisher, sender, lobbyID, round)
 		},
 		StartGame: func(ctx context.Context, snapshot domain.Snapshot) (string, error) {
 			return startGame(ctx, database, publisher, sender, snapshot)
@@ -139,12 +139,12 @@ func checkStarted(snapshot domain.Snapshot) error {
 // gameOver reports whether the game of a lobby round has ended, so that a
 // member can reopen the lobby for another game. A real-time game that nobody
 // has played for its turn limit, because its players all closed their tabs,
-// is ended first, as abandoned, and its game.ended pushed with publisher
-// (services.EndAbandonedRound); no turn is played, so it answers within the
+// is ended first, as abandoned, its game.ended pushed with publisher and its
+// bots told with sender (services.EndAbandonedRound); no turn is played, so it answers within the
 // lobby's hook timeout. A round whose start bound no game counts as over, so
 // the lobby can't be stuck. A failed read is reported as unavailable.
-func gameOver(ctx context.Context, database *gorm.DB, publisher services.Publisher, lobbyID string, round int64) (bool, error) {
-	over, err := services.EndAbandonedRound(ctx, database, publisher, lobbyID, round, time.Now())
+func gameOver(ctx context.Context, database *gorm.DB, publisher services.Publisher, sender *services.TurnSender, lobbyID string, round int64) (bool, error) {
+	over, err := services.EndAbandonedRound(ctx, database, publisher, sender, lobbyID, round, time.Now())
 	switch {
 	case err == nil:
 		return over, nil

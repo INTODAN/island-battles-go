@@ -171,6 +171,51 @@ func (handler *LobbyGame) TurnDelivery(ctx context.Context, input *TurnDeliveryR
 	return &TurnDeliveryResponse{Body: delivery}, nil
 }
 
+type GameEndedDeliveryResponse struct{ Body models.GameEndedDelivery }
+
+// GameEndedDeliveryRequest reads the request's own address too, for the demo
+// link when no public URL is configured.
+type GameEndedDeliveryRequest struct {
+	LobbyID       string `path:"lobby_id" format:"uuid"`
+	PlayerID      string `query:"player_id" format:"uuid" doc:"A localhost bot seat that you relay, one of GenerationState.relayed_bots, to read its delivery instead of yours. Absent for your own."`
+	Authorization string `header:"Authorization"`
+	origin        string
+}
+
+// Resolve keeps the scheme and Host the request came in with.
+func (request *GameEndedDeliveryRequest) Resolve(ctx huma.Context) []error {
+	scheme := "http"
+	if ctx.TLS() != nil {
+		scheme = "https"
+	}
+	request.origin = scheme + "://" + ctx.Host()
+	return nil
+}
+
+// GameEndedDelivery answers the end of the caller's game, or that of a
+// localhost bot seat they relay, with a demo link, for a client to relay to
+// the localhost bot.
+func (handler *LobbyGame) GameEndedDelivery(ctx context.Context, input *GameEndedDeliveryRequest) (*GameEndedDeliveryResponse, error) {
+	defer handler.runRetention(ctx)
+	principal, err := handler.authenticate(ctx, input.Authorization)
+	if err != nil {
+		return nil, err
+	}
+	if handler.Demos.Tokens == nil {
+		return nil, huma.Error503ServiceUnavailable("game-ended deliveries are not configured")
+	}
+	origin := strings.TrimRight(handler.PublicURL, "/")
+	if origin == "" {
+		origin = input.origin
+	}
+	service := services.GenerationService{Database: handler.Database, Publisher: handler.Publisher, Bots: handler.Bots}
+	ended, err := service.GameEndedDelivery(ctx, principal, input.LobbyID, input.PlayerID, handler.Demos, origin)
+	if err != nil {
+		return nil, generationHTTPError(ctx, err)
+	}
+	return &GameEndedDeliveryResponse{Body: ended}, nil
+}
+
 // generationHTTPError answers a service error. An unexpected one answers 503
 // without its cause, which goes on the request's error line instead.
 func generationHTTPError(ctx context.Context, err error) error {
