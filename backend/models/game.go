@@ -82,10 +82,13 @@ type GameOutcome struct {
 	// TimedOut lists the teams that lost a turn_timeout game, in colour
 	// order. It is empty for every other reason.
 	TimedOut []TimedOutTeam `json:"timed_out,omitempty"`
-	// Survivors lists the colours of the teams that were still in a
-	// turn_timeout game and didn't time out, in colour order. The winner is
-	// one of them, or they drew; without any, every team still in the game
-	// timed out, which is a draw.
+	// Survivors lists the colours of the teams that were still in the game
+	// when it ended, in colour order: those with castles or soldier groups,
+	// leaving out a team that timed out in a turn_timeout game and one whose
+	// resignation was waiting for the turn in an abandoned game. The winner
+	// is one of them, or they drew; without any, every team was eliminated,
+	// timed out, resigned or left, which is a draw. A rated game without a
+	// winner rates each other team as a loss to each survivor.
 	Survivors []uint `json:"survivors,omitempty"`
 	// Departures lists the teams that resigned or left a real-time game, as
 	// Game.Departures had them when it ended. A resignation still waiting for
