@@ -115,6 +115,7 @@ jobs:
           cache-dependency-glob: |
             clients/conformance/uv.lock
             clients/island-battles-python/uv.lock
+            league/uv.lock
 
       - name: Gameplay client bot tests
         run: uv run --project clients/island-battles-python --locked pytest clients/island-battles-python/tests
@@ -144,6 +145,15 @@ jobs:
 
       - name: Go SDK conformance (offline)
         run: ISLAND_BATTLES_CLIENT_COMMAND="$RUNNER_TEMP/island-battles-go-conformance" uv run --project clients/conformance --locked pytest clients/conformance/tests/test_models.py
+
+      # The bot league (league/README.md): its tools' and every bot's checks,
+      # then every bot plays the others and the default bots on one map with
+      # the headless runner. A bot that fails a turn fails the job.
+      - name: Bot league checks
+        run: league/scripts/check.sh
+
+      - name: Bot league plays a tournament
+        run: uv run --project league --locked league tournament --maps circle --run-id checks --strict
 
       # The bot template as the bot tutorial installs it: no lock, so the newest
       # SDK, here this repository's, offered as a release newer than PyPI's. A

@@ -1,0 +1,69 @@
+{
+  "map_name": "gyre",
+  "player_amount": 2,
+  "plane_size_x": 14,
+  "plane_size_y": 8,
+  "neutral_starting_soldier_amount": 15,
+  "castles": [
+    {
+      "team_color": 1,
+      "x": -5.0,
+      "y": -0.0,
+      "starting_soldier_amount": 30
+    },
+    {
+      "team_color": 2,
+      "x": 5.0,
+      "y": 0.0,
+      "starting_soldier_amount": 30
+    },
+    {
+      "team_color": 0,
+      "x": -1.0,
+      "y": -2.0,
+      "starting_soldier_amount": 12
+    },
+    {
+      "team_color": 0,
+      "x": 1.0,
+      "y": 2.0,
+      "starting_soldier_amount": 12
+    },
+    {
+      "team_color": 0,
+      "x": -2.0,
+      "y": -0.0,
+      "starting_soldier_amount": 5
+    },
+    {
+      "team_color": 0,
+      "x": 2.0,
+      "y": 0.0,
+      "starting_soldier_amount": 5
+    },
+    {
+      "team_color": 0,
+      "x": -3.5,
+      "y": -3.5,
+      "starting_soldier_amount": 5
+    },
+    {
+      "team_color": 0,
+      "x": 3.5,
+      "y": 3.5,
+      "starting_soldier_amount": 5
+    },
+    {
+      "team_color": 0,
+      "x": -0.5,
+      "y": 3.0,
+      "starting_soldier_amount": 25
+    },
+    {
+      "team_color": 0,
+      "x": 0.5,
+      "y": -3.0,
+      "starting_soldier_amount": 25
+    }
+  ]
+}

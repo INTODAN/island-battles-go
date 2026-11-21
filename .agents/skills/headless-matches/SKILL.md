@@ -1,0 +1,61 @@
+---
+name: headless-matches
+description: "Play whole Island Battles games between bots in memory, without the database, the lobby or a browser, with backend/cmd/headless-match: the schedule format, the result lines, the demos, what differs from a lobby's game, and how to change the runner. Load it before playing bots against each other, measuring a bot, or changing backend/services/headless_match.go or backend/cmd/headless-match."
+---
+
+# Headless matches
+
+`go run ./backend/cmd/headless-match` plays games between bots in one process: no PostgreSQL, lobby, Centrifugo or HTTP. Use it whenever the question is "how does this bot play", and the live stack (`./scripts/dev.sh`, `island-battles-bot run`) only when the question is about the lobby, deadlines, real-time turns or the network.
+
+For the league's bots, don't write schedules by hand: `league tournament` writes them, caches results and sums them up. See the `bot-league` skill.
+
+## Run it
+
+```sh
+go run ./backend/cmd/headless-match schedule.json > results.jsonl     # or the schedule on stdin
+```
+
+```json
+{
+  "players": {
+    "level3": {"default_level": 3},
+    "mine": {"worker": ["python", "-m", "island_battles_client.worker", "bot:play"], "directory": "path/to/the/bot"}
+  },
+  "maps": {"strait": "league/maps/train/strait.json"},
+  "matches": [{"id": "strait-1", "map": "strait", "seats": ["mine", "level3"]}],
+  "max_generations": 300,
+  "turn_timeout_milliseconds": 2000,
+  "parallel": 8,
+  "demo_directory": "demos",
+  "compress_demos": true
+}
+```
+
+- **A player** is a default bot (`default_level`) or a **worker**: any command that speaks the SDKs' worker protocol, JSON Lines on stdin and stdout. For Python, `python -m island_battles_client.worker module:function` run where the module imports, with a Python that has the SDK (`uv run --project <the bot's project> python ...`, or that environment's interpreter). A Go bot's program has a `worker` command. `environment` adds variables for the worker.
+- **A map** is a map file, the `MapTemplate` schema, by path. `seats[index]` plays team colour `index + 1`, and a match needs as many seats as its map has teams. Play each pair from both sides: maps are fair, turn order is not always.
+- **Output:** one JSON line per match, in the order the matches end: `id`, `map`, `players`, `outcome` (`reason`, `winner_team_color`, `summary`), `winner` (a player's name, or null for a draw), `generations`, `seats` and `demo`. A match that couldn't be played has `error` instead. A seat has `castles`, `soldiers`, `eliminated_at_turn`, `turns_played`, `commands`, `failed_turns`, `failures` (the first five, with the turn and the message, a Python traceback included) and `total_turn_milliseconds`, `slowest_turn_milliseconds`, `slowest_turn`.
+- **Demos** are the files that Save demo writes, with every team's log lines. `compress_demos` packs them with gzip; the demo viewer opens the unpacked file.
+
+## What it shares with a lobby's game, and what it doesn't
+
+The same: the `BotTurn` a bot gets (turn number, the game's last generation, the upgrade table, its memory), the checks of a completing `POST /generation/commands` batch (`validateCommands`, the memory and log limits), `simulation.Simulate` and `simulation.Outcome`. A bot whose result the server would reject is rejected here.
+
+Different:
+
+- **No deadline.** A bot that raises, answers something the rules reject, or takes longer than `turn_timeout_milliseconds` **passes the turn** and gets an error line in its game log, as a failed default bot does; the seat's `failed_turns` counts it. In a lobby's game a late answer loses the game. Treat any failed turn as a bug in the bot.
+- **No real-time turns, departures or resignations.**
+- **Teams answer in colour order**, each seeing the board as its turn started.
+- **Generation IDs start at 5538**, not at 1, as on the server, where every game shares the IDs: a bot that reads `generation.id` as the turn number plays badly here too. The turn's number is `turn.turn_number`.
+
+## Speed
+
+A worker process is started once and plays any number of games, since a bot keeps nothing between turns: a match borrows a process per worker seat and gives it back. Starting a worker is not counted in a turn's time. `parallel` is how many matches play at once, the number of CPUs by default. A Python bot's turn costs about 1 ms, mostly the SDK reading the turn; a default bot's 0.3 ms.
+
+Bots are deterministic, so a match with the same runner, map, seats, bots and settings always plays the same game. Playing it twice measures nothing; add maps instead.
+
+## Changing the runner
+
+- The engine is `services.PlayHeadlessMatch` in `backend/services/headless_match.go`; it must keep using the service's own checks rather than copies of them, so the rules can't drift. Its tests are `backend/services/headless_match_test.go`, which need no database.
+- The command, the schedule and the worker processes are `backend/cmd/headless-match`; its tests use the test binary itself as a worker.
+- `go test ./backend/services -run Headless` and `go test ./backend/cmd/headless-match` run both in a second. `TestGoBotTournament` plays the default bots on the same in-memory board.
+- A rule change (see the `game-rules` skill) needs nothing here, but it changes every bot's results: say so in the pull request, and play the league again.

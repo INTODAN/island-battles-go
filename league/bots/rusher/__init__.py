@@ -1,0 +1,1 @@
+"""The rusher bot."""

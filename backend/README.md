@@ -523,6 +523,61 @@ The bots are deterministic: the same `BotTurn` always gives the same result, and
 
 Every request plays at least one turn, however small its budget, so a game always makes progress. A game without Go bots pays one read of its roster for this. Locally a game plays about 60 turns a second.
 
+### Headless matches
+
+`go run ./backend/cmd/headless-match` plays whole games between bots **in memory**: no database, no lobby, no Centrifugo and no HTTP. It is for playing many games quickly, such as the [bot league](../league/README.md)'s tournaments, where the live stack would spend its time on everything but the game.
+
+```sh
+go run ./backend/cmd/headless-match schedule.json > results.jsonl     # or the schedule on stdin
+```
+
+The schedule is a JSON document:
+
+```json
+{
+  "players": {
+    "level3": {"default_level": 3},
+    "mine": {"worker": ["python", "-m", "island_battles_client.worker", "bot:play"], "directory": "path/to/the/bot", "environment": {}}
+  },
+  "maps": {"strait": "league/maps/train/strait.json"},
+  "matches": [{"id": "strait-1", "map": "strait", "seats": ["mine", "level3"]}],
+  "max_generations": 300,
+  "turn_timeout_milliseconds": 2000,
+  "parallel": 8,
+  "demo_directory": "demos",
+  "compress_demos": true
+}
+```
+
+- **A player** is a [default bot](#default-bots), by `default_level`, or a **worker**: a command that speaks the SDKs' worker protocol, JSON Lines on stdin and stdout, which is how the [bot runners](#bot-runners) run a package. `python -m island_battles_client.worker module:function` is the Python SDK's, and a Go bot's program has a `worker` command. `directory` is the worker's working directory, and `environment` is added to the command's own.
+- **A map** is a [map file](#map-files), by path. `seats[index]` plays team colour `index + 1`; a match needs as many seats as its map has teams, and an `id` that is a file name of its own.
+- `max_generations` is every game's [length](#game-length) (300 when left out), `turn_timeout_milliseconds` how long a player may take for a turn (no limit when left out), and `parallel` how many matches play at once (the number of CPUs when left out). Without a `demo_directory` no demos are written.
+- An unknown key, a player that is both or neither kind, an unknown level, map or player, a map file that isn't valid and an `id` used twice are refused before anything is played, with exit status 2.
+
+**Output:** one JSON line per match on stdout, as each match ends, so in any order:
+
+```json
+{"id": "strait-1", "map": "strait", "players": ["mine", "level3"], "winner": "mine", "generations": 44, "seconds": 0.05,
+ "outcome": {"reason": "last_team_standing", "winner_team_color": 1, "summary": "mine wins as the last team standing", "departures": []},
+ "seats": [{"name": "mine", "team_color": 1, "castles": 5, "soldiers": 71, "eliminated_at_turn": 0, "turns_played": 43, "commands": 9,
+            "failed_turns": 0, "failures": [], "total_turn_milliseconds": 41.2, "slowest_turn_milliseconds": 1.9, "slowest_turn": 30}],
+ "demo": "demos/strait-1.json.gz"}
+```
+
+`seats` has one entry per seat, in seat order; the example shows the first. `winner` is the winning player's name, or null for a draw. A match that couldn't be played, such as one whose seats don't fit its map or whose worker doesn't start, has `error` in place of the outcome. `failures` lists a seat's first five failed turns with the turn and the message, which for a Python bot is its traceback. The demo is a [demo file](#demos) with every team's game log, named after the match's `id`.
+
+**The same rules as a lobby's game.** `services.PlayHeadlessMatch` gives each player the `BotTurn` a bot gets from the server, checks its answer with the checks of a completing `POST /generation/commands` batch (the commands against the board and the turn's earlier batches, the memory, the log lines), plays the turn with `simulation.Simulate`, and ends the game by `simulation.Outcome`. It shares that code with the service, so the rules can't drift apart.
+
+**What it leaves out:**
+
+- **Deadlines.** A player that returns an error, answers something the rules reject, or takes longer than the turn timeout **passes the turn**, as a default bot that fails does: it sends no commands, keeps its memory, and its game log gets one `error` line from `island_battles.bots`. The seat's `failed_turns` counts it. In a lobby's game a late answer loses the game ([turn deadlines](#turn-deadlines)), so a seat with failed turns hasn't shown that it can play there.
+- **Real-time turns, resignations and departures.** Every game waits for every team.
+- **Players answering at once.** The teams answer in colour order.
+
+Generation IDs start at 5538 rather than 1: on the server every game shares the IDs, and a bot that reads `generation.id` as the turn number should play as badly here as there.
+
+**Speed.** A bot keeps nothing between turns, so one worker process plays any number of games: a match borrows a process for each worker seat and gives it back for the next match, and at most two processes per match played at once ever run. Starting a process is not counted in a turn's time. On an 32-thread desktop, 216 two-player matches of four Python bots and the three default bots, 124 turns each on average, take 4 seconds; a Python bot's turn costs about 1 ms and a default bot's 0.3 ms. The same match always plays the same game when its bots are deterministic, which the bot rules require.
+
 ### Demos
 
 A roster player can save the game as a **demo file** at any time, and watch it later in the browser, after the lobby, the guest session and the game itself are gone.
@@ -841,6 +896,8 @@ go vet ./...
 go test -race ./backend/lobbyadapter/... ./backend/dal/...
 ./scripts/test-lobby-acceptance.sh
 ```
+
+The [headless matches](#headless-matches)' tests, `go test ./backend/cmd/headless-match` and `go test ./backend/services -run Headless`, need no database.
 
 Database tests require a Docker-compatible runtime and use disposable PostgreSQL. On rootless Podman, set the runtime up first as described in [Database tests on rootless Podman](#database-tests-on-rootless-podman). The live runner supports Linux Docker or Podman, creates unique test containers, and preserves failure logs. It never uses the configured developer database.
 
