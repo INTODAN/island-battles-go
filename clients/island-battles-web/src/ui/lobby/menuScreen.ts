@@ -1,6 +1,7 @@
 import { ApiError } from "../../api/errors";
 import type { ReadableStore, Session } from "../../realtime";
 import { h } from "../dom";
+import { leaderboardLink } from "../leaderboard/links";
 import { rulesButton } from "../rules/rulesDialog";
 import type { LobbyActions } from "./actions";
 import {
@@ -33,6 +34,8 @@ export interface MenuScreenOptions {
   onChangeName(): void;
   /** A signed-in person's "Account": opens the account page. */
   onAccount(): void;
+  /** Opens the leaderboard, from a link in the heading. */
+  onLeaderboard?: () => void;
   newId(): string;
 }
 
@@ -262,6 +265,9 @@ export function mountMenuScreen(options: MenuScreenOptions): Screen {
             "Change name",
           ),
       " · ",
+      ...(options.onLeaderboard
+        ? [leaderboardLink("Leaderboard", options.onLeaderboard), " · "]
+        : []),
       rulesButton("link"),
     ),
   );

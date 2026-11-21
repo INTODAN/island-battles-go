@@ -60,3 +60,18 @@ export function backToLobby(
 ): "reopen" | "show room" {
   return game === "running" ? "show room" : "reopen";
 }
+
+/**
+ * Whether the leaderboard, shown over the app's screens, gives way to the
+ * lobby: when the rounds send the tab to a game it hasn't entered yet, such
+ * as one the host started while the leaderboard covered the room. Covering
+ * that game would keep the bot relay and hand play from starting, and the
+ * team could lose its turns. `enteredRound` is the round whose game the tab
+ * has entered in this lobby, or null.
+ */
+export function leaderboardGivesWay(
+  decision: RoundRoute | undefined,
+  enteredRound: number | null,
+): boolean {
+  return decision?.view === "game" && decision.round !== enteredRound;
+}

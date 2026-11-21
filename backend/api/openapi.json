@@ -1068,7 +1068,7 @@
             "type": "array"
           },
           "ratings": {
-            "description": "How the game changed each team's competitor's Elo rating, one per team in colour order, for a rated game only: absent when the game isn't rated. The winner gains and every other team loses, each against the winner alone; in a draw every pair of teams counts as a draw.",
+            "description": "How the game changed each team's competitor's Elo rating, one per team in colour order, for a rated game only: absent when the game isn't rated. The winner gains and every other team loses, each against the winner alone. Without a winner, the teams still in the game when it ended draw each other, and each team that was eliminated, timed out, resigned or left loses to each of them; when no team was left, every pair of teams counts as a draw.",
             "items": {
               "$ref": "#/components/schemas/RatingChange"
             },
@@ -2708,7 +2708,7 @@
   "paths": {
     "/account": {
       "delete": {
-        "description": "Requires the player token of a signed-in player; a guest's token is 403 with problem type urn:island-battles:problem:sign-in-required. Deletes every competitor of the account, its bot names and its hand play with their ratings, and the game's record of the account. Call it before the lobby's DELETE /lobby/v1/account, so the game's part is gone first. Deleting an account the game doesn't know is 204 too.",
+        "description": "Requires the player token of a signed-in player; a guest's token is 403 with problem type urn:island-battles:problem:sign-in-required. Deletes every competitor of the account, its bot names and its hand play with their ratings, and the game's record of the account, unless the account is hidden from the leaderboard: then the game keeps its record, with its display name, so that it stays hidden, with its new hand play and bot names, when it plays again. Call it before the lobby's DELETE /lobby/v1/account, so the game's part is gone first. Deleting an account the game doesn't know is 204 too.",
         "operationId": "deleteIslandAccount",
         "parameters": [
           {

@@ -1,5 +1,6 @@
 import { nameRule, validateAccountName } from "../account/accountModel";
 import { h } from "../dom";
+import { leaderboardLink } from "../leaderboard/links";
 import { maxNameLength, validateDisplayName } from "./form";
 import type { GoogleSignIn } from "./googleSignIn";
 import { googleSignInStep } from "./signIn";
@@ -34,6 +35,8 @@ export interface NameScreenOptions {
    * the guest name step it always was.
    */
   google?: GoogleSignInOptions;
+  /** Opens the leaderboard, from a line at the foot of the panel. */
+  onLeaderboard?: () => void;
 }
 
 /** The lead sentence once Google's button shows above the name field. */
@@ -88,6 +91,14 @@ export function mountNameScreen(options: NameScreenOptions): Screen {
     input,
     error,
     h("div", { class: "actions" }, button),
+    options.onLeaderboard
+      ? h(
+          "p",
+          { class: "panel-footer" },
+          "Who's on top? ",
+          leaderboardLink("See the leaderboard", options.onLeaderboard),
+        )
+      : null,
   );
   form.addEventListener("submit", async (event) => {
     event.preventDefault();

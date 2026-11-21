@@ -17,7 +17,7 @@ export interface paths {
         post?: never;
         /**
          * Delete your account's part of the game
-         * @description Requires the player token of a signed-in player; a guest's token is 403 with problem type urn:island-battles:problem:sign-in-required. Deletes every competitor of the account, its bot names and its hand play with their ratings, and the game's record of the account. Call it before the lobby's DELETE /lobby/v1/account, so the game's part is gone first. Deleting an account the game doesn't know is 204 too.
+         * @description Requires the player token of a signed-in player; a guest's token is 403 with problem type urn:island-battles:problem:sign-in-required. Deletes every competitor of the account, its bot names and its hand play with their ratings, and the game's record of the account, unless the account is hidden from the leaderboard: then the game keeps its record, with its display name, so that it stays hidden, with its new hand play and bot names, when it plays again. Call it before the lobby's DELETE /lobby/v1/account, so the game's part is gone first. Deleting an account the game doesn't know is 204 too.
          */
         delete: operations["deleteIslandAccount"];
         options?: never;
@@ -991,7 +991,7 @@ export interface components {
         GameOutcome: {
             /** @description The teams that resigned or left a real-time game, in the order they left. Always present, and empty for most games; a demo saved before this field existed has none, which reads as empty. */
             departures?: components["schemas"]["Departure"][];
-            /** @description How the game changed each team's competitor's Elo rating, one per team in colour order, for a rated game only: absent when the game isn't rated. The winner gains and every other team loses, each against the winner alone; in a draw every pair of teams counts as a draw. */
+            /** @description How the game changed each team's competitor's Elo rating, one per team in colour order, for a rated game only: absent when the game isn't rated. The winner gains and every other team loses, each against the winner alone. Without a winner, the teams still in the game when it ended draw each other, and each team that was eliminated, timed out, resigned or left loses to each of them; when no team was left, every pair of teams counts as a draw. */
             ratings?: components["schemas"]["RatingChange"][];
             /**
              * @description last_team_standing: one team was left after every other team lost all its castles and soldier groups, or resigned or left the game. all_eliminated: the last teams were eliminated, or left, in the same turn, a draw. generation_cap: the game reached its last generation; the team with the most castles won, and equal counts are a draw. turn_timeout: in a game that waits for every player, a turn passed its deadline; every team with a player who hadn't completed it lost, and among the other teams still standing the team with the most castles won, while equal counts, or no team left, are a draw. abandoned: nobody played a real-time game for its turn limit, so it ended on its open generation; among the teams still in it, except one whose resignation was waiting for the turn, the team with the most castles won, and equal counts, or no team left, are a draw.

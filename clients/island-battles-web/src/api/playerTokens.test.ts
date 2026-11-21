@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createApiClients } from "./client";
 import { ApiError } from "./errors";
+import { needsPlayerToken } from "./playerTokens";
 
 const LOBBY_ID = "4f7c0a2e-58c4-4a51-9d2e-3c1f0f1d2a3b";
 const generation = `/game/from-lobby/${LOBBY_ID}/generation`;
@@ -143,12 +144,24 @@ describe("player tokens", () => {
     ]);
   });
 
+  test("only the account's own paths take one", () => {
+    expect(needsPlayerToken("/account")).toBe(true);
+    expect(needsPlayerToken("/account/bot-names")).toBe(true);
+    for (const pathname of ["/accounts", "/admin/account", "/my/account/x"]) {
+      expect(needsPlayerToken(pathname)).toBe(false);
+    }
+  });
+
   test("the game's public routes need no token", async () => {
     const server = serverFor();
     await server.gameApi.GET("/game/upgrades");
     await server.gameApi.GET("/map/templates");
+    await server.gameApi.GET("/leaderboard");
+    await server.gameApi.GET("/leaderboard/{competitor_id}", {
+      params: { path: { competitor_id: LOBBY_ID } },
+    });
     expect(server.issued()).toBe(0);
-    expect(server.gameAuthorizations()).toEqual([null, null]);
+    expect(server.gameAuthorizations()).toEqual([null, null, null, null]);
   });
 
   test("a token is renewed once 80 % of its life has passed", async () => {
