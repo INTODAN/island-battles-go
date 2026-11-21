@@ -105,7 +105,7 @@ func abandonGame(transaction *gorm.DB, game *models.Game, generation *models.Gen
 		}
 	}
 	outcome.Departures = slices.Clone(game.Departures)
-	if err := rateGame(transaction, game, players, outcome); err != nil {
+	if err := rateGame(transaction, game, players, outcome, 0); err != nil {
 		return nil, err
 	}
 	if err := dal.SaveGameOutcome(transaction, game, *outcome); err != nil {

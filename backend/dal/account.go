@@ -220,6 +220,19 @@ func FindOrCreateHouseCompetitor(database *gorm.DB, level uint) (models.Competit
 	return firstCompetitor(find())
 }
 
+// FindHouseCompetitor returns the house bot of a default bot level, or nil
+// before a rated game first needs it.
+func FindHouseCompetitor(database *gorm.DB, level uint) (*models.Competitor, error) {
+	var found []models.Competitor
+	if err := database.Where(&models.Competitor{Kind: models.HouseCompetitor, HouseLevel: &level}).Limit(1).Find(&found).Error; err != nil {
+		return nil, err
+	}
+	if len(found) == 0 {
+		return nil, nil
+	}
+	return &found[0], nil
+}
+
 func firstCompetitor(found []models.Competitor, err error) (models.Competitor, error) {
 	if err != nil {
 		return models.Competitor{}, err

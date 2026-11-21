@@ -173,7 +173,7 @@ func TestAHostedBotURLFollowsEveryRule(t *testing.T) {
 		}
 	}
 	for settings, detail := range map[string]string{
-		`{"bot":{"kind":"hosted"}}`: "kind hosted needs a url: where your bot server takes turns, such as https://bot.example.com/turn, or the name of one of your bot names, which plays at its own URL",
+		`{"bot":{"kind":"hosted"}}`: "kind hosted needs a url: where your bot server takes turns, such as https://bot.example.com/turn, the name of one of your bot names, or the competitor_id of a bot from the leaderboard, which play at their own URL",
 		`{"bot":{"kind":"hosted","url":"https://bot.example.com","level":1}}`: "level is only for kind default",
 		`{"bot":{"kind":"localhost","url":"https://bot.example.com"}}`:        "url is only for kind hosted",
 		`{"bot":{"kind":"uploaded"}}`:                                         "kind uploaded needs a package_id: one of your packages in this lobby",

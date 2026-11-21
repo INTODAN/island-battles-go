@@ -70,6 +70,7 @@ type CompetitorResultView struct {
 	RatingBefore int                            `json:"rating_before" doc:"The competitor's rating before the game, rounded."`
 	RatingAfter  int                            `json:"rating_after" doc:"The competitor's rating after the game, rounded."`
 	Opponents    []CompetitorResultOpponentView `json:"opponents" nullable:"false" doc:"The game's other teams' competitors, in colour order."`
+	Away         bool                           `json:"away" doc:"Whether the competitor played away: a bot name in a seat of someone else's lobby, or chosen by a member of another account. Its owner wasn't there."`
 }
 
 // CompetitorResultOpponentView is another team's competitor in a rated

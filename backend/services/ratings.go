@@ -24,9 +24,12 @@ import (
 // each of them for every other team; stores each
 // competitor's new rating, its rated games and its win, draw or loss; and
 // adds a history row for each, whose unique pair of game and competitor
-// refuses to rate a game twice. Any error fails the transaction, so the
-// outcome and the ratings are stored together or not at all.
-func rateGame(transaction *gorm.DB, game *models.Game, players []models.FrozenGamePlayer, outcome *models.GameOutcome) error {
+// refuses to rate a game twice, and which says whether the competitor
+// played away. A bot that played away and is in the outcome's timed_out,
+// which missed turn missedTurn, is paused too (dal.PauseAway), until its
+// owner resumes it. Any error fails the transaction, so the outcome and the
+// ratings are stored together or not at all.
+func rateGame(transaction *gorm.DB, game *models.Game, players []models.FrozenGamePlayer, outcome *models.GameOutcome, missedTurn int) error {
 	if !game.Rated {
 		return nil
 	}
@@ -81,7 +84,7 @@ func rateGame(transaction *gorm.DB, game *models.Game, players []models.FrozenGa
 		competitor := competitors[competitorIDs[index]]
 		result := ratingResult(before, index, winner)
 		event := models.RatingEvent{GameID: game.ID, CompetitorID: competitor.ID, Result: result, RatingBefore: competitor.Rating,
-			RatingAfter: competitor.Rating + changes[index], K: rating.K(competitor.Games), Opponents: []models.RatingOpponent{}, EndedAt: endedAt}
+			RatingAfter: competitor.Rating + changes[index], K: rating.K(competitor.Games), Opponents: []models.RatingOpponent{}, Away: player.Away, EndedAt: endedAt}
 		for other, opponentID := range competitorIDs {
 			if other != index {
 				event.Opponents = append(event.Opponents, models.RatingOpponent{CompetitorID: opponentID, RatingBefore: before[other].Rating})
@@ -110,6 +113,17 @@ func rateGame(transaction *gorm.DB, game *models.Game, players []models.FrozenGa
 	for _, competitor := range updated {
 		if err := dal.SaveCompetitorRecord(transaction, competitor); err != nil {
 			return fmt.Errorf("rate game %d: store competitor %s: %w", game.ID, competitor.ID, err)
+		}
+	}
+	// One missed turn pauses a bot that played away: its owner, whose
+	// server may be down, loses one away game, not ten.
+	for _, timedOut := range outcome.TimedOut {
+		for _, player := range teams {
+			if player.TeamColor == timedOut.Color && player.Away {
+				if err := dal.PauseAway(transaction, *player.CompetitorID, endedAt, awayPauseReason(missedTurn, endedAt)); err != nil {
+					return fmt.Errorf("rate game %d: pause competitor %s: %w", game.ID, *player.CompetitorID, err)
+				}
+			}
 		}
 	}
 	outcome.Ratings = ratings

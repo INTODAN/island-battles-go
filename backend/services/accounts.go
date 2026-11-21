@@ -162,6 +162,27 @@ func (accounts Accounts) checkBotNameURL(ctx context.Context, url string) error 
 	}
 }
 
+// ResumeAway lets one of the caller's bot names play away again, in rated
+// games of other people's lobbies, after it missed a turn there. Resuming a
+// name that isn't paused changes nothing. Another account's bot name, the
+// hand play, or an unknown one is 404.
+func (accounts Accounts) ResumeAway(ctx context.Context, principal domain.Principal, competitorID string) (models.CompetitorView, error) {
+	if err := signedIn(principal); err != nil {
+		return models.CompetitorView{}, err
+	}
+	if err := accounts.Seen(ctx, principal.AccountID, principal.DisplayName); err != nil {
+		return models.CompetitorView{}, accountsUnavailable(ctx, "store the account", err)
+	}
+	competitor, err := dal.ResumeAway(accounts.Database.WithContext(ctx), principal.AccountID, competitorID)
+	if err != nil {
+		return models.CompetitorView{}, accountsUnavailable(ctx, "resume the bot name", err)
+	}
+	if competitor == nil {
+		return models.CompetitorView{}, reject(404, "your account has no bot name with this ID")
+	}
+	return CompetitorView(*competitor, principal.DisplayName), nil
+}
+
 // DeleteBotName deletes one of the caller's bot names, with its rating. The
 // name is free at once. Another account's bot name, or an unknown one, is
 // 404.
@@ -204,6 +225,13 @@ func CompetitorView(competitor models.Competitor, ownerName string) models.Compe
 	view := models.CompetitorView{ID: competitor.ID, Kind: competitor.Kind, Rating: competitor.Rating,
 		Games: competitor.Games, Wins: competitor.Wins, Draws: competitor.Draws, Losses: competitor.Losses, LastPlayedAt: competitor.LastPlayedAt,
 		URL: botNameURL(competitor)}
+	if competitor.AwayPausedAt != nil {
+		reason := ""
+		if competitor.AwayPausedReason != nil {
+			reason = *competitor.AwayPausedReason
+		}
+		view.AwayPaused = &models.AwayPauseView{At: *competitor.AwayPausedAt, Reason: reason}
+	}
 	switch {
 	case competitor.Kind == models.ManualCompetitor:
 		view.Name = ownerName

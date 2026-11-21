@@ -163,7 +163,7 @@ func TestARatedLobbysReadyGate(t *testing.T) {
 	// default bot.
 	for _, bot := range []string{`{"kind":"default","level":2}`, `{"kind":"localhost"}`, `{"kind":"localhost","port":41415}`, `{"kind":"hosted","url":"https://bot.example.com/turn"}`} {
 		stack.expect(stack.choose(room, dana, bot), http.StatusOK, nil)
-		if detail := stack.expectRequirement(stack.ready(room, dana), services.RatedBotNameRequiredProblemType); detail != "This lobby is rated. Play by hand, or choose one of your hosted bot names." {
+		if detail := stack.expectRequirement(stack.ready(room, dana), services.RatedBotNameRequiredProblemType); detail != "This lobby is rated. Play by hand, or choose one of your hosted bot names or a bot from the leaderboard." {
 			t.Fatalf("%s = %q", bot, detail)
 		}
 	}
@@ -338,7 +338,7 @@ func TestARatedStartChecksTheRosterAgain(t *testing.T) {
 
 	room = readyRoom(false, map[guest]string{dana: `{"kind":"manual"}`, erin: `{"kind":"default","level":2}`})
 	stack.setRated(room, true)
-	if detail := stack.expectRequirement(stack.start(room, dana), services.RatedBotNameRequiredProblemType); detail != "This lobby is rated: waiting for Erin to play by hand, or to choose one of their hosted bot names." {
+	if detail := stack.expectRequirement(stack.start(room, dana), services.RatedBotNameRequiredProblemType); detail != "This lobby is rated: waiting for Erin to play by hand, or to choose one of their hosted bot names or a bot from the leaderboard." {
 		t.Fatalf("a default bot at the start = %q", detail)
 	}
 
@@ -631,4 +631,166 @@ func TestARatedGameAgainstABotSeatRatesThePersonAndTheHouseBot(t *testing.T) {
 	if account.Hand.Rating != 1480 || account.Hand.Losses != 1 {
 		t.Fatalf("hand play = %+v", account.Hand)
 	}
+}
+
+// listBot lists a bot name on the leaderboard, as its first rated game does.
+func (stack *lobbyStack) listBot(competitorID string) {
+	stack.t.Helper()
+	if err := stack.database.Model(&models.Competitor{}).Where(&models.Competitor{ID: competitorID}).
+		Updates(map[string]any{"games": 1, "wins": 1, "rating": 1520, "last_played_at": time.Now()}).Error; err != nil {
+		stack.t.Fatal(err)
+	}
+}
+
+// pauseAway pauses a bot name, as a missed turn away does.
+func (stack *lobbyStack) pauseAway(competitorID string) {
+	stack.t.Helper()
+	if err := stack.database.Model(&models.Competitor{}).Where(&models.Competitor{ID: competitorID}).
+		Updates(map[string]any{"away_paused_at": time.Now(), "away_paused_reason": "Missed turn 12 of a rated game on 21 November"}).Error; err != nil {
+		stack.t.Fatal(err)
+	}
+}
+
+// A signed-in host who owns neither bot opens a rated lobby, chooses listed
+// bot Kraken for their own team and adds listed bot Leviathan as a seat,
+// named after it and its owner, and starts. Both play away at their names'
+// URLs, and the game records them as its competitors.
+func TestAnyHostMayPlayListedBotsInARatedLobby(t *testing.T) {
+	stack := newServerBotStack(t)
+	dana, erin, fay := stack.player("google-dana", "Dana"), stack.player("google-erin", "Erin"), stack.player("google-fay", "Fay")
+	kraken, leviathan := stack.registerBotName(dana, "Kraken"), stack.registerBotName(erin, "Leviathan")
+	room := stack.lobbyOf(fay, 2, ratedSettings(2, true))
+
+	// Unlisted, a bot of someone else's can be neither chosen nor seated.
+	krakenChoice := `{"kind":"hosted","competitor_id":"` + kraken.ID + `"}`
+	if detail := stack.expectInvalid(stack.choose(room, fay, krakenChoice), "invalid_member_settings"); detail != "The leaderboard lists no bot with this competitor_id: choose one that it lists, with a URL." {
+		t.Fatalf("an unlisted bot's choice = %q", detail)
+	}
+	if detail := stack.expectInvalid(stack.addSeat(room, fay, 1, map[string]any{"bot_competitor_id": leviathan.ID}), "invalid_seat_settings"); detail != "The leaderboard lists no bot with this bot_competitor_id: choose one that it lists, with a URL." {
+		t.Fatalf("an unlisted bot's seat = %q", detail)
+	}
+	for _, bot := range []string{`{"kind":"hosted","competitor_id":"` + kraken.ID + `","name":"Kraken"}`, `{"kind":"hosted","competitor_id":"` + kraken.ID + `","url":"https://bot.example.com/turn"}`, `{"kind":"localhost","competitor_id":"` + kraken.ID + `"}`, `{"kind":"hosted","competitor_id":"kraken"}`} {
+		stack.expectInvalid(stack.choose(room, fay, bot), "invalid_member_settings")
+	}
+	stack.listBot(kraken.ID)
+	stack.listBot(leviathan.ID)
+	stack.expect(stack.choose(room, fay, krakenChoice), http.StatusOK, nil)
+	var seated domain.Snapshot
+	stack.expect(stack.addSeat(room, fay, 1, map[string]any{"bot_competitor_id": leviathan.ID}), http.StatusOK, &seated)
+	if seat := seatOn(t, seated, 1); seat.DisplayName != "Leviathan (Erin)" {
+		t.Fatalf("Leviathan's seat = %+v", seat)
+	}
+	if detail := stack.expectInvalid(stack.addSeat(room, fay, 1, map[string]any{"bot_competitor_id": leviathan.ID}), "invalid_seat_settings"); detail != services.RatedSeatRule+" This lobby already has Leviathan (Erin)." {
+		t.Fatalf("a second Leviathan = %q", detail)
+	}
+	stack.expect(stack.ready(room, fay), http.StatusOK, nil)
+	stack.expect(stack.start(room, fay), http.StatusOK, nil)
+
+	state := stack.state(room, fay)
+	if !state.Rated || state.Bot.Kind != models.HostedBot || state.Bot.Name != "Kraken" {
+		t.Fatalf("Fay's state: rated %t, bot %+v", state.Rated, state.Bot)
+	}
+	players, err := dal.LoadFrozenPlayers(stack.database, state.GameID)
+	if err != nil || len(players) != 2 {
+		t.Fatalf("frozen players = %+v, %v", players, err)
+	}
+	for _, player := range players {
+		want := leviathan
+		if player.PlayerID == fay.playerID {
+			want = kraken
+		}
+		if player.CompetitorID == nil || *player.CompetitorID != want.ID || !player.Away || player.BotURL == nil || *player.BotURL != botURL(want.Name) {
+			t.Fatalf("frozen player = %+v, want %s away", player, want.Name)
+		}
+	}
+}
+
+// The ready gate refuses an away bot that the leaderboard no longer lists,
+// or that is paused, and the start two competitors of one account. A seat
+// of a paused bot is refused when it is added.
+func TestARatedLobbyRefusesUnlistedPausedAndSameAccountBots(t *testing.T) {
+	stack := newServerBotStack(t)
+	dana, fay := stack.player("google-dana", "Dana"), stack.player("google-fay", "Fay")
+	kraken, leviathan := stack.registerBotName(dana, "Kraken"), stack.registerBotName(dana, "Leviathan")
+	stack.listBot(kraken.ID)
+	stack.listBot(leviathan.ID)
+	room := stack.lobbyOf(fay, 2, ratedSettings(2, true))
+	stack.expect(stack.choose(room, fay, `{"kind":"hosted","competitor_id":"`+kraken.ID+`"}`), http.StatusOK, nil)
+
+	// Hidden, Kraken is no longer listed.
+	if found, err := dal.SetAccountHidden(stack.database, *mustAccount(t, stack, kraken.ID), true); err != nil || !found {
+		t.Fatalf("hide Dana: %v, %v", found, err)
+	}
+	if detail := stack.expectRequirement(stack.ready(room, fay), services.RatedBotNotListedProblemType); detail != "Kraken is no longer on the leaderboard. Choose another bot." {
+		t.Fatalf("an unlisted bot = %q", detail)
+	}
+	if _, err := dal.SetAccountHidden(stack.database, *mustAccount(t, stack, kraken.ID), false); err != nil {
+		t.Fatal(err)
+	}
+	stack.pauseAway(kraken.ID)
+	if detail := stack.expectRequirement(stack.ready(room, fay), services.RatedBotPausedProblemType); detail != "Kraken is paused after it missed a turn, until its owner resumes it. Choose another bot." {
+		t.Fatalf("a paused bot = %q", detail)
+	}
+	if detail := stack.expectInvalid(stack.addSeat(room, fay, 1, map[string]any{"bot_competitor_id": kraken.ID}), "invalid_seat_settings"); detail != "Kraken is paused after it missed a turn, until its owner resumes it. Choose another bot." {
+		t.Fatalf("a paused bot's seat = %q", detail)
+	}
+	// Its owner resumes it on the account page: another account can't.
+	path := "/account/bot-names/" + kraken.ID + "/away-pause"
+	stack.expect(stack.api.Delete(path, stack.playerToken(fay, lobbyadapter.GameKey)), http.StatusNotFound, nil)
+	var account models.IslandAccountView
+	stack.expect(stack.api.Get("/account", stack.playerToken(dana, lobbyadapter.GameKey)), http.StatusOK, &account)
+	if paused := account.BotNames[0].AwayPaused; paused == nil || paused.Reason != "Missed turn 12 of a rated game on 21 November" {
+		t.Fatalf("Kraken on Dana's account = %+v", account.BotNames[0])
+	}
+	var resumed models.CompetitorView
+	stack.expect(stack.api.Delete(path, stack.playerToken(dana, lobbyadapter.GameKey)), http.StatusOK, &resumed)
+	if resumed.ID != kraken.ID || resumed.AwayPaused != nil {
+		t.Fatalf("resumed Kraken = %+v", resumed)
+	}
+	stack.expect(stack.api.Delete("/account/bot-names/"+account.Hand.ID+"/away-pause", stack.playerToken(dana, lobbyadapter.GameKey)), http.StatusNotFound, nil)
+
+	// Kraken and Leviathan are both Dana's.
+	stack.expect(stack.ready(room, fay), http.StatusOK, nil)
+	stack.expect(stack.addSeat(room, fay, 1, map[string]any{"bot_competitor_id": leviathan.ID}), http.StatusOK, nil)
+	if detail := stack.expectRequirement(stack.start(room, fay), services.RatedSameAccountProblemType); detail != "Kraken and Leviathan are both Dana's bots. A rated game needs a different account on each team." {
+		t.Fatalf("two bots of Dana's = %q", detail)
+	}
+}
+
+// In a lobby that isn't rated a listed bot's seat plays at its name's URL
+// and rates nothing, whatever its pause.
+func TestAListedBotSeatOfAnUnratedLobbyRatesNothing(t *testing.T) {
+	stack := newServerBotStack(t)
+	dana, fay := stack.player("google-dana", "Dana"), stack.player("google-fay", "Fay")
+	kraken := stack.registerBotName(dana, "Kraken")
+	stack.listBot(kraken.ID)
+	stack.pauseAway(kraken.ID)
+	room := stack.lobbyOf(fay, 2, ratedSettings(2, false))
+	stack.expect(stack.addSeat(room, fay, 1, map[string]any{"bot_competitor_id": kraken.ID}), http.StatusOK, nil)
+	stack.expect(stack.choose(room, fay, `{"kind":"manual"}`), http.StatusOK, nil)
+	stack.expect(stack.ready(room, fay), http.StatusOK, nil)
+	stack.expect(stack.start(room, fay), http.StatusOK, nil)
+	state := stack.state(room, fay)
+	players, err := dal.LoadFrozenPlayers(stack.database, state.GameID)
+	if err != nil || state.Rated || len(players) != 2 {
+		t.Fatalf("state rated %t, frozen players = %+v, %v", state.Rated, players, err)
+	}
+	for _, player := range players {
+		if player.CompetitorID != nil || player.Away {
+			t.Fatalf("frozen player = %+v, want no competitor", player)
+		}
+		if player.PlayerID != fay.playerID && (player.BotURL == nil || *player.BotURL != botURL("Kraken")) {
+			t.Fatalf("Kraken's seat = %+v", player)
+		}
+	}
+}
+
+// mustAccount is the account of a competitor.
+func mustAccount(t *testing.T, stack *lobbyStack, competitorID string) *string {
+	t.Helper()
+	var competitor models.Competitor
+	if err := stack.database.Where(&models.Competitor{ID: competitorID}).First(&competitor).Error; err != nil {
+		t.Fatal(err)
+	}
+	return competitor.AccountID
 }

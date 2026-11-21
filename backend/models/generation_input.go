@@ -50,7 +50,12 @@ type FrozenGamePlayer struct {
 	// games and games never hold them back: an account's manual competitor
 	// for a person who plays by hand, a bot name's for a named bot, and a
 	// house bot's for a default bot seat. Nil in a game that isn't rated.
-	CompetitorID *string `gorm:"column:competitor_id;type:uuid"`
+	CompetitorID *string `gorm:"column:competitor_id;type:uuid;index"`
+	// Away is set in a rated game when CompetitorID is a bot name that plays
+	// away: in a bot seat, or chosen by a member of another account. The
+	// daily caps count these rows (checkAwayCaps), and a missed turn pauses
+	// the bot (rateGame).
+	Away bool `gorm:"column:away;not null;default:false"`
 	// BotName is the bot name of CompetitorID when it is a bot name, as it
 	// was at the start, which GenerationState.bot shows. Nil otherwise.
 	BotName *string `gorm:"column:bot_name"`

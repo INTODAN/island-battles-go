@@ -191,7 +191,7 @@ func expireTurn(transaction *gorm.DB, game *models.Game, generation *models.Gene
 		}
 	}
 	slices.Sort(outcome.Survivors)
-	if err := rateGame(transaction, game, players, outcome); err != nil {
+	if err := rateGame(transaction, game, players, outcome, generation.Number); err != nil {
 		return nil, err
 	}
 	if err := dal.SaveGameOutcome(transaction, game, *outcome); err != nil {

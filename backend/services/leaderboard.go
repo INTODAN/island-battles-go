@@ -102,7 +102,7 @@ func (leaderboard Leaderboard) Competitor(ctx context.Context, competitorID stri
 	view := models.LeaderboardCompetitorView{LeaderboardEntryView: leaderboardEntry(*competitor, accounts, ahead+1), History: []models.CompetitorResultView{}}
 	for _, event := range events {
 		result := models.CompetitorResultView{EndedAt: event.EndedAt, Result: event.Result,
-			RatingBefore: models.RoundRating(event.RatingBefore), RatingAfter: models.RoundRating(event.RatingAfter), Opponents: []models.CompetitorResultOpponentView{}}
+			RatingBefore: models.RoundRating(event.RatingBefore), RatingAfter: models.RoundRating(event.RatingAfter), Opponents: []models.CompetitorResultOpponentView{}, Away: event.Away}
 		for _, opponent := range event.Opponents {
 			result.Opponents = append(result.Opponents, resultOpponent(opponent, opponentsByID, accounts))
 		}

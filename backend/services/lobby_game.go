@@ -24,9 +24,11 @@ import (
 // clients relay their localhost bots, and sender sends the turns of hosted
 // and uploaded bots, once the start has committed. In a rated game, which the
 // lobby's settings make rated, each frozen player also records their
-// competitor: a person's hand play or bot name, or a seat's house bot. A
-// hosted bot under a bot name plays at the name's URL as it is at the start,
-// in a rated game always, and elsewhere when it has no url of its own.
+// competitor: a person's hand play or bot name, a listed bot, or a seat's
+// house bot or listed bot, and whether it plays away, whose daily caps the
+// start checks. A hosted bot under a bot name plays at the name's URL as it
+// is at the start, in a rated game always, and elsewhere when it has no url
+// of its own or is chosen by its competitor ID.
 // Repeated and concurrent starts reuse the committed state.
 func RunLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, sender *TurnSender, snapshot domain.Snapshot) (models.BindingResult, error) {
 	chosen, err := lobbyBots(snapshot)
@@ -66,15 +68,17 @@ func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 	if err != nil {
 		return models.BindingResult{}, err
 	}
+	var roster map[string]rosterCompetitor
 	if gameSettings.Rated && !started {
-		competitors, err := ratedCompetitors(ctx, database, snapshot, chosen)
+		roster, err = ratedCompetitors(ctx, database, snapshot)
 		if err != nil {
 			return models.BindingResult{}, fmt.Errorf("rated start: %w", err)
 		}
 		rated := make(map[string]frozenBot, len(chosen))
 		for playerID, bot := range chosen {
-			if competitor, found := competitors[playerID]; found {
-				bot.Competitor = &competitor
+			if entry, found := roster[playerID]; found {
+				competitor := *entry.Competitor
+				bot.Competitor, bot.Away = &competitor, entry.Away
 				// A named hosted bot plays at its name's URL, as it is now,
 				// whatever url the member chose; the check above refused a
 				// name without one.
@@ -135,6 +139,13 @@ func runLobbyGame(ctx context.Context, database *gorm.DB, publisher Publisher, s
 				}
 			}
 			players = append(players, player)
+		}
+		// The away bots' caps, with their rows locked until the game's
+		// players are stored, so two starts at once can't both pass one.
+		if roster != nil {
+			if err := lockAwayCaps(transaction, roster, started); err != nil {
+				return err
+			}
 		}
 		if err := dal.StoreFrozenPlayers(transaction, players); err != nil {
 			return err

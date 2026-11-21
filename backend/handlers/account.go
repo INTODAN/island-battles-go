@@ -77,6 +77,21 @@ func (handler *Accounts) SetBotNameURL(ctx context.Context, input *struct {
 	return &CompetitorResponse{Status: http.StatusOK, Body: view}, nil
 }
 
+func (handler *Accounts) ResumeAway(ctx context.Context, input *struct {
+	CompetitorID  string `path:"competitor_id" format:"uuid"`
+	Authorization string `header:"Authorization"`
+}) (*CompetitorResponse, error) {
+	principal, err := authenticatePlayer(ctx, handler.Players, input.Authorization)
+	if err != nil {
+		return nil, err
+	}
+	view, err := handler.Service.ResumeAway(ctx, principal, input.CompetitorID)
+	if err != nil {
+		return nil, accountsHTTPError(ctx, err)
+	}
+	return &CompetitorResponse{Status: http.StatusOK, Body: view}, nil
+}
+
 func (handler *Accounts) DeleteBotName(ctx context.Context, input *struct {
 	CompetitorID  string `path:"competitor_id" format:"uuid"`
 	Authorization string `header:"Authorization"`

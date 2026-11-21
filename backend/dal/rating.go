@@ -2,6 +2,7 @@ package dal
 
 import (
 	"errors"
+	"time"
 
 	"islandBattles/backend/models"
 
@@ -72,4 +73,49 @@ func AccountDisplayNames(database *gorm.DB, accountIDs []string) (map[string]str
 		names[account.AccountID] = account.DisplayName
 	}
 	return names, nil
+}
+
+// RatedPlayersSince returns the frozen players of rated games that started
+// at since or later, whose competitor is one of competitorIDs, of every game,
+// finished or not. Game retention keeps a game for a week, so a day's games
+// are always there. No IDs read nothing.
+func RatedPlayersSince(database *gorm.DB, competitorIDs []string, since time.Time) ([]models.FrozenGamePlayer, error) {
+	if len(competitorIDs) == 0 {
+		return nil, nil
+	}
+	var players []models.FrozenGamePlayer
+	err := database.Where(clause.IN{Column: clause.Column{Name: "competitor_id"}, Values: anyValues(competitorIDs)}).
+		Where(clause.Gte{Column: createdAtColumn, Value: since}).
+		Find(&players).Error
+	return players, err
+}
+
+// PauseAway pauses a bot name that missed a turn while it played away, with
+// the reason its owner sees, soft-deleted or not. The transaction holds its
+// row locked (LockCompetitors).
+func PauseAway(transaction *gorm.DB, competitorID string, at time.Time, reason string) error {
+	// A model without its primary key would update every competitor.
+	if competitorID == "" {
+		return errors.New("pause away: no competitor ID")
+	}
+	return transaction.Unscoped().Model(&models.Competitor{ID: competitorID}).
+		Updates(map[string]any{"away_paused_at": at, "away_paused_reason": reason}).Error
+}
+
+// ResumeAway clears the away pause of one of an account's live bot names,
+// paused or not, and returns the bot name. It returns nil when the account
+// has no such live bot name.
+func ResumeAway(database *gorm.DB, accountID, competitorID string) (*models.Competitor, error) {
+	// A struct filter drops empty fields, which would match every bot name.
+	if accountID == "" || competitorID == "" {
+		return nil, errors.New("resume away: no account or competitor ID")
+	}
+	var changed []models.Competitor
+	err := database.Model(&changed).Clauses(clause.Returning{}).
+		Where(&models.Competitor{ID: competitorID, AccountID: &accountID, Kind: models.BotCompetitor}).
+		Updates(map[string]any{"away_paused_at": nil, "away_paused_reason": nil}).Error
+	if err != nil || len(changed) == 0 {
+		return nil, err
+	}
+	return &changed[0], nil
 }

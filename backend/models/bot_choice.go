@@ -61,10 +61,13 @@ type BotChoiceView struct {
 type MemberBotView struct {
 	Kind      BotKind `json:"kind" enum:"localhost,default,hosted,uploaded,manual" doc:"localhost: your own bot, which island-battles-bot serve runs on your machine and your game client relays each turn to. default: a default bot of GET /bots/defaults, which the backend plays. hosted: your own bot server at url, which the server sends each turn to. uploaded: your own bot package in this lobby, package_id, which the server runs. manual: you play by hand in the 3D client; no bot plays for you. hosted and uploaded are offered only when GET /bots/defaults says server_bots."`
 	Level     *uint   `json:"level,omitempty" minimum:"1" doc:"For kind default only: a level that GET /bots/defaults lists."`
-	URL       string  `json:"url,omitempty" maxLength:"2048" doc:"For kind hosted only: where the server POSTs each TurnDelivery. https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public. Required unless the bot has a name, which then plays at its own URL (GET /account). In a rated lobby a named hosted bot always plays at its name's URL, and url is ignored."`
+	URL       string  `json:"url,omitempty" maxLength:"2048" doc:"For kind hosted only: where the server POSTs each TurnDelivery. https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public. Required unless the bot has a name or a competitor_id, which then plays at its own URL (GET /account). In a rated lobby a named hosted bot always plays at its name's URL, and url is ignored."`
 	PackageID string  `json:"package_id,omitempty" format:"uuid" doc:"For kind uploaded only: a package of yours in this lobby, from GET /game/lobbies/{lobby_id}/bot-packages."`
 	Port      *uint   `json:"port,omitempty" minimum:"1024" maximum:"65535" doc:"For kind localhost only: the port on 127.0.0.1 where your bot serves (island-battles-bot serve --port N), where your game client delivers each turn. 41414 when absent."`
-	Name      string  `json:"name,omitempty" maxLength:"200" doc:"For kinds localhost, hosted and uploaded only: one of the bot names of your account (GET /account), compared without regard to case, that the bot plays as. Only a signed-in player has bot names. A rated lobby takes a bot only as a hosted bot under one of your bot names, which plays at the name's URL, and records the game under the name. Elsewhere the name changes nothing, except that a hosted bot without a url plays at its name's URL."`
+	Name      string  `json:"name,omitempty" maxLength:"200" doc:"For kinds localhost, hosted and uploaded only: one of the bot names of your account (GET /account), compared without regard to case, that the bot plays as. Only a signed-in player has bot names. A rated lobby takes a bot only as a hosted bot under a bot name, which plays at the name's URL, and records the game under the name. Elsewhere the name changes nothing, except that a hosted bot without a url plays at its name's URL."`
+	// CompetitorID names a bot name by its competitor, rather than by a name
+	// of the member's own: a listed bot of any account, or one of theirs.
+	CompetitorID string `json:"competitor_id,omitempty" format:"uuid" doc:"For kind hosted only, instead of url and name: a bot name by its competitor_id, one that the leaderboard lists (GET /leaderboard, with a url), or one of your own bot names. It plays at the name's URL as it is at the start. Another account's bot plays away: in a rated lobby it is that bot that plays for your team, your own hand play isn't in the game, and the daily caps and the pause apply to it. One of your own plays as if you named it. In a lobby that isn't rated it rates nothing."`
 }
 
 // MemberSettingsView are Island Battles' member settings in a lobby: the bot
@@ -75,8 +78,9 @@ type MemberSettingsView struct {
 }
 
 // BotSeatSettingsView are the seat_settings of a bot seat that the host adds.
-// Exactly one bot field is set: bot_level, bot_localhost_port, bot_url or
-// bot_package_id. A localhost bot seat also names its relay.
+// Exactly one bot field is set: bot_level, bot_localhost_port, bot_url,
+// bot_package_id or bot_competitor_id. A localhost bot seat also names its
+// relay.
 type BotSeatSettingsView struct {
 	BotLocalhostPort *uint `json:"bot_localhost_port,omitempty" minimum:"1024" maximum:"65535" doc:"A localhost bot on the machine of the host who adds the seat, which island-battles-bot serve --port N runs on this port of 127.0.0.1; that host's game client delivers each turn to it, as to their own localhost bot. A string of the port's digits, which the lobby page's text field sends, is read the same. The port must differ from that host's own localhost bot's and from every other localhost bot seat's that they added. Needs bot_relay_player_id. The seat is named \"Localhost bot (port N)\"."`
 	// BotRelayPlayerID records who added a localhost bot seat, since the
@@ -85,6 +89,7 @@ type BotSeatSettingsView struct {
 	BotLevel         *uint  `json:"bot_level,omitempty" minimum:"1" doc:"A default bot of this level, one that GET /bots/defaults lists, which the backend plays. The seat is named \"Bot (level N)\"."`
 	BotURL           string `json:"bot_url,omitempty" maxLength:"2048" doc:"A hosted bot at this URL, under the rules of a member's hosted bot; the server sends it each turn. The seat is named \"Hosted bot\". Only when GET /bots/defaults says server_bots."`
 	BotPackageID     string `json:"bot_package_id,omitempty" format:"uuid" doc:"Any member's bot package in this lobby, which the server runs. The seat is named after its owner, such as \"Alex's bot\". Only when GET /bots/defaults says server_bots."`
+	BotCompetitorID  string `json:"bot_competitor_id,omitempty" format:"uuid" doc:"A bot name that the leaderboard lists, by its competitor_id (GET /leaderboard), whoever owns it, which plays at the name's URL as it is at the start. The seat is named after the bot and its owner, such as \"Kraken (Dana)\". It plays away: in a rated lobby the bot is the seat's competitor, and the daily caps and the pause apply to it; in a lobby that isn't rated it rates nothing. Only when GET /bots/defaults says server_bots."`
 }
 
 // URLHost is the host name of a hosted bot's URL, the only part of it that
