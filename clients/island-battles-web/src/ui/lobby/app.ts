@@ -5,6 +5,7 @@ import { isDesktop, tabStorage } from "../../platform";
 import { playsByHand, startHandPlay } from "../../play";
 import type { Realtime } from "../../realtime";
 import { openAccount } from "../account/accountDialog";
+import { createAccountService } from "../account/accountService";
 import { h } from "../dom";
 import { mountDemoView, mountGameView, mountWatchView } from "../game/index";
 import { leaderboardApi, ownCompetitors } from "../leaderboard/api";
@@ -881,6 +882,19 @@ export function mountLobbyApp(options: {
             forgetRoom(left);
             route();
           },
+          readAccount: async () => ({
+            botNames: (
+              await createAccountService(realtime).read()
+            ).bot_names.map((competitor) => competitor.name),
+          }),
+          openAccount: () =>
+            new Promise<void>((resolve) => {
+              openAccount({
+                realtime,
+                onSignOut: signOutForGood,
+                onForgetGoogle: forgetGoogle,
+              }).addEventListener("close", () => resolve(), { once: true });
+            }),
         });
         return room;
       });

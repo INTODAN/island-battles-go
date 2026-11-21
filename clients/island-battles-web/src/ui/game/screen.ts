@@ -58,6 +58,7 @@ import {
   openGenerationId,
 } from "./logs";
 import { createOrderNotices } from "./notices";
+import { ratedGameText, ratingLines, ratingLineText } from "./ratings";
 import {
   confirmationKey,
   givesOrders,
@@ -246,6 +247,12 @@ export class GameScreen {
   private yourBots = new Map<number, string>();
   private readonly banner = element("div", "gv-outcome");
   private readonly bannerText = element("span");
+  /** A rated game's rating changes, under the summary, the winner first. */
+  private readonly bannerRatings = element("ul", "gv-ratings");
+  /** "Rated game", first in the teams box: from your state, or a rated outcome. */
+  private readonly ratedTag = element("div", "gv-rated", ratedGameText);
+  /** Whether your state says the game is rated (`GenerationState.rated`). */
+  private rated = false;
   private readonly slider = element("input", "gv-slider");
   private readonly playButton = button("Play", "▶");
   private readonly backButton = button("Previous turn", "◀");
@@ -392,7 +399,10 @@ export class GameScreen {
 
     this.banner.setAttribute("role", "status");
     this.banner.hidden = true;
-    this.banner.append(this.bannerText);
+    this.banner.append(this.bannerText, this.bannerRatings);
+    this.bannerRatings.setAttribute("aria-label", "Rating changes");
+    this.bannerRatings.hidden = true;
+    this.ratedTag.hidden = true;
 
     this.overlay.setAttribute("role", "status");
     this.overlayAction.addEventListener("click", () => this.retry?.());
@@ -518,6 +528,17 @@ export class GameScreen {
     if (paceMs === this.gamePaceMs) return;
     this.gamePaceMs = paceMs;
     this.applyGamePace?.();
+  }
+
+  /**
+   * Whether the game is rated, from a roster player's state (`GenerationState.rated`): the teams
+   * box says "Rated game". A watcher's and a demo's learn it from the outcome's ratings.
+   */
+  setRated(rated: boolean): void {
+    if (rated === this.rated) return;
+    this.rated = rated;
+    const running = this.running;
+    if (running) this.render(running.controller.state);
   }
 
   /** The teams that are out of the game so far, from the live state; the outcome adds the rest. */
@@ -1087,7 +1108,7 @@ export class GameScreen {
       this.teamRows.set(team.color, { soldiers, castles, status });
       rows.push(card);
     }
-    this.teamsBox.replaceChildren(...rows);
+    this.teamsBox.replaceChildren(this.ratedTag, ...rows);
     this.showYourBot();
   }
 
@@ -1111,6 +1132,9 @@ export class GameScreen {
     this.follow.disabled = !state.live || state.outcome !== null;
     this.renderStats(running, frame, state.outcome);
     this.renderOutcome(running, state.outcome);
+    this.ratedTag.hidden = !(
+      this.rated || ratingLines(state.outcome).length > 0
+    );
     this.renderClashes(frame);
     this.renderLogs(state);
   }
@@ -1157,6 +1181,22 @@ export class GameScreen {
     this.banner.style.setProperty("--winner", color);
     this.banner.dataset.result = winner ? "win" : "draw";
     this.bannerText.textContent = outcome.summary;
+    const lines = ratingLines(outcome);
+    this.bannerRatings.hidden = lines.length === 0;
+    this.bannerRatings.replaceChildren(
+      ...lines.map((line) => {
+        const item = element("li", `gv-rating gv-rating-${line.direction}`);
+        item.setAttribute("aria-label", ratingLineText(line));
+        const name = element("strong", "gv-rating-name", line.name);
+        name.style.color = teamColorHex(line.teamColor);
+        item.append(
+          swatch(line.teamColor),
+          name,
+          element("span", "gv-rating-change", line.change),
+        );
+        return item;
+      }),
+    );
   }
 
   private renderLogs(state: ViewState): void {

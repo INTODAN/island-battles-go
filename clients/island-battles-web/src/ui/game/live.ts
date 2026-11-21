@@ -172,6 +172,7 @@ export function mountLive(
     if (turn.game_id !== gameId) return;
     screen.setGamePace(turn.turn_pace_milliseconds ?? null);
     screen.setDepartures(turn.departures ?? []);
+    screen.setRated(turn.rated === true);
     controller?.merge([turn.generation], turn.outcome ?? null);
   }
 
@@ -206,6 +207,7 @@ export function mountLive(
       screen.setGamePace(live.at(-1)?.turn_pace_milliseconds ?? null);
       controller = screen.start(demo.teams, frames, outcome);
       screen.setDepartures(held?.departures ?? []);
+      screen.setRated(held?.rated === true);
       showYourBot(held);
       screen.hideOverlay();
     } catch (error) {

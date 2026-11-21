@@ -303,6 +303,17 @@ function checkDemo(demo: Obj): void {
         count(departure.turn_number, `${path}.turn_number`, 1);
       }
     });
+    // A rated game's rating changes, which the 3D client's banner draws; absent otherwise.
+    if (outcome.ratings !== undefined) {
+      array(outcome.ratings, "outcome.ratings").forEach((raw, index) => {
+        const path = `outcome.ratings[${index}]`;
+        const rating = object(raw, path);
+        count(rating.team_color, `${path}.team_color`, 1);
+        string(rating.name, `${path}.name`);
+        number(rating.before, `${path}.before`);
+        number(rating.after, `${path}.after`);
+      });
+    }
   }
   const frames = array(demo.frames, "frames");
   if (!frames.length) {

@@ -501,6 +501,49 @@ select:focus-visible {
   background: #d9ecf7;
 }
 
+/* A person who isn't signed in, in a rated lobby. */
+.tag.guest {
+  background: #f6e3c8;
+  color: #7a4a10;
+}
+
+/* What keeps you from getting ready in a rated lobby, above the Ready button. */
+.rated-blocker {
+  margin: 8px 0 0;
+  padding: 6px 10px;
+  border-left: 4px solid #d98b1c;
+  border-radius: 6px;
+  background: #fdf1df;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* A checkbox field, such as Rated: the box beside its label. */
+label.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.check input {
+  margin: 0;
+}
+
+/* A bot's Plays as: which of your bot names it plays as in a rated lobby. */
+.bot-plays-as[hidden] {
+  display: none;
+}
+
+.bot-plays-as label {
+  margin: 0;
+}
+
+.bot-plays-as select {
+  flex: 1 1 10em;
+  width: auto;
+  min-width: 0;
+}
+
 .member.seat {
   background: rgba(29, 111, 184, 0.04);
   border: 1px dashed #9db8cc;

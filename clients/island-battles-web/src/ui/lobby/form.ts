@@ -69,6 +69,12 @@ export function describePace(milliseconds: number): string {
   return `${milliseconds / 1000} s`;
 }
 
+/** The Rated checkbox's line for a signed-in host. */
+export const ratedHint =
+  "Rated games count for the leaderboard. Everyone signs in, and plays by hand or with one of their bot names.";
+/** The Rated checkbox's line for a guest, who can't turn it on. */
+export const ratedGuestHint = "Sign in to host a rated lobby.";
+
 /** The game lengths the form offers, as `max_generations`: the most turns of a game. */
 export const gameLengths = [150, 300, 600, 1200];
 export const defaultGameLength = 300;
@@ -95,7 +101,7 @@ export type MapChoice =
   /** A map file's parsed JSON once `POST /map/validate` accepted it, or null with the problem to show. */
   | { kind: "file"; map: MapTemplate | null; error?: string };
 
-/** The map, turn limit, turn pace and game length fields, which the create form and the room's Change map form share. */
+/** The map, turn limit, turn pace, game length and Rated fields, which the create form and the room's Change settings form share. */
 export interface MapSettingsValues {
   map: MapChoice;
   /** Seconds, or null for no limit. */
@@ -114,8 +120,8 @@ export interface MapSettingsValues {
   /** The lobby's current game length, accepted even when the list lacks it. */
   currentMaxGenerations?: number;
   /**
-   * The lobby's `rated` setting, which the form doesn't change yet: kept as
-   * it is when the host changes the map.
+   * The lobby's `rated` setting, the **Rated** checkbox: a rated game counts
+   * for the leaderboard. Off when left out.
    */
   rated?: boolean;
 }
@@ -205,7 +211,7 @@ export function validateCreateForm(
 
 /**
  * The map and turn limit fields' values for a lobby's `game_settings`, which
- * the room's Change map form starts from.
+ * the room's Change settings form starts from.
  */
 export function lobbyMapSettings(
   settings: Record<string, unknown> | undefined,

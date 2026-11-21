@@ -9,6 +9,8 @@ import {
   type MapTemplateSummary,
   mapTeamCount,
   normalizeJoinCode,
+  ratedGuestHint,
+  ratedHint,
   readMapFile,
   teamName,
   validateCreateForm,
@@ -43,6 +45,29 @@ const values = (extra: Partial<CreateFormValues> = {}): CreateFormValues => ({
   turnPaceMilliseconds: 1000,
   maxGenerations: 300,
   ...extra,
+});
+
+describe("the Rated setting", () => {
+  test("a new lobby is rated only when the host ticks it", () => {
+    const base = {
+      lobbyName: "Rated",
+      map: { kind: "template" as const, templateId: 4 },
+      turnTimeoutSeconds: 30,
+      turnPaceMilliseconds: 1000,
+      maxGenerations: 300,
+    };
+    const rated = validateCreateForm({ ...base, rated: true }, templates);
+    expect(rated.ok && rated.gameSettings.rated).toBe(true);
+    const unrated = validateCreateForm({ ...base, rated: false }, templates);
+    expect(unrated.ok && "rated" in unrated.gameSettings).toBe(false);
+  });
+
+  test("says what rated means, and why a guest can't turn it on", () => {
+    expect(ratedHint).toBe(
+      "Rated games count for the leaderboard. Everyone signs in, and plays by hand or with one of their bot names.",
+    );
+    expect(ratedGuestHint).toBe("Sign in to host a rated lobby.");
+  });
 });
 
 describe("the create form", () => {
@@ -215,7 +240,7 @@ describe("the create form", () => {
   });
 });
 
-describe("the room's Change map form", () => {
+describe("the room's Change settings form", () => {
   test("starts from the lobby's map and turn limit", () => {
     // Settings without a map start on the first default map once it loads.
     expect(lobbyMapSettings({})).toEqual({
@@ -290,6 +315,25 @@ describe("the room's Change map form", () => {
       templates,
     );
     expect(unrated.ok && "rated" in unrated.gameSettings).toBe(false);
+  });
+
+  test("the Rated checkbox turns rated on and off", () => {
+    const values = lobbyMapSettings({ map_template_id: 4 });
+    const on = validateMapSettings({ ...values, rated: true }, templates);
+    expect(on.ok && changeSettingsBody(on).game_settings).toMatchObject({
+      rated: true,
+    });
+    // Unticked, a rated lobby's settings leave rated out, which turns it off.
+    const off = validateMapSettings(
+      {
+        ...lobbyMapSettings({ map_template_id: 4, rated: true }),
+        rated: false,
+      },
+      templates,
+    );
+    expect(
+      off.ok && "rated" in (changeSettingsBody(off).game_settings ?? {}),
+    ).toBe(false);
   });
 
   test("keeps a turn limit the list lacks only when it is the lobby's own", () => {

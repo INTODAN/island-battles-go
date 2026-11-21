@@ -10,7 +10,12 @@ import {
   describeBot,
   describeRealTime,
   describeSettings,
+  guestTag,
   memberSettingsBot,
+  ratedBlockers,
+  ratedBotNameBlocker,
+  ratedSignInBlocker,
+  seatLevels,
   startBlocker,
   teamTaken,
 } from "./roomModel";
@@ -436,4 +441,229 @@ test("a room names the game length when it isn't 300 turns", () => {
   expect(
     describeSettings({ map_template_id: 4, max_generations: 600 }, []),
   ).toBe("Map: default map #4 · Turn limit: 30 s · Game length: 600 turns");
+});
+
+describe("a rated lobby", () => {
+  const signedIn = (extra: Record<string, unknown> = {}) => ({
+    signed_in: true,
+    ...extra,
+  });
+  const named = (kind: string, name?: string, more = {}) => ({
+    member_settings: { bot: { kind, ...more, ...(name ? { name } : {}) } },
+  });
+  const seatOf = (id: string, teamId: string, settings: object) =>
+    member(id, teamId, { kind: "seat", ready: true, seat_settings: settings });
+  /** A room for these members, seen by p1, who is the host; rated unless said otherwise. */
+  const roomOf = (members: unknown[], rated = true, you = "p1") =>
+    buildRoom(
+      {
+        ...snapshot,
+        lobby: { ...snapshot.lobby, game_settings: { rated } },
+        members,
+      } as unknown as Snapshot,
+      you,
+    );
+  const kraken = { botNames: ["Kraken", "Squid"] };
+
+  test("reads rated from the settings, and who signed in from the snapshot", () => {
+    const room = roomOf([
+      member("p1", "t-blue", signedIn(named("manual"))),
+      member("p2", "t-red"),
+    ]);
+    expect(room.rated).toBe(true);
+    expect(room.you?.signedIn).toBe(true);
+    expect(room.teams[1]?.members[0]?.signedIn).toBe(false);
+    expect(roomOf([member("p1", "t-blue")], false).rated).toBe(false);
+  });
+
+  test("a lobby that isn't rated blocks nothing", () => {
+    expect(
+      ratedBlockers(
+        roomOf(
+          [
+            member("p1", "t-blue", named("default", undefined, { level: 2 })),
+            member("p2", "t-red"),
+            seatOf("p3", "t-green", { bot_url: "https://bot.example.com" }),
+          ],
+          false,
+        ),
+        null,
+      ),
+    ).toEqual({ you: null, host: null, guests: [] });
+  });
+
+  test("a guest must sign in, and the others see them tagged guest", () => {
+    const guest = roomOf(
+      [
+        member("p1", "t-blue", signedIn()),
+        member("p2", "t-red", named("manual")),
+      ],
+      true,
+      "p2",
+    );
+    expect(ratedBlockers(guest, null).you).toBe(ratedSignInBlocker);
+    expect(ratedSignInBlocker).toBe("Sign in to play in this rated lobby.");
+    // The host sees the guest's tag; nobody is tagged for themself.
+    const host = roomOf([
+      member("p1", "t-blue", signedIn(named("manual"))),
+      member("p2", "t-red", named("manual")),
+    ]);
+    expect(ratedBlockers(host, kraken)).toEqual({
+      you: null,
+      host: null,
+      guests: ["m-p2"],
+    });
+    expect(ratedBlockers(guest, null).guests).toEqual([]);
+    expect(guestTag).toBe("guest");
+  });
+
+  test("a bot needs one of your bot names, and a default bot never plays for you", () => {
+    const you = (settings: Record<string, unknown>) =>
+      ratedBlockers(
+        roomOf([member("p1", "t-blue", signedIn(settings))]),
+        kraken,
+      ).you;
+    expect(you(named("default", undefined, { level: 2 }))).toBe(
+      ratedBotNameBlocker,
+    );
+    expect(ratedBotNameBlocker).toBe("Choose a bot name, or play by hand.");
+    expect(you(named("localhost"))).toBe(ratedBotNameBlocker);
+    expect(you(named("hosted", undefined, { url: "https://b.example" }))).toBe(
+      ratedBotNameBlocker,
+    );
+    expect(you(named("uploaded", undefined, { package_id: "pk" }))).toBe(
+      ratedBotNameBlocker,
+    );
+    expect(you(named("localhost", "Kraken"))).toBeNull();
+    // Names compare without regard to case, as the server compares them.
+    expect(you(named("uploaded", "squid", { package_id: "pk" }))).toBeNull();
+    expect(you(named("manual"))).toBeNull();
+    // Without a bot, the server's "choose your bot first" applies, as in any lobby.
+    expect(you({})).toBeNull();
+  });
+
+  test("a deleted bot name is named, once your names are known", () => {
+    const room = roomOf([
+      member("p1", "t-blue", signedIn(named("localhost", "Octopus"))),
+    ]);
+    expect(ratedBlockers(room, kraken).you).toBe(
+      "Your bot name Octopus no longer exists. Choose another.",
+    );
+    // Until the names are read, the server decides.
+    expect(ratedBlockers(room, null).you).toBeNull();
+  });
+
+  test("the host is told which seats to remove, in the server's terms", () => {
+    const members = [
+      member("p1", "t-blue", signedIn(named("manual"))),
+      seatOf("p2", "t-red", { bot_level: 2 }),
+      seatOf("p3", "t-green", { bot_level: 2 }),
+    ];
+    expect(ratedBlockers(roomOf(members), kraken).host).toBe(
+      "Remove P3: a rated game allows only default bot seats, each level once.",
+    );
+    const hosted = [
+      member("p1", "t-blue", signedIn(named("manual"))),
+      seatOf("p2", "t-red", { bot_url: "https://bot.example.com" }),
+      seatOf("p3", "t-green", { bot_level: 1 }),
+    ];
+    expect(ratedBlockers(roomOf(hosted), kraken).host).toBe(
+      "Remove P2: a rated game allows only default bot seats, each level once.",
+    );
+    // Only the host is told.
+    expect(ratedBlockers(roomOf(members, true, "p2"), null).host).toBeNull();
+    expect(
+      ratedBlockers(
+        roomOf([
+          member("p1", "t-blue", signedIn(named("manual"))),
+          seatOf("p2", "t-red", { bot_level: 2 }),
+        ]),
+        kraken,
+      ),
+    ).toEqual({ you: null, host: null, guests: [] });
+  });
+
+  test("the seats' levels, for Add bot", () => {
+    expect(
+      seatLevels(
+        roomOf([
+          seatOf("p2", "t-red", { bot_level: 3 }),
+          seatOf("p3", "t-green", { bot_level: 1 }),
+        ]),
+      ),
+    ).toEqual([3, 1]);
+  });
+});
+
+describe("a bot that plays under a bot name", () => {
+  test("is read from the member settings with its name", () => {
+    expect(
+      memberSettingsBot({ bot: { kind: "localhost", name: "Kraken" } }),
+    ).toEqual({ kind: "localhost", name: "Kraken" });
+    expect(
+      memberSettingsBot({
+        bot: { kind: "uploaded", package_id: "pk", name: "Squid" },
+      }),
+    ).toEqual({ kind: "uploaded", package_id: "pk", name: "Squid" });
+    // Play by hand and default bots have no name.
+    expect(memberSettingsBot({ bot: { kind: "manual", name: "X" } })).toEqual({
+      kind: "manual",
+    });
+  });
+
+  test("is named in the room by its bot name", () => {
+    expect(describeBot({ kind: "localhost", name: "Kraken" })).toBe(
+      "Kraken (own bot, localhost)",
+    );
+    expect(
+      describeBot({ kind: "localhost", port: 41415, name: "Kraken" }),
+    ).toBe("Kraken (own bot, localhost:41415)");
+    expect(
+      describeBot({
+        kind: "hosted",
+        url: "https://bot.example.com/turn",
+        name: "Kraken",
+      }),
+    ).toBe("Kraken (hosted bot, bot.example.com)");
+    expect(
+      describeBot({ kind: "uploaded", package_id: "pk", name: "Squid" }),
+    ).toBe("Squid (uploaded bot)");
+    expect(describeBot({ kind: "localhost" })).toBe("Own bot (localhost)");
+  });
+
+  test("the picker's value takes the name from Plays as, and No name leaves it out", () => {
+    expect(choiceFromValue("localhost", "", 41414, "Kraken")).toEqual({
+      kind: "localhost",
+      name: "Kraken",
+    });
+    expect(choiceFromValue("localhost", "", 41415, "Kraken")).toEqual({
+      kind: "localhost",
+      port: 41415,
+      name: "Kraken",
+    });
+    expect(
+      choiceFromValue(
+        "hosted",
+        " https://bot.example.com/turn ",
+        41414,
+        "Kraken",
+      ),
+    ).toEqual({
+      kind: "hosted",
+      url: "https://bot.example.com/turn",
+      name: "Kraken",
+    });
+    expect(choiceFromValue("package-pk", "", 41414, "Squid")).toEqual({
+      kind: "uploaded",
+      package_id: "pk",
+      name: "Squid",
+    });
+    expect(choiceFromValue("localhost", "", 41414, "")).toEqual({
+      kind: "localhost",
+    });
+    // The name doesn't change which radio the choice is.
+    expect(choiceValue({ kind: "localhost", name: "Kraken" })).toBe(
+      "localhost",
+    );
+  });
 });

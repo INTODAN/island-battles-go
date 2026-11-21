@@ -58,11 +58,11 @@ const seatSentences: Record<string, string> = {
     "The lobby changed while that bot was being added. Try again.",
 };
 
-/** The sentences for the host's change of the map and turn limit. */
+/** The sentences for the host's change of the lobby's settings: the map, the turn limit, Rated. */
 const settingsSentences: Record<string, string> = {
-  not_host: "Only the host can change the map.",
+  not_host: "Only the host can change the settings.",
   phase_conflict:
-    "The game has already started, so the map can't change any more.",
+    "The game has already started, so the settings can't change any more.",
   lobby_full:
     "That map has fewer teams than the lobby has players and bots. Remove a bot, or pick a map with more teams.",
 };
@@ -71,6 +71,13 @@ const settingsSentences: Record<string, string> = {
 const reopenSentences: Record<string, string> = {
   phase_conflict: "This lobby can't be opened again.",
 };
+
+/**
+ * The rule of a rated lobby's bot seats, which the game's refusal of a seat starts with
+ * (`RatedSeatRule` in `backend/services/rated_lobbies.go`); such a refusal is shown as it is.
+ */
+export const ratedSeatRefusal =
+  "A rated game allows only default bot seats, each level once.";
 
 const botNotChosen =
   "Choose your bot first: play by hand, your localhost bot or a default level.";
@@ -125,8 +132,15 @@ export function describeProblem(
   }
   if (code === "empty_teams") shown.teamIds = error.teamIds ?? [];
   if (code === "invalid_game_settings") {
-    shown.message =
-      `The map or turn limit was refused. ${error.detail ?? ""}`.trim();
+    shown.message = `The settings were refused. ${error.detail ?? ""}`.trim();
+    return shown;
+  }
+  // A rated lobby's seat refusal is the game's own sentence, which names the rule.
+  if (
+    code === "invalid_seat_settings" &&
+    error.detail?.startsWith(ratedSeatRefusal)
+  ) {
+    shown.message = error.detail;
     return shown;
   }
   if (code === "invalid_input") {

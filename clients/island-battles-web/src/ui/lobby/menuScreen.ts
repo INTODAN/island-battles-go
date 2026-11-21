@@ -161,7 +161,7 @@ export function mountMenuScreen(options: MenuScreenOptions): Screen {
     maxLength: maxNameLength,
     value: `${playerName}'s lobby`,
   });
-  const mapFields = mountMapFields({ actions });
+  const mapFields = mountMapFields({ actions, signedIn });
   const lobbyNameError = h("p", {
     class: "field-error",
     attrs: { role: "alert", "data-field": "lobbyName" },
