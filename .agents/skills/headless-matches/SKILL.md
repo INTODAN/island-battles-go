@@ -7,7 +7,7 @@ description: "Play whole Island Battles games between bots in memory, without th
 
 `go run ./backend/cmd/headless-match` plays games between bots in one process: no PostgreSQL, lobby, Centrifugo or HTTP. Use it whenever the question is "how does this bot play", and the live stack (`./scripts/dev.sh`, `island-battles-bot run`) only when the question is about the lobby, deadlines, real-time turns or the network.
 
-For the league's bots, don't write schedules by hand: `league tournament` writes them, caches results and sums them up. See the `bot-league` skill.
+A project outside this repository can build the runner from a commit of it and write the schedules itself: the bot league, [INTODAN/island-battles-rsi-bot](https://github.com/INTODAN/island-battles-rsi-bot), does, with a result cache and ratings on top.
 
 ## Run it
 
@@ -21,7 +21,7 @@ go run ./backend/cmd/headless-match schedule.json > results.jsonl     # or the s
     "level3": {"default_level": 3},
     "mine": {"worker": ["python", "-m", "island_battles_client.worker", "bot:play"], "directory": "path/to/the/bot"}
   },
-  "maps": {"strait": "league/maps/train/strait.json"},
+  "maps": {"strait": "path/to/strait.json"},
   "matches": [{"id": "strait-1", "map": "strait", "seats": ["mine", "level3"]}],
   "max_generations": 300,
   "turn_timeout_milliseconds": 2000,
@@ -58,4 +58,4 @@ Bots are deterministic, so a match with the same runner, map, seats, bots and se
 - The engine is `services.PlayHeadlessMatch` in `backend/services/headless_match.go`; it must keep using the service's own functions (`checkBotResult`, `goBotGeneration`, the simulation) rather than copies of them, so a rule changes in both places at once. The loop around them is its own: when `playTurn` or `playGoBots` in `go_bots.go` changes what a turn does, change it here too. Its tests are `backend/services/headless_match_test.go`, which need no database.
 - The command, the schedule and the worker processes are `backend/cmd/headless-match`; its tests use the test binary itself as a worker, and cover a worker that is late, one that exits, one that stops reading its requests and one that can't start again. Run them with `-race`: a seat's turns must never overlap.
 - `go test ./backend/services -run Headless` and `go test ./backend/cmd/headless-match` run both in a second. `TestGoBotTournament` plays the default bots on the same in-memory board.
-- A rule change (see the `game-rules` skill) needs nothing here, but it changes every bot's results: say so in the pull request, and play the league again.
+- A rule change (see the `game-rules` skill) needs nothing here, but it changes every bot's results. Say so in the pull request: a project that measures bots with the runner, such as the bot league, has to play its games again.
