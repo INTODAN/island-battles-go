@@ -24,7 +24,7 @@ const map = (id: number, teams: number): MapTemplateSummary => ({
 const kraken = { name: "Kraken", url: "https://kraken.example.org/bot" };
 const you = "p-you";
 
-/** A fake lobby: records the calls, and answers a snapshot of three teams. */
+/** A fake lobby: records the calls, and answers a snapshot of two teams. */
 function fakeLobby(
   options: {
     serverBots?: boolean;

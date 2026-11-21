@@ -711,7 +711,7 @@ describe("a bot that plays under a bot name", () => {
     expect(describeBot({ kind: "localhost" })).toBe("Own bot (localhost)");
   });
 
-  test("the picker's value takes the name from Plays as, and No name leaves it out", () => {
+  test("the picker's value carries the bot name, and no name leaves it out", () => {
     expect(choiceFromValue("localhost", "", 41414, "Kraken")).toEqual({
       kind: "localhost",
       name: "Kraken",

@@ -674,6 +674,8 @@ export function mountLobbyApp(options: {
   window.addEventListener("popstate", onPopState);
 
   function showLeaderboard(at: LeaderboardRoute): void {
+    // Going back to the leaderboard cancels a **Play against it** that waited for a session.
+    cancelPendingPlay();
     if (screen?.key === "leaderboard" && boardScreen) {
       boardScreen.setRoute(at);
       return;
@@ -713,9 +715,21 @@ export function mountLobbyApp(options: {
       navigateBoard(undefined);
       return;
     }
-    if (realtime.lobby.get()) throw new Error(inLobbyProblem(target.name));
+    // A tab still rejoining its saved room counts as in a lobby.
+    if (realtime.lobby.get() || resuming)
+      throw new Error(inLobbyProblem(target.name));
     await makeLobbyAgainst(target);
     navigateBoard(undefined);
+  }
+
+  /**
+   * Forgets a **Play against it** that waited for a session, with its name-screen notice, which
+   * a silent sign-in may never have shown.
+   */
+  function cancelPendingPlay(): void {
+    if (!pendingPlay) return;
+    if (notice === signInToPlayNotice(pendingPlay.name)) notice = "";
+    pendingPlay = undefined;
   }
 
   /** Makes the lobby; a seat that wasn't added is said in the room, shown now or once it mounts. */
@@ -858,7 +872,7 @@ export function mountLobbyApp(options: {
     // **Play against it** from the name screen: the lobby is made now that there is a session.
     if (pendingPlay && !lobby && !resuming) {
       const target = pendingPlay;
-      pendingPlay = undefined;
+      cancelPendingPlay();
       playing = target;
       void makeLobbyAgainst(target)
         .catch((cause: unknown) => {
