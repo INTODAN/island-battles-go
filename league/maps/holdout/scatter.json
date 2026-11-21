@@ -1,0 +1,81 @@
+{
+  "map_name": "scatter",
+  "player_amount": 2,
+  "plane_size_x": 16,
+  "plane_size_y": 10,
+  "neutral_starting_soldier_amount": 15,
+  "castles": [
+    {
+      "team_color": 1,
+      "x": -7.5,
+      "y": 1,
+      "starting_soldier_amount": 30
+    },
+    {
+      "team_color": 2,
+      "x": 7.5,
+      "y": -1,
+      "starting_soldier_amount": 30
+    },
+    {
+      "team_color": 0,
+      "x": -6.5,
+      "y": 3.5,
+      "starting_soldier_amount": 5
+    },
+    {
+      "team_color": 0,
+      "x": 6.5,
+      "y": -3.5,
+      "starting_soldier_amount": 5
+    },
+    {
+      "team_color": 0,
+      "x": -5,
+      "y": -2,
+      "starting_soldier_amount": 9
+    },
+    {
+      "team_color": 0,
+      "x": 5,
+      "y": 2,
+      "starting_soldier_amount": 9
+    },
+    {
+      "team_color": 0,
+      "x": -3,
+      "y": 2,
+      "starting_soldier_amount": 11
+    },
+    {
+      "team_color": 0,
+      "x": 3,
+      "y": -2,
+      "starting_soldier_amount": 11
+    },
+    {
+      "team_color": 0,
+      "x": -2,
+      "y": -4,
+      "starting_soldier_amount": 13
+    },
+    {
+      "team_color": 0,
+      "x": 2,
+      "y": 4,
+      "starting_soldier_amount": 13
+    },
+    {
+      "team_color": 0,
+      "x": -0.5,
+      "y": 0.5,
+      "starting_soldier_amount": 28
+    },
+    {
+      "team_color": 0,
+      "x": 0.5,
+      "y": -0.5,
+      "starting_soldier_amount": 28
+    }
+  ]
+}

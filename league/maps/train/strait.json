@@ -1,0 +1,57 @@
+{
+  "map_name": "strait",
+  "player_amount": 2,
+  "plane_size_x": 10,
+  "plane_size_y": 8,
+  "neutral_starting_soldier_amount": 15,
+  "castles": [
+    {
+      "team_color": 1,
+      "x": -4,
+      "y": 0,
+      "starting_soldier_amount": 30
+    },
+    {
+      "team_color": 2,
+      "x": 4,
+      "y": 0,
+      "starting_soldier_amount": 30
+    },
+    {
+      "team_color": 0,
+      "x": -1.5,
+      "y": 0.5,
+      "starting_soldier_amount": 5
+    },
+    {
+      "team_color": 0,
+      "x": 1.5,
+      "y": -0.5,
+      "starting_soldier_amount": 5
+    },
+    {
+      "team_color": 0,
+      "x": -3,
+      "y": 3,
+      "starting_soldier_amount": 25
+    },
+    {
+      "team_color": 0,
+      "x": 3,
+      "y": -3,
+      "starting_soldier_amount": 25
+    },
+    {
+      "team_color": 0,
+      "x": -0.5,
+      "y": 3,
+      "starting_soldier_amount": 15
+    },
+    {
+      "team_color": 0,
+      "x": 0.5,
+      "y": -3,
+      "starting_soldier_amount": 15
+    }
+  ]
+}
