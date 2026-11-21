@@ -1,5 +1,6 @@
 import { ApiError } from "../../api/errors";
 import { h } from "../dom";
+import { leaderboardLink } from "../leaderboard/links";
 import { rulesButton } from "../rules/rulesDialog";
 import type { LobbyActions } from "./actions";
 import {
@@ -28,6 +29,8 @@ export interface MenuScreenOptions {
   /** The session ended while a call ran. */
   onSignedOut(): void;
   onChangeName(): void;
+  /** Opens the leaderboard, from a link in the heading. */
+  onLeaderboard?: () => void;
   newId(): string;
 }
 
@@ -238,6 +241,9 @@ export function mountMenuScreen(options: MenuScreenOptions): Screen {
         "Change name",
       ),
       " · ",
+      ...(options.onLeaderboard
+        ? [leaderboardLink("Leaderboard", options.onLeaderboard), " · "]
+        : []),
       rulesButton("link"),
     ),
   );

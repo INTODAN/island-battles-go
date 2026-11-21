@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { backToLobby, type RoundRouteInput, routeRound } from "./rounds";
+import {
+  backToLobby,
+  leaderboardGivesWay,
+  type RoundRouteInput,
+  routeRound,
+} from "./rounds";
 
 const at = (input: Partial<RoundRouteInput>): RoundRouteInput => ({
   phase: "waiting",
@@ -86,5 +91,35 @@ describe("backToLobby", () => {
 
   test("asks to reopen when no game state is known, such as after a failed start", () => {
     expect(backToLobby("unknown")).toBe("reopen");
+  });
+});
+
+describe("leaderboardGivesWay", () => {
+  test("a game started while the leaderboard covered the room takes over", () => {
+    // The host started round 1 while this member looked at the leaderboard.
+    const started = routeRound(at({ phase: "started" }));
+    expect(leaderboardGivesWay(started, null)).toBe(true);
+    // The next round, while the previous round's game was entered.
+    const next = routeRound(
+      at({ phase: "started", round: 2, viewingRound: 1 }),
+    );
+    expect(leaderboardGivesWay(next, 1)).toBe(true);
+  });
+
+  test("the leaderboard stays over a game already entered, the room and the menu", () => {
+    expect(
+      leaderboardGivesWay(
+        routeRound(at({ phase: "started", viewingRound: 1 })),
+        1,
+      ),
+    ).toBe(false);
+    expect(leaderboardGivesWay(routeRound(at({})), null)).toBe(false);
+    expect(
+      leaderboardGivesWay(
+        routeRound(at({ phase: "started", closedRound: 1, viewingRound: 1 })),
+        1,
+      ),
+    ).toBe(false);
+    expect(leaderboardGivesWay(undefined, null)).toBe(false);
   });
 });

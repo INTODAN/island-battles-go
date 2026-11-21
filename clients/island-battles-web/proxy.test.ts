@@ -10,6 +10,8 @@ test("forwards the game's paths to the backend", () => {
     "/bots/defaults",
     "/account",
     "/account/bot-names",
+    "/leaderboard",
+    "/leaderboard/7c9e6679-7425-40de-944b-e07fc1f90ae7",
     "/healthz",
     "/openapi.json",
   ]) {
@@ -27,6 +29,7 @@ test("keeps the client's own paths local, and forwards nothing to the lobby, whi
     "/healthz/x",
     "/lobbyist",
     "/accounts",
+    "/leaderboards",
   ]) {
     expect(proxyOrigin(pathname)).toBeUndefined();
   }

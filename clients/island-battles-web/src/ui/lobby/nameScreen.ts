@@ -1,4 +1,5 @@
 import { h } from "../dom";
+import { leaderboardLink } from "../leaderboard/links";
 import { maxNameLength, validateDisplayName } from "./form";
 
 export interface Screen {
@@ -16,6 +17,8 @@ export interface NameScreenOptions {
   onSubmit(name: string): Promise<void>;
   /** Shown when the person arrives here because the session ended. */
   notice: string;
+  /** Opens the leaderboard, from a line at the foot of the panel. */
+  onLeaderboard?: () => void;
 }
 
 /** Screen 1: the player's name. */
@@ -56,6 +59,14 @@ export function mountNameScreen(options: NameScreenOptions): Screen {
     input,
     error,
     h("div", { class: "actions" }, button),
+    options.onLeaderboard
+      ? h(
+          "p",
+          { class: "panel-footer" },
+          "Who's on top? ",
+          leaderboardLink("See the leaderboard", options.onLeaderboard),
+        )
+      : null,
   );
   form.addEventListener("submit", async (event) => {
     event.preventDefault();

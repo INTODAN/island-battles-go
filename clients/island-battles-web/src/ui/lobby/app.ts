@@ -6,6 +6,16 @@ import { playsByHand, startHandPlay } from "../../play";
 import type { Realtime } from "../../realtime";
 import { h } from "../dom";
 import { mountDemoView, mountGameView, mountWatchView } from "../game/index";
+import { leaderboardApi, ownCompetitors } from "../leaderboard/api";
+import {
+  type LeaderboardScreen,
+  mountLeaderboard,
+} from "../leaderboard/leaderboardScreen";
+import {
+  type LeaderboardRoute,
+  leaderboardSearch,
+  readLeaderboardRoute,
+} from "../leaderboard/model";
 import { createLobbyActions } from "./actions";
 import { releaseLease, startHeartbeat } from "./lease";
 import { mountMenuScreen } from "./menuScreen";
@@ -14,7 +24,12 @@ import { type Ocean, startOcean } from "./ocean";
 import { describeProblem } from "./problems";
 import { mountRelayBanner } from "./relayBanner";
 import { mountRoomScreen } from "./roomScreen";
-import { backToLobby, routeRound } from "./rounds";
+import {
+  backToLobby,
+  leaderboardGivesWay,
+  type RoundRoute,
+  routeRound,
+} from "./rounds";
 import { watchForGame } from "./startRetry";
 import { mountWatchersPanel } from "./watchersPanel";
 
@@ -150,6 +165,15 @@ export function mountLobbyApp(options: {
   let room: ReturnType<typeof mountRoomScreen> | undefined;
   let watching: { lobbyId: string; stop(): void } | undefined;
   let heartbeat: { lobbyId: string; stop(): void } | undefined;
+  /**
+   * The leaderboard's page from `?leaderboard` (or `?leaderboard=<competitor_id>`),
+   * which stays in the address while it shows: it needs no session, so it
+   * shows before the name screen or the menu.
+   */
+  let board: LeaderboardRoute | undefined = readLeaderboardRoute(
+    location.search,
+  );
+  let boardScreen: LeaderboardScreen | undefined;
 
   const stage = h("div", { class: "overlay" });
   const gameHost = h("div", { class: "game-host", hidden: true });
@@ -541,6 +565,54 @@ export function mountLobbyApp(options: {
     route();
   }
 
+  // --- The leaderboard ---
+
+  /**
+   * Shows a route of the leaderboard, or leaves it with undefined, and puts it
+   * in the address as a new history entry, so the browser's Back works too.
+   */
+  function navigateBoard(next: LeaderboardRoute | undefined): void {
+    board = next;
+    history.pushState(
+      null,
+      "",
+      `${location.pathname}${leaderboardSearch(location.search, next)}${location.hash}`,
+    );
+    route();
+  }
+
+  function onPopState(): void {
+    board = readLeaderboardRoute(location.search);
+    route();
+  }
+  window.addEventListener("popstate", onPopState);
+
+  function showLeaderboard(at: LeaderboardRoute): void {
+    if (screen?.key === "leaderboard" && boardScreen) {
+      boardScreen.setRoute(at);
+      return;
+    }
+    show("leaderboard", () => {
+      // The leaderboard is public: its routes need no session. Your own
+      // competitors, highlighted, come from the game's account route, which
+      // only a session can ask for: a guest's is refused, and then none is.
+      const { gameApi } = createApiClients({
+        getAccessToken: () => realtime.session.get()?.accessToken,
+      });
+      boardScreen = mountLeaderboard({
+        route: at,
+        api: leaderboardApi(gameApi),
+        ownCompetitors: realtime.session.get()
+          ? ownCompetitors(gameApi)
+          : Promise.resolve(new Set()),
+        navigate: navigateBoard,
+      });
+      return boardScreen;
+    });
+  }
+
+  const openBoard = () => navigateBoard({ view: "board" });
+
   // --- Routing from the stores ---
 
   function show(key: string, make: () => Screen): void {
@@ -554,9 +626,53 @@ export function mountLobbyApp(options: {
     stage.scrollTop = 0;
   }
 
+  /** Where the lobby's rounds send this tab, or undefined without a lobby. */
+  function roundDecision(): RoundRoute | undefined {
+    const lobby = realtime.lobby.get();
+    if (!lobby) return undefined;
+    const lobbyId = lobby.lobby.id;
+    return routeRound({
+      phase: lobby.lobby.phase,
+      round: lobby.lobby.round,
+      closedRound: closed && closed.lobbyId === lobbyId ? closed.round : null,
+      viewingRound: game && game.lobbyId === lobbyId ? game.round : null,
+    });
+  }
+
   function route(): void {
     if (disposed) return;
     syncHeartbeat();
+    // A game the player hasn't entered yet takes over from the leaderboard,
+    // which leaves the address, so the bot relay and hand play start with it.
+    if (
+      board &&
+      !watching &&
+      realtime.session.get() &&
+      leaderboardGivesWay(
+        roundDecision(),
+        game && game.lobbyId === realtime.lobby.get()?.lobby.id
+          ? game.round
+          : null,
+      )
+    ) {
+      board = undefined;
+      history.replaceState(
+        null,
+        "",
+        `${location.pathname}${leaderboardSearch(location.search, undefined)}${location.hash}`,
+      );
+    }
+    // The leaderboard shows over whatever else the stores would show, which
+    // goes on behind it: a lobby keeps its lease, and a game hidden behind the
+    // leaderboard shows again on Back. A watcher stays on the watched game.
+    if (board && !watching) {
+      demo?.stop();
+      demo = undefined;
+      game?.setHidden(true);
+      setOcean(true);
+      showLeaderboard(board);
+      return;
+    }
     const session = realtime.session.get();
     const lobby = realtime.lobby.get();
     const problem = realtime.problem.get();
@@ -579,6 +695,7 @@ export function mountLobbyApp(options: {
           watchCode: pendingWatch,
           initialName: read(() => localStorage, nameKey) ?? "",
           notice: message,
+          onLeaderboard: openBoard,
           async onSubmit(name) {
             try {
               await realtime.signIn(name);
@@ -594,15 +711,7 @@ export function mountLobbyApp(options: {
     // A watcher stays on the watched game until they stop watching.
     if (watching) return;
     const lobbyId = lobby?.lobby.id;
-    const decision = lobby
-      ? routeRound({
-          phase: lobby.lobby.phase,
-          round: lobby.lobby.round,
-          closedRound:
-            closed && closed.lobbyId === lobbyId ? closed.round : null,
-          viewingRound: game && game.lobbyId === lobbyId ? game.round : null,
-        })
-      : undefined;
+    const decision = roundDecision();
     if (demo && decision?.view !== "game") return;
     if (lobbyId && decision?.view === "game") {
       if (game?.lobbyId !== lobbyId || game.round !== decision.round) {
@@ -693,6 +802,7 @@ export function mountLobbyApp(options: {
         notice: message,
         onSignedOut: () => realtime.signOut(),
         onChangeName: () => realtime.signOut(),
+        onLeaderboard: openBoard,
         newId: () => crypto.randomUUID(),
       });
     });
@@ -741,6 +851,7 @@ export function mountLobbyApp(options: {
       disposed = true;
       for (const unsubscribe of unsubscribers) unsubscribe();
       window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("popstate", onPopState);
       heartbeat?.stop();
       game?.stop();
       demo?.stop();

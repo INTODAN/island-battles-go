@@ -16,8 +16,9 @@ const backendPrefixes = [
   "/map/",
   "/bots/",
   "/account/",
+  "/leaderboard/",
 ];
-const backendPaths = ["/healthz", "/openapi.json", "/account"];
+const backendPaths = ["/healthz", "/openapi.json", "/account", "/leaderboard"];
 
 /**
  * The origin the dev server forwards a path to, so the client and the game are on one origin, as
