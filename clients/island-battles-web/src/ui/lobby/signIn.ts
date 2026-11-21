@@ -65,5 +65,19 @@ export function googleSignInStep(
     : { kind: "button-problem", message };
 }
 
+/**
+ * Whether the lobby refused Google's credential of a silent sign-in for good (#409): the token
+ * was refused, sign-in is off, or the account is gone. The browser then stops signing in by
+ * itself. A failure to reach the lobby, or its own, keeps it for the next tab.
+ */
+export function refusedGoogleSignIn(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    (error.status === 401 ||
+      error.status === 404 ||
+      error.code === "display_name_required")
+  );
+}
+
 /** The browser remembers, in `localStorage`, that its person signed in with Google (#409). */
 export const googleSignInKey = "island-battles-web.google-sign-in";

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ApiError } from "../../api/errors";
-import { googleSignInStep } from "./signIn";
+import { googleSignInStep, refusedGoogleSignIn } from "./signIn";
 
 const problem = (status: number, code?: string, detail?: string) =>
   new ApiError({ kind: "problem", status, code, detail });
@@ -54,5 +54,23 @@ describe("signing in with Google", () => {
       kind: "name-problem",
       message: "Could not sign in. Please try again.",
     });
+  });
+});
+
+describe("the silent sign-in's refusals (#409)", () => {
+  test("a refused token, sign-in off or a gone account stops the browser signing in by itself", () => {
+    expect(refusedGoogleSignIn(problem(401, "unauthenticated"))).toBe(true);
+    expect(refusedGoogleSignIn(problem(404))).toBe(true);
+    expect(refusedGoogleSignIn(problem(422, "display_name_required"))).toBe(
+      true,
+    );
+  });
+
+  test("an unreachable or failing lobby keeps it for the next tab", () => {
+    expect(
+      refusedGoogleSignIn(new ApiError({ kind: "transport", status: 0 })),
+    ).toBe(false);
+    expect(refusedGoogleSignIn(problem(503, "unavailable"))).toBe(false);
+    expect(refusedGoogleSignIn(new Error("boom"))).toBe(false);
   });
 });

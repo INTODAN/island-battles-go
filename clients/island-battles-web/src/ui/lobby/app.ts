@@ -43,7 +43,7 @@ import {
   type RoundRoute,
   routeRound,
 } from "./rounds";
-import { googleSignInKey } from "./signIn";
+import { googleSignInKey, refusedGoogleSignIn } from "./signIn";
 import { watchForGame } from "./startRetry";
 import { mountWatchersPanel } from "./watchersPanel";
 
@@ -178,6 +178,12 @@ export function mountLobbyApp(options: {
     read(browserStorage, googleSignInKey) === "1";
   const setSignedInWithGoogle = (on: boolean) =>
     write(browserStorage, googleSignInKey, on ? "1" : null);
+  // A tab signed in before #409 kept the mark in its own storage: the browser keeps it now. The
+  // desktop app's tab storage is the browser's already.
+  if (!isDesktop && read(tabStorage, googleSignInKey) === "1") {
+    setSignedInWithGoogle(true);
+    write(tabStorage, googleSignInKey, null);
+  }
   /** The silent sign-in of the session that ended last: running, or tried. */
   let silent: "running" | "tried" | undefined;
 
@@ -191,10 +197,10 @@ export function mountLobbyApp(options: {
       try {
         await realtime.signInWithGoogle(credential);
         return;
-      } catch {
+      } catch (cause) {
         // The lobby refused Google's credential (the account is gone, or sign-in is off): the
         // browser stops trying. The name screen shows, with the button.
-        setSignedInWithGoogle(false);
+        if (refusedGoogleSignIn(cause)) setSignedInWithGoogle(false);
       }
     }
     // Without a credential from Google (it allows one silent sign-in per 10 minutes, and some

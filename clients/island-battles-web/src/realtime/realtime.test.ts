@@ -683,6 +683,76 @@ describe("remembered Google session", () => {
     expect(h.remembered.getItem(rememberedSessionKey)).toBeNull();
   });
 
+  test("a tab signed in before #409 is remembered when it reloads", async () => {
+    const h = harness();
+    googleRoutes(h, "Dana");
+    await h.realtime.signInWithGoogle("id-token");
+    h.remembered.items.clear();
+    h.locks.held.clear();
+    createRealtime({
+      storage: h.storage,
+      rememberStorage: h.remembered,
+      sessionLock: createSessionLock(h.locks),
+    });
+    expect(h.remembered.getItem(rememberedSessionKey)).toContain("access-g");
+  });
+
+  test("a rename or a reload leaves another tab's newer remembered session", async () => {
+    const h = harness();
+    googleRoutes(h, "Dana");
+    await h.realtime.signInWithGoogle("id-token");
+    const newer = JSON.stringify({
+      playerId: "another-player",
+      accessToken: "access-other",
+      expiresAt: Date.now() + 86_400_000,
+      displayName: "Dana",
+      account: { id: ACCOUNT_ID, displayName: "Dana" },
+    });
+    h.remembered.setItem(rememberedSessionKey, newer);
+    h.routes.set("PUT /lobby/v1/account", () =>
+      json({ id: ACCOUNT_ID, display_name: "Dana B" }),
+    );
+    await h.realtime.renameAccount("Dana B");
+    expect(h.remembered.getItem(rememberedSessionKey)).toBe(newer);
+    createRealtime({
+      storage: h.storage,
+      rememberStorage: h.remembered,
+      sessionLock: createSessionLock(h.locks),
+    });
+    expect(h.remembered.getItem(rememberedSessionKey)).toBe(newer);
+  });
+
+  test("a newer session remembered while the lock was asked for is taken instead", async () => {
+    const h = harness();
+    const old = {
+      playerId: "old-player",
+      accessToken: "access-old",
+      expiresAt: Date.now() + 86_400_000,
+      displayName: "Dana",
+      account: { id: ACCOUNT_ID, displayName: "Dana" },
+    };
+    const newer = { ...old, playerId: "new-player", accessToken: "access-new" };
+    h.remembered.setItem(rememberedSessionKey, JSON.stringify(old));
+    // Another tab signs in while this one asks for the old player's lock.
+    const lock = createSessionLock({
+      request(name, options, callback) {
+        if (name.endsWith("old-player")) {
+          h.remembered.setItem(rememberedSessionKey, JSON.stringify(newer));
+        }
+        return h.locks.request(name, options, callback);
+      },
+    });
+    const tab = createRealtime({
+      storage: new FakeStorage(),
+      rememberStorage: h.remembered,
+      sessionLock: lock,
+    });
+    expect(await tab.resumeRemembered()).toBe(true);
+    expect(tab.session.get()?.playerId).toBe("new-player");
+    await flush();
+    expect([...h.locks.held]).toEqual(["island-battles-web.player.new-player"]);
+  });
+
   test("a tab with a session keeps it", async () => {
     const h = harness();
     googleRoutes(h, "Dana");
