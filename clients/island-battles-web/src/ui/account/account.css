@@ -1,0 +1,178 @@
+/* The account page (#369): a dialog like the Game rules page (rules.css draws its frame). */
+
+.account-dialog {
+  width: min(640px, calc(100vw - 32px));
+}
+
+.account-body {
+  padding: 4px 20px 20px;
+}
+
+.account-section {
+  padding: 14px 0;
+  border-bottom: 1px solid #e3ebf1;
+}
+
+.account-section:last-child {
+  border-bottom: 0;
+}
+
+.account-section h3 {
+  margin: 0 0 4px;
+  font-size: 17px;
+}
+
+.account-inline {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.account-inline input {
+  flex: 1;
+  min-width: 0;
+}
+
+.account-count {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--ink-soft);
+}
+
+.account-list {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.account-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 4px 14px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(29, 111, 184, 0.07);
+}
+
+.account-list li.hand {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.account-list li.account-empty {
+  display: block;
+  color: var(--ink-soft);
+}
+
+.account-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.account-rating {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.account-games {
+  font-size: 13px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.account-add {
+  margin-top: 10px;
+}
+
+.account-danger-zone {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+button.danger {
+  padding: 8px 14px;
+  border: 1px solid #c4554a;
+  border-radius: 8px;
+  background: #fff;
+  color: #8a1c10;
+  font-weight: 600;
+}
+
+button.danger.small {
+  padding: 4px 10px;
+  font-size: 13px;
+}
+
+button.danger.solid {
+  border-color: var(--bad);
+  background: var(--bad);
+  color: #fff;
+}
+
+/* The confirmations: a box over the account page, styled like the Resign confirmation. */
+.account-confirm {
+  box-sizing: border-box;
+  width: min(460px, calc(100vw - 32px));
+  padding: 20px 24px;
+  border: 0;
+  border-radius: 12px;
+  background: #fff;
+  color: var(--ink);
+  box-shadow: 0 18px 48px rgba(10, 30, 50, 0.45);
+  font:
+    15px / 1.5 system-ui,
+    sans-serif;
+}
+
+.account-confirm::backdrop {
+  background: rgba(10, 25, 40, 0.55);
+}
+
+.account-confirm p {
+  margin: 0;
+}
+
+.account-confirm .account-confirm-question {
+  margin-bottom: 6px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.account-confirm .actions {
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+@media (max-width: 520px) {
+  .account-body {
+    padding: 4px 16px 16px;
+  }
+
+  .account-dialog .rules-header {
+    padding: 12px 16px;
+  }
+
+  .account-list li {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .account-list li .account-games {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .account-list li .account-rating,
+  .account-list li > button {
+    grid-row: 1 / span 2;
+  }
+
+  .account-list li.hand {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}

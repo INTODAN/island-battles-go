@@ -352,6 +352,182 @@ describe("session", () => {
   });
 });
 
+// --- Signing in with Google ---
+
+const ACCOUNT_ID = "33333333-3333-4333-8333-333333333333";
+
+/** The lobby's Google sign-in: an account named `existing`, or none until a name is given. */
+function googleRoutes(h: Harness, existing?: string) {
+  const bodies: Record<string, unknown>[] = [];
+  const authorizations: (string | null)[] = [];
+  let name = existing;
+  h.routes.set("POST /lobby/v1/sessions/google", async (request) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    bodies.push(body);
+    authorizations.push(request.headers.get("Authorization"));
+    if (body.credential !== "id-token") {
+      return json({ status: 401, code: "unauthenticated" }, 401);
+    }
+    if (name === undefined) {
+      if (body.display_name === undefined) {
+        return json({ status: 422, code: "display_name_required" }, 422);
+      }
+      if (body.display_name === "Taken") {
+        return json({ status: 409, code: "display_name_taken" }, 409);
+      }
+      name = String(body.display_name);
+    }
+    return json(
+      {
+        player_id: PLAYER_ID,
+        access_token: "access-g",
+        expires_at: new Date(Date.now() + 86_400_000).toISOString(),
+        account: {
+          id: ACCOUNT_ID,
+          display_name: name,
+          created_at: "2026-11-21T10:00:00Z",
+        },
+      },
+      201,
+    );
+  });
+  return { bodies, authorizations };
+}
+
+const caughtApi = async (promise: Promise<unknown>) => {
+  try {
+    await promise;
+  } catch (error) {
+    return error as { status: number; code?: string };
+  }
+  throw new Error("expected a rejection");
+};
+
+describe("signInWithGoogle", () => {
+  test("signs in an existing account, saves the session with it, and sends no bearer token", async () => {
+    const h = harness();
+    const google = googleRoutes(h, "Dana");
+    const session = await h.realtime.signInWithGoogle("id-token");
+    expect(session).toMatchObject({
+      playerId: PLAYER_ID,
+      accessToken: "access-g",
+      displayName: "Dana",
+      account: { id: ACCOUNT_ID, displayName: "Dana" },
+    });
+    expect(google.bodies).toEqual([{ credential: "id-token" }]);
+    expect(google.authorizations).toEqual([null]);
+    expect(h.realtime.session.get()).toBe(session);
+    const again = createRealtime({ storage: h.storage });
+    expect(again.session.get()?.account).toEqual({
+      id: ACCOUNT_ID,
+      displayName: "Dana",
+    });
+  });
+
+  test("a first sign-in is 422 display_name_required, then works with a name and the same credential", async () => {
+    const h = harness();
+    const google = googleRoutes(h);
+    const error = await caughtApi(h.realtime.signInWithGoogle("id-token"));
+    expect(error).toMatchObject({ status: 422, code: "display_name_required" });
+    expect(h.realtime.session.get()).toBeNull();
+    const session = await h.realtime.signInWithGoogle("id-token", "Dana");
+    expect(session.displayName).toBe("Dana");
+    expect(google.bodies).toEqual([
+      { credential: "id-token" },
+      { credential: "id-token", display_name: "Dana" },
+    ]);
+  });
+
+  test("a taken display name is 409 display_name_taken and opens no session", async () => {
+    const h = harness();
+    googleRoutes(h);
+    const error = await caughtApi(
+      h.realtime.signInWithGoogle("id-token", "Taken"),
+    );
+    expect(error).toMatchObject({ status: 409, code: "display_name_taken" });
+    expect(h.realtime.session.get()).toBeNull();
+    expect(h.storage.getItem(sessionStorageKey)).toBeNull();
+  });
+
+  test("a saved session with a malformed account is dropped", () => {
+    const storage = new FakeStorage();
+    storage.setItem(
+      sessionStorageKey,
+      JSON.stringify({
+        playerId: PLAYER_ID,
+        accessToken: "a",
+        expiresAt: Date.now() + 60_000,
+        displayName: "Dana",
+        account: { id: 7 },
+      }),
+    );
+    expect(createRealtime({ storage }).session.get()).toBeNull();
+  });
+
+  test("renameAccount renames in the lobby and keeps the session in step", async () => {
+    const h = harness();
+    googleRoutes(h, "Dana");
+    await h.realtime.signInWithGoogle("id-token");
+    const sent: unknown[] = [];
+    h.routes.set("PUT /lobby/v1/account", async (request) => {
+      sent.push(await request.json());
+      return json({
+        id: ACCOUNT_ID,
+        display_name: "Dana B",
+        created_at: "2026-11-21T10:00:00Z",
+      });
+    });
+    const session = await h.realtime.renameAccount("Dana B");
+    expect(sent).toEqual([{ display_name: "Dana B" }]);
+    expect(session).toMatchObject({
+      displayName: "Dana B",
+      account: { id: ACCOUNT_ID, displayName: "Dana B" },
+    });
+    expect(h.realtime.session.get()).toBe(session);
+    expect(h.storage.getItem(sessionStorageKey)).toContain("Dana B");
+  });
+
+  test("a taken name leaves the session as it was", async () => {
+    const h = harness();
+    googleRoutes(h, "Dana");
+    const before = await h.realtime.signInWithGoogle("id-token");
+    h.routes.set("PUT /lobby/v1/account", () =>
+      json({ status: 409, code: "display_name_taken" }, 409),
+    );
+    const error = await caughtApi(h.realtime.renameAccount("Ada"));
+    expect(error).toMatchObject({ status: 409, code: "display_name_taken" });
+    expect(h.realtime.session.get()).toBe(before);
+  });
+
+  test("deleteAccount deletes the lobby's account and leaves the sign-out to the caller", async () => {
+    const h = harness();
+    googleRoutes(h, "Dana");
+    await h.realtime.signInWithGoogle("id-token");
+    h.routes.set(
+      "DELETE /lobby/v1/account",
+      () => new Response(null, { status: 204 }),
+    );
+    await h.realtime.deleteAccount();
+    expect(h.count("DELETE", "/lobby/v1/account")).toBe(1);
+    h.realtime.signOut();
+    expect(h.realtime.session.get()).toBeNull();
+    expect(h.realtime.problem.get()).toBeNull();
+    expect(h.storage.getItem(sessionStorageKey)).toBeNull();
+  });
+
+  test("a 401 on an account call ends the session", async () => {
+    const h = harness();
+    googleRoutes(h, "Dana");
+    await h.realtime.signInWithGoogle("id-token");
+    h.routes.set("PUT /lobby/v1/account", () =>
+      json({ status: 401, code: "unauthenticated" }, 401),
+    );
+    await caughtApi(h.realtime.renameAccount("Ada"));
+    expect(h.realtime.session.get()).toBeNull();
+    expect(h.realtime.problem.get()?.scope).toBe("session");
+  });
+});
+
 // --- Connection ---
 
 describe("connection", () => {

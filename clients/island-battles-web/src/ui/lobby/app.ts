@@ -1,12 +1,18 @@
 import { createApiClients } from "../../api/client";
 import { ApiError } from "../../api/errors";
 import { type BotRelays, startBotRelays } from "../../bots";
-import { tabStorage } from "../../platform";
+import { isDesktop, tabStorage } from "../../platform";
 import { playsByHand, startHandPlay } from "../../play";
 import type { Realtime } from "../../realtime";
+import { openAccount } from "../account/accountDialog";
 import { h } from "../dom";
 import { mountDemoView, mountGameView, mountWatchView } from "../game/index";
 import { createLobbyActions } from "./actions";
+import {
+  type GoogleSignIn,
+  loadGoogleSignIn,
+  offeredGoogleClientId,
+} from "./googleSignIn";
 import { releaseLease, startHeartbeat } from "./lease";
 import { mountMenuScreen } from "./menuScreen";
 import { mountNameScreen, type Screen } from "./nameScreen";
@@ -15,6 +21,7 @@ import { describeProblem } from "./problems";
 import { mountRelayBanner } from "./relayBanner";
 import { mountRoomScreen } from "./roomScreen";
 import { backToLobby, routeRound } from "./rounds";
+import { googleSignInKey } from "./signIn";
 import { watchForGame } from "./startRetry";
 import { mountWatchersPanel } from "./watchersPanel";
 
@@ -94,6 +101,22 @@ export interface LobbyApp {
 }
 
 /**
+ * Google's sign-in when the lobby offers it (`GET /lobby/v1/sign-in`), else undefined. The desktop
+ * app never asks: Google's button doesn't work in its web view, and its CSP blocks the script.
+ */
+function startGoogleSignIn(): Promise<GoogleSignIn | undefined> {
+  if (isDesktop) return Promise.resolve(undefined);
+  const { lobbyApi } = createApiClients({ getAccessToken: () => undefined });
+  return lobbyApi
+    .GET("/lobby/v1/sign-in")
+    .then(({ data }) => {
+      const clientId = offeredGoogleClientId(data, isDesktop);
+      return clientId === undefined ? undefined : loadGoogleSignIn(clientId);
+    })
+    .catch(() => undefined);
+}
+
+/**
  * The web client's own flow: name, create or join, lobby room, then the game
  * view, and back to the room for the lobby's next game. Which screen shows is
  * decided by the realtime stores and the round whose game view the player
@@ -109,6 +132,44 @@ export function mountLobbyApp(options: {
   // reused, so a reloaded tab joins again under a new id.
   const clientInstanceId = crypto.randomUUID();
   const actions = createLobbyActions({ realtime, clientInstanceId });
+
+  const google = startGoogleSignIn();
+  /**
+   * The tab's person signed in with Google and didn't sign out: when their session ends, Google is
+   * asked for a credential without a click before the name screen shows.
+   */
+  const signedInWithGoogle = (): boolean =>
+    read(tabStorage, googleSignInKey) === "1";
+  const setSignedInWithGoogle = (on: boolean) =>
+    write(tabStorage, googleSignInKey, on ? "1" : null);
+  /** The silent sign-in of the session that ended last: running, or tried. */
+  let silent: "running" | "tried" | undefined;
+
+  async function signInSilently(): Promise<void> {
+    const signIn = await google;
+    const credential = signIn ? await signIn.silent() : undefined;
+    if (credential !== undefined && !disposed) {
+      try {
+        await realtime.signInWithGoogle(credential);
+        return;
+      } catch {
+        // The name screen shows, with the button.
+      }
+    }
+    setSignedInWithGoogle(false);
+    silent = "tried";
+    route();
+  }
+
+  /**
+   * Sign out from the account page, and after the account is deleted: Google's silent sign-in is
+   * turned off, so neither an ended session nor a reload signs the person in again by itself.
+   */
+  function signOutForGood(): void {
+    setSignedInWithGoogle(false);
+    void google.then((signIn) => signIn?.disableAutoSelect());
+    realtime.signOut();
+  }
 
   const params = new URLSearchParams(location.search);
   let pendingJoin = params.get("join")?.trim() || undefined;
@@ -569,8 +630,28 @@ export function mountLobbyApp(options: {
         realtime.leaveWatch();
       }
       setOcean(true);
-      if (problem?.scope === "session")
-        notice = describeProblem(problem.error, "ready").message;
+      if (signedInWithGoogle() && silent === undefined) {
+        silent = "running";
+        void signInSilently();
+      }
+      if (silent === "running") {
+        show("signing-in", () => ({
+          el: h(
+            "div",
+            { class: "panel narrow signing-in", attrs: { role: "status" } },
+            h("h1", {}, "Island Battles"),
+            h("p", { class: "lead" }, "Signing you in again…"),
+          ),
+          dispose() {},
+        }));
+        return;
+      }
+      if (problem?.scope === "session") {
+        notice =
+          silent === "tried"
+            ? "Your session expired. Sign in again to continue."
+            : describeProblem(problem.error, "ready").message;
+      }
       show("name", () => {
         const message = notice;
         notice = "";
@@ -587,10 +668,18 @@ export function mountLobbyApp(options: {
             }
             write(() => localStorage, nameKey, name);
           },
+          google: {
+            ready: google,
+            async submit(credential, displayName) {
+              await realtime.signInWithGoogle(credential, displayName);
+              setSignedInWithGoogle(true);
+            },
+          },
         });
       });
       return;
     }
+    silent = undefined;
     // A watcher stays on the watched game until they stop watching.
     if (watching) return;
     const lobbyId = lobby?.lobby.id;
@@ -685,7 +774,7 @@ export function mountLobbyApp(options: {
       const watchCode = pendingWatch;
       pendingWatch = undefined;
       return mountMenuScreen({
-        playerName: session.displayName,
+        session: realtime.session,
         actions,
         joinCode,
         watchCode,
@@ -693,6 +782,8 @@ export function mountLobbyApp(options: {
         notice: message,
         onSignedOut: () => realtime.signOut(),
         onChangeName: () => realtime.signOut(),
+        onAccount: () =>
+          void openAccount({ realtime, onSignOut: signOutForGood }),
         newId: () => crypto.randomUUID(),
       });
     });
