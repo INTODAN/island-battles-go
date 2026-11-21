@@ -45,7 +45,7 @@ When your change needs a step after it merges (a plan and apply, an apply-role s
   - `game-state-testing`: generation, command and game-state tests
   - `headless-matches`: playing whole games between bots in memory with `backend/cmd/headless-match`, and changing that runner
   - `bot-league`: anything under `league/`: the bots that only agents write, the `league` command, reading standings and studying a game
-  - `bot-league-iteration`: improving the league's bots: one measured iteration of study, candidates, selection and the ledger
+  - `bot-league-iteration`: when asked to "run a league iteration" or to improve the league's bots: the whole procedure, from the branch to the report
 - The lobby lives in [`INTODAN/mpl`](https://github.com/INTODAN/mpl); lobby changes go there first. This repository uses it at the version that README.md's [The lobby's version](README.md#the-lobbys-version) names, and changes the pin only to take a lobby change that is merged there. Island Battles specifics belong in `backend/`.
 - **The repository is public.** Never commit a secret, not even for local development: `.env.example` holds placeholders only, and production's secrets live in the deploy bucket.
 - After changing an API, re-export the OpenAPI documents and regenerate the clients in the same change. On a rebase conflict in generated files, regenerate them instead of merging by hand.

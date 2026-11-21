@@ -1,17 +1,34 @@
 ---
 name: bot-league-iteration
-description: "One iteration of improving the bot league's bots (league/): measure the population, study the champion's lost games and logs on the training maps, write candidates with one idea each, gate and select them against the training and holdout maps, and record it in the ledger. Load it when asked to improve the league's bots, run a league iteration, 'do RSI' on the bots, or find a better champion."
+description: "One iteration of improving the bot league's bots (league/), from the branch to the final report: measure the population, study the champion's lost games and logs on the training maps, write candidates with one idea each, gate and select them against the training and holdout maps, and record it in the ledger. Load it when asked to run a league iteration, improve the league's bots, 'do RSI' on the bots, or find a better champion; the request needs to say nothing more."
 ---
 
 # A league iteration
 
-An iteration takes the league from one measured state to the next: it ends with a tournament that says what improved, a ledger entry, and nothing half-done. Read the `bot-league` skill first for the commands, how to read standings and games, and the rules for a bot.
+An iteration takes the league from one measured state to the next: it ends with a tournament that says what improved, a ledger entry, and nothing half-done.
 
-Run several iterations in a row when asked to; finish each one completely before starting the next. Each is one commit when the session was asked to commit.
+"Run a league iteration" is the whole request: everything else is here. Asked for several, finish each one completely before starting the next.
+
+## Before you start
+
+**Read these first, in full**, even if you think you know them:
+
+1. [league/README.md](../../../league/README.md): what the league is.
+2. The [`bot-league`](../bot-league/SKILL.md) skill: the commands, reading standings and games, the rules for a bot.
+3. [island-battles-rules](../../../templates/python-bot/.agents/skills/island-battles-rules/SKILL.md) and [writing-a-bot](../../../templates/python-bot/.agents/skills/writing-a-bot/SKILL.md): the game and the SDK.
+4. [league/ledger/iterations.md](../../../league/ledger/iterations.md): where the league stands.
+
+**Branch.** An iteration is its own branch, `claude/league-iteration-N`, cut from `main`, or from the branch that holds the ledger's last entry while that one isn't merged yet. Never work on another pull request's branch.
+
+**Commit, push, pull request.** Only what the request asks for. Asked to commit, make one commit when the iteration is done, whose message names the iteration and what was promoted and rejected. Don't push or open a pull request unless asked.
+
+**What you may change:** the directories of the candidates you create under `league/bots/`, the `bot.toml` of a bot whose status changes, and `league/ledger/iterations.md`. Nothing else: not another bot's code, the tools, the tests, an existing map, the runner or these skills. New map files are allowed only as **When the numbers stop moving** says, and only before the iteration's first measurement.
+
+**When something doesn't work, stop.** A tool that crashes, a command from a skill that fails, a check that failed before you changed anything, or a result that can't be right (a bot that wins every game after a small change, a tournament with no matches): stop, and report what you ran and what it printed. Don't work around it, and don't fix the tool inside the iteration. A wrong measurement is worse than no iteration.
 
 ## 0. Start from the ledger
 
-Read [league/ledger/iterations.md](../../../league/ledger/iterations.md): the **Lessons so far**, and the last two or three entries. They say who the champion is, where it loses, and which ideas were already tried and rejected. Don't try a rejected idea again unless you can say what is different this time. The new iteration's number is the last entry's plus one.
+In the ledger, read the **Lessons so far**, and the last two or three entries. They say who the champion is, where it loses, and which ideas were already tried and rejected. Don't try a rejected idea again unless you can say what is different this time. The new iteration's number is the last entry's plus one.
 
 Then `uv run --project league league roster` and `league/scripts/check.sh`. A league that doesn't pass its checks is fixed before anything is measured.
 
@@ -58,10 +75,10 @@ Rules:
 - **One idea per candidate.** Two changes in one candidate give a result that says nothing about either. Two ideas are two candidates, and a third that has both if both win.
 - Change **only the candidate's directory**. Never the parent, another bot, the maps or the tools: a tool that needs changing is a separate change, made before the iteration and measured with a full tournament.
 - Keep the logging rule: the changed decision shows in the turn's log line.
-- Three to six candidates per iteration is the useful range. Fewer wastes the tournament; more than six is usually the same idea with different numbers.
+- **Three candidates** unless the request names another number. More than six is usually the same idea with different numbers.
 - **A number is not an idea.** Don't make candidates that only differ in a constant. If an idea needs a constant tuned, tune it inside the candidate on the training maps, and count that as the one idea.
 
-Candidates don't share files, so they can be written in parallel: one subagent per candidate, each given the finding with its evidence (the digest lines and log lines), the parent's name, the candidate's name, and the instruction to read the `bot-league` skill and the template's rules skills and to touch nothing outside `league/bots/<candidate>/`. Each subagent finishes by running `league/scripts/check.sh` and `league tournament --focus <candidate> --strict`, and reports the standings. Do the selection yourself.
+Write the candidates yourself, one after the other, measuring each as it is done. When the request asks for subagents, or for more than three candidates, they can be written in parallel, since candidates don't share files: one subagent per candidate, each given the finding with its evidence (the digest lines and log lines), the parent's name, the candidate's name, and the instruction to read the `bot-league` skill and the template's rules skills and to touch nothing outside `league/bots/<candidate>/`. Each subagent finishes by running `league/scripts/check.sh` and `league tournament --focus <candidate> --strict`, and reports the standings. Do the selection yourself.
 
 ## 4. Gate
 
@@ -87,6 +104,8 @@ uv run --project league league tournament --maps holdout --focus CANDIDATES --ru
 ```
 
 A candidate is **promoted** when its holdout rating is not below its parent's. Read only the standings and the tables of that run. **Never digest a holdout game, and never change a candidate after seeing its holdout numbers:** a candidate that fails the holdout is rejected, and its idea may come back next iteration in another form, measured again from the start.
+
+**Promoting nothing is a result.** Most ideas don't work, and an iteration that rejects all three and says why has done its job. Never promote a candidate that missed a rule by a little, and never loosen a rule to get a promotion.
 
 Then:
 
@@ -116,17 +135,30 @@ Then update **Lessons so far** at the top: add what this iteration showed about 
 
 Run `league/scripts/check.sh` once more. The iteration is done when the checks pass, the roster has no candidate left, and the ledger entry is written.
 
+## 7. Report
+
+End with a report to whoever asked, short enough to read in a minute:
+
+- the findings, one line each, with the map and turns;
+- each candidate: its idea, its training rating and its points against its parent, its holdout rating if it got there, and **promoted** or **rejected**, with the rule it missed;
+- the standings on the training maps and on the holdout maps, as tables;
+- the champion and its rating, before and after;
+- what you didn't do or couldn't verify, and anything that looked wrong on the way.
+
+Say what the numbers say. "No candidate was promoted; the champion is unchanged at 1093" is a complete report.
+
 ## When the numbers stop moving
 
-- **Nothing promoted twice in a row:** add a founder, and add maps. `league new-map NAME --seed N --set train` and one for `holdout`; new maps change every rating, so play `--maps all` before the iteration's measurements and say in the ledger that the map set grew.
+- **Nothing promoted twice in a row:** make one of the next iteration's candidates a founder, and start that iteration by adding maps: `league new-map NAME --seed N --set train` and one for `holdout`. New maps change every rating, so add them before step 1, never in the middle of an iteration, and say in the ledger that the map set grew.
 - **The champion wins everything:** the opponents are too weak. Add founders built to beat it: read its logs for what it never does (never defends, never upgrades speed, never attacks before turn 40) and write the bot that punishes that.
-- **Training rating up, holdout rating down, more than once:** the bots are learning the maps. Add training maps, and prefer ideas stated without map geometry.
+- **Training rating up, holdout rating down, more than once:** the bots are learning the maps. Start the next iteration by adding training maps, and prefer ideas stated without map geometry.
 - **Two bots that trade the top place every iteration** are a cycle, not progress: the measure of progress is the rating against the default bots and the retired bots, which don't move.
 
 ## What an iteration never does
 
 - Change a bot that isn't a candidate, or a candidate after its holdout run.
 - Read or digest a holdout game.
-- Change the runner, the rules, a map or the tests to make a bot pass.
+- Change the runner, the rules, an existing map or the tests, for any reason.
+- Go on after a tool failed or a result looked impossible.
 - Keep a candidate "for later". At the end every candidate is active or deleted.
 - Report an improvement that the final tournament doesn't show.
