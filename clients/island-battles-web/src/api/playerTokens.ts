@@ -19,8 +19,8 @@ export const needsPlayerToken = (pathname: string): boolean =>
   pathname.includes("/game/from-lobby/") ||
   pathname.includes("/game/lobbies/") ||
   pathname.endsWith("/generation/commands") ||
-  pathname.endsWith("/account") ||
-  pathname.includes("/account/");
+  pathname === "/account" ||
+  pathname.startsWith("/account/");
 
 /**
  * The player token the game's routes take, for the current guest session. The

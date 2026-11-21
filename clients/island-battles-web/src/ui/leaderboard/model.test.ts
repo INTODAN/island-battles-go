@@ -59,6 +59,8 @@ const ready = (change: Partial<BoardState>): BoardState => ({
   status: "ready",
   entries: [],
   total: 0,
+  offset: change.entries?.length ?? 0,
+  exhausted: false,
   loadingMore: false,
   error: undefined,
   ...change,
@@ -312,6 +314,63 @@ describe("loading the leaderboard", () => {
     expect(boardView(store.state, new Set()).showMore).toBe(false);
   });
 
+  test("after a page repeats a competitor, the next page still starts at the next 50", async () => {
+    // Pages cached in different minutes: the board moved between them, so
+    // the second page repeats c50, which swapped places with c51.
+    const first = entries(50);
+    const fifty = first[49];
+    if (!fifty) throw new Error("no 50th entry");
+    const pages: Record<number, Leaderboard> = {
+      0: { total: 132, entries: first },
+      50: { total: 132, entries: [fifty, ...entries(49, 51)] },
+      100: { total: 132, entries: entries(32, 100) },
+    };
+    const calls: number[] = [];
+    const store = new BoardStore(
+      {
+        list(query) {
+          calls.push(query.offset);
+          return Promise.resolve(
+            pages[query.offset] ?? { total: 132, entries: [] },
+          );
+        },
+      },
+      () => {},
+    );
+    store.start();
+    await tick();
+    await store.showMore();
+    expect(store.state.entries).toHaveLength(99);
+    expect(boardView(store.state, new Set()).showMore).toBe(true);
+    await store.showMore();
+    expect(calls).toEqual([0, 50, 100]);
+    expect(store.state.entries).toHaveLength(131);
+    // Every page was asked: Show more is gone instead of asking offset 131 forever.
+    expect(boardView(store.state, new Set()).showMore).toBe(false);
+  });
+
+  test("a page that comes back empty ends Show more, whatever the total says", async () => {
+    const calls: number[] = [];
+    const store = new BoardStore(
+      {
+        list(query) {
+          calls.push(query.offset);
+          return Promise.resolve({
+            total: 120,
+            entries: query.offset === 0 ? entries(50) : [],
+          });
+        },
+      },
+      () => {},
+    );
+    store.start();
+    await tick();
+    expect(boardView(store.state, new Set()).showMore).toBe(true);
+    await store.showMore();
+    expect(calls).toEqual([0, 50]);
+    expect(boardView(store.state, new Set()).showMore).toBe(false);
+  });
+
   test("a tab starts from its first page, and an older tab's answer is dropped", async () => {
     const api = fakeList(10);
     const store = new BoardStore(api, () => {});
@@ -379,6 +438,8 @@ describe("loading the leaderboard", () => {
     ).toBe("The server is busy. Try again in a moment.");
   });
 });
+
+const uuid = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
 
 const kraken: LeaderboardCompetitor = {
   competitor_id: "c1",
@@ -528,28 +589,38 @@ describe("a competitor's page", () => {
   });
 
   test("loads the competitor, and a 404 or an ID that isn't one is not found", async () => {
+    const asked: string[] = [];
     const answer = (error?: ApiError) => ({
-      competitor: (id: string) =>
-        error
+      competitor: (id: string) => {
+        asked.push(id);
+        return error
           ? Promise.reject(error)
-          : Promise.resolve({ ...kraken, competitor_id: id }),
+          : Promise.resolve({ ...kraken, competitor_id: id });
+      },
     });
-    expect(await loadCompetitor(answer(), "c9")).toEqual({
+    expect(await loadCompetitor(answer(), uuid)).toEqual({
       status: "ready",
-      competitor: { ...kraken, competitor_id: "c9" },
+      competitor: { ...kraken, competitor_id: uuid },
     });
     for (const status of [404, 422]) {
       expect(
         await loadCompetitor(
           answer(new ApiError({ kind: "problem", status })),
-          "nope",
+          uuid,
         ),
       ).toEqual({ status: "not-found" });
     }
+    asked.length = 0;
+    for (const id of ["nope", "c9", `${uuid}x`, " "]) {
+      expect(await loadCompetitor(answer(), id)).toEqual({
+        status: "not-found",
+      });
+    }
+    expect(asked).toEqual([]);
     expect(
       await loadCompetitor(
         answer(new ApiError({ kind: "http", status: 502 })),
-        "c1",
+        uuid,
       ),
     ).toEqual({
       status: "error",

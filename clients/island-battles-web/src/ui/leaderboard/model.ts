@@ -67,6 +67,13 @@ export function leaderboardSearch(
   return parts.length > 0 ? `?${parts.join("&")}` : "";
 }
 
+/** A competitor ID is a UUID; anything else in the address names no competitor. */
+const uuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export const isCompetitorId = (value: string): boolean =>
+  uuidPattern.test(value);
+
 /** The relative link to a route, for an `<a href>` that can be shared or opened in a new tab. */
 export function leaderboardHref(route: LeaderboardRoute): string {
   return leaderboardSearch("", route);
@@ -160,6 +167,15 @@ export interface BoardState {
   status: "loading" | "ready" | "error";
   entries: LeaderboardEntry[];
   total: number;
+  /**
+   * How many rows the pages asked so far returned: the next page's `offset`.
+   * It counts a competitor `appendPage` left out as already shown, so the
+   * offsets stay multiples of the page size even when two pages came from
+   * different minutes of the cache.
+   */
+  offset: number;
+  /** A page came back empty: the leaderboard has nothing more, whatever `total` says. */
+  exhausted: boolean;
   /** A further page is on its way. */
   loadingMore: boolean;
   /** Why the last load failed, shown with **Try again**. */
@@ -203,7 +219,10 @@ export function boardView(
     rows: rows.slice(3),
     empty: state.status === "ready" && state.total === 0,
     showing: showingText(state.entries.length, state.total),
-    showMore: state.status === "ready" && state.entries.length < state.total,
+    showMore:
+      state.status === "ready" &&
+      !state.exhausted &&
+      state.offset < state.total,
   };
 }
 
@@ -379,6 +398,8 @@ export class BoardStore {
     status: "loading",
     entries: [],
     total: 0,
+    offset: 0,
+    exhausted: false,
     loadingMore: false,
     error: undefined,
   };
@@ -414,17 +435,19 @@ export class BoardStore {
   }
 
   async showMore(): Promise<void> {
-    const { tab, entries, loadingMore } = this.current;
+    const { tab, offset, loadingMore } = this.current;
     if (loadingMore) return;
     const request = ++this.request;
     this.set({ loadingMore: true, error: undefined });
     try {
-      const page = await this.api.list(leaderboardQuery(tab, entries.length));
+      const page = await this.api.list(leaderboardQuery(tab, offset));
       if (request !== this.request) return;
       this.set({
         status: "ready",
         entries: appendPage(this.current.entries, page.entries),
         total: page.total,
+        offset: offset + page.entries.length,
+        exhausted: page.entries.length === 0,
         loadingMore: false,
       });
     } catch (error) {
@@ -443,13 +466,21 @@ export class BoardStore {
       status: "loading",
       entries: [],
       total: 0,
+      offset: 0,
+      exhausted: false,
       loadingMore: false,
       error: undefined,
     });
     try {
       const page = await this.api.list(leaderboardQuery(tab, 0));
       if (request !== this.request) return;
-      this.set({ status: "ready", entries: page.entries, total: page.total });
+      this.set({
+        status: "ready",
+        entries: appendPage([], page.entries),
+        total: page.total,
+        offset: page.entries.length,
+        exhausted: page.entries.length === 0,
+      });
     } catch (error) {
       if (request !== this.request) return;
       this.set({
@@ -471,13 +502,15 @@ export type CompetitorState =
   | { status: "error"; message: string };
 
 /**
- * A competitor's page. A competitor the leaderboard doesn't list is 404, and an
- * ID that isn't one (a link mistyped by hand) is 422: both are "not found".
+ * A competitor's page. An ID that isn't a UUID (a link mistyped by hand) is
+ * "not found" without asking, and so is a competitor the leaderboard doesn't
+ * list (404), or an ID the game refuses (422).
  */
 export async function loadCompetitor(
   api: Pick<LeaderboardApi, "competitor">,
   competitorId: string,
 ): Promise<CompetitorState> {
+  if (!isCompetitorId(competitorId)) return { status: "not-found" };
   try {
     return {
       status: "ready",

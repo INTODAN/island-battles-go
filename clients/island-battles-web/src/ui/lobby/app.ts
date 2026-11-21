@@ -24,7 +24,12 @@ import { type Ocean, startOcean } from "./ocean";
 import { describeProblem } from "./problems";
 import { mountRelayBanner } from "./relayBanner";
 import { mountRoomScreen } from "./roomScreen";
-import { backToLobby, routeRound } from "./rounds";
+import {
+  backToLobby,
+  leaderboardGivesWay,
+  type RoundRoute,
+  routeRound,
+} from "./rounds";
 import { watchForGame } from "./startRetry";
 import { mountWatchersPanel } from "./watchersPanel";
 
@@ -621,11 +626,44 @@ export function mountLobbyApp(options: {
     stage.scrollTop = 0;
   }
 
+  /** Where the lobby's rounds send this tab, or undefined without a lobby. */
+  function roundDecision(): RoundRoute | undefined {
+    const lobby = realtime.lobby.get();
+    if (!lobby) return undefined;
+    const lobbyId = lobby.lobby.id;
+    return routeRound({
+      phase: lobby.lobby.phase,
+      round: lobby.lobby.round,
+      closedRound: closed && closed.lobbyId === lobbyId ? closed.round : null,
+      viewingRound: game && game.lobbyId === lobbyId ? game.round : null,
+    });
+  }
+
   function route(): void {
     if (disposed) return;
     syncHeartbeat();
-    // The leaderboard shows over whatever the stores would show, which goes
-    // on behind it: a lobby keeps its lease, and a game hidden behind the
+    // A game the player hasn't entered yet takes over from the leaderboard,
+    // which leaves the address, so the bot relay and hand play start with it.
+    if (
+      board &&
+      !watching &&
+      realtime.session.get() &&
+      leaderboardGivesWay(
+        roundDecision(),
+        game && game.lobbyId === realtime.lobby.get()?.lobby.id
+          ? game.round
+          : null,
+      )
+    ) {
+      board = undefined;
+      history.replaceState(
+        null,
+        "",
+        `${location.pathname}${leaderboardSearch(location.search, undefined)}${location.hash}`,
+      );
+    }
+    // The leaderboard shows over whatever else the stores would show, which
+    // goes on behind it: a lobby keeps its lease, and a game hidden behind the
     // leaderboard shows again on Back. A watcher stays on the watched game.
     if (board && !watching) {
       demo?.stop();
@@ -673,15 +711,7 @@ export function mountLobbyApp(options: {
     // A watcher stays on the watched game until they stop watching.
     if (watching) return;
     const lobbyId = lobby?.lobby.id;
-    const decision = lobby
-      ? routeRound({
-          phase: lobby.lobby.phase,
-          round: lobby.lobby.round,
-          closedRound:
-            closed && closed.lobbyId === lobbyId ? closed.round : null,
-          viewingRound: game && game.lobbyId === lobbyId ? game.round : null,
-        })
-      : undefined;
+    const decision = roundDecision();
     if (demo && decision?.view !== "game") return;
     if (lobbyId && decision?.view === "game") {
       if (game?.lobbyId !== lobbyId || game.round !== decision.round) {

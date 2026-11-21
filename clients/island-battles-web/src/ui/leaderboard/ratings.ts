@@ -28,7 +28,7 @@ export const ratingsSections: readonly RulesSection[] = [
     id: "basics",
     title: "How ratings work",
     paragraphs: [
-      `Everyone starts at ${initialRating}. Winning a rated game raises your rating and losing lowers it: more when the result is a surprise, less when it was expected.`,
+      `Everyone starts at ${initialRating}, and is listed after their first rated game. Winning a rated game raises your rating and losing lowers it: more when the result is a surprise, less when it was expected. Ratings are shown rounded.`,
     ],
   },
   {
@@ -55,13 +55,15 @@ export const ratingsSections: readonly RulesSection[] = [
   {
     id: "teams",
     title: "More than two teams",
-    paragraphs: ["only the winner gains, and each other team loses a little."],
+    paragraphs: [
+      "when a team wins, only it gains, and each other team loses a little, to the winner only.",
+    ],
   },
   {
     id: "draws",
     title: "No winner",
     paragraphs: [
-      "the teams still in the game at the end draw with each other, and a team that dropped out before (knocked out, out of time, resigned or left) loses to each of them.",
+      "the teams still in the game at the end draw with each other, and a team that dropped out before (knocked out, out of time, resigned or left) loses to each of them. If no team is left, every team draws with every other. A draw raises the lower rating and lowers the higher one.",
     ],
   },
   {
