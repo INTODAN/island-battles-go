@@ -55,8 +55,10 @@ var rejectionTypes = map[string]bool{
 // Outcome is what an invocation did, as the function returns it.
 type Outcome struct {
 	// Outcome is "submitted" (the bot's answer), "passed" (a pass, because
-	// the bot failed), "delivered" (a hosted bot's delivery was posted) or
-	// "unsubmitted" (no submission was taken).
+	// the bot failed), "delivered" (a hosted bot's delivery, or the end of
+	// its game, was posted), "unsubmitted" (no submission was taken),
+	// "ended" (an uploaded bot took the end of its game) or "unended" (it
+	// failed to).
 	Outcome string `json:"outcome"`
 	// Status is the HTTP status of the last submission or delivery, or 0
 	// when none answered.
@@ -92,11 +94,12 @@ type Runner struct {
 }
 
 // event is the part of a BotRunnerEvent that is passed on as it came: the
-// turn the worker plays, and a hosted bot's delivery.
+// turn the worker plays, a hosted bot's delivery, and the end of the game.
 type event struct {
 	models.BotRunnerEvent
-	rawTurn     json.RawMessage
-	rawDelivery json.RawMessage
+	rawTurn      json.RawMessage
+	rawDelivery  json.RawMessage
+	rawGameEnded json.RawMessage
 }
 
 func decodeEvent(payload []byte) (event, error) {
@@ -105,10 +108,15 @@ func decodeEvent(payload []byte) (event, error) {
 		return event{}, fmt.Errorf("the event is not a bot runner event: %w", err)
 	}
 	var raw struct {
-		Delivery json.RawMessage `json:"delivery"`
+		Delivery  json.RawMessage `json:"delivery"`
+		GameEnded json.RawMessage `json:"game_ended"`
 	}
 	if err := json.Unmarshal(payload, &raw); err != nil {
 		return event{}, err
+	}
+	decoded.rawDelivery, decoded.rawGameEnded = raw.Delivery, raw.GameEnded
+	if decoded.Delivery == nil {
+		return decoded, nil
 	}
 	var rawDelivery struct {
 		Turn json.RawMessage `json:"turn"`
@@ -116,19 +124,28 @@ func decodeEvent(payload []byte) (event, error) {
 	if err := json.Unmarshal(raw.Delivery, &rawDelivery); err != nil {
 		return event{}, fmt.Errorf("the event's delivery is not a turn delivery: %w", err)
 	}
-	decoded.rawTurn, decoded.rawDelivery = rawDelivery.Turn, raw.Delivery
+	decoded.rawTurn = rawDelivery.Turn
 	return decoded, nil
 }
 
 // Handle plays the turn of one event: a package's turn, or a hosted bot's
-// delivery. An event that can't be played at all, such as one whose submit
-// URL isn't on the game's host, is an error and submits nothing.
+// delivery, or offers a bot the end of its game. An event that can't be
+// played at all, such as one whose submit URL isn't on the game's host, is
+// an error and submits nothing.
 func (runner *Runner) Handle(ctx context.Context, payload json.RawMessage) (Outcome, error) {
 	received, err := decodeEvent(payload)
 	if err != nil {
 		return Outcome{}, err
 	}
-	delivery := received.Delivery
+	switch {
+	case received.Delivery != nil && received.GameEnded != nil:
+		return Outcome{}, errors.New("the event has both a turn and the end of a game")
+	case received.GameEnded != nil:
+		return runner.endGame(ctx, received)
+	case received.Delivery == nil:
+		return Outcome{}, errors.New("the event has neither a turn nor the end of a game")
+	}
+	delivery := *received.Delivery
 	if err := checkSubmitURL(delivery.Submit.URL, runner.SubmitHost); err != nil {
 		return Outcome{}, err
 	}
@@ -156,27 +173,91 @@ func (runner *Runner) Handle(ctx context.Context, payload json.RawMessage) (Outc
 	return submitted("submitted", status, rejection), nil
 }
 
+// endGame offers a bot the end of its game (#413): it POSTs a hosted bot's
+// GameEndedDelivery to the game-ended sibling of its URL, and offers an
+// uploaded bot's worker the {"game_ended": ...} line, loading the package
+// first if needed. It submits nothing, and a bot that fails changes nothing:
+// the outcome only says what happened. The demo link must be on the game's
+// host, like a submit URL.
+func (runner *Runner) endGame(ctx context.Context, received event) (Outcome, error) {
+	ended := received.GameEnded
+	if err := checkSubmitURL(ended.Demo.URL, runner.SubmitHost); err != nil {
+		return Outcome{}, fmt.Errorf("the demo link: %w", err)
+	}
+	if ended.GameID == 0 {
+		return Outcome{}, errors.New("the event's game_ended has no game")
+	}
+	switch {
+	case received.Hosted != nil && received.Package != nil:
+		return Outcome{}, errors.New("the event has both a package and a hosted bot")
+	case received.Hosted != nil:
+		target, err := hostedbot.GameEndedURL(received.Hosted.URL)
+		if err != nil {
+			return Outcome{}, fmt.Errorf("the hosted bot's URL is refused: %w", err)
+		}
+		return runner.deliver(ctx, target, received.rawGameEnded)
+	case received.Package == nil:
+		return Outcome{}, errors.New("the event has neither a package nor a hosted bot")
+	case received.Limits == nil || received.Limits.LoadSeconds <= 0 || received.Limits.PlaySeconds <= 0:
+		return Outcome{}, errors.New("a package's event needs positive limits.load_seconds and limits.play_seconds")
+	}
+	if failure := runner.ensureLoaded(ctx, *received.Package, *received.Limits); failure != "" {
+		return runner.endFailed(ctx, ended, failure), nil
+	}
+	err := runner.loaded.endGame(ctx, received.rawGameEnded, seconds(received.Limits.PlaySeconds))
+	var botError *botAnswerError
+	switch {
+	case err == nil:
+		return Outcome{Outcome: "ended"}, nil
+	case errors.As(err, &botError):
+		return runner.endFailed(ctx, ended, "The uploaded bot failed at the end of its game: "+botError.message), nil
+	default:
+		stderr := runner.loaded.stderr.String()
+		runner.Unload()
+		return runner.endFailed(ctx, ended, withOutput("The uploaded bot "+err.Error()+" at the end of its game.", stderr)), nil
+	}
+}
+
+// endFailed is the outcome of an uploaded bot that failed at the end of its
+// game. It is only logged: the game has ended, so there is no game log line
+// to add it to.
+func (runner *Runner) endFailed(ctx context.Context, ended *models.GameEndedDelivery, reason string) Outcome {
+	reason = truncateLogMessage(reason)
+	runner.logger().WarnContext(ctx, "An uploaded bot failed at the end of its game", "game_id", ended.GameID, "reason", reason)
+	return Outcome{Outcome: "unended", Reason: reason}
+}
+
+// ensureLoaded loads the package with its worker, unless the instance has
+// it loaded already, within limits.LoadSeconds. It returns why it couldn't.
+func (runner *Runner) ensureLoaded(ctx context.Context, botPackage models.BotRunnerPackage, limits models.BotRunnerLimits) string {
+	if runner.loaded != nil && (runner.loaded.packageID != botPackage.ID || runner.loaded.stopped()) {
+		runner.Unload()
+	}
+	if runner.loaded != nil {
+		return ""
+	}
+	loadContext, cancel := context.WithTimeout(ctx, seconds(limits.LoadSeconds))
+	loaded, err := runner.load(loadContext, botPackage)
+	cancel()
+	if err != nil {
+		runner.Unload()
+		var started *loadError
+		stderr := ""
+		if errors.As(err, &started) {
+			stderr = started.stderr
+		}
+		return withOutput("The uploaded bot could not be loaded: "+err.Error(), stderr)
+	}
+	runner.loaded = loaded
+	return ""
+}
+
 // play plays the turn with the package's worker, loading the package first
 // if the instance has another one, or none. It returns the worker's result,
 // or why the bot passes.
 func (runner *Runner) play(ctx context.Context, botPackage models.BotRunnerPackage, limits models.BotRunnerLimits, turn json.RawMessage) (json.RawMessage, string) {
-	if runner.loaded != nil && (runner.loaded.packageID != botPackage.ID || runner.loaded.stopped()) {
-		runner.Unload()
-	}
-	if runner.loaded == nil {
-		loadContext, cancel := context.WithTimeout(ctx, seconds(limits.LoadSeconds))
-		loaded, err := runner.load(loadContext, botPackage)
-		cancel()
-		if err != nil {
-			runner.Unload()
-			var started *loadError
-			stderr := ""
-			if errors.As(err, &started) {
-				stderr = started.stderr
-			}
-			return nil, withOutput("The uploaded bot could not be loaded, so it passes this turn: "+err.Error(), stderr)
-		}
-		runner.loaded = loaded
+	if failure := runner.ensureLoaded(ctx, botPackage, limits); failure != "" {
+		return nil, strings.Replace(failure, "could not be loaded:", "could not be loaded, so it passes this turn:", 1)
 	}
 	answer, err := runner.loaded.play(ctx, turn, seconds(limits.PlaySeconds))
 	var botError *botAnswerError
@@ -273,7 +354,7 @@ func (runner *Runner) logger() *slog.Logger {
 	return slog.Default()
 }
 
-// deliver posts a hosted bot's delivery to its URL, and does nothing more:
+// deliver posts a hosted bot's delivery, or the end of its game, to its URL, and does nothing more:
 // the bot submits its answer itself. The URL must pass hostedbot's rules
 // again, and the post goes through hostedbot.Client, which connects only to
 // public addresses on port 443, checking the address it really connects to,

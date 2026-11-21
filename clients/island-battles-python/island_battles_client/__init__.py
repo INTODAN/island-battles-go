@@ -3,6 +3,9 @@
 from ._generated import (
     BotTurn,
     BotTurnResult,
+    Demo,
+    DemoLink,
+    GameEndedDelivery,
     GenerationLogLine,
     PublicGenerationCommand,
 )
@@ -40,6 +43,7 @@ from .errors import (
     TeamOutError,
     UpgradeMaxLevelError,
 )
+from .game_end import GameEnded, download_demo
 from .models import (
     NEUTRAL_TEAM_COLOR,
     BoardEntity,
@@ -69,9 +73,13 @@ __all__ = [
     "CastleNotOwnedError",
     "Clash",
     "ClashParticipant",
+    "Demo",
+    "DemoLink",
     "GameAuthenticationError",
     "GameClientClosedError",
     "GameCommandError",
+    "GameEnded",
+    "GameEndedDelivery",
     "GameEndedError",
     "GameError",
     "GameOutcome",
@@ -95,6 +103,7 @@ __all__ = [
     "burst_castle",
     "burst_potential",
     "can_burst",
+    "download_demo",
     "log_line",
     "logger",
     "next_upgrade_cost",

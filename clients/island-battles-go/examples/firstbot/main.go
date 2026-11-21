@@ -1,6 +1,6 @@
 // Command firstbot is the first bot of the README: it sends one soldier from
-// its first castle with soldiers to the first enemy castle, and counts its
-// turns in its memory.
+// its first castle with soldiers to the first enemy castle, counts its turns
+// in its memory, and logs how each game ended.
 package main
 
 import (
@@ -33,6 +33,15 @@ attack:
 	return result, err
 }
 
+// gameEnded hears how each game ended, with the memory of its last turn. It
+// could also save the game's demo: islandbattles.DownloadDemo(ctx, ended.Demo).
+func gameEnded(ctx context.Context, ended islandbattles.GameEndedDelivery) error {
+	var remembered memory
+	_ = ended.Memory.Decode(&remembered)
+	islandbattles.Logger(ctx).Info("the game ended", "outcome", ended.Outcome.Summary, "turns", remembered.Turns)
+	return nil
+}
+
 func main() {
-	islandbattles.Main(play)
+	islandbattles.Main(play, islandbattles.OnGameEnd(gameEnded))
 }

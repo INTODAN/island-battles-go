@@ -8,16 +8,22 @@ import "time"
 // backend/cmd/bot-runner-native (native packages, and hosted bots). Both
 // runners' tests read the example in backend/botrunner/testdata/event.json.
 //
+// An event carries exactly one of Delivery, a turn, and GameEnded, the end
+// of the bot's game (#413).
+//
 // An uploaded bot's event has Package and Limits: the runner loads the
 // package, plays Delivery.Turn with it and submits the answer to
-// Delivery.Submit itself, or a pass when the bot fails. A hosted bot's event
-// has Hosted instead, which only the native runner takes: it POSTs Delivery
-// to the bot's URL and does nothing more, since the bot submits for itself.
+// Delivery.Submit itself, or a pass when the bot fails; or it offers the
+// worker GameEnded and submits nothing. A hosted bot's event has Hosted
+// instead, which only the native runner takes: it POSTs Delivery to the bot's
+// URL, or GameEnded to the URL's sibling path game-ended (hostedbot.GameEndedURL),
+// and does nothing more, since the bot submits for itself.
 type BotRunnerEvent struct {
-	Package  *BotRunnerPackage `json:"package,omitempty"`
-	Hosted   *BotRunnerHosted  `json:"hosted,omitempty"`
-	Delivery TurnDelivery      `json:"delivery"`
-	Limits   *BotRunnerLimits  `json:"limits,omitempty"`
+	Package   *BotRunnerPackage  `json:"package,omitempty"`
+	Hosted    *BotRunnerHosted   `json:"hosted,omitempty"`
+	Delivery  *TurnDelivery      `json:"delivery,omitempty"`
+	GameEnded *GameEndedDelivery `json:"game_ended,omitempty"`
+	Limits    *BotRunnerLimits   `json:"limits,omitempty"`
 }
 
 // BotRunnerPackage is the uploaded package a runner plays: the ready
@@ -35,7 +41,8 @@ type BotRunnerPackage struct {
 
 // BotRunnerHosted is a hosted bot: the player's own server.
 type BotRunnerHosted struct {
-	// URL is where the runner POSTs the TurnDelivery.
+	// URL is where the runner POSTs the TurnDelivery. It POSTs the
+	// GameEndedDelivery to hostedbot.GameEndedURL of it.
 	URL string `json:"url"`
 }
 
@@ -50,6 +57,12 @@ type BotRunnerLimits struct {
 // DefaultBotRunnerLimits are the owner's budget for a turn (#112): 2 seconds
 // of play, and up to 10 seconds to load a package.
 var DefaultBotRunnerLimits = BotRunnerLimits{LoadSeconds: 10, PlaySeconds: 2}
+
+// GameEndedBotRunnerLimits are an uploaded bot's limits for the end of its
+// game: up to 10 seconds to load a package that isn't loaded, and 5 for the
+// bot's game-end callback, such as to download the demo. Both fit the
+// runners' 20-second timeout.
+var GameEndedBotRunnerLimits = BotRunnerLimits{LoadSeconds: 10, PlaySeconds: 5}
 
 // BotRunnerName names one of the two runners: python plays python packages,
 // and native plays native packages and delivers hosted bots' turns.

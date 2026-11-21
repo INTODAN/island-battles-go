@@ -284,13 +284,20 @@ func (state generationState) validate() error {
 		return err
 	}
 	if state.Outcome != nil {
-		switch state.Outcome.Reason {
-		case LastTeamStanding, AllEliminated, GenerationCap, TurnTimeout, Abandoned:
-		default:
-			return fmt.Errorf("unknown outcome reason %q", state.Outcome.Reason)
+		if err := state.Outcome.validate(); err != nil {
+			return err
 		}
 	}
 	return validateGeneration(state.Generation, "generation")
+}
+
+// validate reports an outcome whose reason the SDK doesn't know.
+func (outcome GameOutcome) validate() error {
+	switch outcome.Reason {
+	case LastTeamStanding, AllEliminated, GenerationCap, TurnTimeout, Abandoned:
+		return nil
+	}
+	return fmt.Errorf("unknown outcome reason %q", outcome.Reason)
 }
 
 // parseEvent reads a publication of the player's channel: a GenerationEvent,

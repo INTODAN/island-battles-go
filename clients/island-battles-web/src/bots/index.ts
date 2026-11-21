@@ -3,6 +3,7 @@ import type { Realtime } from "../realtime";
 import { createStore, type ReadableStore } from "../realtime/store";
 import {
   defaultBotPort,
+  deliverGameEnded,
   deliverTurn,
   type GenerationState,
   type RelayedBot,
@@ -13,7 +14,9 @@ export {
   BotError,
   checkBotHealth,
   defaultBotPort,
+  deliverGameEnded,
   deliverTurn,
+  type GameEndedDelivery,
   localhostBotOrigin,
   nextFreePort,
   parseBotPort,
@@ -51,7 +54,10 @@ function relayCalls(options: {
   fetch?: typeof fetch;
 }): (
   seatId?: string,
-) => Pick<RelayDeps, "loadDelivery" | "applyDeadline" | "now" | "schedule"> {
+) => Pick<
+  RelayDeps,
+  "loadDelivery" | "loadGameEnded" | "applyDeadline" | "now" | "schedule"
+> {
   const { realtime, lobbyId } = options;
   const { gameApi } = createApiClients({
     getAccessToken: () => realtime.session.get()?.accessToken,
@@ -71,6 +77,19 @@ function relayCalls(options: {
       if (!data) throw new Error("The server sent no turn delivery.");
       return data;
     },
+    async loadGameEnded() {
+      const { data } = await gameApi.GET(
+        "/game/from-lobby/{lobby_id}/game-ended-delivery",
+        {
+          params: {
+            path: { lobby_id: lobbyId },
+            ...(seatId === undefined ? {} : { query: { player_id: seatId } }),
+          },
+        },
+      );
+      if (!data) throw new Error("The server sent no game-ended delivery.");
+      return data;
+    },
     async applyDeadline() {
       await gameApi.POST("/game/from-lobby/{lobby_id}/deadline", {
         params: { path: { lobby_id: lobbyId } },
@@ -88,7 +107,8 @@ function relayCalls(options: {
  * Starts the relay for the signed-in player's game in `lobbyId`, with the
  * browser's `fetch` and the realtime session's token. The game store must be
  * followed (`realtime.followGame`) for the relay to see turns. It delivers to
- * the port of the player's localhost bot, `GenerationState.bot.port`.
+ * the port of the player's localhost bot, `GenerationState.bot.port`, and
+ * tells it there when the game ends.
  */
 export function startBotRelay(options: {
   realtime: Realtime;
@@ -104,6 +124,10 @@ export function startBotRelay(options: {
     ...calls(),
     deliver: (delivery) =>
       deliverTurn(delivery, { port: game.get()?.bot.port ?? defaultBotPort }),
+    deliverGameEnded: (delivery) =>
+      deliverGameEnded(delivery, {
+        port: game.get()?.bot.port ?? defaultBotPort,
+      }),
     ...(options.standDown === undefined
       ? {}
       : { standDown: options.standDown }),
@@ -113,8 +137,8 @@ export function startBotRelay(options: {
 /**
  * Starts the player's own relay and one relay per localhost bot seat that they added as the
  * host, `GenerationState.relayed_bots`: each reads its seat's turn with
- * `player_id` and delivers it to the seat's own port. Only the player's own relay asks for
- * turn deadlines.
+ * `player_id` and delivers it to the seat's own port, as it does the seat's game-ended delivery
+ * when the game ends. Only the player's own relay asks for turn deadlines.
  */
 export function startBotRelays(options: {
   realtime: Realtime;
@@ -152,6 +176,8 @@ export function startBotRelays(options: {
             game,
             ...calls(bot.player_id),
             deliver: (delivery) => deliverTurn(delivery, { port: bot.port }),
+            deliverGameEnded: (delivery) =>
+              deliverGameEnded(delivery, { port: bot.port }),
             seat: true,
           }),
         }

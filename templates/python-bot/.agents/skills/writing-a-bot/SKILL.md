@@ -37,6 +37,10 @@ SDK releases with bursts also have `burst_castle(castle_id, amount)`, `burst_pot
 
 `NEUTRAL_TEAM_COLOR` is `0`. The helpers validate their arguments and raise `pydantic.ValidationError` for bad ones (zero soldiers, unknown upgrade type) before anything is sent.
 
+## When the game ends (optional)
+
+SDK releases with #413 call an optional `game_ended(delivery)` function in `bot.py`, next to `play`, once the game has its outcome, under `serve`, an uploaded package and `scripts/run.sh` alike. `delivery` is a `GameEndedDelivery`: `outcome` (`reason`, `winner_team_color`, `summary`), the final `generation`, `team_color`, `turn_number`, `memory`, and `demo`, a private link that downloads the game's demo until `demo.expires_at`. It can't change the game, which is over; use it to log the result or save the demo for study with `download_demo(delivery, "demo.json")`. Keep it quick: an uploaded bot has 5 seconds. A bot without it plays the same.
+
 ## Why the server rejects a result
 
 The server checks the commands in order against the board and rejects the **whole result** (the turn stays open and `scripts/run.sh` stops; through `serve` the lobby page shows the error) if any one is invalid:

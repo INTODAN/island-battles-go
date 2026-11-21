@@ -152,12 +152,30 @@ func TestTypesMatchTheOpenAPIDocument(t *testing.T) {
 	}
 }
 
-// A TurnDelivery, which serve reads, has exactly the properties of the
-// document's, besides the $schema link the server adds, and every one is
-// required.
-func TestTurnDeliveryMatchesTheOpenAPIDocument(t *testing.T) {
-	schemas, _ := loadSchemas(t)
-	for name, goType := range map[string]reflect.Type{"TurnDelivery": reflect.TypeFor[TurnDelivery](), "TurnSubmit": reflect.TypeFor[TurnSubmit]()} {
+// deliveryTypes are the SDK's types for the deliveries that serve, worker
+// and run read: a turn's, and a game's end.
+var deliveryTypes = map[string]reflect.Type{
+	"TurnDelivery":      reflect.TypeFor[TurnDelivery](),
+	"TurnSubmit":        reflect.TypeFor[TurnSubmit](),
+	"GameEndedDelivery": reflect.TypeFor[GameEndedDelivery](),
+	"DemoLink":          reflect.TypeFor[DemoLink](),
+}
+
+// A TurnDelivery and a GameEndedDelivery, which serve, worker and run read,
+// have exactly the properties of the document's, besides the $schema link
+// the server adds, and every one is required. Every schema they reference
+// has an SDK type.
+func TestDeliveriesMatchTheOpenAPIDocument(t *testing.T) {
+	schemas, rawSchemas := loadSchemas(t)
+	for name, goType := range deliveryTypes {
+		for _, referenced := range references(rawSchemas[name]) {
+			_, turnType := schemaTypes[referenced]
+			_, clientType := clientSchemaTypes[referenced]
+			_, deliveryType := deliveryTypes[referenced]
+			if !turnType && !clientType && !deliveryType {
+				t.Errorf("%s references %s, which has no SDK type", name, referenced)
+			}
+		}
 		current, found := schemas[name]
 		if !found {
 			t.Fatalf("the document has no schema %s", name)

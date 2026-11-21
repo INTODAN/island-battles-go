@@ -36,18 +36,31 @@ async function until(predicate) {
   assert.fail("expected event did not arrive");
 }
 
-function relay(context, { bot = async () => {}, state = stateOf(), delivery = null, ...options } = {}) {
+// The server's game-ended delivery for a state.
+const endedOf = (state) => ({
+  game_id: state.game_id, team_color: state.team_color, turn_number: state.generation_id, outcome: state.outcome,
+  generation: state.generation, memory: state.memory,
+  demo: { url: `https://island-battles.example.org/game/${state.game_id}/demo?token=ibdt1.x`, expires_at: "2030-01-08T00:00:00Z" },
+});
+
+function relay(context, { bot = async () => {}, state = stateOf(), delivery = null, ended = null, endBot = async () => {}, ...options } = {}) {
   const subscription = new Subscription();
   const requests = [];
   const deliveries = [];
+  const ends = [];
   const statuses = [];
   let current = state;
   const player = new ExamplePlayer({
     lobbyID: "room", playerID: "player", subscription, demo: false, botRetryDelay: 20, retryDelay: 20,
     onStatus: (title, detail) => statuses.push({ title, detail }),
     deliver: async (sent) => { deliveries.push(sent); return bot(sent); },
+    deliverEnd: async (sent, port) => { ends.push({ sent, port }); return endBot(sent, port); },
     fetcher: async (url, init) => {
       requests.push({ url, method: init.method, headers: init.headers, body: init.body && JSON.parse(init.body) });
+      if (url.endsWith("/game-ended-delivery")) {
+        const answer = ended ? ended(player.state) : { status: 200, body: endedOf(player.state) };
+        return { ok: answer.status === 200, status: answer.status, json: async () => answer.body };
+      }
       if (url.endsWith("/turn-delivery")) {
         const answer = delivery ? delivery(player.state) : { status: 200, body: deliveryOf(player.state) };
         return { ok: answer.status === 200, status: answer.status, json: async () => answer.body };
@@ -60,7 +73,8 @@ function relay(context, { bot = async () => {}, state = stateOf(), delivery = nu
   const reads = () => requests.filter((request) => request.url.endsWith("/turn-delivery"));
   const submissions = () => requests.filter((request) => request.url === "/generation/commands");
   const deadlines = () => requests.filter((request) => request.url.endsWith("/deadline"));
-  return { player, subscription, requests, deliveries, statuses, reads, submissions, deadlines, setState: (next) => { current = next; } };
+  const endReads = () => requests.filter((request) => request.url.includes("/game-ended-delivery"));
+  return { player, subscription, requests, deliveries, ends, statuses, reads, submissions, deadlines, endReads, setState: (next) => { current = next; } };
 }
 
 test("a localhost bot gets the server's turn delivery, and the page submits nothing", async (context) => {
@@ -195,4 +209,75 @@ test("a server that doesn't answer the delivery read is asked again", async (con
   player.receive(stateOf());
   await until(() => deliveries.length === 1);
   assert.equal(reads, 2);
+});
+
+const OUTCOME = { reason: "last_team_standing", winner_team_color: 2, summary: "Blue wins" };
+
+test("once the game has an outcome, the localhost bot gets its game-ended delivery once, on its port", async (context) => {
+  const { player, ends, endReads, statuses } = relay(context);
+  player.receive(stateOf());
+  await until(() => !player.inFlight && player.delivered === "1:1");
+  const final = stateOf({ generation_id: 2, outcome: OUTCOME, bot: { kind: "localhost", port: 41417 } });
+  player.receive(final);
+  await until(() => ends.length === 1);
+  assert.equal(endReads()[0].url, "/game/from-lobby/room/game-ended-delivery");
+  assert.equal(endReads()[0].method, "GET");
+  assert.equal(endReads()[0].headers.Authorization, undefined);
+  assert.deepEqual(ends[0], { sent: endedOf(final), port: 41417 });
+  // The final state again, or a deadline answer for it, tells the bot nothing more.
+  player.receive(final);
+  player.receive({ ...final, outcome: undefined });
+  await delay(30);
+  assert.equal(endReads().length, 1);
+  assert.equal(ends.length, 1);
+  assert.equal(statuses.at(-1).title, "Game over");
+});
+
+test("a bot whose team was out, or a page that opens after the end, still tells the bot", async (context) => {
+  const { player, ends, reads } = relay(context);
+  player.receive(stateOf({ generation_id: 9, outcome: OUTCOME, submitted: true, team_color: 4 }));
+  await until(() => ends.length === 1);
+  assert.equal(ends[0].port, 41414, "the default port, when the state names none");
+  assert.equal(reads().length, 0, "the final generation has no turn");
+});
+
+test("a player whose bot isn't a localhost bot, or a demo's player, tells nothing at the end", async (context) => {
+  for (const bot of [{ kind: "default", level: 2 }, { kind: "hosted", host: "bot.example.com" }, { kind: "uploaded" }, { kind: "manual" }]) {
+    const { player, ends, endReads } = relay(context);
+    player.receive(stateOf({ bot, outcome: OUTCOME }));
+    await delay(20);
+    assert.equal(endReads().length, 0, bot.kind);
+    assert.equal(ends.length, 0, bot.kind);
+  }
+  const { player, ends, endReads } = relay(context, { demo: true });
+  player.receive(stateOf({ outcome: OUTCOME }));
+  await delay(20);
+  assert.equal(endReads().length, 0);
+  assert.equal(ends.length, 0);
+});
+
+test("a failure to tell the bot that the game ended is ignored quietly and not retried", async (context) => {
+  const debug = context.mock.method(console, "debug", () => {});
+  const cases = [
+    { endBot: async () => { throw new BotError("unreachable", "Your bot is not reachable on 127.0.0.1:41414."); } },
+    { endBot: async () => { throw new BotError("refused", "Your bot refused the end of the game (HTTP 404)."); } },
+    { ended: () => ({ status: 409, body: { type: "urn:island-battles:problem:game-not-ended", detail: "the game has not ended" } }) },
+    { ended: () => ({ status: 404, body: { detail: "Not Found" } }) },
+  ];
+  for (const options of cases) {
+    const { player, endReads, statuses } = relay(context, options);
+    player.receive(stateOf({ outcome: OUTCOME }));
+    await until(() => debug.mock.callCount() === cases.indexOf(options) + 1);
+    await delay(30);
+    assert.equal(endReads().length, 1);
+    assert.equal(statuses.at(-1).title, "Game over");
+  }
+});
+
+test("another game's game-ended delivery is not posted", async (context) => {
+  const { player, ends, endReads } = relay(context, { ended: (state) => ({ status: 200, body: endedOf({ ...state, game_id: 99 }) }) });
+  player.receive(stateOf({ outcome: OUTCOME }));
+  await until(() => endReads().length === 1);
+  await delay(20);
+  assert.equal(ends.length, 0);
 });

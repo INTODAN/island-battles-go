@@ -13,7 +13,10 @@ import (
 	"time"
 
 	"github.com/INTODAN/mpl/domain"
+	"net/url"
+
 	"islandBattles/backend/dal"
+	"islandBattles/backend/demotoken"
 	"islandBattles/backend/internal/testutils"
 	"islandBattles/backend/models"
 	"islandBattles/backend/services"
@@ -38,12 +41,16 @@ type invocation struct {
 type fakeRunners struct {
 	database *gorm.DB
 	tokens   *submittoken.Signer
+	demos    *demotoken.Signer
 	mutex    sync.Mutex
 	events   []invocation
 	failing  map[string]bool
 }
 
 func (runners *fakeRunners) Invoke(ctx context.Context, runner models.BotRunnerName, event models.BotRunnerEvent) error {
+	if event.GameEnded != nil {
+		return runners.invokeGameEnded(ctx, runner, event)
+	}
 	claims, err := runners.tokens.Verify(event.Delivery.Submit.Token, time.Now())
 	if err != nil {
 		return err
@@ -57,6 +64,33 @@ func (runners *fakeRunners) Invoke(ctx context.Context, runner models.BotRunnerN
 		return errors.New("TooManyRequestsException: Rate Exceeded")
 	}
 	return nil
+}
+
+// invokeGameEnded records the end of a game, whose event is committed once
+// the game's outcome is visible outside the transaction that stored it.
+func (runners *fakeRunners) invokeGameEnded(ctx context.Context, runner models.BotRunnerName, event models.BotRunnerEvent) error {
+	claims, err := demoClaims(runners.demos, event.GameEnded.Demo)
+	if err != nil {
+		return err
+	}
+	game, err := dal.FindGame(runners.database.WithContext(ctx), claims.GameID)
+	committed := err == nil && game.Outcome != nil
+	runners.mutex.Lock()
+	defer runners.mutex.Unlock()
+	runners.events = append(runners.events, invocation{runner: runner, event: event, committed: committed})
+	if runners.failing[claims.PlayerID] {
+		return errors.New("TooManyRequestsException: Rate Exceeded")
+	}
+	return nil
+}
+
+// demoClaims verifies the demo token of a demo link.
+func demoClaims(demos *demotoken.Signer, link models.DemoLink) (demotoken.Claims, error) {
+	parsed, err := url.Parse(link.URL)
+	if err != nil {
+		return demotoken.Claims{}, err
+	}
+	return demos.Verify(parsed.Query().Get("token"), time.Now())
 }
 
 // take returns the events sent since the last take.
@@ -75,13 +109,17 @@ func (fakeLinks) PresignDownload(_ context.Context, key string, expires time.Dur
 	return fmt.Sprintf("https://packages.example/%s?expires=%s", key, expires), nil
 }
 
-const serverBotSubmitURL = "https://island-battles.example.org/generation/commands"
+const (
+	serverBotOrigin    = "https://island-battles.example.org"
+	serverBotSubmitURL = serverBotOrigin + "/generation/commands"
+)
 
 // serverBotGame is a started game with bots that the server plays.
 type serverBotGame struct {
 	database *gorm.DB
 	runners  *fakeRunners
 	tokens   *submittoken.Signer
+	demos    *demotoken.Signer
 	service  *services.GenerationService
 	lobbyID  string
 	gameID   uint
@@ -99,8 +137,14 @@ func startServerBotGame(t *testing.T, packages []models.BotPackage, bots []servi
 		t.Fatal(err)
 	}
 	game := serverBotGame{database: database, tokens: tokens, lobbyID: uuid.NewString()}
-	game.runners = &fakeRunners{database: database, tokens: tokens, failing: map[string]bool{}}
-	sender := &services.TurnSender{Runners: game.runners, Packages: fakeLinks{}, Tokens: tokens, SubmitURL: serverBotSubmitURL}
+	demos, err := demotoken.New([]byte("server-bot-test-secret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	game.demos = demos
+	game.runners = &fakeRunners{database: database, tokens: tokens, demos: demos, failing: map[string]bool{}}
+	sender := &services.TurnSender{Runners: game.runners, Packages: fakeLinks{}, Tokens: tokens, SubmitURL: serverBotSubmitURL,
+		Origin: serverBotOrigin, Demos: services.DemoLinks{Tokens: demos}}
 	publisher := &testutils.RecordedPublisher{}
 	game.service = &services.GenerationService{Database: database, Publisher: publisher, Bots: sender}
 	for _, record := range packages {
@@ -385,9 +429,11 @@ func TestOnlyStandingUnfinishedServerBotsGetTheirTurn(t *testing.T) {
 	if err != nil || !slices.Equal(sent, []string{"hosted", "uploaded"}) {
 		t.Fatalf("sent %v, %v", sent, err)
 	}
-	// A finished game sends nothing, nor does a server without a sender.
+	// A finished game sends every hosted and uploaded bot the end of its
+	// game instead, whatever became of its team (#413). A server without a
+	// sender sends nothing.
 	game.Outcome = &models.GameOutcome{Reason: models.GameOutcomeLastTeamStanding}
-	if sent, err := services.SentTurnPlayers(sender, game, generation, players, inputs); err != nil || len(sent) != 0 {
+	if sent, err := services.SentTurnPlayers(sender, game, generation, players, inputs); err != nil || !slices.Equal(sent, []string{"hosted", "uploaded", "eliminated", "completed"}) {
 		t.Fatalf("a finished game sent %v, %v", sent, err)
 	}
 	game.Outcome = nil
@@ -403,4 +449,103 @@ func mustSigner(t *testing.T) *submittoken.Signer {
 		t.Fatal(err)
 	}
 	return signer
+}
+
+// When a game ends, every hosted and uploaded bot on its roster is told,
+// once the outcome has committed, with a demo link that downloads the game's
+// full demo as its player sees it, and works for no other game (#413).
+func TestTheEndOfAGameIsSentToEveryServerRunBot(t *testing.T) {
+	uploaded := pythonPackage()
+	// The third player's localhost bot never answers, so the turn times out.
+	game := startServerBotGame(t, []models.BotPackage{uploaded}, []services.ServerBot{{PackageID: uploaded.PackageID}, {URL: "https://bot.example.org/bots/turn"}, {}})
+	for _, invoked := range game.runners.take() {
+		game.submit(t, invoked.event)
+	}
+	if pending := game.runners.take(); len(pending) != 0 {
+		t.Fatalf("a turn that waits for the localhost bot sent %d", len(pending))
+	}
+	final := game.latestGeneration(t)
+	game.service.Now = func() time.Time { return time.Now().Add(time.Minute) }
+	state, err := game.service.ApplyDeadline(context.Background(), game.players[2], game.lobbyID)
+	if err != nil || state.Outcome == nil || state.Outcome.Reason != models.GameOutcomeTurnTimeout {
+		t.Fatalf("the deadline: %+v, %v", state.Outcome, err)
+	}
+	sent := game.runners.take()
+	if len(sent) != 2 {
+		t.Fatalf("sent %d events, want one per server-run bot", len(sent))
+	}
+	byPlayer := map[string]invocation{}
+	for _, invoked := range sent {
+		ended := invoked.event.GameEnded
+		if ended == nil || invoked.event.Delivery != nil || !invoked.committed {
+			t.Fatalf("sent %+v", invoked)
+		}
+		claims, err := demoClaims(game.demos, ended.Demo)
+		if err != nil || claims.GameID != game.gameID {
+			t.Fatalf("the demo link %q: %+v, %v", ended.Demo.URL, claims, err)
+		}
+		wantURL := fmt.Sprintf("%s/game/%d/demo?token=", serverBotOrigin, game.gameID)
+		if !strings.HasPrefix(ended.Demo.URL, wantURL) || !ended.Demo.ExpiresAt.Equal(final.CreatedAt.Add(services.DefaultDemoLinkLifetime).UTC().Truncate(time.Second)) {
+			t.Fatalf("the demo link %+v", ended.Demo)
+		}
+		if ended.GameID != game.gameID || ended.TurnNumber != final.Number || ended.Generation.ID != final.ID || ended.Outcome.Reason != models.GameOutcomeTurnTimeout {
+			t.Fatalf("game_ended %+v", ended)
+		}
+		byPlayer[claims.PlayerID] = invoked
+	}
+	uploadedEvent, hostedEvent := byPlayer[game.players[0].PlayerID], byPlayer[game.players[1].PlayerID]
+	if uploadedEvent.runner != models.BotRunnerPython || uploadedEvent.event.Package == nil || uploadedEvent.event.Limits == nil || *uploadedEvent.event.Limits != models.GameEndedBotRunnerLimits {
+		t.Fatalf("the uploaded bot's event %+v", uploadedEvent)
+	}
+	if hostedEvent.runner != models.BotRunnerNative || hostedEvent.event.Hosted == nil || hostedEvent.event.Hosted.URL != "https://bot.example.org/bots/turn" {
+		t.Fatalf("the hosted bot's event %+v", hostedEvent)
+	}
+
+	// The demo token stands for its player on its game, and the demo holds
+	// every team's logs and the outcome.
+	claims, _ := demoClaims(game.demos, hostedEvent.event.GameEnded.Demo)
+	principal, err := game.service.AuthorizeDemoToken(context.Background(), claims)
+	if err != nil || principal.PlayerID != game.players[1].PlayerID {
+		t.Fatalf("authorize: %+v, %v", principal, err)
+	}
+	demo, err := game.service.GameDemo(context.Background(), principal, game.gameID)
+	if err != nil || demo.Outcome == nil || demo.GameID != game.gameID || len(demo.Frames) != final.Number {
+		t.Fatalf("the demo: %d frames, outcome %+v, %v", len(demo.Frames), demo.Outcome, err)
+	}
+	for _, frame := range demo.Logs {
+		if len(frame.HiddenTeamColors) != 0 {
+			t.Fatalf("a finished game's demo hides teams: %+v", frame.HiddenTeamColors)
+		}
+	}
+	claims.PlayerID = uuid.NewString()
+	if _, err := game.service.AuthorizeDemoToken(context.Background(), claims); !errors.Is(err, demotoken.ErrInvalid) {
+		t.Fatalf("a player off the roster: %v", err)
+	}
+
+	// The localhost bot's client reads the same end, for its bot.
+	links := services.DemoLinks{Tokens: game.demos}
+	ended, err := game.service.GameEndedDelivery(context.Background(), game.players[2], game.lobbyID, "", links, serverBotOrigin)
+	if err != nil || ended.TeamColor != 3 || ended.Outcome.Reason != models.GameOutcomeTurnTimeout {
+		t.Fatalf("the localhost bot's end: %+v, %v", ended, err)
+	}
+	if claims, err := demoClaims(game.demos, ended.Demo); err != nil || claims.PlayerID != game.players[2].PlayerID {
+		t.Fatalf("its demo link: %+v, %v", claims, err)
+	}
+	// Asking again sends nothing more.
+	if _, err := game.service.ApplyDeadline(context.Background(), game.players[2], game.lobbyID); err != nil {
+		t.Fatal(err)
+	}
+	if again := game.runners.take(); len(again) != 0 {
+		t.Fatalf("the end was sent again: %d", len(again))
+	}
+}
+
+// A running game's end can't be read yet.
+func TestTheEndOfARunningGameIsAConflict(t *testing.T) {
+	game := startServerBotGame(t, nil, []services.ServerBot{{URL: "https://bot.example.org/turn"}, {}})
+	_, err := game.service.GameEndedDelivery(context.Background(), game.players[1], game.lobbyID, "", services.DemoLinks{Tokens: game.demos}, serverBotOrigin)
+	var rejection *services.GenerationError
+	if !errors.As(err, &rejection) || rejection.Status != 409 || rejection.Type != services.GameNotEndedProblemType {
+		t.Fatalf("got %v", err)
+	}
 }

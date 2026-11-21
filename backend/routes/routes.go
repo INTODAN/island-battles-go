@@ -120,6 +120,31 @@ func SetupGameRoutes(api huma.API, game *handlers.LobbyGame) {
 			Content: map[string]*huma.MediaType{"application/json": {Schema: demo}},
 		}},
 	}, game.Demo)
+	api.OpenAPI().Components.SecuritySchemes[DemoTokenScheme] = &huma.SecurityScheme{Type: "apiKey", In: "query", Name: "token",
+		Description: "A demo token, which starts with ibdt1., in the token query parameter, as the link GameEndedDelivery.demo.url carries it; Authorization: Bearer ibdt1.… works too. It authorizes GET /game/{id}/demo of its one game, as its one roster player sees it, and nothing else, until GameEndedDelivery.demo.expires_at, when game retention deletes the game."}
+	huma.Register(api, huma.Operation{
+		OperationID: "getIslandGameDemo", Path: "/game/{id}/demo", Method: http.MethodGet,
+		Summary: "Save a game, by its ID, as a demo file, with a demo link or for a roster player",
+		Description: "The demo of GET /game/from-lobby/{lobby_id}/demo, the same file, for a game named by its ID. A bot that runs outside the backend has no player token and doesn't know the lobby, so the end of its game, GameEndedDelivery, carries demo.url: this path with a read-only demo token in its token query parameter, which downloads the game's demo as the bot's player sees it, once the game has ended with every team's game log lines and the outcome, and nothing else. " +
+			"The demo token can also go in Authorization: Bearer ibdt1.…, and a roster player's player token works too. A demo token of another game, an expired or altered one, or one of a player no longer on the roster is 401. Packed with gzip when Accept-Encoding allows it. The game is deleted 7 days after its last generation by default, when the link expires; then this returns 404.",
+		Tags: []string{"Island Battles"}, Security: []map[string][]string{{DemoTokenScheme: {}}, {PlayerTokenScheme: {}}},
+		Responses: map[string]*huma.Response{"200": {
+			Description: "The demo file.",
+			Headers: map[string]*huma.Param{
+				"Content-Disposition": {Description: "attachment, with the demo's file name.", Schema: &huma.Schema{Type: huma.TypeString}},
+				"Content-Encoding":    {Description: "gzip when the request's Accept-Encoding allows it; absent otherwise.", Schema: &huma.Schema{Type: huma.TypeString}},
+			},
+			Content: map[string]*huma.MediaType{"application/json": {Schema: demo}},
+		}},
+	}, game.GameDemo)
+	huma.Register(api, huma.Operation{
+		OperationID: "getIslandLobbyGameEndedDelivery", Path: "/game/from-lobby/{lobby_id}/game-ended-delivery", Method: http.MethodGet,
+		Summary: "Read the end of your game, or a localhost bot seat's that you relay, as a delivery for the bot, with a demo link",
+		Description: "Requires a place on the game's frozen roster; the lobby is not consulted. Once the game has an outcome, returns it as a GameEndedDelivery for the caller's bot: the outcome, the final generation as the bot's team sees it, the memory the bot sent last, and demo.url, a self-contained link to GET /game/{id}/demo with a read-only demo token. " +
+			"The server sends the same delivery to every hosted and uploaded bot on the roster when the game ends; a game client reads this to relay it to a localhost bot, island-battles-bot serve, at POST /game-ended, which answers 2xx. With player_id, the player who added a localhost bot seat reads the seat's, as for GET /game/from-lobby/{lobby_id}/turn-delivery; any other player_id is 403. " +
+			"Like every game request, it first ends the turn once its deadline has passed. While the game runs it returns 409 with problem type " + services.GameNotEndedProblemType + ". Each call issues a new link that expires at the same time." + newestGame,
+		Tags: []string{"Island Battles"}, Security: playerTokenSecurity,
+	}, game.GameEndedDelivery)
 	huma.Register(api, huma.Operation{
 		OperationID: "watchIslandLobbyGeneration", Path: "/game/from-lobby/{lobby_id}/watch", Method: http.MethodGet,
 		Summary: "Read the current generation of a lobby's game for a watcher",
@@ -225,6 +250,8 @@ func SetupGameRoutes(api huma.API, game *handlers.LobbyGame) {
 	botTurnResult := registry.SchemaFromRef(registry.Schema(reflect.TypeOf(models.BotTurnResult{}), true, "").Ref)
 	botTurnResult.Description = "A bot's answer to a BotTurn. Its commands, logs and memory are sent as one completing batch of POST /generation/commands."
 	turnDelivery := registry.SchemaFromRef(registry.Schema(reflect.TypeOf(models.TurnDelivery{}), true, "").Ref)
+	gameEnded := registry.SchemaFromRef(registry.Schema(reflect.TypeOf(models.GameEndedDelivery{}), true, "").Ref)
+	gameEnded.Description = "The end of a game, delivered to a bot that runs outside the backend, once the game has an outcome, however it ended and whatever became of the bot's team: the outcome, the final generation as the bot's team sees it, its last memory, and demo.url, a self-contained link that downloads the game's demo. It carries no submit token. The server POSTs it to a hosted bot's URL with the last path segment replaced by game-ended (https://bot.example.com/turn gives https://bot.example.com/game-ended), and offers it to an uploaded bot's worker; a game client relays it to its localhost bot at POST /game-ended, from GET /game/from-lobby/{lobby_id}/game-ended-delivery. The server doesn't wait for the answer or retry it: a 2xx is expected, and anything else changes nothing."
 	turnDelivery.Description = "One turn delivered to a bot that runs outside the backend, such as the player's own bot server: the BotTurn to play, and where and with which submit token to submit the answer. A bot server answers the delivery with 202 at once and submits its BotTurnResult itself as one completing batch."
 	// Sent inside the generic lobby create request as its game_settings.
 	settings := registry.SchemaFromRef(registry.Schema(reflect.TypeOf(models.LobbySettings{}), true, "").Ref)
@@ -257,6 +284,10 @@ func SetupGameRoutes(api huma.API, game *handlers.LobbyGame) {
 // SubmitTokenScheme names the security scheme of the submit tokens that turn
 // deliveries carry.
 const SubmitTokenScheme = "SubmitToken"
+
+// DemoTokenScheme names the security scheme of the demo tokens that
+// game-ended deliveries' demo links carry.
+const DemoTokenScheme = "DemoToken"
 
 // PlayerTokenScheme names the security scheme of the lobby's player tokens,
 // which every route of a player's game takes.

@@ -1,9 +1,10 @@
 """``island-battles-bot``: serve, check and run a bot function.
 
 ``serve`` is the bot's HTTP server, which takes turn deliveries and submits
-its answers itself, ``check`` calls the bot once on a fixture turn,
-``package`` zips the bot for the server's runners, ``upload`` uploads that zip
-to a lobby, and ``run`` plays a seat without a browser.
+its answers itself, and takes the end of each game; ``check`` calls the bot
+once on a fixture turn, ``package`` zips the bot for the server's runners,
+``upload`` uploads that zip to a lobby, and ``run`` plays a seat without a
+browser.
 """
 
 from __future__ import annotations
@@ -32,13 +33,21 @@ from urllib.parse import urlsplit
 import httpx
 from pydantic import ValidationError
 
-from ._generated import BotTurn, BotTurnResult, GameOutcome, Generation, TurnDelivery
+from ._generated import (
+    BotTurn,
+    BotTurnResult,
+    GameEndedDelivery,
+    GameOutcome,
+    Generation,
+    TurnDelivery,
+)
 from .bot import MEMORY_LIMIT_BYTES, Play, log_line, run_turn, turn_result
 from .bundle import DEFAULT_ENTRY, DEFAULT_OUTPUT
 from .bundle import run as package
 from .client import IslandBattlesClient
 from .errors import BotMemoryTooLargeError, GameError, InvalidBotResultError
 from .fixture import fixture_turn, fixture_turn_data
+from .game_end import GameEnded, call_game_ended, module_game_ended
 from .game_log import ClientLogging
 from .upload import run as upload
 
@@ -142,6 +151,12 @@ def load_play(spec: str) -> Play:
     return play
 
 
+def load_game_ended(spec: str) -> GameEnded | None:
+    """The ``game_ended`` function in the module of ``module:function``, or
+    None when it has none. Call it after ``load_play``, which imports the module."""
+    return module_game_ended(importlib.import_module(spec.partition(":")[0]))
+
+
 def _is_installed(file: Path) -> bool:
     """Whether a module file is in the standard library or site-packages."""
     resolved = file.resolve()
@@ -166,6 +181,7 @@ class ReloadingPlay:
         self._module_name = spec.partition(":")[0]
         self._signature: tuple | None = None
         self._play: Play | None = None
+        self._game_ended: GameEnded | None = None
         self._error: str | None = None
         self._lock = threading.Lock()
 
@@ -214,6 +230,13 @@ class ReloadingPlay:
         with self._lock:
             return self._get()
 
+    def get_game_ended(self) -> GameEnded | None:
+        """The bot module's ``game_ended`` function as of the files now, or None
+        when it has none; raises what importing the bot raised."""
+        with self._lock:
+            self._get()
+            return self._game_ended
+
     def _get(self) -> Play:
         signature = self._current_signature()
         first = self._signature is None
@@ -224,11 +247,13 @@ class ReloadingPlay:
             self._signature = signature
             try:
                 self._play = load_play(self.spec)
+                self._game_ended = load_game_ended(self.spec)
                 self._error = None
                 if not first:
                     print(f"reloaded {self.spec}", flush=True)
             except Exception:  # noqa: BLE001 - reported to the caller of /turn
                 self._play = None
+                self._game_ended = None
                 self._error = traceback.format_exc()
                 print(f"could not load {self.spec}\n{self._error}", flush=True)
         if self._play is None:
@@ -236,8 +261,8 @@ class ReloadingPlay:
         return self._play
 
 
-def submit_refusal(url: str, extra_hosts: frozenset[str] = frozenset()) -> str | None:
-    """Why the bot may not submit to ``url``, or None when it may.
+def game_url_allowed(url: str, extra_hosts: frozenset[str] = frozenset()) -> bool:
+    """Whether ``url`` is on a game the bot talks to.
 
     Allowed: https on the official game host or a host added with
     ``--allow-submit-host`` (a name, or name:port), and http on localhost or
@@ -248,8 +273,8 @@ def submit_refusal(url: str, extra_hosts: frozenset[str] = frozenset()) -> str |
         host = parts.hostname or ""
         port = parts.port
     except ValueError:
-        return f"submit.url {url!r} is not a URL"
-    allowed = (
+        return False
+    return (
         parts.username is None
         and parts.password is None
         and (
@@ -264,13 +289,36 @@ def submit_refusal(url: str, extra_hosts: frozenset[str] = frozenset()) -> str |
             )
         )
     )
-    if allowed:
+
+
+def submit_refusal(url: str, extra_hosts: frozenset[str] = frozenset()) -> str | None:
+    """Why the bot may not submit to ``url``, or None when it may: see
+    ``game_url_allowed``."""
+    try:
+        urlsplit(url).port  # noqa: B018 - raises on a bad port
+    except ValueError:
+        return f"submit.url {url!r} is not a URL"
+    if game_url_allowed(url, extra_hosts):
         return None
     return (
         f"submit.url {url} is not an allowed host, so the bot doesn't play this "
         f"turn: it submits only to https://{OFFICIAL_SUBMIT_HOST} and to "
         "http://localhost or http://127.0.0.1 on any port. Start the server with "
         "--allow-submit-host <host> to add an https host."
+    )
+
+
+def demo_refusal(url: str, extra_hosts: frozenset[str] = frozenset()) -> str | None:
+    """Why the bot doesn't take a game's end whose demo link is ``url``, or None
+    when it does: the link must be on a game it submits to, so a page can't
+    make the bot download from elsewhere."""
+    if game_url_allowed(url, extra_hosts):
+        return None
+    return (
+        f"demo.url {url} is not an allowed host, so the bot doesn't take this "
+        f"game's end: it takes only demo links of https://{OFFICIAL_SUBMIT_HOST} "
+        "and of http://localhost or http://127.0.0.1 on any port. Start the server "
+        "with --allow-submit-host <host> to add an https host."
     )
 
 
@@ -314,6 +362,8 @@ class BotServer(ThreadingHTTPServer):
         # The turns being played, so a turn delivered again isn't played twice.
         self._playing: set[tuple[str, int, int, int]] = set()
         self._playing_lock = threading.Lock()
+        # The game ends taken, so a game's end delivered again runs once.
+        self._ended: set[tuple[str, int, int]] = set()
 
     def server_close(self) -> None:
         super().server_close()
@@ -347,6 +397,39 @@ class BotServer(ThreadingHTTPServer):
                     self._playing.discard(key)
 
         threading.Thread(target=play_and_submit, daemon=True, name="bot-turn").start()
+
+    def accept_game_ended(self, delivery: GameEndedDelivery) -> None:
+        """Call the bot's ``game_ended`` function in the background, once per
+        game and team. Its failures are printed; nothing waits for it."""
+        demo_host = urlsplit(str(delivery.demo.url)).netloc
+        key = (demo_host, delivery.game_id, delivery.team_color)
+        with self._playing_lock:
+            if key in self._ended:
+                return
+            self._ended.add(key)
+
+        def end() -> None:
+            print(
+                f"game {delivery.game_id} ended at generation {delivery.turn_number}: "
+                f"{delivery.outcome.summary}; its demo can be downloaded until "
+                f"{delivery.demo.expires_at.isoformat()}",
+                flush=True,
+            )
+            try:
+                game_ended = self.bot.get_game_ended()
+                if game_ended is None:
+                    return
+                with self.client_logging.scope():
+                    asyncio.run(call_game_ended(game_ended, delivery))
+            except Exception:  # noqa: BLE001 - the terminal shows what went wrong
+                print(
+                    f"game {delivery.game_id}: game_ended failed\n"
+                    f"{traceback.format_exc()}",
+                    end="",
+                    flush=True,
+                )
+
+        threading.Thread(target=end, daemon=True, name="bot-game-ended").start()
 
     def play(self, delivery: TurnDelivery) -> BotTurnResult:
         """Play the turn, within --turn-timeout and before the deadline; a bot
@@ -453,7 +536,8 @@ class BotServer(ThreadingHTTPServer):
 
 
 class BotRequestHandler(BaseHTTPRequestHandler):
-    """``POST /turn``, ``GET /health`` and the CORS preflights for them.
+    """``POST /turn``, ``POST /game-ended``, ``GET /health`` and the CORS
+    preflights for them.
 
     One request per connection: HTTP/1.0 closes after each response, and every
     refusal also sends ``Connection: close``. Never keep a connection after a
@@ -563,26 +647,20 @@ class BotRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         """``/turn`` accepts a ``TurnDelivery`` with ``202``, then plays it and
-        submits the answer itself."""
+        submits the answer itself. ``/game-ended`` accepts a
+        ``GameEndedDelivery`` with ``202``, then calls the bot's
+        ``game_ended`` function, if it has one."""
         if self._refuse():
             return
-        if self.path != "/turn":
+        if self.path not in ("/turn", "/game-ended"):
             self._text(404, "not found\n")
             return
-        media_type = self.headers.get("Content-Type", "").partition(";")[0]
-        if media_type.strip().lower() != "application/json":
-            self._text(415, "Content-Type must be application/json\n")
+        raw = self._read_json_body()
+        if raw is None:
             return
-        try:
-            length = int(self.headers.get("Content-Length", ""))
-        except ValueError:
-            self._text(411, "Content-Length is required\n")
+        if self.path == "/game-ended":
+            self._game_ended(raw)
             return
-        if not 0 <= length <= MAX_BODY_BYTES:
-            self._text(413, "request body is too large\n")
-            return
-        raw = self.rfile.read(length)
-        self._body_read = True
         try:
             delivery = TurnDelivery.model_validate_json(raw)
         except ValidationError as error:
@@ -594,6 +672,38 @@ class BotRequestHandler(BaseHTTPRequestHandler):
             return
         self._send(202, b'{"accepted": true}', "application/json")
         self.server.accept_turn(delivery)
+
+    def _game_ended(self, raw: bytes) -> None:
+        """Accept the end of a game with ``202``, and take it in the background."""
+        try:
+            delivery = GameEndedDelivery.model_validate_json(raw)
+        except ValidationError as error:
+            self._text(422, f"the body is not a GameEndedDelivery:\n{error}\n")
+            return
+        refusal = demo_refusal(str(delivery.demo.url), self.server.submit_hosts)
+        if refusal is not None:
+            self._text(400, refusal + "\n")
+            return
+        self._send(202, b'{"accepted": true}', "application/json")
+        self.server.accept_game_ended(delivery)
+
+    def _read_json_body(self) -> bytes | None:
+        """The request's JSON body, or None after refusing it."""
+        media_type = self.headers.get("Content-Type", "").partition(";")[0]
+        if media_type.strip().lower() != "application/json":
+            self._text(415, "Content-Type must be application/json\n")
+            return None
+        try:
+            length = int(self.headers.get("Content-Length", ""))
+        except ValueError:
+            self._text(411, "Content-Length is required\n")
+            return None
+        if not 0 <= length <= MAX_BODY_BYTES:
+            self._text(413, "request body is too large\n")
+            return None
+        raw = self.rfile.read(length)
+        self._body_read = True
+        return raw
 
 
 def serve(args: argparse.Namespace) -> int:
@@ -702,6 +812,7 @@ def run(args: argparse.Namespace) -> int:
     """Play one seat of a lobby's game to its end, without a browser."""
     game_url, lobby_url = seat_urls(args)
     play = load_play(args.bot)
+    game_ended = load_game_ended(args.bot)
 
     client: IslandBattlesClient | None = None
 
@@ -716,6 +827,7 @@ def run(args: argparse.Namespace) -> int:
             args.token,
             args.lobby_id,
             play=play,
+            game_ended=game_ended,
             game_url=game_url,
             lobby_url=lobby_url,
             on_game_ended=ended,

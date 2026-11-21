@@ -20,11 +20,15 @@ import (
 //     answers one line, {"result": <BotTurnResult>} or {"error": "<message>"}.
 //  3. The result is checked like check does (memory size, commands, log
 //     lines), and the lines the bot logged come first in its logs.
-//  4. The bot's own stdout goes to stderr, so prints never corrupt the
+//  4. When a game ends the runner writes one line
+//     {"game_ended": <GameEndedDelivery>}. The worker calls the bot's
+//     game-end callback, if it has one, and answers {"ended": true}, or
+//     {"error": "<message>"} when the callback failed.
+//  5. The bot's own stdout goes to stderr, so prints never corrupt the
 //     protocol. Stderr is free text.
-//  5. The worker exits when stdin closes.
+//  6. The worker exits when stdin closes.
 func worker(ctx context.Context, program invocation, arguments []string) int {
-	flags := newFlags(program, "worker", "Plays turns for the server's runners: JSON Lines on stdin and stdout.\nIt writes {\"ready\": true}, then answers each {\"turn\": ...} line with {\"result\": ...}\nor {\"error\": \"...\"}, and exits when stdin closes. The bot's own output goes to stderr.")
+	flags := newFlags(program, "worker", "Plays turns for the server's runners: JSON Lines on stdin and stdout.\nIt writes {\"ready\": true}, then answers each {\"turn\": ...} line with {\"result\": ...}\nor {\"error\": \"...\"}, and each {\"game_ended\": ...} line with {\"ended\": true} or\n{\"error\": \"...\"}, and exits when stdin closes. The bot's own output goes to stderr.")
 	if status, ok := parseFlags(flags, arguments); !ok {
 		return status
 	}
@@ -38,7 +42,7 @@ func worker(ctx context.Context, program invocation, arguments []string) int {
 	if program.stdin != nil {
 		requests = program.stdin
 	}
-	if err := serveLines(ctx, program.play, requests, protocol, program.stderr); err != nil {
+	if err := serveLines(ctx, servedBot{play: program.play, gameEnd: program.gameEnd}, requests, protocol, program.stderr); err != nil {
 		_, _ = fmt.Fprintf(program.stderr, "the worker stopped: %v\n", err)
 		return 1
 	}
@@ -49,7 +53,15 @@ func worker(ctx context.Context, program invocation, arguments []string) int {
 type workerAnswer struct {
 	Ready  bool            `json:"ready,omitempty"`
 	Result json.RawMessage `json:"result,omitempty"`
+	Ended  bool            `json:"ended,omitempty"`
 	Error  *string         `json:"error,omitempty"`
+}
+
+// servedBot is the bot a worker serves: its play function and its game-end
+// callback, or nil.
+type servedBot struct {
+	play    Play
+	gameEnd GameEnd
 }
 
 func errorAnswer(format string, arguments ...any) workerAnswer {
@@ -59,7 +71,7 @@ func errorAnswer(format string, arguments ...any) workerAnswer {
 
 // serveLines writes the ready line, then answers each request line from
 // requests until it ends or ctx is cancelled.
-func serveLines(ctx context.Context, play Play, requests io.Reader, protocol, stderr io.Writer) error {
+func serveLines(ctx context.Context, bot servedBot, requests io.Reader, protocol, stderr io.Writer) error {
 	write := func(answer workerAnswer) error {
 		line, err := json.Marshal(answer)
 		if err != nil {
@@ -99,7 +111,7 @@ func serveLines(ctx context.Context, play Play, requests io.Reader, protocol, st
 			return nil
 		case next := <-inputs:
 			if line := bytes.TrimSpace(next.line); len(line) > 0 {
-				if err := write(answerLine(ctx, play, line, botLog)); err != nil {
+				if err := write(answerLine(ctx, bot, line, botLog)); err != nil {
 					return err
 				}
 			}
@@ -113,16 +125,21 @@ func serveLines(ctx context.Context, play Play, requests io.Reader, protocol, st
 	}
 }
 
-// answerLine plays the turn in one request line.
-func answerLine(ctx context.Context, play Play, line []byte, botLog *logOutputs) workerAnswer {
+// answerLine plays the turn in one request line, or reports the game's end
+// to the bot.
+func answerLine(ctx context.Context, bot servedBot, line []byte, botLog *logOutputs) workerAnswer {
 	var request struct {
-		Turn json.RawMessage `json:"turn"`
+		Turn      json.RawMessage `json:"turn"`
+		GameEnded json.RawMessage `json:"game_ended"`
 	}
 	if err := json.Unmarshal(line, &request); err != nil {
 		return errorAnswer("the line is not a JSON object: %v", err)
 	}
-	if len(request.Turn) == 0 {
-		return errorAnswer(`the line must be an object like {"turn": ...}`)
+	if len(request.GameEnded) > 0 && len(request.Turn) == 0 {
+		return endGame(ctx, bot.gameEnd, request.GameEnded, botLog)
+	}
+	if len(request.Turn) == 0 || len(request.GameEnded) > 0 {
+		return errorAnswer(`the line must be an object like {"turn": ...} or {"game_ended": ...}`)
 	}
 	turn, err := DecodeTurn(request.Turn)
 	if err != nil {
@@ -131,7 +148,7 @@ func answerLine(ctx context.Context, play Play, line []byte, botLog *logOutputs)
 	// The lines the bot logs come first in the result's logs, within the game
 	// log's limits, as under serve.
 	turnLog := newTurnLog(newGameLog(turn.Generation.ID, 0), botLog)
-	result, err := callPlay(turnLog.context(ctx), play, turn)
+	result, err := callPlay(turnLog.context(ctx), bot.play, turn)
 	turnLog.close()
 	if err != nil {
 		return errorAnswer("%s", err.Error())
@@ -143,4 +160,20 @@ func answerLine(ctx context.Context, play Play, line []byte, botLog *logOutputs)
 		return errorAnswer("could not encode the result: %v", err)
 	}
 	return workerAnswer{Result: encoded}
+}
+
+// endGame calls the bot's game-end callback, if it has one, with the
+// GameEndedDelivery of a {"game_ended": ...} line, and answers
+// {"ended": true}, or the error.
+func endGame(ctx context.Context, gameEnd GameEnd, data json.RawMessage, botLog *logOutputs) workerAnswer {
+	ended, err := DecodeGameEndedDelivery(data)
+	if err != nil {
+		return errorAnswer("game_ended is not a GameEndedDelivery:\n%v", err)
+	}
+	if gameEnd != nil {
+		if err := runGameEnd(ctx, gameEnd, ended, botLog, GameEndTimeout); err != nil {
+			return errorAnswer("the bot's game-end callback failed on game %d: %v", ended.GameID, err)
+		}
+	}
+	return workerAnswer{Ended: true}
 }

@@ -542,6 +542,20 @@ class Demo(GameModel):
     """
 
 
+class DemoLink(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    expires_at: AwareDatetime
+    """
+    When the link stops working: when game retention deletes the game, 7 days after its final generation by default. Download the demo before then.
+    """
+    url: AnyUrl
+    """
+    GET /game/{id}/demo on the game's public URL, with a read-only demo token in its token query parameter, so a plain GET downloads the Demo file. The token lets its bearer download this game's demo as this player sees it, and nothing else; keep the link private.
+    """
+
+
 class Departure(GameModel):
     model_config = ConfigDict(
         extra="ignore",
@@ -619,6 +633,44 @@ class ErrorModel(GameModel):
     ] = "about:blank"
     """
     A URI reference to human-readable documentation for the error.
+    """
+
+
+class GameEndedDelivery(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    field_schema: Annotated[
+        AnyUrl | None,
+        Field(alias="$schema", examples=["https://example.com/GameEndedDelivery.json"]),
+    ] = None
+    """
+    A URL to the JSON Schema for this object.
+    """
+    demo: DemoLink
+    """
+    Where to download the game's demo.
+    """
+    game_id: Annotated[StrictInt, Field(ge=1)]
+    generation: Generation
+    """
+    The final generation, the board the outcome was decided on, as a BotTurn's generation shows it to the bot's team.
+    """
+    memory: Mapping[str, Any] | None
+    """
+    The memory the bot sent with its latest completed turn, as the next BotTurn.memory would have been, or null.
+    """
+    outcome: GameOutcome
+    """
+    How the game ended, as GenerationState.outcome says it.
+    """
+    team_color: Annotated[StrictInt, Field(ge=1)]
+    """
+    The bot's team, also when it was eliminated or left before the end.
+    """
+    turn_number: Annotated[StrictInt, Field(ge=1)]
+    """
+    The final generation's turn number, as BotTurn.turn_number counts it.
     """
 
 

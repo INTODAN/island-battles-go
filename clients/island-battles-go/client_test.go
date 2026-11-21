@@ -47,6 +47,13 @@ type fakeServer struct {
 	issued       int
 	valid        map[string]bool
 	refuseTokens bool
+	// gameEnded is the GameEndedDelivery that GET /game-ended-delivery
+	// answers, nil for 409 game-not-ended, and gameEndedStatus another
+	// status to answer instead; gameEndedAuthorization is the Authorization
+	// that it was read with.
+	gameEnded              []byte
+	gameEndedStatus        int
+	gameEndedAuthorization string
 }
 
 func newFakeServer(t *testing.T) *fakeServer {
@@ -125,8 +132,10 @@ func (fake *fakeServer) handle(writer http.ResponseWriter, request *http.Request
 		fake.batches = append(fake.batches, body)
 	case strings.HasSuffix(request.URL.Path, "/deadline"):
 		fake.deadlines++
+	case strings.HasSuffix(request.URL.Path, "/game-ended-delivery"):
+		fake.gameEndedAuthorization = authorization
 	}
-	answer, deadline := fake.answer, fake.deadline
+	answer, deadline, gameEnded, gameEndedStatus := fake.answer, fake.deadline, fake.gameEnded, fake.gameEndedStatus
 	fake.mutex.Unlock()
 	switch request.URL.Path {
 	case "/lobby/v1/connection-token":
@@ -141,6 +150,16 @@ func (fake *fakeServer) handle(writer http.ResponseWriter, request *http.Request
 			fake.setState(state)
 		}
 		writeJSON(writer, 200, state)
+	case "/game/from-lobby/" + testLobbyID + "/game-ended-delivery":
+		switch {
+		case gameEndedStatus != 0:
+			writeJSON(writer, gameEndedStatus, map[string]any{"status": gameEndedStatus, "detail": "injected"})
+		case gameEnded == nil:
+			writeJSON(writer, 409, map[string]any{"type": "urn:island-battles:problem:game-not-ended", "status": 409, "detail": "the game has not ended"})
+		default:
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write(gameEnded)
+		}
 	case "/generation/commands":
 		if answer != nil && answer(writer, request, body) {
 			return
@@ -978,6 +997,113 @@ func TestRunPlaysASeatToTheEnd(t *testing.T) {
 	}
 	if status, _, stderr := run(t, sender, "run", "--base-url", server.server.URL, "--token=bad", "--lobby-id", testLobbyID); status != 1 || !strings.Contains(stderr, "FAIL: HTTP 401: bad credential") {
 		t.Fatalf("got status %d, stderr %q", status, stderr)
+	}
+}
+
+// publishEnd publishes the game's end on the player channel.
+func publishEnd(server *fakeServer, realtime *fakeRealtime) {
+	realtime.publish(gameEndedEvent, server.stateOf(2, false, map[string]any{"reason": "last_team_standing", "winner_team_color": 1, "summary": "Team 1 won"}))
+}
+
+func TestClientCallsTheGameEndCallbackAfterTheEnd(t *testing.T) {
+	server, realtime := newFakeServer(t), &fakeRealtime{}
+	server.gameEnded = gameEndedJSON(t, "https://game.test/game/7/demo?token=ibdt1.x")
+	var mutex sync.Mutex
+	var order []string
+	var heard GameEndedDelivery
+	client := testClient(t, server, realtime, sender,
+		WithGameEnded(func(context.Context, GameOutcome, Generation) {
+			mutex.Lock()
+			defer mutex.Unlock()
+			order = append(order, "outcome")
+		}),
+		WithGameEndedDelivery(func(_ context.Context, ended GameEndedDelivery) error {
+			// Wait returns only after the callback.
+			time.Sleep(50 * time.Millisecond)
+			mutex.Lock()
+			defer mutex.Unlock()
+			order = append(order, "delivery")
+			heard = ended
+			return nil
+		}))
+	if _, err := client.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, func() bool { return len(server.batchesSent()) == 1 })
+	publishEnd(server, realtime)
+	if err := waitFor(t, client); err != nil {
+		t.Fatal(err)
+	}
+	mutex.Lock()
+	defer mutex.Unlock()
+	if !slices.Equal(order, []string{"outcome", "delivery"}) || heard.GameID != 7 || heard.Demo.URL != "https://game.test/game/7/demo?token=ibdt1.x" {
+		t.Fatalf("got %v, %+v", order, heard)
+	}
+	server.mutex.Lock()
+	defer server.mutex.Unlock()
+	if !strings.HasPrefix(server.gameEndedAuthorization, "Bearer player-token-") {
+		t.Fatalf("read the end with %q", server.gameEndedAuthorization)
+	}
+}
+
+// Neither a failed read of the end, a refused token, nor the callback's own
+// error fails the client: each is a warning.
+func TestClientLogsAFailedGameEnd(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		prepare func(*fakeServer)
+		fails   bool
+		warning string
+	}{
+		{"not ended", func(*fakeServer) {}, false, "could not read the game's end for the bot's game-end callback: HTTP 409: the game has not ended"},
+		{"refused", func(server *fakeServer) { server.gameEndedStatus = 401 }, false, "could not read the game's end for the bot's game-end callback: HTTP 401: injected"},
+		{"not a delivery", func(server *fakeServer) { server.gameEnded = []byte(`{"game_id": 7}`) }, false, "could not read the game's end for the bot's game-end callback: invalid game-ended delivery: game_ended.team_color is missing"},
+		{"the callback fails", func(server *fakeServer) { server.gameEnded = gameEndedJSON(t, "https://game.test/demo") }, true, "the bot's game-end callback failed: no disk"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server, realtime := newFakeServer(t), &fakeRealtime{}
+			test.prepare(server)
+			var console bytes.Buffer
+			called := false
+			client := testClient(t, server, realtime, sender, WithLogOutput(&syncWriter{writer: &console}), WithGameEndedDelivery(func(context.Context, GameEndedDelivery) error {
+				called = true
+				return errors.New("no disk")
+			}))
+			if _, err := client.Start(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			eventually(t, func() bool { return len(server.batchesSent()) == 1 })
+			publishEnd(server, realtime)
+			if err := waitFor(t, client); err != nil {
+				t.Fatalf("the client failed: %v", err)
+			}
+			if called != test.fails || !strings.Contains(console.String(), "WARNING island_battles.sdk: "+test.warning) {
+				t.Fatalf("called %v, console %q", called, console.String())
+			}
+		})
+	}
+}
+
+// run calls Main's game-end callback once the game has ended.
+func TestRunCallsTheGameEndCallback(t *testing.T) {
+	server, realtime := newFakeServer(t), &fakeRealtime{}
+	server.gameEnded = gameEndedJSON(t, "https://game.test/demo")
+	play := func(context.Context, Turn) (Result, error) {
+		go publishEnd(server, realtime)
+		return Result{}, nil
+	}
+	var heard uint
+	gameEnd := func(_ context.Context, ended GameEndedDelivery) error {
+		heard = ended.GameID
+		return nil
+	}
+	var stdout, stderr bytes.Buffer
+	status := runMain(context.Background(), invocation{
+		name: "mybot", play: play, gameEnd: gameEnd, stdout: &syncWriter{writer: &stdout}, stderr: &stderr,
+		clientOptions: []ClientOption{func(client *Client) { client.dial = realtime.dial }},
+	}, []string{"run", "--base-url", server.server.URL, "--token=good", "--lobby-id", testLobbyID})
+	if status != 0 || heard != 7 {
+		t.Fatalf("got status %d, game %d, stdout %q, stderr %q", status, heard, stdout.String(), stderr.String())
 	}
 }
 
