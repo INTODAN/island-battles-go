@@ -69,6 +69,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/account/bot-names/{competitor_id}/away-pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Let one of your bot names play away again after it missed a turn
+         * @description Requires the player token of a signed-in player, which names their account; a guest's token is 403 with problem type urn:island-battles:problem:sign-in-required. Every call stores the account the first time the game sees it, with its hand play, and the display name of the token whenever it changed, so a rename in the lobby reaches the game with the next player token. A bot name plays away when it sits in a bot seat, or when a member of another account chose it, in a rated lobby that someone else opened. One that misses a turn there loses the game, as any rated game, and is paused: it plays away in no rated game until its owner resumes it here. Your own games with it are unaffected. Clears the bot name's away_paused and answers 200 with the bot name; resuming a name that isn't paused changes nothing. Another account's bot name, your hand play, or an unknown one is 404.
+         */
+        delete: operations["resumeIslandBotNameAway"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/bots/defaults": {
         parameters: {
             query?: never;
@@ -1876,6 +1896,39 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    resumeIslandBotNameAway: {
+        parameters: {
+            query?: never;
+            header?: {
+                Authorization?: string;
+            };
+            path: {
+                competitor_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Competitor"];
+                };
             };
             /** @description Error */
             default: {

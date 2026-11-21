@@ -3038,6 +3038,61 @@
         ]
       }
     },
+    "/account/bot-names/{competitor_id}/away-pause": {
+      "delete": {
+        "description": "Requires the player token of a signed-in player, which names their account; a guest's token is 403 with problem type urn:island-battles:problem:sign-in-required. Every call stores the account the first time the game sees it, with its hand play, and the display name of the token whenever it changed, so a rename in the lobby reaches the game with the next player token. A bot name plays away when it sits in a bot seat, or when a member of another account chose it, in a rated lobby that someone else opened. One that misses a turn there loses the game, as any rated game, and is paused: it plays away in no rated game until its owner resumes it here. Your own games with it are unaffected. Clears the bot name's away_paused and answers 200 with the bot name; resuming a name that isn't paused changes nothing. Another account's bot name, your hand play, or an unknown one is 404.",
+        "operationId": "resumeIslandBotNameAway",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "competitor_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Authorization",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Competitor"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorModel"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "security": [
+          {
+            "PlayerToken": []
+          }
+        ],
+        "summary": "Let one of your bot names play away again after it missed a turn",
+        "tags": [
+          "Island Battles"
+        ]
+      }
+    },
     "/bots/defaults": {
       "get": {
         "description": "Lists the default bots in level order, each with its level, a name and a description of how it plays. Higher levels play better. The backend plays a default bot itself, with no client: it plays each turn as soon as the generation is created, so it never misses a turn's deadline. A game in which only default bots are left plays on by itself, and each game request continues it for a few seconds. The list is static and needs no authentication. server_bots says whether the server also offers hosted and uploaded bots, which it plays without a player's tab, in member settings and bot seats.",
