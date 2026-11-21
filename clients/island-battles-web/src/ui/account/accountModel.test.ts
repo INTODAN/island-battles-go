@@ -4,6 +4,8 @@ import {
   accountProblem,
   accountView,
   botNameProblem,
+  botUrlEditHint,
+  botUrlPublicSentence,
   type Competitor,
   deleteAccountConfirmation,
   deleteBotNameConfirmation,
@@ -11,11 +13,14 @@ import {
   endsSession,
   gamesText,
   type IslandAccount,
+  noBotUrlSentence,
   ratingText,
   serverSentence,
   validateAccountName,
   validateBotName,
+  validateBotUrl,
   withBotName,
+  withChangedBotName,
   withoutBotName,
 } from "./accountModel";
 
@@ -88,6 +93,7 @@ describe("the account's view", () => {
       name: "Dana",
       rating: "1546",
       games: "18 rated games",
+      url: null,
     });
     expect(view.bots.map((row) => [row.name, row.rating, row.games])).toEqual([
       ["Kraken", "1609", "52 rated games"],
@@ -131,6 +137,74 @@ describe("the account's view", () => {
       "Eel",
     ]);
     expect(accountView(again).add.disabled).toBe(false);
+  });
+});
+
+describe("a bot name's URL", () => {
+  test("each name shows its URL; one registered before names had URLs shows none", () => {
+    const old = { ...competitor("Old", 1500, 0), url: null };
+    const view = accountView(account([...three, old]));
+    expect(view.bots.map((row) => row.url)).toEqual([
+      "https://bot.example.com/Kraken",
+      "https://bot.example.com/Squid",
+      "https://bot.example.com/Narwhal",
+      null,
+    ]);
+    expect(noBotUrlSentence).toBe(
+      "Add the URL your bot runs at to play it in rated lobbies.",
+    );
+  });
+
+  test("a new name says its URL becomes public after its first rated game", () => {
+    expect(botUrlPublicSentence).toContain(
+      "Once the name has played a rated game, the leaderboard shows the URL",
+    );
+    // A listed name's change shows on the leaderboard; an unlisted one's isn't public yet.
+    expect(botUrlEditHint(three[0] as Competitor)).toStartWith(
+      "The leaderboard shows Kraken's new URL within a minute.",
+    );
+    expect(botUrlEditHint(three[2] as Competitor)).toContain(
+      "Once the name has played a rated game",
+    );
+  });
+
+  test("is checked far enough to say what is wrong before sending it", () => {
+    expect(validateBotUrl("https://kraken.example.org/bot")).toBeUndefined();
+    expect(validateBotUrl("  https://kraken.example.org  ")).toBeUndefined();
+    expect(validateBotUrl("")).toBe(
+      "Enter the URL your hosted bot runs at, such as https://bot.example.com/turn.",
+    );
+    expect(validateBotUrl("kraken.example.org")).toBe(
+      "Enter a whole URL, such as https://bot.example.com/turn.",
+    );
+    expect(validateBotUrl("ftp://kraken.example.org")).toBe(
+      "Use an https:// URL, such as https://bot.example.com/turn.",
+    );
+    // The game decides http://, which it takes only on its own machine.
+    expect(validateBotUrl("http://127.0.0.1:41414/turn")).toBeUndefined();
+  });
+
+  test("a changed URL replaces the name's, keeping its place", () => {
+    const changed = withChangedBotName(account(three), {
+      ...(three[1] as Competitor),
+      url: "https://squid.example.org/",
+    });
+    expect(changed.bot_names.map((bot) => bot.url)).toEqual([
+      "https://bot.example.com/Kraken",
+      "https://squid.example.org/",
+      "https://bot.example.com/Narwhal",
+    ]);
+  });
+
+  test("a URL the game refuses shows its sentence", () => {
+    expect(
+      botNameProblem(
+        problem({
+          status: 422,
+          detail: "a hosted bot's URL must use https://",
+        }),
+      ),
+    ).toBe("A hosted bot's URL must use https://.");
   });
 });
 

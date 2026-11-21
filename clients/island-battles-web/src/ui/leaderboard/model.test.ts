@@ -5,6 +5,7 @@ import {
   type BoardState,
   BoardStore,
   boardView,
+  botUrl,
   type CompetitorResult,
   competitorStats,
   competitorSubtitle,
@@ -21,6 +22,8 @@ import {
   ownCompetitorIds,
   ownerLine,
   pageSize,
+  playAgainstHint,
+  playAgainstLabel,
   ratingChange,
   readLeaderboardRoute,
   resultLine,
@@ -189,6 +192,27 @@ describe("the leaderboard", () => {
     ).podium;
     expect(house?.house).toBe(true);
     expect(house?.owner).toBeUndefined();
+  });
+
+  test("a listed bot shows its URL; hand play, a house bot and a bot without one show none", () => {
+    const url = "https://kraken.example.org/bot";
+    const list = [
+      entry({ name: "Kraken", url }),
+      entry({ kind: "manual", owner: null, name: "Dana", url: null }),
+      entry({ kind: "house", owner: null, name: "Bot (level 2)", url: null }),
+      entry({ name: "Old", url: null }),
+    ];
+    const view = boardView(ready({ entries: list, total: 4 }), new Set());
+    expect([...view.podium, ...view.rows].map((row) => row.url)).toEqual([
+      url,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    // Only a bot's URL is shown, whatever another kind's answer says.
+    expect(botUrl({ kind: "manual", url })).toBeUndefined();
+    expect(botUrl({ kind: "house", url })).toBeUndefined();
+    expect(botUrl({ kind: "bot", url: "" })).toBeUndefined();
   });
 
   test("an empty leaderboard says nobody has played, and offers no Show more", () => {
@@ -478,6 +502,13 @@ function result(change: Partial<CompetitorResult>): CompetitorResult {
 }
 
 describe("a competitor's page", () => {
+  test("a listed bot's page offers to play against it, unrated", () => {
+    expect(playAgainstLabel).toBe("Play against it");
+    expect(playAgainstHint("Kraken")).toBe(
+      "Starts an unrated lobby with you as host and Kraken as a bot seat on the other team. The game changes no rating.",
+    );
+  });
+
   test("says a result with every opponent and their rating before the game", () => {
     expect(resultText(result({}))).toBe("Won against Bot (level 3) (1590)");
     expect(

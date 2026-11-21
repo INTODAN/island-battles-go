@@ -275,6 +275,49 @@ a:focus-visible {
   margin-left: 0;
 }
 
+/* A listed bot's hosted bot URL (#404): text to read or copy, never a link. */
+.bot-url {
+  display: block;
+  color: var(--ink-soft);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
+.podium-url {
+  margin-top: 2px;
+  font-size: 11px;
+}
+
+.play-against .bot-url-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+  margin: 0;
+}
+
+.play-against .bot-url-line .bot-url {
+  display: inline;
+  min-width: 0;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.play-against-action {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.play-against-action .hint {
+  flex: 1 1 18em;
+  margin: 0;
+}
+
 .board-table a {
   color: var(--ink);
   font-weight: 600;

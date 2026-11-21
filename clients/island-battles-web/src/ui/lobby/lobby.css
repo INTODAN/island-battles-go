@@ -529,21 +529,6 @@ label.check {
   margin: 0;
 }
 
-/* A bot's Plays as: which of your bot names it plays as in a rated lobby. */
-.bot-plays-as[hidden] {
-  display: none;
-}
-
-.bot-plays-as label {
-  margin: 0;
-}
-
-.bot-plays-as select {
-  flex: 1 1 10em;
-  width: auto;
-  min-width: 0;
-}
-
 .member.seat {
   background: rgba(29, 111, 184, 0.04);
   border: 1px dashed #9db8cc;
@@ -659,6 +644,26 @@ label.check {
     Menlo,
     monospace;
   overflow-wrap: anywhere;
+}
+
+/* A rated lobby's bot names: each a hosted bot, its URL as text under the name (#404). */
+.bot-name-url {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+.bot-option.no-url {
+  background: #eef3f6;
+  color: #5d7181;
+  cursor: not-allowed;
+}
+
+.bot-name-choice .bot-help {
+  margin-left: 34px;
+}
+
+.bot-rated .hint {
+  margin: 6px 0;
 }
 
 .bot-picker.saving {

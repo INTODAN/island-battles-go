@@ -29,6 +29,25 @@ export const notFoundHint =
   "Its owner may have deleted it, or it hasn't played a rated game.";
 export const houseTag = "house bot";
 
+/** The action on a listed bot's page (#404). */
+export const playAgainstLabel = "Play against it";
+
+/** Under **Play against it**: what it does, and that the game is unrated. */
+export const playAgainstHint = (name: string): string =>
+  `Starts an unrated lobby with you as host and ${name} as a bot seat on the other team. The game changes no rating.`;
+
+/**
+ * A listed bot's hosted bot URL, shown as text so others can play against it; undefined for hand
+ * play, a house bot and a name without one. The leaderboard answers it only for listed bots, so a
+ * removed name or a hidden account has none.
+ */
+export function botUrl(entry: {
+  kind: CompetitorKind;
+  url: string | null;
+}): string | undefined {
+  return entry.kind === "bot" && entry.url ? entry.url : undefined;
+}
+
 // --- The address ---
 
 /** What the page shows: the leaderboard, or one competitor's page. */
@@ -153,6 +172,8 @@ export interface BoardRow {
   /** One of the signed-in person's own competitors. */
   mine: boolean;
   owner: string | undefined;
+  /** A bot's hosted bot URL, shown as text (`botUrl`). */
+  url: string | undefined;
   house: boolean;
   wdl: string;
 }
@@ -197,6 +218,7 @@ function row(entry: LeaderboardEntry, own: ReadonlySet<string>): BoardRow {
     entry,
     mine: own.has(entry.competitor_id),
     owner: ownerLine(entry),
+    url: botUrl(entry),
     house: entry.kind === "house",
     wdl: wdl(entry),
   };

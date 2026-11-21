@@ -18,7 +18,12 @@ import { gameBaseUrl } from "../../platform";
 import { copyText, h } from "../dom";
 import type { DefaultBot, LobbyActions, MemberBot } from "./actions";
 import { describePace, turnPaceOf } from "./form";
-import { choiceFromValue, choiceValue } from "./roomModel";
+import {
+  type BotName,
+  choiceFromValue,
+  choiceValue,
+  findBotName,
+} from "./roomModel";
 
 export interface BotPicker {
   el: HTMLElement;
@@ -28,83 +33,88 @@ export interface BotPicker {
     locked: boolean,
     /**
      * The lobby's `game_settings`: the Play by hand line names its turn pace, and a rated
-     * lobby (`rated`) shows **Plays as** and disables the default bots.
+     * lobby (`rated`) offers only hand play and your hosted bot names.
      */
     gameSettings?: Record<string, unknown>,
   ): void;
   /**
-   * Your account, for **Plays as**: your bot names, or null while they load or can't be read.
-   * Null for a guest, who sees no **Plays as**.
+   * Your account, for a rated lobby's choices: your bot names, or null while they load or can't
+   * be read. Null for a guest, who has none.
    */
   setAccount(account: PickerAccount | null): void;
   dispose(): void;
 }
 
-/** A signed-in member's bot names, from the game's `GET /account`; null until they are read. */
+/** A signed-in member's bot names with their URLs, from the game's `GET /account`; null until they are read. */
 export interface PickerAccount {
-  botNames: readonly string[] | null;
+  botNames: readonly BotName[] | null;
 }
 
-/** Under **Plays as**, for a signed-in member who has no bot names yet. */
+/** In a rated lobby, for a signed-in member who has no bot names yet. */
 export const noBotNamesHint =
-  "Register a bot name in your account to play rated games with a bot.";
-/** Beside the default bots in a rated lobby, whose radios are disabled. */
-export const ratedDefaultsHint =
-  "Default bots play only in bot seats in a rated lobby.";
+  "Register a bot name with its hosted bot's URL in your account to play rated games with a bot.";
+/** In a rated lobby, for a guest: only a signed-in member has bot names. */
+export const guestBotNamesHint =
+  "Sign in with Google to play a rated game with one of your bot names.";
+/** In a rated lobby: why your localhost, uploaded and default bots aren't offered (#400). */
+export const ratedKindsHint =
+  "Rated bots run at their bot name's URL, so localhost and uploaded bots aren't offered here, and default bots play only in the host's bot seats.";
+/** In a rated lobby, when the server plays no hosted bots: no bot name can play. */
+export const noServerBotsHint =
+  "This server doesn't play hosted bots, so here a rated game is played by hand.";
+/** Beside a bot name without a URL, whose radio is disabled. */
+export const nameWithoutUrlHint = "No URL yet, so it can't play rated games.";
 
-/**
- * The bot names a **Plays as** select offers, "" (No name) first: your names, and the one chosen
- * when it is no longer among them, so the select still shows what is saved.
- */
-export function playsAsOptions(
-  names: readonly string[],
-  chosen: string,
-): { value: string; label: string }[] {
-  const options = [
-    { value: "", label: "No name" },
-    ...names.map((name) => ({ value: name, label: name })),
-  ];
-  if (
-    chosen &&
-    !names.some((name) => name.toLowerCase() === chosen.toLowerCase())
-  ) {
-    options.push({ value: chosen, label: `${chosen} (deleted)` });
-  }
-  return options;
+/** The radio value of one of your bot names in a rated lobby. */
+export const botNameValue = (name: string): string => `botname:${name}`;
+
+/** The bot name a radio value stands for, or undefined for any other choice. */
+export function botNameOfValue(value: string): string | undefined {
+  return value.startsWith("botname:") && value.length > "botname:".length
+    ? value.slice("botname:".length)
+    : undefined;
 }
 
-/** Whether a radio value is a bot that plays under a bot name: a localhost, hosted or uploaded bot. */
-export const takesBotName = (value: string): boolean =>
-  value === "localhost" || value === "hosted" || value.startsWith("package-");
-
 /**
- * The bot name a choice plays as. In a rated lobby, for a signed-in member: its **Plays as**
- * while changed and not saved yet (`pending`), else the name the saved bot plays as, which a
- * switch between your localhost, hosted and uploaded bots carries over. Unrated, only the saved
- * choice keeps its name. A guest's, and a choice that takes no name (by hand, a default bot), has
- * none.
+ * The radio a saved choice checks in a rated lobby, "" for none: hand play, or a hosted bot under
+ * one of your names (found without regard to case). Any other choice checks none, and the room
+ * says what to do (`ratedBlockers`).
  */
-export function playsAsName(
-  value: string,
+export function ratedChoiceValue(
   chosen: MemberBot | undefined,
-  pending: string | undefined,
-  lobby: { rated: boolean; signedIn: boolean },
+  names: readonly BotName[] | null,
 ): string {
-  if (!takesBotName(value)) return "";
-  const saved = chosen?.name ?? "";
-  if (!lobby.rated) return choiceValue(chosen) === value ? saved : "";
-  if (!lobby.signedIn) return "";
-  return pending ?? saved;
+  if (chosen?.kind === "manual") return "manual";
+  if (chosen?.kind !== "hosted" || !chosen.name) return "";
+  const found = findBotName(names ?? [], chosen.name);
+  return found ? botNameValue(found.name) : "";
 }
 
-/** Whether a choice's **Plays as** is disabled: while the lobby locks or a save runs, and for a package greyed out this month. */
-export function playsAsLocked(
-  value: string,
-  state: { locked: boolean; saving: boolean; computeSpent: string | null },
+/** What a rated lobby's choice of a bot name saves: a hosted bot under the name, which plays at its URL. */
+export const ratedChoice = (name: string): MemberBot => ({
+  kind: "hosted",
+  name,
+});
+
+/** Whether a bot name's radio is disabled: without a URL, while the lobby locks or a save runs, or when the server plays no hosted bots. */
+export function botNameLocked(
+  name: BotName,
+  state: { locked: boolean; saving: boolean; serverBots: boolean | undefined },
 ): boolean {
   return (
-    state.locked || state.saving || uploadedGreyedOut(value, state.computeSpent)
+    state.locked ||
+    state.saving ||
+    name.url === null ||
+    state.serverBots === false
   );
+}
+
+/**
+ * The name an unrated lobby's choice keeps: the saved choice's, when the same kind of bot is saved
+ * again (a new port or URL), else none. Only a rated lobby picks a name.
+ */
+export function keptName(value: string, chosen: MemberBot | undefined): string {
+  return choiceValue(chosen) === value ? (chosen?.name ?? "") : "";
 }
 
 /** The note for browsers that block a page from reaching localhost (the lobby page's `safariNote`). */
@@ -148,109 +158,106 @@ export function mountBotPicker(options: {
   let disposed = false;
   /** The server offers hosted and uploaded bots (`GET /bots/defaults`). */
   let serverBots = false;
+  /** Whether `GET /bots/defaults` has answered, so a rated lobby knows whether names can play. */
+  let serverBotsKnown = false;
   /** Your own packages in the lobby, which you may choose as your bot. */
   let ownPackages: BotPackage[] = [];
   /** Why uploaded bots are greyed out this month (`GET /game/bot-compute`); null while they aren't. */
   let computeSpent: string | null = null;
-  /** The lobby is rated: **Plays as** shows, and default bots can't be chosen. */
+  /** The lobby is rated: only hand play and your hosted bot names are offered. */
   let rated = false;
-  /** Your bot names, for **Plays as**; null for a guest. */
+  /** Your bot names, for a rated lobby; null for a guest. */
   let account: PickerAccount | null = null;
-  /** The name each choice's **Plays as** shows until it is saved, by radio value. */
-  const pendingNames = new Map<string, string>();
-  /** Each choice's **Plays as** row, by radio value. */
-  const nameRows = new Map<
-    string,
-    {
-      row: HTMLElement;
-      select: HTMLSelectElement;
-      hint: HTMLElement;
-      key: string;
-    }
-  >();
-  const defaultsNote = h(
-    "p",
-    { class: "hint", hidden: true },
-    ratedDefaultsHint,
+
+  // --- A rated lobby's choices: your bot names, each a hosted bot at its own URL (#400) ---
+  const ratedNames = h("div", { class: "bot-names" });
+  const ratedNote = h("p", { class: "hint" });
+  const manageNames = h(
+    "button",
+    { type: "button", class: "link small" },
+    "Manage bot names",
   );
+  manageNames.addEventListener("click", () => options.onManageBotNames?.());
+  const ratedOptions = h(
+    "div",
+    { class: "bot-rated", hidden: true },
+    h(
+      "p",
+      { class: "hint" },
+      "Or play one of your bot names. The server plays it at the name's URL; this tab relays nothing.",
+    ),
+    ratedNames,
+    ratedNote,
+    h("p", { class: "hint" }, ratedKindsHint),
+  );
+  /** The names drawn last, so a redraw only replaces them when they change. */
+  let ratedKey = "";
 
-  /**
-   * The bot name a choice plays as (`playsAsName`).
-   */
-  function nameFor(value: string): string {
-    return playsAsName(value, chosen, pendingNames.get(value), {
-      rated,
-      signedIn: account !== null,
-    });
-  }
-
-  /** The **Plays as** row of a choice: made once, and drawn by `showNames`. */
-  function nameRow(value: string, label: string): HTMLElement {
-    const known = nameRows.get(value);
-    if (known) return known.row;
-    const id = `bot-name-${value}`;
-    const select = h("select", { id, class: "bot-name" });
-    select.setAttribute("aria-label", `Plays as, for ${label}`);
-    select.addEventListener("change", () => {
-      pendingNames.set(value, select.value);
-      void choose(value);
-    });
-    const hint = h("span", { class: "hint" });
-    const manage = h(
-      "button",
-      { type: "button", class: "link small" },
-      "Manage bot names",
-    );
-    manage.addEventListener("click", () => options.onManageBotNames?.());
-    const row = h(
-      "div",
-      { class: "bot-help bot-plays-as", hidden: true },
-      h("label", { htmlFor: id }, "Plays as"),
-      select,
-      hint,
-      manage,
-    );
-    nameRows.set(value, { row, select, hint, key: "" });
-    return row;
-  }
-
-  /** Draws each **Plays as**: shown to a signed-in member in a rated lobby. */
-  function showNames(): void {
-    for (const [value, entry] of nameRows) {
-      const shown = rated && account !== null;
-      entry.row.hidden = !shown;
-      if (!shown || !account) continue;
-      const names = account.botNames;
-      const current = nameFor(value);
-      entry.select.hidden = names === null || names.length === 0;
-      entry.hint.textContent =
-        names === null
+  /** Draws your bot names as choices, each with its URL as text, or what to do without one. */
+  function showRatedNames(): void {
+    const names = account?.botNames ?? null;
+    const key = JSON.stringify([account === null, names]);
+    if (key !== ratedKey) {
+      ratedKey = key;
+      const rows: HTMLElement[] = (names ?? []).map((name, index) => {
+        const id = `bot-name-${index}`;
+        const radio = h("input", {
+          type: "radio",
+          name: "bot",
+          value: botNameValue(name.name),
+          id,
+        });
+        const help: (HTMLElement | null)[] = [];
+        if (name.url === null) {
+          const add = h(
+            "button",
+            { type: "button", class: "link small" },
+            "Add its URL in your account",
+          );
+          add.addEventListener("click", (event) => {
+            event.preventDefault();
+            options.onManageBotNames?.();
+          });
+          help.push(h("span", { class: "hint" }, nameWithoutUrlHint), add);
+        }
+        return h(
+          "div",
+          { class: "bot-name-choice" },
+          h(
+            "label",
+            {
+              class: `bot-option${name.url === null ? " no-url" : ""}`,
+              htmlFor: id,
+            },
+            radio,
+            h(
+              "span",
+              { class: "bot-text" },
+              h("strong", {}, name.name),
+              name.url === null
+                ? null
+                : h("span", { class: "hint bot-name-url" }, name.url),
+            ),
+          ),
+          help.length > 0 ? h("div", { class: "bot-help" }, ...help) : null,
+        );
+      });
+      ratedNames.replaceChildren(...rows);
+    }
+    const sentence =
+      account === null
+        ? guestBotNamesHint
+        : names === null
           ? "Loading your bot names…"
           : names.length === 0
             ? noBotNamesHint
-            : "";
-      entry.hint.hidden = entry.hint.textContent === "";
-      const offered = playsAsOptions(names ?? [], current);
-      const key = JSON.stringify(offered);
-      // Replacing the options closes an open select, so only a change does.
-      if (key !== entry.key) {
-        entry.key = key;
-        entry.select.replaceChildren(
-          ...offered.map((option) => new Option(option.label, option.value)),
-        );
-      }
-      if (document.activeElement !== entry.select) {
-        entry.select.value =
-          offered.find(
-            (option) => option.value.toLowerCase() === current.toLowerCase(),
-          )?.value ?? "";
-      }
-      entry.select.disabled = playsAsLocked(value, {
-        locked,
-        saving,
-        computeSpent,
-      });
-    }
+            : serverBotsKnown && !serverBots
+              ? noServerBotsHint
+              : "";
+    ratedNote.replaceChildren(
+      ...(sentence ? [sentence, " "] : []),
+      ...(account === null ? [] : [manageNames]),
+    );
   }
 
   const status = h(
@@ -380,7 +387,6 @@ export function mountBotPicker(options: {
     ),
   );
   const hostedHelp = h("div", { class: "bot-help" }, hostedUrl, useUrl);
-  const hostedName = nameRow("hosted", "My hosted bot");
   const uploaded = h("div", { class: "bot-uploaded" });
   const serverOptions = h(
     "div",
@@ -392,7 +398,6 @@ export function mountBotPicker(options: {
     ),
     hostedLabel,
     hostedHelp,
-    hostedName,
     uploaded,
   );
   const packages = mountPackages({
@@ -408,23 +413,28 @@ export function mountBotPicker(options: {
       options.onPackages?.(items);
     },
   });
-  const el = h(
-    "section",
-    { class: "card bot-picker" },
-    h("h2", {}, "Your bot"),
-    manualLabel,
+  // Every choice of a lobby that isn't rated; a rated lobby offers its own (`ratedOptions`).
+  const unratedOptions = h(
+    "div",
+    { class: "bot-unrated" },
     localLabel,
     localHelp,
-    nameRow("localhost", "My localhost bot"),
     h(
       "p",
       { class: "hint" },
       "Or let the server play for you with a default bot:",
     ),
-    defaultsNote,
     defaults,
     serverOptions,
     packages.el,
+  );
+  const el = h(
+    "section",
+    { class: "card bot-picker" },
+    h("h2", {}, "Your bot"),
+    manualLabel,
+    ratedOptions,
+    unratedOptions,
   );
 
   function radios(): HTMLInputElement[] {
@@ -432,17 +442,23 @@ export function mountBotPicker(options: {
   }
 
   function sync(): void {
-    const value = choiceValue(chosen);
+    const names = account?.botNames ?? null;
+    if (rated) showRatedNames();
+    const value = rated ? ratedChoiceValue(chosen, names) : choiceValue(chosen);
     for (const radio of radios()) {
       radio.checked = radio.value === value;
-      radio.disabled =
-        locked ||
-        saving ||
-        uploadedGreyedOut(radio.value, computeSpent) ||
-        // A rated lobby's default bots play only in the bot seats the host adds.
-        (rated && radio.value.startsWith("level-"));
+      const name = botNameOfValue(radio.value);
+      const botName = name ? findBotName(names ?? [], name) : undefined;
+      radio.disabled = botName
+        ? botNameLocked(botName, {
+            locked,
+            saving,
+            serverBots: serverBotsKnown ? serverBots : undefined,
+          })
+        : locked || saving || uploadedGreyedOut(radio.value, computeSpent);
     }
-    defaultsNote.hidden = !rated;
+    ratedOptions.hidden = !rated;
+    unratedOptions.hidden = rated;
     hostedUrl.disabled = locked || saving;
     useUrl.disabled = locked || saving;
     port.disabled = locked || saving;
@@ -453,7 +469,6 @@ export function mountBotPicker(options: {
       hostedUrl.value = chosen.url ?? "";
     }
     el.classList.toggle("saving", saving);
-    showNames();
   }
 
   /** Your packages as choices, "Uploaded: <package>", and the one you chose if it is gone. */
@@ -480,13 +495,7 @@ export function mountBotPicker(options: {
           ),
         ),
       );
-      return [
-        label,
-        nameRow(
-          `package-${item.package_id}`,
-          `Uploaded: ${describePackage(item)}`,
-        ),
-      ];
+      return [label];
     });
     if (
       chosen?.kind === "uploaded" &&
@@ -519,9 +528,20 @@ export function mountBotPicker(options: {
   }
 
   async function choose(value: string): Promise<void> {
-    // A package greyed out this month can't be chosen, not even through its Plays as.
+    // A package greyed out this month can't be chosen.
     if (uploadedGreyedOut(value, computeSpent)) {
       sync();
+      return;
+    }
+    // A rated lobby's bot name: a hosted bot under it, which plays at the name's URL.
+    const name = botNameOfValue(value);
+    if (name !== undefined) {
+      const same =
+        chosen?.kind === "hosted" &&
+        chosen.name?.toLowerCase() === name.toLowerCase() &&
+        !chosen.url;
+      if (!same && !saving && !locked) await save(ratedChoice(name));
+      else sync();
       return;
     }
     // Your localhost bot keeps the port in its field, which the seats you relay mustn't use;
@@ -543,7 +563,7 @@ export function mountBotPicker(options: {
       value,
       hostedUrl.value,
       localPort,
-      takesBotName(value) ? nameFor(value) : "",
+      keptName(value, chosen),
     );
     const same =
       value === choiceValue(chosen) &&
@@ -562,6 +582,11 @@ export function mountBotPicker(options: {
       sync();
       return;
     }
+    await save(choice);
+  }
+
+  /** Saves a choice; saved or refused, the radios show the saved choice again. */
+  async function save(choice: MemberBot): Promise<void> {
     saving = true;
     options.onError("");
     sync();
@@ -570,8 +595,6 @@ export function mountBotPicker(options: {
     } catch (cause) {
       options.onError(options.describeError(cause));
     } finally {
-      // Saved or refused, the select shows the saved choice again.
-      pendingNames.delete(value);
       saving = false;
       if (!disposed) sync();
     }
@@ -629,6 +652,7 @@ export function mountBotPicker(options: {
       if (disposed) return;
       if (offered.bots.length > 0) showDefaults(offered.bots);
       serverBots = offered.serverBots;
+      serverBotsKnown = true;
       serverOptions.hidden = !serverBots;
       packages.setChoosable(serverBots);
       sync();

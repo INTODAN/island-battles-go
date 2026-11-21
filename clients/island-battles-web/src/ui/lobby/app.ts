@@ -18,6 +18,12 @@ import {
   leaderboardSearch,
   readLeaderboardRoute,
 } from "../leaderboard/model";
+import {
+  inLobbyProblem,
+  type PlayTarget,
+  signInToPlayNotice,
+  startPlayAgainst,
+} from "../leaderboard/playAgainst";
 import { createLobbyActions } from "./actions";
 import {
   type GoogleSignIn,
@@ -250,6 +256,10 @@ export function mountLobbyApp(options: {
     location.search,
   );
   let boardScreen: LeaderboardScreen | undefined;
+  /** **Play against it** from someone without a session: started once they have one. */
+  let pendingPlay: PlayTarget | undefined;
+  /** The lobby being made against a listed bot, while it isn't there yet. */
+  let playing: PlayTarget | undefined;
 
   const stage = h("div", { class: "overlay" });
   const gameHost = h("div", { class: "game-host", hidden: true });
@@ -664,6 +674,8 @@ export function mountLobbyApp(options: {
   window.addEventListener("popstate", onPopState);
 
   function showLeaderboard(at: LeaderboardRoute): void {
+    // Going back to the leaderboard cancels a **Play against it** that waited for a session.
+    cancelPendingPlay();
     if (screen?.key === "leaderboard" && boardScreen) {
       boardScreen.setRoute(at);
       return;
@@ -683,12 +695,54 @@ export function mountLobbyApp(options: {
           ? ownCompetitors(gameApi)
           : Promise.resolve(new Set()),
         navigate: navigateBoard,
+        playAgainst,
       });
       return boardScreen;
     });
   }
 
   const openBoard = () => navigateBoard({ view: "board" });
+
+  /**
+   * **Play against it** on a listed bot's page: an unrated lobby with this tab's player as host
+   * and the bot as a hosted bot seat, whose room then shows. Without a session, the name screen
+   * comes first, and the lobby is made once there is one.
+   */
+  async function playAgainst(target: PlayTarget): Promise<void> {
+    if (!realtime.session.get()) {
+      pendingPlay = target;
+      notice = signInToPlayNotice(target.name);
+      navigateBoard(undefined);
+      return;
+    }
+    // A tab still rejoining its saved room counts as in a lobby.
+    if (realtime.lobby.get() || resuming)
+      throw new Error(inLobbyProblem(target.name));
+    await makeLobbyAgainst(target);
+    navigateBoard(undefined);
+  }
+
+  /**
+   * Forgets a **Play against it** that waited for a session, with its name-screen notice, which
+   * a silent sign-in may never have shown.
+   */
+  function cancelPendingPlay(): void {
+    if (!pendingPlay) return;
+    if (notice === signInToPlayNotice(pendingPlay.name)) notice = "";
+    pendingPlay = undefined;
+  }
+
+  /** Makes the lobby; a seat that wasn't added is said in the room, shown now or once it mounts. */
+  async function makeLobbyAgainst(target: PlayTarget): Promise<void> {
+    const made = await startPlayAgainst(target, {
+      actions,
+      playerId: realtime.session.get()?.playerId ?? "",
+      newId: () => crypto.randomUUID(),
+    });
+    if (!made.notice) return;
+    if (room) room.showNotice(made.notice);
+    else roomNotice = made.notice;
+  }
 
   // --- Routing from the stores ---
 
@@ -815,6 +869,37 @@ export function mountLobbyApp(options: {
     silent = undefined;
     // A watcher stays on the watched game until they stop watching.
     if (watching) return;
+    // **Play against it** from the name screen: the lobby is made now that there is a session.
+    if (pendingPlay && !lobby && !resuming) {
+      const target = pendingPlay;
+      cancelPendingPlay();
+      playing = target;
+      void makeLobbyAgainst(target)
+        .catch((cause: unknown) => {
+          notice =
+            cause instanceof Error && cause.message
+              ? cause.message
+              : describeProblem(cause, "create").message;
+        })
+        .finally(() => {
+          playing = undefined;
+          route();
+        });
+    }
+    if (playing && !lobby) {
+      setOcean(true);
+      const name = playing.name;
+      show("playing", () => ({
+        el: h(
+          "div",
+          { class: "panel narrow", attrs: { role: "status" } },
+          h("h1", {}, "Island Battles"),
+          h("p", { class: "lead" }, `Making a lobby against ${name}…`),
+        ),
+        dispose() {},
+      }));
+      return;
+    }
     const lobbyId = lobby?.lobby.id;
     const decision = roundDecision();
     if (demo && decision?.view !== "game") return;
@@ -885,7 +970,7 @@ export function mountLobbyApp(options: {
           readAccount: async () => ({
             botNames: (
               await createAccountService(realtime).read()
-            ).bot_names.map((competitor) => competitor.name),
+            ).bot_names.map(({ name, url }) => ({ name, url })),
           }),
           openAccount: () =>
             new Promise<void>((resolve) => {

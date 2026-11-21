@@ -99,6 +99,8 @@ export function memberSettingsBot(
   if (kind === "hosted" && typeof url === "string") {
     return { kind, url, ...named };
   }
+  // A named hosted bot without a URL plays at its name's URL (#400).
+  if (kind === "hosted" && named.name) return { kind, ...named };
   if (kind === "uploaded" && typeof package_id === "string") {
     return { kind, package_id, ...named };
   }
@@ -210,7 +212,9 @@ export function describeBot(
           ? `${bot.name} (own bot, localhost:${bot.port})`
           : `${bot.name} (own bot, localhost)`;
       case "hosted":
-        return `${bot.name} (hosted bot, ${urlHost(bot.url ?? "")})`;
+        return bot.url
+          ? `${bot.name} (hosted bot, ${urlHost(bot.url)})`
+          : `${bot.name} (hosted bot)`;
       case "uploaded":
         return `${bot.name} (uploaded bot)`;
     }
@@ -256,8 +260,8 @@ export function choiceValue(bot: MemberBot | undefined): string {
  * The choice a radio value stands for, or null for none. `hosted` takes the
  * URL typed next to it, and is null while that is empty. `localhost` takes the
  * port next to it, left out when it is the default one. A localhost, hosted or
- * uploaded bot takes `name`, the bot name chosen in its **Plays as**, left out
- * when it is "" (No name); the other kinds have none.
+ * uploaded bot takes `name`, the bot name the saved choice kept (`keptName` in
+ * `botPicker.ts`), left out when it is ""; the other kinds have none.
  */
 export function choiceFromValue(
   value: string,
@@ -360,14 +364,20 @@ function seatRelay(
 
 /** Arranges a lobby snapshot, with the members' bots, for the room screen. */
 export function buildRoom(snapshot: Snapshot, playerId: string): RoomModel {
+  const rated = snapshot.lobby.game_settings?.rated === true;
   const rows = (snapshot.members ?? [])
     .filter((member) => member.active)
     .sort((left, right) => left.join_sequence - right.join_sequence)
     .map((member): MemberRow & { teamId: string | null } => {
       const seat = member.kind === "seat";
-      const bot = seat
+      const chosen = seat
         ? seatChoice(member.seat_settings)
         : memberSettingsBot(member.member_settings);
+      // A rated lobby plays a named hosted bot at its name's URL, whatever url the choice has.
+      const bot =
+        rated && chosen?.kind === "hosted" && chosen.name
+          ? { kind: chosen.kind, name: chosen.name }
+          : chosen;
       return {
         memberId: member.id,
         playerId: member.player_id,
@@ -411,7 +421,7 @@ export function buildRoom(snapshot: Snapshot, playerId: string): RoomModel {
     yourTeamId: you?.teamId ?? null,
     isHost: you?.isHost ?? false,
     phase: snapshot.lobby.phase,
-    rated: snapshot.lobby.game_settings?.rated === true,
+    rated,
   };
 }
 
@@ -463,16 +473,38 @@ export function startBlocker(
 /** Your blocker in a rated lobby while you aren't signed in. */
 export const ratedSignInBlocker = "Sign in to play in this rated lobby.";
 /** Your blocker in a rated lobby while your bot plays under no bot name: a default bot, or a bot without one. */
-export const ratedBotNameBlocker = "Choose a bot name, or play by hand.";
+export const ratedBotNameBlocker =
+  "Choose one of your hosted bot names, or play by hand.";
+/** Your blocker in a rated lobby while you chose a named localhost or uploaded bot (#400). */
+export const ratedHostedBlocker =
+  "Rated bots run at their own URL: choose one of your hosted bot names, or play by hand.";
+/** Your blocker in a rated lobby while your bot name has no URL yet, as the server says it. */
+export const botNameUrlBlocker = (name: string): string =>
+  `Your bot name ${name} has no URL yet. Add its hosted bot's URL on the account page.`;
 /** The rule of a rated lobby's bot seats, as the server says it. */
 export const ratedSeatRule =
   "a rated game allows only default bot seats, each level once.";
 /** The tag beside a person who isn't signed in, in a rated lobby. */
 export const guestTag = "guest";
 
+/** One of your bot names, with its hosted bot's URL, null for a name registered before names had URLs. */
+export interface BotName {
+  name: string;
+  url: string | null;
+}
+
 /** What `ratedBlockers` knows of your account: your bot names, once the game's `GET /account` answered. */
 export interface RatedAccount {
-  botNames: readonly string[];
+  botNames: readonly BotName[];
+}
+
+/** One of your bot names, found without regard to case, as the server compares them. */
+export function findBotName(
+  names: readonly BotName[],
+  name: string,
+): BotName | undefined {
+  const key = name.toLowerCase();
+  return names.find((candidate) => candidate.name.toLowerCase() === key);
 }
 
 /** What a rated lobby is still missing before its start, as the room shows it. */
@@ -534,11 +566,12 @@ function ratedSeatsToRemove(room: RoomModel): string[] {
 
 /**
  * What a rated lobby still needs before it can start, in the server's own terms (its ready gate,
- * `backend/services/rated_lobbies.go`): for you, to sign in, or to choose a bot name or play by
- * hand (also when you chose a default bot), or another name once yours was deleted; for the host,
- * the seats to remove. Nothing for a lobby that isn't rated. `account` holds your bot names once
- * read, or null; a name is checked against them only then. The server stays the authority: it
- * alone knows two members of one account, for example.
+ * `backend/services/rated_lobbies.go`): for you, to sign in, or to choose one of your hosted bot
+ * names or play by hand (also when you chose a default bot, or a named localhost or uploaded bot),
+ * another name once yours was deleted, or a URL for a name without one; for the host, the seats to
+ * remove. Nothing for a lobby that isn't rated. `account` holds your bot names once read, or null;
+ * a name is checked against them only then. The server stays the authority: it alone knows two
+ * members of one account, for example.
  */
 export function ratedBlockers(
   room: RoomModel,
@@ -556,17 +589,17 @@ export function ratedBlockers(
   const you = room.you;
   if (you?.kind === "human") {
     const bot = you.bot;
+    const found =
+      bot?.name && account ? findBotName(account.botNames, bot.name) : null;
     if (!you.signedIn) blockers.you = ratedSignInBlocker;
-    else if (bot && bot.kind !== "manual" && !bot.name) {
-      blockers.you = ratedBotNameBlocker;
-    } else if (
-      bot?.name &&
-      account &&
-      !account.botNames.some(
-        (name) => name.toLowerCase() === bot.name?.toLowerCase(),
-      )
-    ) {
+    else if (!bot || bot.kind === "manual") {
+      // Hand play is allowed; without a bot, the server's "choose your bot first" applies.
+    } else if (!bot.name) blockers.you = ratedBotNameBlocker;
+    else if (bot.kind !== "hosted") blockers.you = ratedHostedBlocker;
+    else if (found === undefined) {
       blockers.you = `Your bot name ${bot.name} no longer exists. Choose another.`;
+    } else if (found && found.url === null) {
+      blockers.you = botNameUrlBlocker(found.name);
     }
   }
   if (room.isHost) {

@@ -83,8 +83,47 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* A bot name's URL: text, never a link, on a line of its own under the name. */
+.account-url {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  align-items: baseline;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.account-url-text {
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.account-url-missing {
+  color: #8a4b00;
+}
+
+.account-url-form {
+  display: block;
+  margin-top: 2px;
+}
+
+.account-url-form .hint,
+.account-url-form .field-error {
+  margin: 4px 0 0;
+}
+
 .account-add {
+  display: grid;
+  gap: 4px;
   margin-top: 10px;
+}
+
+.account-add .hint,
+.account-add .field-error {
+  margin: 0 0 4px;
 }
 
 .account-danger-zone {
@@ -170,6 +209,18 @@ button.danger.solid {
   .account-list li .account-rating,
   .account-list li > button {
     grid-row: 1 / span 2;
+  }
+
+  .account-list li .account-url {
+    grid-row: 3;
+  }
+
+  .account-url-form .account-inline {
+    flex-wrap: wrap;
+  }
+
+  .account-url-form .account-inline input {
+    flex-basis: 100%;
   }
 
   .account-list li.hand {

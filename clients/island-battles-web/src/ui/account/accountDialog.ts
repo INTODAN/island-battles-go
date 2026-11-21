@@ -7,18 +7,25 @@ import {
   accountProblem,
   accountView,
   botNameProblem,
+  botUrlEditHint,
+  botUrlPublicSentence,
   type Competitor,
+  type CompetitorRow,
   type Confirmation,
   deleteAccountConfirmation,
   deleteBotNameConfirmation,
   displayNameProblem,
   endsSession,
+  exampleBotUrl,
   type IslandAccount,
   nameRule,
+  noBotUrlSentence,
   partlyDeletedProblem,
   validateAccountName,
   validateBotName,
+  validateBotUrl,
   withBotName,
+  withChangedBotName,
   withoutBotName,
 } from "./accountModel";
 import { type AccountService, createAccountService } from "./accountService";
@@ -88,8 +95,9 @@ function confirm(question: Confirmation): Promise<boolean> {
 }
 
 function competitorItem(
-  row: { name: string; rating: string; games: string },
+  row: Pick<CompetitorRow, "name" | "rating" | "games">,
   action?: HTMLElement,
+  below?: HTMLElement,
 ): HTMLElement {
   return h(
     "li",
@@ -98,6 +106,7 @@ function competitorItem(
     h("span", { class: "account-rating" }, row.rating),
     h("span", { class: "account-games" }, row.games),
     action ?? null,
+    below ?? null,
   );
 }
 
@@ -162,6 +171,14 @@ export function openAccount(options: AccountDialogOptions): HTMLDialogElement {
     spellcheck: false,
     placeholder: "Leviathan",
   });
+  const urlInput = h("input", {
+    id: "new-bot-url",
+    type: "url",
+    maxLength: 2048,
+    autocomplete: "off",
+    spellcheck: false,
+    placeholder: exampleBotUrl,
+  });
   const addButton = h("button", { type: "submit", class: "primary" }, "Add");
   const addHint = h("p", { class: "hint" });
   const addError = h("p", { class: "field-error", attrs: { role: "alert" } });
@@ -169,9 +186,43 @@ export function openAccount(options: AccountDialogOptions): HTMLDialogElement {
     "form",
     { class: "account-add", noValidate: true },
     h("label", { htmlFor: "new-bot-name" }, "New bot name"),
-    h("div", { class: "account-inline" }, botInput, addButton),
+    botInput,
     addHint,
+    h("label", { htmlFor: "new-bot-url" }, "Its hosted bot's URL"),
+    h("div", { class: "account-inline" }, urlInput, addButton),
+    h("p", { class: "hint account-public" }, botUrlPublicSentence),
     addError,
+  );
+
+  // --- Changing a name's URL: one form, in the row of the name being changed ---
+  /** The bot name whose URL is being changed, by competitor ID. */
+  let editing: string | null = null;
+  let savingUrl = false;
+  const editInput = h("input", {
+    type: "url",
+    maxLength: 2048,
+    autocomplete: "off",
+    spellcheck: false,
+    placeholder: exampleBotUrl,
+  });
+  const editSave = h(
+    "button",
+    { type: "submit", class: "primary small" },
+    "Save",
+  );
+  const editCancel = h(
+    "button",
+    { type: "button", class: "secondary small" },
+    "Cancel",
+  );
+  const editHint = h("p", { class: "hint" });
+  const editError = h("p", { class: "field-error", attrs: { role: "alert" } });
+  const editForm = h(
+    "form",
+    { class: "account-url account-url-form", noValidate: true },
+    h("div", { class: "account-inline" }, editInput, editSave, editCancel),
+    editHint,
+    editError,
   );
   const botSection = h(
     "section",
@@ -180,7 +231,7 @@ export function openAccount(options: AccountDialogOptions): HTMLDialogElement {
     h(
       "p",
       { class: "hint" },
-      "Choose one of these where you choose your bot in a rated lobby. Each name has its own rating; the code behind it can change.",
+      "Each name is a hosted bot at its own URL, which plays when you choose the name in a rated lobby. Each name has its own rating, which stays when its URL changes.",
     ),
     botList,
     addForm,
@@ -281,9 +332,18 @@ export function openAccount(options: AccountDialogOptions): HTMLDialogElement {
         if (competitor) {
           remove.addEventListener("click", () => void removeBot(competitor));
         }
-        return competitorItem(row, remove);
+        return competitorItem(
+          row,
+          remove,
+          competitor && editing === competitor.id
+            ? editForm
+            : urlLine(row, competitor),
+        );
       }),
     );
+    editInput.disabled = savingUrl || busy;
+    editSave.disabled = savingUrl || busy;
+    editCancel.disabled = savingUrl;
     if (view.bots.length === 0) {
       botList.replaceChildren(
         h("li", { class: "account-empty" }, "No bot names yet."),
@@ -296,8 +356,55 @@ export function openAccount(options: AccountDialogOptions): HTMLDialogElement {
     );
   }
 
+  /**
+   * A name's URL as text, never a link, with **Change URL**; a name registered before names had
+   * URLs says what to do, with **Add URL**.
+   */
+  function urlLine(
+    row: CompetitorRow,
+    competitor: Competitor | undefined,
+  ): HTMLElement {
+    const change = h(
+      "button",
+      { type: "button", class: "link small", disabled: busy || savingUrl },
+      row.url ? "Change URL" : "Add URL",
+    );
+    change.setAttribute(
+      "aria-label",
+      `${row.url ? "Change" : "Add"} the URL of ${row.name}`,
+    );
+    if (competitor) {
+      change.addEventListener("click", () => startEditing(competitor));
+    }
+    return h(
+      "div",
+      { class: "account-url" },
+      row.url
+        ? h("span", { class: "account-url-text" }, row.url)
+        : h("span", { class: "account-url-missing" }, noBotUrlSentence),
+      change,
+    );
+  }
+
+  function startEditing(competitor: Competitor): void {
+    editing = competitor.id;
+    editInput.value = competitor.url ?? "";
+    editInput.setAttribute("aria-label", `The URL of ${competitor.name}`);
+    editHint.textContent = botUrlEditHint(competitor);
+    editError.textContent = "";
+    draw();
+    editInput.focus();
+  }
+
+  function stopEditing(): void {
+    editing = null;
+    editError.textContent = "";
+    draw();
+  }
+
   function addInputs(disabled: boolean): void {
     botInput.disabled = disabled;
+    urlInput.disabled = disabled;
     addButton.disabled = disabled;
   }
 
@@ -370,21 +477,67 @@ export function openAccount(options: AccountDialogOptions): HTMLDialogElement {
       botInput.focus();
       return;
     }
+    const urlProblem = validateBotUrl(urlInput.value);
+    if (urlProblem) {
+      addError.textContent = urlProblem;
+      urlInput.focus();
+      return;
+    }
     addError.textContent = "";
     adding = true;
     draw();
     try {
-      // The page has no URL field yet (#404), so the game refuses the name
-      // with its 422, which addError shows.
-      const competitor = await service.addBotName(botInput.value.trim(), "");
+      const competitor = await service.addBotName(
+        botInput.value.trim(),
+        urlInput.value.trim(),
+      );
       if (account) account = withBotName(account, competitor);
       botInput.value = "";
+      urlInput.value = "";
     } catch (error) {
       failed(error, addError, botNameProblem(error));
     } finally {
       adding = false;
       draw();
       if (!botInput.disabled) botInput.focus();
+    }
+  });
+
+  editForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const competitorId = editing;
+    if (!account || !competitorId || savingUrl) return;
+    const problem = validateBotUrl(editInput.value);
+    if (problem) {
+      editError.textContent = problem;
+      editInput.focus();
+      return;
+    }
+    editError.textContent = "";
+    savingUrl = true;
+    draw();
+    try {
+      const changed = await service.setBotNameUrl(
+        competitorId,
+        editInput.value.trim(),
+      );
+      if (account) account = withChangedBotName(account, changed);
+      editing = null;
+    } catch (error) {
+      failed(error, editError, botNameProblem(error));
+    } finally {
+      savingUrl = false;
+      draw();
+      if (editing) editInput.focus();
+    }
+  });
+  editCancel.addEventListener("click", stopEditing);
+  editInput.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      // Escape cancels the change, not the whole page.
+      event.preventDefault();
+      event.stopPropagation();
+      stopEditing();
     }
   });
 
@@ -395,6 +548,7 @@ export function openAccount(options: AccountDialogOptions): HTMLDialogElement {
     try {
       await service.deleteBotName(competitor.id);
       if (account) account = withoutBotName(account, competitor.id);
+      if (editing === competitor.id) editing = null;
     } catch (error) {
       failed(error, addError, accountProblem(error));
     } finally {

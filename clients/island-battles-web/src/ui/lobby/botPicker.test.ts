@@ -1,87 +1,102 @@
 import { describe, expect, test } from "bun:test";
 import {
+  botNameLocked,
+  botNameOfValue,
+  botNameValue,
+  guestBotNamesHint,
+  keptName,
+  nameWithoutUrlHint,
   noBotNamesHint,
-  playsAsLocked,
-  playsAsName,
-  playsAsOptions,
-  ratedDefaultsHint,
-  takesBotName,
+  ratedChoice,
+  ratedChoiceValue,
+  ratedKindsHint,
 } from "./botPicker";
 
-describe("Plays as", () => {
-  test("offers No name first, then your bot names", () => {
-    expect(playsAsOptions(["Kraken", "Squid"], "")).toEqual([
-      { value: "", label: "No name" },
-      { value: "Kraken", label: "Kraken" },
-      { value: "Squid", label: "Squid" },
-    ]);
-    // A chosen name is one of yours without regard to case.
-    expect(playsAsOptions(["Kraken"], "kraken")).toHaveLength(2);
+const names = [
+  { name: "Kraken", url: "https://kraken.example.org/bot" },
+  { name: "Old", url: null },
+];
+
+describe("a rated lobby's choices", () => {
+  test("a bot name saves a hosted bot under it, with no URL to type", () => {
+    expect(ratedChoice("Kraken")).toEqual({ kind: "hosted", name: "Kraken" });
+    expect(botNameValue("Kraken")).toBe("botname:Kraken");
+    expect(botNameOfValue("botname:Kraken")).toBe("Kraken");
+    expect(botNameOfValue("botname:")).toBeUndefined();
+    expect(botNameOfValue("hosted")).toBeUndefined();
+    expect(botNameOfValue("manual")).toBeUndefined();
   });
 
-  test("keeps a chosen name that was deleted, marked, so the select shows what is saved", () => {
-    expect(playsAsOptions(["Kraken"], "Octopus").at(-1)).toEqual({
-      value: "Octopus",
-      label: "Octopus (deleted)",
-    });
+  test("checks hand play, or the name a hosted bot plays as, without regard to case", () => {
+    expect(ratedChoiceValue({ kind: "manual" }, names)).toBe("manual");
+    expect(ratedChoiceValue({ kind: "hosted", name: "kraken" }, names)).toBe(
+      "botname:Kraken",
+    );
+    // A url beside the name is ignored, as a rated lobby ignores it.
+    expect(
+      ratedChoiceValue(
+        { kind: "hosted", name: "Kraken", url: "https://typed.example" },
+        names,
+      ),
+    ).toBe("botname:Kraken");
   });
 
-  test("belongs to the localhost, hosted and uploaded choices only", () => {
-    expect(takesBotName("localhost")).toBe(true);
-    expect(takesBotName("hosted")).toBe(true);
-    expect(takesBotName("package-pk")).toBe(true);
-    expect(takesBotName("manual")).toBe(false);
-    expect(takesBotName("level-2")).toBe(false);
+  test("checks nothing for a choice a rated lobby refuses, or a deleted name", () => {
+    expect(ratedChoiceValue(undefined, names)).toBe("");
+    expect(ratedChoiceValue({ kind: "localhost", name: "Kraken" }, names)).toBe(
+      "",
+    );
+    expect(
+      ratedChoiceValue(
+        { kind: "uploaded", package_id: "pk", name: "Kraken" },
+        names,
+      ),
+    ).toBe("");
+    expect(ratedChoiceValue({ kind: "default", level: 2 }, names)).toBe("");
+    expect(
+      ratedChoiceValue({ kind: "hosted", url: "https://b.example" }, names),
+    ).toBe("");
+    expect(ratedChoiceValue({ kind: "hosted", name: "Octopus" }, names)).toBe(
+      "",
+    );
+    expect(ratedChoiceValue({ kind: "hosted", name: "Kraken" }, null)).toBe("");
+  });
+
+  test("a name without a URL can't be chosen, nor any name while the server plays no hosted bots", () => {
+    const free = { locked: false, saving: false, serverBots: true };
+    const [kraken, old] = names as [(typeof names)[0], (typeof names)[1]];
+    expect(botNameLocked(kraken, free)).toBe(false);
+    expect(botNameLocked(old, free)).toBe(true);
+    expect(botNameLocked(kraken, { ...free, serverBots: false })).toBe(true);
+    // Until GET /bots/defaults answers, a name can be chosen; the server decides.
+    expect(botNameLocked(kraken, { ...free, serverBots: undefined })).toBe(
+      false,
+    );
+    expect(botNameLocked(kraken, { ...free, saving: true })).toBe(true);
+    expect(botNameLocked(kraken, { ...free, locked: true })).toBe(true);
   });
 
   test("its sentences", () => {
+    expect(ratedKindsHint).toBe(
+      "Rated bots run at their bot name's URL, so localhost and uploaded bots aren't offered here, and default bots play only in the host's bot seats.",
+    );
     expect(noBotNamesHint).toBe(
-      "Register a bot name in your account to play rated games with a bot.",
+      "Register a bot name with its hosted bot's URL in your account to play rated games with a bot.",
     );
-    expect(ratedDefaultsHint).toBe(
-      "Default bots play only in bot seats in a rated lobby.",
+    expect(guestBotNamesHint).toBe(
+      "Sign in with Google to play a rated game with one of your bot names.",
+    );
+    expect(nameWithoutUrlHint).toBe(
+      "No URL yet, so it can't play rated games.",
     );
   });
 });
 
-describe("the name a choice plays as", () => {
+test("an unrated lobby keeps a saved name when the same kind of bot is saved again, and offers none", () => {
   const kraken = { kind: "localhost" as const, name: "Kraken" };
-  const rated = { rated: true, signedIn: true };
-
-  test("carries over to another of your bots in a rated lobby", () => {
-    expect(playsAsName("localhost", kraken, undefined, rated)).toBe("Kraken");
-    expect(playsAsName("hosted", kraken, undefined, rated)).toBe("Kraken");
-    expect(playsAsName("package-pk", kraken, undefined, rated)).toBe("Kraken");
-    // Plays as, changed and not saved yet, wins; "" is No name.
-    expect(playsAsName("hosted", kraken, "Squid", rated)).toBe("Squid");
-    expect(playsAsName("hosted", kraken, "", rated)).toBe("");
-  });
-
-  test("is none for hand play, a default bot and a guest", () => {
-    expect(playsAsName("manual", kraken, undefined, rated)).toBe("");
-    expect(playsAsName("level-2", kraken, undefined, rated)).toBe("");
-    expect(
-      playsAsName("hosted", kraken, "Squid", { rated: true, signedIn: false }),
-    ).toBe("");
-  });
-
-  test("stays with its own choice in an unrated lobby", () => {
-    const unrated = { rated: false, signedIn: true };
-    expect(playsAsName("localhost", kraken, undefined, unrated)).toBe("Kraken");
-    expect(playsAsName("hosted", kraken, undefined, unrated)).toBe("");
-  });
-});
-
-test("a package greyed out this month can't be chosen through its Plays as", () => {
-  const free = { locked: false, saving: false, computeSpent: null };
-  const spent = {
-    ...free,
-    computeSpent: "Uploaded bots have used this month's free compute.",
-  };
-  expect(playsAsLocked("package-pk", free)).toBe(false);
-  expect(playsAsLocked("package-pk", spent)).toBe(true);
-  // Only uploaded bots use the server's compute.
-  expect(playsAsLocked("localhost", spent)).toBe(false);
-  expect(playsAsLocked("hosted", { ...free, saving: true })).toBe(true);
-  expect(playsAsLocked("hosted", { ...free, locked: true })).toBe(true);
+  expect(keptName("localhost", kraken)).toBe("Kraken");
+  expect(keptName("hosted", kraken)).toBe("");
+  expect(keptName("manual", kraken)).toBe("");
+  expect(keptName("hosted", { kind: "hosted", name: "Kraken" })).toBe("Kraken");
+  expect(keptName("localhost", undefined)).toBe("");
 });

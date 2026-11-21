@@ -50,6 +50,46 @@ export function validateBotName(text: string): string | undefined {
   return undefined;
 }
 
+/** An example of a hosted bot's URL, in the field and in sentences. */
+export const exampleBotUrl = "https://bot.example.com/turn";
+
+/**
+ * A bot name's URL, before it is sent: something that reads as an https:// URL. The game checks
+ * the rest (port 443, no credentials, a public host) and its sentence shows when it refuses.
+ */
+export function validateBotUrl(text: string): string | undefined {
+  const url = text.trim();
+  if (url === "") {
+    return `Enter the URL your hosted bot runs at, such as ${exampleBotUrl}.`;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return `Enter a whole URL, such as ${exampleBotUrl}.`;
+  }
+  // http:// is left to the game, which takes it only for a bot on its own machine, in development.
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    return `Use an https:// URL, such as ${exampleBotUrl}.`;
+  }
+  return undefined;
+}
+
+/** Under the URL of a name registered before names had URLs. */
+export const noBotUrlSentence =
+  "Add the URL your bot runs at to play it in rated lobbies.";
+
+/** Beside the new name's fields: what the URL is for, and that it becomes public. */
+export const botUrlPublicSentence =
+  "Rated games play the name at this URL. Once the name has played a rated game, the leaderboard shows the URL, so others can play against your bot.";
+
+/** Under the field that changes a name's URL. */
+export function botUrlEditHint(competitor: Competitor): string {
+  return competitor.games > 0
+    ? `The leaderboard shows ${competitor.name}'s new URL within a minute. Its rating stays; a game already started keeps the URL it started with.`
+    : "Its rating stays. Once the name has played a rated game, the leaderboard shows its URL, so others can play against your bot.";
+}
+
 /** A rating as shown: rounded. */
 export const ratingText = (rating: number): string =>
   String(Math.round(rating));
@@ -65,6 +105,8 @@ export interface CompetitorRow {
   name: string;
   rating: string;
   games: string;
+  /** A bot name's hosted bot URL, shown as text; null for hand play and a name without one. */
+  url: string | null;
 }
 
 const row = (competitor: Competitor): CompetitorRow => ({
@@ -72,6 +114,7 @@ const row = (competitor: Competitor): CompetitorRow => ({
   name: competitor.name,
   rating: ratingText(competitor.rating),
   games: gamesText(competitor.games),
+  url: competitor.kind === "bot" ? competitor.url : null,
 });
 
 export interface AddBotNameView {
@@ -129,6 +172,17 @@ export const withBotName = (
 ): IslandAccount => ({
   ...account,
   bot_names: [...account.bot_names, competitor],
+});
+
+/** An account with one of its bot names as the server answered it, such as with a new URL. */
+export const withChangedBotName = (
+  account: IslandAccount,
+  competitor: Competitor,
+): IslandAccount => ({
+  ...account,
+  bot_names: account.bot_names.map((name) =>
+    name.id === competitor.id ? competitor : name,
+  ),
 });
 
 /** An account without one of its bot names. */
@@ -217,8 +271,8 @@ const fallback = (error: unknown): string =>
     : "Something went wrong. Please try again.";
 
 /**
- * The sentence under the bot name field for a refused or failed add: the server's own for a
- * taken name or one that breaks the rule.
+ * The sentence under the bot name fields for a refused or failed add or change of URL: the
+ * server's own for a taken name, or a name or URL that breaks its rule.
  */
 export function botNameProblem(error: unknown): string {
   return common(error) ?? fallback(error);

@@ -57,7 +57,7 @@ export interface RoomScreenOptions {
   /** A sentence to show when the room opens, such as why reopening failed. */
   notice?: string;
   /**
-   * Reads a signed-in member's bot names, for **Plays as** in a rated lobby: the game's
+   * Reads a signed-in member's bot names and their URLs, for a rated lobby's choices: the game's
    * `GET /account`.
    */
   readAccount?(): Promise<RatedAccount>;
@@ -122,7 +122,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
   /** Whether each localhost bot seat's port answers, by port, as last asked; the host's room asks. */
   let seatHealth = new Map<number, boolean>();
   let lastVersion = -1;
-  /** Your bot names once read, for Plays as and your blocker; null until then. */
+  /** Your bot names once read, for a rated lobby's choices and your blocker; null until then. */
   let account: RatedAccount | null = null;
   /** Whether your bot names have been asked for: once a rated lobby needs them. */
   let accountAsked = false;
@@ -298,14 +298,14 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     },
     onManageBotNames() {
       if (!options.openAccount) return;
-      // Names added or deleted on the account page reach Plays as once it closes.
+      // Names and URLs changed on the account page reach the choices once it closes.
       void options.openAccount().then(() => {
         if (!disposed) void readAccount();
       });
     },
   });
 
-  /** Reads your bot names for Plays as; a failed read leaves them unknown, and the server decides. */
+  /** Reads your bot names for a rated lobby's choices; a failed read leaves them unknown, and the server decides. */
   async function readAccount(): Promise<void> {
     if (!options.readAccount) return;
     accountAsked = true;
@@ -316,7 +316,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
       picker.setAccount({ botNames: read.botNames });
       render();
     } catch {
-      // Asked again in a while; until then Plays as says it is loading.
+      // Asked again in a while; until then the picker says they are loading.
       setTimeout(() => {
         accountAsked = false;
         if (!disposed) render();
@@ -780,7 +780,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     const model = room(snapshot);
     const started = model.phase !== "waiting";
     const signedIn = realtime.session.get()?.account !== undefined;
-    // A rated lobby needs your bot names, for Plays as and your blocker.
+    // A rated lobby needs your bot names, for its choices and your blocker.
     if (model.rated && signedIn && !accountAsked) void readAccount();
     const rated = ratedBlockers(model, account);
     title.textContent = snapshot.lobby.name;

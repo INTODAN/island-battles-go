@@ -1,4 +1,4 @@
-import { h } from "../dom";
+import { copyText, h } from "../dom";
 import type { Screen } from "../lobby/nameScreen";
 import { routeLink } from "./links";
 import {
@@ -6,6 +6,7 @@ import {
   type BoardState,
   BoardStore,
   boardView,
+  botUrl,
   type CompetitorState,
   competitorStats,
   competitorSubtitle,
@@ -22,10 +23,13 @@ import {
   notFoundHint,
   notFoundText,
   type PodiumStep,
+  playAgainstHint,
+  playAgainstLabel,
   ratingChange,
   resultLine,
   updatedLine,
 } from "./model";
+import type { PlayTarget } from "./playAgainst";
 import { ratingsSections } from "./ratings";
 import "./leaderboard.css";
 
@@ -41,9 +45,18 @@ export interface LeaderboardScreenOptions {
   ownCompetitors: Promise<ReadonlySet<string>>;
   /** Shows a route: a link, a tab or **Back**. Undefined leaves the leaderboard. */
   navigate(route: LeaderboardRoute | undefined): void;
+  /**
+   * **Play against it** on a listed bot's page: makes the unrated lobby and opens its room, or
+   * the name screen first without a session. Rejects with the sentence to show under the button.
+   * Without it, the page has no such action.
+   */
+  playAgainst?(target: PlayTarget): Promise<void>;
 }
 
 const youTag = () => h("span", { class: "tag you" }, "you");
+/** A listed bot's URL: text to copy, never a link that opens it. */
+const urlText = (url: string, className = "bot-url") =>
+  h("span", { class: className, attrs: { translate: "no" } }, url);
 const houseBotTag = () => h("span", { class: "tag house" }, houseTag);
 
 /** "How ratings work": the opening paragraph, then each point with its title. */
@@ -193,6 +206,7 @@ export function mountLeaderboard(
         { class: "owner" },
         row.house ? houseBotTag() : (row.owner ?? ""),
       ),
+      row.url ? urlText(row.url) : null,
     );
   }
 
@@ -266,6 +280,7 @@ export function mountLeaderboard(
         step.mine ? youTag() : null,
         step.house ? houseBotTag() : null,
         step.owner ? h("div", { class: "hint" }, step.owner) : null,
+        step.url ? urlText(step.url, "bot-url podium-url") : null,
       ),
       h("div", { class: "big" }, String(step.entry.rating)),
     );
@@ -336,6 +351,71 @@ export function mountLeaderboard(
 
   // --- A competitor's page ---
 
+  /** A listed bot's URL and **Play against it**, under its name; none for hand play or a house bot. */
+  function playSection(competitor: LeaderboardCompetitor): HTMLElement | null {
+    const url = botUrl(competitor);
+    if (!url) return null;
+    const target = { name: competitor.name, url };
+    const copy = h(
+      "button",
+      { type: "button", class: "secondary small" },
+      "Copy URL",
+    );
+    copy.addEventListener("click", async () => {
+      copy.textContent = (await copyText(url)) ? "Copied" : "Copy failed";
+      setTimeout(() => {
+        copy.textContent = "Copy URL";
+      }, 1500);
+    });
+    const section = h(
+      "section",
+      { class: "card play-against", attrs: { "aria-label": "Its hosted bot" } },
+      h(
+        "p",
+        { class: "bot-url-line" },
+        h("span", { class: "hint" }, "Plays at "),
+        urlText(url),
+        " ",
+        copy,
+      ),
+    );
+    const play = options.playAgainst;
+    if (play) {
+      const button = h(
+        "button",
+        { type: "button", class: "primary" },
+        playAgainstLabel,
+      );
+      const error = h("p", { class: "field-error", attrs: { role: "alert" } });
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        button.textContent = "Starting…";
+        error.textContent = "";
+        try {
+          await play(target);
+        } catch (cause) {
+          error.textContent =
+            cause instanceof Error && cause.message
+              ? cause.message
+              : "Something went wrong. Please try again.";
+        } finally {
+          button.disabled = false;
+          button.textContent = playAgainstLabel;
+        }
+      });
+      section.append(
+        h(
+          "div",
+          { class: "play-against-action" },
+          button,
+          h("p", { class: "hint" }, playAgainstHint(competitor.name)),
+        ),
+        error,
+      );
+    }
+    return section;
+  }
+
   function competitorPage(competitor: LeaderboardCompetitor): HTMLElement {
     const tag = kindTag(competitor.kind);
     const back = link(
@@ -400,6 +480,7 @@ export function mountLeaderboard(
       h(
         "div",
         { class: "board-body" },
+        playSection(competitor),
         h(
           "div",
           { class: "card" },
