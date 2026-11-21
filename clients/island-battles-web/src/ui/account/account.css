@@ -105,6 +105,22 @@
   color: #8a4b00;
 }
 
+/* A bot name paused after it missed a turn while it played away (#412), with Resume. */
+.account-paused {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: center;
+  font-size: 13px;
+}
+
+.account-paused-text {
+  flex: 1 1 16em;
+  min-width: 0;
+  color: #8a4b00;
+}
+
 .account-url-form {
   display: block;
   margin-top: 2px;
@@ -213,6 +229,10 @@ button.danger.solid {
 
   .account-list li .account-url {
     grid-row: 3;
+  }
+
+  .account-list li .account-paused {
+    grid-row: 4;
   }
 
   .account-url-form .account-inline {

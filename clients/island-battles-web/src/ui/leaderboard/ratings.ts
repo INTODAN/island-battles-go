@@ -1,8 +1,9 @@
 /**
  * "How ratings work", the leaderboard's explanation of the rating rule, in a
- * player's words. The numbers are the backend's (`backend/rating/` and
- * `models.InitialRating`); `ratings.test.ts` reads them from the Go sources,
- * so a change there fails here until the text says it too.
+ * player's words. The numbers are the backend's (`backend/rating/`,
+ * `models.InitialRating` and the away bots' caps in `backend/services/`);
+ * `ratings.test.ts` reads them from the Go sources, so a change there fails
+ * here until the text says it too.
  */
 import type { RulesSection } from "../rules/rules";
 
@@ -17,6 +18,15 @@ export const provisionalK = 40;
 
 /** The points at stake once those games are played (`rating.EstablishedK`). */
 export const establishedK = 20;
+
+/**
+ * How many rated games two competitors, at least one of them away, play in a UTC day: one with
+ * each on the lower team colour (`capRefusal` in `backend/services/rated_away.go`).
+ */
+export const pairGamesPerDay = 2;
+
+/** How many rated games a bot plays away in a UTC day (`services.MaxAwayGamesPerDay`). */
+export const awayGamesPerDay = 10;
 
 /**
  * The explanation: the first section is the opening paragraph under the
@@ -35,7 +45,7 @@ export const ratingsSections: readonly RulesSection[] = [
     id: "rated-games",
     title: "Which games count",
     paragraphs: [
-      "the host turned Rated on, everyone is signed in and plays by hand or with one of their hosted bot names, and each team is a different competitor.",
+      "the host turned Rated on, everyone is signed in and plays by hand, with one of their hosted bot names or with a bot from the leaderboard, and each team is a different account's competitor.",
     ],
   },
   {
@@ -49,7 +59,28 @@ export const ratingsSections: readonly RulesSection[] = [
     id: "bot-urls",
     title: "Rated bots",
     paragraphs: [
-      "a rated bot runs at its bot name's URL, which the leaderboard shows once the bot is listed. Anyone can play against it from its page, and those games are unrated.",
+      "a rated bot runs at its bot name's URL, which the leaderboard shows once the bot is listed. Anyone can then play against it from its page, rated or unrated, or choose it in a rated lobby, for their own team or a bot seat.",
+    ],
+  },
+  {
+    id: "away",
+    title: "Playing away",
+    paragraphs: [
+      "a bot plays away when it sits in a bot seat, or plays for someone who doesn't own it. Its owner needn't be there. The bot is rated, not the person who chose it, and its page marks the result away.",
+    ],
+  },
+  {
+    id: "daily-limits",
+    title: "Daily limits",
+    paragraphs: [
+      `two competitors, at least one of them away, play at most ${pairGamesPerDay} rated games against each other a day, one with each of them on the lower team colour: swap their teams for the second. A bot plays away in at most ${awayGamesPerDay} rated games a day. Days are UTC days.`,
+    ],
+  },
+  {
+    id: "missed-turns",
+    title: "Missed turns",
+    paragraphs: [
+      "a bot that misses a turn while it plays away loses that game, as anyone who runs out of time does, and is paused: it plays away in no rated game until its owner resumes it on the account page. The owner's own games with it go on.",
     ],
   },
   {

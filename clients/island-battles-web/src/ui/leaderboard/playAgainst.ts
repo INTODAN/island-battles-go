@@ -1,8 +1,10 @@
 /**
- * **Play against it** on a listed bot's page (#404): an unrated lobby with the viewer as host and
- * a hosted bot seat at the bot's URL on the other team. No route of its own: the lobby's create,
- * team and seat calls, as the menu and the room make them. The game is unrated, since a lobby
- * that isn't rated changes no rating, and a seat is never a competitor.
+ * **Play against it** on a listed bot's page (#404, #412): a lobby with the viewer as host and the
+ * bot as a seat on the other team, `{"bot_competitor_id": …}`, which the server plays at the bot
+ * name's URL. No route of its own: the lobby's create, team and seat calls, as the menu and the
+ * room make them. The viewer chooses a rated lobby, whose game rates the bot, playing away, and
+ * whoever plays the host's team, or an unrated one, which changes no rating. Only a signed-in
+ * viewer can host a rated lobby.
  */
 import { ApiError } from "../../api/errors";
 import { serverSentence } from "../account/accountModel";
@@ -19,10 +21,15 @@ import {
 import { describeProblem } from "../lobby/problems";
 import { seatBody } from "../lobby/roomModel";
 
-/** A listed bot to play against: its name and the URL the leaderboard shows. */
+/** A listed bot to play against, and in which kind of lobby. */
 export interface PlayTarget {
   name: string;
+  /** Its competitor ID, which the seat names it by. */
+  competitorId: string;
+  /** The URL the leaderboard shows. */
   url: string;
+  /** A rated lobby, whose game counts for the leaderboard, or an unrated one. */
+  rated: boolean;
 }
 
 export type PlayAgainstActions = Pick<
@@ -45,8 +52,14 @@ export function playAgainstMap(
 }
 
 /** Shown on the name screen while someone without a session is on the way to the lobby. */
-export const signInToPlayNotice = (name: string): string =>
-  `Choose a name to play against ${name}. A lobby with ${name} as a bot opens next.`;
+export const signInToPlayNotice = (name: string, rated = false): string =>
+  rated
+    ? `Sign in with Google to play a rated game against ${name}. A rated lobby with ${name} as a bot opens next.`
+    : `Choose a name to play against ${name}. A lobby with ${name} as a bot opens next.`;
+
+/** When a guest asks for a rated lobby, which only a signed-in host can make. */
+export const ratedSignInProblem = (name: string): string =>
+  `Sign in with Google to play a rated game against ${name}, or play an unrated one.`;
 
 /** When the tab is in a lobby already, which one tab holds at a time. */
 export const inLobbyProblem = (name: string): string =>
@@ -59,20 +72,26 @@ export const noMapProblem =
   "There is no default map to play on. Create a lobby with a map file instead.";
 
 /**
- * Makes the lobby: checks that the server plays hosted bots, creates an unrated lobby on a default
- * map, takes the first team if the lobby didn't give you one, and adds the bot as a hosted bot
- * seat on another team. A failure before the lobby exists rejects with an Error to show. Once it
- * exists, the room shows it, so a failed team or seat call resolves with a sentence for the room.
+ * Makes the lobby: checks that a rated one has a signed-in host and that the server plays hosted
+ * bots, creates the lobby, rated or not, on a default map, takes the first team if the lobby
+ * didn't give you one, and adds the bot as a seat on another team, by its competitor ID. A failure
+ * before the lobby exists rejects with an Error to show. Once it exists, the room shows it, so a
+ * failed team or seat call resolves with a sentence for the room.
  */
 export async function startPlayAgainst(
   target: PlayTarget,
   options: {
     actions: PlayAgainstActions;
     playerId: string;
+    /** The viewer signed in with Google, so they can host a rated lobby. */
+    signedIn: boolean;
     newId(): string;
   },
 ): Promise<{ notice?: string }> {
   const { actions } = options;
+  if (target.rated && !options.signedIn) {
+    throw new Error(ratedSignInProblem(target.name));
+  }
   const fail = (cause: unknown, context: "create" | "seat") =>
     new Error(describeProblem(cause, context).message);
   let offered: Awaited<ReturnType<PlayAgainstActions["botOptions"]>>;
@@ -94,7 +113,7 @@ export async function startPlayAgainst(
       turnTimeoutSeconds: defaultTurnTimeout,
       turnPaceMilliseconds: defaultTurnPace,
       maxGenerations: defaultGameLength,
-      rated: false,
+      rated: target.rated,
     },
     maps,
   );
@@ -125,18 +144,22 @@ export async function startPlayAgainst(
     const other = teams.find((team) => team.id !== yourTeam);
     if (!other) throw new Error("The lobby has no other team.");
     await actions.addSeat(
-      seatBody(other.id, { bot_url: target.url }, options.newId()),
+      seatBody(
+        other.id,
+        { bot_competitor_id: target.competitorId },
+        options.newId(),
+      ),
     );
   } catch (cause) {
-    // A refused URL (its host no longer public, say) is the game's own sentence.
+    // A refused bot (paused, or no longer listed) is the game's own sentence.
     const why =
       cause instanceof ApiError &&
       cause.code === "invalid_seat_settings" &&
       cause.detail
         ? serverSentence(cause.detail)
-        : describeProblem(cause, "seat").message;
+        : describeProblem(cause, "listed-seat").message;
     return {
-      notice: `${target.name} wasn't added: ${why} Add it with Add bot, as a hosted bot at ${target.url}.`,
+      notice: `${target.name} wasn't added: ${why} Add it with Add bot, as a bot from the leaderboard.`,
     };
   }
   return {};

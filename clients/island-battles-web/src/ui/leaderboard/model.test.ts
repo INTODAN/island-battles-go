@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { ApiError } from "../../api/errors";
 import {
   appendPage,
+  awayTag,
+  awayTitle,
   type BoardState,
   BoardStore,
   boardView,
@@ -24,6 +26,8 @@ import {
   pageSize,
   playAgainstHint,
   playAgainstLabel,
+  playRatedLabel,
+  playUnratedLabel,
   ratingChange,
   readLeaderboardRoute,
   resultLine,
@@ -487,6 +491,7 @@ function result(change: Partial<CompetitorResult>): CompetitorResult {
   return {
     ended_at: "2026-11-20T14:32:00Z",
     result: "win",
+    away: false,
     rating_before: 1599,
     rating_after: 1609,
     opponents: [
@@ -502,10 +507,27 @@ function result(change: Partial<CompetitorResult>): CompetitorResult {
 }
 
 describe("a competitor's page", () => {
-  test("a listed bot's page offers to play against it, unrated", () => {
+  test("a listed bot's page offers to play against it, rated or unrated", () => {
     expect(playAgainstLabel).toBe("Play against it");
+    expect([playRatedLabel, playUnratedLabel]).toEqual([
+      "Rated game",
+      "Unrated game",
+    ]);
     expect(playAgainstHint("Kraken")).toBe(
-      "Starts an unrated lobby with you as host and Kraken as a bot seat on the other team. The game changes no rating.",
+      "Starts a lobby with you as host and Kraken as a bot seat on the other team. A rated game counts for the leaderboard and needs you signed in with Google; an unrated one changes no rating.",
+    );
+  });
+
+  test("marks a result the competitor played away, in someone else's lobby", () => {
+    expect(resultLine(result({})).away).toBe(false);
+    expect(resultLine(result({ away: true })).away).toBe(true);
+    expect(awayTag).toBe("away");
+    expect(awayTitle).toBe(
+      "Played away: in someone else's lobby, without its owner.",
+    );
+    // The sentence is the same: the tag says it was away.
+    expect(resultText(result({ away: true }))).toBe(
+      "Won against Bot (level 3) (1590)",
     );
   });
 

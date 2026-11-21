@@ -29,12 +29,19 @@ export const notFoundHint =
   "Its owner may have deleted it, or it hasn't played a rated game.";
 export const houseTag = "house bot";
 
-/** The action on a listed bot's page (#404). */
+/** The action on a listed bot's page (#404), in a rated lobby or an unrated one (#412). */
 export const playAgainstLabel = "Play against it";
+export const playRatedLabel = "Rated game";
+export const playUnratedLabel = "Unrated game";
 
-/** Under **Play against it**: what it does, and that the game is unrated. */
+/** Under **Play against it**: what it does, and what each kind of game rates. */
 export const playAgainstHint = (name: string): string =>
-  `Starts an unrated lobby with you as host and ${name} as a bot seat on the other team. The game changes no rating.`;
+  `Starts a lobby with you as host and ${name} as a bot seat on the other team. A rated game counts for the leaderboard and needs you signed in with Google; an unrated one changes no rating.`;
+
+/** The tag of a result that the competitor played away: in someone else's lobby, without its owner (#412). */
+export const awayTag = "away";
+export const awayTitle =
+  "Played away: in someone else's lobby, without its owner.";
 
 /**
  * A listed bot's hosted bot URL, shown as text so others can play against it; undefined for hand
@@ -267,6 +274,8 @@ export interface ResultOpponent {
 
 export interface ResultLine {
   result: CompetitorResult["result"];
+  /** The competitor played away, in someone else's lobby, without its owner: tagged "away". */
+  away: boolean;
   /** "Won", "Lost" or "Drew". */
   word: string;
   /** "against", "to" or "with". */
@@ -287,6 +296,7 @@ const resultWords: Record<
 export function resultLine(result: CompetitorResult): ResultLine {
   return {
     result: result.result,
+    away: result.away,
     ...resultWords[result.result],
     opponents: result.opponents.map((opponent) => ({
       name: opponent.name,

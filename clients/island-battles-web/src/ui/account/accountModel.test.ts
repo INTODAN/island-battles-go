@@ -14,6 +14,7 @@ import {
   gamesText,
   type IslandAccount,
   noBotUrlSentence,
+  pausedSentence,
   ratingText,
   serverSentence,
   validateAccountName,
@@ -94,6 +95,7 @@ describe("the account's view", () => {
       rating: "1546",
       games: "18 rated games",
       url: null,
+      paused: null,
     });
     expect(view.bots.map((row) => [row.name, row.rating, row.games])).toEqual([
       ["Kraken", "1609", "52 rated games"],
@@ -137,6 +139,34 @@ describe("the account's view", () => {
       "Eel",
     ]);
     expect(accountView(again).add.disabled).toBe(false);
+  });
+});
+
+describe("a paused bot name", () => {
+  const paused: Competitor = {
+    ...competitor("Kraken", 1588, 12),
+    away_paused: {
+      at: "2026-11-21T09:14:00Z",
+      reason: "Missed turn 12 of a rated game on 21 November",
+    },
+  };
+
+  test("says which turn it missed and what the pause stops, beside Resume", () => {
+    const view = accountView(account([paused, competitor("Squid", 1500, 0)]));
+    expect(view.bots.map((row) => row.paused)).toEqual([
+      "Paused: Missed turn 12 of a rated game on 21 November. It plays in nobody else's rated game until you resume it; your own games with it go on.",
+      null,
+    ]);
+    expect(view.hand.paused).toBeNull();
+    expect(pausedSentence("missed turn 3 of a rated game on 2 December.")).toBe(
+      "Paused: Missed turn 3 of a rated game on 2 December. It plays in nobody else's rated game until you resume it; your own games with it go on.",
+    );
+  });
+
+  test("resumed, as the server answers it, it is no longer paused", () => {
+    const { away_paused: _, ...resumed } = paused;
+    const after = withChangedBotName(account([paused]), resumed);
+    expect(accountView(after).bots[0]?.paused).toBeNull();
   });
 });
 

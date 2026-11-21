@@ -722,14 +722,14 @@ export function mountLobbyApp(options: {
   const openBoard = () => navigateBoard({ view: "board" });
 
   /**
-   * **Play against it** on a listed bot's page: an unrated lobby with this tab's player as host
-   * and the bot as a hosted bot seat, whose room then shows. Without a session, the name screen
-   * comes first, and the lobby is made once there is one.
+   * **Play against it** on a listed bot's page: a rated or unrated lobby with this tab's player as
+   * host and the bot as a seat, whose room then shows. Without a session, the name screen comes
+   * first, and the lobby is made once there is one.
    */
   async function playAgainst(target: PlayTarget): Promise<void> {
     if (!realtime.session.get()) {
       pendingPlay = target;
-      notice = signInToPlayNotice(target.name);
+      notice = signInToPlayNotice(target.name, target.rated);
       navigateBoard(undefined);
       return;
     }
@@ -746,7 +746,9 @@ export function mountLobbyApp(options: {
    */
   function cancelPendingPlay(): void {
     if (!pendingPlay) return;
-    if (notice === signInToPlayNotice(pendingPlay.name)) notice = "";
+    if (notice === signInToPlayNotice(pendingPlay.name, pendingPlay.rated)) {
+      notice = "";
+    }
     pendingPlay = undefined;
   }
 
@@ -755,6 +757,7 @@ export function mountLobbyApp(options: {
     const made = await startPlayAgainst(target, {
       actions,
       playerId: realtime.session.get()?.playerId ?? "",
+      signedIn: realtime.session.get()?.account !== undefined,
       newId: () => crypto.randomUUID(),
     });
     if (!made.notice) return;
@@ -988,7 +991,7 @@ export function mountLobbyApp(options: {
           readAccount: async () => ({
             botNames: (
               await createAccountService(realtime).read()
-            ).bot_names.map(({ name, url }) => ({ name, url })),
+            ).bot_names.map(({ id, name, url }) => ({ id, name, url })),
           }),
           openAccount: () =>
             new Promise<void>((resolve) => {

@@ -7,6 +7,7 @@ import {
   serveCommandFor,
 } from "../../bots";
 import { computeSpentMessage, uploadedGreyedOut } from "../../bots/compute";
+import { type ListedBot, listedBotLabel } from "../../bots/kinds";
 import {
   type BotPackage,
   describePackage,
@@ -23,6 +24,7 @@ import {
   choiceFromValue,
   choiceValue,
   findBotName,
+  leaderboardValue,
 } from "./roomModel";
 
 export interface BotPicker {
@@ -42,6 +44,8 @@ export interface BotPicker {
    * be read. Null for a guest, who has none.
    */
   setAccount(account: PickerAccount | null): void;
+  /** The bots from the leaderboard that you may choose, or null while they load or can't be read. */
+  setListedBots(bots: readonly ListedBot[] | null): void;
   dispose(): void;
 }
 
@@ -64,6 +68,18 @@ export const noServerBotsHint =
   "This server doesn't play hosted bots, so here a rated game is played by hand.";
 /** Beside a bot name without a URL, whose radio is disabled. */
 export const nameWithoutUrlHint = "No URL yet, so it can't play rated games.";
+/** Under "A bot from the leaderboard" in a rated lobby (#412): whose rating the game changes. */
+export const leaderboardRatedHint =
+  "Anyone's listed bot plays for your team at its URL. Someone else's bot is rated in your place and plays away, within the daily limits that How ratings work on the leaderboard explains.";
+/** Under "A bot from the leaderboard" in a lobby that isn't rated. */
+export const leaderboardUnratedHint =
+  "Anyone's listed bot plays for your team at its URL. The server plays it; this tab relays nothing.";
+/** In place of the list when the server plays no hosted bots, as a bot from the leaderboard is. */
+export const noServerListedHint = "This server doesn't play hosted bots.";
+/** In place of the list while the leaderboard lists no bot with a URL. */
+export const noListedBotsHint = "No bots are on the leaderboard yet.";
+/** The option for a chosen bot that the list doesn't hold: no longer listed, or past its first page. */
+export const chosenUnlistedLabel = "The bot you chose";
 
 /** The radio value of one of your bot names in a rated lobby. */
 export const botNameValue = (name: string): string => `botname:${name}`;
@@ -76,15 +92,16 @@ export function botNameOfValue(value: string): string | undefined {
 }
 
 /**
- * The radio a saved choice checks in a rated lobby, "" for none: hand play, or a hosted bot under
- * one of your names (found without regard to case). Any other choice checks none, and the room
- * says what to do (`ratedBlockers`).
+ * The radio a saved choice checks in a rated lobby, "" for none: hand play, a bot from the
+ * leaderboard, or a hosted bot under one of your names (found without regard to case). Any other
+ * choice checks none, and the room says what to do (`ratedBlockers`).
  */
 export function ratedChoiceValue(
   chosen: MemberBot | undefined,
   names: readonly BotName[] | null,
 ): string {
   if (chosen?.kind === "manual") return "manual";
+  if (chosen?.kind === "hosted" && chosen.competitor_id) return leaderboardValue;
   if (chosen?.kind !== "hosted" || !chosen.name) return "";
   const found = findBotName(names ?? [], chosen.name);
   return found ? botNameValue(found.name) : "";
@@ -95,6 +112,60 @@ export const ratedChoice = (name: string): MemberBot => ({
   kind: "hosted",
   name,
 });
+
+/** What choosing a bot from the leaderboard saves: a hosted bot by its competitor ID, which plays at its name's URL. */
+export const leaderboardChoice = (competitorId: string): MemberBot => ({
+  kind: "hosted",
+  competitor_id: competitorId,
+});
+
+/**
+ * The bots from the leaderboard that the picker lists: all but your own bot names, which it
+ * offers by name already.
+ */
+export function pickableListedBots(
+  listed: readonly ListedBot[],
+  names: readonly BotName[] | null,
+): ListedBot[] {
+  const own = new Set((names ?? []).flatMap((name) => name.id ?? []));
+  return listed.filter((bot) => !own.has(bot.competitorId));
+}
+
+/**
+ * The options of the leaderboard's select, `{value, label}`: "Choose a bot…" while none is
+ * chosen, each bot as "Kraken, by Dana", and the chosen one when the list doesn't hold it.
+ */
+export function listedBotOptions(
+  bots: readonly ListedBot[],
+  chosenId: string | undefined,
+): { value: string; label: string }[] {
+  const options = bots.map((bot) => ({
+    value: bot.competitorId,
+    label: listedBotLabel(bot),
+  }));
+  if (!chosenId) return [{ value: "", label: "Choose a bot…" }, ...options];
+  return bots.some((bot) => bot.competitorId === chosenId)
+    ? options
+    : [{ value: chosenId, label: chosenUnlistedLabel }, ...options];
+}
+
+/**
+ * Whether "A bot from the leaderboard" is disabled: while the lobby locks or a save runs, when
+ * the server plays no hosted bots, or with no bot to choose.
+ */
+export function leaderboardLocked(state: {
+  locked: boolean;
+  saving: boolean;
+  serverBots: boolean | undefined;
+  offered: number;
+}): boolean {
+  return (
+    state.locked ||
+    state.saving ||
+    state.serverBots === false ||
+    state.offered === 0
+  );
+}
 
 /** Whether a bot name's radio is disabled: without a URL, while the lobby locks or a save runs, or when the server plays no hosted bots. */
 export function botNameLocked(
@@ -168,6 +239,8 @@ export function mountBotPicker(options: {
   let rated = false;
   /** Your bot names, for a rated lobby; null for a guest. */
   let account: PickerAccount | null = null;
+  /** The bots from the leaderboard, null while they load or can't be read. */
+  let listed: readonly ListedBot[] | null = null;
 
   // --- A rated lobby's choices: your bot names, each a hosted bot at its own URL (#400) ---
   const ratedNames = h("div", { class: "bot-names" });
@@ -184,12 +257,12 @@ export function mountBotPicker(options: {
     h(
       "p",
       { class: "hint" },
-      "Or play one of your bot names. The server plays it at the name's URL; this tab relays nothing.",
+      "Or play one of your bot names, or a bot from the leaderboard. The server plays it at the name's URL; this tab relays nothing.",
     ),
     ratedNames,
     ratedNote,
-    h("p", { class: "hint" }, ratedKindsHint),
   );
+  const ratedKinds = h("p", { class: "hint", hidden: true }, ratedKindsHint);
   /** The names drawn last, so a redraw only replaces them when they change. */
   let ratedKey = "";
 
@@ -258,6 +331,74 @@ export function mountBotPicker(options: {
       ...(sentence ? [sentence, " "] : []),
       ...(account === null ? [] : [manageNames]),
     );
+  }
+
+  // --- A bot from the leaderboard, by its competitor ID (#412), in a rated lobby or not ---
+  const leaderboardHint = h("span", { class: "hint" });
+  const leaderboardLabel = h(
+    "label",
+    { class: "bot-option", htmlFor: "bot-leaderboard" },
+    h("input", {
+      type: "radio",
+      name: "bot",
+      value: leaderboardValue,
+      id: "bot-leaderboard",
+    }),
+    h(
+      "span",
+      { class: "bot-text" },
+      h("strong", {}, "A bot from the leaderboard"),
+      leaderboardHint,
+    ),
+  );
+  const leaderboardSelect = h("select", {
+    class: "bot-listed",
+    attrs: { "aria-label": "A bot from the leaderboard" },
+  });
+  const leaderboardNote = h("span", { class: "hint" });
+  const leaderboardEl = h(
+    "div",
+    { class: "bot-leaderboard" },
+    leaderboardLabel,
+    h("div", { class: "bot-help" }, leaderboardSelect, leaderboardNote),
+  );
+  /** The options drawn last, so a redraw only replaces them when they change. */
+  let listedKey = "";
+  /** The listed bots you may choose: all but your own names. */
+  const offeredBots = () =>
+    pickableListedBots(listed ?? [], account?.botNames ?? null);
+  const chosenListed = () =>
+    chosen?.kind === "hosted" ? chosen.competitor_id : undefined;
+
+  /** Draws the leaderboard's bots as the select's options, with the saved one selected. */
+  function showListed(): void {
+    const bots = offeredBots();
+    const chosenId = chosenListed();
+    const options = listedBotOptions(bots, chosenId);
+    const key = JSON.stringify(options);
+    if (key !== listedKey) {
+      listedKey = key;
+      leaderboardSelect.replaceChildren(
+        ...options.map((option) =>
+          h("option", { attrs: { value: option.value } }, option.label),
+        ),
+      );
+    }
+    if (document.activeElement !== leaderboardSelect) {
+      leaderboardSelect.value = chosenId ?? "";
+    }
+    leaderboardSelect.hidden = bots.length === 0 && !chosenId;
+    leaderboardNote.textContent =
+      serverBotsKnown && !serverBots
+        ? noServerListedHint
+        : listed === null
+          ? "Loading the leaderboard…"
+          : bots.length === 0
+            ? noListedBotsHint
+            : "";
+    leaderboardHint.textContent = rated
+      ? leaderboardRatedHint
+      : leaderboardUnratedHint;
   }
 
   const status = h(
@@ -388,6 +529,8 @@ export function mountBotPicker(options: {
   );
   const hostedHelp = h("div", { class: "bot-help" }, hostedUrl, useUrl);
   const uploaded = h("div", { class: "bot-uploaded" });
+  /** Where "A bot from the leaderboard" goes in a lobby that isn't rated. */
+  const unratedLeaderboard = h("div", {});
   const serverOptions = h(
     "div",
     { class: "bot-server", hidden: true },
@@ -399,6 +542,7 @@ export function mountBotPicker(options: {
     hostedLabel,
     hostedHelp,
     uploaded,
+    unratedLeaderboard,
   );
   const packages = mountPackages({
     actions,
@@ -435,7 +579,10 @@ export function mountBotPicker(options: {
     manualLabel,
     ratedOptions,
     unratedOptions,
+    ratedKinds,
   );
+  // A rated lobby offers it after your names.
+  ratedOptions.append(leaderboardEl);
 
   function radios(): HTMLInputElement[] {
     return Array.from(el.querySelectorAll<HTMLInputElement>("input[name=bot]"));
@@ -444,6 +591,17 @@ export function mountBotPicker(options: {
   function sync(): void {
     const names = account?.botNames ?? null;
     if (rated) showRatedNames();
+    // The leaderboard's bots follow the lobby: after your names, or after the server's bots.
+    const slot = rated ? ratedOptions : unratedLeaderboard;
+    if (leaderboardEl.parentElement !== slot) slot.append(leaderboardEl);
+    showListed();
+    const listedLocked = leaderboardLocked({
+      locked,
+      saving,
+      serverBots: serverBotsKnown ? serverBots : undefined,
+      offered: offeredBots().length + (chosenListed() ? 1 : 0),
+    });
+    leaderboardSelect.disabled = listedLocked;
     const value = rated ? ratedChoiceValue(chosen, names) : choiceValue(chosen);
     for (const radio of radios()) {
       radio.checked = radio.value === value;
@@ -455,9 +613,12 @@ export function mountBotPicker(options: {
             saving,
             serverBots: serverBotsKnown ? serverBots : undefined,
           })
-        : locked || saving || uploadedGreyedOut(radio.value, computeSpent);
+        : radio.value === leaderboardValue
+          ? listedLocked
+          : locked || saving || uploadedGreyedOut(radio.value, computeSpent);
     }
     ratedOptions.hidden = !rated;
+    ratedKinds.hidden = !rated;
     unratedOptions.hidden = rated;
     hostedUrl.disabled = locked || saving;
     useUrl.disabled = locked || saving;
@@ -533,6 +694,20 @@ export function mountBotPicker(options: {
       sync();
       return;
     }
+    // A bot from the leaderboard: the one its select shows.
+    if (value === leaderboardValue) {
+      const competitorId = leaderboardSelect.value;
+      if (!competitorId) {
+        options.onError("Choose a bot from the leaderboard's list first.");
+        sync();
+        leaderboardSelect.focus();
+        return;
+      }
+      if (competitorId !== chosenListed() && !saving && !locked) {
+        await save(leaderboardChoice(competitorId));
+      } else sync();
+      return;
+    }
     // A rated lobby's bot name: a hosted bot under it, which plays at the name's URL.
     const name = botNameOfValue(value);
     if (name !== undefined) {
@@ -606,6 +781,10 @@ export function mountBotPicker(options: {
       void choose(target.value);
     }
   });
+  leaderboardSelect.addEventListener(
+    "change",
+    () => void choose(leaderboardValue),
+  );
   useUrl.addEventListener("click", () => void choose("hosted"));
   usePort.addEventListener("click", () => void choose("localhost"));
   port.addEventListener("keydown", (event) => {
@@ -701,6 +880,10 @@ export function mountBotPicker(options: {
     },
     setAccount(next) {
       account = next;
+      sync();
+    },
+    setListedBots(next) {
+      listed = next;
       sync();
     },
     dispose() {

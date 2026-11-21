@@ -8,6 +8,37 @@ import type { components } from "../api/generated/game";
 
 export type BotChoice = components["schemas"]["BotChoice"];
 export type RelayedBot = components["schemas"]["RelayedBot"];
+type LeaderboardEntry = components["schemas"]["LeaderboardEntry"];
+
+/**
+ * A bot from the leaderboard (#412): a listed bot name, with its URL, that anyone may choose for
+ * their own team or seat as a bot, by its competitor ID. The server plays it at the name's URL.
+ */
+export interface ListedBot {
+  competitorId: string;
+  name: string;
+  /** The display name of the account that owns it. */
+  owner: string | null;
+}
+
+/** The listed bots among the leaderboard's entries: bot names with a URL, in its order. */
+export function listedBots(entries: readonly LeaderboardEntry[]): ListedBot[] {
+  return entries.flatMap((entry) =>
+    entry.kind === "bot" && entry.url
+      ? [
+          {
+            competitorId: entry.competitor_id,
+            name: entry.name,
+            owner: entry.owner,
+          },
+        ]
+      : [],
+  );
+}
+
+/** "Kraken, by Dana", as the leaderboard names a bot. */
+export const listedBotLabel = (bot: ListedBot): string =>
+  bot.owner ? `${bot.name}, by ${bot.owner}` : bot.name;
 
 /** Whether the server plays this bot without the player's tab: a hosted or an uploaded bot. */
 export function playedByServer(bot: BotChoice): boolean {
@@ -16,7 +47,8 @@ export function playedByServer(bot: BotChoice): boolean {
 
 /**
  * A few words naming the bot that plays your seat, for the game view's player list, with the bot
- * name it plays as in a rated game: "Kraken, your localhost bot on port 41414, …".
+ * name it plays as in a rated game: "Kraken, your localhost bot on port 41414, …". A named hosted
+ * bot may be someone else's, a bot from the leaderboard, so it isn't called yours.
  */
 export function describeGameBot(bot: BotChoice): string {
   const your = bot.name ? `${bot.name}, your` : "your";
@@ -26,7 +58,9 @@ export function describeGameBot(bot: BotChoice): string {
     case "default":
       return `Default bot, level ${bot.level ?? "?"}, played by the server`;
     case "hosted":
-      return `Played by the server: ${your} hosted bot${bot.host ? ` at ${bot.host}` : ""}`;
+      return bot.name
+        ? `Played by the server: ${bot.name}, hosted${bot.host ? ` at ${bot.host}` : ""}`
+        : `Played by the server: your hosted bot${bot.host ? ` at ${bot.host}` : ""}`;
     case "uploaded":
       return `Played by the server: ${your} uploaded bot`;
     case "manual":

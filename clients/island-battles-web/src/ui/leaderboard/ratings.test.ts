@@ -5,8 +5,10 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import {
+  awayGamesPerDay,
   establishedK,
   initialRating,
+  pairGamesPerDay,
   provisionalGames,
   provisionalK,
   ratingsSections,
@@ -53,12 +55,26 @@ describe("how ratings work", () => {
     expect(provisionalK / establishedK, changed).toBe(2);
   });
 
+  test("names the away bots' daily caps", () => {
+    expect(awayGamesPerDay, changed).toBe(
+      goConstant("backend/services/rated_lobbies.go", "MaxAwayGamesPerDay"),
+    );
+    // The pair cap is one game with each competitor on the lower colour: two, which the start's
+    // refusal says once both are used.
+    const caps = read("backend/services/rated_away.go");
+    expect(caps, changed).toContain("have played both their rated games today");
+    expect(caps, changed).toContain("first.TeamColor < second.TeamColor");
+    expect(pairGamesPerDay, changed).toBe(2);
+  });
+
   test("says each number in the text", () => {
     for (const number of [
       initialRating,
       provisionalGames,
       provisionalK,
       establishedK,
+      pairGamesPerDay,
+      awayGamesPerDay,
     ]) {
       expect(text).toContain(String(number));
     }

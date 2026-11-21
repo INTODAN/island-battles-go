@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { describeGameBot, describeRelayedBot, playedByServer } from "./kinds";
+import {
+  describeGameBot,
+  describeRelayedBot,
+  listedBotLabel,
+  listedBots,
+  playedByServer,
+} from "./kinds";
 
 describe("the bot that plays your seat", () => {
   test("is played by the server unless it is your localhost bot or a default bot", () => {
@@ -50,8 +56,61 @@ test("a rated game names the bot name your bot plays as", () => {
       host: "bot.example.com",
       name: "Kraken",
     }),
-  ).toBe("Played by the server: Kraken, your hosted bot at bot.example.com");
+  ).toBe("Played by the server: Kraken, hosted at bot.example.com");
   expect(describeGameBot({ kind: "uploaded", name: "Squid" })).toBe(
     "Played by the server: Squid, your uploaded bot",
   );
+});
+
+test("the bots from the leaderboard are its bot names with a URL, named with their owner", () => {
+  const entry = {
+    rank: 1,
+    rating: 1520,
+    games: 3,
+    wins: 2,
+    draws: 0,
+    losses: 1,
+    last_played_at: "2026-11-20T14:32:00Z",
+  };
+  const bots = listedBots([
+    {
+      ...entry,
+      competitor_id: "c-kraken",
+      kind: "bot",
+      name: "Kraken",
+      owner: "Dana",
+      url: "https://kraken.example.org/bot",
+    },
+    {
+      ...entry,
+      competitor_id: "c-old",
+      kind: "bot",
+      name: "Old",
+      owner: "Dana",
+      url: null,
+    },
+    {
+      ...entry,
+      competitor_id: "c-hand",
+      kind: "manual",
+      name: "Dana",
+      owner: null,
+      url: null,
+    },
+    {
+      ...entry,
+      competitor_id: "c-house",
+      kind: "house",
+      name: "Bot (level 2)",
+      owner: null,
+      url: null,
+    },
+  ]);
+  expect(bots).toEqual([
+    { competitorId: "c-kraken", name: "Kraken", owner: "Dana" },
+  ]);
+  expect(listedBotLabel(bots[0] as (typeof bots)[0])).toBe("Kraken, by Dana");
+  expect(
+    listedBotLabel({ competitorId: "c-x", name: "Squid", owner: null }),
+  ).toBe("Squid");
 });

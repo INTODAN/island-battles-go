@@ -1,5 +1,6 @@
 import { checkBotHealth, nextFreePort, portProblem } from "../../bots";
 import { offeredChoice, seatOptions } from "../../bots/compute";
+import type { ListedBot } from "../../bots/kinds";
 import { webClientUrl } from "../../platform";
 import type { Realtime, Snapshot } from "../../realtime";
 import { copyText, h } from "../dom";
@@ -33,6 +34,7 @@ import {
   type RoomModel,
   ratedBlockers,
   seatBody,
+  seatCompetitors,
   seatLevels,
   seatSettingsFromValue,
   startBlocker,
@@ -126,6 +128,8 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
   let account: RatedAccount | null = null;
   /** Whether your bot names have been asked for: once a rated lobby needs them. */
   let accountAsked = false;
+  /** The bots from the leaderboard, for the bot picker, Add bot and the members' bots; empty until read. */
+  let listed: ListedBot[] = [];
 
   const title = h("h1", {});
   const settingsLine = h("p", { class: "lead" });
@@ -423,6 +427,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
   /** A fresh request ID per click; a transport retry resends the same body, so the seat is added once. */
   const addBot = (teamId: string) => {
     const choice = seatChoice(teamId);
+    const fromLeaderboard = choice.startsWith("competitor-");
     const snapshot = realtime.lobby.get();
     const taken = snapshot ? yourPorts(room(snapshot)) : [];
     const port = seatPorts.get(teamId) ?? String(nextFreePort(taken));
@@ -449,7 +454,8 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     const body = seatBody(teamId, settings, crypto.randomUUID());
     problems.seat = undefined;
     return run(
-      "seat",
+      // A refused bot from the leaderboard (paused, or no longer listed) is the game's own sentence.
+      fromLeaderboard ? "listed-seat" : "seat",
       () => retryTransport(() => actions.addSeat(body)),
       (shown) => {
         problems.seat = { teamId, message: shown.message };
@@ -499,9 +505,11 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
       serverBots,
       packages: lobbyPackages,
       spent: computeSpent,
-      // A rated lobby seats only default bots, each level once.
+      // A rated lobby seats only default bots, each level once, and bots from the leaderboard, each once.
       rated: model?.rated === true,
       takenLevels: model ? seatLevels(model) : [],
+      listed,
+      takenCompetitors: model ? seatCompetitors(model) : [],
     });
   };
 
@@ -554,7 +562,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
       h(
         "span",
         { class: `bot-label${member.bot ? "" : " none"}` },
-        describeBot(member.bot, member.relay),
+        describeBot(member.bot, member.relay, listed),
         localPort === undefined
           ? null
           : h(
@@ -663,7 +671,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
         ? h(
             "p",
             { class: "hint seat-add" },
-            "Each bot level already has a seat: a rated game holds each level once.",
+            "Each bot level and bot from the leaderboard already has a seat: a rated game holds each once.",
           )
         : editSeats && !taken
           ? h(
@@ -919,8 +927,27 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
       if (offered.bots.length > 0) levels = offered.bots;
       serverBots = offered.serverBots;
       render();
+      if (serverBots) void readListed();
     })
     .catch(() => undefined);
+
+  /**
+   * Reads the bots from the leaderboard, which the server plays only when it offers hosted bots;
+   * a failed read is tried again in a while, and offers none until then.
+   */
+  async function readListed(): Promise<void> {
+    try {
+      const read = await actions.listedBots();
+      if (disposed) return;
+      listed = read;
+      picker.setListedBots(read);
+      render();
+    } catch {
+      setTimeout(() => {
+        if (!disposed) void readListed();
+      }, 30000);
+    }
+  }
 
   const el = h(
     "div",

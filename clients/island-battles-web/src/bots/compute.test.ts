@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   computeSpentMessage,
+  listedSeatValue,
   offeredChoice,
   seatOptions,
   uploadedGreyedOut,
@@ -118,4 +119,68 @@ test("a rated lobby's Add bot offers only the default levels that no seat has", 
       takenLevels: [1],
     }).map((choice) => choice.value),
   ).toEqual(["level-1", "localhost"]);
+});
+
+describe("Add bot's bots from the leaderboard", () => {
+  const listed = [
+    { competitorId: "c-kraken", name: "Kraken", owner: "Dana" },
+    { competitorId: "c-squid", name: "Squid", owner: "Sam" },
+  ];
+
+  test("a rated lobby offers each bot that no seat has, after the levels", () => {
+    expect(
+      seatOptions({
+        levels: [1, 2],
+        serverBots: true,
+        packages: [],
+        spent: null,
+        rated: true,
+        takenLevels: [2],
+        listed,
+        takenCompetitors: ["c-squid"],
+      }),
+    ).toEqual([
+      { value: "level-1", label: "Bot level 1", disabled: false },
+      {
+        value: listedSeatValue("c-kraken"),
+        label: "From the leaderboard: Kraken, by Dana",
+        disabled: false,
+      },
+    ]);
+    expect(listedSeatValue("c-kraken")).toBe("competitor-c-kraken");
+  });
+
+  test("an unrated lobby offers every one, after the hosted bot", () => {
+    expect(
+      seatOptions({
+        levels: [1],
+        serverBots: true,
+        packages: [],
+        spent: null,
+        listed,
+        takenCompetitors: ["c-squid"],
+      }).map((choice) => choice.value),
+    ).toEqual([
+      "level-1",
+      "localhost",
+      "hosted",
+      "competitor-c-kraken",
+      "competitor-c-squid",
+    ]);
+  });
+
+  test("none while the server plays no hosted bots", () => {
+    for (const rated of [true, false]) {
+      expect(
+        seatOptions({
+          levels: [1],
+          serverBots: false,
+          packages: [],
+          spent: null,
+          rated,
+          listed,
+        }).some((choice) => choice.value.startsWith("competitor-")),
+      ).toBe(false);
+    }
+  });
 });

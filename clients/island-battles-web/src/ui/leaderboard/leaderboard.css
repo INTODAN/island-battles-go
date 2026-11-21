@@ -560,3 +560,10 @@ a:focus-visible {
     font-size: 19px;
   }
 }
+
+/* A result the competitor played away, in someone else's lobby (#412). */
+.tag.away {
+  background: #dcebf7;
+  color: #24557d;
+  vertical-align: middle;
+}

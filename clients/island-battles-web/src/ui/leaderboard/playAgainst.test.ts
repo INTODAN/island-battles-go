@@ -9,6 +9,8 @@ import {
   type PlayAgainstActions,
   playAgainstLobbyName,
   playAgainstMap,
+  ratedSignInProblem,
+  signInToPlayNotice,
   startPlayAgainst,
 } from "./playAgainst";
 
@@ -21,7 +23,12 @@ const map = (id: number, teams: number): MapTemplateSummary => ({
   plane_size_y: 100,
 });
 
-const kraken = { name: "Kraken", url: "https://kraken.example.org/bot" };
+const kraken = {
+  name: "Kraken",
+  competitorId: "c-kraken",
+  url: "https://kraken.example.org/bot",
+  rated: false,
+};
 const you = "p-you";
 
 /** A fake lobby: records the calls, and answers a snapshot of two teams. */
@@ -32,6 +39,8 @@ function fakeLobby(
     onTeam?: string | null;
     seatError?: ApiError;
     createError?: ApiError;
+    rated?: boolean;
+    signedIn?: boolean;
   } = {},
 ) {
   const calls: string[] = [];
@@ -86,11 +95,15 @@ function fakeLobby(
     seats,
     teams,
     play: () =>
-      startPlayAgainst(kraken, {
-        actions,
-        playerId: you,
-        newId: () => `id-${++id}`,
-      }),
+      startPlayAgainst(
+        { ...kraken, rated: options.rated ?? false },
+        {
+          actions,
+          playerId: you,
+          signedIn: options.signedIn ?? true,
+          newId: () => `id-${++id}`,
+        },
+      ),
   };
 }
 
@@ -104,7 +117,7 @@ const rejection = async (promise: Promise<unknown>): Promise<Error> => {
 };
 
 describe("Play against it", () => {
-  test("makes an unrated lobby with you on one team and the bot's URL as a seat on another", async () => {
+  test("makes an unrated lobby with you on one team and the bot as a seat on another", async () => {
     const lobby = fakeLobby();
     expect(await lobby.play()).toEqual({});
     expect(lobby.calls).toEqual([
@@ -129,13 +142,48 @@ describe("Play against it", () => {
       },
     ]);
     expect(lobby.teams).toEqual(["t-blue"]);
+    // The seat names the bot by its competitor ID; the server plays it at its name's URL.
     expect(lobby.seats).toEqual([
       {
         request_id: "id-2",
         team_id: "t-red",
-        seat_settings: { bot_url: "https://kraken.example.org/bot" },
+        seat_settings: { bot_competitor_id: "c-kraken" },
       },
     ]);
+  });
+
+  test("makes a rated lobby, with the same seat, for a signed-in viewer", async () => {
+    const lobby = fakeLobby({ rated: true });
+    expect(await lobby.play()).toEqual({});
+    expect(lobby.created[0]?.game_settings).toEqual({
+      map_template_id: 2,
+      turn_timeout_seconds: 30,
+      turn_pace_milliseconds: 1000,
+      max_generations: 300,
+      rated: true,
+    });
+    expect(lobby.seats[0]?.seat_settings).toEqual({
+      bot_competitor_id: "c-kraken",
+    });
+  });
+
+  test("a guest can't host a rated lobby, and is asked to sign in first", async () => {
+    const lobby = fakeLobby({ rated: true, signedIn: false });
+    expect((await rejection(lobby.play())).message).toBe(
+      ratedSignInProblem("Kraken"),
+    );
+    expect(ratedSignInProblem("Kraken")).toBe(
+      "Sign in with Google to play a rated game against Kraken, or play an unrated one.",
+    );
+    expect(lobby.calls).toEqual([]);
+    // An unrated lobby needs no sign-in.
+    expect(await fakeLobby({ signedIn: false }).play()).toEqual({});
+    expect(signInToPlayNotice("Kraken")).toBe(
+      "Choose a name to play against Kraken. A lobby with Kraken as a bot opens next.",
+    );
+    expect(signInToPlayNotice("Kraken", true)).toBe(
+      "Sign in with Google to play a rated game against Kraken. A rated lobby with Kraken as a bot opens next.",
+    );
   });
 
   test("keeps the team the lobby gave you, and seats the bot on another", async () => {
@@ -180,16 +228,18 @@ describe("Play against it", () => {
 
   test("a refused seat leaves the lobby, and says why and how to add it", async () => {
     const lobby = fakeLobby({
+      rated: true,
       seatError: new ApiError({
         kind: "problem",
         status: 422,
         code: "invalid_seat_settings",
-        detail: "the bot's host kraken.example.org has no address",
+        detail:
+          "Kraken is paused after it missed a turn, until its owner resumes it. Choose another bot.",
       }),
     });
     expect(await lobby.play()).toEqual({
       notice:
-        "Kraken wasn't added: The bot's host kraken.example.org has no address. Add it with Add bot, as a hosted bot at https://kraken.example.org/bot.",
+        "Kraken wasn't added: Kraken is paused after it missed a turn, until its owner resumes it. Choose another bot. Add it with Add bot, as a bot from the leaderboard.",
     });
   });
 });

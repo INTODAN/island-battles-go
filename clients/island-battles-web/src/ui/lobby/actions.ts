@@ -2,6 +2,7 @@ import { createApiClients } from "../../api/client";
 import { ApiError } from "../../api/errors";
 import type { components as GameComponents } from "../../api/generated/game";
 import type { components as LobbyComponents } from "../../api/generated/lobby";
+import { type ListedBot, listedBots } from "../../bots/kinds";
 import { platformFetch } from "../../platform";
 import type { Realtime, Snapshot, WatchAccess } from "../../realtime";
 import {
@@ -59,6 +60,9 @@ export async function retryTransport<T>(
     }
   }
 }
+
+/** How many of the leaderboard's bots the bot pickers offer: the most one page of it holds. */
+export const listedBotsLimit = 100;
 
 function required<T>(data: T | undefined): T {
   if (data === undefined) {
@@ -338,6 +342,18 @@ export function createLobbyActions(options: {
       const { data } = await gameApi.GET("/bots/defaults");
       const body = required(data);
       return { bots: body.bots, serverBots: body.server_bots };
+    },
+
+    /**
+     * The bots from the leaderboard that anyone may choose as a bot (#412): the first
+     * `listedBotsLimit` of its bots (`GET /leaderboard?kind=bot`), those with a URL. Public: it
+     * needs no token.
+     */
+    async listedBots(): Promise<ListedBot[]> {
+      const { data } = await gameApi.GET("/leaderboard", {
+        params: { query: { kind: "bot", limit: listedBotsLimit, offset: 0 } },
+      });
+      return listedBots(required(data).entries);
     },
 
     /** Whether games with uploaded bots may start this month (`GET /game/bot-compute`). */
