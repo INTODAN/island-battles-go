@@ -55,7 +55,7 @@ const (
 // bot in their member settings, has its own generated SDK from api/lobby/openapi.json.
 var PlayerOperations = []string{"createLobbyConnectionToken", "getIslandLobbyGeneration", "getIslandLobbyTurnDelivery", "getIslandLobbyGameEndedDelivery", "getIslandGameDemo", "applyIslandLobbyTurnDeadline", "resignIslandLobbyGame", "registerGenerationCommand", "getIslandLobbyGenerationLogs", "getIslandLobbyDemo", "watchIslandLobbyGeneration", "watchIslandLobbyDemo", "watchIslandLobbyGenerationLogs", "listUpgrades", "listMapTemplates", "listDefaultBots", "getBotCompute",
 	"startIslandBotPackageUpload", "completeIslandBotPackageUpload", "listIslandBotPackages", "deleteIslandBotPackage", "createIslandBotUploadToken",
-	"getIslandAccount", "registerIslandBotName", "setIslandBotNameURL", "deleteIslandBotName", "deleteIslandAccount",
+	"getIslandAccount", "registerIslandBotName", "setIslandBotNameURL", "resumeIslandBotNameAway", "deleteIslandBotName", "deleteIslandAccount",
 	"listIslandLeaderboard", "getIslandCompetitor"}
 
 // PlayerEventSchemas are delivered by Centrifugo rather than HTTP responses.

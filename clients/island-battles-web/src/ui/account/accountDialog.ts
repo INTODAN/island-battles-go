@@ -97,7 +97,7 @@ function confirm(question: Confirmation): Promise<boolean> {
 function competitorItem(
   row: Pick<CompetitorRow, "name" | "rating" | "games">,
   action?: HTMLElement,
-  below?: HTMLElement,
+  ...below: (HTMLElement | null)[]
 ): HTMLElement {
   return h(
     "li",
@@ -106,7 +106,7 @@ function competitorItem(
     h("span", { class: "account-rating" }, row.rating),
     h("span", { class: "account-games" }, row.games),
     action ?? null,
-    below ?? null,
+    ...below,
   );
 }
 
@@ -338,6 +338,7 @@ export function openAccount(options: AccountDialogOptions): HTMLDialogElement {
           competitor && editing === competitor.id
             ? editForm
             : urlLine(row, competitor),
+          pausedLine(row, competitor),
         );
       }),
     );
@@ -384,6 +385,43 @@ export function openAccount(options: AccountDialogOptions): HTMLDialogElement {
         : h("span", { class: "account-url-missing" }, noBotUrlSentence),
       change,
     );
+  }
+
+  /**
+   * A paused bot name's reason, with **Resume** (#412): it missed a turn while it played away,
+   * and plays away again once resumed. Null for a name that isn't paused.
+   */
+  function pausedLine(
+    row: CompetitorRow,
+    competitor: Competitor | undefined,
+  ): HTMLElement | null {
+    if (!row.paused || !competitor) return null;
+    const resume = h(
+      "button",
+      { type: "button", class: "secondary small", disabled: busy },
+      "Resume",
+    );
+    resume.setAttribute("aria-label", `Resume ${row.name}`);
+    resume.addEventListener("click", () => void resumeBot(competitor));
+    return h(
+      "div",
+      { class: "account-paused" },
+      h("span", { class: "account-paused-text" }, row.paused),
+      resume,
+    );
+  }
+
+  async function resumeBot(competitor: Competitor): Promise<void> {
+    addError.textContent = "";
+    setBusy(true);
+    try {
+      const resumed = await service.resumeBotName(competitor.id);
+      if (account) account = withChangedBotName(account, resumed);
+    } catch (error) {
+      failed(error, addError, accountProblem(error));
+    } finally {
+      setBusy(false);
+    }
   }
 
   function startEditing(competitor: Competitor): void {

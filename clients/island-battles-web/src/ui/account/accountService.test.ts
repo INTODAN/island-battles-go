@@ -44,7 +44,9 @@ async function signedIn() {
   const fail = { playerTokens: false, lobbyDelete: false };
   let tokens = 0;
   const tokenNames = new Map<string, string>();
-  let bots: ReturnType<typeof competitor>[] = [];
+  let bots: (ReturnType<typeof competitor> & {
+    away_paused?: { at: string; reason: string };
+  })[] = [];
   const fetchStub = (async (
     input: Request | string | URL,
     init?: RequestInit,
@@ -160,6 +162,14 @@ async function signedIn() {
       bots = bots.map((bot) => (bot.id === id ? changed : bot));
       return Response.json(changed);
     }
+    if (request.method === "DELETE" && path.endsWith("/away-pause")) {
+      const id = path.split("/").at(-2);
+      const found = bots.find((bot) => bot.id === id);
+      if (!found) return Response.json({ status: 404 }, { status: 404 });
+      const { away_paused: _, ...resumed } = found;
+      bots = bots.map((bot) => (bot.id === id ? resumed : bot));
+      return Response.json(resumed);
+    }
     if (request.method === "DELETE" && path.startsWith("/account/bot-names/")) {
       const id = path.split("/").at(-1);
       bots = bots.filter((bot) => bot.id !== id);
@@ -182,7 +192,21 @@ async function signedIn() {
     fetch: fetchStub,
   });
   calls.length = 0;
-  return { realtime, service, calls, fail };
+  /** Pauses a bot name, as a missed turn while it played away does. */
+  const pause = (id: string) => {
+    bots = bots.map((bot) =>
+      bot.id === id
+        ? {
+            ...bot,
+            away_paused: {
+              at: "2026-11-21T09:14:00Z",
+              reason: "Missed turn 12 of a rated game on 21 November",
+            },
+          }
+        : bot,
+    );
+  };
+  return { realtime, service, calls, fail, pause };
 }
 
 const rejection = async (promise: Promise<unknown>) => {
@@ -252,6 +276,24 @@ describe("the account service", () => {
     expect(
       await rejection(service.setBotNameUrl("id-Unknown", BOT_URL)),
     ).toMatchObject({ status: 404 });
+  });
+
+  test("resumes a paused bot name, which then plays away again", async () => {
+    const { service, calls, pause } = await signedIn();
+    const added = await service.addBotName("Kraken", BOT_URL);
+    pause(added.id);
+    expect((await service.read()).bot_names[0]?.away_paused?.reason).toBe(
+      "Missed turn 12 of a rated game on 21 November",
+    );
+    calls.length = 0;
+    const resumed = await service.resumeBotName(added.id);
+    expect(calls).toEqual(["DELETE /account/bot-names/id-Kraken/away-pause"]);
+    expect(resumed).toMatchObject({ id: "id-Kraken", name: "Kraken" });
+    expect(resumed.away_paused).toBeUndefined();
+    expect((await service.read()).bot_names[0]?.away_paused).toBeUndefined();
+    expect(await rejection(service.resumeBotName("id-Unknown"))).toMatchObject({
+      status: 404,
+    });
   });
 
   test("a rename goes to the lobby, then the game learns it with a new player token", async () => {

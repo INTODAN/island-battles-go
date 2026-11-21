@@ -2,6 +2,8 @@ import { copyText, h } from "../dom";
 import type { Screen } from "../lobby/nameScreen";
 import { routeLink } from "./links";
 import {
+  awayTag,
+  awayTitle,
   type BoardRow,
   type BoardState,
   BoardStore,
@@ -25,6 +27,8 @@ import {
   type PodiumStep,
   playAgainstHint,
   playAgainstLabel,
+  playRatedLabel,
+  playUnratedLabel,
   ratingChange,
   resultLine,
   updatedLine,
@@ -46,9 +50,9 @@ export interface LeaderboardScreenOptions {
   /** Shows a route: a link, a tab or **Back**. Undefined leaves the leaderboard. */
   navigate(route: LeaderboardRoute | undefined): void;
   /**
-   * **Play against it** on a listed bot's page: makes the unrated lobby and opens its room, or
-   * the name screen first without a session. Rejects with the sentence to show under the button.
-   * Without it, the page has no such action.
+   * **Play against it** on a listed bot's page: makes the rated or unrated lobby and opens its
+   * room, or the name screen first without a session. Rejects with the sentence to show under the
+   * buttons. Without it, the page has no such action.
    */
   playAgainst?(target: PlayTarget): Promise<void>;
 }
@@ -355,7 +359,11 @@ export function mountLeaderboard(
   function playSection(competitor: LeaderboardCompetitor): HTMLElement | null {
     const url = botUrl(competitor);
     if (!url) return null;
-    const target = { name: competitor.name, url };
+    const target = {
+      name: competitor.name,
+      competitorId: competitor.competitor_id,
+      url,
+    };
     const copy = h(
       "button",
       { type: "button", class: "secondary small" },
@@ -381,33 +389,51 @@ export function mountLeaderboard(
     );
     const play = options.playAgainst;
     if (play) {
-      const button = h(
-        "button",
-        { type: "button", class: "primary" },
-        playAgainstLabel,
-      );
       const error = h("p", { class: "field-error", attrs: { role: "alert" } });
-      button.addEventListener("click", async () => {
-        button.disabled = true;
-        button.textContent = "Starting…";
-        error.textContent = "";
-        try {
-          await play(target);
-        } catch (cause) {
-          error.textContent =
-            cause instanceof Error && cause.message
-              ? cause.message
-              : "Something went wrong. Please try again.";
-        } finally {
-          button.disabled = false;
-          button.textContent = playAgainstLabel;
-        }
-      });
+      // Your own bot can't be rated against your own hand play: one account, one competitor.
+      const kinds: (readonly [boolean, string, string])[] = own.has(
+        competitor.competitor_id,
+      )
+        ? [[false, playUnratedLabel, "primary"]]
+        : [
+            [true, playRatedLabel, "primary"],
+            [false, playUnratedLabel, "secondary"],
+          ];
+      const buttons: HTMLButtonElement[] = kinds.map(
+        ([rated, label, className]) => {
+          const button = h(
+            "button",
+            { type: "button", class: className },
+            label,
+          );
+          button.addEventListener("click", async () => {
+            for (const each of buttons) each.disabled = true;
+            button.textContent = "Starting…";
+            error.textContent = "";
+            try {
+              await play({ ...target, rated });
+            } catch (cause) {
+              error.textContent =
+                cause instanceof Error && cause.message
+                  ? cause.message
+                  : "Something went wrong. Please try again.";
+            } finally {
+              for (const each of buttons) each.disabled = false;
+              button.textContent = label;
+            }
+          });
+          return button;
+        },
+      );
       section.append(
         h(
           "div",
-          { class: "play-against-action" },
-          button,
+          {
+            class: "play-against-action",
+            attrs: { role: "group", "aria-label": playAgainstLabel },
+          },
+          h("strong", {}, `${playAgainstLabel}:`),
+          ...buttons,
           h("p", { class: "hint" }, playAgainstHint(competitor.name)),
         ),
         error,
@@ -448,6 +474,13 @@ export function mountLeaderboard(
           h("span", { class: `res ${line.result}` }, line.word),
           ` ${line.joiner} `,
           ...opponents,
+          line.away
+            ? h(
+                "span",
+                { class: "tag away", attrs: { title: awayTitle } },
+                awayTag,
+              )
+            : null,
         ),
         h(
           "span",

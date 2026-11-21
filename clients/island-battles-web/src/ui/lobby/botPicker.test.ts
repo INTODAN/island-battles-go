@@ -3,14 +3,22 @@ import {
   botNameLocked,
   botNameOfValue,
   botNameValue,
+  chosenUnlistedLabel,
   guestBotNamesHint,
   keptName,
+  leaderboardChoice,
+  leaderboardLocked,
+  leaderboardRatedHint,
+  leaderboardUnratedHint,
+  listedBotOptions,
   nameWithoutUrlHint,
   noBotNamesHint,
+  pickableListedBots,
   ratedChoice,
   ratedChoiceValue,
   ratedKindsHint,
 } from "./botPicker";
+import { choiceValue, leaderboardValue } from "./roomModel";
 
 const names = [
   { name: "Kraken", url: "https://kraken.example.org/bot" },
@@ -60,6 +68,16 @@ describe("a rated lobby's choices", () => {
       "",
     );
     expect(ratedChoiceValue({ kind: "hosted", name: "Kraken" }, null)).toBe("");
+    // One of your names chosen by its ID checks that name.
+    expect(
+      ratedChoiceValue({ kind: "hosted", competitor_id: "c-kraken" }, [
+        {
+          name: "Kraken",
+          url: "https://kraken.example.org/bot",
+          id: "c-kraken",
+        },
+      ]),
+    ).toBe("botname:Kraken");
   });
 
   test("a name without a URL can't be chosen, nor any name while the server plays no hosted bots", () => {
@@ -99,4 +117,90 @@ test("an unrated lobby keeps a saved name when the same kind of bot is saved aga
   expect(keptName("manual", kraken)).toBe("");
   expect(keptName("hosted", { kind: "hosted", name: "Kraken" })).toBe("Kraken");
   expect(keptName("localhost", undefined)).toBe("");
+});
+
+describe("a bot from the leaderboard", () => {
+  const listed = [
+    { competitorId: "c-kraken", name: "Kraken", owner: "Dana" },
+    { competitorId: "c-eel", name: "Eel", owner: "Sam" },
+  ];
+
+  test("saves a hosted bot by its competitor ID, with no name or URL", () => {
+    expect(leaderboardChoice("c-eel")).toEqual({
+      kind: "hosted",
+      competitor_id: "c-eel",
+    });
+    expect(leaderboardValue).toBe("leaderboard");
+  });
+
+  test("checks its radio in a rated lobby and in one that isn't", () => {
+    const chosen = leaderboardChoice("c-eel");
+    expect(ratedChoiceValue(chosen, names)).toBe(leaderboardValue);
+    expect(ratedChoiceValue(chosen, null)).toBe(leaderboardValue);
+    expect(choiceValue(chosen)).toBe(leaderboardValue);
+    // A hosted bot at a URL is still the URL's radio.
+    expect(choiceValue({ kind: "hosted", url: "https://b.example" })).toBe(
+      "hosted",
+    );
+  });
+
+  test("lists every listed bot but your own names, which it offers by name", () => {
+    expect(
+      pickableListedBots(listed, [
+        {
+          name: "Kraken",
+          url: "https://kraken.example.org/bot",
+          id: "c-kraken",
+        },
+      ]),
+    ).toEqual([{ competitorId: "c-eel", name: "Eel", owner: "Sam" }]);
+    expect(pickableListedBots(listed, null)).toEqual(listed);
+    // Your own bot, chosen by its ID, stays listed.
+    expect(
+      pickableListedBots(
+        listed,
+        [
+          {
+            name: "Kraken",
+            url: "https://kraken.example.org/bot",
+            id: "c-kraken",
+          },
+        ],
+        "c-kraken",
+      ),
+    ).toEqual(listed);
+  });
+
+  test("its select names each bot with its owner, and keeps a chosen one it doesn't list", () => {
+    expect(listedBotOptions(listed, undefined)).toEqual([
+      { value: "", label: "Choose a bot…" },
+      { value: "c-kraken", label: "Kraken, by Dana" },
+      { value: "c-eel", label: "Eel, by Sam" },
+    ]);
+    expect(listedBotOptions(listed, "c-eel")).toEqual([
+      { value: "c-kraken", label: "Kraken, by Dana" },
+      { value: "c-eel", label: "Eel, by Sam" },
+    ]);
+    expect(listedBotOptions(listed, "c-gone")[0]).toEqual({
+      value: "c-gone",
+      label: chosenUnlistedLabel,
+    });
+  });
+
+  test("can't be chosen while locked or saving, without hosted bots, or with no bot to choose", () => {
+    const free = { locked: false, saving: false, serverBots: true, offered: 2 };
+    expect(leaderboardLocked(free)).toBe(false);
+    expect(leaderboardLocked({ ...free, serverBots: undefined })).toBe(false);
+    expect(leaderboardLocked({ ...free, serverBots: false })).toBe(true);
+    expect(leaderboardLocked({ ...free, offered: 0 })).toBe(true);
+    expect(leaderboardLocked({ ...free, locked: true })).toBe(true);
+    expect(leaderboardLocked({ ...free, saving: true })).toBe(true);
+  });
+
+  test("says whose rating a rated game changes", () => {
+    expect(leaderboardRatedHint).toContain("rated in your place");
+    expect(leaderboardUnratedHint).toBe(
+      "Anyone's listed bot plays for your team at its URL. The server plays it; this tab relays nothing.",
+    );
+  });
 });

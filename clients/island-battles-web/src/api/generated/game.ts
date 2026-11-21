@@ -69,6 +69,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/account/bot-names/{competitor_id}/away-pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Let one of your bot names play away again after it missed a turn
+         * @description Requires the player token of a signed-in player, which names their account; a guest's token is 403 with problem type urn:island-battles:problem:sign-in-required. Every call stores the account the first time the game sees it, with its hand play, and the display name of the token whenever it changed, so a rename in the lobby reaches the game with the next player token. A bot name plays away when it sits in a bot seat, or when a member of another account chose it, in a rated lobby that someone else opened. One that misses a turn there loses the game, as any rated game, and is paused: it plays away in no rated game until its owner resumes it here. Your own games with it are unaffected. Clears the bot name's away_paused and answers 200 with the bot name; resuming a name that isn't paused changes nothing. Another account's bot name, your hand play, or an unknown one is 404.
+         */
+        delete: operations["resumeIslandBotNameAway"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/bots/defaults": {
         parameters: {
             query?: never;
@@ -537,6 +557,15 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AwayPause: {
+            /**
+             * Format: date-time
+             * @description When it missed the turn.
+             */
+            at: string;
+            /** @description Which turn it missed, such as "Missed turn 12 of a rated game on 21 November". */
+            reason: string;
+        };
         BotChoice: {
             /** @description For kind hosted, the host name of the bot's URL, such as bot.example.com; the rest of the URL is not shown. Absent for the other kinds. */
             host?: string;
@@ -550,7 +579,7 @@ export interface components {
              * @description For kind default, the level of the default bot, one that GET /bots/defaults lists. Absent for the other kinds.
              */
             level?: number;
-            /** @description In a rated game, the bot name that a hosted bot plays as, one that its player registered in their account, such as Kraken. Absent for the other kinds and in a game that isn't rated. */
+            /** @description In a rated game, the bot name that a hosted bot plays as, such as Kraken: one that its player registered in their account, or a bot from the leaderboard that plays away, for a member of another account or in a seat. Absent for the other kinds and in a game that isn't rated. */
             name?: string;
             /**
              * Format: int64
@@ -641,6 +670,11 @@ export interface components {
         };
         /** @description Island Battles seat_settings for a bot seat that the host adds with POST …/seats: exactly one of bot_level, bot_localhost_port, bot_url and bot_package_id. {"bot_level": N}, with a level that GET /bots/defaults lists, is a default bot that the backend plays, named "Bot (level N)". {"bot_localhost_port": N, "bot_relay_player_id": "<your player ID>"}, a port from 1024 to 65535, is a localhost bot on your machine as the host, which island-battles-bot serve --port N runs and only your game client relays, named "Localhost bot (port N)": you can seat several, each on its own port. bot_relay_player_id records who added the seat, since the lobby doesn't, and must be the host's own player ID. A later host never relays it: a start with a localhost bot seat whose adder left the lobby fails with game_requirement of type urn:island-battles:problem:localhost-seat-relay-gone, until the host removes the seat, and can add it again from their own page. A port that your own localhost bot or another localhost bot seat of yours already uses is invalid_seat_settings, unless the seat is already there with these settings, so a seat request sent again after a lost answer finds its own seat. A start where someone would relay two localhost bots on one port, after they changed their own port or added the same seat twice, fails with game_requirement of type urn:island-battles:problem:localhost-port-taken. When GET /bots/defaults says server_bots, also {"bot_url": "https://…"}, a hosted bot under the rules of MemberBot's url, named "Hosted bot", or {"bot_package_id": "…"}, any ready bot package of the lobby, named after its owner, such as "Alex's bot"; the server plays both. A seat whose package is gone by the start stops it with game_requirement of type urn:island-battles:problem:bot-package-gone. */
         BotSeatSettings: {
+            /**
+             * Format: uuid
+             * @description A bot name that the leaderboard lists, by its competitor_id (GET /leaderboard), whoever owns it, which plays at the name's URL as it is at the start. The seat is named after the bot and its owner, such as "Kraken (Dana)". It plays away: in a rated lobby the bot is the seat's competitor, and the daily caps and the pause apply to it; in a lobby that isn't rated it rates nothing. Only when GET /bots/defaults says server_bots.
+             */
+            bot_competitor_id?: string;
             /**
              * Format: int64
              * @description A default bot of this level, one that GET /bots/defaults lists, which the backend plays. The seat is named "Bot (level N)".
@@ -830,6 +864,8 @@ export interface components {
              * @example https://example.com/Competitor.json
              */
             readonly $schema?: string;
+            /** @description For a bot name that missed a turn while it played away, in a rated game of someone else's lobby: it plays away in no rated game until its owner resumes it with DELETE /account/bot-names/{competitor_id}/away-pause. Its owner's own games with it are unaffected. Absent otherwise. */
+            away_paused?: components["schemas"]["AwayPause"];
             /** Format: int64 */
             draws: number;
             /**
@@ -864,6 +900,8 @@ export interface components {
             wins: number;
         };
         CompetitorResult: {
+            /** @description Whether the competitor played away: a bot name in a seat of someone else's lobby, or chosen by a member of another account. Its owner wasn't there. */
+            away: boolean;
             /**
              * Format: date-time
              * @description When the game ended.
@@ -1190,7 +1228,7 @@ export interface components {
             outcome?: components["schemas"]["GameOutcome"];
             /** Format: uuid */
             player_id: string;
-            /** @description Whether the game is rated: its lobby's rated setting at the start. Every team of a rated game is played by a competitor, a signed-in player's hand play or bot name or a house bot, and bot.name names a player's bot name. */
+            /** @description Whether the game is rated: its lobby's rated setting at the start. Every team of a rated game is played by a competitor, a signed-in player's hand play or bot name, a bot from the leaderboard or a house bot, and bot.name names the bot name that plays. */
             rated: boolean;
             /** @description The localhost bot seats that you added to the lobby as its host, which only you relay: your client reads each one's turn with GET /game/from-lobby/{lobby_id}/turn-delivery?player_id= and delivers it to 127.0.0.1 on the seat's port, as it does for your own localhost bot. Empty for everyone else. */
             relayed_bots: components["schemas"]["RelayedBot"][];
@@ -1388,7 +1426,7 @@ export interface components {
              */
             max_generations: number;
             /**
-             * @description Whether the game is rated, false when left out. A rated lobby starts only when every member is signed in and plays by hand or with one of their bot names, no two teams belong to one account, and every bot seat is a default bot level, each level once. The game then records the competitor of each team, and its end changes their Elo ratings.
+             * @description Whether the game is rated, false when left out. A rated lobby starts only when every member is signed in and plays by hand, with one of their bot names or with a bot from the leaderboard, no two teams belong to one account, every bot seat is a default bot level, each level once, or a bot from the leaderboard, each once, and the bots that play away have rated games left today. The game then records the competitor of each team, and its end changes their Elo ratings.
              * @default false
              */
             rated: boolean;
@@ -1456,6 +1494,11 @@ export interface components {
         /** @description The bot you choose for yourself. Send only the field of its kind: level for default, url for hosted, package_id for uploaded, and port, or none, for localhost; manual takes no other field. localhost, hosted and uploaded may also take name, one of your bot names. A localhost bot's port is from 1024 to 65535, 41414 when left out. A hosted bot's URL is https://, at most 2048 characters, without credentials, on port 443 or none, and names a host, not an IP address, whose addresses are all public: not loopback, private, link-local or unique-local. The server resolves it when you choose it, and again before it sends each turn. An uploaded bot is one of your ready packages in the lobby; if you replace or delete it, choose it again before getting ready. */
         MemberBot: {
             /**
+             * Format: uuid
+             * @description For kind hosted only, instead of url and name: a bot name by its competitor_id, one that the leaderboard lists (GET /leaderboard, with a url), or one of your own bot names. It plays at the name's URL as it is at the start. Another account's bot plays away: in a rated lobby it is that bot that plays for your team, your own hand play isn't in the game, and the daily caps and the pause apply to it. One of your own plays as if you named it. In a lobby that isn't rated it rates nothing.
+             */
+            competitor_id?: string;
+            /**
              * @description localhost: your own bot, which island-battles-bot serve runs on your machine and your game client relays each turn to. default: a default bot of GET /bots/defaults, which the backend plays. hosted: your own bot server at url, which the server sends each turn to. uploaded: your own bot package in this lobby, package_id, which the server runs. manual: you play by hand in the 3D client; no bot plays for you. hosted and uploaded are offered only when GET /bots/defaults says server_bots.
              * @enum {string}
              */
@@ -1465,7 +1508,7 @@ export interface components {
              * @description For kind default only: a level that GET /bots/defaults lists.
              */
             level?: number;
-            /** @description For kinds localhost, hosted and uploaded only: one of the bot names of your account (GET /account), compared without regard to case, that the bot plays as. Only a signed-in player has bot names. A rated lobby takes a bot only as a hosted bot under one of your bot names, which plays at the name's URL, and records the game under the name. Elsewhere the name changes nothing, except that a hosted bot without a url plays at its name's URL. */
+            /** @description For kinds localhost, hosted and uploaded only: one of the bot names of your account (GET /account), compared without regard to case, that the bot plays as. Only a signed-in player has bot names. A rated lobby takes a bot only as a hosted bot under a bot name, which plays at the name's URL, and records the game under the name. Elsewhere the name changes nothing, except that a hosted bot without a url plays at its name's URL. */
             name?: string;
             /**
              * Format: uuid
@@ -1477,7 +1520,7 @@ export interface components {
              * @description For kind localhost only: the port on 127.0.0.1 where your bot serves (island-battles-bot serve --port N), where your game client delivers each turn. 41414 when absent.
              */
             port?: number;
-            /** @description For kind hosted only: where the server POSTs each TurnDelivery. https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public. Required unless the bot has a name, which then plays at its own URL (GET /account). In a rated lobby a named hosted bot always plays at its name's URL, and url is ignored. */
+            /** @description For kind hosted only: where the server POSTs each TurnDelivery. https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public. Required unless the bot has a name or a competitor_id, which then plays at its own URL (GET /account). In a rated lobby a named hosted bot always plays at its name's URL, and url is ignored. */
             url?: string;
         };
         /** @description Island Battles member_settings for setLobbyMemberSettings: the bot that plays for you. {"bot": {"kind": "manual"}} is you, playing by hand in the 3D client: no bot plays or relays for you, and your client sends your commands with POST /generation/commands. {"bot": {"kind": "localhost"}} is your own bot, which island-battles-bot serve runs on your machine and your game client relays each turn to, on port 41414 or on the port you add, {"bot": {"kind": "localhost", "port": 41415}}, and {"bot": {"kind": "default", "level": N}} a default bot of a level that GET /bots/defaults lists, which the backend plays itself. When GET /bots/defaults says server_bots, also {"bot": {"kind": "hosted", "url": "https://…"}}, your own bot server at a public URL, or {"bot": {"kind": "uploaded", "package_id": "…"}}, one of your bot packages in the lobby; the server plays both, without your game client. A localhost, hosted or uploaded bot may add "name", one of the bot names of your account (GET /account), compared without regard to case: {"bot": {"kind": "localhost", "name": "Kraken"}}. A name that isn't one of yours, or any name from a guest, is invalid_member_settings; it is accepted in every lobby, but only a rated lobby, where a bot needs one, records the game under it. Anything else is invalid_member_settings. You choose a bot before getting ready, and can change it while the lobby waits: getting ready without one is refused with game_requirement of type urn:island-battles:problem:bot-not-chosen, and an uploaded bot that is no longer a ready package of yours in the lobby, replaced, deleted or someone else's, with type urn:island-battles:problem:bot-package-gone. The start checks every roster player and bot seat the same way. It then initializes one playable generation, which waits for every frozen roster player to complete their turn, and copies each roster player's bot, and each bot seat's, which GenerationState.bot reports from then on. */
@@ -1936,6 +1979,39 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    resumeIslandBotNameAway: {
+        parameters: {
+            query?: never;
+            header?: {
+                Authorization?: string;
+            };
+            path: {
+                competitor_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Competitor"];
+                };
             };
             /** @description Error */
             default: {

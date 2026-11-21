@@ -154,8 +154,24 @@ describe("a rated lobby's refusals", () => {
         "Dana and Dana are the same account. A rated game needs a different account on each team.",
       ],
       [
+        "rated-bot-not-listed",
+        "Kraken is no longer on the leaderboard. Choose another bot.",
+      ],
+      [
+        "rated-bot-paused",
+        "Kraken is paused after it missed a turn, until its owner resumes it. Choose another bot.",
+      ],
+      [
+        "rated-pair-limit",
+        "Kraken and Bot (level 2) have played their rated game with Kraken on Red today. Swap their teams, or play again tomorrow (UTC).",
+      ],
+      [
+        "rated-bot-day-limit",
+        "Kraken has played its 10 rated games away from its owner today. Play it again tomorrow (UTC).",
+      ],
+      [
         "rated-seat",
-        "A rated game allows only default bot seats, each level once. Remove Hosted bot.",
+        "A rated game allows only default bot seats, each level once, and bots from the leaderboard, each once. Remove Hosted bot.",
       ],
     ] as const) {
       const error = lobby("game_requirement", {
@@ -171,10 +187,10 @@ describe("a rated lobby's refusals", () => {
     const seat = lobby("invalid_seat_settings", {
       status: 422,
       detail:
-        "A rated game allows only default bot seats, each level once. This lobby already has Bot level 2.",
+        "A rated game allows only default bot seats, each level once, and bots from the leaderboard, each once. This lobby already has Bot level 2.",
     });
     expect(describeProblem(seat, "seat").message).toBe(
-      "A rated game allows only default bot seats, each level once. This lobby already has Bot level 2.",
+      "A rated game allows only default bot seats, each level once, and bots from the leaderboard, each once. This lobby already has Bot level 2.",
     );
     const name = lobby("invalid_member_settings", {
       status: 422,
@@ -191,18 +207,36 @@ describe("a rated lobby's refusals", () => {
     expect(describeProblem(noUrl, "bot").message).toBe(noUrl.detail ?? "");
   });
 
+  test("a refused bot from the leaderboard in a seat shows the game's sentence", () => {
+    const paused = lobby("invalid_seat_settings", {
+      status: 422,
+      detail:
+        "Kraken is paused after it missed a turn, until its owner resumes it. Choose another bot.",
+    });
+    expect(describeProblem(paused, "listed-seat").message).toBe(
+      paused.detail ?? "",
+    );
+    // Another seat's refusal keeps the room's own sentence.
+    expect(describeProblem(paused, "seat").message).toBe(
+      "That bot level was refused. Choose another level.",
+    );
+    expect(describeProblem(lobby("not_host"), "listed-seat").message).toBe(
+      "Only the host can add or remove bots.",
+    );
+  });
+
   test("turning Rated on with a seat it doesn't allow says which", () => {
     expect(
       describeProblem(
         lobby("invalid_game_settings", {
           status: 422,
           detail:
-            "A rated game allows only default bot seats, each level once. Remove Hosted bot.",
+            "A rated game allows only default bot seats, each level once, and bots from the leaderboard, each once. Remove Hosted bot.",
         }),
         "settings",
       ).message,
     ).toBe(
-      "The settings were refused. A rated game allows only default bot seats, each level once. Remove Hosted bot.",
+      "The settings were refused. A rated game allows only default bot seats, each level once, and bots from the leaderboard, each once. Remove Hosted bot.",
     );
   });
 });

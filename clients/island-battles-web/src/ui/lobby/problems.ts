@@ -19,6 +19,8 @@ export type ProblemContext =
   | "start"
   | "bot"
   | "seat"
+  /** Adding a bot from the leaderboard as a seat, whose refusal is the game's own sentence. */
+  | "listed-seat"
   | "create"
   | "watch"
   | "settings"
@@ -77,7 +79,7 @@ const reopenSentences: Record<string, string> = {
  * (`RatedSeatRule` in `backend/services/rated_lobbies.go`); such a refusal is shown as it is.
  */
 export const ratedSeatRefusal =
-  "A rated game allows only default bot seats, each level once.";
+  "A rated game allows only default bot seats, each level once, and bots from the leaderboard, each once.";
 
 const botNotChosen =
   "Choose your bot first: play by hand, your localhost bot or a default level.";
@@ -135,10 +137,12 @@ export function describeProblem(
     shown.message = `The settings were refused. ${error.detail ?? ""}`.trim();
     return shown;
   }
-  // A rated lobby's seat refusal is the game's own sentence, which names the rule.
+  // A rated lobby's seat refusal is the game's own sentence, which names the rule, and so is the
+  // refusal of a bot from the leaderboard that is paused or no longer listed.
   if (
     code === "invalid_seat_settings" &&
-    error.detail?.startsWith(ratedSeatRefusal)
+    error.detail &&
+    (error.detail.startsWith(ratedSeatRefusal) || context === "listed-seat")
   ) {
     shown.message = error.detail;
     return shown;
@@ -150,7 +154,7 @@ export function describeProblem(
   const known =
     code === undefined
       ? undefined
-      : context === "seat"
+      : context === "seat" || context === "listed-seat"
         ? (seatSentences[code] ?? sentences[code])
         : context === "settings"
           ? (settingsSentences[code] ?? sentences[code])

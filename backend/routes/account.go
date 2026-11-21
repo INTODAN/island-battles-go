@@ -56,6 +56,13 @@ func SetupAccountRoutes(api huma.API, handler *handlers.Accounts) {
 		Tags:        []string{"Island Battles"}, Security: playerTokenSecurity,
 	}, handler.DeleteBotName)
 	huma.Register(api, huma.Operation{
+		OperationID: "resumeIslandBotNameAway", Path: "/account/bot-names/{competitor_id}/away-pause", Method: http.MethodDelete,
+		Summary: "Let one of your bot names play away again after it missed a turn",
+		Description: signedIn + "A bot name plays away when it sits in a bot seat, or when a member of another account chose it, in a rated lobby that someone else opened. One that misses a turn there loses the game, as any rated game, and is paused: it plays away in no rated game until its owner resumes it here. Your own games with it are unaffected. " +
+			"Clears the bot name's away_paused and answers 200 with the bot name; resuming a name that isn't paused changes nothing. Another account's bot name, your hand play, or an unknown one is 404.",
+		Tags: []string{"Island Battles"}, Security: playerTokenSecurity,
+	}, handler.ResumeAway)
+	huma.Register(api, huma.Operation{
 		OperationID: "deleteIslandAccount", Path: "/account", Method: http.MethodDelete, DefaultStatus: http.StatusNoContent,
 		Summary: "Delete your account's part of the game",
 		Description: "Requires the player token of a signed-in player; a guest's token is 403 with problem type " + services.SignInRequiredProblemType + ". " +

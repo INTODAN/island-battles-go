@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/dal"
@@ -31,18 +32,31 @@ const (
 	BotNameURLRequiredProblemType     = "urn:island-battles:problem:bot-name-url-required"
 	RatedSameAccountProblemType       = "urn:island-battles:problem:rated-same-account"
 	RatedSeatProblemType              = "urn:island-battles:problem:rated-seat"
+	// A bot chosen by its competitor ID that the leaderboard no longer
+	// lists, in any lobby, and in a rated lobby an away bot that is paused.
+	RatedBotNotListedProblemType = "urn:island-battles:problem:rated-bot-not-listed"
+	RatedBotPausedProblemType    = "urn:island-battles:problem:rated-bot-paused"
+	// The daily caps of the bots that play away, at the start only.
+	RatedPairLimitProblemType   = "urn:island-battles:problem:rated-pair-limit"
+	RatedBotDayLimitProblemType = "urn:island-battles:problem:rated-bot-day-limit"
 )
+
+// MaxAwayGamesPerDay is how many rated games a bot plays away in a UTC day,
+// against all opponents together. Two competitors, at least one of them
+// away, play at most two rated games a day: one with each on the lower team
+// colour.
+const MaxAwayGamesPerDay = 10
 
 // The sentences that a rated lobby's ready gate tells a member getting ready,
 // which the clients show as they are.
 const (
 	ratedSignInMessage      = "This lobby is rated. Sign in with Google in the 3D client to play in it."
-	ratedBotNameMessage     = "This lobby is rated. Play by hand, or choose one of your hosted bot names."
+	ratedBotNameMessage     = "This lobby is rated. Play by hand, or choose one of your hosted bot names or a bot from the leaderboard."
 	ratedHostedBotMessage   = "This lobby is rated. Rated bots run at their own URL: choose one of your hosted bot names, or play by hand."
 	ratedSameAccountMessage = "A rated game needs a different account on each team."
 	// RatedSeatRule is the rule of a rated lobby's bot seats, which every
 	// refusal of a seat starts with.
-	RatedSeatRule = "A rated game allows only default bot seats, each level once."
+	RatedSeatRule = "A rated game allows only default bot seats, each level once, and bots from the leaderboard, each once."
 )
 
 // LobbyRated reports whether a lobby's game_settings make its game rated.
@@ -161,28 +175,62 @@ func checkNameURLs(members []domain.ReadyMember, names botNames, rated, atStart 
 	return nil
 }
 
-// checkUnratedNameURLs is the part of the ready gate of a lobby that isn't
-// rated that reads bot names: a hosted bot without a url of its own plays at
-// its name's URL, so the name must still exist and have one. It reads the
-// members' bot names, in one query, only when such a bot is chosen.
-func (rules BotRules) checkUnratedNameURLs(ctx context.Context, members []domain.ReadyMember, atStart bool) error {
+// checkUnratedBots is the part of the ready gate of a lobby that isn't rated
+// that reads bot names: a hosted bot without a url plays at its name's URL,
+// so the name must still exist and have one, and a bot chosen by its
+// competitor ID, a member's or, at the start, a seat's, must still be one of
+// the member's names or listed (checkChosenBots). It reads the members' bot
+// names, and the chosen bots, only when such a bot is chosen. lobby is the
+// start's snapshot, nil for a member getting ready.
+func (rules BotRules) checkUnratedBots(ctx context.Context, lobby *domain.Snapshot, members []domain.ReadyMember, atStart bool) error {
 	needed := false
 	for _, member := range members {
 		if bot, err := MemberBot(member.Settings, true); err == nil && playsAtNameURL(bot, false) {
 			needed = true
 		}
 	}
-	if !needed {
+	seats := activeSeats(lobby)
+	ids := chosenCompetitorIDs(members, seats)
+	if !needed && len(ids) == 0 {
 		return nil
 	}
-	names, err := readBotNames(rules.Database.WithContext(ctx), namedAccounts(members))
+	database := rules.Database.WithContext(ctx)
+	names, err := readBotNames(database, namedAccounts(members))
 	if err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		return fmt.Errorf("%w: read the members' bot names: %w", domain.ErrUnavailable, err)
+		return unavailable(ctx, "read the members' bot names", err)
 	}
-	return checkNameURLs(members, names, false, atStart)
+	if err := checkNameURLs(members, names, false, atStart); err != nil {
+		return err
+	}
+	chosen, err := readChosenBots(database, ids)
+	if err != nil {
+		return unavailable(ctx, "read the chosen bots", err)
+	}
+	return checkChosenBots(members, seats, chosen, false, atStart)
+}
+
+// unavailable reports a failed read of the ready gate or a validator: the
+// context's error for a cancelled request, and otherwise one that wraps
+// domain.ErrUnavailable.
+func unavailable(ctx context.Context, action string, err error) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return fmt.Errorf("%w: %s: %w", domain.ErrUnavailable, action, err)
+}
+
+// activeSeats are the active bot seats of a lobby, none without one.
+func activeSeats(lobby *domain.Snapshot) []domain.Member {
+	if lobby == nil {
+		return nil
+	}
+	var seats []domain.Member
+	for _, member := range lobby.Members {
+		if member.Active && member.IsSeat() {
+			seats = append(seats, member)
+		}
+	}
+	return seats
 }
 
 // mayFailRated reports whether a member getting ready could break a rated
@@ -198,35 +246,53 @@ func mayFailRated(members []domain.ReadyMember) bool {
 }
 
 // checkRated is the ready gate of a rated lobby: each member is signed in
-// and plays by hand or with a hosted bot under one of their live bot names,
-// which has a URL, and, at
-// the start, no two members share an account and the lobby's active seats
-// are default bot levels, each level once. A member without a valid bot is
-// left to checkMembersReady. It reads the members' bot names in one query.
+// and plays by hand or with a hosted bot under a live bot name with a URL,
+// one of theirs or a listed bot, and an away bot isn't paused; at the start
+// also no two competitors share an account, the lobby's active seats are
+// default bot levels, each level once, and listed bots, each once, and the
+// away bots have rated games left today (checkAwayCaps). A member without a
+// valid bot is left to checkMembersReady. It reads the members' bot names
+// and the chosen bots in a query each, and at the start the competitors and
+// their games of the day.
 func (rules BotRules) checkRated(ctx context.Context, lobby domain.Snapshot, members []domain.ReadyMember, atStart bool) error {
-	names, err := readBotNames(rules.Database.WithContext(ctx), namedAccounts(members))
+	database := rules.Database.WithContext(ctx)
+	names, err := readBotNames(database, namedAccounts(members))
 	if err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		return fmt.Errorf("%w: read the members' bot names: %w", domain.ErrUnavailable, err)
+		return unavailable(ctx, "read the members' bot names", err)
 	}
 	var seats []domain.Member
 	if atStart {
-		for _, member := range lobby.Members {
-			if member.Active && member.IsSeat() {
-				seats = append(seats, member)
-			}
-		}
+		seats = activeSeats(&lobby)
 	}
-	return checkRatedRoster(members, seats, atStart, names)
+	chosen, err := readChosenBots(database, chosenCompetitorIDs(members, seats))
+	if err != nil {
+		return unavailable(ctx, "read the chosen bots", err)
+	}
+	if err := checkRatedRoster(members, seats, atStart, names, chosen); err != nil || !atStart {
+		return err
+	}
+	roster, err := resolveRoster(ctx, database, lobby, members, seats, names, chosen, false)
+	if domain.ErrorCodeOf(err) == domain.CodeGameRequirement {
+		return err
+	}
+	if err != nil {
+		return unavailable(ctx, "read the competitors", err)
+	}
+	if err := checkAwayCaps(database, roster, time.Now()); err != nil {
+		if domain.ErrorCodeOf(err) == domain.CodeGameRequirement {
+			return err
+		}
+		return unavailable(ctx, "count the away games", err)
+	}
+	return nil
 }
 
 // checkRatedRoster checks members and seats against a rated lobby's rules,
-// with the members' live bot names. At the start its refusals name the
-// members, or the seats, that break them, since the host who sees them can't
-// act for them.
-func checkRatedRoster(members []domain.ReadyMember, seats []domain.Member, atStart bool, names botNames) error {
+// with the members' live bot names and the bots chosen by competitor ID, all
+// but the caps, which read the day's games. At the start its refusals name
+// the members, or the seats, that break them, since the host who sees them
+// can't act for them.
+func checkRatedRoster(members []domain.ReadyMember, seats []domain.Member, atStart bool, names botNames, chosen chosenBots) error {
 	var guests, nameless, notHosted []string
 	for _, member := range members {
 		if member.AccountID == "" {
@@ -236,7 +302,7 @@ func checkRatedRoster(members []domain.ReadyMember, seats []domain.Member, atSta
 		bot, err := MemberBot(member.Settings, true)
 		switch {
 		case err != nil, bot.Kind == models.ManualBot:
-		case bot.Kind == models.DefaultBot, bot.Name == "":
+		case bot.Kind == models.DefaultBot, bot.Name == "" && bot.CompetitorID == "":
 			nameless = append(nameless, member.DisplayName)
 		case bot.Kind != models.HostedBot:
 			// A named localhost or uploaded bot: a rated bot runs at its
@@ -250,7 +316,7 @@ func checkRatedRoster(members []domain.ReadyMember, seats []domain.Member, atSta
 	case len(guests) > 0:
 		return domain.GameRequirement(RatedSignInRequiredProblemType, ratedSignInMessage)
 	case len(nameless) > 0 && atStart:
-		return domain.GameRequirement(RatedBotNameRequiredProblemType, "This lobby is rated: waiting for "+strings.Join(nameless, ", ")+" to play by hand, or to choose one of their hosted bot names.")
+		return domain.GameRequirement(RatedBotNameRequiredProblemType, "This lobby is rated: waiting for "+strings.Join(nameless, ", ")+" to play by hand, or to choose one of their hosted bot names or a bot from the leaderboard.")
 	case len(nameless) > 0:
 		return domain.GameRequirement(RatedBotNameRequiredProblemType, ratedBotNameMessage)
 	case len(notHosted) > 0 && atStart:
@@ -261,15 +327,14 @@ func checkRatedRoster(members []domain.ReadyMember, seats []domain.Member, atSta
 	if err := checkNameURLs(members, names, true, atStart); err != nil {
 		return err
 	}
+	if err := checkChosenBots(members, seats, chosen, true, atStart); err != nil {
+		return err
+	}
 	if !atStart {
 		return nil
 	}
-	accounts := map[string]string{}
-	for _, member := range members {
-		if first, found := accounts[member.AccountID]; found {
-			return domain.GameRequirement(RatedSameAccountProblemType, first+" and "+member.DisplayName+" are the same account. "+ratedSameAccountMessage)
-		}
-		accounts[member.AccountID] = member.DisplayName
+	if err := checkOneAccountEach(members, seats, names, chosen); err != nil {
+		return err
 	}
 	if remove := ratedSeatsToRemove(seats); len(remove) > 0 {
 		return domain.GameRequirement(RatedSeatProblemType, RatedSeatRule+" Remove "+strings.Join(remove, ", ")+".")
@@ -278,35 +343,44 @@ func checkRatedRoster(members []domain.ReadyMember, seats []domain.Member, atSta
 }
 
 // ratedSeatsToRemove names the seats that a rated game doesn't allow: every
-// seat that isn't a default bot level, and every seat of a level after its
-// first.
+// seat that is neither a default bot level nor a bot chosen by its
+// competitor ID, and every seat of a level, or of a bot, after its first.
 func ratedSeatsToRemove(seats []domain.Member) []string {
 	var remove []string
-	levels := map[uint]bool{}
+	levels, bots := map[uint]bool{}, map[string]bool{}
 	for _, seat := range seats {
 		settings, err := seatSettings(seat.SeatSettings, true)
-		if err != nil || settings.BotLevel == nil || levels[*settings.BotLevel] {
+		switch {
+		case err != nil:
 			remove = append(remove, seat.DisplayName)
-			continue
+		case settings.BotLevel != nil && !levels[*settings.BotLevel]:
+			levels[*settings.BotLevel] = true
+		case settings.BotCompetitorID != "" && !bots[settings.BotCompetitorID]:
+			bots[settings.BotCompetitorID] = true
+		default:
+			remove = append(remove, seat.DisplayName)
 		}
-		levels[*settings.BotLevel] = true
 	}
 	return remove
 }
 
-// checkRatedSeat refuses a new seat of a rated lobby that isn't a default
-// bot level, or whose level an active seat of the lobby has. A seat request
-// sent again after a lost answer is refused too, as a second seat of its
-// level, but the first one stands.
+// checkRatedSeat refuses a new seat of a rated lobby that is neither a
+// default bot level nor a bot chosen by its competitor ID, or whose level or
+// bot an active seat of the lobby has. A seat request sent again after a
+// lost answer is refused too, as a second seat of its level or bot, but the
+// first one stands.
 func checkRatedSeat(lobby domain.Snapshot, seat models.BotSeatSettingsView) error {
-	if seat.BotLevel == nil {
+	if seat.BotLevel == nil && seat.BotCompetitorID == "" {
 		return reject(422, RatedSeatRule)
 	}
-	for _, member := range lobby.Members {
-		if !member.Active || !member.IsSeat() {
+	for _, member := range activeSeats(&lobby) {
+		existing, err := seatSettings(member.SeatSettings, true)
+		if err != nil {
 			continue
 		}
-		if existing, err := seatSettings(member.SeatSettings, true); err == nil && existing.BotLevel != nil && *existing.BotLevel == *seat.BotLevel {
+		sameLevel := existing.BotLevel != nil && seat.BotLevel != nil && *existing.BotLevel == *seat.BotLevel
+		sameBot := existing.BotCompetitorID != "" && existing.BotCompetitorID == seat.BotCompetitorID
+		if sameLevel || sameBot {
 			return reject(422, RatedSeatRule+" This lobby already has "+member.DisplayName+".")
 		}
 	}
@@ -315,15 +389,10 @@ func checkRatedSeat(lobby domain.Snapshot, seat models.BotSeatSettingsView) erro
 
 // CheckRatedSeats refuses to turn a lobby rated while one of its active
 // seats breaks a rated game's rule of seats, with a *models.LobbySettingsError
-// on the rated field, whose message names the seats to remove.
+// on the rated field, whose message names the seats to remove. A listed
+// bot's seat stays; the ready gate checks that it is still listed.
 func CheckRatedSeats(lobby domain.Snapshot) error {
-	var seats []domain.Member
-	for _, member := range lobby.Members {
-		if member.Active && member.IsSeat() {
-			seats = append(seats, member)
-		}
-	}
-	if remove := ratedSeatsToRemove(seats); len(remove) > 0 {
+	if remove := ratedSeatsToRemove(activeSeats(&lobby)); len(remove) > 0 {
 		return models.NewLobbySettingsError("rated", RatedSeatRule+" Remove "+strings.Join(remove, ", ")+".")
 	}
 	return nil
@@ -331,15 +400,18 @@ func CheckRatedSeats(lobby domain.Snapshot) error {
 
 // ratedCompetitors resolves the competitor of each roster player of a rated
 // game's start, by player ID, after checking the roster as the ready gate
-// does at the start: a person's manual competitor when they play by hand,
-// which Accounts.Ensure creates for an account new to the game, their bot
-// name's when their hosted bot plays under one, whose URL the start then
-// plays, and a default bot seat's house competitor. A roster it can't resolve fails the start hook, which runs
-// after the lobby committed the start: the host's start then answers 502
-// game_unavailable, and the lobby stays started, without a game, until the
-// host starts it again or reopens it. So a rated game never starts with a
-// player who has no competitor.
-func ratedCompetitors(ctx context.Context, database *gorm.DB, snapshot domain.Snapshot, chosen map[string]frozenBot) (map[string]models.Competitor, error) {
+// does at the start, all but the caps, which the start checks with the
+// away bots' rows locked (lockAwayCaps): a person's manual competitor when
+// they play by hand, which Accounts.Ensure creates for an account new to the
+// game, their bot name's when their hosted bot plays under one, a listed
+// bot's, away, when a member of another account chose it, a seat's listed
+// bot, away, and a default bot seat's house competitor. The start plays a
+// bot name at its URL. A roster it can't resolve fails the start hook,
+// which runs after the lobby committed the start: the host's start then
+// answers 502 game_unavailable, and the lobby stays started, without a game,
+// until the host starts it again or reopens it. So a rated game never starts
+// with a player who has no competitor.
+func ratedCompetitors(ctx context.Context, database *gorm.DB, snapshot domain.Snapshot) (map[string]rosterCompetitor, error) {
 	membersByPlayer := map[string]domain.Member{}
 	for _, member := range snapshot.Members {
 		membersByPlayer[member.PlayerID] = member
@@ -363,40 +435,14 @@ func ratedCompetitors(ctx context.Context, database *gorm.DB, snapshot domain.Sn
 	if err != nil {
 		return nil, err
 	}
-	if err := checkRatedRoster(people, seats, true, names); err != nil {
+	chosen, err := readChosenBots(database, chosenCompetitorIDs(people, seats))
+	if err != nil {
 		return nil, err
 	}
-	competitors := make(map[string]models.Competitor, len(snapshot.StartRoster))
-	for _, person := range people {
-		bot := chosen[person.PlayerID]
-		if bot.Kind == models.ManualBot {
-			if err := (Accounts{Database: database}).Ensure(ctx, person.AccountID, person.DisplayName); err != nil {
-				return nil, err
-			}
-			hand, err := dal.FindManualCompetitor(database, person.AccountID)
-			if err != nil {
-				return nil, err
-			}
-			if hand == nil {
-				return nil, fmt.Errorf("the hand play of %s was not stored", person.DisplayName)
-			}
-			competitors[person.PlayerID] = *hand
-			continue
-		}
-		named, found := names.find(person.AccountID, bot.Name)
-		if !found {
-			return nil, domain.GameRequirement(RatedBotNameRequiredProblemType, "This lobby is rated: waiting for "+person.DisplayName+" to play by hand, or to choose one of their hosted bot names.")
-		}
-		competitors[person.PlayerID] = named
+	if err := checkRatedRoster(people, seats, true, names, chosen); err != nil {
+		return nil, err
 	}
-	for _, seat := range seats {
-		house, err := dal.FindOrCreateHouseCompetitor(database, chosen[seat.PlayerID].Level)
-		if err != nil {
-			return nil, err
-		}
-		competitors[seat.PlayerID] = house
-	}
-	return competitors, nil
+	return resolveRoster(ctx, database, snapshot, people, seats, names, chosen, true)
 }
 
 // readyMember is a person of the lobby as the ready gate sees them.
@@ -408,19 +454,27 @@ func readyMember(member domain.Member) domain.ReadyMember {
 	return domain.ReadyMember{PlayerID: member.PlayerID, DisplayName: member.DisplayName, AccountID: accountID, Settings: member.MemberSettings}
 }
 
-// playNameURLs gives each roster person of an unrated game's start whose
-// hosted bot plays at its bot name's URL, one without a url of its own, the
-// name's URL, read in one query. The ready gate checked the names; one
-// deleted since fails the start, as a rated start's does, before the game is
+// playNameURLs gives each roster player of an unrated game's start whose
+// hosted bot plays at a bot name's URL its URL, read in a query or two: a
+// person's hosted bot without a url of its own, under one of their names,
+// and a bot chosen by its competitor ID, a person's or a seat's. The ready
+// gate checked the names and the chosen bots; one deleted or no longer
+// listed since fails the start, as a rated start's does, before the game is
 // bound.
 func playNameURLs(database *gorm.DB, snapshot domain.Snapshot, chosen map[string]frozenBot) error {
 	var people []domain.ReadyMember
+	var seats []domain.Member
 	for _, member := range snapshot.Members {
-		if bot, found := chosen[member.PlayerID]; found && !member.IsSeat() && bot.Kind == models.HostedBot && bot.Name != "" && bot.URL == "" {
+		bot, found := chosen[member.PlayerID]
+		switch {
+		case !found || bot.Kind != models.HostedBot:
+		case member.IsSeat() && bot.CompetitorID != "":
+			seats = append(seats, member)
+		case !member.IsSeat() && (bot.CompetitorID != "" || bot.Name != "" && bot.URL == ""):
 			people = append(people, readyMember(member))
 		}
 	}
-	if len(people) == 0 {
+	if len(people) == 0 && len(seats) == 0 {
 		return nil
 	}
 	names, err := readBotNames(database, namedAccounts(people))
@@ -430,10 +484,26 @@ func playNameURLs(database *gorm.DB, snapshot domain.Snapshot, chosen map[string
 	if err := checkNameURLs(people, names, false, true); err != nil {
 		return err
 	}
+	bots, err := readChosenBots(database, chosenCompetitorIDs(people, seats))
+	if err != nil {
+		return err
+	}
+	if err := checkChosenBots(people, seats, bots, false, true); err != nil {
+		return err
+	}
+	for _, seat := range seats {
+		bot := chosen[seat.PlayerID]
+		bot.URL = *bots[bot.CompetitorID].competitor.URL
+		chosen[seat.PlayerID] = bot
+	}
 	for _, person := range people {
-		named, _ := names.find(person.AccountID, chosen[person.PlayerID].Name)
 		bot := chosen[person.PlayerID]
-		bot.URL = *named.URL
+		if bot.CompetitorID != "" {
+			bot.URL = *bots[bot.CompetitorID].competitor.URL
+		} else {
+			named, _ := names.find(person.AccountID, bot.Name)
+			bot.URL = *named.URL
+		}
 		chosen[person.PlayerID] = bot
 	}
 	return nil

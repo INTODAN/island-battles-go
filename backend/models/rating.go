@@ -29,7 +29,10 @@ type RatingEvent struct {
 	// Opponents are the game's other teams' competitors, without names,
 	// which are read from the competitors when shown.
 	Opponents []RatingOpponent `gorm:"column:opponents;serializer:json;type:jsonb;not null"`
-	EndedAt   time.Time        `gorm:"column:ended_at;not null"`
+	// Away is set when the competitor played away: a bot name in a seat, or
+	// chosen by a member of another account.
+	Away    bool      `gorm:"column:away;not null;default:false"`
+	EndedAt time.Time `gorm:"column:ended_at;not null"`
 }
 
 func (RatingEvent) TableName() string { return "island_rating_events" }

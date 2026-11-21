@@ -29,7 +29,7 @@ type LobbySettings struct {
 	// DefaultTurnPaceMilliseconds when the settings leave it out.
 	TurnPaceMilliseconds uint `json:"turn_pace_milliseconds,omitempty" minimum:"500" maximum:"5000" default:"1000" doc:"How long each turn lasts in a real-time game, in whole milliseconds from 500 to 5000; 1000 when left out. A game is real-time when a player on its roster plays by hand: each turn then ends this long after its generation was created, and the server plays it with the commands that arrived, so a player who sent nothing passes. A game of bots only doesn't use it and waits for every player."`
 	// Rated is false when the settings leave it out.
-	Rated bool `json:"rated,omitempty" default:"false" doc:"Whether the game is rated, false when left out. A rated lobby starts only when every member is signed in and plays by hand or with one of their bot names, no two teams belong to one account, and every bot seat is a default bot level, each level once. The game then records the competitor of each team, and its end changes their Elo ratings."`
+	Rated bool `json:"rated,omitempty" default:"false" doc:"Whether the game is rated, false when left out. A rated lobby starts only when every member is signed in and plays by hand, with one of their bot names or with a bot from the leaderboard, no two teams belong to one account, every bot seat is a default bot level, each level once, or a bot from the leaderboard, each once, and the bots that play away have rated games left today. The game then records the competitor of each team, and its end changes their Elo ratings."`
 }
 
 // The turn paces a lobby may set for a real-time game, in milliseconds, and

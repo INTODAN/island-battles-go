@@ -19,6 +19,11 @@ export interface AccountService {
   /** `DELETE /account/bot-names/{competitor_id}`, with its rating. */
   deleteBotName(competitorId: string): Promise<void>;
   /**
+   * `DELETE /account/bot-names/{competitor_id}/away-pause`: resumes a bot name paused after it
+   * missed a turn while it played away, so it plays away in rated games again (#412).
+   */
+  resumeBotName(competitorId: string): Promise<Competitor>;
+  /**
    * The lobby's `PUT /lobby/v1/account`, then the game's `GET /account` with a new player token,
    * which carries the new name, so the game learns it at once.
    */
@@ -99,6 +104,14 @@ export function createAccountService(
         await gameApi.DELETE("/account/bot-names/{competitor_id}", {
           params: { path: { competitor_id: competitorId } },
         });
+      }),
+    resumeBotName: (competitorId) =>
+      call(async () => {
+        const { data } = await gameApi.DELETE(
+          "/account/bot-names/{competitor_id}/away-pause",
+          { params: { path: { competitor_id: competitorId } } },
+        );
+        return required(data);
       }),
     async rename(displayName) {
       await realtime.renameAccount(displayName);

@@ -326,7 +326,7 @@ func playTurn(ctx context.Context, transaction *gorm.DB, game *models.Game, play
 		if standing := simulation.StandingTeams(board, game.Teams); len(standing) > 0 {
 			outcome.Survivors = standing
 		}
-		if err := rateGame(transaction, game, players, outcome); err != nil {
+		if err := rateGame(transaction, game, players, outcome, 0); err != nil {
 			return nil, nil, nil, nil, err
 		}
 		if err := dal.SaveGameOutcome(transaction, game, *outcome); err != nil {

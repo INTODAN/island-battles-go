@@ -107,6 +107,16 @@ export interface CompetitorRow {
   games: string;
   /** A bot name's hosted bot URL, shown as text; null for hand play and a name without one. */
   url: string | null;
+  /**
+   * For a bot name paused after it missed a turn while it played away (#412): the sentence with
+   * its reason, shown with **Resume**. Null otherwise.
+   */
+  paused: string | null;
+}
+
+/** The line of a paused bot name: which turn it missed, and what the pause stops. */
+export function pausedSentence(reason: string): string {
+  return `Paused: ${serverSentence(reason)} It plays in nobody else's rated game until you resume it; your own games with it go on.`;
 }
 
 const row = (competitor: Competitor): CompetitorRow => ({
@@ -115,6 +125,10 @@ const row = (competitor: Competitor): CompetitorRow => ({
   rating: ratingText(competitor.rating),
   games: gamesText(competitor.games),
   url: competitor.kind === "bot" ? competitor.url : null,
+  paused:
+    competitor.kind === "bot" && competitor.away_paused
+      ? pausedSentence(competitor.away_paused.reason)
+      : null,
 });
 
 export interface AddBotNameView {

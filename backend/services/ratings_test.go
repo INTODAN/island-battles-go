@@ -391,7 +391,7 @@ func TestARatedGameIsRatedOnce(t *testing.T) {
 	rate := func() (models.GameOutcome, error) {
 		outcome := models.GameOutcome{Reason: models.GameOutcomeLastTeamStanding, WinnerTeamColor: colour(1)}
 		err := fixture.database.Transaction(func(transaction *gorm.DB) error {
-			return services.RateGame(transaction, game, players, &outcome)
+			return services.RateGame(transaction, game, players, &outcome, 0)
 		})
 		return outcome, err
 	}
