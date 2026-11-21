@@ -257,6 +257,10 @@ func PlayHeadlessMatch(ctx context.Context, match HeadlessMatch) (HeadlessResult
 		clashes = simulation.Clashes(events)
 		if outcome := simulation.Outcome(state, game.Teams, number+1 >= maxGenerations); outcome != nil {
 			outcome.FinalTurn = number + 1
+			// As playTurn records them for a lobby's game.
+			if standing := simulation.StandingTeams(state, game.Teams); len(standing) > 0 {
+				outcome.Survivors = standing
+			}
 			game.Outcome = outcome
 		}
 	}
