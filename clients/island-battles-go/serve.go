@@ -171,9 +171,13 @@ type botServer struct {
 	// again calls the bot once. endings counts the game-end callbacks in the
 	// background, for tests to wait on.
 	ended      map[endedGame]bool
+	endedOrder []endedGame
 	endedMutex sync.Mutex
 	endings    sync.WaitGroup
 }
+
+// maxEndedGames is how many delivered game ends serve remembers.
+const maxEndedGames = 1000
 
 // endedGame names a game whose end was delivered for a team: the game's
 // site, from the demo link, and the game and team.
@@ -208,18 +212,28 @@ func (server *botServer) addSubmitHosts(hosts ...string) {
 	}
 }
 
+// gameURLAllowed reports whether link is on a game the bot talks to: https
+// on an allowed host, or http on localhost or 127.0.0.1.
+func (server *botServer) gameURLAllowed(link string) bool {
+	parsed, err := url.Parse(link)
+	if err != nil || parsed.User != nil || parsed.Host == "" {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	switch {
+	case parsed.Scheme == "http" && (host == "localhost" || host == "127.0.0.1"):
+		return true
+	case parsed.Scheme == "https" && (server.submitHosts[host] || (parsed.Port() != "" && server.submitHosts[host+":"+parsed.Port()])):
+		return true
+	}
+	return false
+}
+
 // submitRefusal says why the bot may not submit to submitURL, or is empty
-// when it may: https on an allowed host, or http on localhost or 127.0.0.1.
+// when it may: see gameURLAllowed.
 func (server *botServer) submitRefusal(submitURL string) string {
-	parsed, err := url.Parse(submitURL)
-	if err == nil && parsed.User == nil && parsed.Host != "" {
-		host := strings.ToLower(parsed.Hostname())
-		switch {
-		case parsed.Scheme == "http" && (host == "localhost" || host == "127.0.0.1"):
-			return ""
-		case parsed.Scheme == "https" && (server.submitHosts[host] || (parsed.Port() != "" && server.submitHosts[host+":"+parsed.Port()])):
-			return ""
-		}
+	if server.gameURLAllowed(submitURL) {
+		return ""
 	}
 	return fmt.Sprintf("submit.url %s is not an allowed host, so the bot doesn't play this turn: it submits only to https://%s and to http://localhost or http://127.0.0.1 on any port. Start the server with --allow-submit-host <host> to add an https host.\n", submitURL, OfficialSubmitHost)
 }
@@ -420,6 +434,11 @@ func (server *botServer) gameEnded(writer http.ResponseWriter, request *http.Req
 		server.text(writer, request, http.StatusUnprocessableEntity, fmt.Sprintf("the body is not a GameEndedDelivery:\n%v\n", err))
 		return
 	}
+	// A page can't make the bot download from elsewhere.
+	if !server.gameURLAllowed(ended.Demo.URL) {
+		server.text(writer, request, http.StatusBadRequest, fmt.Sprintf("demo.url %s is not an allowed host, so the bot doesn't take this game's end: it takes only demo links of https://%s and of http://localhost or http://127.0.0.1 on any port. Start the server with --allow-submit-host <host> to add an https host.\n", ended.Demo.URL, OfficialSubmitHost))
+		return
+	}
 	server.send(writer, request, http.StatusAccepted, []byte(`{"accepted":true}`), "application/json")
 	key := endedGame{gameID: ended.GameID, teamColor: ended.TeamColor}
 	if link, err := url.Parse(ended.Demo.URL); err == nil {
@@ -430,7 +449,14 @@ func (server *botServer) gameEnded(writer http.ResponseWriter, request *http.Req
 	if server.ended[key] {
 		return
 	}
+	// Only the latest games are kept: a game's end arrives once, or again
+	// within moments.
+	if len(server.endedOrder) >= maxEndedGames {
+		delete(server.ended, server.endedOrder[0])
+		server.endedOrder = server.endedOrder[1:]
+	}
 	server.ended[key] = true
+	server.endedOrder = append(server.endedOrder, key)
 	server.logf("game %d ended at turn %d: %s", ended.GameID, ended.TurnNumber, ended.Outcome.Summary)
 	if server.gameEnd == nil {
 		return

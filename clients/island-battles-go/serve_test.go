@@ -458,13 +458,15 @@ func TestServeRefusals(t *testing.T) {
 		{"no submit URL", http.MethodPost, "/turn", bytes.NewReader(bytes.Replace(deliveryJSON(t, api.url(), nil), []byte(`"url":`), []byte(`"link":`), 1)), jsonHeaders, 422,
 			"the body is not a TurnDelivery:\nsubmit.url is missing\n"},
 		{"not JSON at all", http.MethodPost, "/turn", strings.NewReader(`{`), jsonHeaders, 422, ""},
-		{"a game end from another origin", http.MethodPost, "/game-ended", bytes.NewReader(gameEndedJSON(t, "https://game.test/demo")),
+		{"a game end from another origin", http.MethodPost, "/game-ended", bytes.NewReader(gameEndedJSON(t, "https://island-battles.elidan.org/demo")),
 			map[string]string{"Origin": "https://evil.example.org", "Content-Type": "application/json"}, 403, ""},
-		{"a game end that isn't JSON", http.MethodPost, "/game-ended", bytes.NewReader(gameEndedJSON(t, "https://game.test/demo")), map[string]string{"Content-Type": "text/plain"}, 415, ""},
+		{"a game end that isn't JSON", http.MethodPost, "/game-ended", bytes.NewReader(gameEndedJSON(t, "https://island-battles.elidan.org/demo")), map[string]string{"Content-Type": "text/plain"}, 415, ""},
 		{"a turn as a game end", http.MethodPost, "/game-ended", turn(), jsonHeaders, 422, "the body is not a GameEndedDelivery:\ngame_ended.game_id is missing\n"},
-		{"a game end without a demo", http.MethodPost, "/game-ended", bytes.NewReader(bytes.Replace(gameEndedJSON(t, "https://game.test/demo"), []byte(`"demo":`), []byte(`"link":`), 1)),
+		{"a game end without a demo", http.MethodPost, "/game-ended", bytes.NewReader(bytes.Replace(gameEndedJSON(t, "https://island-battles.elidan.org/demo"), []byte(`"demo":`), []byte(`"link":`), 1)),
 			jsonHeaders, 422, "the body is not a GameEndedDelivery:\ngame_ended.demo is missing\n"},
 		{"a game end on GET", http.MethodGet, "/game-ended", nil, nil, 404, "not found\n"},
+		{"a game end whose demo is elsewhere", http.MethodPost, "/game-ended", bytes.NewReader(gameEndedJSON(t, "https://elsewhere.example.org/game/7/demo")), jsonHeaders, 400,
+			"demo.url https://elsewhere.example.org/game/7/demo is not an allowed host, so the bot doesn't take this game's end: it takes only demo links of https://island-battles.elidan.org and of http://localhost or http://127.0.0.1 on any port. Start the server with --allow-submit-host <host> to add an https host.\n"},
 	} {
 		response, body := request(t, server, test.method, test.path, test.body, test.headers)
 		if response.StatusCode != test.status || (test.text != "" && body != test.text) || !response.Close ||
@@ -512,7 +514,7 @@ func TestServeAcceptsAGameEndAndCallsTheBotOnce(t *testing.T) {
 	server := httptest.NewServer(bot)
 	defer server.Close()
 	started := time.Now()
-	body := gameEndedJSON(t, "https://game.test/game/7/demo?token=ibdt1.x")
+	body := gameEndedJSON(t, "https://island-battles.elidan.org/game/7/demo?token=ibdt1.x")
 	response, answer := request(t, server, http.MethodPost, "/game-ended", bytes.NewReader(body), map[string]string{"Content-Type": "application/json", "Origin": "tauri://localhost"})
 	if response.StatusCode != http.StatusAccepted || answer != `{"accepted":true}` || response.Header.Get("Access-Control-Allow-Origin") != "tauri://localhost" || !response.Close {
 		t.Fatalf("got %d %q %v", response.StatusCode, answer, response.Header)
@@ -527,7 +529,7 @@ func TestServeAcceptsAGameEndAndCallsTheBotOnce(t *testing.T) {
 	bot.endings.Wait()
 	mutex.Lock()
 	defer mutex.Unlock()
-	if len(calls) != 1 || calls[0].GameID != 7 || calls[0].TeamColor != 1 || calls[0].Outcome.Summary != "Team 1 won" || calls[0].Demo.URL != "https://game.test/game/7/demo?token=ibdt1.x" ||
+	if len(calls) != 1 || calls[0].GameID != 7 || calls[0].TeamColor != 1 || calls[0].Outcome.Summary != "Team 1 won" || calls[0].Demo.URL != "https://island-battles.elidan.org/game/7/demo?token=ibdt1.x" ||
 		string(calls[0].Memory) != `{"turns":90}` {
 		t.Fatalf("the bot got %+v", calls)
 	}
@@ -541,7 +543,7 @@ func TestServeAcceptsAGameEndAndCallsTheBotOnce(t *testing.T) {
 // A bot without a game-end callback accepts the end, and that is all.
 func TestServeAcceptsAGameEndWithoutACallback(t *testing.T) {
 	server, bot := startBot(t, sender, time.Second)
-	response, answer := request(t, server, http.MethodPost, "/game-ended", bytes.NewReader(gameEndedJSON(t, "https://game.test/demo")), jsonHeaders)
+	response, answer := request(t, server, http.MethodPost, "/game-ended", bytes.NewReader(gameEndedJSON(t, "https://island-battles.elidan.org/demo")), jsonHeaders)
 	if response.StatusCode != http.StatusAccepted || answer != `{"accepted":true}` {
 		t.Fatalf("got %d %q", response.StatusCode, answer)
 	}
@@ -612,7 +614,7 @@ func TestServeCommand(t *testing.T) {
 		t.Fatalf("got %d", response.StatusCode)
 	}
 	// Main's game-end callback is serve's.
-	response, err = http.Post(match[1]+"/game-ended", "application/json", bytes.NewReader(gameEndedJSON(t, "https://game.test/demo")))
+	response, err = http.Post(match[1]+"/game-ended", "application/json", bytes.NewReader(gameEndedJSON(t, "https://island-battles.elidan.org/demo")))
 	if err != nil {
 		t.Fatal(err)
 	}

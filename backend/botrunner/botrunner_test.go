@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -289,5 +290,44 @@ func TestLocalPlaysAPythonPackageWithRunnerPy(t *testing.T) {
 	first, second := taken[0]["memory"], taken[1]["memory"]
 	if first == nil || first.(map[string]any)["pid"] != second.(map[string]any)["pid"] {
 		t.Errorf("memories %v and %v; want the same worker", first, second)
+	}
+}
+
+// The end of a game has no turn: the local runners log it by its game, and
+// deliver a hosted bot's to its game-ended path (#413).
+func TestLocalDeliversTheEndOfAHostedBotsGame(t *testing.T) {
+	game := newFakeGame(t, 1)
+	local := newLocal(t, game)
+	received := make(chan string, 1)
+	bot := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		var ended models.GameEndedDelivery
+		_ = json.NewDecoder(request.Body).Decode(&ended)
+		received <- fmt.Sprintf("%s %d", request.URL.Path, ended.GameID)
+		response.WriteHeader(http.StatusAccepted)
+	}))
+	t.Cleanup(bot.Close)
+	data, err := os.ReadFile("testdata/game_ended_event.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var event models.BotRunnerEvent
+	if err := json.Unmarshal(data, &event); err != nil {
+		t.Fatal(err)
+	}
+	event.Package, event.Limits = nil, nil
+	event.Hosted = &models.BotRunnerHosted{URL: bot.URL + "/turn"}
+	event.GameEnded.Demo.URL = game.server.URL + "/game/1/demo?token=ibdt1.x.y"
+
+	if err := local.Invoke(context.Background(), models.BotRunnerNative, event); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case got := <-received:
+		if got != fmt.Sprintf("/game-ended %d", event.GameEnded.GameID) {
+			t.Errorf("the hosted bot got %q", got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the hosted bot got nothing")
 	}
 }
