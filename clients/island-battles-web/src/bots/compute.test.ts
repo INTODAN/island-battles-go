@@ -86,3 +86,36 @@ describe("the monthly guard on uploaded bots", () => {
     expect(offeredChoice(choices, "package-gone")).toBe("level-1");
   });
 });
+
+test("a rated lobby's Add bot offers only the default levels that no seat has", () => {
+  expect(
+    seatOptions({
+      levels: [1, 2, 3],
+      serverBots: true,
+      packages: [{ package_id: "pk", owner_name: "Alex", language: "python" }],
+      spent: null,
+      rated: true,
+      takenLevels: [2],
+    }).map((choice) => choice.value),
+  ).toEqual(["level-1", "level-3"]);
+  expect(
+    seatOptions({
+      levels: [1],
+      serverBots: false,
+      packages: [],
+      spent: null,
+      rated: true,
+      takenLevels: [1],
+    }),
+  ).toEqual([]);
+  // Unrated, a taken level is offered again.
+  expect(
+    seatOptions({
+      levels: [1],
+      serverBots: false,
+      packages: [],
+      spent: null,
+      takenLevels: [1],
+    }).map((choice) => choice.value),
+  ).toEqual(["level-1", "localhost"]);
+});

@@ -25,6 +25,11 @@ export interface LiveTurn {
   departures?: Departure[];
   /** The game's turn pace in a real-time game, null when it waits for every player. */
   turn_pace_milliseconds?: number | null;
+  /**
+   * Whether the game is rated, from a roster player's state; a watcher's state doesn't say, and
+   * learns it from the outcome's `ratings` at the end.
+   */
+  rated?: boolean;
 }
 
 export interface LiveSource {

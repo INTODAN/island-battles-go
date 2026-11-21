@@ -27,9 +27,13 @@ import {
   countPeople,
   describeBot,
   describeSettings,
+  guestTag,
   type MemberRow,
+  type RatedAccount,
   type RoomModel,
+  ratedBlockers,
   seatBody,
+  seatLevels,
   seatSettingsFromValue,
   startBlocker,
   type TeamRow,
@@ -52,6 +56,13 @@ export interface RoomScreenOptions {
   onReturnToGame(): void;
   /** A sentence to show when the room opens, such as why reopening failed. */
   notice?: string;
+  /**
+   * Reads a signed-in member's bot names, for **Plays as** in a rated lobby: the game's
+   * `GET /account`.
+   */
+  readAccount?(): Promise<RatedAccount>;
+  /** Opens the account page, from **Manage bot names**; resolves once it closes. */
+  openAccount?(): Promise<void>;
 }
 
 export interface RoomScreen extends Screen {
@@ -111,6 +122,10 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
   /** Whether each localhost bot seat's port answers, by port, as last asked; the host's room asks. */
   let seatHealth = new Map<number, boolean>();
   let lastVersion = -1;
+  /** Your bot names once read, for Plays as and your blocker; null until then. */
+  let account: RatedAccount | null = null;
+  /** Whether your bot names have been asked for: once a rated lobby needs them. */
+  let accountAsked = false;
 
   const title = h("h1", {});
   const settingsLine = h("p", { class: "lead" });
@@ -134,6 +149,12 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
   const hint = h("p", { class: "hint" });
 
   const readyButton = h("button", { type: "button", class: "primary" });
+  /** What keeps you from getting ready in a rated lobby, above the Ready button. */
+  const ratedLine = h("p", {
+    class: "rated-blocker",
+    hidden: true,
+    attrs: { role: "status" },
+  });
   const readyError = h("p", { class: "field-error", attrs: { role: "alert" } });
   const startButton = h(
     "button",
@@ -159,16 +180,16 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
   );
   const botError = h("p", { class: "field-error", attrs: { role: "alert" } });
 
-  // --- Change map: the host's map and turn limit, while the lobby waits ---
+  // --- Change settings: the host's map, turn limit, turn pace, game length and Rated, while the lobby waits ---
   const changeButton = h(
     "button",
     { type: "button", class: "secondary small", hidden: true },
-    "Change map",
+    "Change settings",
   );
   const changePanel = h("section", {
     class: "card change-map",
     hidden: true,
-    attrs: { "aria-label": "Change map" },
+    attrs: { "aria-label": "Change settings" },
   });
   const changeError = h("p", {
     class: "field-error",
@@ -190,12 +211,13 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
       actions,
       idPrefix: "change-",
       initial: lobbyMapSettings(snapshot.lobby.game_settings),
+      signedIn: realtime.session.get()?.account !== undefined,
     });
     changeError.textContent = "";
     const form = h(
       "form",
       { noValidate: true },
-      h("h2", {}, "Change map"),
+      h("h2", {}, "Change settings"),
       ...changeFields.nodes,
       h(
         "p",
@@ -274,7 +296,38 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
       computeSpent = spent;
       render();
     },
+    onManageBotNames() {
+      if (!options.openAccount) return;
+      // Names added or deleted on the account page reach Plays as once it closes.
+      void options.openAccount().then(() => {
+        if (!disposed) void readAccount();
+      });
+    },
   });
+
+  /** Reads your bot names for Plays as; a failed read leaves them unknown, and the server decides. */
+  async function readAccount(): Promise<void> {
+    if (!options.readAccount) return;
+    accountAsked = true;
+    try {
+      const read = await options.readAccount();
+      if (disposed) return;
+      account = read;
+      picker.setAccount({ botNames: read.botNames });
+      render();
+    } catch {
+      // Asked again in a while; until then Plays as says it is loading.
+      setTimeout(() => {
+        accountAsked = false;
+        if (!disposed) render();
+      }, 5000);
+    }
+  }
+
+  // A guest has no bot names; a signed-in member's are read once a rated lobby needs them.
+  picker.setAccount(
+    realtime.session.get()?.account !== undefined ? { botNames: null } : null,
+  );
 
   // The people who watch with the join code, in a section of their own.
   const watchersPanel = mountWatchersPanel({ realtime, actions });
@@ -438,13 +491,19 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
   });
 
   /** The Add bot select's choices: uploaded bots are greyed out once their month's compute is spent. */
-  const seatChoices = () =>
-    seatOptions({
+  const seatChoices = () => {
+    const snapshot = realtime.lobby.get();
+    const model = snapshot ? room(snapshot) : undefined;
+    return seatOptions({
       levels: levels.map((bot) => bot.level),
       serverBots,
       packages: lobbyPackages,
       spent: computeSpent,
+      // A rated lobby seats only default bots, each level once.
+      rated: model?.rated === true,
+      takenLevels: model ? seatLevels(model) : [],
     });
+  };
 
   /** The Add bot select's value for a team: its last choice while still offered, or the first level. */
   function seatChoice(teamId: string): string {
@@ -462,7 +521,11 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
    * player who added a localhost bot seat, whose tab relays it, sees whether its bot answers on
    * its port; everyone sees a localhost bot seat that nobody relays.
    */
-  function memberItem(member: MemberRow, remove?: () => void): HTMLElement {
+  function memberItem(
+    member: MemberRow,
+    remove?: () => void,
+    guest = false,
+  ): HTMLElement {
     const seat = member.kind === "seat";
     const ready = seat || member.ready;
     const localPort =
@@ -483,6 +546,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
         seat ? h("span", { class: "tag bot" }, "bot") : null,
         member.isYou ? h("span", { class: "tag" }, "you") : null,
         member.isHost ? h("span", { class: "tag host" }, "host") : null,
+        guest ? h("span", { class: "tag guest" }, guestTag) : null,
         member.connected
           ? null
           : h("span", { class: "tag offline" }, "disconnected"),
@@ -532,7 +596,11 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     );
   }
 
-  function teamCard(team: TeamRow, model: RoomModel): HTMLElement {
+  function teamCard(
+    team: TeamRow,
+    model: RoomModel,
+    guests: readonly string[],
+  ): HTMLElement {
     const mine = model.yourTeamId === team.id;
     const taken = teamTaken(team);
     const needsPlayer = problems.highlight.includes(team.id);
@@ -589,52 +657,59 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
               seatUrls.set(team.id, (event.target as HTMLInputElement).value),
           })
         : null;
+    const offered = seatChoices();
     const addSeat =
-      editSeats && !taken
+      editSeats && !taken && offered.length === 0
         ? h(
-            "div",
-            { class: "seat-add" },
-            h(
-              "select",
-              {
-                attrs: { "aria-label": `Bot for ${team.name}` },
-                onchange: (event: Event) => {
-                  chosenSeat.set(
-                    team.id,
-                    (event.target as HTMLSelectElement).value,
-                  );
-                  // The URL field shows only for a hosted bot.
-                  render();
-                },
-              },
-              ...seatChoices().map((item) =>
-                option(item.value, item.label, item.disabled),
-              ),
-            ),
-            urlInput,
-            portInput,
-            portInput
-              ? h(
-                  "span",
-                  { class: "hint" },
-                  "Your tab relays this bot's turns to 127.0.0.1 on its port; serve it there with island-battles-bot serve --port N.",
-                )
-              : null,
-            computeSpent && serverBots && lobbyPackages.length > 0
-              ? h("span", { class: "hint" }, computeSpent)
-              : null,
-            h(
-              "button",
-              {
-                type: "button",
-                class: "secondary small",
-                disabled: busy,
-                onclick: () => void addBot(team.id),
-              },
-              "Add bot",
-            ),
+            "p",
+            { class: "hint seat-add" },
+            "Each bot level already has a seat: a rated game holds each level once.",
           )
-        : null;
+        : editSeats && !taken
+          ? h(
+              "div",
+              { class: "seat-add" },
+              h(
+                "select",
+                {
+                  attrs: { "aria-label": `Bot for ${team.name}` },
+                  onchange: (event: Event) => {
+                    chosenSeat.set(
+                      team.id,
+                      (event.target as HTMLSelectElement).value,
+                    );
+                    // The URL field shows only for a hosted bot.
+                    render();
+                  },
+                },
+                ...offered.map((item) =>
+                  option(item.value, item.label, item.disabled),
+                ),
+              ),
+              urlInput,
+              portInput,
+              portInput
+                ? h(
+                    "span",
+                    { class: "hint" },
+                    "Your tab relays this bot's turns to 127.0.0.1 on its port; serve it there with island-battles-bot serve --port N.",
+                  )
+                : null,
+              computeSpent && serverBots && lobbyPackages.length > 0
+                ? h("span", { class: "hint" }, computeSpent)
+                : null,
+              h(
+                "button",
+                {
+                  type: "button",
+                  class: "secondary small",
+                  disabled: busy,
+                  onclick: () => void addBot(team.id),
+                },
+                "Add bot",
+              ),
+            )
+          : null;
     const action = mine
       ? h(
           "button",
@@ -673,6 +748,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
                 editSeats && member.kind === "seat"
                   ? () => void removeBot(member, team.id)
                   : undefined,
+                guests.includes(member.memberId),
               ),
             ),
           )
@@ -703,6 +779,10 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     if (!snapshot) return;
     const model = room(snapshot);
     const started = model.phase !== "waiting";
+    const signedIn = realtime.session.get()?.account !== undefined;
+    // A rated lobby needs your bot names, for Plays as and your blocker.
+    if (model.rated && signedIn && !accountAsked) void readAccount();
+    const rated = ratedBlockers(model, account);
     title.textContent = snapshot.lobby.name;
     settingsLine.textContent = describeSettings(
       snapshot.lobby.game_settings,
@@ -726,7 +806,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     connection.dataset.state = state;
 
     teamsEl.replaceChildren(
-      ...model.teams.map((team) => teamCard(team, model)),
+      ...model.teams.map((team) => teamCard(team, model, rated.guests)),
     );
     unassignedEl.hidden = model.unassigned.length === 0;
     unassignedEl.replaceChildren(
@@ -734,7 +814,9 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
       h(
         "ul",
         { class: "members" },
-        ...model.unassigned.map((member) => memberItem(member)),
+        ...model.unassigned.map((member) =>
+          memberItem(member, undefined, rated.guests.includes(member.memberId)),
+        ),
       ),
     );
 
@@ -745,12 +827,16 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     );
     readyButton.textContent = model.you?.ready ? "Cancel ready" : "I'm ready";
     readyButton.classList.toggle("is-ready", model.you?.ready === true);
-    readyButton.disabled = busy || started || !model.you;
+    // In a rated lobby, what you still miss keeps you from getting ready; the server decides all the same.
+    const youBlocked = rated.you !== null && model.you?.ready !== true;
+    ratedLine.textContent = rated.you ?? "";
+    ratedLine.hidden = started || rated.you === null;
+    readyButton.disabled = busy || started || !model.you || youBlocked;
     readyButton.hidden = started;
     returnButton.hidden = !started;
     startButton.hidden = !model.isHost || started;
     startError.hidden = !model.isHost;
-    const blocker = startBlocker(model, snapshot.start_rules);
+    const blocker = rated.host ?? startBlocker(model, snapshot.start_rules);
     startButton.disabled = busy || started || blocker !== null;
     leaveButton.disabled = busy;
     const members = countPeople([
@@ -871,6 +957,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
           "section",
           { class: "card controls" },
           hint,
+          ratedLine,
           h(
             "div",
             { class: "actions" },

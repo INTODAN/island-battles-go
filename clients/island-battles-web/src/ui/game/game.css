@@ -606,6 +606,60 @@
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
 }
 
+/* A rated game's rating changes under the summary (#370): the name in its team's colour. */
+.gv-ratings {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 14px;
+}
+
+.gv-ratings[hidden] {
+  display: none;
+}
+
+.gv-rating {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  margin: 2px 0;
+}
+
+.gv-rating-owner {
+  color: #4a5568;
+  font-size: 13px;
+}
+
+.gv-rating-change {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: #2a3546;
+}
+
+.gv-rating-up .gv-rating-change {
+  color: #1d6b3a;
+}
+
+.gv-rating-down .gv-rating-change {
+  color: #8a1c10;
+}
+
+/* "Rated game", first in the teams box. */
+.gv-rated {
+  align-self: center;
+  padding: 1px 8px;
+  border-radius: 6px;
+  background: #fbe7a6;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.gv-rated[hidden] {
+  display: none;
+}
+
 .gv-timeline {
   display: flex;
   align-items: center;

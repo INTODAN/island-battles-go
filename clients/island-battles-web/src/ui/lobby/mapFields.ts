@@ -12,6 +12,7 @@ import {
   mapTeamCount,
   maxTeams,
   minTeams,
+  ratedField,
   readMapFile,
   teamName,
   turnPaces,
@@ -30,8 +31,13 @@ export interface MapFieldsOptions {
   actions: Pick<LobbyActions, "mapTemplates" | "validateMap">;
   /** Prefixes the fields' element IDs, so two sets can share a page. */
   idPrefix?: string;
-  /** The values to start from: a lobby's current settings for Change map. */
+  /** The values to start from: a lobby's current settings for Change settings. */
   initial?: MapSettingsValues;
+  /**
+   * Whether the host signed in with Google: only they can turn Rated on. A guest sees the
+   * checkbox disabled, with a line that says why.
+   */
+  signedIn?: boolean;
 }
 
 export interface MapFields {
@@ -48,8 +54,8 @@ export interface MapFields {
 }
 
 /**
- * The map and turn limit fields, which the create form and the room's Change
- * map form share. The map decides the teams. Without a map to start from, the
+ * The map, turn limit, turn pace, game length and Rated fields, which the create form and the
+ * room's Change settings form share. The map decides the teams. Without a map to start from, the
  * first default map is chosen once the default maps load.
  */
 export function mountMapFields(options: MapFieldsOptions): MapFields {
@@ -142,6 +148,21 @@ export function mountMapFields(options: MapFieldsOptions): MapFields {
       (turns) =>
         new Option(`${turns} turns`, String(turns), false, turns === length),
     ),
+  );
+  // Rated: off by default, and only a signed-in host can turn it on; a guest who became the
+  // host of a rated lobby can still turn it off.
+  const rated = ratedField(options.signedIn === true, initial?.rated === true);
+  const ratedBox = h("input", {
+    type: "checkbox",
+    id: id("rated"),
+    checked: initial?.rated === true,
+    disabled: rated.disabled,
+  });
+  const ratedLabel = h(
+    "label",
+    { class: "check", htmlFor: id("rated") },
+    ratedBox,
+    " Rated",
   );
   const errorOf = (field: string) =>
     h("p", {
@@ -352,6 +373,8 @@ export function mountMapFields(options: MapFieldsOptions): MapFields {
         "The game ends after this many turns; the team with the most castles wins.",
       ),
       errors.gameLength,
+      ratedLabel,
+      h("p", { class: "hint" }, rated.hint),
     ],
     values: () => ({
       map: mapChoice(),
@@ -359,12 +382,12 @@ export function mountMapFields(options: MapFieldsOptions): MapFields {
         timeoutSelect.value === "none" ? null : Number(timeoutSelect.value),
       turnPaceMilliseconds: Number(paceSelect.value),
       maxGenerations: Number(lengthSelect.value),
+      rated: ratedBox.checked,
       ...(initial
         ? {
             currentTurnTimeoutSeconds: initial.turnTimeoutSeconds,
             currentTurnPaceMilliseconds: initial.turnPaceMilliseconds,
             currentMaxGenerations: initial.maxGenerations,
-            rated: initial.rated,
           }
         : {}),
     }),

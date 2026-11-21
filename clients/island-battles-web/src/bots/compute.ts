@@ -58,19 +58,25 @@ export interface BotOption {
  * The host's Add bot choices for an empty team: a default bot of each level, a localhost bot on
  * a port of the host's machine, which only the tab of the host who adds it relays, and, when
  * the server offers them, each of the lobby's packages, greyed out once their compute is
- * spent, and a hosted bot.
+ * spent, and a hosted bot. A rated lobby allows only default bot seats, each level once, so it
+ * offers only the levels that no seat has (`takenLevels`).
  */
 export function seatOptions(options: {
   levels: number[];
   serverBots: boolean;
   packages: { package_id: string; owner_name: string; language: string }[];
   spent: string | null;
+  rated?: boolean;
+  takenLevels?: readonly number[];
 }): BotOption[] {
-  const choices: BotOption[] = options.levels.map((level) => ({
-    value: `level-${level}`,
-    label: `Bot level ${level}`,
-    disabled: false,
-  }));
+  const choices: BotOption[] = options.levels
+    .filter((level) => !options.rated || !options.takenLevels?.includes(level))
+    .map((level) => ({
+      value: `level-${level}`,
+      label: `Bot level ${level}`,
+      disabled: false,
+    }));
+  if (options.rated) return choices;
   choices.push({
     value: "localhost",
     label: "My localhost bot (port)",

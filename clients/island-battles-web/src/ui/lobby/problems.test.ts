@@ -58,7 +58,7 @@ describe("problem sentences", () => {
       "create",
     );
     expect(shown.message).toContain("game_settings.map.castles[0].x");
-    expect(shown.message).toMatch(/^The map or turn limit was refused/);
+    expect(shown.message).toMatch(/^The settings were refused/);
   });
 
   test("stale_membership means the player is no longer in the lobby", () => {
@@ -123,5 +123,72 @@ describe("problem sentences", () => {
       "ready",
     );
     expect(offline.message).toContain("Cannot reach the server");
+  });
+});
+
+describe("a rated lobby's refusals", () => {
+  test("the ready gate's sentence is shown as the server gives it", () => {
+    for (const [type, detail] of [
+      [
+        "rated-sign-in-required",
+        "This lobby is rated. Sign in with Google in the 3D client to play in it.",
+      ],
+      [
+        "rated-bot-name-required",
+        "This lobby is rated. Play by hand, or choose one of your bot names for your bot.",
+      ],
+      [
+        "rated-bot-name-gone",
+        "Your bot name Kraken no longer exists. Choose another.",
+      ],
+      [
+        "rated-same-account",
+        "Dana and Dana are the same account. A rated game needs a different account on each team.",
+      ],
+      [
+        "rated-seat",
+        "A rated game allows only default bot seats, each level once. Remove Hosted bot.",
+      ],
+    ] as const) {
+      const error = lobby("game_requirement", {
+        problemType: `urn:island-battles:problem:${type}`,
+        detail,
+      });
+      expect(describeProblem(error, "ready").message).toBe(detail);
+      expect(describeProblem(error, "start").message).toBe(detail);
+    }
+  });
+
+  test("a refused seat shows the rule, and a refused name the game's sentence", () => {
+    const seat = lobby("invalid_seat_settings", {
+      status: 422,
+      detail:
+        "A rated game allows only default bot seats, each level once. This lobby already has Bot level 2.",
+    });
+    expect(describeProblem(seat, "seat").message).toBe(
+      "A rated game allows only default bot seats, each level once. This lobby already has Bot level 2.",
+    );
+    const name = lobby("invalid_member_settings", {
+      status: 422,
+      detail: "Octopus isn't one of your bot names.",
+    });
+    expect(describeProblem(name, "bot").message).toBe(
+      "Octopus isn't one of your bot names.",
+    );
+  });
+
+  test("turning Rated on with a seat it doesn't allow says which", () => {
+    expect(
+      describeProblem(
+        lobby("invalid_game_settings", {
+          status: 422,
+          detail:
+            "A rated game allows only default bot seats, each level once. Remove Hosted bot.",
+        }),
+        "settings",
+      ).message,
+    ).toBe(
+      "The settings were refused. A rated game allows only default bot seats, each level once. Remove Hosted bot.",
+    );
   });
 });

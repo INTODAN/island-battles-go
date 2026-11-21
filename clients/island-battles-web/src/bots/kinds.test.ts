@@ -39,3 +39,19 @@ describe("the bot that plays your seat", () => {
     expect(describeGameBot({ kind: "manual" })).toBe("You play by hand");
   });
 });
+
+test("a rated game names the bot name your bot plays as", () => {
+  expect(describeGameBot({ kind: "localhost", name: "Kraken" })).toBe(
+    "Kraken, your localhost bot on port 41414, relayed by this tab",
+  );
+  expect(
+    describeGameBot({
+      kind: "hosted",
+      host: "bot.example.com",
+      name: "Kraken",
+    }),
+  ).toBe("Played by the server: Kraken, your hosted bot at bot.example.com");
+  expect(describeGameBot({ kind: "uploaded", name: "Squid" })).toBe(
+    "Played by the server: Squid, your uploaded bot",
+  );
+});

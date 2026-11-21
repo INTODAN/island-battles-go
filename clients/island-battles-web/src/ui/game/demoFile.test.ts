@@ -69,6 +69,26 @@ describe("readDemo", () => {
     );
   });
 
+  test("a rated game's demo keeps its rating changes", () => {
+    const rated = sampleDemo();
+    if (!rated.outcome) throw new Error("the sample has an outcome");
+    rated.outcome.ratings = [
+      {
+        team_color: 1,
+        competitor_id: "00000000-0000-4000-8000-000000000001",
+        kind: "bot",
+        name: "Kraken",
+        owner: "Dana",
+        before: 1500,
+        after: 1520,
+      },
+    ];
+    expect(readDemo(JSON.stringify(rated))).toEqual(rated);
+    const wrong = structuredClone(rated);
+    (wrong.outcome?.ratings?.[0] as { after: unknown }).after = "1520";
+    rejects(wrong, /outcome\.ratings\[0\]\.after must be a number/, "text");
+  });
+
   test("files that aren't demos are refused plainly", () => {
     const files: Record<string, string> = {
       "empty file": "",

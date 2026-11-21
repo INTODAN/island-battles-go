@@ -25,6 +25,8 @@ export interface MemberRow {
   connected: boolean;
   isYou: boolean;
   isHost: boolean;
+  /** Whether a person had signed in with Google when they joined. Always false for a seat. */
+  signedIn: boolean;
   /** A person's bot choice, or a seat's bot. */
   bot: MemberBot | undefined;
   /**
@@ -81,15 +83,24 @@ export function memberSettingsBot(
 ): MemberBot | undefined {
   const bot = settings?.bot;
   if (typeof bot !== "object" || bot === null) return undefined;
-  const { kind, level, url, package_id, port } = bot as Record<string, unknown>;
+  const { kind, level, url, package_id, port, name } = bot as Record<
+    string,
+    unknown
+  >;
+  // The bot name a localhost, hosted or uploaded bot plays as, in a rated lobby.
+  const named = typeof name === "string" && name !== "" ? { name } : {};
   if (kind === "manual") return { kind };
   if (kind === "localhost") {
-    return typeof port === "number" ? { kind, port } : { kind };
+    return typeof port === "number"
+      ? { kind, port, ...named }
+      : { kind, ...named };
   }
   if (kind === "default" && typeof level === "number") return { kind, level };
-  if (kind === "hosted" && typeof url === "string") return { kind, url };
+  if (kind === "hosted" && typeof url === "string") {
+    return { kind, url, ...named };
+  }
   if (kind === "uploaded" && typeof package_id === "string") {
-    return { kind, package_id };
+    return { kind, package_id, ...named };
   }
   return undefined;
 }
@@ -178,17 +189,32 @@ export interface RoomModel {
   yourTeamId: string | null;
   isHost: boolean;
   phase: string;
+  /** The lobby's `rated` setting: its game counts for the leaderboard. */
+  rated: boolean;
 }
 
 /**
  * A few words naming a member's bot. A localhost bot seat's, with its row's `relay`, runs on the
- * machine of the host who added it, whose tab alone relays it; nobody does once they left.
+ * machine of the host who added it, whose tab alone relays it; nobody does once they left. A bot
+ * that plays as one of its player's bot names is named by it: "Kraken (own bot, localhost)".
  */
 export function describeBot(
   bot: MemberBot | undefined,
   relay?: SeatRelay | null,
 ): string {
   if (!bot) return "No bot yet";
+  if (bot.name) {
+    switch (bot.kind) {
+      case "localhost":
+        return bot.port && bot.port !== defaultBotPort
+          ? `${bot.name} (own bot, localhost:${bot.port})`
+          : `${bot.name} (own bot, localhost)`;
+      case "hosted":
+        return `${bot.name} (hosted bot, ${urlHost(bot.url ?? "")})`;
+      case "uploaded":
+        return `${bot.name} (uploaded bot)`;
+    }
+  }
   switch (bot.kind) {
     case "localhost":
       if (relay === null)
@@ -229,25 +255,33 @@ export function choiceValue(bot: MemberBot | undefined): string {
 /**
  * The choice a radio value stands for, or null for none. `hosted` takes the
  * URL typed next to it, and is null while that is empty. `localhost` takes the
- * port next to it, left out when it is the default one.
+ * port next to it, left out when it is the default one. A localhost, hosted or
+ * uploaded bot takes `name`, the bot name chosen in its **Plays as**, left out
+ * when it is "" (No name); the other kinds have none.
  */
 export function choiceFromValue(
   value: string,
   url = "",
   port: number = defaultBotPort,
+  name = "",
 ): MemberBot | null {
+  const named = name ? { name } : {};
   if (value === "localhost") {
     return port === defaultBotPort
-      ? { kind: "localhost" }
-      : { kind: "localhost", port };
+      ? { kind: "localhost", ...named }
+      : { kind: "localhost", port, ...named };
   }
   if (value === "manual") return { kind: "manual" };
   if (value === "hosted") {
     const trimmed = url.trim();
-    return trimmed ? { kind: "hosted", url: trimmed } : null;
+    return trimmed ? { kind: "hosted", url: trimmed, ...named } : null;
   }
   if (value.startsWith("package-") && value.length > "package-".length) {
-    return { kind: "uploaded", package_id: value.slice("package-".length) };
+    return {
+      kind: "uploaded",
+      package_id: value.slice("package-".length),
+      ...named,
+    };
   }
   const level = /^level-([1-9][0-9]*)$/.exec(value);
   return level ? { kind: "default", level: Number(level[1]) } : null;
@@ -343,6 +377,7 @@ export function buildRoom(snapshot: Snapshot, playerId: string): RoomModel {
         connected: seat || member.disconnected_until === null,
         isYou: member.player_id === playerId,
         isHost: member.player_id === snapshot.lobby.host_player_id,
+        signedIn: !seat && member.signed_in === true,
         bot,
         ...(seat && bot?.kind === "localhost"
           ? {
@@ -376,6 +411,7 @@ export function buildRoom(snapshot: Snapshot, playerId: string): RoomModel {
     yourTeamId: you?.teamId ?? null,
     isHost: you?.isHost ?? false,
     phase: snapshot.lobby.phase,
+    rated: snapshot.lobby.game_settings?.rated === true,
   };
 }
 
@@ -422,6 +458,124 @@ export function startBlocker(
     return `Remove ${orphan.name}: the player who added it left. The host can add it again from their own tab.`;
   }
   return null;
+}
+
+/** Your blocker in a rated lobby while you aren't signed in. */
+export const ratedSignInBlocker = "Sign in to play in this rated lobby.";
+/** Your blocker in a rated lobby while your bot plays under no bot name: a default bot, or a bot without one. */
+export const ratedBotNameBlocker = "Choose a bot name, or play by hand.";
+/** The rule of a rated lobby's bot seats, as the server says it. */
+export const ratedSeatRule =
+  "a rated game allows only default bot seats, each level once.";
+/** The tag beside a person who isn't signed in, in a rated lobby. */
+export const guestTag = "guest";
+
+/** What `ratedBlockers` knows of your account: your bot names, once the game's `GET /account` answered. */
+export interface RatedAccount {
+  botNames: readonly string[];
+}
+
+/** What a rated lobby is still missing before its start, as the room shows it. */
+export interface RatedBlockers {
+  /** What keeps you from getting ready, shown above the Ready button, or null. */
+  you: string | null;
+  /** For the host: the bot seats that a rated game doesn't allow, or null. */
+  host: string | null;
+  /** The member IDs of the other people who aren't signed in, tagged "guest". */
+  guests: string[];
+}
+
+const noRatedBlockers = (): RatedBlockers => ({
+  you: null,
+  host: null,
+  guests: [],
+});
+
+/**
+ * The default bot levels that the lobby's seats have, each once, in seat order: on a team or
+ * not, as the server counts them.
+ */
+export function seatLevels(room: RoomModel): number[] {
+  const levels: number[] = [];
+  for (const member of [
+    ...room.teams.flatMap((team) => team.members),
+    ...room.unassigned,
+  ]) {
+    if (
+      member.kind === "seat" &&
+      member.bot?.kind === "default" &&
+      member.bot.level !== undefined &&
+      !levels.includes(member.bot.level)
+    ) {
+      levels.push(member.bot.level);
+    }
+  }
+  return levels;
+}
+
+/**
+ * The seats that a rated game doesn't allow, by name, as the server finds them: every seat that
+ * isn't a default bot level, and every seat of a level after its first.
+ */
+function ratedSeatsToRemove(room: RoomModel): string[] {
+  const remove: string[] = [];
+  const levels = new Set<number>();
+  for (const member of [
+    ...room.teams.flatMap((team) => team.members),
+    ...room.unassigned,
+  ]) {
+    if (member.kind !== "seat") continue;
+    const level = member.bot?.kind === "default" ? member.bot.level : undefined;
+    if (level === undefined || levels.has(level)) remove.push(member.name);
+    else levels.add(level);
+  }
+  return remove;
+}
+
+/**
+ * What a rated lobby still needs before it can start, in the server's own terms (its ready gate,
+ * `backend/services/rated_lobbies.go`): for you, to sign in, or to choose a bot name or play by
+ * hand (also when you chose a default bot), or another name once yours was deleted; for the host,
+ * the seats to remove. Nothing for a lobby that isn't rated. `account` holds your bot names once
+ * read, or null; a name is checked against them only then. The server stays the authority: it
+ * alone knows two members of one account, for example.
+ */
+export function ratedBlockers(
+  room: RoomModel,
+  account: RatedAccount | null,
+): RatedBlockers {
+  if (!room.rated) return noRatedBlockers();
+  const blockers = noRatedBlockers();
+  const people = [
+    ...room.teams.flatMap((team) => team.members),
+    ...room.unassigned,
+  ].filter((member) => member.kind === "human");
+  blockers.guests = people
+    .filter((member) => !member.isYou && !member.signedIn)
+    .map((member) => member.memberId);
+  const you = room.you;
+  if (you?.kind === "human") {
+    const bot = you.bot;
+    if (!you.signedIn) blockers.you = ratedSignInBlocker;
+    else if (bot && bot.kind !== "manual" && !bot.name) {
+      blockers.you = ratedBotNameBlocker;
+    } else if (
+      bot?.name &&
+      account &&
+      !account.botNames.some(
+        (name) => name.toLowerCase() === bot.name?.toLowerCase(),
+      )
+    ) {
+      blockers.you = `Your bot name ${bot.name} no longer exists. Choose another.`;
+    }
+  }
+  if (room.isHost) {
+    const remove = ratedSeatsToRemove(room);
+    if (remove.length > 0) {
+      blockers.host = `Remove ${remove.join(", ")}: ${ratedSeatRule}`;
+    }
+  }
+  return blockers;
 }
 
 /** Whether any member plays by hand, which makes the game real-time. Only people can: a bot seat never plays by hand. */
