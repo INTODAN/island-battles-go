@@ -8,7 +8,13 @@ import type {
 import { UnauthorizedError } from "./centrifuge";
 import type { GenerationState, Snapshot } from "./install";
 import { createRealtime, type RealtimeOptions } from "./realtime";
-import { type StorageLike, sessionStorageKey } from "./session-storage";
+import { createSessionLock } from "./session-lock";
+import {
+  rememberedSessionKey,
+  type StorageLike,
+  sessionStorageKey,
+} from "./session-storage";
+import { FakeLocks } from "./testing";
 
 // --- Fakes ---
 
@@ -165,6 +171,10 @@ const outcome = {
 interface Harness {
   realtime: ReturnType<typeof createRealtime>;
   storage: FakeStorage;
+  /** The browser's `localStorage`, where a Google sign-in is remembered. */
+  remembered: FakeStorage;
+  /** The browser's Web Locks. */
+  locks: FakeLocks;
   clients: FakeCentrifuge[];
   calls: { method: string; path: string }[];
   /** Answers by "METHOD path"; later assignments replace earlier ones. */
@@ -175,6 +185,8 @@ interface Harness {
 
 function harness(extra: Partial<RealtimeOptions> = {}): Harness {
   const storage = new FakeStorage();
+  const remembered = new FakeStorage();
+  const locks = new FakeLocks();
   const clients: FakeCentrifuge[] = [];
   const calls: { method: string; path: string }[] = [];
   const routes: Harness["routes"] = new Map();
@@ -215,6 +227,8 @@ function harness(extra: Partial<RealtimeOptions> = {}): Harness {
     baseUrl: "http://api.test",
     fetch: fetchStub,
     storage,
+    rememberStorage: remembered,
+    sessionLock: createSessionLock(locks),
     createClient: (url, options) => {
       const client = new FakeCentrifuge(url, options);
       clients.push(client);
@@ -228,6 +242,8 @@ function harness(extra: Partial<RealtimeOptions> = {}): Harness {
   return {
     realtime,
     storage,
+    remembered,
+    locks,
     clients,
     calls,
     routes,
@@ -544,6 +560,136 @@ describe("signInWithGoogle", () => {
     await caughtApi(h.realtime.renameAccount("Ada"));
     expect(h.realtime.session.get()).toBeNull();
     expect(h.realtime.problem.get()?.scope).toBe("session");
+  });
+});
+
+describe("remembered Google session", () => {
+  /** Another tab of the same browser: its own tab storage, the browser's storage and locks. */
+  const otherTab = (h: Harness) => {
+    const lock = createSessionLock(h.locks);
+    const realtime = createRealtime({
+      baseUrl: "http://api.test",
+      storage: new FakeStorage(),
+      rememberStorage: h.remembered,
+      sessionLock: lock,
+    });
+    return { realtime, lock };
+  };
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  test("a Google sign-in is remembered, and a new tab takes it once its tab is closed", async () => {
+    const h = harness();
+    googleRoutes(h, "Dana");
+    const session = await h.realtime.signInWithGoogle("id-token");
+    expect(h.remembered.getItem(rememberedSessionKey)).toContain("access-g");
+    await flush();
+
+    // The first tab is still open: the new tab doesn't share its player.
+    const second = otherTab(h);
+    expect(await second.realtime.resumeRemembered()).toBe(false);
+    expect(second.realtime.session.get()).toBeNull();
+
+    // The first tab closes: the browser lets go of its lock.
+    h.locks.held.clear();
+    const third = otherTab(h);
+    expect(await third.realtime.resumeRemembered()).toBe(true);
+    expect(third.realtime.session.get()).toEqual(session);
+    expect(third.realtime.problem.get()).toBeNull();
+  });
+
+  test("a tab reloaded with its own Google session holds its player", async () => {
+    const h = harness();
+    googleRoutes(h, "Dana");
+    await h.realtime.signInWithGoogle("id-token");
+    h.locks.held.clear();
+    const reloaded = createRealtime({
+      storage: h.storage,
+      rememberStorage: h.remembered,
+      sessionLock: createSessionLock(h.locks),
+    });
+    expect(reloaded.session.get()?.account?.id).toBe(ACCOUNT_ID);
+    await flush();
+    expect(await otherTab(h).realtime.resumeRemembered()).toBe(false);
+  });
+
+  test("a guest's session is not remembered", async () => {
+    const h = harness();
+    await h.realtime.signIn("Ada");
+    expect(h.remembered.getItem(rememberedSessionKey)).toBeNull();
+    expect(h.locks.held.size).toBe(0);
+    expect(await otherTab(h).realtime.resumeRemembered()).toBe(false);
+  });
+
+  test("an expired remembered session is not taken", async () => {
+    const h = harness();
+    googleRoutes(h, "Dana");
+    await h.realtime.signInWithGoogle("id-token");
+    h.locks.held.clear();
+    const later = createRealtime({
+      storage: new FakeStorage(),
+      rememberStorage: h.remembered,
+      sessionLock: createSessionLock(h.locks),
+      now: () => Date.now() + 2 * 86_400_000,
+    });
+    expect(await later.resumeRemembered()).toBe(false);
+    expect(h.remembered.getItem(rememberedSessionKey)).toBeNull();
+  });
+
+  test("a rename is remembered", async () => {
+    const h = harness();
+    googleRoutes(h, "Dana");
+    await h.realtime.signInWithGoogle("id-token");
+    h.routes.set("PUT /lobby/v1/account", () =>
+      json({ id: ACCOUNT_ID, display_name: "Dana B" }),
+    );
+    await h.realtime.renameAccount("Dana B");
+    expect(h.remembered.getItem(rememberedSessionKey)).toContain("Dana B");
+  });
+
+  test("signing out forgets the session and lets go of the player", async () => {
+    const h = harness();
+    googleRoutes(h, "Dana");
+    await h.realtime.signInWithGoogle("id-token");
+    await flush();
+    h.realtime.signOut();
+    await flush();
+    expect(h.remembered.getItem(rememberedSessionKey)).toBeNull();
+    expect(h.locks.held.size).toBe(0);
+  });
+
+  test("a session the lobby ended is forgotten", async () => {
+    const h = harness();
+    googleRoutes(h, "Dana");
+    await h.realtime.signInWithGoogle("id-token");
+    h.realtime.sessionRefused(new ApiError({ kind: "problem", status: 401 }));
+    expect(h.remembered.getItem(rememberedSessionKey)).toBeNull();
+  });
+
+  test("ending a session leaves another tab's newer remembered session", async () => {
+    const h = harness();
+    googleRoutes(h, "Dana");
+    await h.realtime.signInWithGoogle("id-token");
+    const newer = JSON.stringify({
+      playerId: "another-player",
+      accessToken: "access-other",
+      expiresAt: Date.now() + 86_400_000,
+      displayName: "Dana",
+      account: { id: ACCOUNT_ID, displayName: "Dana" },
+    });
+    h.remembered.setItem(rememberedSessionKey, newer);
+    h.realtime.signOut();
+    expect(h.remembered.getItem(rememberedSessionKey)).toBe(newer);
+    h.realtime.forgetRemembered();
+    expect(h.remembered.getItem(rememberedSessionKey)).toBeNull();
+  });
+
+  test("a tab with a session keeps it", async () => {
+    const h = harness();
+    googleRoutes(h, "Dana");
+    await h.realtime.signInWithGoogle("id-token");
+    const held = h.realtime.session.get();
+    expect(await h.realtime.resumeRemembered()).toBe(true);
+    expect(h.realtime.session.get()).toBe(held);
   });
 });
 

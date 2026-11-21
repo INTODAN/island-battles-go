@@ -65,5 +65,5 @@ export function googleSignInStep(
     : { kind: "button-problem", message };
 }
 
-/** The tab remembers that its person signed in with Google, for the silent sign-in. */
+/** The browser remembers, in `localStorage`, that its person signed in with Google (#409). */
 export const googleSignInKey = "island-battles-web.google-sign-in";
