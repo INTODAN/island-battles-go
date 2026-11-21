@@ -60,6 +60,7 @@ Teams and readiness belong to the generic lobby. Starting freezes a roster. The 
 *   **Check generated gameplay models:** `uv run --project clients/island-battles-python/tools --locked python clients/island-battles-python/scripts/generate.py --check`
 *   **Regenerate the web client's API types:** `bun run generate` in `clients/island-battles-web/` (`bun run generate --check` verifies they are current; `web-client.yml` runs it on any change to `api/lobby/` or `backend/api/`)
 *   **Python bot client tests:** `uv run --project clients/island-battles-python --locked pytest clients/island-battles-python/tests`
+*   **Headless matches:** `go run ./backend/cmd/headless-match schedule.json` plays games between bots in memory, without the database or the lobby; see [Headless matches](backend/README.md#headless-matches)
 *   **Python bot runner tests:** `uv run --no-project --python 3.14 python -I -m unittest discover -s backend/botrunner/python` (the end-to-end test needs PyPI; see [Bot runners](backend/README.md#bot-runners))
 *   **Gameplay client conformance (offline):** `uv run --project clients/conformance --locked pytest clients/conformance/tests/test_models.py`
 *   **Go SDK conformance (offline):** `ISLAND_BATTLES_CLIENT_COMMAND="go run ./clients/island-battles-go/conformance" uv run --project clients/conformance --locked pytest clients/conformance/tests/test_models.py`; live: `./scripts/test-client-conformance.sh "go -C $PWD run ./clients/island-battles-go/conformance"`

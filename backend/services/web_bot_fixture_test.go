@@ -41,7 +41,7 @@ func TestWriteWebClientBotFixture(t *testing.T) {
 	memories := make([]models.BotMemory, len(levels))
 	frames := []models.GenerationView{fixtureView(1, state, nil)}
 	for generations := 1; generations <= 48; generations++ {
-		generation := generationFromState(uint(generations), state)
+		generation := generationFromState(uint(generations), generations, state)
 		inputs := []models.GenerationInput{}
 		commands := []models.CommandFields{}
 		for index, level := range levels {

@@ -64,6 +64,7 @@ dist-desktop/
 /admin-mcp
 /bot-runner-native
 /export-openapi
+/headless-match
 /lambda
 /lobby-games
 /migrate
