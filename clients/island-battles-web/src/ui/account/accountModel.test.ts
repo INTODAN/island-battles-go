@@ -185,16 +185,14 @@ describe("a bot name's URL", () => {
     );
   });
 
-  test("a new name says its URL becomes public after its first rated game", () => {
-    expect(botUrlPublicSentence).toContain(
-      "Once the name has played a rated game, the leaderboard shows the URL",
-    );
-    // A listed name's change shows on the leaderboard; an unlisted one's isn't public yet.
+  test("a new name says its URL is public, so anyone can play against it", () => {
+    expect(botUrlPublicSentence).toContain("The URL is public");
+    // A listed name's change shows on the leaderboard; an unrated one's where others find it.
     expect(botUrlEditHint(three[0] as Competitor)).toStartWith(
       "The leaderboard shows Kraken's new URL within a minute.",
     );
     expect(botUrlEditHint(three[2] as Competitor)).toContain(
-      "Once the name has played a rated game",
+      "Anyone who finds your bot by name plays it at the new URL.",
     );
   });
 

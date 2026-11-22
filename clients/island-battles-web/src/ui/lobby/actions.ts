@@ -61,7 +61,7 @@ export async function retryTransport<T>(
   }
 }
 
-/** How many of the leaderboard's bots the bot pickers offer: the most one page of it holds. */
+/** How many registered bots one read offers the bot pickers: the most one page holds. */
 export const listedBotsLimit = 100;
 
 function required<T>(data: T | undefined): T {
@@ -345,15 +345,15 @@ export function createLobbyActions(options: {
     },
 
     /**
-     * The bots from the leaderboard that anyone may choose as a bot (#412): the first
-     * `listedBotsLimit` of its bots (`GET /leaderboard?kind=bot`), those with a URL. Public: it
-     * needs no token.
+     * The registered bots that anyone may choose as a bot (#412), rated or not: the first
+     * `listedBotsLimit` of `GET /bots/registered`, rated ones first, or those whose name or owner
+     * holds `search`. Public: it needs no token.
      */
-    async listedBots(): Promise<ListedBot[]> {
-      const { data } = await gameApi.GET("/leaderboard", {
-        params: { query: { kind: "bot", limit: listedBotsLimit, offset: 0 } },
+    async listedBots(search = ""): Promise<ListedBot[]> {
+      const { data } = await gameApi.GET("/bots/registered", {
+        params: { query: { search, limit: listedBotsLimit, offset: 0 } },
       });
-      return listedBots(required(data).entries);
+      return listedBots(required(data).bots);
     },
 
     /** Whether games with uploaded bots may start this month (`GET /game/bot-compute`). */

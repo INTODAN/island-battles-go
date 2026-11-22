@@ -6,7 +6,7 @@
  */
 
 import type { components } from "../api/generated/game";
-import { type ListedBot, listedBotLabel } from "./kinds";
+import { type ListedBot, listedBotLabel, listedBotRating } from "./kinds";
 
 export type BotCompute = components["schemas"]["BotCompute"];
 
@@ -55,17 +55,21 @@ export interface BotOption {
   disabled: boolean;
 }
 
-/** The Add bot value of a bot from the leaderboard, by its competitor ID. */
+/** The Add bot value of a registered bot, by its competitor ID. */
 export const listedSeatValue = (competitorId: string): string =>
   `competitor-${competitorId}`;
+
+/** The Add bot value that opens the search of every registered bot, rated or not. */
+export const searchSeatValue = "search";
 
 /**
  * The host's Add bot choices for an empty team: a default bot of each level, a localhost bot on
  * a port of the host's machine, which only the tab of the host who adds it relays, and, when
  * the server offers them, each of the lobby's packages, greyed out once their compute is
- * spent, a hosted bot, and each bot from the leaderboard (`listed`). A rated lobby allows only
- * default bot seats, each level once, and bots from the leaderboard, each once, so it offers only
- * the levels and the bots that no seat has (`takenLevels`, `takenCompetitors`).
+ * spent, a hosted bot, each registered bot read so far (`listed`), rated or not, and **Search for
+ * a bot…**, which finds any other. A rated lobby allows only default bot seats, each level once,
+ * and registered bots, each once, so it offers only the levels and the bots that no seat has
+ * (`takenLevels`, `takenCompetitors`).
  */
 export function seatOptions(options: {
   levels: number[];
@@ -93,11 +97,14 @@ export function seatOptions(options: {
         )
         .map((bot) => ({
           value: listedSeatValue(bot.competitorId),
-          label: `From the leaderboard: ${listedBotLabel(bot)}`,
+          label: `${listedBotLabel(bot)} (${listedBotRating(bot)})`,
           disabled: false,
         }))
     : [];
-  if (options.rated) return [...choices, ...listed];
+  const search: BotOption[] = options.serverBots
+    ? [{ value: searchSeatValue, label: "Search for a bot…", disabled: false }]
+    : [];
+  if (options.rated) return [...choices, ...listed, ...search];
   choices.push({
     value: "localhost",
     label: "My localhost bot (port)",
@@ -112,7 +119,7 @@ export function seatOptions(options: {
     });
   }
   choices.push({ value: "hosted", label: "Hosted bot (URL)", disabled: false });
-  return [...choices, ...listed];
+  return [...choices, ...listed, ...search];
 }
 
 /** The choice a select shows: `wanted` while it is offered and not greyed out, or else the first. */

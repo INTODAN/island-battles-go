@@ -376,8 +376,8 @@ func TestAnAwayBotThatMissesATurnIsPaused(t *testing.T) {
 }
 
 // No two competitors of a rated game belong to one account, whoever chose
-// them; a bot that isn't listed can't play away.
-func TestARatedStartRefusesTwoCompetitorsOfOneAccountAndUnlistedBots(t *testing.T) {
+// them; an unrated bot plays away, but not one of a hidden account.
+func TestARatedStartRefusesTwoCompetitorsOfOneAccountAndUnregisteredBots(t *testing.T) {
 	fixture := newAwayAccounts(t)
 	dana, fay := fixture.person("Dana"), fixture.person("Fay")
 	kraken, leviathan := fixture.listedBot(t, dana, "Kraken"), fixture.listedBot(t, dana, "Leviathan")
@@ -396,16 +396,26 @@ func TestARatedStartRefusesTwoCompetitorsOfOneAccountAndUnlistedBots(t *testing.
 	_, err := fixture.start(t, mapSettings("30", 1, 2, 3), seated(kraken.ID), seated(kraken.ID), byHand(fay))
 	expectRefusal(t, err, services.RatedSameAccountProblemType, "Kraken can play for one team only. A rated game needs a different account on each team.")
 
-	unlisted, err := fixture.accounts.RegisterBotName(context.Background(), dana, "Hydra", "https://bot.example.com/hydra")
+	erin := fixture.person("Erin")
+	hydra, err := fixture.accounts.RegisterBotName(context.Background(), erin, "Hydra", "https://bot.example.com/hydra")
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = fixture.start(t, settings, byHand(fay), seated(unlisted.ID))
-	expectRefusal(t, err, services.RatedBotNotListedProblemType, "Hydra is no longer on the leaderboard. Remove Seat.")
-	_, err = fixture.start(t, settings, choosing(fay, unlisted.ID), seated(kraken.ID))
-	expectRefusal(t, err, services.RatedBotNotListedProblemType, "Hydra, which Fay chose, is no longer on the leaderboard: they must choose another bot.")
-	// Its owner may choose it by its ID, unlisted, as if they named it.
-	fixture.mustStart(t, settings, choosing(dana, unlisted.ID), awayTeam{settings: `{"bot_level":2}`})
+	// Hydra has played no rated game: it isn't on the leaderboard, yet anyone may choose it.
+	fixture.mustStart(t, settings, byHand(fay), seated(hydra.ID))
+	if _, err := dal.SetAccountHidden(fixture.database, erin.AccountID, true); err != nil {
+		t.Fatal(err)
+	}
+	_, err = fixture.start(t, settings, seated(hydra.ID), byHand(fay))
+	expectRefusal(t, err, services.RatedBotNotListedProblemType, "Hydra is no longer a registered bot with a URL. Remove Seat.")
+	_, err = fixture.start(t, settings, choosing(fay, hydra.ID), seated(kraken.ID))
+	expectRefusal(t, err, services.RatedBotNotListedProblemType, "Hydra, which Fay chose, is no longer a registered bot with a URL: they must choose another bot.")
+	// Its owner may choose their own unrated bot by its ID, as if they named it.
+	gorgon, err := fixture.accounts.RegisterBotName(context.Background(), dana, "Gorgon", "https://bot.example.com/gorgon")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.mustStart(t, settings, choosing(dana, gorgon.ID), awayTeam{settings: `{"bot_level":2}`})
 }
 
 // In a real-time game, which plays on without a bot that doesn't answer, an

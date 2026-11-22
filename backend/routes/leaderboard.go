@@ -33,6 +33,16 @@ func SetupLeaderboardRoutes(api huma.API, handler *handlers.Leaderboard, adminAP
 		Errors: []int{http.StatusNotFound},
 	}, handler.Competitor)
 
+	huma.Register(api, huma.Operation{
+		OperationID: "listIslandRegisteredBots", Path: "/bots/registered", Method: http.MethodGet,
+		Summary: "Search the registered bots: every bot name with a URL, rated or not",
+		Description: "Public: it needs no credential. It lists every registered bot name that has a hosted bot URL, across all accounts, with its owner's display name and its URL, whether or not it has played a rated game. " +
+			"Anyone may choose one by its competitor_id: for their own team, as a member's {\"kind\": \"hosted\", \"competitor_id\": \"…\"}, or as a seat, {\"bot_competitor_id\": \"…\"}, and the server plays it at its URL, without its owner joining. " +
+			"A deleted bot name, one without a URL, and the bots of an account that the admin hid aren't listed. " +
+			"search keeps only the bots whose name or owner's display name holds it, without regard to case. The order is rated bots first, by rating, highest first, then unrated bots by name; limit (1 to 100, default 50) and offset (default 0) page through it, and total counts the bots that match.",
+		Tags: []string{"Island Battles"},
+	}, handler.RegisteredBots)
+
 	registerAdminAPIKeyScheme(api)
 	const admin = "Admins only: send the deployment's admin API key in the " + AdminAPIKeyHeader + " header. A missing or wrong key returns 401, and when the deployment sets no key every request returns 403. " +
 		"The leaderboard's answers are cached for a minute, so the change shows within a minute. "

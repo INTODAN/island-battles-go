@@ -72,3 +72,19 @@ func (handler *Leaderboard) SetAccountHidden(ctx context.Context, input *struct 
 func leaderboardHTTPError(ctx context.Context, err error) error {
 	return rejectionOrUnavailable(ctx, err, "the leaderboard is temporarily unavailable")
 }
+
+type RegisteredBotsResponse struct {
+	Body models.RegisteredBotsView
+}
+
+func (handler *Leaderboard) RegisteredBots(ctx context.Context, input *struct {
+	Search string `query:"search" maxLength:"100" doc:"Keeps only the bots whose name or owner's display name holds this text, without regard to case. Empty, every registered bot."`
+	Limit  int    `query:"limit" minimum:"1" maximum:"100" default:"50" doc:"How many bots to return, 1 to 100."`
+	Offset int    `query:"offset" minimum:"0" default:"0" doc:"How many bots to skip, in their order."`
+}) (*RegisteredBotsResponse, error) {
+	view, err := handler.Service.RegisteredBots(ctx, input.Search, input.Limit, input.Offset)
+	if err != nil {
+		return nil, leaderboardHTTPError(ctx, err)
+	}
+	return &RegisteredBotsResponse{Body: view}, nil
+}

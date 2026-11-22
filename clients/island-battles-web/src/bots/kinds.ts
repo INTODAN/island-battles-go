@@ -8,35 +8,51 @@ import type { components } from "../api/generated/game";
 
 export type BotChoice = components["schemas"]["BotChoice"];
 export type RelayedBot = components["schemas"]["RelayedBot"];
-type LeaderboardEntry = components["schemas"]["LeaderboardEntry"];
+type RegisteredBot = components["schemas"]["RegisteredBot"];
 
 /**
- * A bot from the leaderboard (#412): a listed bot name, with its URL, that anyone may choose for
- * their own team or seat as a bot, by its competitor ID. The server plays it at the name's URL.
+ * A registered bot (#412): a bot name with its URL, rated or not, that anyone may choose for
+ * their own team or seat as a bot, by its competitor ID. The server plays it at the name's URL,
+ * without its owner joining.
  */
 export interface ListedBot {
   competitorId: string;
   name: string;
   /** The display name of the account that owns it. */
   owner: string | null;
+  /** Where the server plays it. */
+  url: string;
+  /** Its rating, rounded, once it has played a rated game; null while it is unrated. */
+  rating: number | null;
 }
 
-/** The listed bots among the leaderboard's entries: bot names with a URL, in its order. */
-export function listedBots(entries: readonly LeaderboardEntry[]): ListedBot[] {
-  return entries.flatMap((entry) =>
-    entry.kind === "bot" && entry.url
-      ? [
-          {
-            competitorId: entry.competitor_id,
-            name: entry.name,
-            owner: entry.owner,
-          },
-        ]
-      : [],
-  );
+/** The registered bots of `GET /bots/registered`, in its order. */
+export function listedBots(bots: readonly RegisteredBot[]): ListedBot[] {
+  return bots.map((bot) => ({
+    competitorId: bot.competitor_id,
+    name: bot.name,
+    owner: bot.owner,
+    url: bot.url,
+    rating: bot.rating,
+  }));
 }
 
-/** "Kraken, by Dana", as the leaderboard names a bot. */
+/** Adds `more` to `bots`, each bot once, keeping the first's order; a bot read again replaces its old copy. */
+export function mergeListedBots(
+  bots: readonly ListedBot[],
+  more: readonly ListedBot[],
+): ListedBot[] {
+  const fresh = new Map(more.map((bot) => [bot.competitorId, bot]));
+  const kept = bots.map((bot) => fresh.get(bot.competitorId) ?? bot);
+  const known = new Set(bots.map((bot) => bot.competitorId));
+  return [...kept, ...more.filter((bot) => !known.has(bot.competitorId))];
+}
+
+/** "rated 1520" or "unrated", for a registered bot. */
+export const listedBotRating = (bot: ListedBot): string =>
+  bot.rating === null ? "unrated" : `rated ${bot.rating}`;
+
+/** "Kraken, by Dana", as the leaderboard and the registered bots name a bot. */
 export const listedBotLabel = (bot: ListedBot): string =>
   bot.owner ? `${bot.name}, by ${bot.owner}` : bot.name;
 

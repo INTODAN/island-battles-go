@@ -51,12 +51,12 @@ const (
 // PlayerOperations are the endpoints a gameplay client uses, including the
 // turn delivery that a client relays to its localhost bot, the turn deadline that waiting clients apply, the resignation of a hand player, the upgrade cost table, the default bot list, the game log read that the replay also shows, the demo
 // download, the default map list for choosing a lobby's map, whether uploaded bots may start this month, the lobby's bot packages, which the
-// bot pickers and the SDKs' upload commands use, a signed-in player's account with their bot names, and the public leaderboard. Lobby setup, including each member's
+// bot pickers and the SDKs' upload commands use, a signed-in player's account with their bot names, the public leaderboard, and the registered bots. Lobby setup, including each member's
 // bot in their member settings, has its own generated SDK from api/lobby/openapi.json.
 var PlayerOperations = []string{"createLobbyConnectionToken", "getIslandLobbyGeneration", "getIslandLobbyTurnDelivery", "getIslandLobbyGameEndedDelivery", "getIslandGameDemo", "applyIslandLobbyTurnDeadline", "resignIslandLobbyGame", "registerGenerationCommand", "getIslandLobbyGenerationLogs", "getIslandLobbyDemo", "watchIslandLobbyGeneration", "watchIslandLobbyDemo", "watchIslandLobbyGenerationLogs", "listUpgrades", "listMapTemplates", "listDefaultBots", "getBotCompute",
 	"startIslandBotPackageUpload", "completeIslandBotPackageUpload", "listIslandBotPackages", "deleteIslandBotPackage", "createIslandBotUploadToken",
 	"getIslandAccount", "registerIslandBotName", "setIslandBotNameURL", "resumeIslandBotNameAway", "deleteIslandBotName", "deleteIslandAccount",
-	"listIslandLeaderboard", "getIslandCompetitor"}
+	"listIslandLeaderboard", "getIslandCompetitor", "listIslandRegisteredBots"}
 
 // PlayerEventSchemas are delivered by Centrifugo rather than HTTP responses.
 var PlayerEventSchemas = []string{"GenerationEvent", "GameEndedEvent", "WatchGenerationEvent", "WatchGameEndedEvent"}

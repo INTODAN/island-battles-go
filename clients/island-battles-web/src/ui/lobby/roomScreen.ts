@@ -1,6 +1,16 @@
 import { checkBotHealth, nextFreePort, portProblem } from "../../bots";
-import { offeredChoice, seatOptions } from "../../bots/compute";
-import type { ListedBot } from "../../bots/kinds";
+import {
+  listedSeatValue,
+  offeredChoice,
+  searchSeatValue,
+  seatOptions,
+} from "../../bots/compute";
+import {
+  type ListedBot,
+  listedBotLabel,
+  listedBotRating,
+  mergeListedBots,
+} from "../../bots/kinds";
 import { webClientUrl } from "../../platform";
 import type { Realtime, Snapshot } from "../../realtime";
 import { copyText, h } from "../dom";
@@ -128,8 +138,52 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
   let account: RatedAccount | null = null;
   /** Whether your bot names have been asked for: once a rated lobby needs them. */
   let accountAsked = false;
-  /** The bots from the leaderboard, for the bot picker, Add bot and the members' bots; empty until read. */
+  /**
+   * The registered bots read so far, rated or not, for the bot picker, Add bot and the members'
+   * bots: the first page, then each search's finds; empty until read.
+   */
   let listed: ListedBot[] = [];
+  /** The team whose Add bot searches the registered bots, one at a time; null for none. */
+  let searchTeamId: string | null = null;
+  /** The search's last finds, null while it runs, and whether it failed. */
+  let searchFound: ListedBot[] | null = null;
+  let searchFailed = false;
+  let searchTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Counts the searches, so only the latest one's answer is shown. */
+  let searchSerial = 0;
+  const searchInput = h("input", {
+    type: "search",
+    class: "bot-search",
+    placeholder: "Bot or owner name",
+    attrs: { "aria-label": "Search the registered bots", maxlength: "100" },
+  });
+  searchInput.addEventListener("input", () => scheduleSearch(250));
+
+  /** Searches the registered bots after `delay` ms, so typing sends one request. */
+  function scheduleSearch(delay: number): void {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => void runSearch(), delay);
+  }
+
+  /** Reads the registered bots that match the search box; the room remembers what it finds. */
+  async function runSearch(): Promise<void> {
+    const serial = ++searchSerial;
+    searchFound = null;
+    searchFailed = false;
+    render();
+    try {
+      const found = await actions.listedBots(searchInput.value.trim());
+      if (disposed || serial !== searchSerial) return;
+      searchFound = found;
+      listed = mergeListedBots(listed, found);
+      picker.setListedBots(listed);
+    } catch {
+      if (disposed || serial !== searchSerial) return;
+      searchFound = [];
+      searchFailed = true;
+    }
+    render();
+  }
 
   const title = h("h1", {});
   const settingsLine = h("p", { class: "lead" });
@@ -424,9 +478,12 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
       },
     );
   };
-  /** A fresh request ID per click; a transport retry resends the same body, so the seat is added once. */
-  const addBot = (teamId: string) => {
-    const choice = seatChoice(teamId);
+  /**
+   * A fresh request ID per click; a transport retry resends the same body, so the seat is added
+   * once. `wanted` adds that choice, such as a bot the search found, instead of the select's.
+   */
+  const addBot = (teamId: string, wanted?: string) => {
+    const choice = wanted ?? seatChoice(teamId);
     const fromLeaderboard = choice.startsWith("competitor-");
     const snapshot = realtime.lobby.get();
     const taken = snapshot ? yourPorts(room(snapshot)) : [];
@@ -671,7 +728,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
         ? h(
             "p",
             { class: "hint seat-add" },
-            "Each bot level and bot from the leaderboard already has a seat: a rated game holds each once.",
+            "Each bot level and registered bot already has a seat: a rated game holds each once.",
           )
         : editSeats && !taken
           ? h(
@@ -686,7 +743,9 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
                       team.id,
                       (event.target as HTMLSelectElement).value,
                     );
-                    // The URL field shows only for a hosted bot.
+                    // The URL field shows only for a hosted bot, the search only for Search for a bot….
+                    if (chosenSeat.get(team.id) === searchSeatValue)
+                      openSearch(team.id);
                     render();
                   },
                 },
@@ -696,6 +755,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
               ),
               urlInput,
               portInput,
+              choice === searchSeatValue ? seatSearch(team.id, model) : null,
               portInput
                 ? h(
                     "span",
@@ -706,16 +766,18 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
               computeSpent && serverBots && lobbyPackages.length > 0
                 ? h("span", { class: "hint" }, computeSpent)
                 : null,
-              h(
-                "button",
-                {
-                  type: "button",
-                  class: "secondary small",
-                  disabled: busy,
-                  onclick: () => void addBot(team.id),
-                },
-                "Add bot",
-              ),
+              choice === searchSeatValue
+                ? null
+                : h(
+                    "button",
+                    {
+                      type: "button",
+                      class: "secondary small",
+                      disabled: busy,
+                      onclick: () => void addBot(team.id),
+                    },
+                    "Add bot",
+                  ),
             )
           : null;
     const action = mine
@@ -781,10 +843,95 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     startError.textContent = problems.start;
   }
 
+  /** Opens the search on a team's Add bot, reading the first registered bots unless it has read. */
+  function openSearch(teamId: string): void {
+    const first = searchTeamId === null;
+    searchTeamId = teamId;
+    if (first) scheduleSearch(0);
+    queueMicrotask(() => searchInput.focus());
+  }
+
+  /**
+   * A team's search of every registered bot, rated or not: the search box and what it
+   * found, each with its owner, rating and URL and an Add button; another team's search, open
+   * elsewhere, moves here with its button. A rated lobby leaves out the bots already seated.
+   */
+  function seatSearch(teamId: string, model: RoomModel): HTMLElement {
+    if (searchTeamId !== teamId) {
+      return h(
+        "button",
+        {
+          type: "button",
+          class: "secondary small",
+          onclick: () => {
+            openSearch(teamId);
+            render();
+          },
+        },
+        "Search here",
+      );
+    }
+    const taken = model.rated ? seatCompetitors(model) : [];
+    const found = (searchFound ?? []).filter(
+      (bot) => !taken.includes(bot.competitorId),
+    );
+    const note =
+      searchFound === null
+        ? "Searching…"
+        : searchFailed
+          ? "The search failed. Type again to retry."
+          : found.length === 0
+            ? "No registered bot matches."
+            : "";
+    return h(
+      "div",
+      { class: "seat-search" },
+      searchInput,
+      note ? h("span", { class: "hint" }, note) : null,
+      h(
+        "ul",
+        { class: "seat-search-results" },
+        ...found.map((bot) =>
+          h(
+            "li",
+            {},
+            h(
+              "span",
+              { class: "bot-text" },
+              h("strong", {}, listedBotLabel(bot)),
+              h(
+                "span",
+                { class: "hint" },
+                `${listedBotRating(bot)} · ${bot.url}`,
+              ),
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                class: "secondary small",
+                disabled: busy,
+                attrs: { "aria-label": `Add ${listedBotLabel(bot)}` },
+                onclick: () => {
+                  const value = listedSeatValue(bot.competitorId);
+                  chosenSeat.set(teamId, value);
+                  void addBot(teamId, value);
+                },
+              },
+              "Add",
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   function render(): void {
     if (disposed) return;
     const snapshot = realtime.lobby.get();
     if (!snapshot) return;
+    // Redrawing the teams moves the search box, which keeps what was typed but not the focus.
+    const searching = document.activeElement === searchInput;
     const model = room(snapshot);
     const started = model.phase !== "waiting";
     const signedIn = realtime.session.get()?.account !== undefined;
@@ -816,6 +963,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     teamsEl.replaceChildren(
       ...model.teams.map((team) => teamCard(team, model, rated.guests)),
     );
+    if (searching && searchInput.isConnected) searchInput.focus();
     unassignedEl.hidden = model.unassigned.length === 0;
     unassignedEl.replaceChildren(
       h("h3", {}, "Choosing a team"),
@@ -932,15 +1080,15 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     .catch(() => undefined);
 
   /**
-   * Reads the bots from the leaderboard, which the server plays only when it offers hosted bots;
+   * Reads the first registered bots, which the server plays only when it offers hosted bots;
    * a failed read is tried again in a while, and offers none until then.
    */
   async function readListed(): Promise<void> {
     try {
       const read = await actions.listedBots();
       if (disposed) return;
-      listed = read;
-      picker.setListedBots(read);
+      listed = mergeListedBots(read, listed);
+      picker.setListedBots(listed);
       render();
     } catch {
       setTimeout(() => {
@@ -1009,6 +1157,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     },
     dispose() {
       disposed = true;
+      clearTimeout(searchTimer);
       for (const unsubscribe of unsubscribers) unsubscribe();
       picker.dispose();
       watchersPanel.dispose();

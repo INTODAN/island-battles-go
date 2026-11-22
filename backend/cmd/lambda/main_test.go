@@ -233,6 +233,7 @@ var publicRoutes = map[string]string{
 	"POST /map/validate":               "checks a map file and stores nothing",
 	"GET /leaderboard":                 "the public leaderboard (#367), which reads competitors and their ratings, not game data",
 	"GET /leaderboard/{competitor_id}": "a competitor's public page (#367), from the rating history, which outlives the games",
+	"GET /bots/registered":             "the public registered bots, with their owners and URLs, which anyone may choose by ID; competitors, not game data",
 	"/game/demo/*":                     "embedded static browser demo",
 	"GET /map/builder":                 "redirect to the embedded map builder",
 	"/map/builder/*":                   "embedded static map builder",

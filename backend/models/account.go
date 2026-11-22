@@ -102,7 +102,8 @@ type Competitor struct {
 	// competitors.
 	NameKey *string `gorm:"column:name_key"`
 	// URL is a bot name's hosted bot URL (#400): where the name plays in a
-	// rated lobby, and what the leaderboard shows once the name is listed.
+	// rated lobby, which GET /bots/registered shows, and the leaderboard once
+	// the name is listed.
 	// Nil for the other kinds, and for a bot name registered before names
 	// had URLs, until its owner adds one.
 	URL *string `gorm:"column:url"`
@@ -137,7 +138,7 @@ type CompetitorView struct {
 	Draws        int            `json:"draws" minimum:"0"`
 	Losses       int            `json:"losses" minimum:"0"`
 	LastPlayedAt *time.Time     `json:"last_played_at" nullable:"true" doc:"When its latest rated game ended, or null before the first."`
-	URL          *string        `json:"url" nullable:"true" doc:"For a bot name, its hosted bot's URL, where it plays in a rated lobby. It becomes public on the leaderboard once the name has played a rated game. Null for hand play, and for a bot name registered before names had URLs, which plays in no rated lobby until its owner sets one with PUT /account/bot-names/{competitor_id}."`
+	URL          *string        `json:"url" nullable:"true" doc:"For a bot name, its hosted bot's URL, where it plays in a rated lobby. It is public: GET /bots/registered lists it, and the leaderboard too once the name has played a rated game. Null for hand play, and for a bot name registered before names had URLs, which plays in no rated lobby until its owner sets one with PUT /account/bot-names/{competitor_id}."`
 	AwayPaused   *AwayPauseView `json:"away_paused,omitempty" doc:"For a bot name that missed a turn while it played away, in a rated game of someone else's lobby: it plays away in no rated game until its owner resumes it with DELETE /account/bot-names/{competitor_id}/away-pause. Its owner's own games with it are unaffected. Absent otherwise."`
 }
 
@@ -160,10 +161,10 @@ type IslandAccountView struct {
 // RegisterBotNameRequest registers a bot name with its hosted bot's URL.
 type RegisterBotNameRequest struct {
 	Name string `json:"name" maxLength:"200" doc:"The bot's name: 3 to 24 characters after trimming, of letters, digits, spaces, - and _, not starting with Bot (level. It is unique across all accounts without regard to case."`
-	URL  string `json:"url" maxLength:"2048" doc:"The bot's hosted bot URL, where the server sends it each turn in a rated lobby: https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public, as a hosted bot's. It becomes public on the leaderboard once the name has played a rated game, so that others can play against it."`
+	URL  string `json:"url" maxLength:"2048" doc:"The bot's hosted bot URL, where the server sends it each turn in a rated lobby: https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public, as a hosted bot's. It is public, in GET /bots/registered, so that others can play against it."`
 }
 
 // SetBotNameURLRequest changes a bot name's hosted bot URL.
 type SetBotNameURLRequest struct {
-	URL string `json:"url" maxLength:"2048" doc:"The bot's hosted bot URL, where the server sends it each turn in a rated lobby: https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public, as a hosted bot's. It becomes public on the leaderboard once the name has played a rated game, so that others can play against it."`
+	URL string `json:"url" maxLength:"2048" doc:"The bot's hosted bot URL, where the server sends it each turn in a rated lobby: https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public, as a hosted bot's. It is public, in GET /bots/registered, so that others can play against it."`
 }

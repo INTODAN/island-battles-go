@@ -28,7 +28,7 @@ func SetupAccountRoutes(api huma.API, handler *handlers.Accounts) {
 		OperationID: "registerIslandBotName", Path: "/account/bot-names", Method: http.MethodPost, DefaultStatus: http.StatusCreated,
 		Summary: "Register a bot name in your account, with its hosted bot's URL",
 		Description: signedIn + "Registers a bot name, a competitor at a rating of 1500, with the URL of the hosted bot that plays it, and returns it. A name is 3 to 24 characters after trimming, of letters, digits, spaces, - and _, and can't start with Bot (level, otherwise 422. " +
-			"The url is required and must pass a hosted bot's check (https:// on port 443, without credentials, on a host name whose addresses are all public), otherwise 422. In a rated lobby the name plays as a hosted bot at this URL. Once the name has played a rated game, the leaderboard lists it with its URL, so that others can play against it. " +
+			"The url is required and must pass a hosted bot's check (https:// on port 443, without credentials, on a host name whose addresses are all public), otherwise 422. In a rated lobby the name plays as a hosted bot at this URL. GET /bots/registered lists the name with its URL at once, so that others can play against it, and once it has played a rated game the leaderboard lists it too. " +
 			"Names are unique across all accounts without regard to case: a taken name is 409 with problem type " + services.BotNameTakenProblemType + ". An account has at most 5 bot names: a sixth is 409 with problem type " + services.BotNameLimitProblemType + ". " +
 			"A name can't be renamed: delete it and register another.",
 		Tags: []string{"Island Battles"}, Security: playerTokenSecurity,

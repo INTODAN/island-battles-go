@@ -7,7 +7,11 @@ import {
   serveCommandFor,
 } from "../../bots";
 import { computeSpentMessage, uploadedGreyedOut } from "../../bots/compute";
-import { type ListedBot, listedBotLabel } from "../../bots/kinds";
+import {
+  type ListedBot,
+  listedBotLabel,
+  listedBotRating,
+} from "../../bots/kinds";
 import {
   type BotPackage,
   describePackage,
@@ -68,16 +72,16 @@ export const noServerBotsHint =
   "This server doesn't play hosted bots, so here a rated game is played by hand.";
 /** Beside a bot name without a URL, whose radio is disabled. */
 export const nameWithoutUrlHint = "No URL yet, so it can't play rated games.";
-/** Under "A bot from the leaderboard" in a rated lobby (#412): whose rating the game changes. */
+/** Under "A registered bot" in a rated lobby (#412): whose rating the game changes. */
 export const leaderboardRatedHint =
-  "Anyone's listed bot plays for your team at its URL. Someone else's bot is rated in your place and plays away, within the daily limits that How ratings work on the leaderboard explains.";
-/** Under "A bot from the leaderboard" in a lobby that isn't rated. */
+  "Anyone's registered bot, rated or not, plays for your team at its URL, without its owner. Someone else's bot is rated in your place and plays away, within the daily limits that How ratings work on the leaderboard explains.";
+/** Under "A registered bot" in a lobby that isn't rated. */
 export const leaderboardUnratedHint =
-  "Anyone's listed bot plays for your team at its URL. The server plays it; this tab relays nothing.";
+  "Anyone's registered bot, rated or not, plays for your team at its URL, without its owner. The server plays it; this tab relays nothing.";
 /** In place of the list when the server plays no hosted bots, as a bot from the leaderboard is. */
 export const noServerListedHint = "This server doesn't play hosted bots.";
-/** In place of the list while the leaderboard lists no bot with a URL. */
-export const noListedBotsHint = "No bots are on the leaderboard yet.";
+/** In place of the list while no bot name has a URL. */
+export const noListedBotsHint = "No bots are registered yet.";
 /** The option for a chosen bot that the list doesn't hold: no longer listed, or past its first page. */
 export const chosenUnlistedLabel = "The bot you chose";
 
@@ -148,7 +152,7 @@ export function listedBotOptions(
 ): { value: string; label: string }[] {
   const options = bots.map((bot) => ({
     value: bot.competitorId,
-    label: listedBotLabel(bot),
+    label: `${listedBotLabel(bot)} (${listedBotRating(bot)})`,
   }));
   if (!chosenId) return [{ value: "", label: "Choose a bot…" }, ...options];
   return bots.some((bot) => bot.competitorId === chosenId)
@@ -264,7 +268,7 @@ export function mountBotPicker(options: {
     h(
       "p",
       { class: "hint" },
-      "Or play one of your bot names, or a bot from the leaderboard. The server plays it at the name's URL; this tab relays nothing.",
+      "Or play one of your bot names, or anyone's registered bot. The server plays it at the name's URL; this tab relays nothing.",
     ),
     ratedNames,
     ratedNote,
@@ -354,13 +358,13 @@ export function mountBotPicker(options: {
     h(
       "span",
       { class: "bot-text" },
-      h("strong", {}, "A bot from the leaderboard"),
+      h("strong", {}, "A registered bot"),
       leaderboardHint,
     ),
   );
   const leaderboardSelect = h("select", {
     class: "bot-listed",
-    attrs: { "aria-label": "A bot from the leaderboard" },
+    attrs: { "aria-label": "A registered bot" },
   });
   const leaderboardNote = h("span", { class: "hint" });
   const leaderboardEl = h(
@@ -399,7 +403,7 @@ export function mountBotPicker(options: {
       serverBotsKnown && !serverBots
         ? noServerListedHint
         : listed === null
-          ? "Loading the leaderboard…"
+          ? "Loading the registered bots…"
           : bots.length === 0
             ? noListedBotsHint
             : "";
@@ -705,7 +709,7 @@ export function mountBotPicker(options: {
     if (value === leaderboardValue) {
       const competitorId = leaderboardSelect.value;
       if (!competitorId) {
-        options.onError("Choose a bot from the leaderboard's list first.");
+        options.onError("Choose a registered bot from the list first.");
         sync();
         leaderboardSelect.focus();
         return;

@@ -97,7 +97,7 @@ type MemberSettings struct {
 func memberSettingsShape(serverBots bool) string {
 	shape := `member_settings must be {"bot": {"kind": "manual"}}, {"bot": {"kind": "localhost"}}, with an optional "port" from 1024 to 65535, or {"bot": {"kind": "default", "level": N}} with a level that GET /bots/defaults lists`
 	if serverBots {
-		shape += `, {"bot": {"kind": "hosted", "url": "https://…"}}, {"bot": {"kind": "hosted", "name": "<one of your bot names>"}}, {"bot": {"kind": "hosted", "competitor_id": "<a bot from the leaderboard>"}} or {"bot": {"kind": "uploaded", "package_id": "<your package in this lobby>"}}`
+		shape += `, {"bot": {"kind": "hosted", "url": "https://…"}}, {"bot": {"kind": "hosted", "name": "<one of your bot names>"}}, {"bot": {"kind": "hosted", "competitor_id": "<a bot from GET /bots/registered>"}} or {"bot": {"kind": "uploaded", "package_id": "<your package in this lobby>"}}`
 	}
 	return shape
 }
@@ -159,7 +159,7 @@ func checkMemberBotShape(bot models.MemberBotView, serverBots bool) error {
 	case bot.CompetitorID != "" && (bot.URL != "" || bot.Name != ""):
 		return reject(422, "competitor_id names a bot that plays at its own URL, under its own name: give it without url and name")
 	case bot.CompetitorID != "" && !isUUID(bot.CompetitorID):
-		return reject(422, "competitor_id must be a competitor's ID, from GET /leaderboard")
+		return reject(422, "competitor_id must be a competitor's ID, from GET /bots/registered")
 	}
 	switch bot.Kind {
 	case models.DefaultBot:
@@ -171,7 +171,7 @@ func checkMemberBotShape(bot models.MemberBotView, serverBots bool) error {
 		}
 	case models.HostedBot:
 		if bot.URL == "" && bot.Name == "" && bot.CompetitorID == "" {
-			return reject(422, "kind hosted needs a url: where your bot server takes turns, such as https://bot.example.com/turn, the name of one of your bot names, or the competitor_id of a bot from the leaderboard, which play at their own URL")
+			return reject(422, "kind hosted needs a url: where your bot server takes turns, such as https://bot.example.com/turn, the name of one of your bot names, or the competitor_id of a registered bot, which play at their own URL")
 		}
 	case models.UploadedBot:
 		if bot.PackageID == "" {
@@ -209,7 +209,7 @@ func defaultLevelMessage(sentence string) string {
 // gate refuses what a rated lobby doesn't take. The ready check also refuses
 // a package of someone else, and a name deleted since. A bot chosen by its
 // competitor_id must be one of the member's live bot names with a URL, or a
-// bot that the leaderboard lists, and in a rated lobby, which only then is
+// registered bot, rated or not, and in a rated lobby, which only then is
 // read, an away bot that isn't paused (checkCompetitorChoice).
 func (rules BotRules) ValidateMemberSettings(ctx context.Context, lobbyID string, member domain.MemberIdentity, settings json.RawMessage) error {
 	bot, err := MemberBot(settings, rules.ServerBots.Enabled)
@@ -244,7 +244,7 @@ func (rules BotRules) ValidateMemberSettings(ctx context.Context, lobbyID string
 
 // checkCompetitorChoice refuses a member's bot chosen by competitorID that
 // can't play: an unknown or deleted one, one of theirs without a URL, and
-// another account's that the leaderboard doesn't list, or that is paused
+// another account's that isn't registered, or that is paused
 // while the lobby is rated. It reads the lobby only for a paused away bot.
 func (rules BotRules) checkCompetitorChoice(ctx context.Context, lobbyID, accountID, competitorID string) error {
 	chosen, err := readChosenBots(rules.Database.WithContext(ctx), []string{competitorID})
@@ -258,8 +258,8 @@ func (rules BotRules) checkCompetitorChoice(ctx context.Context, lobbyID, accoun
 			return reject(422, bot.name()+" has no URL yet: add its hosted bot's URL on the account page.")
 		}
 		return nil
-	case !found || !bot.listed:
-		return reject(422, "The leaderboard lists no bot with this competitor_id: choose one that it lists, with a URL.")
+	case !found || !bot.registered:
+		return reject(422, "No registered bot with a URL has this competitor_id: choose one that GET /bots/registered lists.")
 	case bot.competitor.AwayPausedAt == nil:
 		return nil
 	}
@@ -775,7 +775,7 @@ func seatSettingsShape(serverBots bool) string {
 	if !serverBots {
 		return `seat_settings must be {"bot_level": N} with a level that GET /bots/defaults lists (` + strings.Join(levels, ", ") + `) or ` + localhost
 	}
-	return `seat_settings must be {"bot_level": N} with a level that GET /bots/defaults lists (` + strings.Join(levels, ", ") + `), ` + localhost + `, {"bot_url": "https://…"}, {"bot_package_id": "<a package of this lobby>"} or {"bot_competitor_id": "<a bot from the leaderboard>"}`
+	return `seat_settings must be {"bot_level": N} with a level that GET /bots/defaults lists (` + strings.Join(levels, ", ") + `), ` + localhost + `, {"bot_url": "https://…"}, {"bot_package_id": "<a package of this lobby>"} or {"bot_competitor_id": "<a bot from GET /bots/registered>"}`
 }
 
 // portDigits matches a localhost bot seat's port typed as text.
@@ -876,7 +876,7 @@ func UploadedBotSeatName(ownerName string) string {
 // after the level, such as "Bot (level 2)". With server bots it may instead
 // be a hosted bot at a URL, under the rules of a member's hosted bot, named
 // "Hosted bot", any ready package of the lobby, named after its owner, or a
-// bot that the leaderboard lists, by its competitor ID, named after the bot
+// registered bot, rated or not, by its competitor ID, named after the bot
 // and its owner, such as "Kraken (Dana)" (AwayBotSeatName).
 // Whatever the server bots, a seat may be a localhost bot on a port of the
 // host's machine, named after its port, such as "Localhost bot (port
@@ -946,8 +946,8 @@ func (rules BotRules) ValidateBotSeat(ctx context.Context, lobbyID, playerID str
 		}
 		bot, found := chosen[decoded.BotCompetitorID]
 		switch {
-		case !found || !bot.listed:
-			return "", reject(422, "The leaderboard lists no bot with this bot_competitor_id: choose one that it lists, with a URL.")
+		case !found || !bot.registered:
+			return "", reject(422, "No registered bot with a URL has this bot_competitor_id: choose one that GET /bots/registered lists.")
 		case lobby != nil && LobbyRated(lobby.Lobby.GameSettings) && bot.competitor.AwayPausedAt != nil:
 			return "", reject(422, pausedMessage(bot.name())+" Choose another bot.")
 		}

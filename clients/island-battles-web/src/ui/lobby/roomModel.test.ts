@@ -538,7 +538,7 @@ describe("a rated lobby", () => {
       ratedBotNameBlocker,
     );
     expect(ratedBotNameBlocker).toBe(
-      "Play by hand, or choose one of your hosted bot names or a bot from the leaderboard.",
+      "Play by hand, or choose one of your hosted bot names or a registered bot.",
     );
     expect(you(named("localhost"))).toBe(ratedBotNameBlocker);
     expect(you(named("hosted", undefined, { url: "https://b.example" }))).toBe(
@@ -654,7 +654,7 @@ describe("a rated lobby", () => {
       seatOf("p5", null, { bot_competitor_id: "c-eel" }),
     ];
     expect(ratedBlockers(roomOf(twice), kraken).host).toBe(
-      "Remove P5: a rated game allows only default bot seats, each level once, and bots from the leaderboard, each once.",
+      "Remove P5: a rated game allows only default bot seats, each level once, and registered bots, each once.",
     );
   });
 
@@ -665,7 +665,7 @@ describe("a rated lobby", () => {
       seatOf("p3", "t-green", { bot_level: 2 }),
     ];
     expect(ratedBlockers(roomOf(members), kraken).host).toBe(
-      "Remove P3: a rated game allows only default bot seats, each level once, and bots from the leaderboard, each once.",
+      "Remove P3: a rated game allows only default bot seats, each level once, and registered bots, each once.",
     );
     const hosted = [
       member("p1", "t-blue", signedIn(named("manual"))),
@@ -673,7 +673,7 @@ describe("a rated lobby", () => {
       seatOf("p3", "t-green", { bot_level: 1 }),
     ];
     expect(ratedBlockers(roomOf(hosted), kraken).host).toBe(
-      "Remove P2: a rated game allows only default bot seats, each level once, and bots from the leaderboard, each once.",
+      "Remove P2: a rated game allows only default bot seats, each level once, and registered bots, each once.",
     );
     // Only the host is told.
     expect(ratedBlockers(roomOf(members, true, "p2"), null).host).toBeNull();
@@ -783,7 +783,15 @@ describe("a bot that plays under a bot name", () => {
 });
 
 describe("a bot from the leaderboard", () => {
-  const listed = [{ competitorId: "c-eel", name: "Eel", owner: "Sam" }];
+  const listed = [
+    {
+      competitorId: "c-eel",
+      name: "Eel",
+      owner: "Sam",
+      url: "https://bot.example.org/turn",
+      rating: 1520,
+    },
+  ];
 
   test("is read from a member's settings and a seat's, by its competitor ID", () => {
     expect(
@@ -813,9 +821,9 @@ describe("a bot from the leaderboard", () => {
   test("is named with its owner once the room knows it", () => {
     const bot = { kind: "hosted" as const, competitor_id: "c-eel" };
     expect(describeBot(bot, undefined, listed)).toBe(
-      "Eel, by Sam (from the leaderboard)",
+      "Eel, by Sam (registered bot)",
     );
-    expect(describeBot(bot)).toBe("A bot from the leaderboard");
+    expect(describeBot(bot)).toBe("A registered bot");
   });
 
   test("Add bot seats it by its competitor ID", () => {
