@@ -184,6 +184,48 @@ describe("Add bot's registered bots", () => {
     ]);
   });
 
+  test("the host's own bot names with a URL come first, as Your bot, each once (#410)", () => {
+    const ownNames = [
+      { name: "Kraken", url: "https://kraken.example.org/bot", id: "c-kraken" },
+      { name: "Old", url: null, id: "c-old" },
+      { name: "Unsaved", url: "https://u.example.org/bot" },
+    ];
+    expect(
+      seatOptions({
+        levels: [1],
+        serverBots: true,
+        packages: [],
+        spent: null,
+        listed,
+        ownNames,
+      }).filter((choice) => choice.value.startsWith("competitor-")),
+    ).toEqual([
+      {
+        value: "competitor-c-kraken",
+        label: "Your bot: Kraken",
+        disabled: false,
+      },
+      {
+        value: "competitor-c-squid",
+        label: "Squid, by Sam (unrated)",
+        disabled: false,
+      },
+    ]);
+    // A rated lobby leaves out your bot once a seat has it.
+    expect(
+      seatOptions({
+        levels: [1],
+        serverBots: true,
+        packages: [],
+        spent: null,
+        rated: true,
+        listed,
+        ownNames,
+        takenCompetitors: ["c-kraken"],
+      }).map((choice) => choice.value),
+    ).toEqual(["level-1", "competitor-c-squid", "search"]);
+  });
+
   test("none while the server plays no hosted bots", () => {
     for (const rated of [true, false]) {
       expect(

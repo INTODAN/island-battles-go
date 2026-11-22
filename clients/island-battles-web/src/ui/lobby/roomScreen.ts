@@ -8,7 +8,6 @@ import {
 import {
   type ListedBot,
   listedBotLabel,
-  listedBotRating,
   mergeListedBots,
 } from "../../bots/kinds";
 import { webClientUrl } from "../../platform";
@@ -50,6 +49,7 @@ import {
   startBlocker,
   type TeamRow,
   teamTaken,
+  urlHost,
   yourPorts,
   yourSeats,
 } from "./roomModel";
@@ -69,7 +69,7 @@ export interface RoomScreenOptions {
   /** A sentence to show when the room opens, such as why reopening failed. */
   notice?: string;
   /**
-   * Reads a signed-in member's bot names and their URLs, for a rated lobby's choices: the game's
+   * Reads a signed-in member's bot names and their URLs, for the bot picker's choices: the game's
    * `GET /account`.
    */
   readAccount?(): Promise<RatedAccount>;
@@ -134,7 +134,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
   /** Whether each localhost bot seat's port answers, by port, as last asked; the host's room asks. */
   let seatHealth = new Map<number, boolean>();
   let lastVersion = -1;
-  /** Your bot names once read, for a rated lobby's choices and your blocker; null until then. */
+  /** Your bot names once read, for the bot picker's choices and a rated lobby's blocker; null until then. */
   let account: RatedAccount | null = null;
   /** Whether your bot names have been asked for: once a rated lobby needs them. */
   let accountAsked = false;
@@ -145,16 +145,18 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
   let listed: ListedBot[] = [];
   /** The team whose Add bot searches the registered bots, one at a time; null for none. */
   let searchTeamId: string | null = null;
-  /** The search's last finds, null while it runs, and whether it failed. */
+  /** The search's last finds, null before the first answer, and whether it failed. */
   let searchFound: ListedBot[] | null = null;
   let searchFailed = false;
+  /** A search is running; the last finds stay shown until it answers. */
+  let searching = false;
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
   /** Counts the searches, so only the latest one's answer is shown. */
   let searchSerial = 0;
   const searchInput = h("input", {
     type: "search",
     class: "bot-search",
-    placeholder: "Bot or owner name",
+    placeholder: "Search by bot or owner name",
     attrs: { "aria-label": "Search the registered bots", maxlength: "100" },
   });
   searchInput.addEventListener("input", () => scheduleSearch(250));
@@ -168,13 +170,13 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
   /** Reads the registered bots that match the search box; the room remembers what it finds. */
   async function runSearch(): Promise<void> {
     const serial = ++searchSerial;
-    searchFound = null;
-    searchFailed = false;
+    searching = true;
     render();
     try {
       const found = await actions.listedBots(searchInput.value.trim());
       if (disposed || serial !== searchSerial) return;
       searchFound = found;
+      searchFailed = false;
       listed = mergeListedBots(listed, found);
       picker.setListedBots(listed);
     } catch {
@@ -182,6 +184,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
       searchFound = [];
       searchFailed = true;
     }
+    searching = false;
     render();
   }
 
@@ -363,7 +366,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     },
   });
 
-  /** Reads your bot names for a rated lobby's choices; a failed read leaves them unknown, and the server decides. */
+  /** Reads your bot names for the bot picker's choices; a failed read leaves them unknown, and the server decides. */
   async function readAccount(): Promise<void> {
     if (!options.readAccount) return;
     accountAsked = true;
@@ -382,7 +385,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     }
   }
 
-  // A guest has no bot names; a signed-in member's are read once a rated lobby needs them.
+  // A guest has no bot names; a signed-in member's are read once the room is drawn.
   picker.setAccount(
     realtime.session.get()?.account !== undefined ? { botNames: null } : null,
   );
@@ -567,6 +570,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
       takenLevels: model ? seatLevels(model) : [],
       listed,
       takenCompetitors: model ? seatCompetitors(model) : [],
+      ownNames: account?.botNames ?? [],
     });
   };
 
@@ -852,9 +856,10 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
   }
 
   /**
-   * A team's search of every registered bot, rated or not: the search box and what it
-   * found, each with its owner, rating and URL and an Add button; another team's search, open
-   * elsewhere, moves here with its button. A rated lobby leaves out the bots already seated.
+   * A team's search of every registered bot, rated or not: the search box, a status line and
+   * what it found, each a row with its name, owner, rating, its URL's host and an Add button; the
+   * finds stay shown while the next search runs. Another team's search, open elsewhere, moves here
+   * with its button. A rated lobby leaves out the bots already seated.
    */
   function seatSearch(teamId: string, model: RoomModel): HTMLElement {
     if (searchTeamId !== teamId) {
@@ -872,57 +877,92 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
       );
     }
     const taken = model.rated ? seatCompetitors(model) : [];
+    const yours = new Set(
+      (account?.botNames ?? []).flatMap((name) => name.id ?? []),
+    );
     const found = (searchFound ?? []).filter(
       (bot) => !taken.includes(bot.competitorId),
     );
     const note =
-      searchFound === null
+      searchFound === null || searching
         ? "Searching…"
         : searchFailed
           ? "The search failed. Type again to retry."
           : found.length === 0
-            ? "No registered bot matches."
-            : "";
+            ? searchInput.value.trim()
+              ? "No registered bot matches."
+              : "No bots are registered yet."
+            : found.length === 1
+              ? "1 bot"
+              : `${found.length} bots`;
     return h(
       "div",
-      { class: "seat-search" },
+      { class: `seat-search${searching ? " searching" : ""}` },
       searchInput,
-      note ? h("span", { class: "hint" }, note) : null,
       h(
-        "ul",
-        { class: "seat-search-results" },
-        ...found.map((bot) =>
-          h(
-            "li",
-            {},
-            h(
-              "span",
-              { class: "bot-text" },
-              h("strong", {}, listedBotLabel(bot)),
+        "p",
+        {
+          class: `seat-search-status${searchFailed ? " failed" : ""}`,
+          attrs: { role: "status" },
+        },
+        note,
+      ),
+      found.length > 0
+        ? h(
+            "ul",
+            { class: "seat-search-results" },
+            ...found.map((bot) =>
               h(
-                "span",
-                { class: "hint" },
-                `${listedBotRating(bot)} · ${bot.url}`,
+                "li",
+                {},
+                h(
+                  "span",
+                  { class: "seat-search-bot" },
+                  h(
+                    "span",
+                    { class: "seat-search-name" },
+                    h("strong", {}, bot.name),
+                    yours.has(bot.competitorId)
+                      ? h("span", { class: "tag" }, "yours")
+                      : null,
+                  ),
+                  h(
+                    "span",
+                    { class: "seat-search-meta" },
+                    bot.owner ? `by ${bot.owner}` : null,
+                    h(
+                      "span",
+                      {
+                        class: `rating-chip${bot.rating === null ? " unrated" : ""}`,
+                      },
+                      bot.rating === null ? "unrated" : String(bot.rating),
+                    ),
+                  ),
+                  h(
+                    "span",
+                    { class: "seat-search-host", attrs: { title: bot.url } },
+                    urlHost(bot.url),
+                  ),
+                ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    class: "primary small",
+                    disabled: busy,
+                    attrs: { "aria-label": `Add ${listedBotLabel(bot)}` },
+                    onclick: () => {
+                      const value = listedSeatValue(bot.competitorId);
+                      chosenSeat.set(teamId, value);
+                      void addBot(teamId, value);
+                    },
+                  },
+                  "Add",
+                ),
               ),
             ),
-            h(
-              "button",
-              {
-                type: "button",
-                class: "secondary small",
-                disabled: busy,
-                attrs: { "aria-label": `Add ${listedBotLabel(bot)}` },
-                onclick: () => {
-                  const value = listedSeatValue(bot.competitorId);
-                  chosenSeat.set(teamId, value);
-                  void addBot(teamId, value);
-                },
-              },
-              "Add",
-            ),
-          ),
-        ),
-      ),
+          )
+        : null,
     );
   }
 
@@ -935,8 +975,8 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     const model = room(snapshot);
     const started = model.phase !== "waiting";
     const signedIn = realtime.session.get()?.account !== undefined;
-    // A rated lobby needs your bot names, for its choices and your blocker.
-    if (model.rated && signedIn && !accountAsked) void readAccount();
+    // Your bot names are choices in every lobby (#410), and a rated lobby's blocker needs them.
+    if (signedIn && !accountAsked) void readAccount();
     const rated = ratedBlockers(model, account);
     title.textContent = snapshot.lobby.name;
     settingsLine.textContent = describeSettings(

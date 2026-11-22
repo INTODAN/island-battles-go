@@ -115,6 +115,7 @@ label {
 input[type="text"],
 input[type="number"],
 input[type="url"],
+input[type="search"],
 input[type="file"],
 select {
   box-sizing: border-box;
@@ -416,6 +417,11 @@ select:focus-visible {
   border-top: 6px solid var(--team);
 }
 
+/* A team whose Add bot search is open takes the whole row, so its finds have room. */
+.team:has(.seat-search) {
+  grid-column: 1 / -1;
+}
+
 .team.mine {
   box-shadow:
     0 0 0 3px var(--team),
@@ -544,6 +550,104 @@ label.check {
   align-items: center;
   gap: 6px;
   margin: 8px 0 0;
+}
+
+/* Add bot's search of the registered bots: a panel across the team card, its finds a list of rows. */
+.seat-search {
+  flex: 1 1 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #c3d3df;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.seat-search-status {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.seat-search-status.failed {
+  color: var(--bad);
+}
+
+.seat-search-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 16rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.seat-search.searching .seat-search-results {
+  opacity: 0.6;
+}
+
+.seat-search-results li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(29, 111, 184, 0.06);
+}
+
+.seat-search-results li:hover {
+  background: rgba(29, 111, 184, 0.12);
+}
+
+.seat-search-bot {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.seat-search-name {
+  overflow-wrap: anywhere;
+}
+
+.seat-search-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.rating-chip {
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #dcefe4;
+  color: var(--good);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.rating-chip.unrated {
+  background: #e7eef3;
+  color: var(--ink-soft);
+}
+
+/* The host of a registered bot's URL; the whole URL is its title. */
+.seat-search-host {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font:
+    11px ui-monospace,
+    Menlo,
+    monospace;
+  color: var(--ink-soft);
 }
 
 /* A hosted bot's URL takes the row's free width. */
