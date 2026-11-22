@@ -277,10 +277,11 @@ describe("your bot names in a lobby that isn't rated (#410)", () => {
     expect(unratedChoiceValue(undefined, own)).toBe("");
   });
 
-  test("a guest, or names not read yet, check the kind's radio", () => {
+  test("names not read yet, or a deleted name, check no radio", () => {
     expect(unratedChoiceValue({ kind: "hosted", name: "Kraken" }, null)).toBe(
-      choiceValue({ kind: "hosted", name: "Kraken" }),
+      "",
     );
+    expect(unratedChoiceValue({ kind: "hosted", name: "Gone" }, own)).toBe("");
     expect(
       unratedChoiceValue({ kind: "hosted", competitor_id: "c-kraken" }, null),
     ).toBe(leaderboardValue);

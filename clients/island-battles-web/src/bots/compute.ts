@@ -67,7 +67,7 @@ export const searchSeatValue = "search";
  * a port of the host's machine, which only the tab of the host who adds it relays, and, when
  * the server offers them, each of the lobby's packages, greyed out once their compute is
  * spent, a hosted bot, the host's own bot names that have a URL (`ownNames`, "Your bot: Kraken",
- * #410), each registered bot read so far (`listed`), rated or not, and **Search for a bot…**,
+ * #410, unrated only), each registered bot read so far (`listed`), rated or not, and **Search for a bot…**,
  * which finds any other. A rated lobby allows only default bot seats, each level once, and
  * registered bots, each once, so it offers only the levels and the bots that no seat has
  * (`takenLevels`, `takenCompetitors`).
@@ -92,7 +92,8 @@ export function seatOptions(options: {
     }));
   const free = (competitorId: string) =>
     !options.rated || !options.takenCompetitors?.includes(competitorId);
-  const own = (options.ownNames ?? []).flatMap((name) =>
+  // A rated game holds one competitor per account, so the host's own names aren't offered there.
+  const own = (options.rated ? [] : (options.ownNames ?? [])).flatMap((name) =>
     name.id && name.url !== null && free(name.id)
       ? [{ ...name, id: name.id }]
       : [],

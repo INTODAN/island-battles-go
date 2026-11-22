@@ -171,6 +171,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
   async function runSearch(): Promise<void> {
     const serial = ++searchSerial;
     searching = true;
+    searchFailed = false;
     render();
     try {
       const found = await actions.listedBots(searchInput.value.trim());

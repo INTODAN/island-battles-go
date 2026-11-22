@@ -211,7 +211,7 @@ describe("Add bot's registered bots", () => {
         disabled: false,
       },
     ]);
-    // A rated lobby leaves out your bot once a seat has it.
+    // A rated lobby, one competitor per account, doesn't offer them as Your bot.
     expect(
       seatOptions({
         levels: [1],
@@ -221,9 +221,13 @@ describe("Add bot's registered bots", () => {
         rated: true,
         listed,
         ownNames,
-        takenCompetitors: ["c-kraken"],
-      }).map((choice) => choice.value),
-    ).toEqual(["level-1", "competitor-c-squid", "search"]);
+        takenCompetitors: ["c-squid"],
+      }).map((choice) => choice.label),
+    ).toEqual([
+      "Bot level 1",
+      "Kraken, by Dana (rated 1520)",
+      "Search for a bot…",
+    ]);
   });
 
   test("none while the server plays no hosted bots", () => {

@@ -121,7 +121,8 @@ export function ratedChoiceValue(
 /**
  * The radio a saved choice checks in a lobby that isn't rated (#410): one of your bot names for a
  * hosted bot under it without a URL of its own, or by its competitor ID, which plays at the name's
- * URL; else the kind's radio (`choiceValue`), so a hosted bot at a typed URL checks
+ * URL, and none while the names aren't read or the name is gone; else the kind's radio
+ * (`choiceValue`), so a hosted bot at a typed URL checks
  * **My hosted bot (URL)** even with a name kept beside it.
  */
 export function unratedChoiceValue(
@@ -135,6 +136,8 @@ export function unratedChoiceValue(
         ? findBotName(names ?? [], chosen.name)
         : undefined;
     if (own) return botNameValue(own.name);
+    // A name not read yet (or deleted) checks none, not My hosted bot (URL) with no URL.
+    if (chosen.name && !chosen.competitor_id) return "";
   }
   return choiceValue(chosen);
 }
