@@ -17,6 +17,8 @@ import {
   ratedChoice,
   ratedChoiceValue,
   ratedKindsHint,
+  unratedChoiceValue,
+  unratedNoBotNamesHint,
 } from "./botPicker";
 import { choiceValue, leaderboardValue } from "./roomModel";
 
@@ -104,9 +106,7 @@ describe("a rated lobby's choices", () => {
     expect(guestBotNamesHint).toBe(
       "Sign in with Google to play a rated game with one of your bot names.",
     );
-    expect(nameWithoutUrlHint).toBe(
-      "No URL yet, so it can't play rated games.",
-    );
+    expect(nameWithoutUrlHint).toBe("No URL yet, so it can't play.");
   });
 });
 
@@ -115,7 +115,15 @@ test("an unrated lobby keeps a saved name when the same kind of bot is saved aga
   expect(keptName("localhost", kraken)).toBe("Kraken");
   expect(keptName("hosted", kraken)).toBe("");
   expect(keptName("manual", kraken)).toBe("");
-  expect(keptName("hosted", { kind: "hosted", name: "Kraken" })).toBe("Kraken");
+  expect(
+    keptName("hosted", {
+      kind: "hosted",
+      name: "Kraken",
+      url: "https://a.example.org",
+    }),
+  ).toBe("Kraken");
+  // A pick of the name itself: a URL typed after it plays under no name (#410).
+  expect(keptName("hosted", { kind: "hosted", name: "Kraken" })).toBe("");
   expect(keptName("localhost", undefined)).toBe("");
 });
 
@@ -221,6 +229,70 @@ describe("a bot from the leaderboard", () => {
     expect(leaderboardRatedHint).toContain("rated in your place");
     expect(leaderboardUnratedHint).toBe(
       "Anyone's registered bot, rated or not, plays for your team at its URL, without its owner. The server plays it; this tab relays nothing.",
+    );
+  });
+});
+
+describe("your bot names in a lobby that isn't rated (#410)", () => {
+  const own = [
+    { name: "Kraken", url: "https://kraken.example.org/bot", id: "c-kraken" },
+    { name: "Old", url: null, id: "c-old" },
+  ];
+
+  test("choosing one saves a hosted bot under it, with no URL to type", () => {
+    expect(ratedChoice("Kraken")).toEqual({ kind: "hosted", name: "Kraken" });
+  });
+
+  test("a saved choice under a name, or by its competitor ID, checks the name's radio", () => {
+    expect(unratedChoiceValue({ kind: "hosted", name: "kraken" }, own)).toBe(
+      botNameValue("Kraken"),
+    );
+    expect(
+      unratedChoiceValue({ kind: "hosted", competitor_id: "c-kraken" }, own),
+    ).toBe(botNameValue("Kraken"));
+  });
+
+  test("a hosted bot at a typed URL checks My hosted bot (URL), even with a name kept", () => {
+    expect(
+      unratedChoiceValue(
+        { kind: "hosted", name: "Kraken", url: "https://other.example.org" },
+        own,
+      ),
+    ).toBe("hosted");
+    expect(
+      unratedChoiceValue({ kind: "hosted", url: "https://b.example" }, own),
+    ).toBe("hosted");
+  });
+
+  test("someone else's registered bot, and every other kind, check as before", () => {
+    expect(
+      unratedChoiceValue({ kind: "hosted", competitor_id: "c-eel" }, own),
+    ).toBe(leaderboardValue);
+    expect(unratedChoiceValue({ kind: "default", level: 2 }, own)).toBe(
+      "level-2",
+    );
+    expect(unratedChoiceValue({ kind: "localhost", name: "Kraken" }, own)).toBe(
+      "localhost",
+    );
+    expect(unratedChoiceValue(undefined, own)).toBe("");
+  });
+
+  test("names not read yet, or a deleted name, check no radio", () => {
+    expect(unratedChoiceValue({ kind: "hosted", name: "Kraken" }, null)).toBe(
+      "",
+    );
+    expect(unratedChoiceValue({ kind: "hosted", name: "Gone" }, own)).toBe("");
+    expect(
+      unratedChoiceValue({ kind: "hosted", competitor_id: "c-kraken" }, null),
+    ).toBe(leaderboardValue);
+  });
+
+  test("a name without a URL can't be chosen, and says where to add one", () => {
+    const state = { locked: false, saving: false, serverBots: true };
+    expect(botNameLocked(own[1] as (typeof own)[number], state)).toBe(true);
+    expect(botNameLocked(own[0] as (typeof own)[number], state)).toBe(false);
+    expect(unratedNoBotNamesHint).toBe(
+      "Register a bot name with its hosted bot's URL in your account to choose it here in one click.",
     );
   });
 });

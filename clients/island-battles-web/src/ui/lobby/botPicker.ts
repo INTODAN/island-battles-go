@@ -70,8 +70,11 @@ export const ratedKindsHint =
 /** In a rated lobby, when the server plays no hosted bots: no bot name can play. */
 export const noServerBotsHint =
   "This server doesn't play hosted bots, so here a rated game is played by hand.";
+/** In a lobby that isn't rated, for a signed-in member who has no bot names yet. */
+export const unratedNoBotNamesHint =
+  "Register a bot name with its hosted bot's URL in your account to choose it here in one click.";
 /** Beside a bot name without a URL, whose radio is disabled. */
-export const nameWithoutUrlHint = "No URL yet, so it can't play rated games.";
+export const nameWithoutUrlHint = "No URL yet, so it can't play.";
 /** Under "A registered bot" in a rated lobby (#412): whose rating the game changes. */
 export const leaderboardRatedHint =
   "Anyone's registered bot, rated or not, plays for your team at its URL, without its owner. Someone else's bot is rated in your place and plays away, within the daily limits that How ratings work on the leaderboard explains.";
@@ -115,7 +118,31 @@ export function ratedChoiceValue(
   return found ? botNameValue(found.name) : "";
 }
 
-/** What a rated lobby's choice of a bot name saves: a hosted bot under the name, which plays at its URL. */
+/**
+ * The radio a saved choice checks in a lobby that isn't rated (#410): one of your bot names for a
+ * hosted bot under it without a URL of its own, or by its competitor ID, which plays at the name's
+ * URL, and none while the names aren't read or the name is gone; else the kind's radio
+ * (`choiceValue`), so a hosted bot at a typed URL checks
+ * **My hosted bot (URL)** even with a name kept beside it.
+ */
+export function unratedChoiceValue(
+  chosen: MemberBot | undefined,
+  names: readonly BotName[] | null,
+): string {
+  if (chosen?.kind === "hosted" && !chosen.url) {
+    const own = chosen.competitor_id
+      ? (names ?? []).find((name) => name.id === chosen.competitor_id)
+      : chosen.name
+        ? findBotName(names ?? [], chosen.name)
+        : undefined;
+    if (own) return botNameValue(own.name);
+    // A name not read yet (or deleted) checks none, not My hosted bot (URL) with no URL.
+    if (chosen.name && !chosen.competitor_id) return "";
+  }
+  return choiceValue(chosen);
+}
+
+/** What choosing one of your bot names saves, in any lobby: a hosted bot under the name, which plays at its URL. */
 export const ratedChoice = (name: string): MemberBot => ({
   kind: "hosted",
   name,
@@ -193,9 +220,11 @@ export function botNameLocked(
 
 /**
  * The name an unrated lobby's choice keeps: the saved choice's, when the same kind of bot is saved
- * again (a new port or URL), else none. Only a rated lobby picks a name.
+ * again (a new port or URL), else none. A hosted bot under a name without a URL of its own is the
+ * pick of that name, so a URL typed after it plays under no name.
  */
 export function keptName(value: string, chosen: MemberBot | undefined): string {
+  if (chosen?.kind === "hosted" && !chosen.url) return "";
   return choiceValue(chosen) === value ? (chosen?.name ?? "") : "";
 }
 
@@ -253,7 +282,7 @@ export function mountBotPicker(options: {
   /** The bots from the leaderboard, null while they load or can't be read. */
   let listed: readonly ListedBot[] | null = null;
 
-  // --- A rated lobby's choices: your bot names, each a hosted bot at its own URL (#400) ---
+  // --- Your bot names, each a hosted bot at its own URL (#400), in a rated lobby or not (#410) ---
   const ratedNames = h("div", { class: "bot-names" });
   const ratedNote = h("p", { class: "hint" });
   const manageNames = h(
@@ -262,17 +291,16 @@ export function mountBotPicker(options: {
     "Manage bot names",
   );
   manageNames.addEventListener("click", () => options.onManageBotNames?.());
-  const ratedOptions = h(
+  const namesIntro = h("p", { class: "hint" });
+  /** Your bot names with their note: in `ratedOptions` in a rated lobby, else in `unratedNames`. */
+  const namesEl = h(
     "div",
-    { class: "bot-rated", hidden: true },
-    h(
-      "p",
-      { class: "hint" },
-      "Or play one of your bot names, or anyone's registered bot. The server plays it at the name's URL; this tab relays nothing.",
-    ),
+    { class: "bot-your-names" },
+    namesIntro,
     ratedNames,
     ratedNote,
   );
+  const ratedOptions = h("div", { class: "bot-rated", hidden: true }, namesEl);
   const ratedKinds = h("p", { class: "hint", hidden: true }, ratedKindsHint);
   /** The names drawn last, so a redraw only replaces them when they change. */
   let ratedKey = "";
@@ -328,13 +356,18 @@ export function mountBotPicker(options: {
       });
       ratedNames.replaceChildren(...rows);
     }
+    namesIntro.textContent = rated
+      ? "Or play one of your bot names, or anyone's registered bot. The server plays it at the name's URL; this tab relays nothing."
+      : "Your bot names, each played at its URL:";
     const sentence =
       account === null
         ? guestBotNamesHint
         : names === null
           ? "Loading your bot names…"
           : names.length === 0
-            ? noBotNamesHint
+            ? rated
+              ? noBotNamesHint
+              : unratedNoBotNamesHint
             : serverBotsKnown && !serverBots
               ? noServerBotsHint
               : "";
@@ -542,6 +575,8 @@ export function mountBotPicker(options: {
   const uploaded = h("div", { class: "bot-uploaded" });
   /** Where "A bot from the leaderboard" goes in a lobby that isn't rated. */
   const unratedLeaderboard = h("div", {});
+  /** Where your bot names go in a lobby that isn't rated; a guest, who has none, sees nothing there. */
+  const unratedNames = h("div", {});
   const serverOptions = h(
     "div",
     { class: "bot-server", hidden: true },
@@ -550,6 +585,7 @@ export function mountBotPicker(options: {
       { class: "hint" },
       "Or let the server play your own bot, without this tab:",
     ),
+    unratedNames,
     hostedLabel,
     hostedHelp,
     uploaded,
@@ -601,7 +637,11 @@ export function mountBotPicker(options: {
 
   function sync(): void {
     const names = account?.botNames ?? null;
-    if (rated) showRatedNames();
+    showRatedNames();
+    // Your names come first among the server's bots, or in a rated lobby's own choices.
+    const namesSlot = rated ? ratedOptions : unratedNames;
+    if (namesEl.parentElement !== namesSlot) namesSlot.prepend(namesEl);
+    namesEl.hidden = !rated && account === null;
     // The leaderboard's bots follow the lobby: after your names, or after the server's bots.
     const slot = rated ? ratedOptions : unratedLeaderboard;
     if (leaderboardEl.parentElement !== slot) slot.append(leaderboardEl);
@@ -613,7 +653,9 @@ export function mountBotPicker(options: {
       offered: offeredBots().length + (chosenListed() ? 1 : 0),
     });
     leaderboardSelect.disabled = listedLocked;
-    const value = rated ? ratedChoiceValue(chosen, names) : choiceValue(chosen);
+    const value = rated
+      ? ratedChoiceValue(chosen, names)
+      : unratedChoiceValue(chosen, names);
     for (const radio of radios()) {
       radio.checked = radio.value === value;
       const name = botNameOfValue(radio.value);
