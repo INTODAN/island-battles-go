@@ -4,6 +4,7 @@
 
 import { ApiError } from "../../api/errors";
 import type { components } from "../../api/generated/game";
+import { botUrlFromInput } from "../../bots/kinds";
 
 export type IslandAccount = components["schemas"]["IslandAccount"];
 export type Competitor = components["schemas"]["Competitor"];
@@ -54,11 +55,12 @@ export function validateBotName(text: string): string | undefined {
 export const exampleBotUrl = "https://bot.example.com/turn";
 
 /**
- * A bot name's URL, before it is sent: something that reads as an https:// URL. The game checks
- * the rest (port 443, no credentials, a public host) and its sentence shows when it refuses.
+ * A bot name's URL, before it is sent: something that reads as an https:// URL once
+ * `botUrlFromInput` puts https:// in front of one typed without a scheme. The game checks the
+ * rest (port 443, no credentials, a public host) and its sentence shows when it refuses.
  */
 export function validateBotUrl(text: string): string | undefined {
-  const url = text.trim();
+  const url = botUrlFromInput(text);
   if (url === "") {
     return `Enter the URL your hosted bot runs at, such as ${exampleBotUrl}.`;
   }

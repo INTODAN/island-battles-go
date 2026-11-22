@@ -46,12 +46,27 @@ export function choiceValue(bot) {
   }
 }
 
+// A hosted bot's URL as typed: trimmed, with https:// in front when it names no
+// scheme, as the web client's botUrlFromInput does. A typed scheme stays;
+// "https:/" or "https//" are read as "https://". Only slashes is empty.
+export function botUrlFromInput(text) {
+  const url = text.trim();
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) return url;
+  const typo = /^(https?)(?::\/*|\/+)(?=[^/])/i.exec(url);
+  if (typo) return `${typo[1]}://${url.slice(typo[0].length)}`;
+  const rest = url.replace(/^\/+/, "");
+  return rest === "" ? "" : `https://${rest}`;
+}
+
 // The choice a select value stands for, or null for none. "hosted" takes the
 // URL typed next to it, and is null while that is empty. "localhost" takes
 // the port typed next to it, which is left out when it is the default one.
 export function choiceFromValue(value, url = "", port = defaultBotPort) {
   if (value === "localhost") return port === defaultBotPort ? { kind: "localhost" } : { kind: "localhost", port };
-  if (value === "hosted") return url.trim() ? { kind: "hosted", url: url.trim() } : null;
+  if (value === "hosted") {
+    const full = botUrlFromInput(url);
+    return full ? { kind: "hosted", url: full } : null;
+  }
   if (value.startsWith("package-") && value.length > "package-".length) return { kind: "uploaded", package_id: value.slice("package-".length) };
   const level = /^level-([1-9][0-9]*)$/.exec(value);
   return level ? { kind: "default", level: Number(level[1]) } : null;
@@ -371,7 +386,12 @@ export class RoomPanel {
     hint.className = "hint";
     hint.textContent = "Your own bot server at a public https:// URL, which speaks the turn delivery protocol. The server sends it each turn; this page relays nothing.";
     this.url = document.createElement("input");
-    this.url.type = "url";
+    // Text, not "url", so a URL typed without https:// isn't marked invalid.
+    this.url.type = "text";
+    this.url.inputMode = "url";
+    this.url.setAttribute("autocapitalize", "off");
+    this.url.setAttribute("autocorrect", "off");
+    this.url.spellcheck = false;
     this.url.maxLength = 2048;
     this.url.placeholder = "https://bot.example.com/turn";
     this.url.setAttribute("aria-label", "Your hosted bot's URL");

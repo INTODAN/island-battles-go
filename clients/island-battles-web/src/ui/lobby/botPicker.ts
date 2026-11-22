@@ -541,10 +541,17 @@ export function mountBotPicker(options: {
   const defaults = h("div", { class: "bot-defaults" });
   // The bots that the server plays without this tab, shown when it offers them.
   const hostedUrl = h("input", {
-    type: "url",
+    type: "text",
+    inputMode: "url",
+    autocapitalize: "off",
+    spellcheck: false,
     class: "bot-url",
     placeholder: "https://bot.example.com/turn",
-    attrs: { "aria-label": "Your hosted bot's URL", maxlength: "2048" },
+    attrs: {
+      "aria-label": "Your hosted bot's URL",
+      maxlength: "2048",
+      autocorrect: "off",
+    },
   });
   const useUrl = h(
     "button",

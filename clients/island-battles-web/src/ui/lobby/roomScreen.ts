@@ -715,13 +715,17 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
     const urlInput =
       choice === "hosted"
         ? h("input", {
-            type: "url",
+            type: "text",
+            inputMode: "url",
+            autocapitalize: "off",
+            spellcheck: false,
             class: "bot-url",
             value: seatUrls.get(team.id) ?? "",
             placeholder: "https://bot.example.com/turn",
             attrs: {
               "aria-label": `Hosted bot URL for ${team.name}`,
               maxlength: "2048",
+              autocorrect: "off",
             },
             oninput: (event: Event) =>
               seatUrls.set(team.id, (event.target as HTMLInputElement).value),

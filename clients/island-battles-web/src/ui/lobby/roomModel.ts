@@ -1,4 +1,8 @@
-import { type ListedBot, listedBotLabel } from "../../bots/kinds";
+import {
+  botUrlFromInput,
+  type ListedBot,
+  listedBotLabel,
+} from "../../bots/kinds";
 import { defaultBotPort, parseBotPort } from "../../bots/localhost";
 import type { Snapshot } from "../../realtime";
 import type {
@@ -154,8 +158,8 @@ export function seatSettingsFromValue(
     return { bot_competitor_id: value.slice("competitor-".length) };
   }
   if (value === "hosted") {
-    const trimmed = url.trim();
-    return trimmed ? { bot_url: trimmed } : null;
+    const full = botUrlFromInput(url);
+    return full ? { bot_url: full } : null;
   }
   return null;
 }
@@ -303,8 +307,8 @@ export function choiceFromValue(
   }
   if (value === "manual") return { kind: "manual" };
   if (value === "hosted") {
-    const trimmed = url.trim();
-    return trimmed ? { kind: "hosted", url: trimmed, ...named } : null;
+    const full = botUrlFromInput(url);
+    return full ? { kind: "hosted", url: full, ...named } : null;
   }
   if (value.startsWith("package-") && value.length > "package-".length) {
     return {

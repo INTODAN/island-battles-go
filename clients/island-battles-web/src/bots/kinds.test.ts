@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  botUrlFromInput,
   describeGameBot,
   describeRelayedBot,
   type ListedBot,
@@ -110,4 +111,57 @@ test("the registered bots are named with their owner and rating, rated or not", 
   // A search's finds join the bots read so far, each once, a fresh copy replacing an old one.
   const renamed = { ...kraken, rating: 1530 };
   expect(mergeListedBots([kraken], [eel, renamed])).toEqual([renamed, eel]);
+});
+
+describe("a hosted bot's URL as typed", () => {
+  test("is tried at https:// when no scheme is typed", () => {
+    expect(botUrlFromInput("bot.example.com/turn")).toBe(
+      "https://bot.example.com/turn",
+    );
+    expect(botUrlFromInput("  bot.example.com  ")).toBe(
+      "https://bot.example.com",
+    );
+    expect(botUrlFromInput("//bot.example.com/turn")).toBe(
+      "https://bot.example.com/turn",
+    );
+    expect(botUrlFromInput("localhost:8080/turn")).toBe(
+      "https://localhost:8080/turn",
+    );
+  });
+
+  test("keeps a typed scheme, and stays empty when nothing is typed", () => {
+    expect(botUrlFromInput(" https://bot.example.com/turn ")).toBe(
+      "https://bot.example.com/turn",
+    );
+    expect(botUrlFromInput("HTTPS://bot.example.com")).toBe(
+      "HTTPS://bot.example.com",
+    );
+    expect(botUrlFromInput("http://127.0.0.1:41414/turn")).toBe(
+      "http://127.0.0.1:41414/turn",
+    );
+    expect(botUrlFromInput("ftp://bot.example.com")).toBe(
+      "ftp://bot.example.com",
+    );
+    expect(botUrlFromInput("   ")).toBe("");
+    expect(botUrlFromInput(" / ")).toBe("");
+  });
+
+  test("reads a mistyped https:// or http:// as the scheme", () => {
+    expect(botUrlFromInput("https:/bot.example.com/turn")).toBe(
+      "https://bot.example.com/turn",
+    );
+    expect(botUrlFromInput("https//bot.example.com")).toBe(
+      "https://bot.example.com",
+    );
+    expect(botUrlFromInput("https:bot.example.com")).toBe(
+      "https://bot.example.com",
+    );
+    expect(botUrlFromInput("http:/127.0.0.1:41414/turn")).toBe(
+      "http://127.0.0.1:41414/turn",
+    );
+    // A host that starts with "http" is not a scheme.
+    expect(botUrlFromInput("httpbin.example.org/turn")).toBe(
+      "https://httpbin.example.org/turn",
+    );
+  });
 });
