@@ -136,7 +136,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
   let lastVersion = -1;
   /** Your bot names once read, for the bot picker's choices and a rated lobby's blocker; null until then. */
   let account: RatedAccount | null = null;
-  /** Whether your bot names have been asked for: once a rated lobby needs them. */
+  /** Whether your bot names have been asked for: once the room is drawn for a signed-in member. */
   let accountAsked = false;
   /**
    * The registered bots read so far, rated or not, for the bot picker, Add bot and the members'
@@ -889,9 +889,11 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
         : searchFailed
           ? "The search failed. Type again to retry."
           : found.length === 0
-            ? searchInput.value.trim()
-              ? "No registered bot matches."
-              : "No bots are registered yet."
+            ? (searchFound?.length ?? 0) > 0
+              ? "Every bot found already has a seat: a rated game holds each once."
+              : searchInput.value.trim()
+                ? "No registered bot matches."
+                : "No bots are registered yet."
             : found.length === 1
               ? "1 bot"
               : `${found.length} bots`;

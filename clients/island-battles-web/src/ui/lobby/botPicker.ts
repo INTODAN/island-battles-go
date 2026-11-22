@@ -217,9 +217,11 @@ export function botNameLocked(
 
 /**
  * The name an unrated lobby's choice keeps: the saved choice's, when the same kind of bot is saved
- * again (a new port or URL), else none. Only a rated lobby picks a name.
+ * again (a new port or URL), else none. A hosted bot under a name without a URL of its own is the
+ * pick of that name, so a URL typed after it plays under no name.
  */
 export function keptName(value: string, chosen: MemberBot | undefined): string {
+  if (chosen?.kind === "hosted" && !chosen.url) return "";
   return choiceValue(chosen) === value ? (chosen?.name ?? "") : "";
 }
 

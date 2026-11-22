@@ -115,7 +115,15 @@ test("an unrated lobby keeps a saved name when the same kind of bot is saved aga
   expect(keptName("localhost", kraken)).toBe("Kraken");
   expect(keptName("hosted", kraken)).toBe("");
   expect(keptName("manual", kraken)).toBe("");
-  expect(keptName("hosted", { kind: "hosted", name: "Kraken" })).toBe("Kraken");
+  expect(
+    keptName("hosted", {
+      kind: "hosted",
+      name: "Kraken",
+      url: "https://a.example.org",
+    }),
+  ).toBe("Kraken");
+  // A pick of the name itself: a URL typed after it plays under no name (#410).
+  expect(keptName("hosted", { kind: "hosted", name: "Kraken" })).toBe("");
   expect(keptName("localhost", undefined)).toBe("");
 });
 
