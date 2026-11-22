@@ -514,7 +514,11 @@ export function mountBotPicker(options: {
     spellcheck: false,
     class: "bot-url",
     placeholder: "https://bot.example.com/turn",
-    attrs: { "aria-label": "Your hosted bot's URL", maxlength: "2048" },
+    attrs: {
+      "aria-label": "Your hosted bot's URL",
+      maxlength: "2048",
+      autocorrect: "off",
+    },
   });
   const useUrl = h(
     "button",

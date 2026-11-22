@@ -231,6 +231,7 @@ describe("bot choices", () => {
     );
     expect(choiceFromValue("hosted", "bot.example.com/turn")).toEqual(hosted);
     expect(choiceFromValue("hosted", "")).toBeNull();
+    expect(choiceFromValue("hosted", "/")).toBeNull();
   });
 
   test("words for a bot", () => {

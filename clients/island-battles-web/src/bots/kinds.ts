@@ -13,12 +13,16 @@ type RegisteredBot = components["schemas"]["RegisteredBot"];
 /**
  * A hosted bot's URL as typed: trimmed, with `https://` put in front when it names no scheme, so
  * `bot.example.com/turn` reaches `https://bot.example.com/turn`. A typed `http://` or another
- * scheme stays for the game, or the URL check, to judge. Empty stays empty.
+ * scheme stays for the game, or the URL check, to judge; `https:/` or `https//`, typos of one,
+ * are read as `https://`. Empty, or only slashes, is empty.
  */
 export function botUrlFromInput(text: string): string {
   const url = text.trim();
-  if (url === "" || /^[a-z][a-z0-9+.-]*:\/\//i.test(url)) return url;
-  return `https://${url.replace(/^\/+/, "")}`;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) return url;
+  const typo = /^(https?)(?::\/*|\/+)(?=[^/])/i.exec(url);
+  if (typo) return `${typo[1]}://${url.slice(typo[0].length)}`;
+  const rest = url.replace(/^\/+/, "");
+  return rest === "" ? "" : `https://${rest}`;
 }
 
 /**

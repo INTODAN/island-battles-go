@@ -720,6 +720,7 @@ export function mountRoomScreen(options: RoomScreenOptions): RoomScreen {
             attrs: {
               "aria-label": `Hosted bot URL for ${team.name}`,
               maxlength: "2048",
+              autocorrect: "off",
             },
             oninput: (event: Event) =>
               seatUrls.set(team.id, (event.target as HTMLInputElement).value),

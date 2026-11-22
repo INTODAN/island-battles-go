@@ -143,5 +143,25 @@ describe("a hosted bot's URL as typed", () => {
       "ftp://bot.example.com",
     );
     expect(botUrlFromInput("   ")).toBe("");
+    expect(botUrlFromInput(" / ")).toBe("");
+  });
+
+  test("reads a mistyped https:// or http:// as the scheme", () => {
+    expect(botUrlFromInput("https:/bot.example.com/turn")).toBe(
+      "https://bot.example.com/turn",
+    );
+    expect(botUrlFromInput("https//bot.example.com")).toBe(
+      "https://bot.example.com",
+    );
+    expect(botUrlFromInput("https:bot.example.com")).toBe(
+      "https://bot.example.com",
+    );
+    expect(botUrlFromInput("http:/127.0.0.1:41414/turn")).toBe(
+      "http://127.0.0.1:41414/turn",
+    );
+    // A host that starts with "http" is not a scheme.
+    expect(botUrlFromInput("httpbin.example.org/turn")).toBe(
+      "https://httpbin.example.org/turn",
+    );
   });
 });

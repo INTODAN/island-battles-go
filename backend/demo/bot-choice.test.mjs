@@ -18,6 +18,11 @@ test("select values stand for choices and back", () => {
   assert.equal(choiceValue({ kind: "hosted", url: "https://bot.example.com/turn" }), "hosted");
   assert.deepEqual(choiceFromValue("hosted", " https://bot.example.com/turn "), { kind: "hosted", url: "https://bot.example.com/turn" });
   assert.equal(choiceFromValue("hosted", " "), null);
+  // Typed without a scheme, it is tried at https://.
+  assert.deepEqual(choiceFromValue("hosted", "bot.example.com/turn"), { kind: "hosted", url: "https://bot.example.com/turn" });
+  assert.deepEqual(choiceFromValue("hosted", "https:/bot.example.com"), { kind: "hosted", url: "https://bot.example.com" });
+  assert.deepEqual(choiceFromValue("hosted", "http://127.0.0.1:41414/turn"), { kind: "hosted", url: "http://127.0.0.1:41414/turn" });
+  assert.equal(choiceFromValue("hosted", "/"), null);
   // A localhost bot takes the port next to it, left out when it is the default one.
   assert.deepEqual(choiceFromValue("localhost", "", 41415), { kind: "localhost", port: 41415 });
   assert.deepEqual(choiceFromValue("localhost", "", 41414), { kind: "localhost" });
