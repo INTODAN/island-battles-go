@@ -208,8 +208,8 @@ export interface RoomModel {
  * A few words naming a member's bot. A localhost bot seat's, with its row's `relay`, runs on the
  * machine of the host who added it, whose tab alone relays it; nobody does once they left. A bot
  * that plays as one of its player's bot names is named by it: "Kraken (own bot, localhost)". A
- * bot from the leaderboard is named from `listed` with its owner, "Kraken, by Dana (from the
- * leaderboard)", while the room knows it.
+ * bot from the leaderboard is named from `listed` with its owner, "Kraken, by Dana (registered
+ * bot)", while the room knows it.
  */
 export function describeBot(
   bot: MemberBot | undefined,
@@ -222,8 +222,8 @@ export function describeBot(
       (candidate) => candidate.competitorId === bot.competitor_id,
     );
     return found
-      ? `${listedBotLabel(found)} (from the leaderboard)`
-      : "A bot from the leaderboard";
+      ? `${listedBotLabel(found)} (registered bot)`
+      : "A registered bot";
   }
   if (bot.name) {
     switch (bot.kind) {
@@ -500,7 +500,7 @@ export function startBlocker(
 export const ratedSignInBlocker = "Sign in to play in this rated lobby.";
 /** Your blocker in a rated lobby while your bot plays under no bot name: a default bot, or a bot without one. */
 export const ratedBotNameBlocker =
-  "Play by hand, or choose one of your hosted bot names or a bot from the leaderboard.";
+  "Play by hand, or choose one of your hosted bot names or a registered bot.";
 /** Your blocker in a rated lobby while you chose a named localhost or uploaded bot (#400). */
 export const ratedHostedBlocker =
   "Rated bots run at their own URL: choose one of your hosted bot names, or play by hand.";
@@ -509,7 +509,7 @@ export const botNameUrlBlocker = (name: string): string =>
   `Your bot name ${name} has no URL yet. Add its hosted bot's URL on the account page.`;
 /** The rule of a rated lobby's bot seats, as the server says it. */
 export const ratedSeatRule =
-  "a rated game allows only default bot seats, each level once, and bots from the leaderboard, each once.";
+  "a rated game allows only default bot seats, each level once, and registered bots, each once.";
 /** The tag beside a person who isn't signed in, in a rated lobby. */
 export const guestTag = "guest";
 

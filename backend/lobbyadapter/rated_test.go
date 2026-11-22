@@ -163,7 +163,7 @@ func TestARatedLobbysReadyGate(t *testing.T) {
 	// default bot.
 	for _, bot := range []string{`{"kind":"default","level":2}`, `{"kind":"localhost"}`, `{"kind":"localhost","port":41415}`, `{"kind":"hosted","url":"https://bot.example.com/turn"}`} {
 		stack.expect(stack.choose(room, dana, bot), http.StatusOK, nil)
-		if detail := stack.expectRequirement(stack.ready(room, dana), services.RatedBotNameRequiredProblemType); detail != "This lobby is rated. Play by hand, or choose one of your hosted bot names or a bot from the leaderboard." {
+		if detail := stack.expectRequirement(stack.ready(room, dana), services.RatedBotNameRequiredProblemType); detail != "This lobby is rated. Play by hand, or choose one of your hosted bot names or a registered bot." {
 			t.Fatalf("%s = %q", bot, detail)
 		}
 	}
@@ -338,7 +338,7 @@ func TestARatedStartChecksTheRosterAgain(t *testing.T) {
 
 	room = readyRoom(false, map[guest]string{dana: `{"kind":"manual"}`, erin: `{"kind":"default","level":2}`})
 	stack.setRated(room, true)
-	if detail := stack.expectRequirement(stack.start(room, dana), services.RatedBotNameRequiredProblemType); detail != "This lobby is rated: waiting for Erin to play by hand, or to choose one of their hosted bot names or a bot from the leaderboard." {
+	if detail := stack.expectRequirement(stack.start(room, dana), services.RatedBotNameRequiredProblemType); detail != "This lobby is rated: waiting for Erin to play by hand, or to choose one of their hosted bot names or a registered bot." {
 		t.Fatalf("a default bot at the start = %q", detail)
 	}
 
@@ -652,7 +652,7 @@ func (stack *lobbyStack) pauseAway(competitorID string) {
 }
 
 // A signed-in host who owns neither bot opens a rated lobby, chooses listed
-// bot Kraken for their own team and adds listed bot Leviathan as a seat,
+// bot Kraken for their own team and adds unrated bot Leviathan as a seat,
 // named after it and its owner, and starts. Both play away at their names'
 // URLs, and the game records them as its competitors.
 func TestAnyHostMayPlayListedBotsInARatedLobby(t *testing.T) {
@@ -661,19 +661,23 @@ func TestAnyHostMayPlayListedBotsInARatedLobby(t *testing.T) {
 	kraken, leviathan := stack.registerBotName(dana, "Kraken"), stack.registerBotName(erin, "Leviathan")
 	room := stack.lobbyOf(fay, 2, ratedSettings(2, true))
 
-	// Unlisted, a bot of someone else's can be neither chosen nor seated.
+	// Unrated, a bot of someone else's can be chosen and seated, but
+	// not deleted: then no registered bot has its ID.
 	krakenChoice := `{"kind":"hosted","competitor_id":"` + kraken.ID + `"}`
-	if detail := stack.expectInvalid(stack.choose(room, fay, krakenChoice), "invalid_member_settings"); detail != "The leaderboard lists no bot with this competitor_id: choose one that it lists, with a URL." {
-		t.Fatalf("an unlisted bot's choice = %q", detail)
+	gone := stack.registerBotName(erin, "Hydra")
+	if err := stack.database.Delete(&models.Competitor{ID: gone.ID}).Error; err != nil {
+		t.Fatal(err)
 	}
-	if detail := stack.expectInvalid(stack.addSeat(room, fay, 1, map[string]any{"bot_competitor_id": leviathan.ID}), "invalid_seat_settings"); detail != "The leaderboard lists no bot with this bot_competitor_id: choose one that it lists, with a URL." {
-		t.Fatalf("an unlisted bot's seat = %q", detail)
+	if detail := stack.expectInvalid(stack.choose(room, fay, `{"kind":"hosted","competitor_id":"`+gone.ID+`"}`), "invalid_member_settings"); detail != "No registered bot with a URL has this competitor_id: choose one that GET /bots/registered lists." {
+		t.Fatalf("a deleted bot's choice = %q", detail)
+	}
+	if detail := stack.expectInvalid(stack.addSeat(room, fay, 1, map[string]any{"bot_competitor_id": gone.ID}), "invalid_seat_settings"); detail != "No registered bot with a URL has this bot_competitor_id: choose one that GET /bots/registered lists." {
+		t.Fatalf("a deleted bot's seat = %q", detail)
 	}
 	for _, bot := range []string{`{"kind":"hosted","competitor_id":"` + kraken.ID + `","name":"Kraken"}`, `{"kind":"hosted","competitor_id":"` + kraken.ID + `","url":"https://bot.example.com/turn"}`, `{"kind":"localhost","competitor_id":"` + kraken.ID + `"}`, `{"kind":"hosted","competitor_id":"kraken"}`} {
 		stack.expectInvalid(stack.choose(room, fay, bot), "invalid_member_settings")
 	}
 	stack.listBot(kraken.ID)
-	stack.listBot(leviathan.ID)
 	stack.expect(stack.choose(room, fay, krakenChoice), http.StatusOK, nil)
 	var seated domain.Snapshot
 	stack.expect(stack.addSeat(room, fay, 1, map[string]any{"bot_competitor_id": leviathan.ID}), http.StatusOK, &seated)
@@ -721,7 +725,7 @@ func TestARatedLobbyRefusesUnlistedPausedAndSameAccountBots(t *testing.T) {
 	if found, err := dal.SetAccountHidden(stack.database, *mustAccount(t, stack, kraken.ID), true); err != nil || !found {
 		t.Fatalf("hide Dana: %v, %v", found, err)
 	}
-	if detail := stack.expectRequirement(stack.ready(room, fay), services.RatedBotNotListedProblemType); detail != "Kraken is no longer on the leaderboard. Choose another bot." {
+	if detail := stack.expectRequirement(stack.ready(room, fay), services.RatedBotNotListedProblemType); detail != "Kraken is no longer a registered bot with a URL. Choose another bot." {
 		t.Fatalf("an unlisted bot = %q", detail)
 	}
 	if _, err := dal.SetAccountHidden(stack.database, *mustAccount(t, stack, kraken.ID), false); err != nil {

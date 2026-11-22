@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
@@ -207,4 +208,37 @@ func resultOpponent(opponent models.RatingOpponent, competitors map[string]model
 	view.CompetitorID = &competitor.ID
 	view.Name, view.Owner = shownName(competitor, accounts)
 	return view
+}
+
+// RegisteredBots returns a page of the bot names that anyone may choose by
+// their competitor ID, rated or not, with their owners and URLs: live, with
+// a URL, of an account that isn't hidden. A search that isn't empty keeps
+// the bots whose name or owner's display name holds it, without regard to
+// case.
+func (leaderboard Leaderboard) RegisteredBots(ctx context.Context, search string, limit, offset int) (models.RegisteredBotsView, error) {
+	database := leaderboard.Database.WithContext(ctx)
+	search = strings.TrimSpace(search)
+	total, err := dal.CountRegisteredBots(database, search)
+	if err != nil {
+		return models.RegisteredBotsView{}, accountsUnavailable(ctx, "count the registered bots", err)
+	}
+	competitors, err := dal.RegisteredBotsPage(database, search, limit, offset)
+	if err != nil {
+		return models.RegisteredBotsView{}, accountsUnavailable(ctx, "read the registered bots", err)
+	}
+	accounts, err := dal.AccountsByID(database, competitorAccounts(competitors))
+	if err != nil {
+		return models.RegisteredBotsView{}, accountsUnavailable(ctx, "read the accounts", err)
+	}
+	view := models.RegisteredBotsView{Total: total, Bots: []models.RegisteredBotView{}}
+	for _, competitor := range competitors {
+		bot := models.RegisteredBotView{CompetitorID: competitor.ID, Name: *competitor.Name, URL: *competitor.URL,
+			Owner: accounts[*competitor.AccountID].DisplayName, Rated: competitor.Games > 0, Games: competitor.Games}
+		if bot.Rated {
+			rating := models.RoundRating(competitor.Rating)
+			bot.Rating = &rating
+		}
+		view.Bots = append(view.Bots, bot)
+	}
+	return view, nil
 }

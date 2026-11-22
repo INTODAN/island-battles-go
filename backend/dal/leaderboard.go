@@ -2,6 +2,7 @@ package dal
 
 import (
 	"errors"
+	"strings"
 	"time"
 
 	"islandBattles/backend/models"
@@ -191,4 +192,56 @@ func anyValues(values []string) []any {
 		converted[index] = value
 	}
 	return converted
+}
+
+// registeredBotsOrder is the registered bots' order: rated bots first, by
+// the leaderboard's order, then unrated ones by name, and the ID, so a page
+// never shows a bot twice or skips one.
+var registeredBotsOrder = clause.OrderBy{Columns: []clause.OrderByColumn{
+	{Column: clause.Column{Raw: true, Name: "games > 0"}, Desc: true},
+	{Column: ratingColumn, Desc: true},
+	{Column: gamesColumn, Desc: true},
+	{Column: clause.Column{Name: "name_key"}},
+	{Column: clause.Column{Name: "id"}},
+}}
+
+// registeredBots selects the bot names that anyone may choose by their
+// competitor ID, rated or not: live, with a URL, of an account that the
+// game knows and that isn't hidden. A search that isn't empty keeps the bots
+// whose name or owner's display name holds it, without regard to case.
+func registeredBots(database *gorm.DB, search string) *gorm.DB {
+	accounts := database.Session(&gorm.Session{NewDB: true}).Model(&models.IslandAccount{}).Select("account_id").
+		Where(clause.Eq{Column: clause.Column{Name: "hidden"}, Value: false})
+	query := database.Model(&models.Competitor{}).Where(&models.Competitor{Kind: models.BotCompetitor}).
+		Where(clause.Neq{Column: clause.Column{Name: "url"}, Value: nil}).
+		Where(clause.Expr{SQL: "? IN (?)", Vars: []any{competitorAccountColumn, accounts}})
+	if search == "" {
+		return query
+	}
+	pattern := "%" + likeEscaper.Replace(strings.ToLower(search)) + "%"
+	owners := database.Session(&gorm.Session{NewDB: true}).Model(&models.IslandAccount{}).Select("account_id").
+		Where(clause.Expr{SQL: "LOWER(display_name) LIKE ? ESCAPE '\\'", Vars: []any{pattern}})
+	return query.Where(clause.Or(
+		clause.Expr{SQL: "name_key LIKE ? ESCAPE '\\'", Vars: []any{pattern}},
+		clause.Expr{SQL: "? IN (?)", Vars: []any{competitorAccountColumn, owners}},
+	))
+}
+
+// likeEscaper escapes LIKE's wildcards and its escape character, so a
+// search matches them as they are.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+// RegisteredBotsPage returns up to limit registered bots that match search,
+// in their order, after skipping offset of them.
+func RegisteredBotsPage(database *gorm.DB, search string, limit, offset int) ([]models.Competitor, error) {
+	var competitors []models.Competitor
+	err := registeredBots(database, search).Order(registeredBotsOrder).Limit(limit).Offset(offset).Find(&competitors).Error
+	return competitors, err
+}
+
+// CountRegisteredBots counts the registered bots that match search.
+func CountRegisteredBots(database *gorm.DB, search string) (int, error) {
+	var count int64
+	err := registeredBots(database, search).Count(&count).Error
+	return int(count), err
 }

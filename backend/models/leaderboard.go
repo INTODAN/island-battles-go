@@ -46,7 +46,7 @@ type LeaderboardEntryView struct {
 	Draws        int            `json:"draws" minimum:"0"`
 	Losses       int            `json:"losses" minimum:"0"`
 	LastPlayedAt time.Time      `json:"last_played_at" doc:"When its latest rated game ended."`
-	URL          *string        `json:"url" nullable:"true" doc:"For a bot name, its hosted bot's URL, which its owner published by playing it in a rated game: anyone may play against it in an unrated lobby of their own, as a hosted bot seat at this URL, which changes no rating. Null for hand play and house bots, and for a bot name without a URL, which was registered before names had URLs."`
+	URL          *string        `json:"url" nullable:"true" doc:"For a bot name, its hosted bot's URL, which GET /bots/registered publishes too: anyone may choose it by its competitor_id, for their own team or as a seat. Null for hand play and house bots, and for a bot name without a URL, which was registered before names had URLs."`
 }
 
 // LeaderboardView is a page of the public leaderboard.
@@ -86,4 +86,22 @@ type CompetitorResultOpponentView struct {
 // leaderboard, or shows them again.
 type SetAccountHiddenRequest struct {
 	Hidden bool `json:"hidden" doc:"true hides the account's hand play and every bot name of it from the leaderboard and from other competitors' history; false shows them again."`
+}
+
+// RegisteredBotView is a registered bot name with a URL, which anyone may
+// choose by its competitor ID, rated or not.
+type RegisteredBotView struct {
+	CompetitorID string `json:"competitor_id" format:"uuid" doc:"Choose it by this ID: a member's {\"kind\": \"hosted\", \"competitor_id\": \"…\"} or a seat's {\"bot_competitor_id\": \"…\"}."`
+	Name         string `json:"name" doc:"The bot's registered name, such as Kraken."`
+	Owner        string `json:"owner" doc:"The display name of the account that owns it, as in \"Kraken, by Dana\"."`
+	URL          string `json:"url" doc:"Its hosted bot's URL, where the server plays it."`
+	Rated        bool   `json:"rated" doc:"Whether it has played a rated game, and so is on the leaderboard. An unrated bot can be chosen too."`
+	Rating       *int   `json:"rating" nullable:"true" doc:"Its Elo rating, rounded, once it is rated; null before its first rated game."`
+	Games        int    `json:"games" minimum:"0" doc:"Rated games played."`
+}
+
+// RegisteredBotsView is a page of the registered bots.
+type RegisteredBotsView struct {
+	Total int                 `json:"total" minimum:"0" doc:"How many registered bots match the search."`
+	Bots  []RegisteredBotView `json:"bots" nullable:"false" doc:"The page's bots: rated ones first, by rating, highest first, then unrated ones, each by name."`
 }

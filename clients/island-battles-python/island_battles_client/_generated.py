@@ -57,7 +57,7 @@ class BotChoice(GameModel):
     """
     name: StrictStr | None = None
     """
-    In a rated game, the bot name that a hosted bot plays as, such as Kraken: one that its player registered in their account, or a bot from the leaderboard that plays away, for a member of another account or in a seat. Absent for the other kinds and in a game that isn't rated.
+    In a rated game, the bot name that a hosted bot plays as, such as Kraken: one that its player registered in their account, or another account's registered bot that plays away, for a member of another account or in a seat. Absent for the other kinds and in a game that isn't rated.
     """
     port: Annotated[StrictInt | None, Field(ge=1024, le=65535)] = None
     """
@@ -193,7 +193,7 @@ class BotSeatSettings(GameModel):
     )
     bot_competitor_id: UUID | None = None
     """
-    A bot name that the leaderboard lists, by its competitor_id (GET /leaderboard), whoever owns it, which plays at the name's URL as it is at the start. The seat is named after the bot and its owner, such as "Kraken (Dana)". It plays away: in a rated lobby the bot is the seat's competitor, and the daily caps and the pause apply to it; in a lobby that isn't rated it rates nothing. Only when GET /bots/defaults says server_bots.
+    A registered bot name with a URL, rated or not, by its competitor_id (GET /bots/registered), whoever owns it, which plays at the name's URL as it is at the start. The seat is named after the bot and its owner, such as "Kraken (Dana)". It plays away: in a rated lobby the bot is the seat's competitor, and the daily caps and the pause apply to it; in a lobby that isn't rated it rates nothing. Only when GET /bots/defaults says server_bots.
     """
     bot_level: Annotated[StrictInt | None, Field(ge=1)] = None
     """
@@ -429,7 +429,7 @@ class Competitor(GameModel):
     """
     url: StrictStr | None
     """
-    For a bot name, its hosted bot's URL, where it plays in a rated lobby. It becomes public on the leaderboard once the name has played a rated game. Null for hand play, and for a bot name registered before names had URLs, which plays in no rated lobby until its owner sets one with PUT /account/bot-names/{competitor_id}.
+    For a bot name, its hosted bot's URL, where it plays in a rated lobby. It is public: GET /bots/registered lists it, and the leaderboard too once the name has played a rated game. Null for hand play, and for a bot name registered before names had URLs, which plays in no rated lobby until its owner sets one with PUT /account/bot-names/{competitor_id}.
     """
     wins: Annotated[StrictInt, Field(ge=0)]
 
@@ -868,7 +868,7 @@ class GenerationState(GameModel):
     player_id: UUID
     rated: StrictBool
     """
-    Whether the game is rated: its lobby's rated setting at the start. Every team of a rated game is played by a competitor, a signed-in player's hand play or bot name, a bot from the leaderboard or a house bot, and bot.name names the bot name that plays.
+    Whether the game is rated: its lobby's rated setting at the start. Every team of a rated game is played by a competitor, a signed-in player's hand play or bot name, a registered bot or a house bot, and bot.name names the bot name that plays.
     """
     relayed_bots: Sequence[RelayedBot]
     """
@@ -1001,7 +1001,7 @@ class LeaderboardCompetitor(GameModel):
     """
     url: StrictStr | None
     """
-    For a bot name, its hosted bot's URL, which its owner published by playing it in a rated game: anyone may play against it in an unrated lobby of their own, as a hosted bot seat at this URL, which changes no rating. Null for hand play and house bots, and for a bot name without a URL, which was registered before names had URLs.
+    For a bot name, its hosted bot's URL, which GET /bots/registered publishes too: anyone may choose it by its competitor_id, for their own team or as a seat. Null for hand play and house bots, and for a bot name without a URL, which was registered before names had URLs.
     """
     wins: Annotated[StrictInt, Field(ge=0)]
 
@@ -1043,7 +1043,7 @@ class LeaderboardEntry(GameModel):
     """
     url: StrictStr | None
     """
-    For a bot name, its hosted bot's URL, which its owner published by playing it in a rated game: anyone may play against it in an unrated lobby of their own, as a hosted bot seat at this URL, which changes no rating. Null for hand play and house bots, and for a bot name without a URL, which was registered before names had URLs.
+    For a bot name, its hosted bot's URL, which GET /bots/registered publishes too: anyone may choose it by its competitor_id, for their own team or as a seat. Null for hand play and house bots, and for a bot name without a URL, which was registered before names had URLs.
     """
     wins: Annotated[StrictInt, Field(ge=0)]
 
@@ -1121,7 +1121,7 @@ class LobbySettings(GameModel):
     """
     rated: StrictBool | None = False
     """
-    Whether the game is rated, false when left out. A rated lobby starts only when every member is signed in and plays by hand, with one of their bot names or with a bot from the leaderboard, no two teams belong to one account, every bot seat is a default bot level, each level once, or a bot from the leaderboard, each once, and the bots that play away have rated games left today. The game then records the competitor of each team, and its end changes their Elo ratings.
+    Whether the game is rated, false when left out. A rated lobby starts only when every member is signed in and plays by hand, with one of their bot names or with a registered bot, no two teams belong to one account, every bot seat is a default bot level, each level once, or a registered bot, each once, and the bots that play away have rated games left today. The game then records the competitor of each team, and its end changes their Elo ratings.
     """
     turn_pace_milliseconds: Annotated[StrictInt | None, Field(ge=500, le=5000)] = 1000
     """
@@ -1190,7 +1190,7 @@ class MemberBot(GameModel):
     )
     competitor_id: UUID | None = None
     """
-    For kind hosted only, instead of url and name: a bot name by its competitor_id, one that the leaderboard lists (GET /leaderboard, with a url), or one of your own bot names. It plays at the name's URL as it is at the start. Another account's bot plays away: in a rated lobby it is that bot that plays for your team, your own hand play isn't in the game, and the daily caps and the pause apply to it. One of your own plays as if you named it. In a lobby that isn't rated it rates nothing.
+    For kind hosted only, instead of url and name: a bot name by its competitor_id: any registered bot with a URL, rated or not (GET /bots/registered), or one of your own bot names. It plays at the name's URL as it is at the start. Another account's bot plays away: in a rated lobby it is that bot that plays for your team, your own hand play isn't in the game, and the daily caps and the pause apply to it. One of your own plays as if you named it. In a lobby that isn't rated it rates nothing.
     """
     kind: Literal["localhost", "default", "hosted", "uploaded", "manual"]
     """
@@ -1329,7 +1329,7 @@ class RegisterBotNameRequest(GameModel):
     """
     url: Annotated[StrictStr, Field(max_length=2048)]
     """
-    The bot's hosted bot URL, where the server sends it each turn in a rated lobby: https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public, as a hosted bot's. It becomes public on the leaderboard once the name has played a rated game, so that others can play against it.
+    The bot's hosted bot URL, where the server sends it each turn in a rated lobby: https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public, as a hosted bot's. It is public, in GET /bots/registered, so that others can play against it.
     """
 
 
@@ -1365,6 +1365,61 @@ class RegisterGenerationCommands(GameModel):
     request_id: UUID
     """
     Identifies this batch. Retry a lost request with the same UUID and body; use a new UUID for every new batch.
+    """
+
+
+class RegisteredBot(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    competitor_id: UUID
+    """
+    Choose it by this ID: a member's {"kind": "hosted", "competitor_id": "…"} or a seat's {"bot_competitor_id": "…"}.
+    """
+    games: Annotated[StrictInt, Field(ge=0)]
+    """
+    Rated games played.
+    """
+    name: StrictStr
+    """
+    The bot's registered name, such as Kraken.
+    """
+    owner: StrictStr
+    """
+    The display name of the account that owns it, as in "Kraken, by Dana".
+    """
+    rated: StrictBool
+    """
+    Whether it has played a rated game, and so is on the leaderboard. An unrated bot can be chosen too.
+    """
+    rating: StrictInt | None
+    """
+    Its Elo rating, rounded, once it is rated; null before its first rated game.
+    """
+    url: StrictStr
+    """
+    Its hosted bot's URL, where the server plays it.
+    """
+
+
+class RegisteredBots(GameModel):
+    model_config = ConfigDict(
+        extra="ignore",
+    )
+    field_schema: Annotated[
+        AnyUrl | None,
+        Field(alias="$schema", examples=["https://example.com/RegisteredBots.json"]),
+    ] = None
+    """
+    A URL to the JSON Schema for this object.
+    """
+    bots: Sequence[RegisteredBot]
+    """
+    The page's bots: rated ones first, by rating, highest first, then unrated ones, each by name.
+    """
+    total: Annotated[StrictInt, Field(ge=0)]
+    """
+    How many registered bots match the search.
     """
 
 
@@ -1419,7 +1474,7 @@ class SetBotNameURLRequest(GameModel):
     )
     url: Annotated[StrictStr, Field(max_length=2048)]
     """
-    The bot's hosted bot URL, where the server sends it each turn in a rated lobby: https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public, as a hosted bot's. It becomes public on the leaderboard once the name has played a rated game, so that others can play against it.
+    The bot's hosted bot URL, where the server sends it each turn in a rated lobby: https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public, as a hosted bot's. It is public, in GET /bots/registered, so that others can play against it.
     """
 
 

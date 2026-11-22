@@ -524,3 +524,71 @@ func TestTheLeaderboardIsPublicAndCachedForAMinute(t *testing.T) {
 		}
 	}
 }
+
+func readRegisteredBots(t *testing.T, api humatest.TestAPI, query string) models.RegisteredBotsView {
+	t.Helper()
+	var registered models.RegisteredBotsView
+	expectStatus(t, api.Get("/bots/registered"+query), http.StatusOK, &registered)
+	return registered
+}
+
+// registeredNames shows a page's bots as name, owner and rating.
+func registeredNames(bots []models.RegisteredBotView) string {
+	shown := []string{}
+	for _, bot := range bots {
+		rating := "unrated"
+		if bot.Rating != nil {
+			rating = fmt.Sprint(*bot.Rating)
+		}
+		shown = append(shown, fmt.Sprintf("%s by %s %s", bot.Name, bot.Owner, rating))
+	}
+	return fmt.Sprint(shown)
+}
+
+// Every registered bot name with a URL is listed with its owner and URL,
+// rated or not: rated ones first, by rating, then unrated ones by
+// name. A search matches a name or an owner without regard to case, and
+// takes LIKE's wildcards as they are. A deleted name and a hidden account's
+// names aren't listed.
+func TestRegisteredBotsListEveryBotNameWithAURL(t *testing.T) {
+	database := testutils.InitTestDB(t)
+	dana, eli := signedInPlayer("Dana"), signedInPlayer("Eli")
+	api := leaderboardAPI(t, database, bearerPlayers{"Bearer dana": dana, "Bearer eli": eli}, testAdminAPIKey)
+	kraken := registerBotName(t, api, "dana", "Kraken")
+	registerBotName(t, api, "dana", "Hydra")
+	leviathan := registerBotName(t, api, "eli", "Leviathan")
+	gone := registerBotName(t, api, "eli", "Gone_bot")
+	handOf(t, api, "dana")
+	houseBot(t, database, 2)
+	played(t, database, leviathan.ID, 1540, 2)
+	played(t, database, kraken.ID, 1490, 1)
+	expectStatus(t, api.Delete("/account/bot-names/"+gone.ID, "Authorization: Bearer eli"), http.StatusNoContent, nil)
+
+	registered := readRegisteredBots(t, api, "")
+	if registered.Total != 3 || registeredNames(registered.Bots) != "[Leviathan by Eli 1540 Kraken by Dana 1490 Hydra by Dana unrated]" {
+		t.Fatalf("registered bots = %d %s", registered.Total, registeredNames(registered.Bots))
+	}
+	first := registered.Bots[0]
+	if first.CompetitorID != leviathan.ID || first.URL != "https://bot.example.com/turn" || !first.Rated || first.Games != 2 || registered.Bots[2].Rated {
+		t.Fatalf("registered bots = %+v", registered.Bots)
+	}
+	for query, want := range map[string]string{
+		"?search=hYd":       "[Hydra by Dana unrated]",
+		"?search=+dana+":    "[Kraken by Dana 1490 Hydra by Dana unrated]",
+		"?search=_":         "[]",
+		"?search=%25":       "[]",
+		"?limit=1&offset=1": "[Kraken by Dana 1490]",
+		"?search=a&limit=2": "[Leviathan by Eli 1540 Kraken by Dana 1490]",
+	} {
+		if got := registeredNames(readRegisteredBots(t, api, query).Bots); got != want {
+			t.Fatalf("GET /bots/registered%s = %s, want %s", query, got, want)
+		}
+	}
+
+	if _, err := dal.SetAccountHidden(database, dana.AccountID, true); err != nil {
+		t.Fatal(err)
+	}
+	if registered := readRegisteredBots(t, api, ""); registered.Total != 1 || registeredNames(registered.Bots) != "[Leviathan by Eli 1540]" {
+		t.Fatalf("registered bots with Dana hidden = %d %s", registered.Total, registeredNames(registered.Bots))
+	}
+}

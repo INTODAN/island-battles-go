@@ -61,6 +61,7 @@ describe("the monthly guard on uploaded bots", () => {
         disabled: true,
       },
       { value: "hosted", label: "Hosted bot (URL)", disabled: false },
+      { value: "search", label: "Search for a bot…", disabled: false },
     ]);
     expect(
       seatOptions({ levels: [1], serverBots: true, packages, spent: null })
@@ -98,7 +99,7 @@ test("a rated lobby's Add bot offers only the default levels that no seat has", 
       rated: true,
       takenLevels: [2],
     }).map((choice) => choice.value),
-  ).toEqual(["level-1", "level-3"]);
+  ).toEqual(["level-1", "level-3", "search"]);
   expect(
     seatOptions({
       levels: [1],
@@ -121,10 +122,22 @@ test("a rated lobby's Add bot offers only the default levels that no seat has", 
   ).toEqual(["level-1", "localhost"]);
 });
 
-describe("Add bot's bots from the leaderboard", () => {
+describe("Add bot's registered bots", () => {
   const listed = [
-    { competitorId: "c-kraken", name: "Kraken", owner: "Dana" },
-    { competitorId: "c-squid", name: "Squid", owner: "Sam" },
+    {
+      competitorId: "c-kraken",
+      name: "Kraken",
+      owner: "Dana",
+      url: "https://kraken.example.org/bot",
+      rating: 1520,
+    },
+    {
+      competitorId: "c-squid",
+      name: "Squid",
+      owner: "Sam",
+      url: "https://squid.example.org/bot",
+      rating: null,
+    },
   ];
 
   test("a rated lobby offers each bot that no seat has, after the levels", () => {
@@ -143,9 +156,10 @@ describe("Add bot's bots from the leaderboard", () => {
       { value: "level-1", label: "Bot level 1", disabled: false },
       {
         value: listedSeatValue("c-kraken"),
-        label: "From the leaderboard: Kraken, by Dana",
+        label: "Kraken, by Dana (rated 1520)",
         disabled: false,
       },
+      { value: "search", label: "Search for a bot…", disabled: false },
     ]);
     expect(listedSeatValue("c-kraken")).toBe("competitor-c-kraken");
   });
@@ -166,6 +180,7 @@ describe("Add bot's bots from the leaderboard", () => {
       "hosted",
       "competitor-c-kraken",
       "competitor-c-squid",
+      "search",
     ]);
   });
 
@@ -179,7 +194,10 @@ describe("Add bot's bots from the leaderboard", () => {
           spent: null,
           rated,
           listed,
-        }).some((choice) => choice.value.startsWith("competitor-")),
+        }).some(
+          (choice) =>
+            choice.value.startsWith("competitor-") || choice.value === "search",
+        ),
       ).toBe(false);
     }
   });

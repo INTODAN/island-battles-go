@@ -81,13 +81,13 @@ export const noBotUrlSentence =
 
 /** Beside the new name's fields: what the URL is for, and that it becomes public. */
 export const botUrlPublicSentence =
-  "Rated games play the name at this URL. Once the name has played a rated game, the leaderboard shows the URL, so others can play against your bot.";
+  "Rated games play the name at this URL. The URL is public: anyone can find your bot by name and play against it, without you joining.";
 
 /** Under the field that changes a name's URL. */
 export function botUrlEditHint(competitor: Competitor): string {
   return competitor.games > 0
     ? `The leaderboard shows ${competitor.name}'s new URL within a minute. Its rating stays; a game already started keeps the URL it started with.`
-    : "Its rating stays. Once the name has played a rated game, the leaderboard shows its URL, so others can play against your bot.";
+    : "Its rating stays. Anyone who finds your bot by name plays it at the new URL.";
 }
 
 /** A rating as shown: rounded. */

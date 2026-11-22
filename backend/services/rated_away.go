@@ -20,17 +20,17 @@ import (
 // {"kind": "hosted", "competitor_id": "…"} or a seat's
 // {"bot_competitor_id": "…"}. Such a bot plays away when it sits in a seat,
 // or when the member who chose it doesn't own it; one that the member owns
-// plays as if they had named it. An away bot must be listed: a bot name that
-// the leaderboard lists, with a URL. In a rated lobby it also must not be
+// plays as if they had named it. An away bot must be registered: a live bot
+// name with a URL, of an account that isn't hidden, rated or not. In a rated lobby it also must not be
 // paused, and it counts towards the daily caps (checkAwayCaps).
 
 // chosenBot is a bot name chosen by its competitor ID: its row, soft-deleted
-// or not, its owner's display name, and whether the leaderboard lists it
-// with a URL.
+// or not, its owner's display name, and whether anyone may choose it
+// (registered).
 type chosenBot struct {
 	competitor models.Competitor
 	owner      string
-	listed     bool
+	registered bool
 }
 
 // chosenBots are the bots chosen by competitor ID, by that ID. An ID that no
@@ -52,9 +52,9 @@ func (bot chosenBot) ownedBy(accountID string) bool {
 }
 
 // readChosenBots reads the competitors with these IDs, soft-deleted ones too,
-// and their accounts, in two queries; no IDs read nothing. A bot is listed
-// as the leaderboard lists it: a live bot name with at least one rated game,
-// of an account that the game knows and that isn't hidden, and with a URL.
+// and their accounts, in two queries; no IDs read nothing. A bot is
+// registered as GET /bots/registered lists it: a live bot name with a URL,
+// of an account that the game knows and that isn't hidden, rated or not.
 func readChosenBots(database *gorm.DB, competitorIDs []string) (chosenBots, error) {
 	chosen := chosenBots{}
 	if len(competitorIDs) == 0 {
@@ -74,7 +74,7 @@ func readChosenBots(database *gorm.DB, competitorIDs []string) (chosenBots, erro
 		}
 		account, known := accounts[*competitor.AccountID]
 		chosen[competitor.ID] = chosenBot{competitor: competitor, owner: account.DisplayName,
-			listed: !competitor.DeletedAt.Valid && competitor.Games > 0 && competitor.URL != nil && known && !account.Hidden}
+			registered: !competitor.DeletedAt.Valid && competitor.URL != nil && known && !account.Hidden}
 	}
 	return chosen, nil
 }
@@ -107,14 +107,14 @@ func pausedMessage(name string) string {
 }
 
 // notListedMessage says that a bot chosen by its competitor ID is no longer
-// listed.
+// registered: deleted, without a URL, or of a hidden account.
 func notListedMessage(name string) string {
-	return name + " is no longer on the leaderboard."
+	return name + " is no longer a registered bot with a URL."
 }
 
 // checkChosenBots refuses the members' and the seats' bots chosen by
 // competitor ID that can't play: a member's own bot name that was deleted or
-// has no URL, an away bot that the leaderboard no longer lists, and in a
+// has no URL, an away bot that is no longer registered, and in a
 // rated lobby an away bot that is paused. A member getting ready is told to
 // choose another; at the start the refusal names whom the host waits for, or
 // the seat to remove.
@@ -136,8 +136,8 @@ func checkChosenBots(members []domain.ReadyMember, seats []domain.Member, chosen
 			startDetail = member.DisplayName + "'s bot name " + bot.name() + " has no URL yet: they must add its hosted bot's URL on the account page."
 		case own:
 			continue
-		case !found || !bot.listed:
-			problemType, detail, startDetail = RatedBotNotListedProblemType, notListedMessage(bot.name())+" Choose another bot.", bot.name()+", which "+member.DisplayName+" chose, is no longer on the leaderboard: they must choose another bot."
+		case !found || !bot.registered:
+			problemType, detail, startDetail = RatedBotNotListedProblemType, notListedMessage(bot.name())+" Choose another bot.", bot.name()+", which "+member.DisplayName+" chose, is no longer a registered bot with a URL: they must choose another bot."
 		case rated && bot.competitor.AwayPausedAt != nil:
 			problemType, detail, startDetail = RatedBotPausedProblemType, pausedMessage(bot.name())+" Choose another bot.", strings.TrimSuffix(pausedMessage(bot.name()), ".")+": "+member.DisplayName+" must choose another bot."
 		default:
@@ -154,7 +154,7 @@ func checkChosenBots(members []domain.ReadyMember, seats []domain.Member, chosen
 			continue
 		}
 		switch bot, found := chosen[settings.BotCompetitorID]; {
-		case !found || !bot.listed:
+		case !found || !bot.registered:
 			return domain.GameRequirement(RatedBotNotListedProblemType, notListedMessage(bot.name())+" Remove "+seat.DisplayName+".")
 		case rated && bot.competitor.AwayPausedAt != nil:
 			return domain.GameRequirement(RatedBotPausedProblemType, pausedMessage(bot.name())+" Remove "+seat.DisplayName+".")
@@ -298,7 +298,7 @@ func resolveRoster(ctx context.Context, database *gorm.DB, lobby domain.Snapshot
 		default:
 			named, found := names.find(person.AccountID, bot.Name)
 			if !found {
-				return nil, domain.GameRequirement(RatedBotNameRequiredProblemType, "This lobby is rated: waiting for "+person.DisplayName+" to play by hand, or to choose one of their hosted bot names or a bot from the leaderboard.")
+				return nil, domain.GameRequirement(RatedBotNameRequiredProblemType, "This lobby is rated: waiting for "+person.DisplayName+" to play by hand, or to choose one of their hosted bot names or a registered bot.")
 			}
 			entry.Competitor, entry.Label = &named, *named.Name
 		}

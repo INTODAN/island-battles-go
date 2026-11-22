@@ -32,8 +32,8 @@ const (
 	BotNameURLRequiredProblemType     = "urn:island-battles:problem:bot-name-url-required"
 	RatedSameAccountProblemType       = "urn:island-battles:problem:rated-same-account"
 	RatedSeatProblemType              = "urn:island-battles:problem:rated-seat"
-	// A bot chosen by its competitor ID that the leaderboard no longer
-	// lists, in any lobby, and in a rated lobby an away bot that is paused.
+	// A bot chosen by its competitor ID that is no longer registered, in
+	// any lobby, and in a rated lobby an away bot that is paused.
 	RatedBotNotListedProblemType = "urn:island-battles:problem:rated-bot-not-listed"
 	RatedBotPausedProblemType    = "urn:island-battles:problem:rated-bot-paused"
 	// The daily caps of the bots that play away, at the start only.
@@ -51,12 +51,12 @@ const MaxAwayGamesPerDay = 10
 // which the clients show as they are.
 const (
 	ratedSignInMessage      = "This lobby is rated. Sign in with Google in the 3D client to play in it."
-	ratedBotNameMessage     = "This lobby is rated. Play by hand, or choose one of your hosted bot names or a bot from the leaderboard."
+	ratedBotNameMessage     = "This lobby is rated. Play by hand, or choose one of your hosted bot names or a registered bot."
 	ratedHostedBotMessage   = "This lobby is rated. Rated bots run at their own URL: choose one of your hosted bot names, or play by hand."
 	ratedSameAccountMessage = "A rated game needs a different account on each team."
 	// RatedSeatRule is the rule of a rated lobby's bot seats, which every
 	// refusal of a seat starts with.
-	RatedSeatRule = "A rated game allows only default bot seats, each level once, and bots from the leaderboard, each once."
+	RatedSeatRule = "A rated game allows only default bot seats, each level once, and registered bots, each once."
 )
 
 // LobbyRated reports whether a lobby's game_settings make its game rated.
@@ -316,7 +316,7 @@ func checkRatedRoster(members []domain.ReadyMember, seats []domain.Member, atSta
 	case len(guests) > 0:
 		return domain.GameRequirement(RatedSignInRequiredProblemType, ratedSignInMessage)
 	case len(nameless) > 0 && atStart:
-		return domain.GameRequirement(RatedBotNameRequiredProblemType, "This lobby is rated: waiting for "+strings.Join(nameless, ", ")+" to play by hand, or to choose one of their hosted bot names or a bot from the leaderboard.")
+		return domain.GameRequirement(RatedBotNameRequiredProblemType, "This lobby is rated: waiting for "+strings.Join(nameless, ", ")+" to play by hand, or to choose one of their hosted bot names or a registered bot.")
 	case len(nameless) > 0:
 		return domain.GameRequirement(RatedBotNameRequiredProblemType, ratedBotNameMessage)
 	case len(notHosted) > 0 && atStart:

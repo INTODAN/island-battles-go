@@ -36,7 +36,7 @@ export interface paths {
         put?: never;
         /**
          * Register a bot name in your account, with its hosted bot's URL
-         * @description Requires the player token of a signed-in player, which names their account; a guest's token is 403 with problem type urn:island-battles:problem:sign-in-required. Every call stores the account the first time the game sees it, with its hand play, and the display name of the token whenever it changed, so a rename in the lobby reaches the game with the next player token. Registers a bot name, a competitor at a rating of 1500, with the URL of the hosted bot that plays it, and returns it. A name is 3 to 24 characters after trimming, of letters, digits, spaces, - and _, and can't start with Bot (level, otherwise 422. The url is required and must pass a hosted bot's check (https:// on port 443, without credentials, on a host name whose addresses are all public), otherwise 422. In a rated lobby the name plays as a hosted bot at this URL. Once the name has played a rated game, the leaderboard lists it with its URL, so that others can play against it. Names are unique across all accounts without regard to case: a taken name is 409 with problem type urn:island-battles:problem:bot-name-taken. An account has at most 5 bot names: a sixth is 409 with problem type urn:island-battles:problem:bot-name-limit. A name can't be renamed: delete it and register another.
+         * @description Requires the player token of a signed-in player, which names their account; a guest's token is 403 with problem type urn:island-battles:problem:sign-in-required. Every call stores the account the first time the game sees it, with its hand play, and the display name of the token whenever it changed, so a rename in the lobby reaches the game with the next player token. Registers a bot name, a competitor at a rating of 1500, with the URL of the hosted bot that plays it, and returns it. A name is 3 to 24 characters after trimming, of letters, digits, spaces, - and _, and can't start with Bot (level, otherwise 422. The url is required and must pass a hosted bot's check (https:// on port 443, without credentials, on a host name whose addresses are all public), otherwise 422. In a rated lobby the name plays as a hosted bot at this URL. GET /bots/registered lists the name with its URL at once, so that others can play against it, and once it has played a rated game the leaderboard lists it too. Names are unique across all accounts without regard to case: a taken name is 409 with problem type urn:island-battles:problem:bot-name-taken. An account has at most 5 bot names: a sixth is 409 with problem type urn:island-battles:problem:bot-name-limit. A name can't be renamed: delete it and register another.
          */
         post: operations["registerIslandBotName"];
         delete?: never;
@@ -101,6 +101,26 @@ export interface paths {
          * @description Lists the default bots in level order, each with its level, a name and a description of how it plays. Higher levels play better. The backend plays a default bot itself, with no client: it plays each turn as soon as the generation is created, so it never misses a turn's deadline. A game in which only default bots are left plays on by itself, and each game request continues it for a few seconds. The list is static and needs no authentication. server_bots says whether the server also offers hosted and uploaded bots, which it plays without a player's tab, in member settings and bot seats.
          */
         get: operations["listDefaultBots"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/bots/registered": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search the registered bots: every bot name with a URL, rated or not
+         * @description Public: it needs no credential. It lists every registered bot name that has a hosted bot URL, across all accounts, with its owner's display name and its URL, whether or not it has played a rated game. Anyone may choose one by its competitor_id: for their own team, as a member's {"kind": "hosted", "competitor_id": "…"}, or as a seat, {"bot_competitor_id": "…"}, and the server plays it at its URL, without its owner joining. A deleted bot name, one without a URL, and the bots of an account that the admin hid aren't listed. search keeps only the bots whose name or owner's display name holds it, without regard to case. The order is rated bots first, by rating, highest first, then unrated bots by name; limit (1 to 100, default 50) and offset (default 0) page through it, and total counts the bots that match.
+         */
+        get: operations["listIslandRegisteredBots"];
         put?: never;
         post?: never;
         delete?: never;
@@ -579,7 +599,7 @@ export interface components {
              * @description For kind default, the level of the default bot, one that GET /bots/defaults lists. Absent for the other kinds.
              */
             level?: number;
-            /** @description In a rated game, the bot name that a hosted bot plays as, such as Kraken: one that its player registered in their account, or a bot from the leaderboard that plays away, for a member of another account or in a seat. Absent for the other kinds and in a game that isn't rated. */
+            /** @description In a rated game, the bot name that a hosted bot plays as, such as Kraken: one that its player registered in their account, or another account's registered bot that plays away, for a member of another account or in a seat. Absent for the other kinds and in a game that isn't rated. */
             name?: string;
             /**
              * Format: int64
@@ -672,7 +692,7 @@ export interface components {
         BotSeatSettings: {
             /**
              * Format: uuid
-             * @description A bot name that the leaderboard lists, by its competitor_id (GET /leaderboard), whoever owns it, which plays at the name's URL as it is at the start. The seat is named after the bot and its owner, such as "Kraken (Dana)". It plays away: in a rated lobby the bot is the seat's competitor, and the daily caps and the pause apply to it; in a lobby that isn't rated it rates nothing. Only when GET /bots/defaults says server_bots.
+             * @description A registered bot name with a URL, rated or not, by its competitor_id (GET /bots/registered), whoever owns it, which plays at the name's URL as it is at the start. The seat is named after the bot and its owner, such as "Kraken (Dana)". It plays away: in a rated lobby the bot is the seat's competitor, and the daily caps and the pause apply to it; in a lobby that isn't rated it rates nothing. Only when GET /bots/defaults says server_bots.
              */
             bot_competitor_id?: string;
             /**
@@ -894,7 +914,7 @@ export interface components {
              * @description The Elo rating, 1500 before the first rated game. Shown rounded.
              */
             rating: number;
-            /** @description For a bot name, its hosted bot's URL, where it plays in a rated lobby. It becomes public on the leaderboard once the name has played a rated game. Null for hand play, and for a bot name registered before names had URLs, which plays in no rated lobby until its owner sets one with PUT /account/bot-names/{competitor_id}. */
+            /** @description For a bot name, its hosted bot's URL, where it plays in a rated lobby. It is public: GET /bots/registered lists it, and the leaderboard too once the name has played a rated game. Null for hand play, and for a bot name registered before names had URLs, which plays in no rated lobby until its owner sets one with PUT /account/bot-names/{competitor_id}. */
             url: string | null;
             /** Format: int64 */
             wins: number;
@@ -1228,7 +1248,7 @@ export interface components {
             outcome?: components["schemas"]["GameOutcome"];
             /** Format: uuid */
             player_id: string;
-            /** @description Whether the game is rated: its lobby's rated setting at the start. Every team of a rated game is played by a competitor, a signed-in player's hand play or bot name, a bot from the leaderboard or a house bot, and bot.name names the bot name that plays. */
+            /** @description Whether the game is rated: its lobby's rated setting at the start. Every team of a rated game is played by a competitor, a signed-in player's hand play or bot name, a registered bot or a house bot, and bot.name names the bot name that plays. */
             rated: boolean;
             /** @description The localhost bot seats that you added to the lobby as its host, which only you relay: your client reads each one's turn with GET /game/from-lobby/{lobby_id}/turn-delivery?player_id= and delivers it to 127.0.0.1 on the seat's port, as it does for your own localhost bot. Empty for everyone else. */
             relayed_bots: components["schemas"]["RelayedBot"][];
@@ -1335,7 +1355,7 @@ export interface components {
              * @description The Elo rating, rounded to a whole number.
              */
             rating: number;
-            /** @description For a bot name, its hosted bot's URL, which its owner published by playing it in a rated game: anyone may play against it in an unrated lobby of their own, as a hosted bot seat at this URL, which changes no rating. Null for hand play and house bots, and for a bot name without a URL, which was registered before names had URLs. */
+            /** @description For a bot name, its hosted bot's URL, which GET /bots/registered publishes too: anyone may choose it by its competitor_id, for their own team or as a seat. Null for hand play and house bots, and for a bot name without a URL, which was registered before names had URLs. */
             url: string | null;
             /** Format: int64 */
             wins: number;
@@ -1376,7 +1396,7 @@ export interface components {
              * @description The Elo rating, rounded to a whole number.
              */
             rating: number;
-            /** @description For a bot name, its hosted bot's URL, which its owner published by playing it in a rated game: anyone may play against it in an unrated lobby of their own, as a hosted bot seat at this URL, which changes no rating. Null for hand play and house bots, and for a bot name without a URL, which was registered before names had URLs. */
+            /** @description For a bot name, its hosted bot's URL, which GET /bots/registered publishes too: anyone may choose it by its competitor_id, for their own team or as a seat. Null for hand play and house bots, and for a bot name without a URL, which was registered before names had URLs. */
             url: string | null;
             /** Format: int64 */
             wins: number;
@@ -1426,7 +1446,7 @@ export interface components {
              */
             max_generations: number;
             /**
-             * @description Whether the game is rated, false when left out. A rated lobby starts only when every member is signed in and plays by hand, with one of their bot names or with a bot from the leaderboard, no two teams belong to one account, every bot seat is a default bot level, each level once, or a bot from the leaderboard, each once, and the bots that play away have rated games left today. The game then records the competitor of each team, and its end changes their Elo ratings.
+             * @description Whether the game is rated, false when left out. A rated lobby starts only when every member is signed in and plays by hand, with one of their bot names or with a registered bot, no two teams belong to one account, every bot seat is a default bot level, each level once, or a registered bot, each once, and the bots that play away have rated games left today. The game then records the competitor of each team, and its end changes their Elo ratings.
              * @default false
              */
             rated: boolean;
@@ -1495,7 +1515,7 @@ export interface components {
         MemberBot: {
             /**
              * Format: uuid
-             * @description For kind hosted only, instead of url and name: a bot name by its competitor_id, one that the leaderboard lists (GET /leaderboard, with a url), or one of your own bot names. It plays at the name's URL as it is at the start. Another account's bot plays away: in a rated lobby it is that bot that plays for your team, your own hand play isn't in the game, and the daily caps and the pause apply to it. One of your own plays as if you named it. In a lobby that isn't rated it rates nothing.
+             * @description For kind hosted only, instead of url and name: a bot name by its competitor_id: any registered bot with a URL, rated or not (GET /bots/registered), or one of your own bot names. It plays at the name's URL as it is at the start. Another account's bot plays away: in a rated lobby it is that bot that plays for your team, your own hand play isn't in the game, and the daily caps and the pause apply to it. One of your own plays as if you named it. In a lobby that isn't rated it rates nothing.
              */
             competitor_id?: string;
             /**
@@ -1582,7 +1602,7 @@ export interface components {
         RegisterBotNameRequest: {
             /** @description The bot's name: 3 to 24 characters after trimming, of letters, digits, spaces, - and _, not starting with Bot (level. It is unique across all accounts without regard to case. */
             name: string;
-            /** @description The bot's hosted bot URL, where the server sends it each turn in a rated lobby: https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public, as a hosted bot's. It becomes public on the leaderboard once the name has played a rated game, so that others can play against it. */
+            /** @description The bot's hosted bot URL, where the server sends it each turn in a rated lobby: https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public, as a hosted bot's. It is public, in GET /bots/registered, so that others can play against it. */
             url: string;
         };
         RegisterGenerationCommands: {
@@ -1610,6 +1630,46 @@ export interface components {
              * @description Identifies this batch. Retry a lost request with the same UUID and body; use a new UUID for every new batch.
              */
             request_id: string;
+        };
+        RegisteredBot: {
+            /**
+             * Format: uuid
+             * @description Choose it by this ID: a member's {"kind": "hosted", "competitor_id": "…"} or a seat's {"bot_competitor_id": "…"}.
+             */
+            competitor_id: string;
+            /**
+             * Format: int64
+             * @description Rated games played.
+             */
+            games: number;
+            /** @description The bot's registered name, such as Kraken. */
+            name: string;
+            /** @description The display name of the account that owns it, as in "Kraken, by Dana". */
+            owner: string;
+            /** @description Whether it has played a rated game, and so is on the leaderboard. An unrated bot can be chosen too. */
+            rated: boolean;
+            /**
+             * Format: int64
+             * @description Its Elo rating, rounded, once it is rated; null before its first rated game.
+             */
+            rating: number | null;
+            /** @description Its hosted bot's URL, where the server plays it. */
+            url: string;
+        };
+        RegisteredBots: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example https://example.com/RegisteredBots.json
+             */
+            readonly $schema?: string;
+            /** @description The page's bots: rated ones first, by rating, highest first, then unrated ones, each by name. */
+            bots: components["schemas"]["RegisteredBot"][];
+            /**
+             * Format: int64
+             * @description How many registered bots match the search.
+             */
+            total: number;
         };
         RelayedBot: {
             /** @description The seat's name in the lobby, such as "Localhost bot (port 41415)". */
@@ -1653,7 +1713,7 @@ export interface components {
             soldier_amount: number;
         };
         SetBotNameURLRequest: {
-            /** @description The bot's hosted bot URL, where the server sends it each turn in a rated lobby: https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public, as a hosted bot's. It becomes public on the leaderboard once the name has played a rated game, so that others can play against it. */
+            /** @description The bot's hosted bot URL, where the server sends it each turn in a rated lobby: https:// on port 443, without credentials, on a host name (not an IP address) whose addresses are all public, as a hosted bot's. It is public, in GET /bots/registered, so that others can play against it. */
             url: string;
         };
         SoldierGroup: {
@@ -2040,6 +2100,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ListDefaultBotsResponseBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    listIslandRegisteredBots: {
+        parameters: {
+            query?: {
+                /** @description Keeps only the bots whose name or owner's display name holds this text, without regard to case. Empty, every registered bot. */
+                search?: string;
+                /** @description How many bots to return, 1 to 100. */
+                limit?: number;
+                /** @description How many bots to skip, in their order. */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegisteredBots"];
                 };
             };
             /** @description Error */

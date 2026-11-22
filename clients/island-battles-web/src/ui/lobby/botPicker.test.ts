@@ -121,8 +121,20 @@ test("an unrated lobby keeps a saved name when the same kind of bot is saved aga
 
 describe("a bot from the leaderboard", () => {
   const listed = [
-    { competitorId: "c-kraken", name: "Kraken", owner: "Dana" },
-    { competitorId: "c-eel", name: "Eel", owner: "Sam" },
+    {
+      competitorId: "c-kraken",
+      name: "Kraken",
+      owner: "Dana",
+      url: "https://bot.example.org/turn",
+      rating: 1520,
+    },
+    {
+      competitorId: "c-eel",
+      name: "Eel",
+      owner: "Sam",
+      url: "https://bot.example.org/turn",
+      rating: 1520,
+    },
   ];
 
   test("saves a hosted bot by its competitor ID, with no name or URL", () => {
@@ -153,7 +165,15 @@ describe("a bot from the leaderboard", () => {
           id: "c-kraken",
         },
       ]),
-    ).toEqual([{ competitorId: "c-eel", name: "Eel", owner: "Sam" }]);
+    ).toEqual([
+      {
+        competitorId: "c-eel",
+        name: "Eel",
+        owner: "Sam",
+        url: "https://bot.example.org/turn",
+        rating: 1520,
+      },
+    ]);
     expect(pickableListedBots(listed, null)).toEqual(listed);
     // Your own bot, chosen by its ID, stays listed.
     expect(
@@ -174,12 +194,12 @@ describe("a bot from the leaderboard", () => {
   test("its select names each bot with its owner, and keeps a chosen one it doesn't list", () => {
     expect(listedBotOptions(listed, undefined)).toEqual([
       { value: "", label: "Choose a bot…" },
-      { value: "c-kraken", label: "Kraken, by Dana" },
-      { value: "c-eel", label: "Eel, by Sam" },
+      { value: "c-kraken", label: "Kraken, by Dana (rated 1520)" },
+      { value: "c-eel", label: "Eel, by Sam (rated 1520)" },
     ]);
     expect(listedBotOptions(listed, "c-eel")).toEqual([
-      { value: "c-kraken", label: "Kraken, by Dana" },
-      { value: "c-eel", label: "Eel, by Sam" },
+      { value: "c-kraken", label: "Kraken, by Dana (rated 1520)" },
+      { value: "c-eel", label: "Eel, by Sam (rated 1520)" },
     ]);
     expect(listedBotOptions(listed, "c-gone")[0]).toEqual({
       value: "c-gone",
@@ -200,7 +220,7 @@ describe("a bot from the leaderboard", () => {
   test("says whose rating a rated game changes", () => {
     expect(leaderboardRatedHint).toContain("rated in your place");
     expect(leaderboardUnratedHint).toBe(
-      "Anyone's listed bot plays for your team at its URL. The server plays it; this tab relays nothing.",
+      "Anyone's registered bot, rated or not, plays for your team at its URL, without its owner. The server plays it; this tab relays nothing.",
     );
   });
 });
