@@ -229,6 +229,7 @@ describe("bot choices", () => {
     expect(choiceFromValue("hosted", " https://bot.example.com/turn ")).toEqual(
       hosted,
     );
+    expect(choiceFromValue("hosted", "bot.example.com/turn")).toEqual(hosted);
     expect(choiceFromValue("hosted", "")).toBeNull();
   });
 
@@ -831,6 +832,16 @@ describe("a bot from the leaderboard", () => {
       bot_competitor_id: "c-eel",
     });
     expect(seatSettingsFromValue("competitor-", "")).toBeNull();
+  });
+
+  test("Add bot seats a hosted bot at https:// when its URL has no scheme", () => {
+    expect(seatSettingsFromValue("hosted", "bot.example.com/turn")).toEqual({
+      bot_url: "https://bot.example.com/turn",
+    });
+    expect(seatSettingsFromValue("hosted", " http://127.0.0.1:8080 ")).toEqual({
+      bot_url: "http://127.0.0.1:8080",
+    });
+    expect(seatSettingsFromValue("hosted", "  ")).toBeNull();
     expect(seatBody("t-red", { bot_competitor_id: "c-eel" }, "r-1")).toEqual({
       request_id: "r-1",
       team_id: "t-red",

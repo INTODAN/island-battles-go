@@ -1,6 +1,7 @@
 // The account page (#369, option A of the mockups): a dialog like the Game rules page, opened from
 // the menu's Account link. It draws `accountModel.ts` and sends `accountService.ts`'s requests.
 
+import { botUrlFromInput } from "../../bots/kinds";
 import type { Realtime } from "../../realtime";
 import { h } from "../dom";
 import {
@@ -173,7 +174,9 @@ export function openAccount(options: AccountDialogOptions): HTMLDialogElement {
   });
   const urlInput = h("input", {
     id: "new-bot-url",
-    type: "url",
+    type: "text",
+    inputMode: "url",
+    autocapitalize: "off",
     maxLength: 2048,
     autocomplete: "off",
     spellcheck: false,
@@ -199,7 +202,9 @@ export function openAccount(options: AccountDialogOptions): HTMLDialogElement {
   let editing: string | null = null;
   let savingUrl = false;
   const editInput = h("input", {
-    type: "url",
+    type: "text",
+    inputMode: "url",
+    autocapitalize: "off",
     maxLength: 2048,
     autocomplete: "off",
     spellcheck: false,
@@ -527,7 +532,7 @@ export function openAccount(options: AccountDialogOptions): HTMLDialogElement {
     try {
       const competitor = await service.addBotName(
         botInput.value.trim(),
-        urlInput.value.trim(),
+        botUrlFromInput(urlInput.value),
       );
       if (account) account = withBotName(account, competitor);
       botInput.value = "";
@@ -557,7 +562,7 @@ export function openAccount(options: AccountDialogOptions): HTMLDialogElement {
     try {
       const changed = await service.setBotNameUrl(
         competitorId,
-        editInput.value.trim(),
+        botUrlFromInput(editInput.value),
       );
       if (account) account = withChangedBotName(account, changed);
       editing = null;

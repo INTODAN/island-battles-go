@@ -11,6 +11,17 @@ export type RelayedBot = components["schemas"]["RelayedBot"];
 type RegisteredBot = components["schemas"]["RegisteredBot"];
 
 /**
+ * A hosted bot's URL as typed: trimmed, with `https://` put in front when it names no scheme, so
+ * `bot.example.com/turn` reaches `https://bot.example.com/turn`. A typed `http://` or another
+ * scheme stays for the game, or the URL check, to judge. Empty stays empty.
+ */
+export function botUrlFromInput(text: string): string {
+  const url = text.trim();
+  if (url === "" || /^[a-z][a-z0-9+.-]*:\/\//i.test(url)) return url;
+  return `https://${url.replace(/^\/+/, "")}`;
+}
+
+/**
  * A registered bot (#412): a bot name with its URL, rated or not, that anyone may choose for
  * their own team or seat as a bot, by its competitor ID. The server plays it at the name's URL,
  * without its owner joining.

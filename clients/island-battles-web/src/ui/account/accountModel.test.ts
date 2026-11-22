@@ -202,7 +202,9 @@ describe("a bot name's URL", () => {
     expect(validateBotUrl("")).toBe(
       "Enter the URL your hosted bot runs at, such as https://bot.example.com/turn.",
     );
-    expect(validateBotUrl("kraken.example.org")).toBe(
+    // Typed without a scheme, it is tried at https://.
+    expect(validateBotUrl("kraken.example.org/bot")).toBeUndefined();
+    expect(validateBotUrl("not a url")).toBe(
       "Enter a whole URL, such as https://bot.example.com/turn.",
     );
     expect(validateBotUrl("ftp://kraken.example.org")).toBe(
