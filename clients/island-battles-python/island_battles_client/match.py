@@ -22,6 +22,7 @@ import argparse
 import json
 import sys
 import threading
+import time
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -50,6 +51,25 @@ START_ATTEMPTS = 5
 START_RETRY_SECONDS = 2.0
 # How often the command looks for Ctrl+C while lobbies play.
 JOIN_SECONDS = 0.5
+# A read that a proxy or the server failed (5xx) or that never got an answer
+# is sent again, this long apart, up to this many times in all, before it fails.
+READ_ATTEMPTS = 4
+READ_RETRY_SECONDS = 2.0
+# A game whose turn number doesn't advance for twice the turn timeout and this
+# margin is given up: its deadline should have ended the turn long before.
+STALL_MARGIN_SECONDS = 60.0
+DEFAULT_TURN_TIMEOUT_SECONDS = 30
+# One line at a time on standard error, from every lobby's thread.
+_STDERR_LOCK = threading.Lock()
+
+
+def say(line: str) -> None:
+    """Write one whole line to standard error."""
+    with _STDERR_LOCK:
+        sys.stderr.write(line + "\n")
+        sys.stderr.flush()
+
+
 # The game's routes take a player token from the lobby, which lasts at most 15
 # minutes; a new one is fetched once this share of its life has passed.
 PLAYER_TOKEN_REFRESH_SHARE = 0.8
@@ -129,7 +149,7 @@ def parse_seat(text: str) -> Seat:
             )
         default_name = Path(value).name
     else:
-        if not value.isdigit() or int(value) < 1:
+        if not (value.isascii() and value.isdigit()) or int(value) < 1:
             raise MatchError(
                 f"--seat {text!r}: the level must be a whole number from 1"
             )
@@ -240,11 +260,34 @@ class Servers:
         game_url: str,
         client: httpx.Client,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+        pause: Callable[[float], None] = time.sleep,
+        retry_seconds: float = READ_RETRY_SECONDS,
     ) -> None:
         self.lobby_url = lobby_url.rstrip("/")
         self.game_url = game_url.rstrip("/")
         self.client = client
         self.clock = clock
+        self.pause = pause
+        self.retry_seconds = retry_seconds
+
+    def _send(
+        self, method: str, url: str, retry: bool, **arguments: Any
+    ) -> httpx.Response:
+        """One request, sent again after a 5xx answer or none when ``retry``
+        says it is safe to; raises httpx.HTTPError when no answer came."""
+        attempts = READ_ATTEMPTS if retry else 1
+        for attempt in range(attempts):
+            if attempt:
+                self.pause(self.retry_seconds)
+            try:
+                response = self.client.request(method, url, **arguments)
+            except httpx.TransportError:
+                if attempt == attempts - 1:
+                    raise
+                continue
+            if response.status_code < 500 or attempt == attempts - 1:
+                return response
+        raise AssertionError("unreachable")
 
     def lobby(
         self,
@@ -253,14 +296,16 @@ class Servers:
         guest: Guest | None = None,
         body: dict[str, Any] | None = None,
         expected: tuple[int, ...] = (200, 201),
+        retry: bool = False,
     ) -> httpx.Response:
-        """A request to the lobby, with the guest's credential."""
+        """A request to the lobby, with the guest's credential; sent again
+        after a 5xx answer or none when ``retry`` says it is safe to."""
         headers = {"Accept": "application/json"}
         if guest is not None:
             headers["Authorization"] = f"Bearer {guest.credential}"
         try:
-            response = self.client.request(
-                method, f"{self.lobby_url}{path}", json=body, headers=headers
+            response = self._send(
+                method, f"{self.lobby_url}{path}", retry, json=body, headers=headers
             )
         except httpx.HTTPError as error:
             raise MatchError(
@@ -284,7 +329,11 @@ class Servers:
             or now >= guest.player_token_renew_at
         ):
             issued = self.lobby(
-                "POST", "/lobby/v1/player-tokens", guest, {"game_key": GAME_KEY}
+                "POST",
+                "/lobby/v1/player-tokens",
+                guest,
+                {"game_key": GAME_KEY},
+                retry=True,
             ).json()
             expires = datetime.fromisoformat(issued["expires_at"])
             guest.player_token = issued["token"]
@@ -295,16 +344,26 @@ class Servers:
         return guest.player_token
 
     def game(
-        self, method: str, path: str, guest: Guest, **arguments: Any
+        self,
+        method: str,
+        path: str,
+        guest: Guest,
+        retry: bool = False,
+        **arguments: Any,
     ) -> httpx.Response:
         """A request to the game with the guest's player token, again with a
-        new token when the game answers 401."""
+        new token when the game answers 401, and after a 5xx answer or none
+        when ``retry`` says it is safe to."""
         response: httpx.Response | None = None
         for renew in (False, True):
             headers = {"Authorization": f"Bearer {self.token(guest, renew)}"}
             try:
-                response = self.client.request(
-                    method, f"{self.game_url}{path}", headers=headers, **arguments
+                response = self._send(
+                    method,
+                    f"{self.game_url}{path}",
+                    retry,
+                    headers=headers,
+                    **arguments,
                 )
             except httpx.HTTPError as error:
                 raise MatchError(
@@ -334,9 +393,15 @@ class Heartbeats:
     as connected while games play and doesn't delete the lobby as idle."""
 
     def __init__(
-        self, servers: Servers, guests: Sequence[Guest], lobby_id: str, interval: float
+        self,
+        servers: Servers,
+        guests: Sequence[Guest],
+        lobby_id: str,
+        interval: float,
+        report: Callable[[str], None] = say,
     ) -> None:
         self.servers = servers
+        self.report = report
         self.guests = guests
         self.lobby_id = lobby_id
         self.interval = interval
@@ -364,11 +429,7 @@ class Heartbeats:
                     },
                 )
             except MatchError as error:
-                print(
-                    f"heartbeat of {guest.seat.name}: {error}",
-                    file=sys.stderr,
-                    flush=True,
-                )
+                self.report(f"heartbeat of {guest.seat.name}: {error}")
 
     def _run(self) -> None:
         while not self.stopped.wait(self.interval):
@@ -389,9 +450,8 @@ class Match:
         poll_seconds: float = POLL_SECONDS,
         retry_seconds: float = START_RETRY_SECONDS,
         heartbeat_seconds: float = HEARTBEAT_SECONDS,
-        report: Callable[[str], None] = lambda line: print(
-            line, file=sys.stderr, flush=True
-        ),
+        report: Callable[[str], None] = say,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self.servers = servers
         self.seats = list(seats)
@@ -402,6 +462,8 @@ class Match:
         self.retry_seconds = retry_seconds
         self.heartbeat_seconds = heartbeat_seconds
         self.report = report
+        self.monotonic = monotonic
+        self.queue = GameQueue([])
         self.guests: list[Guest] = []
         self.lobby_id: str | None = None
         self.snapshot: dict[str, Any] = {}
@@ -420,6 +482,7 @@ class Match:
         as its game ends. The guests leave the lobby at the end, also when a
         game fails or ``cancel`` is set."""
         queue = games if isinstance(games, GameQueue) else GameQueue(games)
+        self.queue = queue
         game = queue.next()
         if game is None:
             return []
@@ -432,12 +495,18 @@ class Match:
             self._open(game)
             assert self.lobby_id is not None
             with Heartbeats(
-                self.servers, self.guests, self.lobby_id, self.heartbeat_seconds
+                self.servers,
+                self.guests,
+                self.lobby_id,
+                self.heartbeat_seconds,
+                self.report,
             ):
                 self._choose_bots()
                 first = True
                 while game is not None:
                     result = self._play_game(game, first=first)
+                    if result is None:
+                        break
                     on_result(result)
                     results.append(result)
                     first = False
@@ -538,7 +607,9 @@ class Match:
         self.report(f"{guest.seat.name}: uploaded {path}: {describe(package)}")
         return str(package.package_id)
 
-    def _play_game(self, game: Game, first: bool) -> dict[str, Any]:
+    def _play_game(self, game: Game, first: bool) -> dict[str, Any] | None:
+        """Play one game and save it, or return None, starting nothing, when
+        another lobby's game failed while this one was getting ready."""
         assert self.lobby_id is not None
         self._check_cancel()
         lobby_path = self.servers.lobby_path
@@ -582,6 +653,10 @@ class Match:
             self.snapshot = self.servers.lobby(
                 "PUT", lobby_path(self.lobby_id, "/ready"), guest, {"ready": True}
             ).json()
+        # A lobby that took its game before another lobby's game failed
+        # still starts nothing after that.
+        if self.queue.stopped.is_set():
+            return None
         self._start()
         lobby_round = self.snapshot["lobby"]["round"]
         names = [guest.seat.name for guest in players]
@@ -640,9 +715,17 @@ class Match:
         """Read the host's game until it ends. Every game request first ends
         a turn whose deadline has passed, so reading also ends a turn that a
         bot didn't answer in time."""
+        timeout = self.settings.get("turn_timeout_seconds") or (
+            DEFAULT_TURN_TIMEOUT_SECONDS
+        )
+        stall_limit = 2 * timeout + STALL_MARGIN_SECONDS
+        last_turn, last_advance = None, self.monotonic()
         while True:
             response = self.servers.game(
-                "GET", f"/game/from-lobby/{self.lobby_id}/generation", self.host
+                "GET",
+                f"/game/from-lobby/{self.lobby_id}/generation",
+                self.host,
+                retry=True,
             )
             if response.status_code != 200:
                 raise MatchError(f"could not read the game: {_problem(response)}")
@@ -652,12 +735,21 @@ class Match:
                 and state.get("outcome") is not None
             ):
                 return state
+            now = self.monotonic()
+            if state.get("turn_number") != last_turn:
+                last_turn, last_advance = state.get("turn_number"), now
+            elif now - last_advance > stall_limit:
+                raise MatchError(
+                    f"the game in lobby {self.lobby_id} stalled: turn {last_turn} "
+                    f"hasn't ended in {round(now - last_advance)} s, although its "
+                    f"{timeout} s deadline should have ended it"
+                )
             self._pause(self.poll_seconds)
 
     def _save_demo(self, path: Path) -> None:
         """The game's demo, with every team's log lines, as Save demo saves it."""
         response = self.servers.game(
-            "GET", f"/game/from-lobby/{self.lobby_id}/demo", self.host
+            "GET", f"/game/from-lobby/{self.lobby_id}/demo", self.host, retry=True
         )
         if response.status_code != 200:
             raise MatchError(f"could not save the demo: {_problem(response)}")
@@ -719,22 +811,29 @@ def play_parallel(
             with lock:
                 failures.append(MatchError(f"{type(error).__name__}: {error}"))
 
-    workers = [
-        threading.Thread(target=worker, name=f"match-{index + 1}")
-        for index in range(max(1, min(parallel, len(games))))
-    ]
-    for thread in workers:
-        thread.start()
+    started: list[threading.Thread] = []
     try:
-        for thread in workers:
+        for index in range(max(1, min(parallel, len(games)))):
+            thread = threading.Thread(target=worker, name=f"match-{index + 1}")
+            # Listed before it starts, so an interrupt during start() still
+            # joins it; one that never started has no ident.
+            started.append(thread)
+            thread.start()
+        for thread in started:
             while thread.is_alive():
                 thread.join(JOIN_SECONDS)
     except KeyboardInterrupt:
         report("stopping: leaving every lobby")
         cancel.set()
         queue.stop()
-        for thread in workers:
-            thread.join()
+        # Every lobby is left before the HTTP client closes, however often
+        # Ctrl+C is pressed meanwhile.
+        for thread in started:
+            while thread.ident is not None and thread.is_alive():
+                try:
+                    thread.join(JOIN_SECONDS)
+                except KeyboardInterrupt:
+                    report("still leaving the lobbies; wait a moment")
         raise
     return failures
 
@@ -762,18 +861,20 @@ def run(args: argparse.Namespace, game_url: str, lobby_url: str) -> int:
         ) as client:
             servers = Servers(lobby_url, game_url, client)
             failures = play_parallel(
-                lambda cancel: Match(servers, seats, output, settings, cancel=cancel),
+                lambda cancel: Match(
+                    servers, seats, output, settings, cancel=cancel, report=say
+                ),
                 games,
                 args.parallel,
                 lambda result: print(json.dumps(result), flush=True),
-                lambda line: print(line, file=sys.stderr, flush=True),
+                say,
             )
     except MatchError as error:
-        print(f"FAIL: {error}", file=sys.stderr)
+        say(f"FAIL: {error}")
         return 1
     except KeyboardInterrupt:
-        print("stopped", file=sys.stderr)
+        say("stopped")
         return 130
     for failure in failures:
-        print(f"FAIL: {failure}", file=sys.stderr)
+        say(f"FAIL: {failure}")
     return 1 if failures else 0

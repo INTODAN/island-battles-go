@@ -14,6 +14,7 @@ import pytest
 
 from island_battles_client import cli
 from island_battles_client.match import (
+    GameQueue,
     Match,
     MatchCancelled,
     MatchError,
@@ -95,6 +96,9 @@ class FakeServers:
         unavailable_starts: int = 0,
         polls_per_game: int = 2,
         refused_map: str | None = None,
+        failed_reads: int = 0,
+        failed_tokens: int = 0,
+        stalled: bool = False,
     ) -> None:
         self.lock = threading.Lock()
         self.requests: list[tuple[str, str]] = []
@@ -107,6 +111,14 @@ class FakeServers:
         self.unavailable_starts = unavailable_starts
         self.polls_per_game = polls_per_game
         self.refused_map = refused_map
+        # How many reads of the game, and of player tokens, fail first: a
+        # proxy's 502 and a dropped connection, in turn.
+        self.failed_reads = failed_reads
+        self.failed_tokens = failed_tokens
+        # A game whose turn never ends.
+        self.stalled = stalled
+        # Called when a member gets ready.
+        self.on_ready = lambda: None
         self.starts: list[dict[str, Any]] = []
         self.left: list[str] = []
         # The most games that ran at once.
@@ -139,6 +151,15 @@ class FakeServers:
         with self.lock:
             return self.handle(request)
 
+    def flaky(self, request: httpx.Request, name: str) -> httpx.Response | None:
+        left = getattr(self, name)
+        if not left:
+            return None
+        setattr(self, name, left - 1)
+        if left % 2:
+            raise httpx.ConnectError("connection reset", request=request)
+        return httpx.Response(502, text="Bad Gateway")
+
     def handle(self, request: httpx.Request) -> httpx.Response:
         method, path = request.method, request.url.path
         self.requests.append(
@@ -151,6 +172,14 @@ class FakeServers:
             else None
         )
         authorization = request.headers.get("authorization", "").removeprefix("Bearer ")
+        if path == "/lobby/v1/player-tokens":
+            failed = self.flaky(request, "failed_tokens")
+            if failed is not None:
+                return failed
+        if path.endswith("/generation"):
+            failed = self.flaky(request, "failed_reads")
+            if failed is not None:
+                return failed
         if request.url.host == "storage.example":
             self.uploads.append(request.content)
             return httpx.Response(204)
@@ -239,6 +268,7 @@ class FakeServers:
             if member["team_id"] is None or member["member_settings"] is None:
                 return self.problem(409, "not_ready")
             member["ready"] = body["ready"]
+            self.on_ready()
             return httpx.Response(200, json=lobby.snapshot())
         if rest == "/settings":
             assert body["game_settings"]["map"]["player_amount"] == len(body["teams"])
@@ -333,7 +363,7 @@ class FakeServers:
             )
         if rest == "/generation":
             assert lobby.phase in ("started", "ended")
-            lobby.polls += 1
+            lobby.polls += 0 if self.stalled else 1
             state = {
                 "game_id": 100 * len(self.lobbies) + lobby.round,
                 "lobby_round": lobby.round,
@@ -389,9 +419,10 @@ def make_match(
     settings: dict | None = None,
     cancel: threading.Event | None = None,
     poll_seconds: float = 0,
+    monotonic=time.monotonic,
 ) -> Match:
     return Match(
-        Servers(LOBBY, GAME, client),
+        Servers(LOBBY, GAME, client, pause=lambda _: None),
         seats,
         output,
         settings or {},
@@ -400,6 +431,7 @@ def make_match(
         retry_seconds=0,
         heartbeat_seconds=0.01,
         report=lambda _: None,
+        monotonic=monotonic,
     )
 
 
@@ -428,6 +460,7 @@ def test_seats_parse_with_their_names(zip_file: Path) -> None:
         "remote:https://x",
         "default:zero",
         "default:0",
+        "default:\u00b2",
         "hosted:not-a-url",
         "package:missing.zip",
     ):
@@ -707,9 +740,14 @@ def test_a_failed_game_starts_no_more_but_lets_running_games_end(
     assert 1 <= len(failures) <= 2
     assert all("this map is refused" in str(failure) for failure in failures)
     assert any("no lobby starts another" in line for line in reports)
-    # The good map's games, already running, ended and were saved.
-    assert sorted(result["id"] for result in results) == ["good-1", "good-2"]
-    assert (tmp_path / "out" / "good-2.demo.json").is_file()
+    # Every game that started, all on the good map, ended and was saved. A
+    # lobby still getting ready for its good game when the bad one failed
+    # started nothing.
+    ids = [result["id"] for result in results]
+    assert set(ids) <= {"good-1", "good-2"} and ids
+    assert len(fake.starts) == len(results)
+    for game_id in ids:
+        assert (tmp_path / "out" / f"{game_id}.demo.json").is_file()
     # No game was left running, and every guest left.
     assert all(lobby.phase != "started" for lobby in fake.lobbies.values())
     assert sorted(fake.left) == sorted(fake.players.values())
@@ -752,8 +790,10 @@ def test_ctrl_c_leaves_every_lobby(maps: list[Path], tmp_path: Path) -> None:
             poll_seconds=0.01,
         )
     # Two games had started; the third lobby, if it got that far, left too.
+    # A guest whose session was made just before Ctrl+C joined no lobby, so
+    # it has nothing to leave.
     assert len(fake.lobbies) >= 2
-    assert sorted(fake.left) == sorted(fake.players.values())
+    assert sorted(fake.left) == sorted(fake.player_lobby)
     assert all(not lobby.members for lobby in fake.lobbies.values())
 
 
@@ -807,3 +847,67 @@ def test_the_command_takes_parallel(
 
     assert cli.main([*arguments, "--map", str(maps[0]), "--parallel", "0"]) == 1
     assert "--parallel must be at least 1" in capsys.readouterr().err
+
+
+def test_reads_survive_a_proxy_error_and_a_dropped_connection(
+    maps: list[Path], tmp_path: Path
+) -> None:
+    fake = FakeServers(failed_reads=3, failed_tokens=3)
+    results = play(
+        fake,
+        [parse_seat("default:1"), parse_seat("default:2")],
+        schedule(maps[:1], 2, 1),
+        tmp_path,
+    )
+    assert [result["id"] for result in results] == ["strait-1", "strait-2"]
+    assert (fake.failed_reads, fake.failed_tokens) == (0, 0)
+
+    # A read that keeps failing fails the game, after its retries.
+    fake = FakeServers(failed_reads=4)
+    with pytest.raises(
+        MatchError, match="the game didn.t answer GET .*generation: connection reset"
+    ):
+        play(
+            fake,
+            [parse_seat("default:1"), parse_seat("default:2")],
+            schedule(maps[:1], 2, 1),
+            tmp_path,
+        )
+    assert sorted(fake.left) == sorted(fake.players.values())
+
+
+def test_a_game_whose_turn_never_ends_is_given_up(
+    maps: list[Path], tmp_path: Path
+) -> None:
+    fake = FakeServers(stalled=True)
+    seconds = iter(range(0, 10**6, 10))
+    with (
+        fake.client() as client,
+        pytest.raises(
+            MatchError,
+            match="stalled: turn 0 hasn't ended in 1[0-9]{2} s, although its 30 s deadline",
+        ),
+    ):
+        make_match(
+            client,
+            [parse_seat("default:1"), parse_seat("default:2")],
+            tmp_path,
+            monotonic=lambda: next(seconds),
+        ).play(schedule(maps, 2, 1))
+    assert sorted(fake.left) == sorted(fake.players.values())
+
+
+def test_a_lobby_still_getting_ready_starts_nothing_after_a_failure(
+    maps: list[Path], tmp_path: Path
+) -> None:
+    fake = FakeServers()
+    queue = GameQueue(schedule(maps, 2, 1))
+    # Another lobby's game fails while this one's members get ready.
+    fake.on_ready = queue.stop
+    with fake.client() as client:
+        results = make_match(
+            client, [parse_seat("default:1"), parse_seat("default:2")], tmp_path
+        ).play(queue)
+    assert results == []
+    assert fake.starts == []
+    assert sorted(fake.left) == sorted(fake.players.values())
