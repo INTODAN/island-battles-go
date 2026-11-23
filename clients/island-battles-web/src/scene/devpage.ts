@@ -10,6 +10,7 @@ import {
 } from "./animation";
 import { type Battlefield, battlefieldOf } from "./battlefield";
 import { loadBoardAssets } from "./boardAssets";
+import { paceBoard } from "./boardPacing";
 import { setCastleAnimation } from "./castles";
 import { toWorld } from "./coordinates";
 import { applyGraphics, type Graphics, savedGraphics } from "./graphics";
@@ -152,7 +153,10 @@ export async function startFixturePage(
   const engine = new Engine(canvas, true, { preserveDrawingBuffer: true });
   const scene = new Scene(engine);
   installBoardControls(scene);
-  window.addEventListener("resize", () => engine.resize());
+  window.addEventListener("resize", () => {
+    pacer.wake();
+    engine.resize();
+  });
   const assets = loadBoardAssets(scene, (progress) =>
     loading?.update(progress),
   );
@@ -186,7 +190,7 @@ export async function startFixturePage(
     next.disabled = current === last;
     status.textContent = `${fixtureName} · generation ${frame.id} · frame ${current + 1} / ${demo.frames.length}`;
   };
-  const { player } = createScenePlayer(scene, demo.teams, {
+  const scenePlayer = createScenePlayer(scene, demo.teams, {
     turnMs: Number.isFinite(turnMs) && turnMs > 0 ? turnMs : DEFAULT_TURN_MS,
     onShown: (generation) => {
       const index = demo.frames.findIndex(
@@ -197,6 +201,9 @@ export async function startFixturePage(
     // The next turn is queued as one ends, so the fixture plays on with no pause between turns.
     onIdle: () => feed(),
   });
+  const { player } = scenePlayer;
+  // Full rate while a turn plays or the fixture plays on, a low rate otherwise (#403).
+  const { pacer } = paceBoard(scene, scenePlayer, () => playing);
   const speed = Number(query.get("speed") ?? "1");
   player.setSpeed(Number.isFinite(speed) ? speed : 1);
   speedBox.value = String(player.speed);
@@ -208,6 +215,7 @@ export async function startFixturePage(
     if (!frame) return;
     queued = target;
     player.seek(frame);
+    pacer.wake();
   };
   const playTurn = (index: number) => {
     const target = clampIndex(index);
@@ -216,6 +224,7 @@ export async function startFixturePage(
     if (!from || !to) return;
     queued = target;
     player.play(from, to);
+    pacer.wake();
   };
   const scrub = (index: number, progress: number) => {
     const target = clampIndex(index);
@@ -224,10 +233,12 @@ export async function startFixturePage(
     if (!from || !to) return;
     queued = target;
     player.scrub(from, to, progress);
+    pacer.wake();
   };
   const setPlaying = (value: boolean) => {
     playing = value;
     play.textContent = playing ? "Pause" : "Play";
+    pacer.wake();
   };
   const advance = (ms: number) => {
     // The player takes at most DEFAULT_MAX_FRAME_MS a tick.
@@ -324,6 +335,7 @@ export async function startFixturePage(
   const setGraphics = async (value: Graphics) => {
     graphics = value;
     effects.checked = value === "high";
+    pacer.wake();
     const camera = scene.activeCamera;
     const applied = camera ? applyGraphics(scene, camera, value) : undefined;
     // `&still=1` keeps the castles still whatever the setting.

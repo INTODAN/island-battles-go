@@ -10,6 +10,7 @@ import type { ConnectionState } from "../../realtime";
 import { createScenePlayer } from "../../scene/animation";
 import { battlefieldOf } from "../../scene/battlefield";
 import { loadBoardAssets } from "../../scene/boardAssets";
+import { paceBoard } from "../../scene/boardPacing";
 import { fitCamera } from "../../scene/camera";
 import { castleScreenPoint } from "../../scene/castleMenuInput";
 import {
@@ -780,7 +781,10 @@ export class GameScreen {
     // The board's art loads behind a loading screen; the board draws placeholders meanwhile.
     const loading = showBoardLoading(this.root);
     loadBoardAssets(scene, (progress) => loading.update(progress)).then(
-      () => loading.done(),
+      () => {
+        loading.done();
+        if (!scene.isDisposed) pacing.pacer.wake();
+      },
       (error) => {
         console.error("the board's art failed to load", error);
         loading.failed();
@@ -789,7 +793,7 @@ export class GameScreen {
     // A turn that ends asks for the next one at once, so playing on loses no time between turns.
     let onIdle = () => {};
     let controllerOf: GameController | undefined;
-    const { player } = createScenePlayer(scene, sorted, {
+    const scenePlayer = createScenePlayer(scene, sorted, {
       onIdle: () => onIdle(),
       // The turn that `next` is: its index in the history, from 1.
       departed: (_previous, next) => {
@@ -813,6 +817,7 @@ export class GameScreen {
         live: this.options.live,
       }).timing,
     });
+    const { player } = scenePlayer;
     const controller = new GameController(
       {
         play: (previous, next) => player.play(previous, next),
@@ -827,6 +832,9 @@ export class GameScreen {
     controllerOf = controller;
     onIdle = () => controller.tick();
     scene.onBeforeRenderObservable.add(() => controller.tick());
+    // Full rate while something moves, a low rate otherwise; any change of the view wakes it.
+    const pacing = paceBoard(scene, scenePlayer);
+    const stopWaking = controller.subscribe(() => pacing.pacer.wake());
     this.handSurface = handPlay && {
       handPlay,
       showsNewestTurn: () => showsNewestTurn(controller.state),
@@ -929,6 +937,7 @@ export class GameScreen {
     let aspect =
       engine.getRenderWidth() / Math.max(1, engine.getRenderHeight());
     const resize = new ResizeObserver(() => {
+      pacing.pacer.wake();
       engine.resize();
       // A very different shape (a phone turned around) needs the board fitted again.
       const field = battlefieldOf(scene);
@@ -963,6 +972,7 @@ export class GameScreen {
       const value: Graphics = this.effects.checked ? "high" : "low";
       saveGraphics(value);
       setGraphics(value);
+      pacing.pacer.wake();
     };
 
     controller.load(frames, outcome);
@@ -994,6 +1004,8 @@ export class GameScreen {
         resize.disconnect();
         stopStackHeights();
         removeDebug();
+        stopWaking();
+        pacing.dispose();
         engine.stopRenderLoop();
         scene.dispose();
         engine.dispose();

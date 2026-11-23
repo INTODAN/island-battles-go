@@ -100,4 +100,9 @@ export class SystemPool<T> {
   busy(key: string): number {
     return this.busyByKind.get(key) ?? 0;
   }
+
+  /** How many systems are lent out now, of every kind. */
+  get leased(): number {
+    return this.leases.size;
+  }
 }
