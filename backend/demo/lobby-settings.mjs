@@ -259,7 +259,7 @@ export class SettingsForm {
       node("label", {}, "Turn timeout", this.timeout),
       node("p", { className: "hint" }, "In a game of bots, a team whose bot doesn’t answer in this time loses. In a real-time game, a player who doesn’t respond for this long has left."),
       node("label", {}, "Turn pace", this.pace),
-      node("p", { className: "hint" }, "Used when someone plays by hand: the game is then real-time, with a turn this often."),
+      node("p", { className: "hint" }, "Used when someone plays by hand: the game is then real-time, with a turn this often. 0.5 s needs a fast connection."),
       node("label", {}, "Game length", this.length),
       node("p", { className: "hint" }, "The game ends after this many turns; the team with the most castles wins."),
       node("label", {}, this.rated, "Rated"),

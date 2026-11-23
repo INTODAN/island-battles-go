@@ -153,6 +153,14 @@ test("the turn pace is sent, and the room's form shows the lobby's current one",
   assert.equal(odd.choice().settings.turn_pace_milliseconds, 1500);
 });
 
+test("the turn pace's hint says that 0.5 s needs a fast connection", async () => {
+  games += 1;
+  const container = new FakeElement("div");
+  new SettingsForm({ container, gameURL: `https://game${games}.example` });
+  await loaded();
+  assert.ok(texts(container).includes("Used when someone plays by hand: the game is then real-time, with a turn this often. 0.5 s needs a fast connection."));
+});
+
 // The texts of an element's descendants, in order.
 function texts(element) {
   return element.children.flatMap((child) => (child instanceof FakeElement ? texts(child) : [String(child)]));

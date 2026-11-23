@@ -14,14 +14,15 @@ import (
 // the commands and the end-of-turn steps in memory, and saves the result as the
 // next generation. A rejected command rolls back the whole turn.
 func MigrateGeneration(database *gorm.DB, gameID uint, commands []models.CommandFields) (uint, error) {
-	generationID, _, err := migrateGeneration(database, gameID, commands, time.Time{})
+	generationID, _, err := migrateGeneration(database, gameID, commands, time.Time{}, nil)
 	return generationID, err
 }
 
 // migrateGeneration is MigrateGeneration, with the new generation created at
-// createdAt, the clock of the request that plays the turn, and also returns
-// the new board so the turn can apply the end rule to it.
-func migrateGeneration(database *gorm.DB, gameID uint, commands []models.CommandFields, createdAt time.Time) (uint, simulation.GameState, error) {
+// createdAt, the clock of the request that plays the turn, and its turn ending
+// at turnDeadlineAt in a real-time game (nil otherwise), and also returns the
+// new board so the turn can apply the end rule to it.
+func migrateGeneration(database *gorm.DB, gameID uint, commands []models.CommandFields, createdAt time.Time, turnDeadlineAt *time.Time) (uint, simulation.GameState, error) {
 	turnCommands := append(append([]models.CommandFields{}, commands...), simulation.EndOfTurnCommands()...)
 	decodedCommands, err := simulation.DecodeCommands(turnCommands)
 	if err != nil {
@@ -39,7 +40,7 @@ func migrateGeneration(database *gorm.DB, gameID uint, commands []models.Command
 		if err != nil {
 			return err
 		}
-		generationID, err = dal.SaveGeneration(transaction, gameID, next, turnCommands, simulation.Clashes(events), createdAt)
+		generationID, err = dal.SaveGeneration(transaction, gameID, next, turnCommands, simulation.Clashes(events), createdAt, turnDeadlineAt)
 		return err
 	})
 	if err != nil {

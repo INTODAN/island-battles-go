@@ -587,39 +587,18 @@ func TestResignInAGameOfBotsIsRefused(t *testing.T) {
 }
 
 // A localhost bot whose submissions stop is taken out after the turn limit;
-// one that answers late every turn, and gets 409 for the stale turn, stays.
-// A localhost seat is heard only through its own submissions, not through its
+// one that answers late every turn stays, one turn or three turns late: its
+// answer joins the open turn, and completes it, and a second late answer then
+// gets 409 for the stale turn, which counts as hearing from it too. A
+// localhost seat is heard only through its own submissions, not through its
 // relayer's turn deliveries.
 func TestLocalhostBotsLeaveWhenTheirSubmissionsStop(t *testing.T) {
 	ctx := context.Background()
-	t.Run("late every turn stays", func(t *testing.T) {
-		game := startClockGame(t, `{"turn_timeout_seconds":5}`, services.ServerBot{Manual: true}, services.ServerBot{})
-		bluePlayer := game.players[0]
-		for turn := range 20 {
-			missed := game.current(t, bluePlayer)
-			game.toTurnEnd(t, bluePlayer)
-			// The bot's answer to the turn it was given comes half a second
-			// after that turn ended, with its submit token.
-			*game.clock = game.clock.Add(500 * time.Millisecond)
-			token, err := game.tokens.Issue(submittoken.Claims{GameID: game.gameID, GenerationID: missed.GenerationID, PlayerID: game.players[1].PlayerID, Expires: time.Now().Add(time.Hour)})
-			if err != nil {
-				t.Fatal(err)
-			}
-			claims, err := game.tokens.Verify(token, time.Now())
-			if err != nil {
-				t.Fatal(err)
-			}
-			principal, err := game.service.AuthorizeSubmitToken(ctx, claims)
-			if err != nil {
-				t.Fatal(err)
-			}
-			_, err = game.service.Register(ctx, principal, models.RegisterGenerationCommands{GameID: game.gameID, GenerationID: missed.GenerationID, RequestID: uuid.NewString(), Commands: []models.PublicGenerationCommand{}})
-			assertProblem(t, err, 409, services.StaleGenerationProblemType, "")
-			if state := game.current(t, bluePlayer); state.Outcome != nil || castleOf(state, red) == nil {
-				t.Fatalf("turn %d: the late bot was taken out: %+v", turn, state.Outcome)
-			}
-		}
-	})
+	for _, lateness := range []int{1, 3} {
+		t.Run(fmt.Sprintf("%d turns late every turn stays", lateness), func(t *testing.T) {
+			lateEveryTurn(t, lateness)
+		})
+	}
 	t.Run("silent leaves", func(t *testing.T) {
 		game := startClockGame(t, `{"turn_timeout_seconds":5}`, services.ServerBot{Manual: true}, services.ServerBot{})
 		state := game.leaveSilently(t)
@@ -649,6 +628,48 @@ func TestLocalhostBotsLeaveWhenTheirSubmissionsStop(t *testing.T) {
 			t.Fatalf("outcome = %+v", outcome)
 		}
 	})
+}
+
+// lateEveryTurn has a localhost bot answer each turn it is given lateness
+// turns after it ended, with its submit token, while the hand player calls
+// each turn's end, and checks that the bot stays in the game.
+func lateEveryTurn(t *testing.T, lateness int) {
+	t.Helper()
+	ctx := context.Background()
+	game := startClockGame(t, `{"turn_timeout_seconds":5}`, services.ServerBot{Manual: true}, services.ServerBot{})
+	bluePlayer := game.players[0]
+	for turn := range 20 {
+		missed := game.current(t, bluePlayer)
+		for range lateness {
+			game.toTurnEnd(t, bluePlayer)
+		}
+		// The answer comes half a second after the last of those turns
+		// ended.
+		*game.clock = game.clock.Add(500 * time.Millisecond)
+		token, err := game.tokens.Issue(submittoken.Claims{GameID: game.gameID, GenerationID: missed.GenerationID, PlayerID: game.players[1].PlayerID, Expires: time.Now().Add(time.Hour)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		claims, err := game.tokens.Verify(token, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		principal, err := game.service.AuthorizeSubmitToken(ctx, claims)
+		if err != nil {
+			t.Fatal(err)
+		}
+		answer := func() error {
+			_, err := game.service.Register(ctx, principal, models.RegisterGenerationCommands{GameID: game.gameID, GenerationID: missed.GenerationID, RequestID: uuid.NewString(), Commands: []models.PublicGenerationCommand{}})
+			return err
+		}
+		if err := answer(); err != nil {
+			t.Fatalf("turn %d: the answer %d turns late = %v", turn, lateness, err)
+		}
+		assertProblem(t, answer(), 409, services.StaleGenerationProblemType, "")
+		if state := game.current(t, bluePlayer); state.Outcome != nil || castleOf(state, red) == nil {
+			t.Fatalf("turn %d: the late bot was taken out: %+v", turn, state.Outcome)
+		}
+	}
 }
 
 // leaveSilently has Blue call each turn's end until Red, who makes no

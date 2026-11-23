@@ -98,12 +98,15 @@ class TeamOutError(GameError):
 class StaleGenerationError(GameError):
     """The server refused a batch because its generation's turn is over.
 
-    In a real-time game the turn ends one turn pace after its generation was
-    created, and the server plays it with the commands that arrived by then,
-    so a bot slower than the pace passes that turn. The client handles it
-    itself there: it writes one line, reads the new state and plays on. In a
-    game that waits for every player the client stops on it, as on any
-    other rejection.
+    In a real-time game each turn ends one turn pace after the previous one,
+    and the server plays it with the commands that arrived by then. A batch
+    that comes later joins the turn open when it arrives, however late, and
+    with ``complete`` completes it; only a batch that comes once the open
+    turn is complete, or that names no generation of the game, gets this
+    error, and the bot has passed that turn. The client handles it itself
+    there: it writes one line, reads the new state and plays on. In a game
+    that waits for every player the client stops on it, as on any other
+    rejection.
     """
 
 

@@ -65,7 +65,6 @@ function setup(
     body: RegisterGenerationCommands;
   })[] = [];
   const deadlines: Call<GenerationState>[] = [];
-  const reads: Call<GenerationState>[] = [];
   const log = { upgrades: 0, refreshes: 0, ids: 0 };
   function call<T>(list: Call<T>[], signal: AbortSignal, extra = {}) {
     return new Promise<T>((resolve, reject) => {
@@ -81,7 +80,6 @@ function setup(
     postCommands: (body, signal) =>
       call(posts as Call<GenerationState>[], signal, { body }),
     applyDeadline: (signal) => call(deadlines, signal),
-    readState: (signal) => call(reads, signal),
     async loadUpgrades() {
       log.upgrades++;
       return options.table ?? upgradeTable;
@@ -97,7 +95,7 @@ function setup(
   });
   const settled: PlayOrder[] = [];
   play.onSettled((order) => settled.push(order));
-  return { play, game, clock, posts, deadlines, reads, log, settled, adopt };
+  return { play, game, clock, posts, deadlines, log, settled, adopt };
 }
 
 /** Answers a post with the open state, as the server does when it accepts the batch. */
@@ -392,102 +390,82 @@ describe("orders", () => {
     expect(env.settled.map((order) => order.id)).toEqual([1, 2]);
   });
 
-  test("a turn that ended while the state reads fail drops the order and those behind it", async () => {
-    const env = setup({ initial: handState(10) });
-    env.play.send(1, 4, 5);
-    env.play.send(1, 3, 5);
-    env.play.upgrade(2, "speed");
-    env.posts[0]?.reject(stale(true));
-    let answered = 0;
-    let deadlinesAnswered = 0;
-    while (env.settled.length === 0 && env.clock.now() < 1_020_000) {
-      while (answered < env.reads.length)
-        env.reads[answered++]?.reject(transport());
-      while (deadlinesAnswered < env.deadlines.length)
-        env.deadlines[deadlinesAnswered++]?.resolve(handState(10));
-      await env.clock.advance(10);
-    }
-    const late = "The turn ended before the order arrived.";
-    expect(
-      env.settled.map((order) => [order.id, order.state, order.sentence]),
-    ).toEqual([
-      [1, "rejected", late],
-      [2, "rejected", late],
-      [3, "rejected", late],
-    ]);
-    expect(env.posts).toHaveLength(1);
-    expect(env.play.state.get().orders.map((order) => order.state)).toEqual([
-      "rejected",
-      "rejected",
-      "rejected",
-    ]);
-  });
-
   for (const typed of [true, false]) {
     const shape = typed ? "the stale-generation type" : "a 409 without a type";
-    test(`a turn that ended (${shape}) sends the order again against the new generation`, async () => {
+    test(`a turn that ended long before the order arrived (${shape}) drops it, and the next one goes`, async () => {
       const env = setup({ initial: handState(10) });
-      env.play.send(1, 4, { share: 0.5 });
-      // The request that is refused plays the turn and pushes the next generation first.
-      env.game.set(withCastle1(11, 40));
+      env.play.send(1, 4, 5);
+      env.play.send(1, 3, 5);
+      env.game.set(handState(11));
       env.posts[0]?.reject(stale(typed));
       await flush();
-      expect(env.reads).toHaveLength(0);
+      // The server plays a late order in the open turn, so a stale turn's 409 no longer comes
+      // for one; if it does, the order is not sent again.
+      expect(env.settled).toEqual([
+        expect.objectContaining({
+          id: 1,
+          state: "rejected",
+          sentence: "The turn ended before the order arrived.",
+        }),
+      ]);
+      expect(env.posts).toHaveLength(2);
       expect(env.posts[1]?.body).toMatchObject({
         generation_id: 11,
-        request_id: "request-2",
-        commands: [{ parameters: { soldier_amount: 20 } }],
+        commands: [{ parameters: { destination_castle_id: 3 } }],
       });
-      accept(env, 1);
-      await flush();
-      expect(env.settled).toEqual([
-        expect.objectContaining({ state: "accepted", generationId: 11 }),
-      ]);
     });
   }
 
-  test("a turn that ended, with no newer state yet, reads it", async () => {
-    const env = setup({ initial: handState(10) });
-    env.play.send(1, 4, 5);
-    env.posts[0]?.reject(stale(true));
+  test("an order that arrives after its turn played is accepted in the open turn, and counts there", async () => {
+    const env = setup({ initial: withCastle1(10, 30) });
+    const given = env.play.send(1, 4, 5);
+    // The turn ends while the order is on its way; the next generation is pushed first.
+    env.game.set(withCastle1(11, 40));
+    expect(env.posts[0]?.body).toMatchObject({ generation_id: 10 });
+    // The server plays it in the open turn and answers that turn's state.
+    accept(env, 0);
     await flush();
-    expect(env.reads).toHaveLength(1);
-    env.reads[0]?.resolve(handState(11));
-    await flush();
-    expect(env.posts[1]?.body).toMatchObject({ generation_id: 11 });
-  });
-
-  test("a turn that ended, and the order no longer passes", async () => {
-    const env = setup({ initial: handState(10) });
-    env.play.send(1, 4, 5);
-    env.game.set(withCastle1(11, 40, 2));
-    env.posts[0]?.reject(stale(false));
-    await flush();
+    expect(given.ok && (await given.settled)).toMatchObject({
+      state: "accepted",
+      generationId: 11,
+    });
+    expect(env.play.state.get().castles.get(1)?.unreserved).toBe(35);
     expect(env.posts).toHaveLength(1);
-    expect(env.settled).toEqual([
-      expect.objectContaining({
-        state: "rejected",
-        sentence: "That castle isn't yours.",
-      }),
-    ]);
   });
 
-  test("a second ended turn drops the order", async () => {
-    const env = setup({ initial: handState(10) });
+  test("an order whose answer names a turn that has played since doesn't count in the open one", async () => {
+    const env = setup({ initial: withCastle1(10, 30) });
     env.play.send(1, 4, 5);
-    env.game.set(handState(11));
-    env.posts[0]?.reject(stale(true));
+    const answer = env.game.get() as GenerationState;
+    env.game.set(withCastle1(11, 40));
+    env.posts[0]?.resolve(answer);
     await flush();
-    env.game.set(handState(12));
-    env.posts[1]?.reject(stale(true));
-    await flush();
-    expect(env.posts).toHaveLength(2);
     expect(env.settled).toEqual([
-      expect.objectContaining({
-        state: "rejected",
-        sentence: "The turn ended before the order arrived.",
-      }),
+      expect.objectContaining({ state: "accepted", generationId: 10 }),
     ]);
+    expect(env.play.state.get().castles.get(1)?.unreserved).toBe(40);
+  });
+
+  test("a retry answered with the next generation doesn't count the order there twice", async () => {
+    const env = setup({ initial: withCastle1(10, 30) });
+    env.play.send(1, 4, 5);
+    // The first attempt was played in turn 10, but its answer was lost.
+    env.posts[0]?.reject(transport());
+    await flush();
+    // Turn 10 plays, with the order: generation 11 already has its soldiers gone.
+    env.game.set(withCastle1(11, 27));
+    await env.clock.advance(retryDelay(0));
+    expect(env.posts[1]?.body).toMatchObject({
+      generation_id: 10,
+      request_id: env.posts[0]?.body.request_id,
+    });
+    // The server replays the request with the current state.
+    accept(env, 1);
+    await flush();
+    expect(env.settled).toEqual([
+      expect.objectContaining({ state: "accepted", generationId: 10 }),
+    ]);
+    expect(env.play.state.get().castles.get(1)?.unreserved).toBe(27);
   });
 
   test("a refusal with a problem type drops the order, and the next one goes", async () => {
