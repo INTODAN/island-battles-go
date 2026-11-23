@@ -284,7 +284,16 @@ select:focus-visible {
   right: 12px;
   /* Above the game view's bottom stack, whose height the view publishes (screen.ts). */
   bottom: calc(var(--gv-bottom-height, 84px) + 12px);
-  z-index: 15;
+  /*
+   * Under the game view's top stack (5), its castle menu (6) and its Resign confirmation (8)
+   * (game.css), which the box would cover on a phone: the Controls panel grows the top stack
+   * down over the box and pushes the Fit button beside it, and a castle near the bottom right
+   * opens its menu over it (#379). The view's elements share this box's stacking context, the
+   * game host's (`.game-host` is fixed; the view and `.gv` make none). Still above the canvas,
+   * and above the view's overlay and the board's loading screen (4, styles.css), which come
+   * earlier in the page; the board's tooltip (5) may pass over it.
+   */
+  z-index: 4;
   max-width: min(280px, calc(100% - 24px));
   /*
    * Capped so the box never reaches the top stack when the bottom stack is tall (the logs open

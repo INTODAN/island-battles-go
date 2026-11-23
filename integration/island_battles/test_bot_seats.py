@@ -58,7 +58,9 @@ async def test_one_person_plays_a_whole_game_against_a_level_two_bot_seat(guests
         )
     assert response.status_code == 200, response.text
     state = response.json()
-    assert state["bot"] == {"kind": "localhost"}
+    # The game's state names the port that Alice's client delivers to: 41414,
+    # since she chose none.
+    assert state["bot"] == {"kind": "localhost", "port": 41414}
     assert state["outcome"] is not None
 
     # Once started, the seats are fixed.
