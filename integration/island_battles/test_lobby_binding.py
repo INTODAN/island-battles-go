@@ -3,7 +3,9 @@ import base64
 import json
 import math
 import os
+import re
 import signal
+from pathlib import Path
 from uuid import uuid4
 
 import httpx
@@ -19,6 +21,37 @@ LOCALHOST_BOT = {"kind": "localhost"}
 # The lobby and the game are separate sites (#228): BASE is the lobby's URL,
 # and GAME the game's, where Island Battles' routes are.
 GAME = os.environ["LOBBY_TEST_GAME_URL"]
+
+
+# The game's tables are AutoMigrated from the GORM models in backend/models.
+MODELS = Path(__file__).resolve().parents[2] / "backend/models"
+
+
+def gorm_columns(model: str, source: str) -> set[str]:
+    """The columns that GORM's default naming gives the fields of a model
+    struct in backend/models: gorm.Model's four, and each other field in
+    snake case, except the has-many associations (a slice of a struct with no
+    serializer), which are other tables, and fields tagged gorm:"-"."""
+    body = re.search(rf"^type {model} struct {{\n(.*?)^}}", (MODELS / source).read_text(), re.M | re.S)
+    assert body, f"no struct {model} in backend/models/{source}"
+    columns = set()
+    for line in body.group(1).splitlines():
+        field = re.match(r"\s*(\w+(?:\.\w+)?)(?:\s+([^\s`]+))?\s*(`.*`)?\s*(?://.*)?$", line)
+        if not field or not field.group(1)[0].isupper() and field.group(1) != "gorm.Model":
+            continue
+        name, kind, tag = field.group(1), field.group(2), field.group(3) or ""
+        if name == "gorm.Model" and kind is None:
+            columns |= {"id", "created_at", "updated_at", "deleted_at"}
+        elif kind is None:
+            raise AssertionError(f"{model} embeds {name}, whose columns the test can't name")
+        elif 'gorm:"-' in tag:
+            continue
+        elif kind.startswith("[]") and kind[2:3].isupper() and "serializer:" not in tag:
+            continue
+        else:
+            column = re.search(r"column:(\w+)", tag)
+            columns.add(column.group(1) if column else re.sub(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", "_", name).lower())
+    return columns
 
 
 async def game_auth(player):
@@ -308,7 +341,18 @@ async def test_island_schema_survives_restart():
         "island_accounts", "island_competitors", "island_rating_events",
     }
     columns = await game_sql("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name='games' ORDER BY ordinal_position")
-    assert set(columns.splitlines()) == {"id", "created_at", "updated_at", "deleted_at", "lobby_id", "lobby_round", "teams", "outcome", "next_soldier_group_id", "turn_timeout_seconds"}
+    expected = {
+        "id", "created_at", "updated_at", "deleted_at", "lobby_id", "lobby_round", "teams", "outcome",
+        "next_soldier_group_id", "turn_timeout_seconds", "max_generations", "turn_pace_milliseconds",
+        "departures", "rated",
+    }
+    # Each expected column is one of models.Game's, and each of its columns is
+    # expected, so a column added to the model fails here first, by name.
+    model = gorm_columns("Game", "game.go")
+    assert expected == model, (
+        f"models.Game has columns the test doesn't list: {sorted(model - expected)}; "
+        f"the test lists columns models.Game lacks: {sorted(expected - model)}")
+    assert set(columns.splitlines()) == expected
     # A lobby plays one game per round: the games are unique by lobby and
     # round, and the old index on the lobby alone is gone.
     indexes = await game_sql("SELECT indexname FROM pg_indexes WHERE schemaname='public' AND tablename='games' AND indexname LIKE 'idx_games_lobby%' ORDER BY indexname")

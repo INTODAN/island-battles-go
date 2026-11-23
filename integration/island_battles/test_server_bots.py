@@ -16,6 +16,7 @@ runs the package here, and it needs uv and PyPI.
 import asyncio
 import os
 import platform
+import re
 import shutil
 import socket
 import subprocess
@@ -87,8 +88,10 @@ def package_template(work: Path) -> Path:
     project = work / "bot"
     shutil.copytree(TEMPLATE, project, ignore=shutil.ignore_patterns(".venv", "dist", "__pycache__", "uv.lock"))
     pyproject = project / "pyproject.toml"
-    text = pyproject.read_text().replace('"island-battles-python>=1.3.0"', '"island-battles-python"')
-    assert '"island-battles-python"' in text
+    # The template requires the SDK at its released version, whatever that is;
+    # the bot takes the wheel just built instead, so its requirement is unpinned.
+    text, replaced = re.subn(r'"island-battles-python[^"]*"', '"island-battles-python"', pyproject.read_text())
+    assert replaced == 1, pyproject.read_text()
     pyproject.write_text(text + f'\n[tool.uv.sources]\nisland-battles-python = {{ path = "{wheel.as_posix()}" }}\n')
     run(["uv", "lock"], project)
     packaged = work / "island-battles-bot.zip"
