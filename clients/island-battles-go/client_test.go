@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -509,10 +510,47 @@ func staleRealTimeGame(t *testing.T, pace any) *fakeServer {
 		}
 		server.setState(stateOf(2))
 		writeJSON(writer, 409, map[string]any{"type": "urn:island-battles:problem:stale-generation", "title": "Conflict", "status": 409,
-			"detail": "generation is no longer current: in this real-time game each turn ends 1 s after its generation was created"})
+			"detail": "generation is no longer current: in this real-time game each turn ends 1 s after the previous one"})
 		return true
 	}
 	return server
+}
+
+// A late answer that the server plays in the open turn completes it (#380):
+// the client has answered that turn, and doesn't play it again.
+func TestClientDoesNotReplayATurnThatALateAnswerCompleted(t *testing.T) {
+	server, realtime := newFakeServer(t), &fakeRealtime{}
+	stateOf := func(generationID uint, submitted bool) map[string]any {
+		state := server.stateOf(generationID, submitted, nil)
+		state["turn_pace_milliseconds"] = 1000
+		return state
+	}
+	server.setState(stateOf(1, false))
+	server.answer = func(writer http.ResponseWriter, _ *http.Request, body []byte) bool {
+		var batch map[string]any
+		_ = json.Unmarshal(body, &batch)
+		if batch["generation_id"] != 1.0 {
+			return false
+		}
+		server.setState(stateOf(2, true))
+		writeJSON(writer, 200, stateOf(2, true))
+		return true
+	}
+	var played atomic.Int32
+	client := testClient(t, server, realtime, func(context.Context, Turn) (Result, error) {
+		played.Add(1)
+		return Result{}, nil
+	})
+	if _, err := client.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, func() bool { return len(server.batchesSent()) == 1 })
+	realtime.publish(nextGenerationEvent, stateOf(2, true))
+	time.Sleep(200 * time.Millisecond)
+	if sent := generationsSent(server); played.Load() != 1 || !slices.Equal(sent, []string{"1:true"}) {
+		t.Fatalf("played %d turns, sent %v", played.Load(), sent)
+	}
+	_ = client.Close(context.Background())
 }
 
 // generationsSent lists each batch's generation and completion.

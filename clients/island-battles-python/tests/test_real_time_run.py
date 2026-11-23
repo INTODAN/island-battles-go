@@ -23,7 +23,7 @@ STALE = {
     "title": "Conflict",
     "status": 409,
     "detail": "generation is no longer current: in this real-time game each turn "
-    "ends 1 s after its generation was created",
+    "ends 1 s after the previous one",
 }
 OUTCOME = {
     "reason": "last_team_standing",
@@ -202,3 +202,49 @@ def test_a_game_that_waits_stops_on_a_stale_batch_as_before() -> None:
         (1, True),
         (1, False),
     ]
+
+
+class LateServer(Server):
+    """A game whose first turn ends while the bot plays it, and whose server
+    plays the bot's late answer in the open turn, generation 2 (#380): the
+    answer completes it, so the bot has nothing more to play there."""
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/generation/commands":
+            batch = json.loads(request.content)
+            self.batches.append(batch)
+            self.current = 2
+            return httpx.Response(
+                200, json=state(self.current, self.pace, submitted=True)
+            )
+        return super().handle(request)
+
+
+def test_a_late_answer_that_joins_the_open_turn_completes_it() -> None:
+    server = LateServer(1000)
+    played: list[int] = []
+
+    async def play(turn):
+        played.append(turn.generation.id)
+        return turn_result([])
+
+    async def scenario() -> None:
+        client = IslandBattlesClient(
+            "guest",
+            LOBBY_ID,
+            play=play,
+            base_url="http://game.test",
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(server.handle)),
+            sdk_factory=FakeSDK,
+            log_to_stdout=False,
+        )
+        running = asyncio.create_task(client.run())
+        await asyncio.sleep(0.5)
+        await client.close()
+        await asyncio.gather(running, return_exceptions=True)
+
+    asyncio.run(scenario())
+    # The answer for generation 1 is the bot's answer for generation 2, which
+    # it doesn't play again.
+    assert played == [1]
+    assert [batch["generation_id"] for batch in server.batches] == [1]

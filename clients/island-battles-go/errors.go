@@ -57,10 +57,13 @@ var (
 	ErrRejected = errors.New("rejected")
 	// ErrStaleGeneration: the server refused a batch because its
 	// generation's turn is over. It is also an ErrRejected. In a real-time
-	// game the turn ends one turn pace after its generation was created and
-	// plays with the commands that arrived by then, so a bot slower than the
-	// pace passes that turn: the Client handles it itself there, writes one
-	// line, reads the new state and plays on. In a game that waits for every
+	// game each turn ends one turn pace after the previous one and plays
+	// with the commands that arrived by then. A batch that comes later joins
+	// the open turn, and when complete completes it, while it names one of
+	// the two turns before the open one; only an older batch, or one that
+	// comes once the open turn is complete, gets this error, and the bot has
+	// passed that turn: the Client handles it itself there, writes one line,
+	// reads the new state and plays on. In a game that waits for every
 	// player the Client stops on it, as on any other rejection.
 	ErrStaleGeneration = fmt.Errorf("stale generation: %w", ErrRejected)
 	// ErrTeamOut: the server refused a batch because the player's team

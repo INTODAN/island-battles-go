@@ -234,7 +234,7 @@ class BotTurn(GameModel):
     team_color: Annotated[StrictInt, Field(ge=1)]
     turn_deadline_at: AwareDatetime | None
     """
-    When the turn ends, GenerationState.turn_deadline_at, or null when turns have no time limit. In a game that waits for every player, a bot that hasn't answered by then makes its whole team lose. In a real-time game, where a player plays by hand, the server plays the turn then without the bot's answer: the bot passes, and a later answer is refused as a stale generation.
+    When the turn ends, GenerationState.turn_deadline_at, or null when turns have no time limit. In a game that waits for every player, a bot that hasn't answered by then makes its whole team lose. In a real-time game, where a player plays by hand, the server plays the turn then without the bot's answer: a later answer joins the open turn, and completes it, while it names one of the two turns before the open one, and is refused as a stale generation after that, when the bot has passed.
     """
     turn_number: Annotated[StrictInt, Field(ge=1)]
     """
@@ -881,7 +881,7 @@ class GenerationState(GameModel):
     team_color: Annotated[StrictInt, Field(ge=1)]
     turn_deadline_at: AwareDatetime | None
     """
-    When this generation's turn ends. In a real-time game (turn_pace_milliseconds isn't null) it is the generation's creation time plus the turn pace: the server then plays the turn with the commands that arrived, and a player who sent nothing passes. Otherwise it is the creation time plus the lobby's turn_timeout_seconds, when the turn times out: if a player of a team hasn't completed it by then, the team loses and the game ends. Null when turns have no time limit, and once the game has ended. A client waiting for the turn to end calls POST /game/from-lobby/{lobby_id}/deadline once it has passed, because the server runs no timers.
+    When this generation's turn ends. In a real-time game (turn_pace_milliseconds isn't null) it is the previous turn's turn_deadline_at plus the turn pace, the first turn's the game's start plus the pace, so that turns come one pace apart whatever the latency, but at least half a pace after the previous turn played: the server then plays the turn with the commands that arrived, and a player who sent nothing passes. Otherwise it is the creation time plus the lobby's turn_timeout_seconds, when the turn times out: if a player of a team hasn't completed it by then, the team loses and the game ends. Null when turns have no time limit, and once the game has ended. A client waiting for the turn to end calls POST /game/from-lobby/{lobby_id}/deadline once it has passed, because the server runs no timers.
     """
     turn_number: Annotated[StrictInt, Field(ge=1)]
     """
@@ -889,7 +889,7 @@ class GenerationState(GameModel):
     """
     turn_pace_milliseconds: Annotated[StrictInt | None, Field(ge=500, le=5000)]
     """
-    The game's turn pace in milliseconds when the game is real-time, because a player on its roster plays by hand: each turn ends this long after its generation was created, at turn_deadline_at, and plays with the commands that arrived, without waiting for anyone. It still plays early once every player completed it. Null when the game waits for every player to complete each turn.
+    The game's turn pace in milliseconds when the game is real-time, because a player on its roster plays by hand: each turn ends this long after the previous one, at turn_deadline_at, and plays with the commands that arrived, without waiting for anyone; a batch that arrives up to two turns late joins the open turn. It still plays early once every player completed it. Null when the game waits for every player to complete each turn.
     """
 
 
@@ -1125,7 +1125,7 @@ class LobbySettings(GameModel):
     """
     turn_pace_milliseconds: Annotated[StrictInt | None, Field(ge=500, le=5000)] = 1000
     """
-    How long each turn lasts in a real-time game, in whole milliseconds from 500 to 5000; 1000 when left out. A game is real-time when a player on its roster plays by hand: each turn then ends this long after its generation was created, and the server plays it with the commands that arrived, so a player who sent nothing passes. A game of bots only doesn't use it and waits for every player.
+    How long each turn lasts in a real-time game, in whole milliseconds from 500 to 5000; 1000 when left out. A game is real-time when a player on its roster plays by hand: each turn then ends this long after the previous one, and the server plays it with the commands that arrived, so a player who sent nothing passes. A game of bots only doesn't use it and waits for every player.
     """
     turn_timeout_seconds: Annotated[StrictInt | None, Field(ge=5, le=600)] = 30
     """
@@ -1526,7 +1526,7 @@ class TurnSubmit(GameModel):
     )
     deadline_at: AwareDatetime | None
     """
-    When the turn ends, the BotTurn's turn_deadline_at, or null when turns have no time limit. An answer must be submitted before it: in a real-time game a later one is refused as a stale generation, and the bot passes the turn.
+    When the turn ends, the BotTurn's turn_deadline_at, or null when turns have no time limit. An answer should be submitted before it: in a real-time game a later one joins the open turn while it names one of the two turns before it, and is refused as a stale generation after that, when the bot has passed the turn.
     """
     token: StrictStr
     """

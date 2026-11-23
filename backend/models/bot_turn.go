@@ -68,7 +68,7 @@ type BotTurn struct {
 	Upgrades       []UpgradeView `json:"upgrades" nullable:"false" doc:"The upgrade cost table, the same list GET /game/upgrades returns as its upgrades. It is the same for the whole game. Reaching a level costs its soldier_cost."`
 	Memory         BotMemory     `json:"memory" doc:"The memory the bot returned with its previous turn in this game, or null on its first turn and after a turn that returned null."`
 	// TurnDeadlineAt is GenerationState.TurnDeadlineAt.
-	TurnDeadlineAt *time.Time `json:"turn_deadline_at" nullable:"true" doc:"When the turn ends, GenerationState.turn_deadline_at, or null when turns have no time limit. In a game that waits for every player, a bot that hasn't answered by then makes its whole team lose. In a real-time game, where a player plays by hand, the server plays the turn then without the bot's answer: the bot passes, and a later answer is refused as a stale generation."`
+	TurnDeadlineAt *time.Time `json:"turn_deadline_at" nullable:"true" doc:"When the turn ends, GenerationState.turn_deadline_at, or null when turns have no time limit. In a game that waits for every player, a bot that hasn't answered by then makes its whole team lose. In a real-time game, where a player plays by hand, the server plays the turn then without the bot's answer: a later answer joins the open turn, and completes it, while it names one of the two turns before the open one, and is refused as a stale generation after that, when the bot has passed."`
 }
 
 // BotTurnResult is a bot's answer to a BotTurn: the commands and game log
@@ -92,7 +92,7 @@ type TurnDelivery struct {
 type TurnSubmit struct {
 	URL        string     `json:"url" format:"uri" doc:"Where to submit the answer: POST /generation/commands on the game's server, as an absolute URL."`
 	Token      string     `json:"token" doc:"The submit token, sent as Authorization: Bearer <token>. It lets the bearer submit this player's turn of this generation and nothing else, and expires at the turn's deadline plus 30 seconds, or 24 hours after the generation when turns have no time limit. Keep it secret until the turn is over."`
-	DeadlineAt *time.Time `json:"deadline_at" nullable:"true" doc:"When the turn ends, the BotTurn's turn_deadline_at, or null when turns have no time limit. An answer must be submitted before it: in a real-time game a later one is refused as a stale generation, and the bot passes the turn."`
+	DeadlineAt *time.Time `json:"deadline_at" nullable:"true" doc:"When the turn ends, the BotTurn's turn_deadline_at, or null when turns have no time limit. An answer should be submitted before it: in a real-time game a later one joins the open turn while it names one of the two turns before it, and is refused as a stale generation after that, when the bot has passed the turn."`
 }
 
 // GameEndedDelivery tells a bot that runs outside the backend that its game

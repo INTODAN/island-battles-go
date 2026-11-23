@@ -34,6 +34,9 @@ func SetGoBotTimeBudgets(t *testing.T, write, read time.Duration) {
 // NewGoBotTurn exposes newGoBotTurn to the external tests.
 var NewGoBotTurn = newGoBotTurn
 
+// NextTurnDeadline exposes nextTurnDeadline to the external tests.
+var NextTurnDeadline = nextTurnDeadline
+
 // ServerBot is a bot that the server plays for a roster player in
 // RunLobbyGameWithServerBots: a default bot of Level, a hosted bot at URL, or
 // the lobby's uploaded package PackageID. Manual is a player who plays by

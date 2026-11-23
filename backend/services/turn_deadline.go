@@ -18,18 +18,22 @@ import (
 )
 
 // turnDeadline is when a generation's turn ends. In a real-time game, whose
-// TurnPaceMilliseconds isn't nil, it is the generation's creation time plus
-// the pace, and the turn then plays with the commands that arrived. In a game
-// that waits for every player it is the creation time plus the game's turn
-// timeout, when the turn times out. It is nil when the game waits and has no
-// turn timeout, and once the game has ended.
+// TurnPaceMilliseconds isn't nil, it is the generation's TurnDeadlineAt, which
+// nextTurnDeadline chose when the turn before it played, or, for the first
+// generation, its creation time, the game's start, plus the pace; the turn
+// then plays with the commands that arrived. In a game that waits for every
+// player it is the creation time plus the game's turn timeout, when the turn
+// times out. It is nil when the game waits and has no turn timeout, and once
+// the game has ended.
 func turnDeadline(game *models.Game, generation *models.Generation) *time.Time {
 	var deadline time.Time
 	switch {
 	case game.Outcome != nil:
 		return nil
+	case game.TurnPaceMilliseconds != nil && generation.TurnDeadlineAt != nil:
+		deadline = *generation.TurnDeadlineAt
 	case game.TurnPaceMilliseconds != nil:
-		deadline = generation.CreatedAt.Add(time.Duration(*game.TurnPaceMilliseconds) * time.Millisecond)
+		deadline = generation.CreatedAt.Add(pace(game))
 	case game.TurnTimeoutSeconds != nil:
 		deadline = generation.CreatedAt.Add(time.Duration(*game.TurnTimeoutSeconds) * time.Second)
 	default:
@@ -37,6 +41,42 @@ func turnDeadline(game *models.Game, generation *models.Generation) *time.Time {
 	}
 	return &deadline
 }
+
+// pace is a real-time game's turn pace.
+func pace(game *models.Game) time.Duration {
+	return time.Duration(*game.TurnPaceMilliseconds) * time.Millisecond
+}
+
+// nextTurnDeadline is when the turn that follows open ends, when a request
+// plays open's turn at now: nil in a game that waits for every player. In a
+// real-time game it is open's deadline plus the pace, so that turns come one
+// pace apart on average however late the requests that play them arrive (a
+// turn that plays late leaves that much less time for the next one). A turn
+// that plays early, once every player completed it, starts the next pace at
+// now instead. The next turn always lasts at least half a pace from now
+// (minimumTurnShare): when a turn plays so late that the previous deadline
+// plus the pace is closer than that, or already past, the next turn ends half
+// a pace after now, so that turns never play back to back with no time to
+// give orders, and the schedule continues from there.
+func nextTurnDeadline(game *models.Game, open *models.Generation, now time.Time) *time.Time {
+	if game.TurnPaceMilliseconds == nil {
+		return nil
+	}
+	start := now
+	if deadline := turnDeadline(game, open); deadline != nil && deadline.Before(now) {
+		start = *deadline
+	}
+	next := start.Add(pace(game))
+	if floor := now.Add(pace(game) / minimumTurnShare); next.Before(floor) {
+		next = floor
+	}
+	return &next
+}
+
+// minimumTurnShare divides the pace into the shortest time a real-time turn
+// lasts from the moment its generation is created (nextTurnDeadline): half a
+// pace.
+const minimumTurnShare = 2
 
 // turnEnd is what ending a turn whose time is up did, for the request that
 // found it overdue: what to do once its transaction commits, and the open
@@ -74,9 +114,10 @@ type turnEnd struct {
 // every player of a team still in the game who hasn't completed it is treated
 // as complete, so the commands of their batches with complete false are
 // played, a player who sent none passes, and the stored memories stay as they
-// are. It plays one turn, however late the request is: the next turn starts
-// when its generation is created, now, so a game that nobody calls stays where
-// it is.
+// are. It plays one turn, however late the request is: the next turn ends one
+// pace after this one's end, but at least half a pace after now
+// (nextTurnDeadline), so a late request never plays several turns at once and
+// a game that nobody calls stays where it is.
 //
 // In a game that waits for every player, the turn times out (expireTurn).
 func endTurn(ctx context.Context, transaction *gorm.DB, game *models.Game, generation *models.Generation, players []models.FrozenGamePlayer, caller string, now time.Time, sender *TurnSender) (turnEnd, error) {
@@ -102,7 +143,7 @@ func endTurn(ctx context.Context, transaction *gorm.DB, game *models.Game, gener
 		return turnEnd{}, err
 	}
 	end := turnEnd{played: true}
-	if end.generation, inputs, end.events, end.turns, err = playTurn(ctx, transaction, game, players, inputs, now, sender); err != nil {
+	if end.generation, inputs, end.events, end.turns, err = playTurn(ctx, transaction, game, generation, players, inputs, now, sender); err != nil {
 		return turnEnd{}, err
 	}
 	end.goBotsOnly = game.Outcome == nil && slices.ContainsFunc(players, isGoBot) && turnComplete(game, end.generation, players, inputs)
@@ -226,11 +267,11 @@ func (service *GenerationService) applyOverdueDeadline(ctx context.Context, game
 		return game, nil
 	}
 	database := service.Database.WithContext(ctx)
-	createdAt, found, err := dal.LatestGenerationCreatedAt(database, game.ID)
+	latest, found, err := dal.LatestGenerationTiming(database, game.ID)
 	if err != nil || !found {
 		return game, err
 	}
-	if deadline := turnDeadline(game, &models.Generation{Model: gorm.Model{CreatedAt: createdAt}}); deadline == nil || service.now().Before(*deadline) {
+	if deadline := turnDeadline(game, latest); deadline == nil || service.now().Before(*deadline) {
 		return game, nil
 	}
 	var end turnEnd

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -100,15 +99,19 @@ func (game clockGame) generationCount(t *testing.T) int {
 	return len(generations)
 }
 
-// turnEnd is when the open turn ends: its generation's creation time plus
-// the game's pace.
+// turnEnd is when the open turn ends: its stored deadline, or, for the first
+// generation, its creation time plus the game's pace.
 func (game clockGame) turnEnd(t *testing.T) time.Time {
 	t.Helper()
 	pace := game.stored(t).TurnPaceMilliseconds
 	if pace == nil {
 		t.Fatal("the game isn't real-time")
 	}
-	return game.open(t).CreatedAt.Add(time.Duration(*pace) * time.Millisecond)
+	open := game.open(t)
+	if open.TurnDeadlineAt != nil {
+		return *open.TurnDeadlineAt
+	}
+	return open.CreatedAt.Add(time.Duration(*pace) * time.Millisecond)
 }
 
 func (game clockGame) current(t *testing.T, player domain.Principal) models.GenerationState {
@@ -337,45 +340,93 @@ func TestTwoManualPlayersShareATurnAndRacingDeadlineCallsPlayItOnce(t *testing.T
 	}
 }
 
-func TestABatchAfterItsTurnEndedIsStaleAndTheTurnHasPlayed(t *testing.T) {
+// A batch that arrives after its turn played joins the open turn while it
+// names one of the two turns before it, and is checked against the open
+// turn's board; an older one is stale.
+func TestALateBatchJoinsTheOpenTurnForTwoTurns(t *testing.T) {
 	game := startClockGame(t, `{"turn_pace_milliseconds":2000}`, services.ServerBot{Manual: true}, services.ServerBot{Level: 2})
 	manual := game.players[0]
 	first := game.current(t, manual)
 	game.register(t, manual, batch(first, false, attack(t, first, 3)))
 	*game.clock = game.turnEnd(t).Add(time.Millisecond)
 
-	_, err := game.service.Register(context.Background(), manual, batch(first, false, attack(t, first, 2)))
-	var rejection *services.GenerationError
-	if !errors.As(err, &rejection) || rejection.Status != 409 || rejection.Type != services.StaleGenerationProblemType || !strings.Contains(rejection.Detail, "generation is no longer current") || !strings.Contains(rejection.Detail, "2 s") {
-		t.Fatalf("late batch error = %v", err)
+	// The late batch's request plays the turn it missed, with the batch
+	// that arrived in time, and then joins the new open turn.
+	second := game.register(t, manual, batch(first, false, attack(t, first, 2)))
+	if second.TurnNumber != 2 || second.Submitted || !hasGroup(second, first.TeamColor, 3) || hasGroup(second, first.TeamColor, 2) {
+		t.Fatalf("after the late batch: turn %d, groups %+v", second.TurnNumber, second.Generation.SoldierGroups)
 	}
-	// The request played the turn it missed, with the batch that arrived in
-	// time and without the late one, and that committed.
-	next := game.current(t, manual)
-	if next.GenerationID == first.GenerationID || next.TurnNumber != 2 {
-		t.Fatalf("the missed turn didn't play: %+v", next)
-	}
-	if !hasGroup(next, first.TeamColor, 3) || hasGroup(next, first.TeamColor, 2) {
-		t.Fatalf("groups after the missed turn: %+v", next.Generation.SoldierGroups)
-	}
-	if events := game.eventsOf(t, next.GenerationID); events != 2 {
+	if events := game.eventsOf(t, second.GenerationID); events != 2 {
 		t.Fatalf("pushed the new generation %d times", events)
 	}
-	// No game log line is written for the pass.
-	logs, err := game.service.Logs(context.Background(), manual, game.lobbyID, first.GenerationID)
-	if err != nil {
-		t.Fatal(err)
+	third := game.toTurnEnd(t, manual)
+	if third.TurnNumber != 3 || !hasGroup(third, first.TeamColor, 2) {
+		t.Fatalf("the late batch wasn't played in the open turn: turn %d, groups %+v", third.TurnNumber, third.Generation.SoldierGroups)
 	}
-	for _, player := range logs.Players {
-		if player.TeamColor == first.TeamColor && len(player.Lines) != 0 {
-			t.Fatalf("the pass wrote log lines: %+v", player.Lines)
-		}
+
+	// Two turns later the first turn's batch still joins, checked against
+	// the open turn's board: more soldiers than the castle has now is
+	// refused for that.
+	_, err := game.service.Register(context.Background(), manual, batch(first, false, attack(t, third, 10_000)))
+	assertProblem(t, err, 409, services.InsufficientSoldiersProblemType, "")
+	joined := game.register(t, manual, batch(first, false, attack(t, third, 1)))
+	if joined.GenerationID != third.GenerationID {
+		t.Fatalf("a batch two turns late answered generation %d, want the open %d", joined.GenerationID, third.GenerationID)
 	}
-	// A batch for a turn that has ended is stale too when a later request
-	// is the one that finds it.
-	_, err = game.service.Register(context.Background(), manual, batch(first, true))
-	if !errors.As(err, &rejection) || rejection.Status != 409 || rejection.Type != services.StaleGenerationProblemType || !strings.Contains(rejection.Detail, "2 s") {
-		t.Fatalf("a batch for an older generation = %v", err)
+	fourth := game.toTurnEnd(t, manual)
+	if !hasGroup(fourth, first.TeamColor, 1) {
+		t.Fatalf("the batch two turns late wasn't played: %+v", fourth.Generation.SoldierGroups)
+	}
+
+	// Three turns late, it is stale, and says how late a batch may be.
+	_, err = game.service.Register(context.Background(), manual, batch(first, false, attack(t, fourth, 1)))
+	assertProblem(t, err, 409, services.StaleGenerationProblemType, "generation is no longer current")
+	assertProblem(t, err, 409, services.StaleGenerationProblemType, "2 s after the previous one")
+	assertProblem(t, err, 409, services.StaleGenerationProblemType, "one of the 2 turns before it")
+	// The second turn's batch is two turns late, and still joins.
+	game.register(t, manual, batch(second, false))
+}
+
+// A late batch whose commands no longer fit the open board is refused for
+// them, and the turn its request played still commits.
+func TestALateBatchThatNoLongerFitsIsRefusedAfterTheTurnPlays(t *testing.T) {
+	game := startClockGame(t, ``, services.ServerBot{Manual: true}, services.ServerBot{Level: 2})
+	manual := game.players[0]
+	first := game.current(t, manual)
+	*game.clock = game.turnEnd(t).Add(time.Millisecond)
+	_, err := game.service.Register(context.Background(), manual, batch(first, false, attack(t, first, 10_000)))
+	assertProblem(t, err, 409, services.InsufficientSoldiersProblemType, "")
+	if game.generationCount(t) != 2 {
+		t.Fatalf("the refused late batch rolled back the turn its request played: %d generations", game.generationCount(t))
+	}
+}
+
+// A late batch that completes its turn completes the open one, with its
+// memory: the client answered a turn late, and its next answer is for the
+// turn after the open one. Once the open turn is complete, a late batch is
+// stale.
+func TestALateCompletingBatchCompletesTheOpenTurn(t *testing.T) {
+	game := startClockGame(t, ``, services.ServerBot{Manual: true}, services.ServerBot{})
+	bot := game.players[1]
+	first := game.current(t, bot)
+	*game.clock = game.turnEnd(t).Add(300 * time.Millisecond)
+	answer := batch(first, true, attack(t, first, 4))
+	answer.Memory = models.BotMemory(`{"turn":1}`)
+	second := game.register(t, bot, answer)
+	if second.TurnNumber != 2 || !second.Submitted || string(second.Memory) != `{"turn":1}` {
+		t.Fatalf("after the late answer: turn %d, submitted %v, memory %s", second.TurnNumber, second.Submitted, second.Memory)
+	}
+	// The turn still waits for its end: the hand player never completes.
+	if game.generationCount(t) != 2 {
+		t.Fatalf("the late answer played the open turn: %d generations", game.generationCount(t))
+	}
+	_, err := game.service.Register(context.Background(), bot, batch(first, true))
+	assertProblem(t, err, 409, services.StaleGenerationProblemType, "")
+	_, err = game.service.Register(context.Background(), bot, batch(second, true))
+	assertTurnStatus(t, err, 409)
+	third := game.toTurnEnd(t, game.players[0])
+	if !hasGroup(third, first.TeamColor, 4) {
+		t.Fatalf("the late answer wasn't played: %+v", third.Generation.SoldierGroups)
 	}
 }
 
@@ -387,18 +438,29 @@ func TestARetryOfAnAcceptedBatchAfterItsTurnEndedGetsItsState(t *testing.T) {
 	game.register(t, manual, accepted)
 	*game.clock = game.turnEnd(t).Add(time.Millisecond)
 	// The retry is the request that finds the turn over: it plays the turn
-	// once and answers the state, not a stale generation.
+	// once and answers the state, and isn't applied again in the open turn.
 	for range 2 {
 		state := game.register(t, manual, accepted)
 		if state.TurnNumber != 2 || !hasGroup(state, first.TeamColor, 3) || game.generationCount(t) != 2 {
 			t.Fatalf("retry = turn %d, %d generations", state.TurnNumber, game.generationCount(t))
 		}
 	}
-	// A new batch for the ended turn is stale.
-	_, err := game.service.Register(context.Background(), manual, batch(first, true))
-	var rejection *services.GenerationError
-	if !errors.As(err, &rejection) || rejection.Status != 409 || rejection.Type != services.StaleGenerationProblemType {
-		t.Fatalf("new batch for the ended turn = %v", err)
+	// A new batch for the ended turn joins the open turn; its retries, in
+	// this turn and after it played, aren't applied again.
+	late := batch(first, false, attack(t, first, 2))
+	game.register(t, manual, late)
+	game.register(t, manual, late)
+	third := game.toTurnEnd(t, manual)
+	game.register(t, manual, late)
+	fourth := game.toTurnEnd(t, manual)
+	twos := 0
+	for _, group := range fourth.Generation.SoldierGroups {
+		if group.TeamColor == first.TeamColor && group.Soldiers == 2 {
+			twos++
+		}
+	}
+	if !hasGroup(third, first.TeamColor, 2) || twos > 1 {
+		t.Fatalf("the late batch was played %d times: %+v", twos, fourth.Generation.SoldierGroups)
 	}
 }
 
@@ -425,15 +487,27 @@ func TestARealTimeTurnSendsAHostedBotItsNextTurn(t *testing.T) {
 		delivery.Turn.TurnDeadlineAt == nil || !delivery.Turn.TurnDeadlineAt.Equal(wantDeadline) {
 		t.Fatalf("the hosted bot's next turn = %+v", delivery)
 	}
-	// The bot's answer to the turn it missed is stale.
+	// The bot's answer to the turn it missed joins the open turn, and
+	// completes it.
 	claims, err := game.tokens.Verify(firstTurns[0].event.Delivery.Submit.Token, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
 	complete := true
-	_, err = game.service.Register(context.Background(), domain.Principal{PlayerID: claims.PlayerID}, models.RegisterGenerationCommands{
-		GameID: claims.GameID, GenerationID: claims.GenerationID, RequestID: uuid.NewString(), Complete: &complete, Commands: []models.PublicGenerationCommand{}})
-	assertTurnStatus(t, err, 409)
+	late := func() (models.GenerationState, error) {
+		return game.service.Register(context.Background(), domain.Principal{PlayerID: claims.PlayerID}, models.RegisterGenerationCommands{
+			GameID: claims.GameID, GenerationID: claims.GenerationID, RequestID: uuid.NewString(), Complete: &complete, Commands: []models.PublicGenerationCommand{}})
+	}
+	if state, err := late(); err != nil || state.GenerationID != next.ID || !state.Submitted {
+		t.Fatalf("the late answer = %+v, %v", state, err)
+	}
+	// Three turns later, it is stale.
+	for range 2 {
+		*game.clock = game.turnEnd(t)
+		game.applyDeadline(t, game.players[0])
+	}
+	_, err = late()
+	assertProblem(t, err, 409, services.StaleGenerationProblemType, "")
 }
 
 func TestTheReadsOfARealTimeGamePlayAnOverdueTurn(t *testing.T) {

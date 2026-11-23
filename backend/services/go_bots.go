@@ -281,15 +281,17 @@ func turnComplete(game *models.Game, generation *models.Generation, players []mo
 	return len(players) > 0
 }
 
-// playTurn plays a completed turn: it applies every player's commands and the
-// end-of-turn steps as the next generation, created at now, ends the game when
+// playTurn plays a completed turn, that of the open generation, open: it
+// applies every player's commands and the end-of-turn steps as the next
+// generation, created at now, with its turn's end in a real-time game
+// (nextTurnDeadline), ends the game when
 // the end rule says so, and has the Go bots play the new generation at once.
 // The teams whose departure waits for this turn leave first, and their own
 // commands are dropped (simulation.TurnCommands). It returns the new
 // generation, its inputs, which are the Go bots', and what to do once the
 // transaction commits: push the events and send the turns of the hosted and
 // uploaded bots with sender.
-func playTurn(ctx context.Context, transaction *gorm.DB, game *models.Game, players []models.FrozenGamePlayer, inputs []models.GenerationInput, now time.Time, sender *TurnSender) (*models.Generation, []models.GenerationInput, []Publication, []turnToSend, error) {
+func playTurn(ctx context.Context, transaction *gorm.DB, game *models.Game, open *models.Generation, players []models.FrozenGamePlayer, inputs []models.GenerationInput, now time.Time, sender *TurnSender) (*models.Generation, []models.GenerationInput, []Publication, []turnToSend, error) {
 	teams := map[string]uint{}
 	for _, player := range players {
 		teams[player.PlayerID] = player.TeamColor
@@ -307,7 +309,7 @@ func playTurn(ctx context.Context, transaction *gorm.DB, game *models.Game, play
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	generationID, board, err := migrateGeneration(transaction, game.ID, allCommands, now)
+	generationID, board, err := migrateGeneration(transaction, game.ID, allCommands, now, nextTurnDeadline(game, open, now))
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -406,7 +408,7 @@ func (service *GenerationService) playGoBotTurns(ctx context.Context, gameID uin
 			if !turnComplete(game, generation, players, inputs) {
 				return nil
 			}
-			_, _, events, turns, err = playTurn(ctx, transaction, game, players, inputs, service.now(), service.Bots)
+			_, _, events, turns, err = playTurn(ctx, transaction, game, generation, players, inputs, service.now(), service.Bots)
 			next = game.Outcome == nil
 			return err
 		})

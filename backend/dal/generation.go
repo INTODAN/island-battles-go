@@ -2,7 +2,6 @@ package dal
 
 import (
 	"fmt"
-	"time"
 
 	"islandBattles/backend/models"
 
@@ -73,22 +72,39 @@ func GetLatestGenerationForGame(db *gorm.DB, gameID uint) (*models.Generation, e
 	return &generation, nil
 }
 
-// LatestGenerationCreatedAt returns when the game's latest generation was
-// created, without loading it, or found false for a game without one.
-func LatestGenerationCreatedAt(db *gorm.DB, gameID uint) (createdAt time.Time, found bool, err error) {
+// LatestGenerationTiming returns the game's latest generation with only its
+// ID, CreatedAt and TurnDeadlineAt loaded, enough to tell when its turn ends
+// without loading its board, or found false for a game without one. Its
+// Number is 0.
+func LatestGenerationTiming(db *gorm.DB, gameID uint) (generation *models.Generation, found bool, err error) {
 	// GORM drops zero-valued struct conditions, which would match every game.
 	if gameID == 0 {
-		return time.Time{}, false, nil
+		return nil, false, nil
 	}
 	var generations []models.Generation
-	err = db.Select("ID", "CreatedAt").
+	err = db.Select("ID", "CreatedAt", "TurnDeadlineAt").
 		Where(&models.Generation{GameID: gameID}).
 		Order(clause.OrderByColumn{Column: clause.Column{Name: "id"}, Desc: true}).
 		Limit(1).Find(&generations).Error
 	if err != nil || len(generations) == 0 {
-		return time.Time{}, false, err
+		return nil, false, err
 	}
-	return generations[0].CreatedAt, true, nil
+	return &generations[0], true, nil
+}
+
+// RecentGenerationIDs returns the IDs of the game's latest generations, at
+// most limit of them, newest first: the open generation, then the ones before
+// it.
+func RecentGenerationIDs(db *gorm.DB, gameID uint, limit int) ([]uint, error) {
+	if gameID == 0 {
+		return nil, nil
+	}
+	var ids []uint
+	err := db.Model(&models.Generation{}).
+		Where(&models.Generation{GameID: gameID}).
+		Order(clause.OrderByColumn{Column: clause.Column{Name: "id"}, Desc: true}).
+		Limit(limit).Pluck("id", &ids).Error
+	return ids, err
 }
 
 func CountGenerationsForGame(db *gorm.DB, gameID uint) (int64, error) {
