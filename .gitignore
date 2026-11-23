@@ -78,3 +78,7 @@ dist-desktop/
 
 # The bot template ships without a lock (templates/python-bot/README.md); a local uv sync writes one.
 templates/python-bot/uv.lock
+
+# Demos that the headless matches' example schedule writes when it runs from
+# the repository root (backend/README.md, Headless matches)
+/demos/
