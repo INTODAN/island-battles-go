@@ -244,10 +244,13 @@ type MapTemplateSummaryView struct {
 }
 
 // Summary describes a stored template for the default map list. ok is false
-// when the template's team colours are not exactly 1 to player_amount, so the
-// map fits no lobby.
+// when the map fits no lobby: its team colours are not exactly 1 to
+// player_amount, or it is made for fewer or more teams than a lobby can have.
+// GET /map/templates leaves such a template out, and
+// GET /map/templates/{map_template_id} doesn't serve it.
 func (template MapTemplate) Summary() (summary MapTemplateSummaryView, ok bool) {
 	teams, ok := MapTeamCount(template.View())
+	ok = ok && teams >= domain.MinTeams && teams <= domain.MaxTeams
 	return MapTemplateSummaryView{
 		MapTemplateID: template.ID,
 		MapName:       template.MapName,

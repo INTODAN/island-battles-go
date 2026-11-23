@@ -35,6 +35,7 @@
   pointer-events: auto;
 }
 
+/* Above the lobby's Watchers box (lobby.css): the Controls panel and the Fit button stay reachable. */
 .gv-stack-top {
   top: 8px;
   z-index: 5;
@@ -715,7 +716,8 @@
   }
 }
 
-/* The castle menu (castleMenu.ts): beside its castle, inside the board, over the stacks. */
+/* The castle menu (castleMenu.ts): beside its castle, inside the board, over the stacks and the
+   lobby's Watchers box (lobby.css, #379). */
 .gv-castle-menu {
   position: absolute;
   left: 0;

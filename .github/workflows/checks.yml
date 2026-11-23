@@ -145,6 +145,14 @@ jobs:
       - name: Go SDK conformance (offline)
         run: ISLAND_BATTLES_CLIENT_COMMAND="$RUNNER_TEMP/island-battles-go-conformance" uv run --project clients/conformance --locked pytest clients/conformance/tests/test_models.py
 
+      # The headless match runner with real workers: the bot template through
+      # this repository's Python SDK, and the Go SDK's example bot built from
+      # this checkout, each against default level 3 from both sides. A change
+      # to either worker, or to how the runner talks to one, that breaks them
+      # together fails here, before the bot league moves its pin.
+      - name: Headless matches with real workers
+        run: scripts/check-headless-match.sh
+
       # The bot template as the bot tutorial installs it: no lock, so the newest
       # SDK, here this repository's, offered as a release newer than PyPI's. A
       # change to the SDK that breaks the template fails here. The release runs
