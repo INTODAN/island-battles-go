@@ -114,27 +114,22 @@ async def test_a_real_time_game_plays_each_turn_at_its_pace(guests):
         response = await http.post("/generation/commands", json=late)
         assert response.status_code == 200, response.text
         assert response.json()["turn_number"] >= state["turn_number"] and not response.json()["submitted"], response.text
+        # With complete true it completes Alice's open turn, which the bot
+        # has completed already, so the turn plays at once.
+        joined = response.json()
         late = dict(batch, request_id=str(uuid4()), commands=[], complete=True)
         response = await http.post("/generation/commands", json=late)
         assert response.status_code == 200, response.text
-        completed = response.json()
-        assert completed["submitted"], completed
+        assert response.json()["turn_number"] > joined["turn_number"], (joined["turn_number"], response.text)
 
-        # Once Alice has completed the open turn, a late batch is stale, and
-        # names the pace; while that turn is open, a batch for it is refused
-        # as complete.
-        response = await http.post("/generation/commands", json=dict(batch, request_id=str(uuid4()), commands=[]))
-        if response.status_code == 409 and response.json().get("type") == "urn:island-battles:problem:stale-generation":
-            assert "2 s" in response.json()["detail"], response.text
-            on_time = dict(batch, generation_id=completed["generation_id"], request_id=str(uuid4()), commands=[])
-            response = await http.post("/generation/commands", json=on_time)
-            if response.status_code == 409:
-                assert "player turn is already complete" in response.json()["detail"], response.text
-        else:
-            # The completed turn's end passed first, on a slow machine: the
-            # batch joined the next turn.
-            assert response.status_code == 200, response.text
-
+        # A batch that names no generation of this game is stale, and names
+        # the pace. (A late batch once the player has completed the open turn
+        # is stale too; against a bot that completes at once, that turn plays
+        # first, so the service tests cover it.)
+        response = await http.post("/generation/commands", json=dict(batch, generation_id=batch["generation_id"] + 1_000_000, request_id=str(uuid4()), commands=[]))
+        assert response.status_code == 409, response.text
+        assert response.json()["type"] == "urn:island-battles:problem:stale-generation", response.text
+        assert "2 s" in response.json()["detail"], response.text
 
 async def test_a_hand_player_resigns_against_a_bot(guests):
     """A hand player resigns against a default bot (#347): the bot has played
