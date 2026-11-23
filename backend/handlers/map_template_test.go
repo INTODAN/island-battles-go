@@ -137,7 +137,9 @@ func TestListMapTemplatesHTTP(t *testing.T) {
 
 func TestGetMapTemplateHTTP(t *testing.T) {
 	database := testutils.InitTestDB(t)
-	_, api := humatest.New(t)
+	// The production config, whose schema link transformer adds $schema to a
+	// response whose schema lacks it.
+	_, api := humatest.New(t, routes.NewAPIConfig("test", "1.0.0"))
 	routes.SetupRoutes(api, &handlers.Env{DB: database}, testAdminAPIKey)
 
 	// Castle positions, starting soldiers and upgrades come back as given.
@@ -156,6 +158,11 @@ func TestGetMapTemplateHTTP(t *testing.T) {
 	served := api.Get(fmt.Sprintf("/map/templates/%d", result.MapTemplateID))
 	if served.Code != http.StatusOK {
 		t.Fatalf("known map status=%d body=%s", served.Code, served.Body.String())
+	}
+	for _, link := range served.Header().Values("Link") {
+		if strings.Contains(link, "describedBy") {
+			t.Fatalf("map file served with a schema link: %s", link)
+		}
 	}
 	// The stored map names every upgrade's level, so the file does too.
 	const levels = `"burst_potential":1,"clash_stop_generations":1,"generation_amount":1`

@@ -311,9 +311,11 @@ func SetupRoutes(api huma.API, env *handlers.Env, adminAPIKey string) {
 			"Castle upgrades are a map of upgrade type to level. Omitted upgrades default to level 1; " + upgradeLevelRanges() + ". " +
 			"An invalid map returns 422 with an error for each invalid field and is not stored. A map_name that another map uses returns 409. " +
 			"Admins only: send the deployment's admin API key in the " + AdminAPIKeyHeader + " header. A missing or wrong key returns 401, and when the deployment sets no key every request returns 403."}, env.CreateMapTemplate)
-	// Registered before dropSchemaLink: Huma adds $schema to a response only
-	// when its schema lacks the property, so the map file it serves keeps only
-	// the file's own keys and passes POST /map/validate unchanged.
+	// Registered after POST /map/create, whose request body adds $schema to
+	// the MapTemplate schema, and before dropSchemaLink removes it: Huma adds
+	// $schema to a response only when its schema lacks the property, so the
+	// map file served here keeps only the file's own keys and passes
+	// POST /map/validate unchanged. TestGetMapTemplateHTTP checks the order.
 	huma.Register(api, huma.Operation{OperationID: "getMapTemplate", Path: "/map/templates/{map_template_id}", Method: http.MethodGet,
 		Summary: "Download a default map as a map file.",
 		Description: "Returns the default map as a map file, the MapTemplate schema that POST /map/create and POST /map/validate take and a lobby's game_settings.map accepts, so the answer can be saved and used as it is. " +
