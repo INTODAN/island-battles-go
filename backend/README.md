@@ -585,7 +585,7 @@ Every request plays at least one turn, however small its budget, so a game alway
 
 ### Headless matches
 
-`go run ./backend/cmd/headless-match` plays whole games between bots **in memory**: no database, no lobby, no Centrifugo and no HTTP. It is for playing many games quickly, such as the tournaments of the [bot league](https://github.com/INTODAN/island-battles-rsi-bot), a project of its own that builds this command from a commit of this repository, where the live stack would spend its time on everything but the game.
+`go run ./backend/cmd/headless-match` plays whole games between bots **in memory**: no database, no lobby, no Centrifugo and no HTTP. It is for playing many games quickly, such as the tournaments of the [bot league](https://github.com/INTODAN/island-battles-rsi-bot), a project of its own that builds this command from a commit of this repository, where the live stack would spend its time on everything but the game. It plays workers and default levels only; to play a hosted bot, or a package as the server's runners play it, use the Python SDK's [`island-battles-bot match`](../clients/island-battles-python/README.md#play-bots-against-each-other-on-map-files), which plays real games of a server through the lobby.
 
 ```sh
 go run ./backend/cmd/headless-match schedule.json > results.jsonl     # or the schedule on stdin

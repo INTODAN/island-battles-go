@@ -3,8 +3,9 @@
 ``serve`` is the bot's HTTP server, which takes turn deliveries and submits
 its answers itself, and takes the end of each game; ``check`` calls the bot
 once on a fixture turn, ``package`` zips the bot for the server's runners,
-``upload`` uploads that zip to a lobby, and ``run`` plays a seat without a
-browser.
+``upload`` uploads that zip to a lobby, ``run`` plays a seat without a
+browser, and ``match`` plays bots that the server runs against each other on
+map files, through the lobby.
 """
 
 from __future__ import annotations
@@ -49,6 +50,7 @@ from .errors import BotMemoryTooLargeError, GameError, InvalidBotResultError
 from .fixture import fixture_turn, fixture_turn_data
 from .game_end import GameEnded, call_game_ended, module_game_ended
 from .game_log import ClientLogging
+from .match import run as run_match
 from .upload import run as upload
 
 DEFAULT_PORT = 41414
@@ -794,7 +796,7 @@ def check(args: argparse.Namespace) -> int:
 
 
 def seat_urls(args: argparse.Namespace) -> tuple[str, str]:
-    """The game's and the lobby's addresses for run: from --game-url and
+    """The game's and the lobby's addresses for run and match: from --game-url and
     --lobby-url, from --base-url, which sets both, or from the environment."""
     if args.base_url and (args.game_url or args.lobby_url):
         raise SystemExit("--base-url sets both addresses; give it, or --game-url and --lobby-url")
@@ -841,6 +843,33 @@ def run(args: argparse.Namespace) -> int:
     except GameError as error:
         return fail(str(error))
     return 0
+
+
+def match(args: argparse.Namespace) -> int:
+    """Play bots against each other on map files, through the lobby."""
+    game_url, lobby_url = seat_urls(args)
+    return run_match(args, game_url, lobby_url)
+
+
+def add_addresses(parser: argparse.ArgumentParser) -> None:
+    """--game-url, --lobby-url and --base-url, which seat_urls reads."""
+    parser.add_argument(
+        "--game-url",
+        metavar="URL",
+        help="the game's address, such as https://island-battles.elidan.org "
+        f"(default ${GAME_URL_ENV})",
+    )
+    parser.add_argument(
+        "--lobby-url",
+        metavar="URL",
+        help=f"the lobby's address, such as https://lobby.elidan.org (default ${LOBBY_URL_ENV})",
+    )
+    parser.add_argument(
+        "--base-url",
+        metavar="URL",
+        help="sets both addresses to one, for a server that serves the game and the lobby "
+        "together (the official game's are two: give --game-url and --lobby-url)",
+    )
 
 
 def print_fixture(_: argparse.Namespace) -> int:
@@ -946,23 +975,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     running = commands.add_parser("run", help="play a seat without a browser")
     running.add_argument("bot", help="module:function")
-    running.add_argument(
-        "--game-url",
-        metavar="URL",
-        help="the game's address, such as https://island-battles.elidan.org "
-        f"(default ${GAME_URL_ENV})",
-    )
-    running.add_argument(
-        "--lobby-url",
-        metavar="URL",
-        help=f"the lobby's address, such as https://lobby.elidan.org (default ${LOBBY_URL_ENV})",
-    )
-    running.add_argument(
-        "--base-url",
-        metavar="URL",
-        help="sets both addresses to one, for a server that serves the game and the lobby "
-        "together (the official game's are two: give --game-url and --lobby-url)",
-    )
+    add_addresses(running)
     running.add_argument("--token", required=True, help="the guest bearer credential")
     running.add_argument("--lobby-id", required=True)
     running.add_argument("--log-file")
@@ -970,6 +983,60 @@ def build_parser() -> argparse.ArgumentParser:
         "--log-level", default="info", choices=("debug", "info", "warning", "error")
     )
     running.set_defaults(handler=run)
+
+    matching = commands.add_parser(
+        "match",
+        help="play bots that the server runs (hosted, uploaded packages, default "
+        "levels) against each other on map files, from every side, without a browser",
+    )
+    matching.add_argument(
+        "--map",
+        action="extend",
+        nargs="+",
+        required=True,
+        metavar="FILE",
+        help="map files, the MapTemplate schema, each made for as many teams as "
+        "there are seats (repeatable; --map maps/*.json takes them all)",
+    )
+    matching.add_argument(
+        "--seat",
+        action="append",
+        required=True,
+        metavar="SPEC",
+        help="a bot that plays a team, in colour order on each map's first game: "
+        "hosted:URL, a hosted bot's turn URL; package:ZIP, a zip that package wrote, "
+        "uploaded to the lobby; or default:LEVEL, a default bot. NAME= before it names "
+        "the seat in the results (repeatable, one per team)",
+    )
+    matching.add_argument(
+        "--games",
+        type=int,
+        default=1,
+        metavar="N",
+        help="how many times to play each map from each side (default 1)",
+    )
+    matching.add_argument(
+        "--output",
+        default="matches",
+        metavar="DIR",
+        help="where each game's result, ID.json, and demo, ID.demo.json, go "
+        "(default matches)",
+    )
+    matching.add_argument(
+        "--turn-timeout",
+        type=int,
+        metavar="SECONDS",
+        help="the lobby's turn timeout, 5 to 600 (default the lobby's, 30): a bot that "
+        "doesn't answer a turn in time loses the game",
+    )
+    matching.add_argument(
+        "--max-generations",
+        type=int,
+        metavar="N",
+        help="the most turns a game lasts, 50 to 1200 (default 300)",
+    )
+    add_addresses(matching)
+    matching.set_defaults(handler=match)
     return parser
 
 
