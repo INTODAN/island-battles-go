@@ -22,7 +22,9 @@
 // - cycles: 5 games in a row in one game view (`/?demo=six-teams.json`, then Open demo file 4
 //   times, which leaves the game shown and starts the next on a new engine), each played for 3 s:
 //   the JS heap after a forced GC with each game shown, how many WebGL contexts and canvases are
-//   still reachable then, and the WebGL textures, buffers and programs not deleted.
+//   still reachable then, the WebGL textures, buffers and programs not deleted in those contexts
+//   that are not lost, and how long each game after the first took to load its art (`loadMs`,
+//   from Open demo file until its loading screen starts to fade).
 //
 // A "frame drawn" is an animation frame callback that issued a WebGL draw call: the script wraps
 // `requestAnimationFrame` and the draw calls before the page runs, the same way on any version.
@@ -53,9 +55,23 @@ function instrument() {
     drew: false,
     contexts: [],
     canvases: [],
-    textures: 0,
-    buffers: 0,
-    programs: 0,
+    /** WebGL objects made and not deleted, per context. */
+    objects: new WeakMap(),
+    /** The WebGL objects not deleted in the contexts still reachable and not lost. */
+    live() {
+      const total = { contexts: 0, textures: 0, buffers: 0, programs: 0 };
+      for (const ref of perf.contexts) {
+        const context = ref.deref();
+        if (!context) continue;
+        total.contexts++;
+        if (context.isContextLost()) continue;
+        const counts = perf.objects.get(context) ?? {};
+        for (const key of ["textures", "buffers", "programs"]) {
+          total[key] += counts[key] ?? 0;
+        }
+      }
+      return total;
+    },
   };
   window.__perf = perf;
   const raf = window.requestAnimationFrame.bind(window);
@@ -84,12 +100,21 @@ function instrument() {
     const count = (create, remove, key) => {
       const made = proto[create];
       const gone = proto[remove];
+      const counts = (context) => {
+        let entry = perf.objects.get(context);
+        if (!entry) {
+          entry = {};
+          perf.objects.set(context, entry);
+        }
+        return entry;
+      };
       proto[create] = function (...rest) {
-        perf[key]++;
+        const entry = counts(this);
+        entry[key] = (entry[key] ?? 0) + 1;
         return made.apply(this, rest);
       };
       proto[remove] = function (...rest) {
-        if (rest[0]) perf[key]--;
+        if (rest[0]) counts(this)[key]--;
         return gone.apply(this, rest);
       };
     };
@@ -375,13 +400,15 @@ async function measureCycles(times = 5) {
   const heaps = [];
   const live = [];
   for (let cycle = 1; cycle <= times; cycle++) {
+    const started = Date.now();
     if (cycle > 1) {
-      // Open demo file: the screen leaves the game it shows and starts the new one.
+      // Open demo file: the screen leaves the game it shows and starts the new one, whose
+      // loading screen stays until the art is in, and 400 ms more to fade.
       await page.setInputFiles(
         'input[aria-label="Demo file"]',
         path.join(fixtureDir, fixture),
       );
-      await page.waitForTimeout(1000);
+      await page.waitForSelector(".board-loading", { state: "attached" });
     }
     await page.waitForSelector(".gv-canvas");
     await page.waitForFunction(
@@ -391,6 +418,7 @@ async function measureCycles(times = 5) {
         timeout: 60000,
       },
     );
+    const loadMs = cycle > 1 ? Date.now() - started - 400 : null;
     await page.waitForTimeout(2000);
     const play = () =>
       page.evaluate(() =>
@@ -405,13 +433,14 @@ async function measureCycles(times = 5) {
     await play();
     heaps.push((await heapAfterGc(page, cdp)) / 1048576);
     live.push(
-      await page.evaluate(() => ({
-        contexts: window.__perf.contexts.filter((ref) => ref.deref()).length,
-        canvases: window.__perf.canvases.filter((ref) => ref.deref()).length,
-        textures: window.__perf.textures,
-        buffers: window.__perf.buffers,
-        programs: window.__perf.programs,
-      })),
+      await page.evaluate(
+        (ms) => ({
+          loadMs: ms,
+          ...window.__perf.live(),
+          canvases: window.__perf.canvases.filter((ref) => ref.deref()).length,
+        }),
+        loadMs,
+      ),
     );
   }
   results.cycles = { heapMB: heaps, live };
