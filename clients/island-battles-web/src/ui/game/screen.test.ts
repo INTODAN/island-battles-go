@@ -139,7 +139,6 @@ function quietHandPlay() {
     game: createStore(null),
     postCommands: () => new Promise(() => {}),
     applyDeadline: () => new Promise(() => {}),
-    readState: () => new Promise(() => {}),
     loadUpgrades: () => new Promise(() => {}),
     adopt: () => {},
     refresh: () => {},
