@@ -171,7 +171,10 @@ interface Running {
 
 export class GameScreen {
   private readonly root = element("div", "gv");
-  private readonly canvas = element("canvas", "gv-canvas");
+  /** The board's canvas: a new one for each game (`start`). */
+  private canvas = element("canvas", "gv-canvas");
+  /** Whether a game has drawn on `canvas`. */
+  private canvasUsed = false;
   private readonly title = element("span", "gv-title");
   private readonly connection = element("span", "gv-connection");
   private readonly connectionDot = element("span", "gv-dot");
@@ -754,9 +757,21 @@ export class GameScreen {
   ): GameController {
     this.stop();
     const sorted = sortTeams(teams);
+    // Each game draws on a canvas of its own, and its engine loses the WebGL context when the
+    // game ends: that frees every GPU resource at once, also those Babylon does not delete itself
+    // (an index buffer of each GPU particle system, 48 a game with Effects on, #403).
+    if (this.canvasUsed) {
+      const canvas = element("canvas", "gv-canvas");
+      canvas.setAttribute("aria-label", "Island Battles battlefield");
+      this.canvas.replaceWith(canvas);
+      this.canvas = canvas;
+    }
+    this.canvasUsed = true;
     // Nothing reads the board's canvas back, so the browser may discard its drawing buffer after
     // each frame (no `preserveDrawingBuffer`, #403); a frame not drawn keeps the last one shown.
-    const engine = new Engine(this.canvas, true);
+    const engine = new Engine(this.canvas, true, {
+      loseContextOnDispose: true,
+    });
     const scene = new Scene(engine);
     this.scene = scene;
     const handPlay = this.options.handPlay ?? null;
