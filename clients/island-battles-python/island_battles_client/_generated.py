@@ -234,7 +234,7 @@ class BotTurn(GameModel):
     team_color: Annotated[StrictInt, Field(ge=1)]
     turn_deadline_at: AwareDatetime | None
     """
-    When the turn ends, GenerationState.turn_deadline_at, or null when turns have no time limit. In a game that waits for every player, a bot that hasn't answered by then makes its whole team lose. In a real-time game, where a player plays by hand, the server plays the turn then without the bot's answer: a later answer joins the open turn, and completes it, while it names one of the two turns before the open one, and is refused as a stale generation after that, when the bot has passed.
+    When the turn ends, GenerationState.turn_deadline_at, or null when turns have no time limit. In a game that waits for every player, a bot that hasn't answered by then makes its whole team lose. In a real-time game, where a player plays by hand, the server plays the turn then without the bot's answer: a later answer joins the turn open when it arrives, and completes it, however late it is, and is refused as a stale generation only once the bot has completed that turn already; an answer that comes in time for a turn that a late answer completed gets the plain 409 player turn is already complete. A submit token expires 30 seconds after this deadline, which limits how late a bot that answers with one can be.
     """
     turn_number: Annotated[StrictInt, Field(ge=1)]
     """
@@ -889,7 +889,7 @@ class GenerationState(GameModel):
     """
     turn_pace_milliseconds: Annotated[StrictInt | None, Field(ge=500, le=5000)]
     """
-    The game's turn pace in milliseconds when the game is real-time, because a player on its roster plays by hand: each turn ends this long after the previous one, at turn_deadline_at, and plays with the commands that arrived, without waiting for anyone; a batch that arrives up to two turns late joins the open turn. It still plays early once every player completed it. Null when the game waits for every player to complete each turn.
+    The game's turn pace in milliseconds when the game is real-time, because a player on its roster plays by hand: each turn ends this long after the previous one, at turn_deadline_at, and plays with the commands that arrived, without waiting for anyone; a batch that arrives late joins the turn open when it arrives. It still plays early once every player completed it. Null when the game waits for every player to complete each turn.
     """
 
 
@@ -1526,7 +1526,7 @@ class TurnSubmit(GameModel):
     )
     deadline_at: AwareDatetime | None
     """
-    When the turn ends, the BotTurn's turn_deadline_at, or null when turns have no time limit. An answer should be submitted before it: in a real-time game a later one joins the open turn while it names one of the two turns before it, and is refused as a stale generation after that, when the bot has passed the turn.
+    When the turn ends, the BotTurn's turn_deadline_at, or null when turns have no time limit. An answer should be submitted before it: in a real-time game a later one joins the turn open when it arrives, but this submit token expires 30 seconds after deadline_at, so that is the latest an answer can come.
     """
     token: StrictStr
     """
@@ -1668,7 +1668,7 @@ class WatchState(GameModel):
     """
     turn_deadline_at: AwareDatetime | None
     """
-    When this generation's turn ends, as in GenerationState: after the turn pace in a real-time game, otherwise when it times out. Null when turns have no time limit, and once the game has ended. Watchers never apply a deadline themselves.
+    When this generation's turn ends, as GenerationState.turn_deadline_at describes. Null when turns have no time limit, and once the game has ended. Watchers never apply a deadline themselves.
     """
     turn_pace_milliseconds: Annotated[StrictInt | None, Field(ge=500, le=5000)]
     """

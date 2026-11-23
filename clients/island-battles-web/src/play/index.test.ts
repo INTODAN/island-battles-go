@@ -145,8 +145,8 @@ describe("startHandPlay", () => {
       });
       await flush();
       const given = env.play.send(1, 4, 5);
-      // A batch at most two turns late is played in the open turn, so a stale turn's 409 means
-      // the order came later than that: it is dropped, not sent again.
+      // A late batch is played in the open turn, so a stale turn's 409 no longer comes for a
+      // late order; if it does, the order is dropped, not sent again.
       expect(given.ok && (await given.settled)).toMatchObject({
         state: "rejected",
         sentence: "The turn ended before the order arrived.",

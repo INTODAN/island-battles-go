@@ -399,8 +399,8 @@ describe("orders", () => {
       env.game.set(handState(11));
       env.posts[0]?.reject(stale(typed));
       await flush();
-      // The server plays an order up to two turns late in the open turn, so a stale turn's 409
-      // means it came later than that: it is not sent again.
+      // The server plays a late order in the open turn, so a stale turn's 409 no longer comes
+      // for one; if it does, the order is not sent again.
       expect(env.settled).toEqual([
         expect.objectContaining({
           id: 1,
@@ -444,6 +444,28 @@ describe("orders", () => {
       expect.objectContaining({ state: "accepted", generationId: 10 }),
     ]);
     expect(env.play.state.get().castles.get(1)?.unreserved).toBe(40);
+  });
+
+  test("a retry answered with the next generation doesn't count the order there twice", async () => {
+    const env = setup({ initial: withCastle1(10, 30) });
+    env.play.send(1, 4, 5);
+    // The first attempt was played in turn 10, but its answer was lost.
+    env.posts[0]?.reject(transport());
+    await flush();
+    // Turn 10 plays, with the order: generation 11 already has its soldiers gone.
+    env.game.set(withCastle1(11, 27));
+    await env.clock.advance(retryDelay(0));
+    expect(env.posts[1]?.body).toMatchObject({
+      generation_id: 10,
+      request_id: env.posts[0]?.body.request_id,
+    });
+    // The server replays the request with the current state.
+    accept(env, 1);
+    await flush();
+    expect(env.settled).toEqual([
+      expect.objectContaining({ state: "accepted", generationId: 10 }),
+    ]);
+    expect(env.play.state.get().castles.get(1)?.unreserved).toBe(27);
   });
 
   test("a refusal with a problem type drops the order, and the next one goes", async () => {

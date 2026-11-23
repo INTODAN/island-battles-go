@@ -518,12 +518,17 @@ export function createHandPlay(deps: HandPlayDeps): HandPlay {
         deps.adopt(answer);
         if (!current()) return;
         // The answer is the state of the turn the order joined: its own, or, when it arrived after
-        // its turn played, the open one, where the server plays a batch up to two turns late
-        // (#380). It holds the order's soldiers while that turn is still the open one.
-        if (answer.game_id === body.game_id)
-          entry.generationId = answer.generation_id;
+        // its turn played, the turn open when it arrived, where the server plays a late batch
+        // however late it is (#380). A retry's answer may instead be the server's replay of an
+        // attempt that was played in an earlier turn, with the current state: then it is known to
+        // be in the answer's turn only when that is the turn it was sent to.
+        const joined =
+          answer.game_id === body.game_id &&
+          (entry.attempt === 0 || answer.generation_id === body.generation_id);
+        if (joined) entry.generationId = answer.generation_id;
         const open = deps.game.get();
         if (
+          joined &&
           open &&
           open.game_id === answer.game_id &&
           open.generation_id === answer.generation_id &&
@@ -570,10 +575,9 @@ export function createHandPlay(deps: HandPlayDeps): HandPlay {
       }, delay);
       return;
     }
-    // A refusal drops the order with its sentence. A batch that arrives after its turn played
-    // is no longer refused while it is at most two turns late: the server plays it in the open
-    // turn (#380), so a stale turn's 409 means the order came later than that, and is not sent
-    // again.
+    // A refusal drops the order with its sentence. A batch that arrives after its turn played is
+    // no longer refused: the server plays it in the open turn (#380). A stale turn's 409, which a
+    // hand player no longer gets for a late order, drops it too, and it is not sent again.
     inflight = null;
     settle(entry, "rejected", rejectionSentence(error as ApiError));
     pump();

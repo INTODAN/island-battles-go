@@ -9,8 +9,8 @@ one overdue turn, and each turn ends one pace after the previous one's end
 The pace is 2 s, and the order is sent right after the deadline call that
 opened its turn; on a machine that stalls longer it arrives after its turn
 played, and the server plays it in the open turn instead, whose state it
-answers. A batch up to two turns late joins the open turn; an older one is
-stale."""
+answers. A late batch joins the open turn however late it is; only a batch
+that comes once the player has completed the open turn is stale."""
 
 import asyncio
 from datetime import datetime, timezone
@@ -70,6 +70,7 @@ async def test_a_real_time_game_plays_each_turn_at_its_pace(guests):
         # the order, although Alice never completed it.
         await wait_until(opened["turn_deadline_at"])
         response = await http.post(f"/game/from-lobby/{scope.lobby_id}/deadline")
+        answered = datetime.now(timezone.utc)
         assert response.status_code == 200, response.text
         second = response.json()
         assert second["turn_number"] == opened["turn_number"] + 1, (opened["turn_number"], second["turn_number"])
@@ -77,10 +78,17 @@ async def test_a_real_time_game_plays_each_turn_at_its_pace(guests):
         assert any(group["team_color"] == opened["team_color"] and group["soldiers"] == 5
                    for group in second["generation"]["soldier_groups"]), second["generation"]["soldier_groups"]
 
-        # The next turn ends one pace after this one's end.
+        # The next turn ends exactly one pace after this one's end, however
+        # late the call came, unless it came more than half a pace late:
+        # then it ends half a pace after the turn played, which was before
+        # the answer arrived here.
         ended = datetime.fromisoformat(opened["turn_deadline_at"].replace("Z", "+00:00"))
         following = datetime.fromisoformat(second["turn_deadline_at"].replace("Z", "+00:00"))
-        assert (following - ended).total_seconds() >= 1, (opened["turn_deadline_at"], second["turn_deadline_at"])
+        gap = (following - ended).total_seconds()
+        if (answered - ended).total_seconds() <= 1:
+            assert abs(gap - 2) < 0.001, (opened["turn_deadline_at"], second["turn_deadline_at"])
+        else:
+            assert 2 < gap <= (answered - ended).total_seconds() + 1.001, (gap, opened["turn_deadline_at"], second["turn_deadline_at"])
 
         # A batch for the turn that ended joins the open turn.
         late = dict(batch, request_id=str(uuid4()), commands=[])
@@ -100,13 +108,32 @@ async def test_a_real_time_game_plays_each_turn_at_its_pace(guests):
             state = response.json()
             assert state["turn_number"] == previous + 1 and state.get("outcome") is None, state
 
-        # Three turns or more after it ended, a batch for that turn is stale,
-        # and names the pace.
+        # Several turns after it ended, a batch for that turn still joins
+        # the open turn, and with complete true it completes it.
         late = dict(batch, request_id=str(uuid4()), commands=[])
         response = await http.post("/generation/commands", json=late)
-        assert response.status_code == 409, response.text
-        assert response.json()["type"] == "urn:island-battles:problem:stale-generation", response.text
-        assert "2 s" in response.json()["detail"], response.text
+        assert response.status_code == 200, response.text
+        assert response.json()["turn_number"] >= state["turn_number"] and not response.json()["submitted"], response.text
+        late = dict(batch, request_id=str(uuid4()), commands=[], complete=True)
+        response = await http.post("/generation/commands", json=late)
+        assert response.status_code == 200, response.text
+        completed = response.json()
+        assert completed["submitted"], completed
+
+        # Once Alice has completed the open turn, a late batch is stale, and
+        # names the pace; while that turn is open, a batch for it is refused
+        # as complete.
+        response = await http.post("/generation/commands", json=dict(batch, request_id=str(uuid4()), commands=[]))
+        if response.status_code == 409 and response.json().get("type") == "urn:island-battles:problem:stale-generation":
+            assert "2 s" in response.json()["detail"], response.text
+            on_time = dict(batch, generation_id=completed["generation_id"], request_id=str(uuid4()), commands=[])
+            response = await http.post("/generation/commands", json=on_time)
+            if response.status_code == 409:
+                assert "player turn is already complete" in response.json()["detail"], response.text
+        else:
+            # The completed turn's end passed first, on a slow machine: the
+            # batch joined the next turn.
+            assert response.status_code == 200, response.text
 
 
 async def test_a_hand_player_resigns_against_a_bot(guests):

@@ -92,21 +92,6 @@ func LatestGenerationTiming(db *gorm.DB, gameID uint) (generation *models.Genera
 	return &generations[0], true, nil
 }
 
-// RecentGenerationIDs returns the IDs of the game's latest generations, at
-// most limit of them, newest first: the open generation, then the ones before
-// it.
-func RecentGenerationIDs(db *gorm.DB, gameID uint, limit int) ([]uint, error) {
-	if gameID == 0 {
-		return nil, nil
-	}
-	var ids []uint
-	err := db.Model(&models.Generation{}).
-		Where(&models.Generation{GameID: gameID}).
-		Order(clause.OrderByColumn{Column: clause.Column{Name: "id"}, Desc: true}).
-		Limit(limit).Pluck("id", &ids).Error
-	return ids, err
-}
-
 func CountGenerationsForGame(db *gorm.DB, gameID uint) (int64, error) {
 	var count int64
 	err := db.Model(&models.Generation{}).Where(&models.Generation{GameID: gameID}).Count(&count).Error

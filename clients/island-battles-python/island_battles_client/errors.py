@@ -100,10 +100,9 @@ class StaleGenerationError(GameError):
 
     In a real-time game each turn ends one turn pace after the previous one,
     and the server plays it with the commands that arrived by then. A batch
-    that comes later joins the open turn, and with ``complete`` completes it,
-    while it names one of the two turns before the open one; only an older
-    batch, or one that comes once the open turn is complete, gets this error,
-    and the bot has passed that turn. The client handles it itself there: it
+    that comes later joins the turn open when it arrives, however late, and
+    with ``complete`` completes it; only a batch that comes once the open
+    turn is complete gets this error, and the bot has passed that turn. The client handles it itself there: it
     writes one line, reads the new state and plays on. In a game that waits
     for every player the client stops on it, as on any other rejection.
     """

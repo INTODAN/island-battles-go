@@ -587,8 +587,9 @@ func TestResignInAGameOfBotsIsRefused(t *testing.T) {
 }
 
 // A localhost bot whose submissions stop is taken out after the turn limit;
-// one that answers late every turn stays, whether its answer joins the open
-// turn (a turn late) or gets 409 for the stale turn (three turns late). A
+// one that answers late every turn stays, one turn or three turns late: its
+// answer joins the open turn, and completes it, and a second late answer then
+// gets 409 for the stale turn, which counts as hearing from it too. A
 // localhost seat is heard only through its own submissions, not through its
 // relayer's turn deliveries.
 func TestLocalhostBotsLeaveWhenTheirSubmissionsStop(t *testing.T) {
@@ -657,12 +658,14 @@ func lateEveryTurn(t *testing.T, lateness int) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = game.service.Register(ctx, principal, models.RegisterGenerationCommands{GameID: game.gameID, GenerationID: missed.GenerationID, RequestID: uuid.NewString(), Commands: []models.PublicGenerationCommand{}})
-		if lateness > services.LateTurns {
-			assertProblem(t, err, 409, services.StaleGenerationProblemType, "")
-		} else if err != nil {
+		answer := func() error {
+			_, err := game.service.Register(ctx, principal, models.RegisterGenerationCommands{GameID: game.gameID, GenerationID: missed.GenerationID, RequestID: uuid.NewString(), Commands: []models.PublicGenerationCommand{}})
+			return err
+		}
+		if err := answer(); err != nil {
 			t.Fatalf("turn %d: the answer %d turns late = %v", turn, lateness, err)
 		}
+		assertProblem(t, answer(), 409, services.StaleGenerationProblemType, "")
 		if state := game.current(t, bluePlayer); state.Outcome != nil || castleOf(state, red) == nil {
 			t.Fatalf("turn %d: the late bot was taken out: %+v", turn, state.Outcome)
 		}

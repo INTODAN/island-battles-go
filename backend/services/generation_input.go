@@ -283,8 +283,8 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 		}
 		// A turn that this request ended is over for its batch, whichever
 		// generation the batch names. In a real-time game a batch that
-		// names one of the turns just before the open one joins the open
-		// turn instead (lateBatchJoins); an older one is stale.
+		// names an earlier turn of the game joins the open turn instead
+		// (lateBatchJoins), however late it is.
 		lateBatch := end.played || generation.ID != request.GenerationID
 		if lateBatch {
 			joins, err := lateBatchJoins(transaction, locked, request.GenerationID)
@@ -312,7 +312,7 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 				// batch can't join it: its turn passed without it.
 				return rejectAfterDeadline(staleGeneration(locked))
 			}
-			return reject(409, "player turn is already complete")
+			return reject(409, alreadyComplete)
 		}
 		// A late batch is checked against the open turn's board and the
 		// commands it already holds, as any batch is.
@@ -392,37 +392,35 @@ func (service *GenerationService) Register(ctx context.Context, principal domain
 	return state, nil
 }
 
-// LateTurns is how many turns before the open one a batch of a real-time game
-// may name and still be played: a batch that arrives after its turn has
-// played, naming one of these turns, joins the open turn (lateBatchJoins).
-const LateTurns = 2
-
-// lateBatchJoins reports whether a batch that names generationID, a
-// generation whose turn has already played, joins the open turn: in a
-// real-time game, when generationID is one of the LateTurns generations
-// before the open one. Its commands are then checked against the open turn's
-// board as any batch's are, and a batch that completes its turn completes the
-// open one. A game that waits for every player plays a turn only once each
+// lateBatchJoins reports whether a batch that names generationID, which isn't
+// the open generation or whose turn the request has just played, joins the
+// open turn: in a real-time game, when generationID is an earlier generation
+// of the game, however many turns ago it played. Its commands are then checked
+// against the open turn's board as any batch's are, and a batch that completes
+// its turn completes the open one. A generation of another game, or none, is
+// stale. A game that waits for every player plays a turn only once each
 // player completed it, so there a batch for an earlier turn is always stale.
 func lateBatchJoins(transaction *gorm.DB, game *models.Game, generationID uint) (bool, error) {
 	if game.TurnPaceMilliseconds == nil {
 		return false, nil
 	}
-	ids, err := dal.RecentGenerationIDs(transaction, game.ID, LateTurns+1)
-	if err != nil || len(ids) < 2 {
-		return false, err
-	}
-	return slices.Contains(ids[1:], generationID), nil
+	return dal.GameHasGeneration(transaction, game.ID, generationID)
 }
 
+// alreadyComplete refuses a batch for a turn the player has already completed:
+// in a real-time game, also an answer that comes in time for a turn that a
+// late completing batch completed.
+const alreadyComplete = "player turn is already complete"
+
 // staleGeneration rejects a batch for a generation whose turn is over, and
-// that can't join the open turn (lateBatchJoins). In a real-time game its
-// detail says how late a batch may be, so a bot's author sees why a slow bot
-// passed.
+// that can't join the open turn (lateBatchJoins). In a real-time game that is
+// a batch that came once the player had completed the open turn, or one that
+// names no generation of the game; its detail says so, so a bot's author sees
+// why a slow bot passed.
 func staleGeneration(game *models.Game) error {
 	detail := "generation is no longer current"
 	if game.TurnPaceMilliseconds != nil {
-		detail += fmt.Sprintf(": in this real-time game each turn ends %s after the previous one and plays with the commands that arrived by then, and a batch that arrives later joins the open turn only when it names one of the %d turns before it and the player hasn't completed the open turn, so this batch came too late and was not played", describePace(*game.TurnPaceMilliseconds), LateTurns)
+		detail += fmt.Sprintf(": in this real-time game each turn ends %s after the previous one and plays with the commands that arrived by then; a batch that arrives later joins the open turn, but not once the player has completed the open turn, nor when it names no generation of this game, so this batch was not played", describePace(*game.TurnPaceMilliseconds))
 	}
 	return &GenerationError{Status: 409, Detail: detail, Type: StaleGenerationProblemType}
 }
