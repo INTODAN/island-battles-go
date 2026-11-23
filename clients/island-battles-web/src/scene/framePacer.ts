@@ -1,5 +1,4 @@
 import type { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
-import { PointerEventTypes } from "@babylonjs/core/Events/pointerEvents";
 import type { Scene } from "@babylonjs/core/scene";
 
 // Draw only when something changes (#403). A board drew every frame at the display's full rate,
@@ -152,11 +151,60 @@ export function cameraWatcher(camera: ArcRotateCamera): () => boolean {
   };
 }
 
+/** The pacer of each paced scene, so `holdFullRate` can wake it. */
+const pacers = new WeakMap<Scene, FramePacer>();
+/** What holds each scene at full rate (`holdFullRate`). */
+const holds = new WeakMap<Scene, Set<object>>();
+
+/**
+ * Keeps `scene` at full rate, from the next frame, until the returned function is called: for an
+ * animation that starts on its own, such as a refused order's flash when the server's answer comes
+ * in. Calling the returned function again does nothing.
+ */
+export function holdFullRate(scene: Scene): () => void {
+  let set = holds.get(scene);
+  if (!set) {
+    set = new Set();
+    holds.set(scene, set);
+  }
+  const token = {};
+  set.add(token);
+  pacers.get(scene)?.wake();
+  return () => {
+    holds.get(scene)?.delete(token);
+  };
+}
+
+/** Whether something holds `scene` at full rate (`holdFullRate`). */
+export function fullRateHeld(scene: Scene): boolean {
+  return (holds.get(scene)?.size ?? 0) > 0;
+}
+
+/**
+ * The pointers pressed now, by ID: a press on the board adds one, its release or cancel anywhere
+ * removes it, so a second finger lifted while the first stays down still counts one.
+ */
+export class PressedPointers {
+  private readonly ids = new Set<number>();
+
+  down(pointerId: number): void {
+    this.ids.add(pointerId);
+  }
+
+  up(pointerId: number): void {
+    this.ids.delete(pointerId);
+  }
+
+  get held(): boolean {
+    return this.ids.size > 0;
+  }
+}
+
 /**
  * Paces `scene`'s engine with `poll`: decides after each frame drawn, wakes on any pointer or
- * wheel event on the board and any key, and keeps full rate while a pointer button is held on the
- * board. Returns the pacer and a function that removes what it added (call it before the scene
- * is disposed).
+ * wheel event on the board and any key, and keeps full rate while a pointer pressed on the board
+ * is down or something holds it (`holdFullRate`). Returns the pacer and a function that removes
+ * what it added (call it before the scene is disposed).
  */
 export function paceScene(
   scene: Scene,
@@ -164,26 +212,43 @@ export function paceScene(
   options: FramePacerOptions = {},
 ): { pacer: FramePacer; dispose: () => void } {
   const engine = scene.getEngine();
-  let held = false;
+  const pressed = new PressedPointers();
+  const held: Activity = { pointer: true };
   const pacer = new FramePacer(
     engine,
-    () => (held ? { pointer: true } : poll()),
+    () => (pressed.held || fullRateHeld(scene) ? held : poll()),
     options,
   );
+  pacers.set(scene, pacer);
   const afterRender = scene.onAfterRenderObservable.add(() => pacer.update());
-  const pointer = scene.onPrePointerObservable.add((info) => {
-    if (info.type === PointerEventTypes.POINTERDOWN) held = true;
-    else if (info.type === PointerEventTypes.POINTERUP) held = false;
+  // Any pointer or wheel event Babylon sees on the board wakes it.
+  const pointer = scene.onPrePointerObservable.add(() => pacer.wake());
+  // Presses are counted from the page's own events: Babylon has no cancel event, and a release
+  // can happen off the board.
+  const canvas = engine.getRenderingCanvas();
+  const onDown = (event: PointerEvent) => {
+    pressed.down(event.pointerId);
     pacer.wake();
-  });
+  };
+  const onUp = (event: PointerEvent) => {
+    pressed.up(event.pointerId);
+    pacer.wake();
+  };
   const wake = () => pacer.wake();
+  canvas?.addEventListener("pointerdown", onDown);
+  window.addEventListener("pointerup", onUp, { capture: true });
+  window.addEventListener("pointercancel", onUp, { capture: true });
   window.addEventListener("keydown", wake);
   return {
     pacer,
     dispose: () => {
       scene.onAfterRenderObservable.remove(afterRender);
       scene.onPrePointerObservable.remove(pointer);
+      canvas?.removeEventListener("pointerdown", onDown);
+      window.removeEventListener("pointerup", onUp, { capture: true });
+      window.removeEventListener("pointercancel", onUp, { capture: true });
       window.removeEventListener("keydown", wake);
+      if (pacers.get(scene) === pacer) pacers.delete(scene);
       engine.maxFPS = undefined;
     },
   };

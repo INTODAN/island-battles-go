@@ -11,9 +11,13 @@ import {
   cameraWatcher,
   FramePacer,
   frameCap,
+  fullRateHeld,
+  holdFullRate,
   IDLE_FPS,
   isActive,
   LINGER_MS,
+  PressedPointers,
+  paceScene,
 } from "./framePacer";
 
 describe("isActive (#403)", () => {
@@ -167,5 +171,106 @@ describe("cameraWatcher (#403)", () => {
     expect(moved()).toBe(true);
     camera.inertialAlphaOffset = 0;
     expect(moved()).toBe(false);
+  });
+});
+
+describe("PressedPointers (#403)", () => {
+  test("a second finger lifted while the first stays down still counts as held", () => {
+    const pressed = new PressedPointers();
+    expect(pressed.held).toBe(false);
+    pressed.down(1);
+    pressed.down(2);
+    pressed.up(2);
+    expect(pressed.held).toBe(true);
+    pressed.up(1);
+    expect(pressed.held).toBe(false);
+    // A release of a pointer never pressed on the board changes nothing.
+    pressed.up(7);
+    expect(pressed.held).toBe(false);
+  });
+});
+
+describe("paceScene (#403)", () => {
+  /** A scene on a NullEngine whose canvas is a plain event target, with a fake window and clock. */
+  function pacedScene() {
+    const canvas = new EventTarget();
+    class CanvasEngine extends NullEngine {
+      override getRenderingCanvas() {
+        return canvas as unknown as HTMLCanvasElement;
+      }
+    }
+    const engine = new CanvasEngine();
+    const scene = new Scene(engine);
+    const page = new EventTarget();
+    const saved = Object.getOwnPropertyDescriptor(globalThis, "window");
+    Object.defineProperty(globalThis, "window", {
+      value: page,
+      configurable: true,
+      writable: true,
+    });
+    let now = 0;
+    const { pacer, dispose } = paceScene(scene, () => ({}), {
+      now: () => now,
+    });
+    const pointer = (target: EventTarget, type: string, pointerId: number) =>
+      target.dispatchEvent(Object.assign(new Event(type), { pointerId }));
+    return {
+      engine,
+      scene,
+      /** Past the linger, with a frame drawn. */
+      idle() {
+        now += LINGER_MS * 2;
+        pacer.update();
+      },
+      down: (id: number) => pointer(canvas, "pointerdown", id),
+      up: (id: number) => pointer(page, "pointerup", id),
+      cancel: (id: number) => pointer(page, "pointercancel", id),
+      dispose() {
+        dispose();
+        scene.dispose();
+        engine.dispose();
+        if (saved) Object.defineProperty(globalThis, "window", saved);
+        else delete (globalThis as { window?: unknown }).window;
+      },
+    };
+  }
+
+  test("full rate while any finger pressed on the board is down, whichever lifts first", () => {
+    const board = pacedScene();
+    try {
+      board.idle();
+      expect(board.engine.maxFPS).toBe(IDLE_FPS);
+      board.down(1);
+      board.down(2);
+      expect(board.engine.maxFPS).toBeUndefined();
+      board.up(1);
+      board.idle();
+      expect(board.engine.maxFPS).toBeUndefined();
+      board.cancel(2);
+      board.idle();
+      expect(board.engine.maxFPS).toBe(IDLE_FPS);
+    } finally {
+      board.dispose();
+    }
+  });
+
+  test("holdFullRate wakes the board at once and holds it until released", () => {
+    const board = pacedScene();
+    try {
+      board.idle();
+      expect(board.engine.maxFPS).toBe(IDLE_FPS);
+      const release = holdFullRate(board.scene);
+      expect(fullRateHeld(board.scene)).toBe(true);
+      expect(board.engine.maxFPS).toBeUndefined();
+      board.idle();
+      expect(board.engine.maxFPS).toBeUndefined();
+      release();
+      release();
+      expect(fullRateHeld(board.scene)).toBe(false);
+      board.idle();
+      expect(board.engine.maxFPS).toBe(IDLE_FPS);
+    } finally {
+      board.dispose();
+    }
   });
 });
