@@ -7,9 +7,22 @@ description: "Play whole Island Battles games between bots in memory, without th
 
 `go run ./backend/cmd/headless-match` plays games between bots in one process: no PostgreSQL, lobby, Centrifugo or HTTP. Use it whenever the question is "how does this bot play", and the live stack (`./scripts/dev.sh`, `island-battles-bot run`) only when the question is about the lobby, deadlines, real-time turns or the network. To measure a bot against a hosted bot, which the runner can't deliver to, use `island-battles-bot match` against a real server instead: it plays packages, hosted bots and default levels through the lobby on map files, from every side, and writes each game's result and demo (the Python SDK's README, "Play bots against each other on map files").
 
-A project outside this repository can build the runner from a commit of it and write the schedules itself: the bot league, [INTODAN/island-battles-rsi-bot](https://github.com/INTODAN/island-battles-rsi-bot), does, with a result cache and ratings on top.
+The bot league, [INTODAN/island-battles-rsi-bot](https://github.com/INTODAN/island-battles-rsi-bot), is a project of its own that plays its tournaments with the runner, with a result cache and ratings on top. Its bots are written in Go, so it depends on the Go SDK's worker.
+
+## Build it from outside
+
+A project outside this repository builds the runner from a whole checkout at a commit, at the checkout's root, and writes the schedules itself:
+
+```sh
+git clone https://github.com/INTODAN/island-battles-go.git && git -C island-battles-go checkout <commit>
+go -C island-battles-go build -o "$PWD/headless-match" ./backend/cmd/headless-match
+```
+
+`go install ...@<commit>` doesn't work: the module is named `islandBattles`, and `go.mod` has a `replace`. That `replace` points the Go SDK at `./clients/island-battles-go`, so `backend/` alone isn't enough either.
 
 ## Run it
+
+From the repository's root, this schedule runs as written: the bot template's bot through this repository's Python SDK, and the Go SDK's example bot, each against default level 3 on the repository's `crossing` map.
 
 ```sh
 go run ./backend/cmd/headless-match schedule.json > results.jsonl     # or the schedule on stdin
@@ -19,10 +32,15 @@ go run ./backend/cmd/headless-match schedule.json > results.jsonl     # or the s
 {
   "players": {
     "level3": {"default_level": 3},
-    "mine": {"worker": ["python", "-m", "island_battles_client.worker", "bot:play"], "directory": "path/to/the/bot"}
+    "python": {"worker": ["uv", "run", "--project", "../../clients/island-battles-python", "--locked", "python", "-m", "island_battles_client.worker", "bot:play"],
+               "directory": "templates/python-bot"},
+    "go": {"worker": ["go", "run", "./clients/island-battles-go/examples/firstbot", "worker"]}
   },
-  "maps": {"strait": "path/to/strait.json"},
-  "matches": [{"id": "strait-1", "map": "strait", "seats": ["mine", "level3"]}],
+  "maps": {"crossing": "backend/cmd/headless-match/maps/crossing.json"},
+  "matches": [
+    {"id": "crossing-python", "map": "crossing", "seats": ["python", "level3"]},
+    {"id": "crossing-go", "map": "crossing", "seats": ["go", "level3"]}
+  ],
   "max_generations": 300,
   "turn_timeout_milliseconds": 2000,
   "parallel": 8,
@@ -31,8 +49,8 @@ go run ./backend/cmd/headless-match schedule.json > results.jsonl     # or the s
 }
 ```
 
-- **A player** is a default bot (`default_level`) or a **worker**: any command that speaks the SDKs' worker protocol, JSON Lines on stdin and stdout. For Python, `python -m island_battles_client.worker module:function` run where the module imports, with a Python that has the SDK (`uv run --project <the bot's project> python ...`, or that environment's interpreter). A Go bot's program has a `worker` command. `environment` adds variables for the worker.
-- **A map** is a map file, the `MapTemplate` schema, by path. `seats[index]` plays team colour `index + 1`, and a match needs as many seats as its map has teams. Play each pair from both sides: maps are fair, turn order is not always.
+- **A player** is a default bot (`default_level`) or a **worker**: any command that speaks the SDKs' worker protocol, JSON Lines on stdin and stdout. For Python, `python -m island_battles_client.worker module:function` run where the module imports, with a Python that has the SDK (`uv run --project <the bot's project> python ...`, or that environment's interpreter). A Go bot's program has a `worker` command, built or through `go run`. `directory` is the worker's working directory, where its command's relative paths start (hence `../../` above); `environment` adds variables for the worker.
+- **A map** is a map file, the `MapTemplate` schema, by path. `seats[index]` plays team colour `index + 1`, and a match needs as many seats as its map has teams. Play each pair from both sides: a map need not be symmetric (`crossing` gives team 1's castle a speed upgrade), and turn order is not fair either. The example above plays one side only, to stay short.
 - **Output:** one JSON line per match, in the order the matches end: `id`, `map`, `players`, `outcome` (`reason`, `winner_team_color`, `summary`), `winner` (a player's name, or null for a draw), `generations`, `seats` and `demo`. A match that couldn't be played has `error` instead. A seat has `castles`, `soldiers`, `eliminated_at_turn`, `turns_played`, `commands`, `failed_turns`, `failures` (the first five, with the turn and the message, a Python traceback included) and `total_turn_milliseconds`, `slowest_turn_milliseconds`, `slowest_turn`.
 - **Demos** are the files that Save demo writes, with every team's log lines. `compress_demos` packs them with gzip; the demo viewer opens the unpacked file.
 
@@ -57,5 +75,6 @@ Bots are deterministic, so a match with the same runner, map, seats, bots and se
 
 - The engine is `services.PlayHeadlessMatch` in `backend/services/headless_match.go`; it must keep using the service's own functions (`checkBotResult`, `goBotGeneration`, the simulation) rather than copies of them, so a rule changes in both places at once. The loop around them is its own: when `playTurn` or `playGoBots` in `go_bots.go` changes what a turn does, change it here too. Its tests are `backend/services/headless_match_test.go`, which need no database.
 - The command, the schedule and the worker processes are `backend/cmd/headless-match`; its tests use the test binary itself as a worker, and cover a worker that is late, one that exits, one that stops reading its requests and one that can't start again. Run them with `-race`: a seat's turns must never overlap.
-- `go test ./backend/services -run Headless` and `go test ./backend/cmd/headless-match` run both in a second. `TestGoBotTournament` plays the default bots on the same in-memory board.
+- `go test ./backend/services -run Headless` takes about a second and `go test ./backend/cmd/headless-match` about 10 seconds. `TestGoBotTournament` plays the default bots on the same in-memory board.
+- Those tests write the worker protocol by hand. `scripts/check-headless-match.sh`, in the checks' Python job, plays the real workers: the bot template's bot through this repository's Python SDK and `clients/island-battles-go/examples/firstbot` built from the checkout, each against default level 3 from both sides on `backend/cmd/headless-match/maps/crossing.json`. It fails on a runner error, a match `error` or any failed turn. Run it after changing either SDK's worker or how the runner talks to one.
 - A rule change (see the `game-rules` skill) needs nothing here, but it changes every bot's results. Say so in the pull request: a project that measures bots with the runner, such as the bot league, has to play its games again.

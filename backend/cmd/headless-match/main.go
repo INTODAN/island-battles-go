@@ -12,10 +12,11 @@
 //	{
 //	  "players": {
 //	    "level3": {"default_level": 3},
-//	    "mybot": {"worker": ["python", "-m", "island_battles_client.worker", "bot:play"], "directory": "path/to/the/bot"}
+//	    "mybot": {"worker": ["python", "-m", "island_battles_client.worker", "bot:play"], "directory": "path/to/the/bot"},
+//	    "gobot": {"worker": ["path/to/gobot", "worker"]}
 //	  },
-//	  "maps": {"strait": "maps/strait.json"},
-//	  "matches": [{"id": "strait-1", "map": "strait", "seats": ["mybot", "level3"]}],
+//	  "maps": {"crossing": "backend/cmd/headless-match/maps/crossing.json"},
+//	  "matches": [{"id": "crossing-1", "map": "crossing", "seats": ["mybot", "level3"]}],
 //	  "max_generations": 300,
 //	  "turn_timeout_milliseconds": 2000,
 //	  "parallel": 8,
