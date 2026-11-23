@@ -387,7 +387,7 @@ export function installDragControls(
           settled.id,
         );
       } else if (entry) {
-        // Hand play gives an order to the next turn when the turn ended before it was sent.
+        // The server plays an order that arrived after its turn played in the open turn (#380).
         entry.generationId = settled.generationId;
       }
     });

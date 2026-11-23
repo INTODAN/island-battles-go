@@ -362,7 +362,7 @@ export function mountMapFields(options: MapFieldsOptions): MapFields {
       h(
         "p",
         { class: "hint" },
-        "Used when someone plays by hand: the game is then real-time, with a turn this often.",
+        "Used when someone plays by hand: the game is then real-time, with a turn this often. 0.5 s needs a fast connection.",
       ),
       errors.turnPace,
       h("label", { htmlFor: id("game-length") }, "Game length"),

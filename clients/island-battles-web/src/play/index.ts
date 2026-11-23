@@ -117,13 +117,6 @@ export function startHandPlay(options: {
       );
       return required(data);
     },
-    async readState(signal) {
-      const { data } = await gameApi.GET(
-        "/game/from-lobby/{lobby_id}/generation",
-        { ...path, signal },
-      );
-      return required(data);
-    },
     async loadUpgrades(signal) {
       const { data } = await gameApi.GET("/game/upgrades", { signal });
       return required(data).upgrades;

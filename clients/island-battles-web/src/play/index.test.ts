@@ -98,6 +98,26 @@ describe("startHandPlay", () => {
     expect(env.game.get()?.generation_id).toBe(11);
   });
 
+  test("a late order that the server plays in the open turn is accepted there", async () => {
+    let posts = 0;
+    const env = setup(async (request) => {
+      const path = new URL(request.url).pathname;
+      if (path === "/generation/commands") {
+        posts++;
+        env.game.set(handState(11));
+        return json(handState(11));
+      }
+      return json({}, 404);
+    });
+    await flush();
+    const given = env.play.send(1, 4, 5);
+    expect(given.ok && (await given.settled)).toMatchObject({
+      state: "accepted",
+      generationId: 11,
+    });
+    expect(posts).toBe(1);
+  });
+
   test("a stale turn's 409, in both shapes, is read through the real error mapping", async () => {
     for (const type of [
       "urn:island-battles:problem:stale-generation",
@@ -125,11 +145,13 @@ describe("startHandPlay", () => {
       });
       await flush();
       const given = env.play.send(1, 4, 5);
+      // A late batch is played in the open turn, so a stale turn's 409 no longer comes for a
+      // late order; if it does, the order is dropped, not sent again.
       expect(given.ok && (await given.settled)).toMatchObject({
-        state: "accepted",
-        generationId: 11,
+        state: "rejected",
+        sentence: "The turn ended before the order arrived.",
       });
-      expect(posts).toBe(2);
+      expect(posts).toBe(1);
     }
   });
 

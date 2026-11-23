@@ -25,11 +25,11 @@ func startByHand(t *testing.T, stack *lobbyStack) (domain.Snapshot, guest, guest
 	return room, alice, bob
 }
 
-// ageOpenGeneration moves the game's open generation back by age, as if
-// nobody had called the game since.
+// ageOpenGeneration moves the game's open generation, and its turn's end, back
+// by age, as if nobody had called the game since.
 func ageOpenGeneration(t *testing.T, database *gorm.DB, generationID uint, age time.Duration) {
 	t.Helper()
-	if err := database.Model(&models.Generation{}).Where(&models.Generation{Model: gorm.Model{ID: generationID}}).Update("created_at", time.Now().Add(-age)).Error; err != nil {
+	if err := database.Model(&models.Generation{}).Where(&models.Generation{Model: gorm.Model{ID: generationID}}).Updates(map[string]any{"created_at": time.Now().Add(-age), "turn_deadline_at": nil}).Error; err != nil {
 		t.Fatal(err)
 	}
 }

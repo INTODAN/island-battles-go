@@ -72,7 +72,7 @@ func TestGameStateRoundTrip(t *testing.T) {
 	state.NextSoldierGroupID = 6
 	commands := append([]models.CommandFields{{CommandType: models.UpgradeCastle, Parameters: []byte(`{"castle_id":2,"upgrade_type":"speed"}`)}}, simulation.EndOfTurnCommands()...)
 	clashes := []models.Clash{{ID: 1, Time: .5, Participants: []models.ClashParticipant{{GroupID: 3, TeamColor: 1, X: 1, Y: 2, ClashRadius: .25, SoldiersBefore: 4}}}}
-	savedID, err := dal.SaveGeneration(database, generation.GameID, state, commands, clashes, time.Time{})
+	savedID, err := dal.SaveGeneration(database, generation.GameID, state, commands, clashes, time.Time{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

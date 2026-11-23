@@ -39,9 +39,12 @@ const SeenWriteInterval = 2 * time.Second
 
 // silenceMargin is how much longer than one turn a player may go unheard
 // before a short turn limit takes them out (silenceLimit). A client that calls
-// once per turn is unheard at a turn's end for less than one pace plus
-// SeenWriteInterval, whatever its latency, because a late call also delays the
-// next turn; the rest is room for the other players' latency.
+// once per turn, at each turn's end, is unheard at a turn's end for less than
+// one pace plus SeenWriteInterval, whatever its latency: each turn ends at
+// most one pace after the previous turn's end, or half a pace after the late
+// request that played it (nextTurnDeadline), which came no later than the
+// client's own call for that turn, and so at most one pace after that call
+// reached the server. The rest is room for the other players' latency.
 const silenceMargin = 5 * time.Second
 
 // silenceLimit is how long the server may go without hearing from a player of
@@ -324,7 +327,7 @@ func (service *GenerationService) Resign(ctx context.Context, principal domain.P
 		}
 		// The turn no longer waits for the resigning team.
 		if turnComplete(locked, generation, players, inputs) {
-			if generation, inputs, events, turns, err = playTurn(ctx, transaction, locked, players, inputs, service.now(), service.Bots); err != nil {
+			if generation, inputs, events, turns, err = playTurn(ctx, transaction, locked, generation, players, inputs, service.now(), service.Bots); err != nil {
 				return err
 			}
 			goBotsOnly = locked.Outcome == nil && slices.ContainsFunc(players, isGoBot) && turnComplete(locked, generation, players, inputs)
@@ -374,8 +377,8 @@ func EndAbandonedRound(ctx context.Context, database *gorm.DB, publisher Publish
 	}
 	// A look without the lock first, so that a running game's hook takes the
 	// lock only once the game is abandoned.
-	createdAt, found, err := dal.LatestGenerationCreatedAt(database, game.ID)
-	if err != nil || !found || !abandoned(game, &models.Generation{Model: gorm.Model{CreatedAt: createdAt}}, now) {
+	latest, found, err := dal.LatestGenerationTiming(database, game.ID)
+	if err != nil || !found || !abandoned(game, latest, now) {
 		return false, err
 	}
 	var events []Publication

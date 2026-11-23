@@ -11,7 +11,6 @@ import {
   type Board,
   buildLedger,
   checkOrder,
-  isStaleTurn,
   isTransientError,
   type Ledger,
   type OrderSpec,
@@ -51,7 +50,10 @@ export interface PlayOrder {
    * when it is sent), then the number sent. Null for an upgrade.
    */
   readonly soldiers: number | null;
-  /** The generation the order was sent to, or the open one while it waits. */
+  /**
+   * The generation the order was sent to, or the open one while it waits; once accepted, the
+   * generation whose turn it joined, which is a later one when it arrived after its turn played.
+   */
   readonly generationId: number;
   /** `sending` until the server accepts it (`accepted`) or it is refused or dropped (`rejected`). */
   readonly state: "sending" | "accepted" | "rejected";
@@ -131,8 +133,6 @@ export interface HandPlayDeps {
   ): Promise<GenerationState>;
   /** `POST /game/from-lobby/{lobby_id}/deadline`. Resolves with the caller's state. */
   applyDeadline(signal: AbortSignal): Promise<GenerationState>;
-  /** `GET /game/from-lobby/{lobby_id}/generation`. */
-  readState(signal: AbortSignal): Promise<GenerationState>;
   /** `GET /game/upgrades`'s `upgrades`. */
   loadUpgrades(signal: AbortSignal): Promise<UpgradeTable>;
   /** Installs a state an HTTP call answered, as any state read: `realtime.adoptGame`. */
@@ -211,7 +211,6 @@ export const presenceGapMs = 2000;
 
 const noAnswerSentence =
   "The server didn't answer; the order may not have been given.";
-const lateSentence = "The turn ended before the order arrived.";
 const leftSentence = "You left the game.";
 
 interface Entry {
@@ -221,11 +220,8 @@ interface Entry {
   sentence?: string;
   soldiers: number | null;
   generationId: number;
-  /**
-   * queued: waits in the queue; posting: a request is out; retrying: waits to post the same body
-   * again; awaiting-turn: its turn ended (stale 409), waits for the next generation's state.
-   */
-  phase: "queued" | "posting" | "retrying" | "awaiting-turn";
+  /** queued: waits in the queue; posting: a request is out; retrying: waits to post the same body again. */
+  phase: "queued" | "posting" | "retrying";
   resolved?: ResolvedOrder;
   body?: RegisterGenerationCommands;
   /** When the current body was first posted, for `orderBudgetMs`. */
@@ -233,10 +229,6 @@ interface Entry {
   attempt: number;
   /** Identifies the entry's current request, so late answers of earlier ones are ignored. */
   token: number;
-  /** Sent once more already after its turn ended. */
-  resent: boolean;
-  /** A read of the state is out, while `awaiting-turn`. */
-  reading: boolean;
   cancel?: () => void;
   resolve(order: PlayOrder): void;
 }
@@ -400,14 +392,14 @@ export function createHandPlay(deps: HandPlayDeps): HandPlay {
 
   /**
    * The ledger the player sees: also the order in flight while its body names the open
-   * generation (once a newer generation is open, it is in that board or will be sent again), and
-   * the queued orders that still pass, each resolved against what the ones ahead leave.
+   * generation (once a newer generation is open, it is in that board, or the server plays it in
+   * the open turn and its answer adds it to `accepted`), and the queued orders that still pass,
+   * each resolved against what the ones ahead leave.
    */
   function optimisticLedger(current: Board): Ledger {
     let ledger = exactLedger(current);
     if (
       inflight?.resolved &&
-      inflight.phase !== "awaiting-turn" &&
       inflight.body?.generation_id === held?.generation_id
     ) {
       ledger = withOrder(current, ledger, inflight.resolved);
@@ -525,11 +517,21 @@ export function createHandPlay(deps: HandPlayDeps): HandPlay {
         if (!current()) return;
         deps.adopt(answer);
         if (!current()) return;
+        // The answer is the state of the turn the order joined: its own, or, when it arrived after
+        // its turn played, the turn open when it arrived, where the server plays a late batch
+        // however late it is (#380). A retry's answer may instead be the server's replay of an
+        // attempt that was played in an earlier turn, with the current state: then it is known to
+        // be in the answer's turn only when that is the turn it was sent to.
+        const joined =
+          answer.game_id === body.game_id &&
+          (entry.attempt === 0 || answer.generation_id === body.generation_id);
+        if (joined) entry.generationId = answer.generation_id;
         const open = deps.game.get();
         if (
+          joined &&
           open &&
-          open.game_id === body.game_id &&
-          open.generation_id === body.generation_id &&
+          open.game_id === answer.game_id &&
+          open.generation_id === answer.generation_id &&
           entry.resolved
         ) {
           const key = turnKey(open);
@@ -573,84 +575,12 @@ export function createHandPlay(deps: HandPlayDeps): HandPlay {
       }, delay);
       return;
     }
-    const apiError = error as ApiError;
-    if (isStaleTurn(apiError) && !entry.resent) {
-      entry.resent = true;
-      entry.phase = "awaiting-turn";
-      entry.started = deps.now();
-      entry.attempt = 0;
-      publish();
-      afterTurn(entry);
-      return;
-    }
+    // A refusal drops the order with its sentence. A batch that arrives after its turn played is
+    // no longer refused: the server plays it in the open turn (#380). A stale turn's 409, which a
+    // hand player no longer gets for a late order, drops it too, and it is not sent again.
     inflight = null;
-    settle(entry, "rejected", rejectionSentence(apiError));
+    settle(entry, "rejected", rejectionSentence(error as ApiError));
     pump();
-  }
-
-  /**
-   * An order whose turn ended before it arrived: once a newer generation is open, it goes back to
-   * the head of the queue, to be checked against it and sent once more. The request that was
-   * refused played the turn, so the new generation is usually pushed already; if not, it is read.
-   */
-  function afterTurn(entry: Entry): void {
-    if (disposed || inflight !== entry || entry.phase !== "awaiting-turn")
-      return;
-    const body = entry.body as RegisterGenerationCommands;
-    const newer = () =>
-      held !== null &&
-      held.game_id === body.game_id &&
-      held.generation_id > body.generation_id;
-    if (newer()) {
-      entry.cancel?.();
-      delete entry.cancel;
-      delete entry.body;
-      delete entry.resolved;
-      entry.phase = "queued";
-      entry.reading = false;
-      inflight = null;
-      queue.unshift(entry);
-      pump();
-      return;
-    }
-    if (entry.cancel || entry.reading) return;
-    entry.reading = true;
-    const token = ++tokens;
-    entry.token = token;
-    const current = () =>
-      !disposed && inflight === entry && entry.token === token;
-    const again = () => {
-      entry.reading = false;
-      const delay = retryDelay(entry.attempt++);
-      if (deps.now() + delay + timeoutMs - entry.started > budgetMs) {
-        // As a transport failure does: the orders behind it would go out just as late.
-        inflight = null;
-        settle(entry, "rejected", lateSentence);
-        rejectQueued(lateSentence);
-        publish();
-        return;
-      }
-      entry.cancel = deps.schedule(() => {
-        delete entry.cancel;
-        afterTurn(entry);
-      }, delay);
-    };
-    request((signal) => deps.readState(signal)).then(
-      (answer) => {
-        if (!current()) return;
-        deps.adopt(answer);
-        if (!current()) return;
-        if (newer()) {
-          entry.reading = false;
-          afterTurn(entry);
-        } else {
-          again();
-        }
-      },
-      () => {
-        if (current()) again();
-      },
-    );
   }
 
   function give(spec: OrderSpec): OrderResult {
@@ -670,8 +600,6 @@ export function createHandPlay(deps: HandPlayDeps): HandPlay {
       started: 0,
       attempt: 0,
       token: 0,
-      resent: false,
-      reading: false,
       resolve,
     };
     queue.push(entry);
@@ -915,7 +843,6 @@ export function createHandPlay(deps: HandPlayDeps): HandPlay {
         settle(entry, "rejected", statusSentence());
       }
     }
-    if (inflight?.phase === "awaiting-turn") afterTurn(inflight);
     pump();
   }
 
