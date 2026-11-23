@@ -313,6 +313,17 @@ func SetupRoutes(api huma.API, env *handlers.Env, adminAPIKey string) {
 			"Castle upgrades are a map of upgrade type to level. Omitted upgrades default to level 1; " + upgradeLevelRanges() + ". " +
 			"An invalid map returns 422 with an error for each invalid field and is not stored. A map_name that another map uses returns 409. " +
 			"Admins only: send the deployment's admin API key in the " + AdminAPIKeyHeader + " header. A missing or wrong key returns 401, and when the deployment sets no key every request returns 403."}, env.CreateMapTemplate)
+	// Registered after POST /map/create, whose request body adds $schema to
+	// the MapTemplate schema, and before dropSchemaLink removes it: Huma adds
+	// $schema to a response only when its schema lacks the property, so the
+	// map file served here keeps only the file's own keys and passes
+	// POST /map/validate unchanged. TestGetMapTemplateHTTP checks the order.
+	huma.Register(api, huma.Operation{OperationID: "getMapTemplate", Path: "/map/templates/{map_template_id}", Method: http.MethodGet,
+		Summary: "Download a default map as a map file.",
+		Description: "Returns the default map as a map file, the MapTemplate schema that POST /map/create and POST /map/validate take and a lobby's game_settings.map accepts, so the answer can be saved and used as it is. " +
+			"Castles are in castle ID order, and a castle without starting_soldier_amount starts with neutral_starting_soldier_amount. The map is public, like the list, and needs no authentication. " +
+			"It serves only the maps that GET /map/templates lists: an unknown ID, and a stored map that fits no lobby, return 404.",
+		Errors: []int{http.StatusNotFound}}, env.GetMapTemplate)
 	dropSchemaLink(api, reflect.TypeFor[models.MapTemplateView]())
 
 	huma.Register(api, huma.Operation{Path: "/map/validate", Method: http.MethodPost, DefaultStatus: http.StatusOK,
@@ -342,7 +353,7 @@ func SetupRoutes(api huma.API, env *handlers.Env, adminAPIKey string) {
 	huma.Register(api, huma.Operation{OperationID: "listMapTemplates", Path: "/map/templates", Method: http.MethodGet,
 		Summary: "List the default maps a lobby can start on.",
 		Description: "Lists every default map whose castle team colours are exactly 1 to player_amount, ordered by name. " +
-			"Choose one when creating an Island Battles lobby by passing its map_template_id in game_settings, with exactly team_count teams. " +
+			"Choose one when creating an Island Battles lobby by passing its map_template_id in game_settings, with exactly team_count teams. GET /map/templates/{map_template_id} downloads one as a map file. " +
 			"Maps that fit no lobby are left out: those whose team colours skip a colour, and those made for fewer than 2 or more than 16 teams."}, env.ListMapTemplates)
 }
 

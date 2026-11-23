@@ -5,7 +5,7 @@ description: "Play whole Island Battles games between bots in memory, without th
 
 # Headless matches
 
-`go run ./backend/cmd/headless-match` plays games between bots in one process: no PostgreSQL, lobby, Centrifugo or HTTP. Use it whenever the question is "how does this bot play", and the live stack (`./scripts/dev.sh`, `island-battles-bot run`) only when the question is about the lobby, deadlines, real-time turns or the network.
+`go run ./backend/cmd/headless-match` plays games between bots in one process: no PostgreSQL, lobby, Centrifugo or HTTP. Use it whenever the question is "how does this bot play", and the live stack (`./scripts/dev.sh`, `island-battles-bot run`) only when the question is about the lobby, deadlines, real-time turns or the network. To measure a bot against a hosted bot, which the runner can't deliver to, use `island-battles-bot match` against a real server instead: it plays packages, hosted bots and default levels through the lobby on map files, from every side, and writes each game's result and demo (the Python SDK's README, "Play bots against each other on map files").
 
 The bot league, [INTODAN/island-battles-rsi-bot](https://github.com/INTODAN/island-battles-rsi-bot), is a project of its own that plays its tournaments with the runner, with a result cache and ratings on top. Its bots are written in Go, so it depends on the Go SDK's worker.
 

@@ -4762,7 +4762,7 @@
     },
     "/map/templates": {
       "get": {
-        "description": "Lists every default map whose castle team colours are exactly 1 to player_amount, ordered by name. Choose one when creating an Island Battles lobby by passing its map_template_id in game_settings, with exactly team_count teams. Maps that fit no lobby are left out: those whose team colours skip a colour, and those made for fewer than 2 or more than 16 teams.",
+        "description": "Lists every default map whose castle team colours are exactly 1 to player_amount, ordered by name. Choose one when creating an Island Battles lobby by passing its map_template_id in game_settings, with exactly team_count teams. GET /map/templates/{map_template_id} downloads one as a map file. Maps that fit no lobby are left out: those whose team colours skip a colour, and those made for fewer than 2 or more than 16 teams.",
         "operationId": "listMapTemplates",
         "responses": {
           "200": {
@@ -4787,6 +4787,69 @@
           }
         },
         "summary": "List the default maps a lobby can start on."
+      }
+    },
+    "/map/templates/{map_template_id}": {
+      "get": {
+        "description": "Returns the default map as a map file, the MapTemplate schema that POST /map/create and POST /map/validate take and a lobby's game_settings.map accepts, so the answer can be saved and used as it is. Castles are in castle ID order, and a castle without starting_soldier_amount starts with neutral_starting_soldier_amount. The map is public, like the list, and needs no authentication. It serves only the maps that GET /map/templates lists: an unknown ID, and a stored map that fits no lobby, return 404.",
+        "operationId": "getMapTemplate",
+        "parameters": [
+          {
+            "description": "A map_template_id from GET /map/templates.",
+            "in": "path",
+            "name": "map_template_id",
+            "required": true,
+            "schema": {
+              "description": "A map_template_id from GET /map/templates.",
+              "format": "int64",
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MapTemplate"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "Download a default map as a map file."
       }
     }
   }

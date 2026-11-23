@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/INTODAN/mpl/domain"
 	"islandBattles/backend/dal"
 	"islandBattles/backend/models"
 	"islandBattles/backend/observability"
@@ -90,9 +89,31 @@ func (env *Env) ListMapTemplates(ctx context.Context, _ *struct{}) (*ListMapTemp
 	response := &ListMapTemplatesResponse{}
 	response.Body.Maps = []models.MapTemplateSummaryView{}
 	for _, template := range templates {
-		if summary, ok := template.Summary(); ok && summary.TeamCount >= domain.MinTeams && summary.TeamCount <= domain.MaxTeams {
+		if summary, ok := template.Summary(); ok {
 			response.Body.Maps = append(response.Body.Maps, summary)
 		}
 	}
 	return response, nil
+}
+
+type GetMapTemplateRequest struct {
+	MapTemplateID uint `path:"map_template_id" minimum:"1" doc:"A map_template_id from GET /map/templates."`
+}
+
+type GetMapTemplateResponse struct {
+	Body models.MapTemplateView
+}
+
+// GetMapTemplate serves a default map as a map file. It serves only the maps
+// that ListMapTemplates lists, and answers 404 for any other ID.
+func (env *Env) GetMapTemplate(ctx context.Context, input *GetMapTemplateRequest) (*GetMapTemplateResponse, error) {
+	template, found, err := dal.FindMapTemplate(env.DB.WithContext(ctx), input.MapTemplateID)
+	if err != nil {
+		observability.RecordError(ctx, fmt.Errorf("find map template %d: %w", input.MapTemplateID, err))
+		return nil, huma.Error500InternalServerError("could not read the default map")
+	}
+	if _, fitsLobby := template.Summary(); !found || !fitsLobby {
+		return nil, huma.Error404NotFound(fmt.Sprintf("GET /map/templates lists no default map with ID %d", input.MapTemplateID))
+	}
+	return &GetMapTemplateResponse{Body: template.View()}, nil
 }
