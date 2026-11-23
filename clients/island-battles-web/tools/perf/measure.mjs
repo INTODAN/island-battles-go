@@ -1,7 +1,7 @@
 // Measures the 3D client's CPU, frames, memory and garbage (#403), for comparing a change with
 // `main`. Run `bun run dev` first, then, from clients/island-battles-web:
 //   node tools/perf/measure.mjs [http://localhost:3000] [--fx=1] [--size=800x500] [--turns=6]
-//     [--only=board,lobby,cycles] [--fixtures=six-teams.json,busy-turn.json]
+//     [--only=board,view,lobby,cycles] [--fixtures=six-teams.json,busy-turn.json]
 // Needs Playwright with a Chromium (`require("playwright")`); no backend, because the dev page
 // (`/?fixture=`) and the demo view (`/?demo=`) read the fixtures, and the lobby's screens draw
 // their backdrop without one. It runs headless with software WebGL (SwiftShader), so GPU-side
@@ -16,6 +16,8 @@
 //   most) and the garbage collections (a trace's MinorGC and MajorGC events); the JS heap after a
 //   forced GC and Babylon's counts (textures in the engine's cache, meshes, materials) after the
 //   board loads and after the playback.
+// - game view: busy time and frames per second of the demo view (`/?demo=six-teams.json`), the
+//   game screen itself, over 10 s idle and the first 10 s of playing it.
 // - lobby: busy time and frames per second over 10 s of the lobby's first screen with its ocean.
 // - cycles: 5 games in a row in one game view (`/?demo=six-teams.json`, then Open demo file 4
 //   times, which leaves the game shown and starts the next on a new engine), each played for 3 s:
@@ -37,7 +39,7 @@ const base =
 const option = (name, fallback) =>
   args.find((arg) => arg.startsWith(`--${name}=`))?.split("=")[1] ?? fallback;
 const fx = option("fx", "1");
-const only = option("only", "board,lobby,cycles").split(",");
+const only = option("only", "board,view,lobby,cycles").split(",");
 const fixtures = option("fixtures", "six-teams.json,busy-turn.json").split(",");
 const turns = Number(option("turns", "6"));
 const [width, height] = option("size", "800x500").split("x").map(Number);
@@ -333,6 +335,40 @@ async function measureLobby() {
   await page.close();
 }
 
+async function measureView() {
+  const { page, cdp } = await openPage(`${base}/?demo=six-teams.json`);
+  await page.waitForSelector(".gv-canvas");
+  await page.waitForFunction(
+    () => !document.querySelector(".board-loading"),
+    undefined,
+    {
+      timeout: 60000,
+    },
+  );
+  await page.waitForTimeout(5000);
+  const idle = await sample(page, cdp, 10);
+  await page.evaluate(() =>
+    document.querySelector('button[aria-label="Play"]')?.click(),
+  );
+  const playing = await sample(page, cdp, 10);
+  const between = gaps(playing.frames);
+  const row = (entry) => ({
+    taskMsPerS: entry.taskMsPerS,
+    scriptMsPerS: entry.scriptMsPerS,
+    fps: entry.fps,
+  });
+  results.view = {
+    idle: row(idle),
+    playing: {
+      ...row(playing),
+      avgFrameMs: between.avg,
+      worstFrameMs: between.worst,
+    },
+  };
+  console.log(JSON.stringify({ view: results.view }));
+  await page.close();
+}
+
 async function measureCycles(times = 5) {
   const fixture = "six-teams.json";
   const { page, cdp } = await openPage(`${base}/?demo=${fixture}`);
@@ -389,6 +425,7 @@ const fmt = (value, digits = 1) =>
 try {
   if (only.includes("board"))
     for (const fixture of fixtures) await measureBoard(fixture);
+  if (only.includes("view")) await measureView();
   if (only.includes("lobby")) await measureLobby();
   if (only.includes("cycles")) await measureCycles();
 } finally {
@@ -413,6 +450,13 @@ for (const fixture of fixtures) {
       "  most allocated:",
       ...row.playback.top.map((line) => `    ${line}`),
     ].join("\n"),
+  );
+}
+if (results.view) {
+  const { idle, playing } = results.view;
+  console.log(
+    `game view (/?demo=six-teams.json): idle ${fmt(idle.taskMsPerS)} ms/s busy (script ${fmt(idle.scriptMsPerS)}), ${fmt(idle.fps)} frames/s; ` +
+      `playing ${fmt(playing.taskMsPerS)} ms/s busy (script ${fmt(playing.scriptMsPerS)}), ${fmt(playing.fps)} frames/s, frames ${fmt(playing.avgFrameMs)} ms on average, worst ${fmt(playing.worstFrameMs)} ms`,
   );
 }
 if (results.lobby) {
