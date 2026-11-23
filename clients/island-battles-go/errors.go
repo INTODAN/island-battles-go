@@ -60,9 +60,10 @@ var (
 	// game each turn ends one turn pace after the previous one and plays
 	// with the commands that arrived by then. A batch that comes later joins
 	// the turn open when it arrives, however late, and when complete
-	// completes it; only a batch that comes once the open turn is complete
-	// gets this error, and the bot has passed that turn: the Client handles it itself there, writes one line,
-	// reads the new state and plays on. In a game that waits for every
+	// completes it; only a batch that comes once the open turn is complete,
+	// or that names no generation of the game, gets this error, and the bot
+	// has passed that turn: the Client handles it itself there, writes one
+	// line, reads the new state and plays on. In a game that waits for every
 	// player the Client stops on it, as on any other rejection.
 	ErrStaleGeneration = fmt.Errorf("stale generation: %w", ErrRejected)
 	// ErrTeamOut: the server refused a batch because the player's team

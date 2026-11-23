@@ -102,9 +102,11 @@ class StaleGenerationError(GameError):
     and the server plays it with the commands that arrived by then. A batch
     that comes later joins the turn open when it arrives, however late, and
     with ``complete`` completes it; only a batch that comes once the open
-    turn is complete gets this error, and the bot has passed that turn. The client handles it itself there: it
-    writes one line, reads the new state and plays on. In a game that waits
-    for every player the client stops on it, as on any other rejection.
+    turn is complete, or that names no generation of the game, gets this
+    error, and the bot has passed that turn. The client handles it itself
+    there: it writes one line, reads the new state and plays on. In a game
+    that waits for every player the client stops on it, as on any other
+    rejection.
     """
 
 
