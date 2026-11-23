@@ -22,7 +22,6 @@ import argparse
 import json
 import sys
 import threading
-import time
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -48,6 +47,9 @@ POLL_SECONDS = 1.0
 # A start whose game the lobby couldn't create (502 game_unavailable) is
 # started again, as the lobby page's Retry starting game does.
 START_ATTEMPTS = 5
+START_RETRY_SECONDS = 2.0
+# How often the command looks for Ctrl+C while lobbies play.
+JOIN_SECONDS = 0.5
 # The game's routes take a player token from the lobby, which lasts at most 15
 # minutes; a new one is fetched once this share of its life has passed.
 PLAYER_TOKEN_REFRESH_SHARE = 0.8
@@ -56,6 +58,32 @@ SEAT_KINDS = ("hosted", "package", "default")
 
 class MatchError(Exception):
     """Why a match couldn't go on, in words for the person running it."""
+
+
+class MatchCancelled(MatchError):
+    """The person stopped the command."""
+
+    def __init__(self) -> None:
+        super().__init__("stopped")
+
+
+class GameQueue:
+    """The games still to play, which every lobby takes from, one at a time.
+    Once stopped, it gives no more."""
+
+    def __init__(self, games: Sequence[Game]) -> None:
+        self._games = list(games)
+        self._lock = threading.Lock()
+        self.stopped = threading.Event()
+
+    def next(self) -> Game | None:
+        with self._lock:
+            if self.stopped.is_set() or not self._games:
+                return None
+            return self._games.pop(0)
+
+    def stop(self) -> None:
+        self.stopped.set()
 
 
 @dataclass(frozen=True)
@@ -357,8 +385,9 @@ class Match:
         output: Path,
         settings: dict[str, Any],
         *,
-        sleep: Callable[[float], None] = time.sleep,
+        cancel: threading.Event | None = None,
         poll_seconds: float = POLL_SECONDS,
+        retry_seconds: float = START_RETRY_SECONDS,
         heartbeat_seconds: float = HEARTBEAT_SECONDS,
         report: Callable[[str], None] = lambda line: print(
             line, file=sys.stderr, flush=True
@@ -368,8 +397,9 @@ class Match:
         self.seats = list(seats)
         self.output = output
         self.settings = settings
-        self.sleep = sleep
+        self.cancel = cancel or threading.Event()
         self.poll_seconds = poll_seconds
+        self.retry_seconds = retry_seconds
         self.heartbeat_seconds = heartbeat_seconds
         self.report = report
         self.guests: list[Guest] = []
@@ -382,28 +412,48 @@ class Match:
 
     def play(
         self,
-        games: Sequence[Game],
+        games: Sequence[Game] | GameQueue,
         on_result: Callable[[dict[str, Any]], None] = lambda _: None,
     ) -> list[dict[str, Any]]:
-        """Play every game and return their results, in order; ``on_result``
-        gets each one as its game ends."""
+        """Play games in one lobby, taking each from ``games`` until none is
+        left, and return their results, in order; ``on_result`` gets each one
+        as its game ends. The guests leave the lobby at the end, also when a
+        game fails or ``cancel`` is set."""
+        queue = games if isinstance(games, GameQueue) else GameQueue(games)
+        game = queue.next()
+        if game is None:
+            return []
         self.output.mkdir(parents=True, exist_ok=True)
-        self.guests = [self._session(seat) for seat in self.seats]
+        results = []
         try:
-            self._open(games[0])
+            for seat in self.seats:
+                self._check_cancel()
+                self.guests.append(self._session(seat))
+            self._open(game)
             assert self.lobby_id is not None
-            results = []
             with Heartbeats(
                 self.servers, self.guests, self.lobby_id, self.heartbeat_seconds
             ):
                 self._choose_bots()
-                for index, game in enumerate(games):
-                    result = self._play_game(game, first=index == 0)
+                first = True
+                while game is not None:
+                    result = self._play_game(game, first=first)
                     on_result(result)
                     results.append(result)
+                    first = False
+                    game = queue.next()
             return results
         finally:
             self._leave()
+
+    def _check_cancel(self) -> None:
+        if self.cancel.is_set():
+            raise MatchCancelled
+
+    def _pause(self, seconds: float) -> None:
+        """Wait, unless the command is stopped meanwhile."""
+        if self.cancel.wait(seconds):
+            raise MatchCancelled
 
     def _session(self, seat: Seat) -> Guest:
         session = self.servers.lobby(
@@ -490,6 +540,7 @@ class Match:
 
     def _play_game(self, game: Game, first: bool) -> dict[str, Any]:
         assert self.lobby_id is not None
+        self._check_cancel()
         lobby_path = self.servers.lobby_path
         if not first:
             self.snapshot = self.servers.lobby(
@@ -583,7 +634,7 @@ class Match:
             except LobbyRefusal as refusal:
                 if refusal.code != "game_unavailable" or attempt == START_ATTEMPTS - 1:
                     raise
-                self.sleep(2.0)
+                self._pause(self.retry_seconds)
 
     def _wait(self, lobby_round: int) -> dict[str, Any]:
         """Read the host's game until it ends. Every game request first ends
@@ -601,7 +652,7 @@ class Match:
                 and state.get("outcome") is not None
             ):
                 return state
-            self.sleep(self.poll_seconds)
+            self._pause(self.poll_seconds)
 
     def _save_demo(self, path: Path) -> None:
         """The game's demo, with every team's log lines, as Save demo saves it."""
@@ -628,11 +679,73 @@ class Match:
                 self.report(f"{guest.seat.name} could not leave the lobby: {error}")
 
 
+def play_parallel(
+    make_match: Callable[[threading.Event], Match],
+    games: Sequence[Game],
+    parallel: int,
+    on_result: Callable[[dict[str, Any]], None],
+    report: Callable[[str], None],
+) -> list[MatchError]:
+    """Play the games in up to ``parallel`` lobbies at once, each with its own
+    guests, which take the next game from one queue as they finish one.
+
+    A failed game stops the schedule: no lobby starts another game, but the
+    games that already run play to their end and are saved, since nothing can
+    stop a started game early. Ctrl+C stops at once: every lobby is left, and
+    a game that had started plays on at the server without anyone watching.
+    Returns the failures, empty when every game was played; raises
+    KeyboardInterrupt after cleaning up on Ctrl+C."""
+    queue = GameQueue(games)
+    cancel = threading.Event()
+    failures: list[MatchError] = []
+    lock = threading.Lock()
+
+    def whole_line(result: dict[str, Any]) -> None:
+        with lock:
+            on_result(result)
+
+    def worker() -> None:
+        try:
+            make_match(cancel).play(queue, whole_line)
+        except MatchCancelled:
+            pass
+        except MatchError as error:
+            queue.stop()
+            with lock:
+                failures.append(error)
+            report(f"a game failed, so no lobby starts another: {error}")
+        except Exception as error:  # noqa: BLE001 - reported like a refusal
+            queue.stop()
+            with lock:
+                failures.append(MatchError(f"{type(error).__name__}: {error}"))
+
+    workers = [
+        threading.Thread(target=worker, name=f"match-{index + 1}")
+        for index in range(max(1, min(parallel, len(games))))
+    ]
+    for thread in workers:
+        thread.start()
+    try:
+        for thread in workers:
+            while thread.is_alive():
+                thread.join(JOIN_SECONDS)
+    except KeyboardInterrupt:
+        report("stopping: leaving every lobby")
+        cancel.set()
+        queue.stop()
+        for thread in workers:
+            thread.join()
+        raise
+    return failures
+
+
 def run(args: argparse.Namespace, game_url: str, lobby_url: str) -> int:
     """The ``match`` command, on the game and the lobby at these addresses."""
     try:
         if args.games < 1:
             raise MatchError("--games must be at least 1")
+        if args.parallel < 1:
+            raise MatchError("--parallel must be at least 1")
         seats = unique_names([parse_seat(text) for text in args.seat])
         if len(seats) < 2:
             raise MatchError("give at least two --seat, one per team of the maps")
@@ -642,12 +755,25 @@ def run(args: argparse.Namespace, game_url: str, lobby_url: str) -> int:
             settings["turn_timeout_seconds"] = args.turn_timeout
         if args.max_generations is not None:
             settings["max_generations"] = args.max_generations
-        with httpx.Client(timeout=30.0, follow_redirects=False) as client:
-            match = Match(
-                Servers(lobby_url, game_url, client), seats, Path(args.output), settings
+        output = Path(args.output)
+        limits = httpx.Limits(max_connections=max(100, 10 * args.parallel))
+        with httpx.Client(
+            timeout=30.0, follow_redirects=False, limits=limits
+        ) as client:
+            servers = Servers(lobby_url, game_url, client)
+            failures = play_parallel(
+                lambda cancel: Match(servers, seats, output, settings, cancel=cancel),
+                games,
+                args.parallel,
+                lambda result: print(json.dumps(result), flush=True),
+                lambda line: print(line, file=sys.stderr, flush=True),
             )
-            match.play(games, lambda result: print(json.dumps(result), flush=True))
     except MatchError as error:
         print(f"FAIL: {error}", file=sys.stderr)
         return 1
-    return 0
+    except KeyboardInterrupt:
+        print("stopped", file=sys.stderr)
+        return 130
+    for failure in failures:
+        print(f"FAIL: {failure}", file=sys.stderr)
+    return 1 if failures else 0

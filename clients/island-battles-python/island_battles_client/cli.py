@@ -1013,7 +1013,17 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         metavar="N",
-        help="how many times to play each map from each side (default 1)",
+        help="play every map from every side N times (default 1): with two seats "
+        "and M maps, 2 * M * N games",
+    )
+    matching.add_argument(
+        "--parallel",
+        type=int,
+        default=1,
+        metavar="N",
+        help="play up to N games at once, each in a lobby of its own with its own "
+        "guests, which uploads its packages once (default 1). A failed game starts "
+        "no more games; those already running end and are saved",
     )
     matching.add_argument(
         "--output",
