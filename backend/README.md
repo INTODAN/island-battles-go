@@ -585,22 +585,38 @@ Every request plays at least one turn, however small its budget, so a game alway
 
 ### Headless matches
 
-`go run ./backend/cmd/headless-match` plays whole games between bots **in memory**: no database, no lobby, no Centrifugo and no HTTP. It is for playing many games quickly, such as the tournaments of the [bot league](https://github.com/INTODAN/island-battles-rsi-bot), a project of its own that builds this command from a commit of this repository, where the live stack would spend its time on everything but the game.
+`go run ./backend/cmd/headless-match` plays whole games between bots **in memory**: no database, no lobby, no Centrifugo and no HTTP. It is for playing many games quickly, where the live stack would spend its time on everything but the game. The [bot league](https://github.com/INTODAN/island-battles-rsi-bot), a project of its own whose bots are written in Go, plays its tournaments with it.
 
 ```sh
 go run ./backend/cmd/headless-match schedule.json > results.jsonl     # or the schedule on stdin
 ```
 
-The schedule is a JSON document:
+**Building it from outside.** A project outside this repository, such as the bot league, builds the runner from a whole checkout of this repository at a commit, with `go build` at the checkout's root:
+
+```sh
+git clone https://github.com/INTODAN/island-battles-go.git && git -C island-battles-go checkout <commit>
+go -C island-battles-go build -o "$PWD/headless-match" ./backend/cmd/headless-match
+```
+
+`go install github.com/INTODAN/island-battles-go/backend/cmd/headless-match@<commit>` doesn't work: the module is named `islandBattles`, not by its repository's path, and `go install` refuses a module whose `go.mod` has a `replace`. Nor is `backend/` alone enough: that `replace` points the Go SDK at `./clients/island-battles-go`, so the build needs the whole checkout.
+
+On every pull request, the Python job of the checks runs `scripts/check-headless-match.sh`, which plays real workers through the runner: the bot template's bot through this repository's Python SDK, and the Go SDK's first bot built from the same checkout, each against default level 3 from both sides on the `crossing` map. It fails when the runner exits with an error, a match has an `error`, or a seat has a failed turn, so a change to either worker, or to how the runner talks to one, that breaks them together fails there rather than in the bot league.
+
+The schedule is a JSON document. This one runs as written from the repository's root: the [bot template](../templates/python-bot/README.md)'s bot through this repository's Python SDK, and the Go SDK's [first bot](../clients/island-battles-go/examples/firstbot/main.go), each against default level 3, on [`backend/cmd/headless-match/maps/crossing.json`](cmd/headless-match/maps/crossing.json), the `crossing` map of [map files](#map-files):
 
 ```json
 {
   "players": {
     "level3": {"default_level": 3},
-    "mine": {"worker": ["python", "-m", "island_battles_client.worker", "bot:play"], "directory": "path/to/the/bot", "environment": {}}
+    "python": {"worker": ["uv", "run", "--project", "../../clients/island-battles-python", "--locked", "python", "-m", "island_battles_client.worker", "bot:play"],
+               "directory": "templates/python-bot", "environment": {}},
+    "go": {"worker": ["go", "run", "./clients/island-battles-go/examples/firstbot", "worker"]}
   },
-  "maps": {"strait": "path/to/strait.json"},
-  "matches": [{"id": "strait-1", "map": "strait", "seats": ["mine", "level3"]}],
+  "maps": {"crossing": "backend/cmd/headless-match/maps/crossing.json"},
+  "matches": [
+    {"id": "crossing-python", "map": "crossing", "seats": ["python", "level3"]},
+    {"id": "crossing-go", "map": "crossing", "seats": ["go", "level3"]}
+  ],
   "max_generations": 300,
   "turn_timeout_milliseconds": 2000,
   "parallel": 8,
@@ -609,19 +625,19 @@ The schedule is a JSON document:
 }
 ```
 
-- **A player** is a [default bot](#default-bots), by `default_level`, or a **worker**: a command that speaks the SDKs' worker protocol, JSON Lines on stdin and stdout, which is how the [bot runners](#bot-runners) run a package. `python -m island_battles_client.worker module:function` is the Python SDK's, and a Go bot's program has a `worker` command. `directory` is the worker's working directory, and `environment` is added to the command's own.
-- **A map** is a [map file](#map-files), by path. `seats[index]` plays team colour `index + 1`; a match needs as many seats as its map has teams, and an `id` that is a file name of its own.
+- **A player** is a [default bot](#default-bots), by `default_level`, or a **worker**: a command that speaks the SDKs' worker protocol, JSON Lines on stdin and stdout, which is how the [bot runners](#bot-runners) run a package. `python -m island_battles_client.worker module:function` is the Python SDK's, run where the module imports with a Python that has the SDK, and a Go bot's program has a `worker` command (built, or through `go run` as above). `directory` is the worker's working directory, where the command's relative paths start, and `environment` is added to the command's own.
+- **A map** is a [map file](#map-files), by path; a relative path, like `directory`, starts where the command runs. `seats[index]` plays team colour `index + 1`; a match needs as many seats as its map has teams, and an `id` that is a file name of its own. Play each pair from both sides when you measure a bot: a map need not be symmetric (`crossing` gives team 1's castle a speed upgrade), so the example above, which plays one side only, measures nothing.
 - `max_generations` is every game's [length](#game-length) (300 when left out), `turn_timeout_milliseconds` how long a player may take for a turn (no limit when left out), and `parallel` how many matches play at once (the number of CPUs when left out). Without a `demo_directory` no demos are written.
 - An unknown key, a player that is both or neither kind, an unknown level, map or player, a map file that isn't valid and an `id` used twice are refused before anything is played, with exit status 2.
 
 **Output:** one JSON line per match on stdout, as each match ends, so in any order:
 
 ```json
-{"id": "strait-1", "map": "strait", "players": ["mine", "level3"], "winner": "mine", "generations": 44, "seconds": 0.05,
- "outcome": {"reason": "last_team_standing", "winner_team_color": 1, "summary": "mine wins as the last team standing", "departures": []},
- "seats": [{"name": "mine", "team_color": 1, "castles": 5, "soldiers": 71, "eliminated_at_turn": 0, "turns_played": 43, "commands": 9,
-            "failed_turns": 0, "failures": [], "total_turn_milliseconds": 41.2, "slowest_turn_milliseconds": 1.9, "slowest_turn": 30}],
- "demo": "demos/strait-1.json.gz"}
+{"id": "crossing-python", "map": "crossing", "players": ["python", "level3"], "winner": "level3", "generations": 16, "seconds": 0.04,
+ "outcome": {"reason": "last_team_standing", "winner_team_color": 2, "summary": "level3 wins as the last team standing", "departures": []},
+ "seats": [{"name": "python", "team_color": 1, "castles": 0, "soldiers": 0, "eliminated_at_turn": 16, "turns_played": 15, "commands": 16,
+            "failed_turns": 0, "failures": [], "total_turn_milliseconds": 35.7, "slowest_turn_milliseconds": 10.2, "slowest_turn": 1}],
+ "demo": "demos/crossing-python.json.gz"}
 ```
 
 `seats` has one entry per seat, in seat order; the example shows the first. `winner` is the winning player's name, or null for a draw. A match that couldn't be played, such as one whose seats don't fit its map or whose worker doesn't start, has `error` in place of the outcome. `failures` lists a seat's first five failed turns with the turn and the message, which for a Python bot is its traceback. The demo is a [demo file](#demos) with every team's game log, named after the match's `id`.
@@ -636,7 +652,7 @@ The schedule is a JSON document:
 
 Generation IDs start at 5538 rather than 1: on the server every game shares the IDs, and a bot that reads `generation.id` as the turn number should play as badly here as there.
 
-**Speed.** A bot keeps nothing between turns, so one worker process plays any number of games: a match borrows a process for each worker seat and gives it back for the next match, so no more processes run than worker seats play at once. Starting a process is never part of a turn's time: a match starts its workers before its first turn, and a worker that stops, or whose turn runs out of time, is stopped and replaced after the failed turn and before that seat's next one, so only the one turn is lost. A replacement that doesn't get ready within 60 seconds is not tried again: the seat's remaining turns of that match fail at once. On a 32-thread desktop, 216 two-player matches of four Python bots and the three default bots, 124 turns each on average, take 4 seconds; a Python bot's turn costs about 1 ms and a default bot's 0.3 ms. The same match always plays the same game when its bots are deterministic, which the bot rules require, and when no turn ran out of time: a timeout depends on the machine's load.
+**Speed.** A bot keeps nothing between turns, so one worker process plays any number of games: a match borrows a process for each worker seat and gives it back for the next match, so no more processes run than worker seats play at once. Starting a process is never part of a turn's time: a match starts its workers before its first turn, and a worker that stops, or whose turn runs out of time, is stopped and replaced after the failed turn and before that seat's next one, so only the one turn is lost. A replacement that doesn't get ready within 60 seconds is not tried again: the seat's remaining turns of that match fail at once. On a 32-thread desktop, 216 two-player matches of the bot league's four Python bots, from before its bots moved to Go, and the three default bots, 124 turns each on average, take 4 seconds; a Python bot's turn costs about 1 ms and a default bot's 0.3 ms. The same match always plays the same game when its bots are deterministic, which the bot rules require, and when no turn ran out of time: a timeout depends on the machine's load.
 
 **Stopping.** On Ctrl+C or SIGTERM the command starts no further match, stops its workers and exits with status 2; the matches it was playing write an `error` line. A worker is stopped together with the processes it started, so a worker command may be a wrapper such as `uv run`; that needs process groups, so on Windows the command should be the bot's own process.
 
@@ -762,6 +778,8 @@ A map file is the JSON that `POST /map/create` stores as a default map, publishe
   ]
 }
 ```
+
+This map is also a file, [`backend/cmd/headless-match/maps/crossing.json`](cmd/headless-match/maps/crossing.json), which the [headless matches](#headless-matches)' example and check play.
 
 - The plane is centred on the origin, so a castle's `x` lies from `-plane_size_x/2` to `plane_size_x/2` and its `y` from `-plane_size_y/2` to `plane_size_y/2`. The replay and the game graph draw it the same way.
 - `player_amount` is the number of teams the map is made for, from 2 to 16, the lobby's limits; each team has one player.
