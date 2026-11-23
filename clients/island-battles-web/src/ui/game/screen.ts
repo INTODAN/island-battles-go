@@ -754,9 +754,9 @@ export class GameScreen {
   ): GameController {
     this.stop();
     const sorted = sortTeams(teams);
-    const engine = new Engine(this.canvas, true, {
-      preserveDrawingBuffer: true,
-    });
+    // Nothing reads the board's canvas back, so the browser may discard its drawing buffer after
+    // each frame (no `preserveDrawingBuffer`, #403); a frame not drawn keeps the last one shown.
+    const engine = new Engine(this.canvas, true);
     const scene = new Scene(engine);
     this.scene = scene;
     const handPlay = this.options.handPlay ?? null;
