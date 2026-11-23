@@ -1,7 +1,7 @@
 // Measures the 3D client's CPU, frames, memory and garbage (#403), for comparing a change with
 // `main`. Run `bun run dev` first, then, from clients/island-battles-web:
 //   node tools/perf/measure.mjs [http://localhost:3000] [--fx=1] [--size=800x500] [--turns=6]
-//     [--only=board,view,lobby,cycles] [--fixtures=six-teams.json,busy-turn.json]
+//     [--only=board,view,lobby,cycles] [--games=5] [--fixtures=six-teams.json,busy-turn.json]
 // Needs Playwright with a Chromium (`require("playwright")`); no backend, because the dev page
 // (`/?fixture=`) and the demo view (`/?demo=`) read the fixtures, and the lobby's screens draw
 // their backdrop without one. It runs headless with software WebGL (SwiftShader), so GPU-side
@@ -44,6 +44,7 @@ const fx = option("fx", "1");
 const only = option("only", "board,view,lobby,cycles").split(",");
 const fixtures = option("fixtures", "six-teams.json,busy-turn.json").split(",");
 const turns = Number(option("turns", "6"));
+const games = Number(option("games", "5"));
 const [width, height] = option("size", "800x500").split("x").map(Number);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixtureDir = path.resolve(here, "../../test/fixtures");
@@ -456,7 +457,7 @@ try {
     for (const fixture of fixtures) await measureBoard(fixture);
   if (only.includes("view")) await measureView();
   if (only.includes("lobby")) await measureLobby();
-  if (only.includes("cycles")) await measureCycles();
+  if (only.includes("cycles")) await measureCycles(games);
 } finally {
   await browser.close();
 }
@@ -497,7 +498,7 @@ if (results.lobby) {
 if (results.cycles) {
   const { heapMB, live } = results.cycles;
   console.log(
-    `5 games in a row: heap with each ${heapMB.map((mb) => fmt(mb)).join(", ")} MB`,
+    `${games} games in a row: heap with each ${heapMB.map((mb) => fmt(mb)).join(", ")} MB`,
   );
   console.log(
     `  reachable with each: ${live.map((entry) => JSON.stringify(entry)).join(" ")}`,
