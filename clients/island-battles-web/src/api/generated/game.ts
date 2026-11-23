@@ -562,9 +562,29 @@ export interface paths {
         };
         /**
          * List the default maps a lobby can start on.
-         * @description Lists every default map whose castle team colours are exactly 1 to player_amount, ordered by name. Choose one when creating an Island Battles lobby by passing its map_template_id in game_settings, with exactly team_count teams. Maps that fit no lobby are left out: those whose team colours skip a colour, and those made for fewer than 2 or more than 16 teams.
+         * @description Lists every default map whose castle team colours are exactly 1 to player_amount, ordered by name. Choose one when creating an Island Battles lobby by passing its map_template_id in game_settings, with exactly team_count teams. GET /map/templates/{map_template_id} downloads one as a map file. Maps that fit no lobby are left out: those whose team colours skip a colour, and those made for fewer than 2 or more than 16 teams.
          */
         get: operations["listMapTemplates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/map/templates/{map_template_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download a default map as a map file.
+         * @description Returns the default map as a map file, the MapTemplate schema that POST /map/create and POST /map/validate take and a lobby's game_settings.map accepts, so the answer can be saved and used as it is. Castles are in castle ID order, and a castle without starting_soldier_amount starts with neutral_starting_soldier_amount. The map is public, like the list, and needs no authentication. It serves only the maps that GET /map/templates lists: an unknown ID, and a stored map that fits no lobby, return 404.
+         */
+        get: operations["getMapTemplate"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3009,6 +3029,56 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    getMapTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description A map_template_id from GET /map/templates. */
+                map_template_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MapTemplate"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };

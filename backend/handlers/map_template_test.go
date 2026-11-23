@@ -134,3 +134,66 @@ func TestListMapTemplatesHTTP(t *testing.T) {
 		t.Fatalf("maps = %+v, want %+v", result.Maps, expected)
 	}
 }
+
+func TestGetMapTemplateHTTP(t *testing.T) {
+	database := testutils.InitTestDB(t)
+	_, api := humatest.New(t)
+	routes.SetupRoutes(api, &handlers.Env{DB: database}, testAdminAPIKey)
+
+	// Castle positions, starting soldiers and upgrades come back as given.
+	mapFile := `{"map_name":"Strait","player_amount":2,"plane_size_x":12,"plane_size_y":9,"neutral_starting_soldier_amount":5,"castles":[` +
+		`{"team_color":1,"x":-4.5,"y":1.25,"starting_soldier_amount":20,"upgrades":{"speed":2}},` +
+		`{"team_color":2,"x":4.5,"y":-1.25,"starting_soldier_amount":20},` +
+		`{"team_color":0,"x":0,"y":0}]}`
+	created := api.Post("/map/create", adminHeader, json.RawMessage(mapFile))
+	var result struct {
+		MapTemplateID uint `json:"map_template_id"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &result); err != nil || created.Code != http.StatusOK {
+		t.Fatalf("create status=%d body=%s err=%v", created.Code, created.Body.String(), err)
+	}
+
+	served := api.Get(fmt.Sprintf("/map/templates/%d", result.MapTemplateID))
+	if served.Code != http.StatusOK {
+		t.Fatalf("known map status=%d body=%s", served.Code, served.Body.String())
+	}
+	// The stored map names every upgrade's level, so the file does too.
+	const levels = `"burst_potential":1,"clash_stop_generations":1,"generation_amount":1`
+	expectedFile := `{"map_name":"Strait","player_amount":2,"plane_size_x":12,"plane_size_y":9,"neutral_starting_soldier_amount":5,"castles":[` +
+		`{"team_color":1,"x":-4.5,"y":1.25,"starting_soldier_amount":20,"upgrades":{` + levels + `,"speed":2}},` +
+		`{"team_color":2,"x":4.5,"y":-1.25,"starting_soldier_amount":20,"upgrades":{` + levels + `,"speed":1}},` +
+		`{"team_color":0,"x":0,"y":0,"upgrades":{` + levels + `,"speed":1}}]}`
+	var servedFile, expected any
+	if err := json.Unmarshal(served.Body.Bytes(), &servedFile); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(expectedFile), &expected); err != nil {
+		t.Fatal(err)
+	}
+	// Exactly the map file's keys: no $schema, which POST /map/validate refuses.
+	if !reflect.DeepEqual(servedFile, expected) {
+		t.Fatalf("served map file %s, want %s", served.Body.String(), expectedFile)
+	}
+	validated := api.Post("/map/validate", json.RawMessage(served.Body.Bytes()))
+	if validated.Code != http.StatusOK || strings.Join(strings.Fields(validated.Body.String()), "") != `{"valid":true,"errors":[]}` {
+		t.Fatalf("validate status=%d body=%s", validated.Code, validated.Body.String())
+	}
+
+	if unknown := api.Get(fmt.Sprintf("/map/templates/%d", result.MapTemplateID+1000)); unknown.Code != http.StatusNotFound {
+		t.Fatalf("unknown map status=%d body=%s", unknown.Code, unknown.Body.String())
+	}
+
+	// A template stored before /map/create refused maps that fit no lobby,
+	// which GET /map/templates leaves out.
+	var crowd models.MapTemplateView
+	if err := json.Unmarshal([]byte(seventeenTeamMap), &crowd); err != nil {
+		t.Fatal(err)
+	}
+	stored := models.NewMapTemplate(crowd)
+	if err := database.Create(&stored).Error; err != nil {
+		t.Fatal(err)
+	}
+	if unlisted := api.Get(fmt.Sprintf("/map/templates/%d", stored.ID)); unlisted.Code != http.StatusNotFound {
+		t.Fatalf("map that fits no lobby status=%d body=%s", unlisted.Code, unlisted.Body.String())
+	}
+}
