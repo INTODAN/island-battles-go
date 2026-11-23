@@ -16,7 +16,6 @@ runs the package here, and it needs uv and PyPI.
 import asyncio
 import os
 import platform
-import re
 import shutil
 import socket
 import subprocess
@@ -88,8 +87,7 @@ def package_template(work: Path) -> Path:
     project = work / "bot"
     shutil.copytree(TEMPLATE, project, ignore=shutil.ignore_patterns(".venv", "dist", "__pycache__", "uv.lock"))
     pyproject = project / "pyproject.toml"
-    # The template's SDK requirement, whatever its version, is this repository's SDK.
-    text = re.sub(r'"island-battles-python>=[^"]*"', '"island-battles-python"', pyproject.read_text())
+    text = pyproject.read_text().replace('"island-battles-python>=1.3.0"', '"island-battles-python"')
     assert '"island-battles-python"' in text
     pyproject.write_text(text + f'\n[tool.uv.sources]\nisland-battles-python = {{ path = "{wheel.as_posix()}" }}\n')
     run(["uv", "lock"], project)
