@@ -60,7 +60,7 @@ func endOpenTurn(t *testing.T, database *gorm.DB, lobbyID string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := database.Model(&models.Generation{}).Where(&models.Generation{Model: gorm.Model{ID: generation.ID}}).Update("created_at", time.Now().Add(-2*time.Second)).Error; err != nil {
+	if err := database.Model(&models.Generation{}).Where(&models.Generation{Model: gorm.Model{ID: generation.ID}}).Updates(map[string]any{"created_at": time.Now().Add(-2 * time.Second), "turn_deadline_at": nil}).Error; err != nil {
 		t.Fatal(err)
 	}
 }
