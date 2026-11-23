@@ -56,12 +56,18 @@ function outlineOf(castleId: number): Outline {
  */
 function leaves(outline: Outline, direction: Direction): number {
   let farthest = 0;
+  // Runs for every boat at the shore every frame of a turn: read the points by index, since
+  // destructuring them made an iterator each time, the most garbage of a turn (#403).
   for (let index = 0; index < outline.length; index++) {
-    const [ax, az] = outline[index] as readonly [number, number];
-    const [bx, bz] = outline[(index + 1) % outline.length] as readonly [
+    const a = outline[index] as readonly [number, number];
+    const b = outline[(index + 1) % outline.length] as readonly [
       number,
       number,
     ];
+    const ax = a[0];
+    const az = a[1];
+    const bx = b[0];
+    const bz = b[1];
     const edgeX = bx - ax;
     const edgeZ = bz - az;
     // Solve origin + direction * t = a + edge * s for t and s.

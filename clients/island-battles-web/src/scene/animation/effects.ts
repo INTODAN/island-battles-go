@@ -40,6 +40,8 @@ export interface TurnEffects {
   castleCaptured(field: Battlefield, castleId: number, team: number): void;
   /** Called every frame with the wall-clock time, for effects that run on their own. */
   tick(nowMs: number): void;
+  /** Whether particles are alive: a burst plays, or the pool warms up. */
+  readonly particles: boolean;
   /**
    * Puts every posed thing back, whenever a turn ends or is cut short. Short particle bursts
    * already under way finish on their own.
@@ -367,6 +369,10 @@ export function createTurnEffects(scene?: Scene): TurnEffects {
     tick() {
       // Effects switched on during a game: the pool is built here, before the first burst.
       if (scene && !scene.isDisposed) burstsFor(scene);
+    },
+
+    get particles() {
+      return bursts?.active ?? false;
     },
 
     clear() {

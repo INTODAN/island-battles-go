@@ -11,6 +11,7 @@ import {
 } from "../../scene/art";
 import { loadBoardAssets } from "../../scene/boardAssets";
 import { createCastleView } from "../../scene/castles";
+import { IDLE_FPS } from "../../scene/framePacer";
 import { applyGraphics, savedGraphics } from "../../scene/graphics";
 import { islandOutline, islandProps, waterline } from "../../scene/landforms";
 import { createBoardLook } from "../../scene/look";
@@ -107,6 +108,8 @@ export function startOcean(canvas: HTMLCanvasElement): Ocean {
     }
   });
 
+  // The backdrop moves slowly and takes no input: it draws at the board's idle rate (#403).
+  engine.maxFPS = IDLE_FPS;
   engine.runRenderLoop(() => scene.render());
   const onResize = () => engine.resize();
   window.addEventListener("resize", onResize);

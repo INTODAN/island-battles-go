@@ -297,6 +297,11 @@ export class Bursts {
     };
   }
 
+  /** Whether a burst plays or a system warms up: particles are alive and move. */
+  get active(): boolean {
+    return this.warming.length > 0 || (this.pool?.leased ?? 0) > 0;
+  }
+
   private texture(shape: ParticleShape): Texture {
     let texture = this.textures.get(shape);
     if (!texture) {

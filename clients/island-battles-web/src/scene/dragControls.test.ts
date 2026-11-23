@@ -52,6 +52,7 @@ afterAll(() => {
   mock.module("./battlefield", () => realBattlefield);
 });
 const { installDragControls } = await import("./dragControls");
+const { fullRateHeld } = await import("./framePacer");
 const { installBoardControls } = await import("./picking");
 
 /** Stands in for the browser's `PointerEvent`, so `instanceof PointerEvent` can tell a real one. */
@@ -825,6 +826,47 @@ describe("the line after an order", () => {
     board.openTurn(13);
     board.drawTurn(11);
     expect(board.drawn()).toEqual(["drag-line", "drag-line-casing"]);
+  });
+
+  test("a refusal that comes long after the release holds the board at full rate while its line flashes (#403)", async () => {
+    const board = setup();
+    send(board);
+    expect(fullRateHeld(board.scene)).toBe(false);
+    const now = performance.now;
+    const start = now.call(performance);
+    let clock = start;
+    performance.now = () => clock;
+    try {
+      // Well past the pacer's linger: the board draws at its idle rate when the answer comes.
+      clock += 5000;
+      board.settle({
+        id: 1,
+        state: "rejected",
+        sentence: "Refused.",
+        generationId: 10,
+      });
+      await settled();
+      expect(fullRateHeld(board.scene)).toBe(true);
+      clock += 300;
+      board.scene.render();
+      expect(fullRateHeld(board.scene)).toBe(true);
+      // The flash is over after 600 ms: its line goes, and so does the hold.
+      clock += 400;
+      board.scene.render();
+      expect(fullRateHeld(board.scene)).toBe(false);
+      expect(board.drawn()).toEqual([]);
+    } finally {
+      performance.now = now;
+    }
+  });
+
+  test("removing the controls mid-flash lets go of full rate (#403)", () => {
+    const board = setup();
+    board.refuseWith("Not enough soldiers.");
+    send(board);
+    expect(fullRateHeld(board.scene)).toBe(true);
+    board.remove();
+    expect(fullRateHeld(board.scene)).toBe(false);
   });
 
   test("an order hand play refuses at once flashes red, with its sentence and no id", () => {

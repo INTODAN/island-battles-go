@@ -42,6 +42,7 @@ import { holdCameraPointer } from "./camera";
 import { castleLabelHeight } from "./castles";
 import { type MapPoint, toMap, toWorld } from "./coordinates";
 import { dragLineSegment } from "./dragLine";
+import { holdFullRate } from "./framePacer";
 import { headingDrawOrder, headingStyle, ribbonGeometry } from "./headingLines";
 import { ISLAND_TOP } from "./landforms";
 import { teamColorHex, tint } from "./palette";
@@ -125,7 +126,12 @@ export function installDragControls(
   let canOrderNow = options.canOrder();
   let openGeneration = handPlay.state.get().turn?.generationId ?? null;
   const pending = new Map<number, Pending>();
-  const flashes: { meshes: LineMeshes; started: number }[] = [];
+  /** Refused orders' lines flashing red, each holding the board at full rate (#403). */
+  const flashes: {
+    meshes: LineMeshes;
+    started: number;
+    release: () => void;
+  }[] = [];
 
   const context = (): DragContext => ({
     canOrder: canOrderNow,
@@ -241,7 +247,13 @@ export function installDragControls(
 
   const flash = (meshes: LineMeshes) => {
     paint(meshes, REJECTED_COLOR, 1);
-    flashes.push({ meshes, started: performance.now() });
+    // The server's refusal can come well after the release, with the board drawing at its idle
+    // rate: the flash asks for full rate until it is over.
+    flashes.push({
+      meshes,
+      started: performance.now(),
+      release: holdFullRate(scene),
+    });
   };
 
   /** Draws the drag's line for the state now; hides it when there is nothing to draw. */
@@ -605,6 +617,7 @@ export function installDragControls(
       const progress = (now - entry.started) / FLASH_MS;
       if (progress >= 1) {
         disposeLine(entry.meshes);
+        entry.release();
         flashes.splice(index, 1);
       } else {
         entry.meshes.line.visibility = 1 - progress;
@@ -636,7 +649,10 @@ export function installDragControls(
     }
     if (live) disposeLine(live);
     for (const entry of pending.values()) disposeLine(entry.meshes);
-    for (const entry of flashes) disposeLine(entry.meshes);
+    for (const entry of flashes) {
+      disposeLine(entry.meshes);
+      entry.release();
+    }
     pending.clear();
     flashes.length = 0;
     ring?.dispose();
