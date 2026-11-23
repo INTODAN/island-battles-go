@@ -295,10 +295,13 @@ func playHeadlessTurn(ctx context.Context, player HeadlessPlayer, timeout time.D
 	if turn.Generation, err = goBotGeneration(generation, turn.TeamColor, inputs); err != nil {
 		return goBotTurn{}, 0, err
 	}
+	// The clock starts before the timeout does, so a player that runs out of
+	// time is measured at the timeout or later, never a little under it.
+	started := time.Now()
 	turnContext := ctx
 	if timeout > 0 {
 		var cancel context.CancelFunc
-		turnContext, cancel = context.WithTimeout(ctx, timeout)
+		turnContext, cancel = context.WithDeadline(ctx, started.Add(timeout))
 		defer cancel()
 	}
 	type answer struct {
@@ -306,7 +309,6 @@ func playHeadlessTurn(ctx context.Context, player HeadlessPlayer, timeout time.D
 		err    error
 	}
 	answers := make(chan answer, 1)
-	started := time.Now()
 	go func() {
 		defer func() {
 			if recovered := recover(); recovered != nil {
