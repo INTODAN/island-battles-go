@@ -182,8 +182,9 @@ func TestGetMapTemplateHTTP(t *testing.T) {
 		t.Fatalf("served map file %s, want %s", served.Body.String(), expectedFile)
 	}
 	validated := api.Post("/map/validate", json.RawMessage(served.Body.Bytes()))
-	if validated.Code != http.StatusOK || strings.Join(strings.Fields(validated.Body.String()), "") != `{"valid":true,"errors":[]}` {
-		t.Fatalf("validate status=%d body=%s", validated.Code, validated.Body.String())
+	var validation handlers.MapTemplateValidation
+	if err := json.Unmarshal(validated.Body.Bytes(), &validation); err != nil || validated.Code != http.StatusOK || !validation.Valid || len(validation.Errors) != 0 {
+		t.Fatalf("validate status=%d body=%s err=%v", validated.Code, validated.Body.String(), err)
 	}
 
 	if unknown := api.Get(fmt.Sprintf("/map/templates/%d", result.MapTemplateID+1000)); unknown.Code != http.StatusNotFound {
