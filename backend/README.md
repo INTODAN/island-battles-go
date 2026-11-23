@@ -801,6 +801,12 @@ The key is compared in constant time, before the body is read. A missing or wron
 
 `POST /map/validate` checks a map file with `models.DecodeMapTemplate` and stores nothing, so it is safe to leave public. Any non-empty body answers 200 with `{"valid": ..., "errors": [...]}`, each error located relative to the file, such as `castles[2].x`. A `*models.MapTemplateError` lists at most 100 problems and counts the rest in a last detail, and it echoes only scalar values, never a whole object, so a large invalid file gets a small answer. A `map_name` that a default map already uses is not a problem here.
 
+`GET /map/templates/{map_template_id}` (#390) returns a default map as a map file, built by `MapTemplate.View()`, with its castles in castle ID order, so it can be saved, opened in the map builder, passed to `POST /map/validate` or put in a lobby's `game_settings.map` as it is. Like `GET /map/templates`, it is public and serves only the maps that list names: an unknown ID, and a stored map that fits no lobby, answer 404. Bots use it to train on the official maps:
+
+```sh
+curl http://localhost:8888/map/templates/1 > claw.json
+```
+
 ### Map builder
 
 Open `/map/builder/` to build a map in the browser, from the [`mapbuilder`](mapbuilder/) package embedded in the backend. Set the map's name, team count, default soldiers and plane size; add castles with **Add castle** or a double-click on the plane, drag them or move them with the arrow keys, and remove them with **Delete**. Each castle has a team colour or neutral, an optional starting soldier count and its upgrade levels, which the page reads from `upgrades.json` next to it, the same table as `GET /game/upgrades`, so they follow `models/upgrades.go`.
@@ -817,7 +823,7 @@ Run the page logic's checks from the repository root with `node backend/mapbuild
 
 An Island Battles lobby starts on the map its `game_settings` choose, published as the `LobbySettings` schema. They must choose one:
 
-- `{"map_template_id": 4}` picks a default map. `GET /map/templates` lists them with each map's name, `team_count`, plane size and castle count.
+- `{"map_template_id": 4}` picks a default map. `GET /map/templates` lists them with each map's name, `team_count`, plane size and castle count, and `GET /map/templates/{map_template_id}` returns one as a map file, which `POST /map/validate` accepts unchanged and the next option takes as it is. It needs no authentication, and answers 404 for an ID the list doesn't name.
 - `{"map": {...}}` carries a whole map file, such as one downloaded from the map builder. It must pass `models.DecodeMapTemplate`.
 
 Pass exactly one of the two: `{}`, no settings, or settings without a map fail with `invalid_game_settings` and `game_settings: must choose a map: …`. There is no generated map any more (#277). A database without default maps, such as a new local one, offers none, so create one with `POST /map/create` ([map files](#map-files)) or load a map file. Either way, the settings may also set `turn_timeout_seconds`, see [turn deadlines](#turn-deadlines), and `max_generations`, see [game length](#game-length). The map sets the lobby's teams and its neutral castles, so a lobby on a map with `player_amount` N has exactly N teams, and the map's castle team colours are exactly 1 to N, with 0 neutral. The lobby's first team plays colour 1, its second colour 2, and so on. `GET /map/templates` leaves out stored maps that fit no lobby: those whose colours skip one, and those made for fewer than 2 or more than 16 teams, the lobby's limits. A bad choice fails lobby creation, or a change of the settings, with `invalid_game_settings`, and the detail names the invalid fields, listing the first 20 and counting the rest, such as `game_settings.map_template_id: no default map has ID 9` or `game_settings.map.castles[2].x: must be inside the plane, from -5 to 5`. Settings are capped at the lobby's 16 KiB, which holds a map file of over a hundred castles.
